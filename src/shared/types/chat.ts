@@ -72,6 +72,7 @@ export interface Session {
   workingDir?: string | null;
   createdAt: string;
   updatedAt: string;
+  lastMessageAt?: string;
   archivedAt?: string;
   messageCount: number;
   userSetName?: boolean;

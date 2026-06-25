@@ -37,6 +37,7 @@ import type { AppShellContent as AppShellContentType } from "./ui/AppShellConten
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
+const mockAcpGetSessionInfo = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
@@ -207,6 +208,7 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
+  acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
@@ -470,6 +472,8 @@ describe("AppShell global navigation", () => {
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
     mockAcpArchiveSession.mockReset();
     mockAcpArchiveSession.mockResolvedValue(undefined);
+    mockAcpGetSessionInfo.mockReset();
+    mockAcpGetSessionInfo.mockResolvedValue(null);
     mockAcpLoadSession.mockReset();
     mockAcpLoadSession.mockResolvedValue(undefined);
     mockToastError.mockReset();

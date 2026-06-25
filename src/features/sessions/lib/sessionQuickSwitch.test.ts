@@ -17,10 +17,18 @@ function session(
 }
 
 describe("buildQuickSwitchResults", () => {
-  it("orders by recency with running sessions first when query is empty", () => {
+  it("orders by last message recency with running sessions first when query is empty", () => {
     const sessions = [
-      session({ id: "old", updatedAt: "2026-01-01T00:00:00Z" }),
-      session({ id: "new", updatedAt: "2026-03-01T00:00:00Z" }),
+      session({
+        id: "old",
+        updatedAt: "2026-03-01T00:00:00Z",
+        lastMessageAt: "2026-01-01T00:00:00Z",
+      }),
+      session({
+        id: "new",
+        updatedAt: "2026-01-01T00:00:00Z",
+        lastMessageAt: "2026-03-01T00:00:00Z",
+      }),
       session({
         id: "running-old",
         updatedAt: "2025-12-01T00:00:00Z",
@@ -79,6 +87,17 @@ describe("buildQuickSwitchResults", () => {
     expect(results.map((r) => r.session.id)).toEqual(["later", "earlier"]);
   });
 
+  it("falls back to updatedAt when lastMessageAt is unavailable", () => {
+    const sessions = [
+      session({ id: "old", updatedAt: "2026-01-01T00:00:00Z" }),
+      session({ id: "new", updatedAt: "2026-03-01T00:00:00Z" }),
+    ];
+
+    const results = buildQuickSwitchResults(sessions, "");
+
+    expect(results.map((r) => r.session.id)).toEqual(["new", "old"]);
+  });
+
   it("reports UTF-16 match positions for titles with surrogate pairs", () => {
     const sessions = [session({ id: "a", title: "a😀b" })];
 
@@ -88,23 +107,28 @@ describe("buildQuickSwitchResults", () => {
     expect(results[0].positions?.has(3)).toBe(true);
   });
 
-  it("breaks score ties by recency", () => {
+  it("breaks score ties by last message recency", () => {
     const sessions = [
       session({
-        id: "older",
+        id: "older-updated-newer-message",
         title: "Weekly sync",
         updatedAt: "2026-01-01T00:00:00Z",
+        lastMessageAt: "2026-03-01T00:00:00Z",
       }),
       session({
-        id: "newer",
+        id: "newer-updated-older-message",
         title: "Weekly sync",
         updatedAt: "2026-02-01T00:00:00Z",
+        lastMessageAt: "2026-02-15T00:00:00Z",
       }),
     ];
 
     const results = buildQuickSwitchResults(sessions, "weekly");
 
-    expect(results.map((r) => r.session.id)).toEqual(["newer", "older"]);
+    expect(results.map((r) => r.session.id)).toEqual([
+      "older-updated-newer-message",
+      "newer-updated-older-message",
+    ]);
   });
 
   it("respects the result limit", () => {

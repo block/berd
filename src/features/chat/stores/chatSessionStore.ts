@@ -36,6 +36,7 @@ export interface ChatSession {
   workingDir?: string | null;
   createdAt: string;
   updatedAt: string;
+  lastMessageAt?: string;
   archivedAt?: string;
   messageCount: number;
   /** First ~10 words of the session's latest real text message, or null. */
@@ -335,6 +336,7 @@ export function sessionToChatSession(session: Session): ChatSession {
     workingDir: session.workingDir,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    lastMessageAt: session.lastMessageAt,
     archivedAt: session.archivedAt,
     messageCount: session.messageCount,
     userSetName: session.userSetName,

@@ -31,6 +31,7 @@ export interface SidebarSessionItem {
   title: string;
   subtitle?: string;
   updatedAt: string;
+  lastMessageAt?: string | null;
   projectId?: string;
   projectName?: string;
   projectIcon?: string | null;

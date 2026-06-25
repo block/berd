@@ -2,12 +2,17 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { groupSessionsByDate } from "./groupSessionsByDate";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 
-function makeSession(id: string, updatedAt: string): ChatSession {
+function makeSession(
+  id: string,
+  updatedAt: string,
+  lastMessageAt?: string,
+): ChatSession {
   return {
     id,
     title: `Session ${id}`,
     createdAt: updatedAt,
     updatedAt,
+    lastMessageAt,
     messageCount: 5,
   };
 }
@@ -46,15 +51,21 @@ describe("groupSessionsByDate", () => {
     expect(groupSessionsByDate([])).toEqual([]);
   });
 
-  it("sorts sessions within each group newest-first", () => {
+  it("keeps backend activity order and groups by last message date", () => {
     const sessions = [
-      makeSession("early", "2026-04-07T06:00:00Z"),
-      makeSession("late", "2026-04-07T11:00:00Z"),
-      makeSession("mid", "2026-04-07T09:00:00Z"),
+      makeSession("active", "2026-03-01T00:00:00Z", "2026-04-07T11:00:00Z"),
+      makeSession(
+        "metadata-only",
+        "2026-04-07T12:00:00Z",
+        "2026-04-06T09:00:00Z",
+      ),
+      makeSession("fallback", "2026-04-07T08:00:00Z"),
     ];
 
     const groups = groupSessionsByDate(sessions);
-    const ids = groups[0].sessions.map((s) => s.id);
-    expect(ids).toEqual(["late", "mid", "early"]);
+
+    expect(groups.map((group) => group.label)).toEqual(["Today", "Yesterday"]);
+    expect(groups[0].sessions.map((s) => s.id)).toEqual(["active", "fallback"]);
+    expect(groups[1].sessions.map((s) => s.id)).toEqual(["metadata-only"]);
   });
 });

@@ -182,13 +182,50 @@ export async function loadSessionMessages(
   perfLog(`[perf:load] ${sid} start`);
   useChatStore.getState().setSessionLoading(sessionId, true);
   try {
-    const [{ acpLoadSession }, { getReplayPerf, clearReplayPerf }] =
-      await Promise.all([
-        import("@/shared/api/acp"),
-        import("@/features/chat/acp/acpNotificationHandler"),
-      ]);
+    const [
+      { acpGetSessionInfo, acpLoadSession },
+      { getReplayPerf, clearReplayPerf },
+    ] = await Promise.all([
+      import("@/shared/api/acp"),
+      import("@/features/chat/acp/acpNotificationHandler"),
+    ]);
     const t1 = performance.now();
     perfLog(`[perf:load] ${sid} import in ${(t1 - t0).toFixed(1)}ms`);
+    let sessionInfo: Awaited<ReturnType<typeof acpGetSessionInfo>> | null =
+      null;
+    if (sessionAtRequest?.pinnedLoadState) {
+      try {
+        sessionInfo = await acpGetSessionInfo(sessionId);
+      } catch (error) {
+        console.warn("Failed to refresh pinned session metadata:", error);
+      }
+    }
+    if (sessionInfo) {
+      const sessionPatch: Partial<ChatSession> = {
+        projectId: sessionInfo.projectId ?? undefined,
+        providerId: sessionInfo.providerId ?? undefined,
+        personaId: sessionInfo.personaId ?? undefined,
+        modelId: sessionInfo.modelId ?? undefined,
+        archivedAt: sessionInfo.archivedAt ?? undefined,
+        messageCount: sessionInfo.messageCount,
+        subtitle: sessionInfo.subtitle ?? undefined,
+        userSetName: sessionInfo.userSetName,
+      };
+      if (sessionInfo.title !== null) sessionPatch.title = sessionInfo.title;
+      if (sessionInfo.workingDir !== null) {
+        sessionPatch.workingDir = sessionInfo.workingDir;
+      }
+      if (sessionInfo.createdAt !== null) {
+        sessionPatch.createdAt = sessionInfo.createdAt;
+      }
+      if (sessionInfo.updatedAt !== null) {
+        sessionPatch.updatedAt = sessionInfo.updatedAt;
+      }
+      if (sessionInfo.lastMessageAt !== null) {
+        sessionPatch.lastMessageAt = sessionInfo.lastMessageAt;
+      }
+      useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
+    }
     const session = useChatSessionStore.getState().getSession(sessionId);
     const project = session?.projectId
       ? (useProjectStore

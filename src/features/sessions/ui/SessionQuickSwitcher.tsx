@@ -97,6 +97,7 @@ export function SessionQuickSwitcher({
           t("common:session.defaultTitle"),
         ),
         updatedAt: session.updatedAt,
+        lastMessageAt: session.lastMessageAt,
         isRunning: isSessionRunning(
           sessionStateById[session.id]?.chatState ?? "idle",
         ),

@@ -52,6 +52,9 @@ export function handleSessionInfoUpdate(
   if (typeof meta.messageCount === "number") {
     patch.messageCount = meta.messageCount;
   }
+  if (typeof meta.lastMessageAt === "string" && meta.lastMessageAt) {
+    patch.lastMessageAt = meta.lastMessageAt;
+  }
   if (typeof meta.userSetName === "boolean") {
     patch.userSetName = meta.userSetName;
   }

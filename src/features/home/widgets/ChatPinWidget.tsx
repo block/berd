@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { IconMessageCircle } from "@tabler/icons-react";
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
@@ -53,7 +54,10 @@ export function ChatPinWidget({
   } else if (isLoading) {
     footerLabel = t("widgets.chatPin.loadingDescription");
   } else if (session) {
-    footerLabel = [project?.name, formatRelativeTimeToNow(session.updatedAt)]
+    footerLabel = [
+      project?.name,
+      formatRelativeTimeToNow(sessionActivityAt(session)),
+    ]
       .filter(Boolean)
       .join(" · ");
   }

@@ -1,3 +1,4 @@
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { formatDate } from "@/shared/i18n";
 
@@ -33,7 +34,7 @@ function buildSearchableString(
     if (name) parts.push(name);
   }
 
-  const date = new Date(session.updatedAt);
+  const date = new Date(sessionActivityAt(session));
   parts.push(
     formatDate(
       date,

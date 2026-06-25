@@ -1,3 +1,4 @@
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 
 interface SessionMetaLineOptions {
@@ -15,5 +16,5 @@ export function getSessionMetaLine(
     displayCount,
   });
 
-  return `${formatRelativeTimeToNow(session.updatedAt)} · ${messageCount}`;
+  return `${formatRelativeTimeToNow(sessionActivityAt(session))} · ${messageCount}`;
 }

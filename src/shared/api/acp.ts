@@ -273,6 +273,12 @@ export async function acpSetSessionConfigOption(
 
 export type { AcpSessionInfo, AcpSessionsPage };
 
+export async function acpGetSessionInfo(
+  sessionId: string,
+): Promise<AcpSessionInfo> {
+  return directAcp.getSessionInfo(sessionId);
+}
+
 export interface AcpSessionSearchResult {
   sessionId: string;
   snippet: string;

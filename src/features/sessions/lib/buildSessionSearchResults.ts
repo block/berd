@@ -1,3 +1,4 @@
+import { compareSessionsByActivityDesc } from "@/features/chat/lib/sessionActivity";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { AcpSessionSearchResult } from "@/shared/api/acp";
 import { filterSessions, type FilterResolvers } from "./filterSessions";
@@ -16,19 +17,15 @@ export interface SessionSearchDisplayResult {
   matchCount?: number;
 }
 
-function sortByUpdatedAtDesc(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
+function sortByActivityDesc(sessions: ChatSession[]): ChatSession[] {
+  return [...sessions].sort(compareSessionsByActivityDesc);
 }
 
-function sortResultsByUpdatedAtDesc(
+function sortResultsByActivityDesc(
   results: SessionSearchDisplayResult[],
 ): SessionSearchDisplayResult[] {
-  return [...results].sort(
-    (a, b) =>
-      new Date(b.session.updatedAt).getTime() -
-      new Date(a.session.updatedAt).getTime(),
+  return [...results].sort((a, b) =>
+    compareSessionsByActivityDesc(a.session, b.session),
   );
 }
 
@@ -44,7 +41,7 @@ export function mergeSessionSearchResults(
     bySessionId.set(result.session.id, result);
   }
 
-  return sortResultsByUpdatedAtDesc([...bySessionId.values()]);
+  return sortResultsByActivityDesc([...bySessionId.values()]);
 }
 
 export function buildSessionSearchResults(
@@ -63,7 +60,7 @@ export function buildSessionSearchResults(
     messageMatches.map((match) => [match.sessionId, match]),
   );
 
-  return sortByUpdatedAtDesc(sessions)
+  return sortByActivityDesc(sessions)
     .filter((session) => {
       return (
         metadataMatchIds.has(session.id) ||

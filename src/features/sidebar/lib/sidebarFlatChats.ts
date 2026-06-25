@@ -1,3 +1,4 @@
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import type { SidebarSessionItem } from "@/features/sessions/ui/session-list/SidebarProjectSection";
 
 export interface FlatChatGroup {
@@ -13,10 +14,10 @@ const FLAT_CHAT_GROUP_DEFINITIONS: Array<Omit<FlatChatGroup, "sessions">> = [
 ];
 
 function getFlatChatGroupId(
-  updatedAt: string | undefined,
+  session: Pick<SidebarSessionItem, "lastMessageAt" | "updatedAt">,
   nowMs: number,
 ): FlatChatGroup["id"] {
-  const updatedMs = Date.parse(updatedAt ?? "");
+  const updatedMs = Date.parse(sessionActivityAt(session));
   if (!Number.isFinite(updatedMs)) {
     return "older";
   }
@@ -43,7 +44,7 @@ export function groupFlatChatsByActivityAge(
   );
 
   for (const session of sessions) {
-    const groupId = getFlatChatGroupId(session.updatedAt, nowMs);
+    const groupId = getFlatChatGroupId(session, nowMs);
     groups.get(groupId)?.sessions.push(session);
   }
 

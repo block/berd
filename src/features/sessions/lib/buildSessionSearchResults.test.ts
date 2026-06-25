@@ -64,7 +64,7 @@ describe("buildSessionSearchResults", () => {
     expect(results[0].session.id).toBe("acp-1");
   });
 
-  it("includes metadata-only matches and sorts by updatedAt descending", () => {
+  it("includes metadata-only matches", () => {
     const sessions = [
       makeSession({
         id: "session-1",
@@ -123,33 +123,35 @@ describe("buildSessionSearchResults", () => {
     });
   });
 
-  it("merges result pages by session id and sorts newest first", () => {
-    const olderSession = makeSession({
+  it("merges result pages by session id and sorts by last message first", () => {
+    const olderUpdatedButNewerMessageSession = makeSession({
       id: "session-1",
       title: "Older needle",
       updatedAt: "2026-04-09T12:00:00Z",
+      lastMessageAt: "2026-04-11T12:00:00Z",
     });
-    const newerSession = makeSession({
+    const newerUpdatedButOlderMessageSession = makeSession({
       id: "session-2",
       title: "Newer needle",
       updatedAt: "2026-04-10T12:00:00Z",
+      lastMessageAt: "2026-04-10T08:00:00Z",
     });
 
     const results = mergeSessionSearchResults(
       [
         {
-          session: olderSession,
+          session: olderUpdatedButNewerMessageSession,
           matchType: "metadata",
         },
       ],
       [
         {
-          session: newerSession,
+          session: newerUpdatedButOlderMessageSession,
           matchType: "message",
           snippet: "newer body match",
         },
         {
-          session: olderSession,
+          session: olderUpdatedButNewerMessageSession,
           matchType: "message",
           snippet: "refreshed older match",
         },
@@ -158,14 +160,14 @@ describe("buildSessionSearchResults", () => {
 
     expect(results).toMatchObject([
       {
-        session: { id: "session-2" },
-        matchType: "message",
-        snippet: "newer body match",
-      },
-      {
         session: { id: "session-1" },
         matchType: "message",
         snippet: "refreshed older match",
+      },
+      {
+        session: { id: "session-2" },
+        matchType: "message",
+        snippet: "newer body match",
       },
     ]);
   });

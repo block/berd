@@ -25,7 +25,10 @@ import {
   getVisibleSessions,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
-import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
+import {
+  compareSessionsByActivityDesc,
+  isSessionRunning,
+} from "@/features/chat/lib/sessionActivity";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
@@ -129,13 +132,6 @@ function validateExpandedProjects(value: unknown): Record<string, boolean> {
   return Object.fromEntries(entries);
 }
 
-function compareSessionsByUpdatedAtDesc(
-  a: Pick<SidebarSessionItem, "updatedAt">,
-  b: Pick<SidebarSessionItem, "updatedAt">,
-): number {
-  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-}
-
 function toSessionListItem(
   session: ChatSession,
   sessionStateById: Record<string, SessionChatRuntime>,
@@ -149,6 +145,7 @@ function toSessionListItem(
     subtitle: branchName ?? session.subtitle ?? undefined,
     projectId: session.projectId ?? undefined,
     updatedAt: session.updatedAt,
+    lastMessageAt: session.lastMessageAt,
     isRunning: isSessionRunning(runtime.chatState),
     hasUnread: runtime.hasUnread,
   };
@@ -240,7 +237,7 @@ function compareSessionListItems(
     return aIsPlaceholder ? -1 : 1;
   }
 
-  return compareSessionsByUpdatedAtDesc(a, b);
+  return compareSessionsByActivityDesc(a, b);
 }
 
 function includeSessionListPlaceholderSessions(

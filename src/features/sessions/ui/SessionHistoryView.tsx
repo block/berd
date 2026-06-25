@@ -5,6 +5,7 @@ import { History } from "lucide-react";
 import { IconCheck, IconCopy, IconUpload, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import {
   focusSessionWindow,
@@ -849,7 +850,7 @@ export function SessionHistoryView({
           key={session.id}
           id={session.id}
           title={session.title}
-          updatedAt={session.updatedAt}
+          updatedAt={sessionActivityAt(session)}
           personaName={
             session.personaId ? getPersonaName(session.personaId) : undefined
           }

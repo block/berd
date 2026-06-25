@@ -155,6 +155,7 @@ function makeAcpSession(
     title: "Test Session",
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
+    lastMessageAt: null,
     archivedAt: null,
     userSetName: false,
     messageCount: 2,

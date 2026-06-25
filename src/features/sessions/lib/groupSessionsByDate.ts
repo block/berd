@@ -1,3 +1,7 @@
+import {
+  compareSessionsByActivityDesc,
+  sessionActivityAt,
+} from "@/features/chat/lib/sessionActivity";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { formatDate } from "@/shared/i18n";
 
@@ -50,12 +54,8 @@ export function groupSessionsByDate(
   const buckets = new Map<string, ChatSession[]>();
   const labelOrder: string[] = [];
 
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
-
-  for (const session of sorted) {
-    const date = new Date(session.updatedAt);
+  for (const session of [...sessions].sort(compareSessionsByActivityDesc)) {
+    const date = new Date(sessionActivityAt(session));
     const label = formatDateLabel(date, now, options);
 
     let bucket = buckets.get(label);

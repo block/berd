@@ -78,6 +78,7 @@ describe("listSessionsPage", () => {
           cwd: "/tmp/project",
           _meta: {
             createdAt: "2026-04-30T00:00:00.000Z",
+            lastMessageAt: "2026-05-01T12:00:00.000Z",
             archivedAt: "2026-05-02T00:00:00.000Z",
             userSetName: true,
             messageCount: 7,
@@ -101,6 +102,7 @@ describe("listSessionsPage", () => {
           title: "Session one",
           updatedAt: "2026-05-01T00:00:00.000Z",
           createdAt: "2026-04-30T00:00:00.000Z",
+          lastMessageAt: "2026-05-01T12:00:00.000Z",
           archivedAt: "2026-05-02T00:00:00.000Z",
           userSetName: true,
           messageCount: 7,
@@ -117,6 +119,54 @@ describe("listSessionsPage", () => {
     expect(mocks.listSessions).toHaveBeenCalledWith({
       ...includeLastMessageSnippetMeta,
       cursor: "cursor-1",
+    });
+  });
+
+  it("ignores malformed session metadata values", async () => {
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          sessionId: "session-1",
+          title: "Session one",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          cwd: "/tmp/project",
+          _meta: {
+            createdAt: 123,
+            lastMessageAt: { at: "2026-05-01T12:00:00.000Z" },
+            archivedAt: false,
+            messageCount: "7",
+            projectId: ["project-1"],
+            providerId: null,
+            modelId: 4,
+            personaId: true,
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+
+    const { listSessionsPage } = await import("../acpApi");
+
+    await expect(listSessionsPage()).resolves.toEqual({
+      sessions: [
+        {
+          sessionId: "session-1",
+          title: "Session one",
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          createdAt: null,
+          lastMessageAt: null,
+          archivedAt: null,
+          userSetName: false,
+          messageCount: 0,
+          subtitle: null,
+          workingDir: "/tmp/project",
+          projectId: null,
+          providerId: null,
+          modelId: null,
+          personaId: null,
+        },
+      ],
+      nextCursor: null,
     });
   });
 
@@ -333,6 +383,7 @@ describe("forkSession", () => {
       title: null,
       updatedAt: null,
       createdAt: "2026-05-01T00:00:00.000Z",
+      lastMessageAt: null,
       archivedAt: null,
       userSetName: true,
       messageCount: 7,

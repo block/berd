@@ -15,11 +15,13 @@ import {
   type SystemNotificationContent,
 } from "@/shared/types/messages";
 
+const acpGetSessionInfo = vi.hoisted(() => vi.fn());
 const acpLoadSession = vi.hoisted(() => vi.fn());
 const resolvePath = vi.hoisted(() => vi.fn());
 const checkDirectoriesExist = vi.hoisted(() => vi.fn());
 
 vi.mock("@/shared/api/acp", () => ({
+  acpGetSessionInfo: (...args: unknown[]) => acpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => acpLoadSession(...args),
 }));
 
@@ -115,6 +117,7 @@ function notificationFromLastMessage(
 describe("loadSessionMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    acpGetSessionInfo.mockResolvedValue(null);
     acpLoadSession.mockResolvedValue(undefined);
     resolvePath.mockImplementation(({ parts }: { parts: string[] }) =>
       Promise.resolve({ path: `/resolved${parts[0]}` }),
@@ -302,6 +305,61 @@ describe("loadSessionMessages", () => {
       useChatSessionStore.getState().getSession("s-root")?.workingDir,
     ).toBe("~/goose artifacts");
     expect(messagesFor("s-root").map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("refreshes pinned placeholder metadata before replaying messages", async () => {
+    acpGetSessionInfo.mockResolvedValue({
+      sessionId: "s-pinned",
+      title: "Control Center MCP Hints",
+      updatedAt: "2026-06-25T00:45:04.000Z",
+      createdAt: "2026-06-19T03:43:17.000Z",
+      lastMessageAt: "2026-06-19T06:59:21.000Z",
+      archivedAt: null,
+      userSetName: false,
+      messageCount: 1143,
+      subtitle: "Commented and resolved the GitHub review thread.",
+      workingDir: "/Users/morganm/goose artifacts",
+      projectId: "goose-internal",
+      providerId: "goose",
+      modelId: "claude-sonnet-4",
+      personaId: null,
+    });
+    checkDirectoriesExist.mockImplementation((paths: string[]) =>
+      Promise.resolve(
+        paths.includes("/resolved/missing/session")
+          ? ["/resolved/missing/session"]
+          : [],
+      ),
+    );
+    seedSession(
+      {
+        id: "s-pinned",
+        title: DEFAULT_CHAT_TITLE,
+        projectId: undefined,
+        workingDir: "/missing/session",
+        pinnedLoadState: "loading",
+        updatedAt: "2026-06-25T00:49:00.000Z",
+      },
+      { replay: true },
+    );
+
+    await expect(loadSessionMessages("s-pinned")).resolves.toBe(true);
+
+    expect(acpGetSessionInfo).toHaveBeenCalledWith("s-pinned");
+    expect(acpLoadSession).toHaveBeenCalledWith(
+      "s-pinned",
+      "/resolved/Users/morganm/goose artifacts",
+    );
+    expect(useChatSessionStore.getState().getSession("s-pinned")).toMatchObject(
+      {
+        title: "Control Center MCP Hints",
+        projectId: "goose-internal",
+        workingDir: "/Users/morganm/goose artifacts",
+        updatedAt: "2026-06-25T00:45:04.000Z",
+        lastMessageAt: "2026-06-19T06:59:21.000Z",
+        pinnedLoadState: undefined,
+      },
+    );
   });
 
   it("skips ACP load and cwd checks when the session already has messages", async () => {

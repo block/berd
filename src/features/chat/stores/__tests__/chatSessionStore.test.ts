@@ -76,6 +76,7 @@ function makeAcpSession(
     title: "ACP Session",
     updatedAt: "2026-04-01T00:00:00.000Z",
     createdAt: "2026-04-01T00:00:00.000Z",
+    lastMessageAt: null,
     archivedAt: null,
     userSetName: false,
     messageCount: 1,
@@ -677,6 +678,7 @@ describe("chatSessionStore", () => {
               title: "ACP Session 1",
               updatedAt: "2026-04-01",
               createdAt: "2026-03-31",
+              lastMessageAt: "2026-04-05T00:00:00.000Z",
               userSetName: true,
               messageCount: 4,
               workingDir: "/tmp/acp-1",
@@ -702,18 +704,19 @@ describe("chatSessionStore", () => {
       expect(mocks.acpListSessionsPage).toHaveBeenCalledWith();
       const sessions = useChatSessionStore.getState().sessions;
       expect(sessions).toHaveLength(2);
-      expect(sessions[0].id).toBe("acp-2");
-      expect(sessions[0].title).toBe("Untitled");
-      expect(sessions[0].messageCount).toBe(7);
-      expect(sessions[1].id).toBe("acp-1");
-      expect(sessions[1].title).toBe("ACP Session 1");
-      expect(sessions[1].messageCount).toBe(4);
-      expect(sessions[1].providerId).toBe("openai");
-      expect(sessions[1].projectId).toBe("project-123");
-      expect(sessions[1].personaId).toBe("persona-1");
-      expect(sessions[1].modelId).toBe("gpt-4.1");
-      expect(sessions[1].workingDir).toBe("/tmp/acp-1");
-      expect(sessions[1].userSetName).toBe(true);
+      expect(sessions[0].id).toBe("acp-1");
+      expect(sessions[0].title).toBe("ACP Session 1");
+      expect(sessions[0].messageCount).toBe(4);
+      expect(sessions[0].lastMessageAt).toBe("2026-04-05T00:00:00.000Z");
+      expect(sessions[0].providerId).toBe("openai");
+      expect(sessions[0].projectId).toBe("project-123");
+      expect(sessions[0].personaId).toBe("persona-1");
+      expect(sessions[0].modelId).toBe("gpt-4.1");
+      expect(sessions[0].workingDir).toBe("/tmp/acp-1");
+      expect(sessions[0].userSetName).toBe(true);
+      expect(sessions[1].id).toBe("acp-2");
+      expect(sessions[1].title).toBe("Untitled");
+      expect(sessions[1].messageCount).toBe(7);
       expect(useChatSessionStore.getState().sessionPageCursor).toBe("cursor-2");
       expect(useChatSessionStore.getState().hasMoreSessions).toBe(true);
     });

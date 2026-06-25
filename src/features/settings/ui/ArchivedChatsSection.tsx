@@ -5,6 +5,7 @@ import {
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import {
   listArchivedProjects,
@@ -50,7 +51,7 @@ export function ArchivedChatsSection() {
   }
 
   function describeChat(session: ChatSession): string {
-    const date = formatRelativeTimeToNow(session.updatedAt);
+    const date = formatRelativeTimeToNow(sessionActivityAt(session));
     if (!session.projectId) {
       return date;
     }

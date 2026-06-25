@@ -23,6 +23,7 @@ export interface AcpSessionInfo {
   title: string | null;
   updatedAt: string | null;
   createdAt: string | null;
+  lastMessageAt: string | null;
   archivedAt: string | null;
   userSetName: boolean;
   messageCount: number;
@@ -61,22 +62,47 @@ function mapLastMessageSnippet(value: unknown): string | null {
   return messageSnippet(value);
 }
 
+function metaString(
+  meta: SessionInfo["_meta"] | null | undefined,
+  key: string,
+): string | null {
+  const value = meta?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function metaNumber(
+  meta: SessionInfo["_meta"] | null | undefined,
+  key: string,
+): number | null {
+  const value = meta?.[key];
+  return typeof value === "number" ? value : null;
+}
+
 function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
   return {
     sessionId: info.sessionId,
     title: info.title ?? null,
     updatedAt: info.updatedAt ?? null,
-    createdAt: (info._meta?.createdAt as string) ?? null,
-    archivedAt: (info._meta?.archivedAt as string) ?? null,
+    createdAt: metaString(info._meta, "createdAt"),
+    lastMessageAt: metaString(info._meta, "lastMessageAt"),
+    archivedAt: metaString(info._meta, "archivedAt"),
     userSetName: info._meta?.userSetName === true,
-    messageCount: (info._meta?.messageCount as number) ?? 0,
+    messageCount: metaNumber(info._meta, "messageCount") ?? 0,
     subtitle: mapLastMessageSnippet(info._meta?.lastMessageSnippet),
     workingDir: info.cwd ?? null,
-    projectId: (info._meta?.projectId as string) ?? null,
-    providerId: (info._meta?.providerId as string) ?? null,
-    modelId: (info._meta?.modelId as string) ?? null,
-    personaId: (info._meta?.personaId as string) ?? null,
+    projectId: metaString(info._meta, "projectId"),
+    providerId: metaString(info._meta, "providerId"),
+    modelId: metaString(info._meta, "modelId"),
+    personaId: metaString(info._meta, "personaId"),
   };
+}
+
+export async function getSessionInfo(
+  sessionId: string,
+): Promise<AcpSessionInfo> {
+  const client = await getClient();
+  const result = await client.goose.GooseUnstableSessionInfo({ sessionId });
+  return mapSessionInfo(result.session as unknown as SessionInfo);
 }
 
 export async function listSessionsPage({
@@ -130,15 +156,16 @@ export async function forkSession(
     sessionId: response.sessionId,
     title: null,
     updatedAt: null,
-    createdAt: (response._meta?.createdAt as string) ?? null,
-    archivedAt: (response._meta?.archivedAt as string) ?? null,
+    createdAt: metaString(response._meta, "createdAt"),
+    lastMessageAt: metaString(response._meta, "lastMessageAt"),
+    archivedAt: metaString(response._meta, "archivedAt"),
     userSetName: response._meta?.userSetName === true,
-    messageCount: (response._meta?.messageCount as number) ?? 0,
+    messageCount: metaNumber(response._meta, "messageCount") ?? 0,
     subtitle: mapLastMessageSnippet(response._meta?.lastMessageSnippet),
     workingDir,
-    projectId: (response._meta?.projectId as string) ?? null,
-    providerId: (response._meta?.providerId as string) ?? null,
-    modelId: (response._meta?.modelId as string) ?? null,
+    projectId: metaString(response._meta, "projectId"),
+    providerId: metaString(response._meta, "providerId"),
+    modelId: metaString(response._meta, "modelId"),
     personaId: null,
   };
 }

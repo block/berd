@@ -1,9 +1,11 @@
 import { Fzf, type FzfResultItem } from "fzf";
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 
 export interface QuickSwitchSession {
   id: string;
   title: string;
   updatedAt: string;
+  lastMessageAt?: string | null;
   isRunning: boolean;
 }
 
@@ -20,7 +22,10 @@ export const QUICK_SWITCH_RESULT_LIMIT = 8;
 const ACTIVE_SESSION_SCORE_BONUS = 32;
 
 function byRecency(a: QuickSwitchSession, b: QuickSwitchSession): number {
-  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  return (
+    Date.parse(sessionActivityAt(b)) - Date.parse(sessionActivityAt(a)) ||
+    b.id.localeCompare(a.id)
+  );
 }
 
 function effectiveScore(result: FzfResultItem<QuickSwitchSession>): number {
@@ -32,8 +37,9 @@ function effectiveScore(result: FzfResultItem<QuickSwitchSession>): number {
 /**
  * Rank sessions for the quick switcher.
  *
- * Empty query: most-recently-updated order with running sessions first (MRU,
- * like Slack's Cmd+K with nothing typed).
+ * Empty query: most-recently-active order with running sessions first (MRU,
+ * like Slack's Cmd+K with nothing typed). Activity uses the last chat message
+ * timestamp when Goose provides it, with updatedAt as an older-backend fallback.
  *
  * With a query: fzf fuzzy match score, boosted for running sessions, with
  * recency as the tiebreaker.

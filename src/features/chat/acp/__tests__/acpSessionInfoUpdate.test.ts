@@ -43,6 +43,7 @@ describe("ACP session info updates", () => {
         updatedAt: "2026-01-01T00:01:00.000Z",
         _meta: {
           messageCount: 1,
+          lastMessageAt: "2026-01-01T00:00:30.000Z",
           userSetName: false,
         },
       },
@@ -53,6 +54,7 @@ describe("ACP session info updates", () => {
     ).toMatchObject({
       title: "Generated Test Title",
       updatedAt: "2026-01-01T00:01:00.000Z",
+      lastMessageAt: "2026-01-01T00:00:30.000Z",
       messageCount: 1,
       userSetName: false,
     });

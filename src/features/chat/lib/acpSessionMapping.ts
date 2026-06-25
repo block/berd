@@ -4,6 +4,7 @@ import type {
   ArchiveSessionMutation,
   ChatSession,
 } from "@/features/chat/stores/chatSessionStore";
+import { compareSessionsByActivityDesc } from "@/features/chat/lib/sessionActivity";
 import { normalizeAcpTitle } from "@/features/chat/lib/sessionTitle";
 
 interface SessionPageState {
@@ -25,17 +26,12 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
     workingDir: session.workingDir ?? undefined,
     createdAt: session.createdAt ?? session.updatedAt ?? now,
     updatedAt: session.updatedAt ?? now,
+    lastMessageAt: session.lastMessageAt ?? undefined,
     archivedAt: session.archivedAt ?? undefined,
     messageCount: session.messageCount,
     subtitle: session.subtitle ?? undefined,
     userSetName: session.userSetName,
   };
-}
-
-function sortByUpdatedAtDesc(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
 }
 
 function mergeSessionMetadata(
@@ -88,7 +84,7 @@ function mergeSessionMetadata(
   }
 
   return {
-    sessions: sortByUpdatedAtDesc([...byId.values()]),
+    sessions: [...byId.values()].sort(compareSessionsByActivityDesc),
     archiveMutationBySessionId: nextArchiveMutationBySessionId,
   };
 }
