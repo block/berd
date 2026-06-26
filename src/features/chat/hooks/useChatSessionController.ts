@@ -64,6 +64,7 @@ interface UseChatSessionControllerOptions {
   onCreatePersonaRequested?: () => void;
 }
 
+const DRAFT_STORE_UPDATE_DEBOUNCE_MS = 300;
 const PENDING_HOME_SESSION_ID = "__home_pending__";
 const EMPTY_SKILL_DRAFTS: ChatSkillDraft[] = [];
 const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
@@ -1446,12 +1447,61 @@ export function useChatSessionController({
       : storedSelectedSkills;
   const hasSelectedAgentBuilderSkill =
     hasAgentBuilderSkillDraft(selectedSkills);
+  const pendingDraftStoreWriteRef = useRef<{
+    sessionId: string;
+    text: string;
+  } | null>(null);
+  const draftStoreWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const flushPendingDraftStoreWrite = useCallback(() => {
+    if (draftStoreWriteTimerRef.current !== null) {
+      clearTimeout(draftStoreWriteTimerRef.current);
+      draftStoreWriteTimerRef.current = null;
+    }
+    const pending = pendingDraftStoreWriteRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingDraftStoreWriteRef.current = null;
+    useChatStore.getState().setDraft(pending.sessionId, pending.text);
+  }, []);
   const handleDraftChange = useCallback(
     (text: string) => {
-      useChatStore.getState().setDraft(stateSessionId, text);
+      if (pendingDraftStoreWriteRef.current?.sessionId !== stateSessionId) {
+        flushPendingDraftStoreWrite();
+      }
+      pendingDraftStoreWriteRef.current = { sessionId: stateSessionId, text };
+      if (text.length === 0) {
+        flushPendingDraftStoreWrite();
+        return;
+      }
+      if (draftStoreWriteTimerRef.current !== null) {
+        clearTimeout(draftStoreWriteTimerRef.current);
+      }
+      draftStoreWriteTimerRef.current = setTimeout(
+        flushPendingDraftStoreWrite,
+        DRAFT_STORE_UPDATE_DEBOUNCE_MS,
+      );
     },
-    [stateSessionId],
+    [flushPendingDraftStoreWrite, stateSessionId],
   );
+  useEffect(() => flushPendingDraftStoreWrite, [flushPendingDraftStoreWrite]);
+  useEffect(() => {
+    const clientSessionId = session?.clientSessionId;
+    if (!sessionId || !clientSessionId || clientSessionId === sessionId) {
+      return;
+    }
+    const pending = pendingDraftStoreWriteRef.current;
+    if (pending?.sessionId !== clientSessionId) {
+      return;
+    }
+    pendingDraftStoreWriteRef.current = {
+      sessionId,
+      text: pending.text,
+    };
+    flushPendingDraftStoreWrite();
+  }, [flushPendingDraftStoreWrite, session?.clientSessionId, sessionId]);
   const handleSkillsChange = useCallback(
     (skills: typeof selectedSkills) => {
       useChatStore
@@ -1513,6 +1563,8 @@ export function useChatSessionController({
     if (!sessionId || !isHomeSession) {
       return;
     }
+
+    flushPendingDraftStoreWrite();
 
     // Pending values are read off the store below; the closures above keep
     // them in the dep array so this effect re-runs when home-side pending
@@ -1669,6 +1721,7 @@ export function useChatSessionController({
     prepareCurrentSession,
     selectedProvider,
     setGlobalSelectedProvider,
+    flushPendingDraftStoreWrite,
     session?.personaId,
     session?.projectId,
     sessionId,

@@ -341,6 +341,135 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("debounces draft store writes while composer text changes", () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleDraftChange("h");
+        result.current.handleDraftChange("hello");
+      });
+
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        undefined,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(299);
+      });
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        undefined,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        "hello",
+      );
+
+      act(() => {
+        result.current.handleDraftChange("");
+      });
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes a pending draft store write on unmount", () => {
+    vi.useFakeTimers();
+    try {
+      const { result, unmount } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleDraftChange("unsaved draft");
+      });
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        undefined,
+      );
+
+      act(() => {
+        unmount();
+      });
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        "unsaved draft",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes a debounced draft to the backend session id when a draft session is promoted", () => {
+    vi.useFakeTimers();
+    try {
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "draft-session",
+            clientSessionId: "draft-session",
+            title: "Chat",
+            providerId: "openai",
+            projectId: "project-1",
+            creationState: "pending",
+            createdAt: "2026-04-20T00:00:00.000Z",
+            updatedAt: "2026-04-20T00:00:00.000Z",
+            messageCount: 0,
+          },
+        ],
+      });
+
+      const { result, rerender } = renderHook(
+        ({ sessionId }: { sessionId: string }) =>
+          useChatSessionController({ sessionId }),
+        {
+          initialProps: { sessionId: "draft-session" },
+        },
+      );
+
+      act(() => {
+        result.current.handleDraftChange("draft during promotion");
+      });
+      expect(
+        useChatStore.getState().draftsBySession["draft-session"],
+      ).toBeUndefined();
+
+      act(() => {
+        useChatStore
+          .getState()
+          .promoteSessionId("draft-session", "backend-session");
+        useChatSessionStore
+          .getState()
+          .promoteDraftSession("draft-session", "backend-session");
+      });
+      rerender({ sessionId: "backend-session" });
+
+      expect(useChatStore.getState().draftsBySession["backend-session"]).toBe(
+        "draft during promotion",
+      );
+      expect(
+        useChatStore.getState().draftsBySession["draft-session"],
+      ).toBeUndefined();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(useChatStore.getState().draftsBySession["backend-session"]).toBe(
+        "draft during promotion",
+      );
+      expect(
+        useChatStore.getState().draftsBySession["draft-session"],
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps queued messages from draining while a project draft session is pending", () => {
     useChatSessionStore.setState({
       sessions: [
@@ -1990,6 +2119,60 @@ describe("useChatSessionController", () => {
     expect(
       useChatStore.getState().queuedMessageBySession.__home_pending__,
     ).toBeUndefined();
+  });
+
+  it("flushes a debounced Home draft before migrating to a real session", () => {
+    vi.useFakeTimers();
+    try {
+      const { result, rerender } = renderHook(
+        ({ sessionId }: { sessionId: string | null }) =>
+          useChatSessionController({ sessionId, isHomeSession: true }),
+        {
+          initialProps: { sessionId: null as string | null },
+        },
+      );
+
+      act(() => {
+        result.current.handleDraftChange("home draft");
+      });
+      expect(
+        useChatStore.getState().draftsBySession.__home_pending__,
+      ).toBeUndefined();
+
+      act(() => {
+        useChatSessionStore.setState((state) => ({
+          sessions: [
+            {
+              id: "session-from-home",
+              title: "Chat",
+              providerId: "openai",
+              createdAt: "2026-04-21T00:00:00.000Z",
+              updatedAt: "2026-04-21T00:00:00.000Z",
+              messageCount: 0,
+            },
+            ...state.sessions,
+          ],
+        }));
+      });
+
+      rerender({ sessionId: "session-from-home" });
+
+      expect(useChatStore.getState().draftsBySession["session-from-home"]).toBe(
+        "home draft",
+      );
+      expect(
+        useChatStore.getState().draftsBySession.__home_pending__,
+      ).toBeUndefined();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(
+        useChatStore.getState().draftsBySession.__home_pending__,
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("moves pending Home queued messages when preparation is superseded", async () => {
