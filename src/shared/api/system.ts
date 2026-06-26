@@ -40,6 +40,13 @@ export async function getHomeDir(): Promise<string> {
   return invoke("get_home_dir");
 }
 
+export async function saveExportedAgentFile(
+  defaultFilename: string,
+  contents: string,
+): Promise<string | null> {
+  return invoke("save_exported_agent_file", { defaultFilename, contents });
+}
+
 export async function saveExportedSessionFile(
   defaultFilename: string,
   contents: string,

@@ -1,16 +1,40 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { exportPersona } from "@/shared/api/agents";
+import { saveExportedAgentFile } from "@/shared/api/system";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { toast } from "sonner";
 import { AgentsView } from "../AgentsView";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: Record<string, unknown>) =>
+      key === "view.exportedTo" && typeof options?.filename === "string"
+        ? `${key}:${options.filename}`
+        : key,
   }),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
+}));
+
+vi.mock("@/shared/api/agents", () => ({
+  exportPersona: vi.fn(),
+  importPersonas: vi.fn(),
+  readImportPersonaFile: vi.fn(),
+}));
+
+vi.mock("@/shared/api/system", () => ({
+  saveExportedAgentFile: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock("@/features/agents/hooks/usePersonas", () => ({
@@ -21,6 +45,22 @@ vi.mock("@/features/agents/hooks/usePersonas", () => ({
   }),
 }));
 
+vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
+  useAvatarLibrary: () => ({
+    catalog: null,
+    cachedAvatarMediaById: {},
+    loading: false,
+    cacheChecking: false,
+    error: false,
+    errorCode: null,
+    downloadingCollectionId: null,
+    failedCollectionIds: new Set(),
+    retryCatalog: () => {},
+    openCollection: async () => {},
+    isCollectionCached: () => false,
+  }),
+}));
+
 const persona = {
   id: "/Users/x/.agents/agents/code-reviewer.md",
   displayName: "Code reviewer",
@@ -28,6 +68,27 @@ const persona = {
   isBuiltin: false,
   writable: true,
 };
+
+const exportedPersona = {
+  contents: "---\nname: code-reviewer\n---\n\nReview code carefully.\n",
+  filename: "code-reviewer.persona.md",
+  mimeType: "text/markdown",
+};
+
+function setTauriInternals(value: unknown = {}): void {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value,
+  });
+}
+
+async function clickDetailExport(): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "detail.moreActions" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "common:actions.export" }),
+  );
+}
 
 describe("AgentsView entry points", () => {
   const originalMatchMedia = window.matchMedia;
@@ -51,10 +112,12 @@ describe("AgentsView entry points", () => {
       value: originalMatchMedia,
     });
     delete document.documentElement.dataset.agentTransition;
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
+    vi.clearAllMocks();
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
@@ -113,6 +176,80 @@ describe("AgentsView entry points", () => {
       path: "/Users/x/.agents/agents/code-reviewer.md",
       slug: "code-reviewer",
     });
+  });
+
+  it("exports agents through the native save dialog in Tauri", async () => {
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL");
+    vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
+    vi.mocked(saveExportedAgentFile).mockResolvedValue(
+      "/Users/x/Desktop/custom-name.persona.md",
+    );
+    setTauriInternals();
+    useAgentStore.setState({ personas: [persona] });
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await clickDetailExport();
+
+    await waitFor(() => {
+      expect(exportPersona).toHaveBeenCalledWith(persona.id);
+      expect(saveExportedAgentFile).toHaveBeenCalledWith(
+        "code-reviewer.persona.md",
+        exportedPersona.contents,
+      );
+      expect(toast.success).toHaveBeenCalledWith(
+        "view.exportedTo:custom-name.persona.md",
+      );
+    });
+    expect(createObjectUrl).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when native agent export is canceled", async () => {
+    vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
+    vi.mocked(saveExportedAgentFile).mockResolvedValue(null);
+    setTauriInternals();
+    useAgentStore.setState({ personas: [persona] });
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await clickDetailExport();
+
+    await waitFor(() => {
+      expect(saveExportedAgentFile).toHaveBeenCalledWith(
+        "code-reviewer.persona.md",
+        exportedPersona.contents,
+      );
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps the browser download fallback outside Tauri", async () => {
+    const createObjectUrl = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:agent-export");
+    const revokeObjectUrl = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const clickAnchor = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
+    useAgentStore.setState({ personas: [persona] });
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await clickDetailExport();
+
+    await waitFor(() => {
+      expect(createObjectUrl).toHaveBeenCalledTimes(1);
+      expect(clickAnchor).toHaveBeenCalledTimes(1);
+      expect(revokeObjectUrl).toHaveBeenCalledWith("blob:agent-export");
+      expect(toast.success).toHaveBeenCalledWith(
+        "view.exportedTo:code-reviewer.persona.md",
+      );
+    });
+    expect(saveExportedAgentFile).not.toHaveBeenCalled();
   });
 
   it("starts a gallery-to-profile view transition when opening detail", () => {

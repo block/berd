@@ -377,6 +377,7 @@ pub fn run() {
             commands::runtime_config::refresh_runtime_config,
             commands::system::get_home_dir,
             commands::system::open_in_chrome,
+            commands::system::save_exported_agent_file,
             commands::system::save_exported_session_file,
             commands::system::save_exported_session_files,
             commands::system::path_exists,

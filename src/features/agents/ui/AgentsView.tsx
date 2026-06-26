@@ -29,6 +29,7 @@ import {
   importPersonas,
   readImportPersonaFile,
 } from "@/shared/api/agents";
+import { saveExportedAgentFile } from "@/shared/api/system";
 import { usePersonas } from "@/features/agents/hooks/usePersonas";
 import type { Persona } from "@/shared/types/agents";
 import {
@@ -60,6 +61,15 @@ function sourcePathToSlug(pathOrId: string): string {
     return baseName.slice(0, -".persona.md".length);
   }
   return lowerName.endsWith(".md") ? baseName.slice(0, -3) : baseName;
+}
+
+function exportFilenameFromPath(
+  path: string,
+  fallbackFilename: string,
+): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const filename = normalized.split("/").pop();
+  return filename?.trim() ? filename : fallbackFilename;
 }
 
 interface AgentsViewProps {
@@ -262,6 +272,23 @@ export function AgentsView({
     async (persona: Persona) => {
       try {
         const result = await exportPersona(persona.id);
+
+        if (window.__TAURI_INTERNALS__) {
+          const savedPath = await saveExportedAgentFile(
+            result.filename,
+            result.contents,
+          );
+          if (!savedPath) {
+            return;
+          }
+          const savedFilename = exportFilenameFromPath(
+            savedPath,
+            result.filename,
+          );
+          toast.success(t("view.exportedTo", { filename: savedFilename }));
+          return;
+        }
+
         const blob = new Blob([result.contents], { type: result.mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
