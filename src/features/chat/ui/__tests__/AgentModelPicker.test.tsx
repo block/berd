@@ -261,6 +261,13 @@ describe("AgentModelPicker", () => {
     });
     expect(trigger).toHaveTextContent("GPT 5.5");
     expect(trigger).toHaveTextContent("Medium");
+    expect(trigger).toHaveClass("group");
+    expect(screen.getByText("Medium")).toHaveClass(
+      "text-muted-foreground/70",
+      "dark:group-hover:text-foreground",
+      "dark:group-data-[state=open]:text-foreground",
+      "dark:group-aria-expanded:text-foreground",
+    );
 
     await user.click(trigger);
 

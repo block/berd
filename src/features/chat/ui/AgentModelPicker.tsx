@@ -382,7 +382,7 @@ export function AgentModelPicker({
             )
           }
           className={cn(
-            "chat-composer-selector-trigger",
+            "chat-composer-selector-trigger group",
             triggerIconOnly ? "shrink-0" : "min-w-0 max-w-full",
           )}
         >
@@ -397,7 +397,7 @@ export function AgentModelPicker({
                 {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
               </span>
               {showReasoningEffort && selectedReasoningEffortLabel ? (
-                <span className="shrink-0 text-muted-foreground/70">
+                <span className="shrink-0 text-muted-foreground/70 dark:group-hover:text-foreground dark:group-data-[state=open]:text-foreground dark:group-aria-expanded:text-foreground">
                   {selectedReasoningEffortLabel}
                 </span>
               ) : null}
