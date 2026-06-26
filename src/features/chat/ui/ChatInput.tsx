@@ -65,7 +65,7 @@ import type { Persona } from "@/shared/types/agents";
 import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 
 const DOCKED_TEXTAREA_MIN_HEIGHT_PX = 140;
-const DOCKED_TEXTAREA_MAX_HEIGHT_PX = 220;
+const DOCKED_TEXTAREA_MAX_HEIGHT_PX = 300;
 const DOCKED_TEXTAREA_VIEWPORT_RATIO = 0.24;
 const AGENT_TOOLS_TIP_AUTO_DISABLE_DISMISSALS = 3;
 const AGENT_TOOLS_TIP_AUTO_DISMISS_MS = 4_500;
@@ -1302,7 +1302,7 @@ export function ChatInput({
                     "mb-2 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer placeholder:opacity-100 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
                     // Backstop for the JS auto-resize cap.
                     surface === "bare"
-                      ? "max-h-[clamp(140px,24dvh,220px)]"
+                      ? "max-h-[clamp(140px,24dvh,300px)]"
                       : "max-h-[200px]",
                     "scrollbar-subtle overscroll-contain",
                   )}

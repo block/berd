@@ -254,6 +254,23 @@ describe("MessageBubble", () => {
     expect(assistantContent?.className).not.toContain("max-w-[85%]");
   });
 
+  it("caps user message height with internal scrolling", () => {
+    const { container } = render(
+      <MessageBubble message={userMessage("long prompt")} />,
+    );
+
+    const userBubble = container.querySelector(
+      '[data-role="user-message"] .bg-message-user-bg',
+    );
+
+    expect(userBubble).toHaveClass(
+      "max-h-[640px]",
+      "overflow-y-auto",
+      "overscroll-contain",
+      "scrollbar-subtle",
+    );
+  });
+
   it("renders assistant message with avatar", () => {
     const { container } = render(
       <MessageBubble

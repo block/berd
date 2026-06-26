@@ -201,6 +201,26 @@ function recallTextbox(): HTMLTextAreaElement {
   return screen.getByRole("textbox") as HTMLTextAreaElement;
 }
 
+function setViewportHeight(height: number) {
+  Object.defineProperty(window, "innerHeight", {
+    configurable: true,
+    writable: true,
+    value: height,
+  });
+}
+
+function setTextareaScrollHeight(
+  textarea: HTMLTextAreaElement,
+  scrollHeight: number,
+) {
+  Object.defineProperty(textarea, "scrollHeight", {
+    configurable: true,
+    value: scrollHeight,
+  });
+}
+
+const DEFAULT_VIEWPORT_HEIGHT = window.innerHeight;
+
 function pressRecallArrowUp(eventInit: Record<string, unknown> = {}) {
   fireEvent.keyDown(recallTextbox(), { key: "ArrowUp", ...eventInit });
 }
@@ -249,6 +269,7 @@ async function stageRecallAttachment() {
 
 describe("ChatInput", () => {
   beforeEach(() => {
+    setViewportHeight(DEFAULT_VIEWPORT_HEIGHT);
     localStorage.clear();
     mockSearchFilesForMentions.mockClear();
     mockSearchFilesForMentions.mockResolvedValue([]);
@@ -1699,7 +1720,11 @@ describe("ChatInput", () => {
 
     const input = screen.getByRole("textbox");
 
-    expect(input).toHaveClass("scrollbar-subtle", "overscroll-contain");
+    expect(input).toHaveClass(
+      "overflow-y-auto",
+      "scrollbar-subtle",
+      "overscroll-contain",
+    );
     expect(input).not.toHaveClass("scrollbar-none");
   });
 
@@ -1707,8 +1732,25 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} surface="bare" />);
 
     expect(screen.getByRole("textbox")).toHaveClass(
-      "max-h-[clamp(140px,24dvh,220px)]",
+      "max-h-[clamp(140px,24dvh,300px)]",
     );
+  });
+
+  it("caps docked textarea growth by viewport before internal scrolling", async () => {
+    setViewportHeight(1400);
+    render(<ChatInput onSend={vi.fn()} surface="bare" />);
+
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    setTextareaScrollHeight(input, 400);
+    fireEvent.change(input, { target: { value: "draft".repeat(100) } });
+
+    await waitFor(() => expect(input.style.height).toBe("300px"));
+
+    setViewportHeight(600);
+    setTextareaScrollHeight(input, 400);
+    fireEvent.change(input, { target: { value: "draft".repeat(101) } });
+
+    await waitFor(() => expect(input.style.height).toBe("144px"));
   });
 
   it("shows send button instead of stop when streaming with text entered", async () => {

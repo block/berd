@@ -675,7 +675,7 @@ export const MessageBubble = memo(function MessageBubble({
           className={cn(
             "min-w-0 text-sm leading-relaxed",
             isUser
-              ? "rounded-sm bg-message-user-bg px-4 py-2 leading-normal"
+              ? "max-h-[640px] overflow-y-auto overscroll-contain rounded-sm bg-message-user-bg px-4 py-2 leading-normal scrollbar-subtle"
               : "w-full",
           )}
           onClick={handleContentClick}
