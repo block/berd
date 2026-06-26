@@ -153,6 +153,26 @@ describe("TerminalPanel", () => {
     expect(mocks.resumeResize).not.toHaveBeenCalled();
   });
 
+  it("lets xterm own the terminal body inset", () => {
+    render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const terminalBody = screen
+      .getByRole("region", { name: "terminal.title" })
+      .querySelector(".goose-terminal");
+
+    expect(terminalBody).toHaveClass("px-0", "py-0");
+    expect(terminalBody).not.toHaveClass("p-2");
+  });
+
   it("focuses xterm when the pane jump focus event is dispatched", () => {
     render(
       <TerminalPanel

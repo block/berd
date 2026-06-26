@@ -565,7 +565,7 @@ export function TerminalPanel({
       ) : null}
       <div
         className={cn(
-          "goose-terminal min-h-0 flex-1 overflow-hidden p-2 opacity-100 transition-opacity duration-150 ease-out motion-reduce:transition-none",
+          "goose-terminal min-h-0 flex-1 overflow-hidden px-0 py-0 opacity-100 transition-opacity duration-150 ease-out motion-reduce:transition-none",
           collapsed && "h-0 flex-none p-0 opacity-0",
         )}
         aria-hidden={collapsed || undefined}

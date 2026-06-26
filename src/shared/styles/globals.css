@@ -10,9 +10,9 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Keep leftover sub-row pixels above the grid and away from rounded edges. */
-  justify-content: flex-end;
-  padding: 8px 8px 2px;
+  /* Keep the first terminal row stable; row-fitting slack falls below the grid. */
+  justify-content: flex-start;
+  padding: 4px 12px 2px;
 }
 
 .goose-terminal .xterm-screen {
