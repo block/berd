@@ -254,6 +254,9 @@ export function useChatSessionController({
   const reasoningEffortDefaultSaveQueueRef = useRef<Promise<void>>(
     Promise.resolve(),
   );
+  const reasoningEffortRefreshKeyBySessionRef = useRef<Record<string, string>>(
+    {},
+  );
   const pendingDraftValue = useChatStore(
     isHomeSession
       ? (s) => s.draftsBySession[PENDING_HOME_SESSION_ID] ?? ""
@@ -391,7 +394,12 @@ export function useChatSessionController({
         return false;
       }
 
-      useChatSessionStore.getState().patchSession(sessionId, { workingDir });
+      useChatSessionStore.getState().patchSession(sessionId, {
+        workingDir,
+        ...(result.configOptionsSnapshot?.reasoningEffort
+          ? { reasoningEffort: result.configOptionsSnapshot.reasoningEffort }
+          : {}),
+      });
       return true;
     },
     [activeWorkspace?.path, project, session?.workingDir, sessionId],
@@ -488,6 +496,9 @@ export function useChatSessionController({
         workingDir,
         modelId: modelToApply.id,
         modelName: modelToApply.name,
+        ...(result.configOptionsSnapshot?.reasoningEffort
+          ? { reasoningEffort: result.configOptionsSnapshot.reasoningEffort }
+          : {}),
       });
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
@@ -559,15 +570,40 @@ export function useChatSessionController({
       if (!result.applied) {
         return false;
       }
+      let configOptionsSnapshot = result.configOptionsSnapshot;
+      if (isHomeSession && !configOptionsSnapshot?.reasoningEffort) {
+        const refreshResult = await applyLatestSessionConfig({
+          sessionId,
+          providerId,
+          workingDir,
+          modelId: modelSelection.id,
+          forceConfigRefresh: true,
+        });
+        if (!isCurrentModelSelectionIntent(sessionId, requestId)) {
+          return false;
+        }
+        if (refreshResult.applied) {
+          configOptionsSnapshot = refreshResult.configOptionsSnapshot;
+        }
+      }
       useChatSessionStore.getState().patchSession(sessionId, {
         workingDir,
         modelId: modelSelection.id,
         modelName: modelSelection.name,
+        ...(configOptionsSnapshot?.reasoningEffort
+          ? { reasoningEffort: configOptionsSnapshot.reasoningEffort }
+          : {}),
       });
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
-    [activeWorkspace?.path, project, session?.workingDir, sessionId],
+    [
+      activeWorkspace?.path,
+      isHomeSession,
+      project,
+      session?.workingDir,
+      sessionId,
+    ],
   );
 
   const prevProjectIdRef = useRef(session?.projectId);
@@ -607,6 +643,83 @@ export function useChatSessionController({
     prepareSelectedProvider,
     applySessionModelSelection,
   });
+
+  const refreshMissingReasoningEffort = useCallback(async () => {
+    if (!sessionId || readOnly || session?.reasoningEffort) {
+      return;
+    }
+
+    const modelId = session?.modelId ?? effectiveModelSelection?.id;
+    const providerId =
+      effectiveModelSelection?.providerId ?? session?.providerId;
+    if (!modelId || !providerId) {
+      return;
+    }
+
+    const refreshKey = [
+      providerId,
+      modelId,
+      session?.workingDir ?? activeWorkspace?.path ?? "",
+    ].join("\u0000");
+    if (
+      reasoningEffortRefreshKeyBySessionRef.current[sessionId] === refreshKey
+    ) {
+      return;
+    }
+    reasoningEffortRefreshKeyBySessionRef.current[sessionId] = refreshKey;
+
+    try {
+      const workingDir = await resolveSessionCwd(
+        project,
+        activeWorkspace?.path ?? session?.workingDir,
+      );
+      const result = await applyLatestSessionConfig({
+        sessionId,
+        providerId,
+        workingDir,
+        modelId,
+        forceConfigRefresh: true,
+      });
+      if (!result.applied) {
+        return;
+      }
+      const reasoningEffort = result.configOptionsSnapshot?.reasoningEffort;
+      if (!reasoningEffort) {
+        return;
+      }
+      const liveSession = useChatSessionStore.getState().getSession(sessionId);
+      if (liveSession?.modelId && liveSession.modelId !== modelId) {
+        return;
+      }
+      useChatSessionStore.getState().patchSession(sessionId, {
+        workingDir,
+        modelId: liveSession?.modelId ?? modelId,
+        modelName:
+          liveSession?.modelName ?? effectiveModelSelection?.name ?? modelId,
+        reasoningEffort,
+      });
+    } catch (error) {
+      console.error("Failed to refresh reasoning effort config:", error);
+    }
+  }, [
+    activeWorkspace?.path,
+    effectiveModelSelection?.id,
+    effectiveModelSelection?.name,
+    effectiveModelSelection?.providerId,
+    project,
+    readOnly,
+    session?.modelId,
+    session?.providerId,
+    session?.reasoningEffort,
+    session?.workingDir,
+    sessionId,
+  ]);
+
+  const handlePickerOpenWithReasoningRefresh = useCallback(() => {
+    handlePickerOpen();
+    void refreshMissingReasoningEffort();
+  }, [handlePickerOpen, refreshMissingReasoningEffort]);
+
   const resolvePersonaModelSelection = useCallback(
     (
       persona: Persona,
@@ -689,6 +802,9 @@ export function useChatSessionController({
         providerId: matchingProvider.id,
         modelId: personaModelSelection.id,
         modelName: personaModelSelection.name,
+        ...(result.configOptionsSnapshot?.reasoningEffort
+          ? { reasoningEffort: result.configOptionsSnapshot.reasoningEffort }
+          : {}),
       });
       return true;
     },
@@ -1790,7 +1906,7 @@ export function useChatSessionController({
     modelsLoading,
     modelStatusMessage,
     handleModelChange: handleModelChangeWithContextReset,
-    handlePickerOpen,
+    handlePickerOpen: handlePickerOpenWithReasoningRefresh,
     reasoningEffort: session?.reasoningEffort,
     handleReasoningEffortChange,
     selectedProjectId: effectiveProjectId,

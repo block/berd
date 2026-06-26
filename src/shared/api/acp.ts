@@ -18,6 +18,16 @@ import {
 import { GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { getExperiment } from "@/features/experiments/experimentPreferences";
 import { perfLog } from "@/shared/lib/perfLog";
+import {
+  applySessionConfigOptionsSnapshot,
+  readSessionConfigOptionsSnapshots,
+  type AcpSessionConfigSnapshots,
+} from "./acpSessionConfigSnapshots";
+import {
+  logReasoningEffortInfo,
+  reasoningEffortConfigLogFields,
+  shortLogId,
+} from "@/shared/lib/reasoningEffortDiagnostics";
 
 export interface AcpProvider {
   id: string;
@@ -38,6 +48,28 @@ export interface AcpCreateSessionOptions {
   personaId?: string;
   projectId?: string;
   modelId?: string | null;
+}
+
+export interface AcpSessionConfigApplyOptions {
+  forceConfigRefresh?: boolean;
+}
+
+export interface AcpCreateSessionResult {
+  sessionId: string;
+  configOptionsSnapshot: AcpSessionConfigSnapshots;
+}
+
+function mergeSessionConfigSnapshots(
+  base: AcpSessionConfigSnapshots,
+  next?: AcpSessionConfigSnapshots,
+): AcpSessionConfigSnapshots {
+  if (!next) {
+    return base;
+  }
+  return {
+    model: next.model ?? base.model,
+    reasoningEffort: next.reasoningEffort ?? base.reasoningEffort,
+  };
 }
 
 /** Discover ACP providers installed on the system. */
@@ -222,23 +254,30 @@ export async function acpPrepareSession(
   sessionId: string,
   providerId: string,
   workingDir: string,
-): Promise<void> {
+  options: AcpSessionConfigApplyOptions = {},
+): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const t0 = performance.now();
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  await sessionRegistry.prepareSession(sessionId, providerId, workingDir);
+  const snapshots = await sessionRegistry.prepareSession(
+    sessionId,
+    providerId,
+    workingDir,
+    options,
+  );
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
   );
+  return snapshots;
 }
 
 export async function acpCreateSession(
   providerId: string,
   workingDir: string,
   options: AcpCreateSessionOptions = {},
-): Promise<{ sessionId: string }> {
+): Promise<AcpCreateSessionResult> {
   const response = await directAcp.newSession(
     workingDir,
     providerId,
@@ -246,28 +285,56 @@ export async function acpCreateSession(
     options.personaId,
   );
   const sessionId = response.sessionId;
-  await directAcp.setProvider(sessionId, providerId);
+  let configOptionsSnapshot = readSessionConfigOptionsSnapshots(response);
+  logReasoningEffortInfo("acpCreateSession newSession response", {
+    sessionId: shortLogId(sessionId),
+    providerId,
+    requestedModelId: options.modelId ?? null,
+    hasReasoningEffortSnapshot: Boolean(configOptionsSnapshot.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      configOptionsSnapshot.reasoningEffort,
+    ),
+  });
+  configOptionsSnapshot = mergeSessionConfigSnapshots(
+    configOptionsSnapshot,
+    await directAcp.setProvider(sessionId, providerId),
+  );
+  logReasoningEffortInfo("acpCreateSession setProvider complete", {
+    sessionId: shortLogId(sessionId),
+    providerId,
+    requestedModelId: options.modelId ?? null,
+    hasReasoningEffortSnapshot: Boolean(configOptionsSnapshot.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      configOptionsSnapshot.reasoningEffort,
+    ),
+  });
   sessionRegistry.registerPreparedSession(sessionId, providerId, workingDir);
   if (options.modelId) {
-    await sessionRegistry.applySessionModel(sessionId, options.modelId);
+    configOptionsSnapshot = mergeSessionConfigSnapshots(
+      configOptionsSnapshot,
+      await sessionRegistry.applySessionModel(sessionId, options.modelId),
+    );
   }
-  return { sessionId };
+  return { sessionId, configOptionsSnapshot };
 }
 
 export async function acpSetModel(
   sessionId: string,
   modelId: string,
-): Promise<void> {
+  options: AcpSessionConfigApplyOptions = {},
+): Promise<AcpSessionConfigSnapshots | undefined> {
   // Routed through the registry so repeat applies of the unchanged model are
   // not sent over the wire (the backend rebuilds the provider on every set).
-  return sessionRegistry.applySessionModel(sessionId, modelId);
+  return sessionRegistry.applySessionModel(sessionId, modelId, options);
 }
 
 export async function acpSetSessionConfigOption(
   sessionId: string,
   configId: string,
   value: string,
-): Promise<void> {
+): Promise<AcpSessionConfigSnapshots> {
   return directAcp.setSessionConfigOption(sessionId, configId, value);
 }
 
@@ -316,6 +383,9 @@ export async function acpLoadSession(
   const effectiveWorkingDir = workingDir ?? "~";
   const sid = sessionId.slice(0, 8);
   const t0 = performance.now();
+  logReasoningEffortInfo("acpLoadSession start", {
+    sessionId: shortLogId(sessionId),
+  });
   const rollbackSessionRegistration = sessionRegistry.registerPreparedSession(
     sessionId,
     "goose",
@@ -323,7 +393,22 @@ export async function acpLoadSession(
   );
   try {
     perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
-    await directAcp.loadSession(sessionId, effectiveWorkingDir);
+    const response = await directAcp.loadSession(
+      sessionId,
+      effectiveWorkingDir,
+    );
+    const snapshots = readSessionConfigOptionsSnapshots(response);
+    logReasoningEffortInfo("acpLoadSession response", {
+      sessionId: shortLogId(sessionId),
+      hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+      ...reasoningEffortConfigLogFields(
+        "reasoningEffort",
+        snapshots.reasoningEffort,
+      ),
+    });
+    applySessionConfigOptionsSnapshot(sessionId, response, {
+      origin: "response",
+    });
     perfLog(
       `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
     );

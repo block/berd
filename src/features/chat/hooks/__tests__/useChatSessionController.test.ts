@@ -21,6 +21,7 @@ const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseChatSteerMessage = vi.fn();
 const mockUseMessageQueue = vi.fn();
+const mockPickerOpen = vi.fn();
 const mockPreSeedDraftAgent = vi.fn();
 const mockDeletePersonaSource = vi.fn();
 const mockUseChatRuntime = {
@@ -181,6 +182,7 @@ vi.mock("../useAgentModelPickerState", () => ({
         });
       }
     },
+    handlePickerOpen: () => mockPickerOpen(),
   }),
 }));
 
@@ -1338,6 +1340,107 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("refreshes missing reasoning effort when the model picker opens", async () => {
+    mockAcpSetModel.mockResolvedValueOnce({
+      model: null,
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "off", name: "Off" },
+          { id: "low", name: "Low" },
+          { id: "high", name: "High" },
+        ],
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePickerOpen();
+    });
+
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-4o", {
+        forceConfigRefresh: true,
+      });
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.reasoningEffort,
+    ).toMatchObject({
+      configId: "thinking_effort",
+      currentValue: "high",
+    });
+  });
+
+  it("refreshes Home reasoning effort when Goose resolves to a concrete model provider", async () => {
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "home-session",
+          title: "Home",
+          providerId: "goose",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+    mockPickerState.availableModels = [
+      {
+        id: "claude-sonnet-4",
+        name: "claude-sonnet-4",
+        displayName: "Claude Sonnet 4",
+        providerId: "anthropic",
+        recommended: true,
+      },
+    ];
+    mockAcpSetModel.mockResolvedValueOnce({
+      model: null,
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "medium",
+        options: [
+          { id: "off", name: "Off" },
+          { id: "medium", name: "Medium" },
+          { id: "high", name: "High" },
+        ],
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({
+        sessionId: "home-session",
+        isHomeSession: true,
+      }),
+    );
+
+    act(() => {
+      result.current.handlePickerOpen();
+    });
+
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "home-session",
+        "claude-sonnet-4",
+        { forceConfigRefresh: true },
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("home-session"),
+    ).toMatchObject({
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "medium",
+      },
+    });
+  });
+
   it("keeps the selected model when send-time preparation supersedes the model switch", async () => {
     const firstPrepare = deferred();
     mockAcpPrepareSession.mockReset();
@@ -2041,6 +2144,64 @@ describe("useChatSessionController", () => {
       providerId: "anthropic",
       modelId: "claude-sonnet-4",
       modelName: "Claude Sonnet 4",
+    });
+  });
+
+  it("refreshes reasoning effort after a Home model change response omits it", async () => {
+    mockAcpSetModel.mockResolvedValueOnce(undefined).mockResolvedValueOnce({
+      model: null,
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "off", name: "Off" },
+          { id: "low", name: "Low" },
+          { id: "high", name: "High" },
+        ],
+      },
+    });
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useChatSessionController({ sessionId, isHomeSession: true }),
+      {
+        initialProps: { sessionId: null as string | null },
+      },
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "home-session-model-change",
+          title: "Home",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+
+    rerender({ sessionId: "home-session-model-change" });
+
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "home-session-model-change",
+        "claude-sonnet-4",
+        { forceConfigRefresh: true },
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("home-session-model-change")
+        ?.reasoningEffort,
+    ).toMatchObject({
+      configId: "thinking_effort",
+      currentValue: "high",
     });
   });
 

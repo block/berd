@@ -126,6 +126,7 @@ import { useForkSession } from "@/features/sessions/hooks/useForkSession";
 import {
   GlobalComposerPill,
   type GlobalComposerHandoffRect,
+  type GlobalComposerModelSelection,
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
@@ -676,6 +677,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
   );
+  const homeComposerReasoningRefreshKeyRef = useRef<string | null>(null);
   const hydratingPinnedSessionIdsRef = useRef<Set<string>>(new Set());
 
   const hydratePinnedChatSessions = useCallback(
@@ -1017,11 +1019,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             providerId: liveHomeSession.providerId,
             workingDir,
             modelId: liveHomeSession.modelId,
+            forceConfigRefresh: !liveHomeSession.reasoningEffort,
           });
           if (!result.applied) {
             return liveHomeSession;
           }
-          patchSession(homeSession.id, { workingDir });
+          patchSession(homeSession.id, {
+            workingDir,
+            ...(result.configOptionsSnapshot?.reasoningEffort
+              ? {
+                  reasoningEffort: result.configOptionsSnapshot.reasoningEffort,
+                }
+              : {}),
+          });
           return readLiveHomeSession();
         }
         if (
@@ -1036,6 +1046,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           providerId: resolvedProviderId,
           workingDir,
           modelId: modelIdToApply,
+          forceConfigRefresh: !liveHomeSession.reasoningEffort,
         });
         if (!result.applied) {
           return homeSession;
@@ -1055,6 +1066,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               : shouldClearHomeModel
                 ? undefined
                 : homeSession.modelName,
+          ...(result.configOptionsSnapshot?.reasoningEffort
+            ? {
+                reasoningEffort: result.configOptionsSnapshot.reasoningEffort,
+              }
+            : {}),
         });
         return (
           useChatSessionStore.getState().getSession(homeSession.id) ??
@@ -1140,36 +1156,47 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               projectId,
               modelId: resolvedSessionModelPreference.modelId,
             },
-          ).then(({ sessionId }) => ({
+          ).then(({ sessionId, configOptionsSnapshot }) => ({
             sessionId,
+            configOptionsSnapshot,
             sessionModelPreference: resolvedSessionModelPreference,
             workingDir: resolvedWorkingDir,
           })),
         )
-        .then(({ sessionId, sessionModelPreference, workingDir }) => {
-          const sessionStore = useChatSessionStore.getState();
-          const latestSession = sessionStore.getSession(session.id);
-          if (!latestSession || latestSession.archivedAt) {
-            return;
-          }
-          const shouldRemainActive =
-            sessionStore.activeSessionId === session.id;
-          promoteChatSessionId(session.id, sessionId);
-          promoteDraftSession(session.id, sessionId, {
-            providerId: sessionModelPreference.providerId,
-            modelId: sessionModelPreference.modelId,
-            modelName: sessionModelPreference.modelName,
+        .then(
+          ({
+            sessionId,
+            configOptionsSnapshot,
+            sessionModelPreference,
             workingDir,
-          });
-          useHomeWidgetStore
-            .getState()
-            .replaceChatPinSessionId(session.id, sessionId);
-          replaceNavigationSessionId(session.id, sessionId);
-          if (shouldRemainActive) {
-            setActiveSession(sessionId);
-            setChatActiveSession(sessionId);
-          }
-        })
+          }) => {
+            const sessionStore = useChatSessionStore.getState();
+            const latestSession = sessionStore.getSession(session.id);
+            if (!latestSession || latestSession.archivedAt) {
+              return;
+            }
+            const shouldRemainActive =
+              sessionStore.activeSessionId === session.id;
+            promoteChatSessionId(session.id, sessionId);
+            promoteDraftSession(session.id, sessionId, {
+              providerId: sessionModelPreference.providerId,
+              modelId: sessionModelPreference.modelId,
+              modelName: sessionModelPreference.modelName,
+              workingDir,
+              ...(configOptionsSnapshot?.reasoningEffort
+                ? { reasoningEffort: configOptionsSnapshot.reasoningEffort }
+                : {}),
+            });
+            useHomeWidgetStore
+              .getState()
+              .replaceChatPinSessionId(session.id, sessionId);
+            replaceNavigationSessionId(session.id, sessionId);
+            if (shouldRemainActive) {
+              setActiveSession(sessionId);
+              setChatActiveSession(sessionId);
+            }
+          },
+        )
         .catch(async (error) => {
           const chatStore = useChatStore.getState();
 
@@ -1810,6 +1837,86 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       });
     },
     [homeSession?.reasoningEffort, homeSessionId, patchSession],
+  );
+
+  const handleGlobalComposerModelSelectionChange = useCallback(
+    (selection: GlobalComposerModelSelection | null) => {
+      if (!homeSessionId || !selection) {
+        return;
+      }
+
+      const refreshKey = [
+        homeSessionId,
+        selection.providerId,
+        selection.modelId,
+      ].join("\u0000");
+      homeComposerReasoningRefreshKeyRef.current = refreshKey;
+
+      const liveHomeSession =
+        useChatSessionStore.getState().getSession(homeSessionId) ?? homeSession;
+      const project = liveHomeSession?.projectId
+        ? (useProjectStore
+            .getState()
+            .projects.find(
+              (candidate) => candidate.id === liveHomeSession.projectId,
+            ) ?? null)
+        : null;
+
+      patchSession(homeSessionId, {
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+        modelName: selection.modelName,
+        reasoningEffort: undefined,
+      });
+
+      void (async () => {
+        try {
+          const workingDir = await resolveSessionCwd(
+            project,
+            liveHomeSession?.workingDir,
+          );
+          const result = await applyLatestSessionConfig({
+            sessionId: homeSessionId,
+            providerId: selection.providerId,
+            workingDir,
+            modelId: selection.modelId,
+            forceConfigRefresh: true,
+          });
+          if (
+            !result.applied ||
+            homeComposerReasoningRefreshKeyRef.current !== refreshKey
+          ) {
+            return;
+          }
+
+          const currentHomeSession = useChatSessionStore
+            .getState()
+            .getSession(homeSessionId);
+          if (
+            currentHomeSession?.providerId !== selection.providerId ||
+            currentHomeSession.modelId !== selection.modelId
+          ) {
+            return;
+          }
+
+          const reasoningEffort = result.configOptionsSnapshot?.reasoningEffort;
+          if (!reasoningEffort) {
+            return;
+          }
+
+          patchSession(homeSessionId, {
+            workingDir,
+            reasoningEffort,
+          });
+        } catch (error) {
+          console.error(
+            "Failed to refresh Home reasoning effort for selected model:",
+            error,
+          );
+        }
+      })();
+    },
+    [homeSession, homeSessionId, patchSession],
   );
 
   const handleGlobalCompose = useCallback(
@@ -3236,6 +3343,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                   providerId: homeSession?.providerId,
                   modelId: homeSession?.modelId,
                 }}
+                onModelSelectionChange={
+                  handleGlobalComposerModelSelectionChange
+                }
                 suggestedPersonaId={
                   renderedLocation.view === "agents"
                     ? renderedLocation.personaId

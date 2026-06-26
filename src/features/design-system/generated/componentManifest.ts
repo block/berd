@@ -1533,6 +1533,7 @@ export const designSystemComponentManifest = [
     exports: [
       "GlobalComposeOptions",
       "GlobalComposerHandoffRect",
+      "GlobalComposerModelSelection",
       "GlobalComposerPill",
     ],
     slots: [],

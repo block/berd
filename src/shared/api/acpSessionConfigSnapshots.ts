@@ -1,3 +1,9 @@
+import {
+  logReasoningEffortInfo,
+  reasoningEffortConfigLogFields,
+  shortLogId,
+} from "@/shared/lib/reasoningEffortDiagnostics";
+
 export interface AcpModelConfigSnapshot {
   modelId: string;
   modelName: string;
@@ -22,14 +28,22 @@ export interface AcpSessionConfigSnapshots {
   reasoningEffort: AcpReasoningEffortConfigSnapshot | null;
 }
 
+export interface AcpSessionConfigSnapshotContext {
+  origin: "notification" | "response";
+  providerId?: string;
+  modelId?: string;
+}
+
 export interface AcpSessionConfigSnapshotHandlers {
   applyModelConfigSnapshot?: (
     sessionId: string,
     snapshot: AcpModelConfigSnapshot,
+    context: AcpSessionConfigSnapshotContext,
   ) => void;
   applyReasoningEffortConfigSnapshot?: (
     sessionId: string,
     snapshot: AcpReasoningEffortConfigSnapshot,
+    context: AcpSessionConfigSnapshotContext,
   ) => void;
 }
 
@@ -48,8 +62,9 @@ export function clearSessionConfigSnapshotHandlers(): void {
 export function applySessionConfigOptionsSnapshot(
   sessionId: string,
   source: unknown,
+  context: AcpSessionConfigSnapshotContext,
 ): void {
-  dispatchSessionConfigSnapshots(sessionId, source, snapshotHandlers);
+  dispatchSessionConfigSnapshots(sessionId, source, snapshotHandlers, context);
 }
 
 // Single fan-out used by both entry points: the registry-backed
@@ -60,11 +75,25 @@ export function dispatchSessionConfigSnapshots(
   sessionId: string,
   source: unknown,
   handlers: AcpSessionConfigSnapshotHandlers,
+  context: AcpSessionConfigSnapshotContext,
 ): void {
   const snapshots = readSessionConfigOptionsSnapshots(source);
+  logReasoningEffortInfo("snapshot dispatch", {
+    sessionId: shortLogId(sessionId),
+    origin: context.origin,
+    providerId: context.providerId ?? null,
+    modelId: context.modelId ?? null,
+    hasModelSnapshot: Boolean(snapshots.model),
+    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      snapshots.reasoningEffort,
+    ),
+    ...getConfigOptionsLogFields(source),
+  });
   if (snapshots.model) {
     if (handlers.applyModelConfigSnapshot) {
-      handlers.applyModelConfigSnapshot(sessionId, snapshots.model);
+      handlers.applyModelConfigSnapshot(sessionId, snapshots.model, context);
     } else {
       warnUnhandledSnapshot("model", sessionId);
     }
@@ -74,6 +103,7 @@ export function dispatchSessionConfigSnapshots(
       handlers.applyReasoningEffortConfigSnapshot(
         sessionId,
         snapshots.reasoningEffort,
+        context,
       );
     } else {
       warnUnhandledSnapshot("reasoningEffort", sessionId);
@@ -188,6 +218,38 @@ function getConfigOptions(source: unknown): unknown[] | null {
     ? configUpdate.configOptions
     : configUpdate.options;
   return Array.isArray(options) ? options : null;
+}
+
+function getConfigOptionsLogFields(source: unknown): {
+  configOptionCount: number | null;
+  configOptionIds: string | null;
+  configOptionCategories: string | null;
+} {
+  const options = getConfigOptions(source);
+  if (!options) {
+    return {
+      configOptionCount: null,
+      configOptionIds: null,
+      configOptionCategories: null,
+    };
+  }
+
+  const ids = options
+    .flatMap((option) =>
+      isRecord(option) ? (getStringProperty(option, "id") ?? []) : [],
+    )
+    .slice(0, 20);
+  const categories = options
+    .flatMap((option) =>
+      isRecord(option) ? (getStringProperty(option, "category") ?? []) : [],
+    )
+    .slice(0, 20);
+
+  return {
+    configOptionCount: options.length,
+    configOptionIds: ids.length > 0 ? ids.join(",") : null,
+    configOptionCategories: categories.length > 0 ? categories.join(",") : null,
+  };
 }
 
 function getSelectOptions(

@@ -24,7 +24,7 @@ export async function logRendererEvent(
   level: RendererLogLevel,
   message: string,
 ): Promise<void> {
-  if (!window.__TAURI_INTERNALS__) {
+  if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
     return;
   }
   try {

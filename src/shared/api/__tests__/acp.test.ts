@@ -21,6 +21,15 @@ const mockRenameSession = vi.fn();
 
 const GOOSE_MANAGED_PROVIDER_IDS = ["goose", "databricks_v2"] as const;
 const EXTERNAL_AGENT_PROVIDER_IDS = ["claude-acp", "codex-acp"] as const;
+const reasoningEffortSnapshot = {
+  configId: "thinking_effort",
+  currentValue: "high",
+  options: [
+    { id: "low", name: "Low" },
+    { id: "medium", name: "Medium" },
+    { id: "high", name: "High" },
+  ],
+};
 
 function enableStyleGuidelinesPrompt(prompt?: string) {
   localStorage.setItem(
@@ -296,6 +305,56 @@ describe("acpLoadSession", () => {
 
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
+
+  it("hydrates reasoning effort from the load response config options", async () => {
+    mockLoadSession.mockResolvedValueOnce({
+      configOptions: [
+        {
+          id: "thinking_effort",
+          category: "thought_level",
+          kind: {
+            type: "select",
+            currentValue: "medium",
+            options: {
+              type: "ungrouped",
+              values: [
+                { value: "off", name: "off" },
+                { value: "low", name: "low" },
+                { value: "medium", name: "medium" },
+                { value: "high", name: "high" },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    const applyReasoningEffortConfigSnapshot = vi.fn();
+
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({
+      applyReasoningEffortConfigSnapshot,
+    });
+    const { acpLoadSession } = await import("../acp");
+
+    await acpLoadSession("acp-session-1", "/tmp/replay");
+
+    expect(applyReasoningEffortConfigSnapshot).toHaveBeenCalledWith(
+      "acp-session-1",
+      {
+        configId: "thinking_effort",
+        currentValue: "medium",
+        options: [
+          { id: "off", name: "off" },
+          { id: "low", name: "low" },
+          { id: "medium", name: "medium" },
+          { id: "high", name: "high" },
+        ],
+      },
+      { origin: "response" },
+    );
+  });
 });
 
 describe("acpCreateSession", () => {
@@ -316,7 +375,13 @@ describe("acpCreateSession", () => {
         personaId: "persona-1",
         modelId: "gpt-4.1",
       }),
-    ).resolves.toEqual({ sessionId: "acp-session-1" });
+    ).resolves.toEqual({
+      sessionId: "acp-session-1",
+      configOptionsSnapshot: {
+        model: null,
+        reasoningEffort: null,
+      },
+    });
 
     expect(mockNewSession).toHaveBeenCalledWith(
       "/tmp/project",
@@ -328,6 +393,38 @@ describe("acpCreateSession", () => {
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
     expect(mockSetModel).toHaveBeenCalledWith("acp-session-1", "gpt-4.1");
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
+  it("returns the latest config snapshot from session creation setup", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
+    mockSetProvider.mockResolvedValueOnce({
+      model: null,
+      reasoningEffort: null,
+    });
+    mockSetModel.mockResolvedValueOnce({
+      model: {
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+      },
+      reasoningEffort: reasoningEffortSnapshot,
+    });
+
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(
+      acpCreateSession("openai", "/tmp/project", {
+        modelId: "gpt-4.1",
+      }),
+    ).resolves.toEqual({
+      sessionId: "acp-session-1",
+      configOptionsSnapshot: {
+        model: {
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        },
+        reasoningEffort: reasoningEffortSnapshot,
+      },
+    });
   });
 });
 

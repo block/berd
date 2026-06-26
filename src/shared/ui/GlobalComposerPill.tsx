@@ -38,6 +38,10 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { getClient } from "@/shared/api/acpConnection";
 import { cn } from "@/shared/lib/cn";
+import {
+  logReasoningEffortInfo,
+  reasoningEffortConfigLogFields,
+} from "@/shared/lib/reasoningEffortDiagnostics";
 import { Button } from "@/shared/ui/button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
@@ -59,6 +63,12 @@ export interface GlobalComposeOptions {
   };
 }
 
+export interface GlobalComposerModelSelection {
+  providerId: string;
+  modelId: string;
+  modelName: string;
+}
+
 export interface GlobalComposerHandoffRect {
   left: number;
   top: number;
@@ -77,6 +87,9 @@ interface GlobalComposerPillProps {
     providerId?: string | null;
     modelId?: string | null;
   };
+  onModelSelectionChange?: (
+    selection: GlobalComposerModelSelection | null,
+  ) => void;
   placement?: "docked" | "centered" | "handoff";
   mainLeftOffsetPx?: number;
   handoffSourceRect?: GlobalComposerHandoffRect | null;
@@ -157,6 +170,7 @@ export function GlobalComposerPill({
   suggestedPersonaId = null,
   reasoningEffort,
   reasoningEffortModelSelection,
+  onModelSelectionChange,
   placement = "docked",
   mainLeftOffsetPx = 0,
   handoffSourceRect,
@@ -421,6 +435,7 @@ export function GlobalComposerPill({
       personaOverrideActiveRef.current = false;
       setProviderOverride(providerId);
       setModelOverride(null);
+      onModelSelectionChange?.(null);
       setSelectedProvider(providerId);
     },
     onModelSelected: (model) => {
@@ -432,6 +447,11 @@ export function GlobalComposerPill({
       personaOverrideActiveRef.current = false;
       setProviderOverride(selection.providerId);
       setModelOverride(selection);
+      onModelSelectionChange?.({
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+        modelName: selection.modelName,
+      });
       setSelectedProvider(selection.providerId);
     },
   });
@@ -532,6 +552,40 @@ export function GlobalComposerPill({
     effectiveModelSelection?.modelId,
     effectiveModelSelection?.providerId,
     reasoningEffort,
+    reasoningEffortModelSelection?.modelId,
+    reasoningEffortModelSelection?.providerId,
+    selectedProviderForPicker,
+  ]);
+  useEffect(() => {
+    const config = reasoningEffort?.config;
+    const effortProviderId = reasoningEffortModelSelection?.providerId;
+    const effortModelId = reasoningEffortModelSelection?.modelId;
+    const selectedProviderId =
+      effectiveModelSelection?.providerId ?? selectedProviderForPicker;
+    const selectedModelId = effectiveModelSelection?.modelId;
+    const providerMatches =
+      !effortProviderId ||
+      !selectedProviderId ||
+      selectedProviderId === effortProviderId;
+    const modelMatches =
+      !effortModelId || !selectedModelId || selectedModelId === effortModelId;
+
+    logReasoningEffortInfo("global composer gate", {
+      hasConfig: Boolean(config),
+      visible: Boolean(activeReasoningEffort?.config),
+      effortProviderId: effortProviderId ?? null,
+      effortModelId: effortModelId ?? null,
+      selectedProviderId: selectedProviderId ?? null,
+      selectedModelId: selectedModelId ?? null,
+      providerMatches,
+      modelMatches,
+      ...reasoningEffortConfigLogFields("config", config),
+    });
+  }, [
+    activeReasoningEffort?.config,
+    effectiveModelSelection?.modelId,
+    effectiveModelSelection?.providerId,
+    reasoningEffort?.config,
     reasoningEffortModelSelection?.modelId,
     reasoningEffortModelSelection?.providerId,
     selectedProviderForPicker,

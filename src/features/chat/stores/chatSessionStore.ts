@@ -10,6 +10,11 @@ import {
 import { mergeAcpSessionPage } from "@/features/chat/lib/acpSessionMapping";
 import { releaseSession } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import {
+  logReasoningEffortInfo,
+  reasoningEffortConfigLogFields,
+  shortLogId,
+} from "@/shared/lib/reasoningEffortDiagnostics";
 
 const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
@@ -196,6 +201,10 @@ interface ChatSessionStoreActions {
 
 export type ChatSessionStore = ChatSessionStoreState & ChatSessionStoreActions;
 
+function patchIncludesReasoningEffort(patch: Partial<ChatSession>): boolean {
+  return Object.hasOwn(patch, "reasoningEffort");
+}
+
 function getArchiveMutationDesiredArchivedAt(
   mutation: ArchiveSessionMutation,
 ): string | undefined {
@@ -362,10 +371,20 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     }
     const now = new Date().toISOString();
     const providerId = opts.providerId ?? "goose";
-    const { sessionId } = await acpCreateSession(providerId, opts.workingDir, {
-      personaId: opts.personaId,
-      modelId: opts.modelId,
-      projectId: opts.projectId,
+    const { sessionId, configOptionsSnapshot } = await acpCreateSession(
+      providerId,
+      opts.workingDir,
+      {
+        personaId: opts.personaId,
+        modelId: opts.modelId,
+        projectId: opts.projectId,
+      },
+    );
+    logReasoningEffortInfo("createSession acp resolved", {
+      sessionId: shortLogId(sessionId),
+      providerId,
+      modelId: opts.modelId ?? null,
+      hasReasoningEffort: Boolean(configOptionsSnapshot?.reasoningEffort),
     });
     const chatSession: ChatSession = {
       id: sessionId,
@@ -373,8 +392,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       projectId: opts.projectId,
       providerId,
       personaId: opts.personaId,
-      modelId: opts.modelId,
-      modelName: opts.modelName,
+      modelId: opts.modelId ?? configOptionsSnapshot?.model?.modelId,
+      modelName: opts.modelName ?? configOptionsSnapshot?.model?.modelName,
+      reasoningEffort: configOptionsSnapshot?.reasoningEffort ?? undefined,
       workingDir: opts.workingDir,
       createdAt: now,
       updatedAt: now,
@@ -385,6 +405,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentDraftState: null,
     };
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
+    logReasoningEffortInfo("createSession inserted", {
+      sessionId: shortLogId(sessionId),
+      providerId,
+      modelId: opts.modelId ?? null,
+      hasReasoningEffort: Boolean(chatSession.reasoningEffort),
+    });
     return chatSession;
   },
 
@@ -424,6 +450,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         (session) => session.id === draftSessionId,
       );
       if (existingIndex < 0) {
+        logReasoningEffortInfo("promoteDraftSession missing draft", {
+          draftSessionId: shortLogId(draftSessionId),
+          backendSessionId: shortLogId(backendSessionId),
+          patchIncludesReasoningEffort: patchIncludesReasoningEffort(patch),
+        });
         return state;
       }
 
@@ -444,6 +475,15 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const { [draftSessionId]: intent, ...remainingIntents } =
         state.modelSelectionIntentBySession;
 
+      logReasoningEffortInfo("promoteDraftSession applied", {
+        draftSessionId: shortLogId(draftSessionId),
+        backendSessionId: shortLogId(backendSessionId),
+        providerId: promoted.providerId ?? null,
+        modelId: promoted.modelId ?? null,
+        patchIncludesReasoningEffort: patchIncludesReasoningEffort(patch),
+        ...reasoningEffortConfigLogFields("previous", existing.reasoningEffort),
+        ...reasoningEffortConfigLogFields("promoted", promoted.reasoningEffort),
+      });
       return {
         sessions,
         activeSessionId:
@@ -565,9 +605,19 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   patchSession: (id, patch) => {
+    const includesReasoningEffort = patchIncludesReasoningEffort(patch);
     set((state) => {
       const existing = state.sessions.find((session) => session.id === id);
-      if (!existing) return state;
+      if (!existing) {
+        if (includesReasoningEffort) {
+          logReasoningEffortInfo("patchSession missing session", {
+            sessionId: shortLogId(id),
+            patchHasReasoningEffort: patch.reasoningEffort !== undefined,
+            ...reasoningEffortConfigLogFields("patch", patch.reasoningEffort),
+          });
+        }
+        return state;
+      }
       const merged: ChatSession = {
         ...existing,
         ...patch,
@@ -580,7 +630,31 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           break;
         }
       }
-      if (!changed) return state;
+      if (!changed) {
+        if (includesReasoningEffort) {
+          logReasoningEffortInfo("patchSession unchanged", {
+            sessionId: shortLogId(id),
+            patchHasReasoningEffort: patch.reasoningEffort !== undefined,
+            ...reasoningEffortConfigLogFields(
+              "existing",
+              existing.reasoningEffort,
+            ),
+            ...reasoningEffortConfigLogFields("patch", patch.reasoningEffort),
+          });
+        }
+        return state;
+      }
+      if (includesReasoningEffort) {
+        logReasoningEffortInfo("patchSession applied", {
+          sessionId: shortLogId(id),
+          patchHasReasoningEffort: patch.reasoningEffort !== undefined,
+          ...reasoningEffortConfigLogFields(
+            "previous",
+            existing.reasoningEffort,
+          ),
+          ...reasoningEffortConfigLogFields("next", merged.reasoningEffort),
+        });
+      }
       return {
         sessions: state.sessions.map((session) =>
           session.id === id ? merged : session,
@@ -767,6 +841,13 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       ) {
         return state;
       }
+      logReasoningEffortInfo("switchSessionProvider clears reasoningEffort", {
+        sessionId: shortLogId(sessionId),
+        previousProviderId: existing.providerId ?? null,
+        nextProviderId: providerId,
+        hadReasoningEffort: Boolean(existing.reasoningEffort),
+        ...reasoningEffortConfigLogFields("previous", existing.reasoningEffort),
+      });
       return {
         sessions: state.sessions.map((session) =>
           session.id === sessionId
@@ -785,6 +866,15 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   beginModelSelectionIntent: (sessionId, intent) => {
+    logReasoningEffortInfo("beginModelSelectionIntent", {
+      sessionId: shortLogId(sessionId),
+      requestId: shortLogId(intent.requestId),
+      intentKind: intent.kind,
+      providerId: intent.providerId ?? null,
+      modelId: intent.modelId ?? null,
+      previousProviderId: intent.previousProviderId ?? null,
+      previousModelId: intent.previousModelId ?? null,
+    });
     set((state) => ({
       modelSelectionIntentBySession: {
         ...state.modelSelectionIntentBySession,
@@ -799,9 +889,22 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   clearModelSelectionIntent: (sessionId, requestId) => {
     const current = get().modelSelectionIntentBySession[sessionId];
     if (!current || (requestId && current.requestId !== requestId)) {
+      logReasoningEffortInfo("clearModelSelectionIntent skipped", {
+        sessionId: shortLogId(sessionId),
+        requestedRequestId: shortLogId(requestId),
+        currentRequestId: shortLogId(current?.requestId),
+        currentIntentKind: current?.kind ?? null,
+      });
       return;
     }
 
+    logReasoningEffortInfo("clearModelSelectionIntent", {
+      sessionId: shortLogId(sessionId),
+      requestId: shortLogId(current.requestId),
+      intentKind: current.kind,
+      providerId: current.providerId ?? null,
+      modelId: current.modelId ?? null,
+    });
     set((state) => {
       const modelSelectionIntentBySession = {
         ...state.modelSelectionIntentBySession,

@@ -764,6 +764,47 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("reports concrete model picks so Home can refresh reasoning effort", async () => {
+    const user = userEvent.setup();
+    const onModelSelectionChange = vi.fn();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "gpt-5",
+              name: "GPT 5",
+              displayName: "GPT 5",
+              providerId: "openai",
+              providerName: "OpenAI",
+              recommended: true,
+            },
+            {
+              id: "claude-sonnet-4",
+              name: "Claude Sonnet 4",
+              displayName: "Claude Sonnet 4",
+              providerId: "anthropic",
+              providerName: "Anthropic",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+
+    renderGlobalComposer(vi.fn(), { onModelSelectionChange });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
+
+    expect(onModelSelectionChange).toHaveBeenCalledWith({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+  });
+
   it("attaches an image through the picker and sends it without text", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer();

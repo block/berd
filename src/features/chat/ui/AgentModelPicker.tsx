@@ -10,6 +10,10 @@ import { IconAiAgents, IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { cn } from "@/shared/lib/cn";
+import {
+  logReasoningEffortInfo,
+  reasoningEffortConfigLogFields,
+} from "@/shared/lib/reasoningEffortDiagnostics";
 import { Button } from "@/shared/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -331,6 +335,30 @@ export function AgentModelPicker({
   const pickerWidth = showReasoningEffortColumn
     ? PICKER_WIDTH_EXPANDED_PX
     : PICKER_WIDTH_COMPACT_PX;
+  useEffect(() => {
+    logReasoningEffortInfo("model picker gate", {
+      open,
+      hasConfig: Boolean(reasoningEffortConfig),
+      hasLiveReasoningEffort,
+      isReasoningEffortPending,
+      showReasoningEffort,
+      showReasoningEffortColumn,
+      isAllView,
+      ...reasoningEffortConfigLogFields(
+        "config",
+        renderedReasoningEffortConfig,
+      ),
+    });
+  }, [
+    hasLiveReasoningEffort,
+    isAllView,
+    isReasoningEffortPending,
+    open,
+    reasoningEffortConfig,
+    renderedReasoningEffortConfig,
+    showReasoningEffort,
+    showReasoningEffortColumn,
+  ]);
   const resolveContentAlign = useCallback((): PopoverContentAlign => {
     if (contentAlign !== "smart") {
       return contentAlign;

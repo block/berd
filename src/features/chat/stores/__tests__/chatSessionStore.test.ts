@@ -463,6 +463,42 @@ describe("chatSessionStore", () => {
       expect(useChatSessionStore.getState().sessions).toContainEqual(session);
     });
 
+    it("seeds reasoning effort from ACP session creation config", async () => {
+      mocks.acpCreateSession.mockResolvedValue({
+        sessionId: "acp-1",
+        configOptionsSnapshot: {
+          model: null,
+          reasoningEffort: {
+            configId: "thinking_effort",
+            currentValue: "medium",
+            options: [
+              { id: "low", name: "Low" },
+              { id: "medium", name: "Medium" },
+              { id: "high", name: "High" },
+            ],
+          },
+        },
+      });
+
+      const session = await useChatSessionStore.getState().createSession({
+        providerId: "openai",
+        workingDir: "/tmp/project",
+      });
+
+      expect(session.reasoningEffort).toEqual({
+        configId: "thinking_effort",
+        currentValue: "medium",
+        options: [
+          { id: "low", name: "Low" },
+          { id: "medium", name: "Medium" },
+          { id: "high", name: "High" },
+        ],
+      });
+      expect(
+        useChatSessionStore.getState().getSession("acp-1")?.reasoningEffort,
+      ).toEqual(session.reasoningEffort);
+    });
+
     it("creates a local draft session without touching ACP", () => {
       const session = useChatSessionStore.getState().createDraftSession({
         title: "New Chat",

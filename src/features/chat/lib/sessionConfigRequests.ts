@@ -1,14 +1,17 @@
 import { acpPrepareSession, acpSetModel } from "@/shared/api/acp";
+import type { AcpSessionConfigSnapshots } from "@/shared/api/acpSessionConfigSnapshots";
 
 export interface SessionConfigRequest {
   sessionId: string;
   providerId: string;
   workingDir: string;
   modelId?: string | null;
+  forceConfigRefresh?: boolean;
 }
 
 export interface SessionConfigResult {
   applied: boolean;
+  configOptionsSnapshot?: AcpSessionConfigSnapshots;
 }
 
 interface QueuedSessionConfigRequest extends SessionConfigRequest {
@@ -80,6 +83,7 @@ function settleFailedWaiters(
 function settleAppliedWaiters(
   queue: SessionConfigQueue,
   request: QueuedSessionConfigRequest,
+  configOptionsSnapshot?: AcpSessionConfigSnapshots,
 ) {
   const remaining: SessionConfigWaiter[] = [];
   for (const waiter of queue.waiters) {
@@ -88,22 +92,58 @@ function settleAppliedWaiters(
       continue;
     }
 
+    const applied = sameSessionConfig(waiter.request, request);
     waiter.resolve({
-      applied: sameSessionConfig(waiter.request, request),
+      applied,
+      ...(applied && configOptionsSnapshot ? { configOptionsSnapshot } : {}),
     });
   }
   queue.waiters = remaining;
 }
 
-async function applyRequest(request: QueuedSessionConfigRequest) {
-  await acpPrepareSession(
-    request.sessionId,
-    request.providerId,
-    request.workingDir,
-  );
-  if (request.modelId) {
-    await acpSetModel(request.sessionId, request.modelId);
+function mergeSessionConfigSnapshots(
+  base: AcpSessionConfigSnapshots | undefined,
+  next: AcpSessionConfigSnapshots | undefined,
+): AcpSessionConfigSnapshots | undefined {
+  if (!base) {
+    return next;
   }
+  if (!next) {
+    return base;
+  }
+  return {
+    model: next.model ?? base.model,
+    reasoningEffort: next.reasoningEffort ?? base.reasoningEffort,
+  };
+}
+
+async function applyRequest(
+  request: QueuedSessionConfigRequest,
+): Promise<AcpSessionConfigSnapshots | undefined> {
+  let snapshots =
+    request.forceConfigRefresh && !request.modelId
+      ? await acpPrepareSession(
+          request.sessionId,
+          request.providerId,
+          request.workingDir,
+          { forceConfigRefresh: true },
+        )
+      : await acpPrepareSession(
+          request.sessionId,
+          request.providerId,
+          request.workingDir,
+        );
+  if (request.modelId) {
+    snapshots = mergeSessionConfigSnapshots(
+      snapshots,
+      request.forceConfigRefresh
+        ? await acpSetModel(request.sessionId, request.modelId, {
+            forceConfigRefresh: true,
+          })
+        : await acpSetModel(request.sessionId, request.modelId),
+    );
+  }
+  return snapshots;
 }
 
 async function drainQueue(sessionId: string, queue: SessionConfigQueue) {
@@ -115,8 +155,9 @@ async function drainQueue(sessionId: string, queue: SessionConfigQueue) {
   try {
     while (queue.latest) {
       const request = queue.latest;
+      let configOptionsSnapshot: AcpSessionConfigSnapshots | undefined;
       try {
-        await applyRequest(request);
+        configOptionsSnapshot = await applyRequest(request);
       } catch (error) {
         if (queue.latest?.sequence !== request.sequence) {
           continue;
@@ -132,7 +173,7 @@ async function drainQueue(sessionId: string, queue: SessionConfigQueue) {
       }
 
       queue.latest = null;
-      settleAppliedWaiters(queue, request);
+      settleAppliedWaiters(queue, request, configOptionsSnapshot);
       break;
     }
   } finally {

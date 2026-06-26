@@ -569,7 +569,9 @@ function handleShared(sessionId: string, update: SessionUpdate): void {
     }
 
     case "config_option_update": {
-      applyChatSessionConfigOptionsSnapshot(sessionId, update);
+      applyChatSessionConfigOptionsSnapshot(sessionId, update, {
+        origin: "notification",
+      });
       break;
     }
 

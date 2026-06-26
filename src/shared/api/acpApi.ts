@@ -10,8 +10,17 @@ import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { toWireProviderId } from "./acpPersonaHandoff";
 import { getClient } from "./acpConnection";
-import { applySessionConfigOptionsSnapshot } from "./acpSessionConfigSnapshots";
+import {
+  applySessionConfigOptionsSnapshot,
+  readSessionConfigOptionsSnapshots,
+  type AcpSessionConfigSnapshots,
+} from "./acpSessionConfigSnapshots";
 import { perfLog } from "@/shared/lib/perfLog";
+import {
+  logReasoningEffortInfo,
+  reasoningEffortConfigLogFields,
+  shortLogId,
+} from "@/shared/lib/reasoningEffortDiagnostics";
 
 export interface AcpProvider {
   id: string;
@@ -173,7 +182,7 @@ export async function forkSession(
 export async function setModel(
   sessionId: string,
   modelId: string,
-): Promise<void> {
+): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
   const client = await getClient();
@@ -183,17 +192,31 @@ export async function setModel(
     configId: "model",
     value: modelId,
   });
-  applySessionConfigOptionsSnapshot(sessionId, response);
+  const snapshots = readSessionConfigOptionsSnapshots(response);
+  logReasoningEffortInfo("setModel response", {
+    sessionId: shortLogId(sessionId),
+    modelId,
+    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      snapshots.reasoningEffort,
+    ),
+  });
+  applySessionConfigOptionsSnapshot(sessionId, response, {
+    origin: "response",
+    modelId,
+  });
   perfLog(
     `[perf:api] ${sid} setModel(${modelId}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
+  return snapshots;
 }
 
 export async function setSessionConfigOption(
   sessionId: string,
   configId: string,
   value: string,
-): Promise<void> {
+): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
   const client = await getClient();
@@ -203,16 +226,30 @@ export async function setSessionConfigOption(
     configId,
     value,
   });
-  applySessionConfigOptionsSnapshot(sessionId, response);
+  const snapshots = readSessionConfigOptionsSnapshots(response);
+  logReasoningEffortInfo("setSessionConfigOption response", {
+    sessionId: shortLogId(sessionId),
+    configId,
+    requestedValue: value,
+    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      snapshots.reasoningEffort,
+    ),
+  });
+  applySessionConfigOptionsSnapshot(sessionId, response, {
+    origin: "response",
+  });
   perfLog(
     `[perf:api] ${sid} setSessionConfigOption(${configId}=${value}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
+  return snapshots;
 }
 
 export async function setProvider(
   sessionId: string,
   providerId: string,
-): Promise<void> {
+): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
   const client = await getClient();
@@ -223,10 +260,25 @@ export async function setProvider(
     configId: "provider",
     value: wireProvider,
   });
-  applySessionConfigOptionsSnapshot(sessionId, response);
+  const snapshots = readSessionConfigOptionsSnapshots(response);
+  logReasoningEffortInfo("setProvider response", {
+    sessionId: shortLogId(sessionId),
+    providerId,
+    wireProvider,
+    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      snapshots.reasoningEffort,
+    ),
+  });
+  applySessionConfigOptionsSnapshot(sessionId, response, {
+    origin: "response",
+    providerId,
+  });
   perfLog(
     `[perf:api] ${sid} setProvider(${providerId}→${wireProvider}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
+  return snapshots;
 }
 
 export async function updateWorkingDir(
@@ -340,6 +392,15 @@ export async function loadSession(
     sessionId,
     cwd: workingDir,
     mcpServers: [],
+  });
+  const snapshots = readSessionConfigOptionsSnapshots(response);
+  logReasoningEffortInfo("loadSession response", {
+    sessionId: shortLogId(sessionId),
+    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      snapshots.reasoningEffort,
+    ),
   });
   perfLog(
     `[perf:api] ${sid} loadSession getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,

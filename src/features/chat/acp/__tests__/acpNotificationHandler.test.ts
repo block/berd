@@ -763,6 +763,41 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("drops stale reasoning effort snapshot during a model selection intent", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "goose",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+    useChatSessionStore.getState().beginModelSelectionIntent("acp-session", {
+      requestId: "model-request-1",
+      kind: "model",
+      modelId: "gpt-5.5",
+      previousModelId: "claude-opus-4-8",
+      previousModelName: "Claude Opus 4.8",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createReasoningEffortConfigUpdate("high"),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session")?.reasoningEffort,
+    ).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Dropped stale ACP reasoningEffort config snapshot",
+      expect.objectContaining({
+        intentKind: "model",
+      }),
+    );
+    warnSpy.mockRestore();
+  });
+
   it("does not hydrate an old model snapshot during a provider-only switch", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     useChatSessionStore.getState().addSession({

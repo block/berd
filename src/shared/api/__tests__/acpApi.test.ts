@@ -487,12 +487,33 @@ describe("provider wire translation", () => {
 
     const { setModel } = await import("../acpApi");
 
-    await setModel("session-9", "claude-opus-4-8");
-
-    expect(applyModelConfigSnapshot).toHaveBeenCalledWith("session-9", {
-      modelId: "claude-opus-4-8",
-      modelName: "Claude Opus 4.8",
+    await expect(setModel("session-9", "claude-opus-4-8")).resolves.toEqual({
+      model: {
+        modelId: "claude-opus-4-8",
+        modelName: "Claude Opus 4.8",
+      },
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "Low" },
+          { id: "medium", name: "Medium" },
+          { id: "high", name: "High" },
+        ],
+      },
     });
+
+    expect(applyModelConfigSnapshot).toHaveBeenCalledWith(
+      "session-9",
+      {
+        modelId: "claude-opus-4-8",
+        modelName: "Claude Opus 4.8",
+      },
+      {
+        origin: "response",
+        modelId: "claude-opus-4-8",
+      },
+    );
     expect(applyReasoningEffortConfigSnapshot).toHaveBeenCalledWith(
       "session-9",
       {
@@ -503,6 +524,54 @@ describe("provider wire translation", () => {
           { id: "medium", name: "Medium" },
           { id: "high", name: "High" },
         ],
+      },
+      {
+        origin: "response",
+        modelId: "claude-opus-4-8",
+      },
+    );
+  });
+
+  it("passes provider context with snapshots from the setProvider response", async () => {
+    const applyModelConfigSnapshot = vi.fn();
+    const applyReasoningEffortConfigSnapshot = vi.fn();
+    setSessionConfigSnapshotHandlers({
+      applyModelConfigSnapshot,
+      applyReasoningEffortConfigSnapshot,
+    });
+    mocks.setSessionConfigOption.mockResolvedValueOnce(
+      createConfigOptionsResponse(),
+    );
+
+    const { setProvider } = await import("../acpApi");
+
+    await setProvider("session-9", "codex-acp");
+
+    expect(applyModelConfigSnapshot).toHaveBeenCalledWith(
+      "session-9",
+      {
+        modelId: "claude-opus-4-8",
+        modelName: "Claude Opus 4.8",
+      },
+      {
+        origin: "response",
+        providerId: "codex-acp",
+      },
+    );
+    expect(applyReasoningEffortConfigSnapshot).toHaveBeenCalledWith(
+      "session-9",
+      {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "Low" },
+          { id: "medium", name: "Medium" },
+          { id: "high", name: "High" },
+        ],
+      },
+      {
+        origin: "response",
+        providerId: "codex-acp",
       },
     );
   });
