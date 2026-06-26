@@ -125,4 +125,3 @@ local override.
 - All `<button>` elements need `type="button"` unless intentionally submitting.
 - Do not hand-edit generated SDK files unless this repo intentionally freezes a
   generated snapshot; prefer updating `sdk/schema/*` and regenerating.
-- Do not push without explicit approval.
