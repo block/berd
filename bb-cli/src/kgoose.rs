@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::bb::auth::SESSION_CREDENTIAL_HEADER;
+use crate::bb::skills_config::normalize_kgoose_service_path;
 pub use crate::proto::squareup::cash::kgoose::api::v3::{
     CallToolRequest, CallToolResponse, ExtensionInfo, ListExtensionsRequest,
     ListExtensionsResponse, ListToolsRequest, ListToolsResponse, Source, ToolConfig,
@@ -23,6 +24,7 @@ const KGOOSE_DEBUG_ENV_VAR: &str = "KGOOSE_DEBUG";
 #[derive(Debug, Clone, PartialEq)]
 pub struct KgooseConfig {
     pub base_url: String,
+    pub service_path: String,
     pub playpen: Option<String>,
     pub goosemcp_playpen: Option<String>,
     pub timeout_secs: f64,
@@ -105,7 +107,13 @@ impl HttpKgooseClient {
         B: Serialize + ?Sized,
     {
         let client = build_http_client(config)?;
-        let url = format!("{}{}", config.base_url.trim_end_matches('/'), path);
+        let service_path = normalize_kgoose_service_path(&config.service_path)?;
+        let request_path = format!(
+            "{}/{}",
+            service_path.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        );
+        let url = format!("{}{}", config.base_url.trim_end_matches('/'), request_path);
 
         debug_log(format!(
             "POST {url} timeout_secs={} playpen={} goosemcp_playpen={}",
@@ -118,16 +126,16 @@ impl HttpKgooseClient {
             .post(&url)
             .json(body)
             .send()
-            .with_context(|| format!("POST {path}"))?;
+            .with_context(|| format!("POST {request_path}"))?;
 
         let status = response.status();
         let final_url = response.url().to_string();
         let response_body = response
             .text()
-            .with_context(|| format!("read {path} response"))?;
+            .with_context(|| format!("read {request_path} response"))?;
 
         debug_log(format!(
-            "POST {path} status={status} final_url={final_url} response_bytes={}",
+            "POST {request_path} status={status} final_url={final_url} response_bytes={}",
             response_body.len()
         ));
 
@@ -143,11 +151,11 @@ impl HttpKgooseClient {
 
         if !status.is_success() {
             let body = truncate(&response_body, 800);
-            anyhow::bail!("POST {path} failed with {status}: {body}");
+            anyhow::bail!("POST {request_path} failed with {status}: {body}");
         }
 
         serde_json::from_str(&response_body)
-            .with_context(|| format!("deserialize JSON response from {path}"))
+            .with_context(|| format!("deserialize JSON response from {request_path}"))
     }
 }
 

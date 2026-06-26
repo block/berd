@@ -21,9 +21,9 @@ mod generated_serde {
     ));
 }
 
-pub const LIST_EXTENSIONS_PATH: &str = "/cash-app/goose/v3/list-extensions";
-pub const LIST_TOOLS_PATH: &str = "/cash-app/goose/v3/list-tools";
-pub const CALL_TOOL_PATH: &str = "/cash-app/goose/v3/call-tool";
+pub const LIST_EXTENSIONS_PATH: &str = "/v3/list-extensions";
+pub const LIST_TOOLS_PATH: &str = "/v3/list-tools";
+pub const CALL_TOOL_PATH: &str = "/v3/call-tool";
 
 #[cfg(test)]
 mod tests {

@@ -349,6 +349,31 @@ fn bb_skills_list_fetches_marketplace_skills_and_bundle_membership() {
 }
 
 #[test]
+fn bb_skills_list_uses_custom_kgoose_service_path() {
+    let server = MockServer::start(vec![skill_page_response(), starter_pack_bundles_response()]);
+
+    let output = bb_command()
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .env("KGOOSE_SERVICE_PATH", "/cash-app/goose-square")
+        .args(["skills", "list", "--json"])
+        .output()
+        .expect("run bb skills list");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose-square/v1/marketplace/skills?limit=5000"
+    );
+    assert_eq!(
+        requests[1].path,
+        "/cash-app/goose-square/v1/marketplace/bundles?limit=5000"
+    );
+}
+
+#[test]
 fn bb_skills_list_formats_marketplace_skills_for_humans() {
     let server = MockServer::start(vec![skill_page_response(), starter_pack_bundles_response()]);
 

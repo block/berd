@@ -24,6 +24,7 @@ const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login";
 #[derive(Debug, Serialize)]
 pub struct BrowserLoginSummary {
     pub kgoose_base_url: String,
+    pub kgoose_service_path: String,
     pub storage: String,
     pub source: BrowserLoginCredentialSource,
     pub subject: Option<String>,
@@ -70,7 +71,7 @@ pub fn run_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<BrowserLoginSummary> {
-    let service_url = kgoose_service_url(&config.kgoose_base_url);
+    let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = Client::builder()
         .redirect(Policy::none())
         .timeout(Duration::from_secs(30))
@@ -95,6 +96,7 @@ pub fn run_browser_login(
                 );
                 return Ok(BrowserLoginSummary {
                     kgoose_base_url: config.kgoose_base_url.clone(),
+                    kgoose_service_path: config.kgoose_service_path.clone(),
                     storage: storage.kind().to_string(),
                     source: BrowserLoginCredentialSource::Stored,
                     subject: me.subject,
@@ -167,6 +169,7 @@ pub fn run_browser_login(
 
     Ok(BrowserLoginSummary {
         kgoose_base_url: config.kgoose_base_url.clone(),
+        kgoose_service_path: config.kgoose_service_path.clone(),
         storage: storage.kind().to_string(),
         source: BrowserLoginCredentialSource::BrowserLogin,
         subject: exchange.subject,
@@ -182,7 +185,7 @@ pub fn verify_stored_session(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<Option<AuthMeResponse>> {
-    let service_url = kgoose_service_url(&config.kgoose_base_url);
+    let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = Client::builder()
         .redirect(Policy::none())
         .timeout(Duration::from_secs(30))
@@ -200,7 +203,7 @@ pub fn logout_stored_session(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<bool> {
-    let service_url = kgoose_service_url(&config.kgoose_base_url);
+    let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = Client::builder()
         .redirect(Policy::none())
         .timeout(Duration::from_secs(30))

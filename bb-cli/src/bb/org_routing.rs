@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use url::{Host, Url};
 
-use super::skills_config::normalize_kgoose_base_url;
+use super::skills_config::normalize_kgoose_base_url_with_service_path;
+#[cfg(test)]
+use super::skills_config::DEFAULT_KGOOSE_SERVICE_PATH;
 
 pub fn normalize_org(value: &str) -> Result<String> {
     let org = value.trim().to_ascii_lowercase();
@@ -23,8 +25,9 @@ pub fn resolve_org_kgoose_base_url(
     base_url: &str,
     org: Option<&str>,
     local_dev: bool,
+    service_path: &str,
 ) -> Result<String> {
-    let base_url = normalize_kgoose_base_url(base_url);
+    let base_url = normalize_kgoose_base_url_with_service_path(base_url, service_path);
     if local_dev {
         return Ok(base_url);
     }
@@ -62,34 +65,67 @@ mod tests {
 
     #[test]
     fn resolve_org_kgoose_base_url_routes_domain_base() {
-        let routed = resolve_org_kgoose_base_url("https://blockstaging.build", Some("test"), false)
-            .expect("route URL");
+        let routed = resolve_org_kgoose_base_url(
+            "https://blockstaging.build",
+            Some("test"),
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("route URL");
 
         assert_eq!(routed, "https://test.blockstaging.build");
     }
 
     #[test]
     fn resolve_org_kgoose_base_url_adds_scheme_when_missing() {
-        let routed = resolve_org_kgoose_base_url("blockstaging.build", Some("test"), false)
-            .expect("route URL");
+        let routed = resolve_org_kgoose_base_url(
+            "blockstaging.build",
+            Some("test"),
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("route URL");
 
         assert_eq!(routed, "https://test.blockstaging.build");
     }
 
     #[test]
     fn resolve_org_kgoose_base_url_keeps_loopback_hosts_unrouted() {
-        let routed = resolve_org_kgoose_base_url("http://127.0.0.1:5173", Some("test"), false)
-            .expect("route URL");
+        let routed = resolve_org_kgoose_base_url(
+            "http://127.0.0.1:5173",
+            Some("test"),
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("route URL");
 
         assert_eq!(routed, "http://127.0.0.1:5173");
     }
 
     #[test]
     fn resolve_org_kgoose_base_url_skips_routing_without_org() {
-        let routed =
-            resolve_org_kgoose_base_url("blockstaging.build", None, false).expect("resolve URL");
+        let routed = resolve_org_kgoose_base_url(
+            "blockstaging.build",
+            None,
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("resolve URL");
 
         assert_eq!(routed, "blockstaging.build");
+    }
+
+    #[test]
+    fn resolve_org_kgoose_base_url_strips_custom_service_path() {
+        let routed = resolve_org_kgoose_base_url(
+            "https://blockstaging.build/cash-app/goose-square/",
+            Some("test"),
+            false,
+            "/cash-app/goose-square",
+        )
+        .expect("route URL");
+
+        assert_eq!(routed, "https://test.blockstaging.build");
     }
 
     #[test]

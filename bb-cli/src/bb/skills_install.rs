@@ -387,7 +387,7 @@ fn execute_install_operation(
     let metadata = InstalledSkillMetadata {
         schema_version: "bb-skills-install/v1".to_string(),
         tenant_id: tenant_id.unwrap_or("unknown").to_string(),
-        server_url: kgoose_service_url(&config.kgoose_base_url),
+        server_url: kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
         slug: slug.clone(),
         version_id: operation.skill.version_id.clone(),
         content_sha256: operation.skill.content_sha256.clone(),
@@ -623,7 +623,7 @@ pub fn install_local_path(
     let metadata = InstalledSkillMetadata {
         schema_version: "bb-skills-install/v1".to_string(),
         tenant_id: "local".to_string(),
-        server_url: kgoose_service_url(&config.kgoose_base_url),
+        server_url: kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
         slug: slug.clone(),
         version_id: format!("local-{}", &content_sha[..12]),
         content_sha256: content_sha,

@@ -599,6 +599,7 @@ mod tests {
     fn kgoose_config() -> KgooseConfig {
         KgooseConfig {
             base_url: "https://example.test".to_string(),
+            service_path: crate::bb::skills_config::DEFAULT_KGOOSE_SERVICE_PATH.to_string(),
             playpen: Some("baxen".to_string()),
             goosemcp_playpen: None,
             timeout_secs: 600.0,

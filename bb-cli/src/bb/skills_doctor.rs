@@ -89,7 +89,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
     // Server reachable + capabilities, distinguishing auth failures from the
     // server being down.
     let mut registry_from_server: Option<TargetRegistry> = None;
-    let service_url = kgoose_service_url(&config.kgoose_base_url);
+    let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     match MarketplaceClient::new(config) {
         Ok(client) => {
             if client.has_auth() {
@@ -324,6 +324,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
         "profile": config.profile,
         "config_path": config.config_path,
         "kgoose_base_url": config.kgoose_base_url,
+        "kgoose_service_path": config.kgoose_service_path,
         "bb_home": config.bb_home,
         "bb_skills_home": config.skills_home,
         "installed_count": installed.len(),

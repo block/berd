@@ -121,7 +121,7 @@ impl MarketplaceClient {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let session_credential = stored_session_credential_header_value(
             &config.profile,
-            &kgoose_service_url(&config.kgoose_base_url),
+            &kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
             config.bb_home.clone(),
         )?;
         if let Some(session_credential) = session_credential.as_deref() {
@@ -139,7 +139,7 @@ impl MarketplaceClient {
             );
         }
         Ok(Self {
-            base_url: kgoose_service_url(&config.kgoose_base_url),
+            base_url: kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
             client: Client::builder()
                 .default_headers(headers)
                 .build()

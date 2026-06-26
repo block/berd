@@ -36,7 +36,7 @@ impl SessionStorageKey {
     pub fn from_config(config: &SkillsConfig) -> Self {
         Self::new(
             config.profile.clone(),
-            kgoose_service_url(&config.kgoose_base_url),
+            kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
         )
     }
 

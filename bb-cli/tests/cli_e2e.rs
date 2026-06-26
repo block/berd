@@ -60,6 +60,32 @@ fn tool_help_surfaces_schema_derived_flags() {
 }
 
 #[test]
+fn tool_help_uses_custom_kgoose_service_path() {
+    let server = MockServer::start(vec![list_tools_response(
+        "utils",
+        calculate_tool_schema(false),
+    )]);
+
+    let output = server
+        .command()
+        .args([
+            "--kgoose-service-path",
+            "/cash-app/goose-square",
+            "utils",
+            "calculate",
+            "--help",
+        ])
+        .output()
+        .expect("run agent-tools help");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/cash-app/goose-square/v3/list-tools");
+}
+
+#[test]
 fn tool_help_prints_full_untruncated_description() {
     let long_description = "Look up table metadata to inform downstream queries.\n\n\
         IMPORTANT: Table Meta Data tells you about the structure of a data table, \

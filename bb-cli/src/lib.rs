@@ -190,6 +190,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
 
     let mut kgoose_config = KgooseConfig {
         base_url: bootstrap.base_url.clone(),
+        service_path: bootstrap.service_path.clone(),
         playpen: bootstrap.playpen.clone(),
         goosemcp_playpen: bootstrap.goosemcp_playpen.clone(),
         timeout_secs: bootstrap.timeout_secs,
@@ -334,8 +335,10 @@ fn apply_builderbot_mode_if_needed(config: &mut KgooseConfig, builderbot_mode: b
         .org
         .as_deref()
         .ok_or_else(bb_org_required_error)?;
-    config.base_url = resolve_org_kgoose_base_url(&config.base_url, Some(org), false)?;
-    config.session_credential = resolve_kgoose_session_credential(&config.base_url)?;
+    config.base_url =
+        resolve_org_kgoose_base_url(&config.base_url, Some(org), false, &config.service_path)?;
+    config.session_credential =
+        resolve_kgoose_session_credential(&config.base_url, &config.service_path)?;
     Ok(())
 }
 
@@ -347,14 +350,14 @@ fn bb_org_required_error() -> anyhow::Error {
     )
 }
 
-fn resolve_kgoose_session_credential(base_url: &str) -> Result<Option<String>> {
+fn resolve_kgoose_session_credential(base_url: &str, service_path: &str) -> Result<Option<String>> {
     let profile = read_optional_env(BB_SKILLS_PROFILE_ENV_VAR)?
         .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
     let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
         .map(std::path::PathBuf::from)
         .unwrap_or_else(default_bb_home);
 
-    for server_url in kgoose_auth_storage_lookup_urls(base_url) {
+    for server_url in kgoose_auth_storage_lookup_urls(base_url, service_path) {
         if let Some(credential) =
             stored_session_credential_header_value(&profile, &server_url, bb_home.clone())?
         {
@@ -365,11 +368,12 @@ fn resolve_kgoose_session_credential(base_url: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn kgoose_auth_storage_lookup_urls(base_url: &str) -> Vec<String> {
+fn kgoose_auth_storage_lookup_urls(base_url: &str, service_path: &str) -> Vec<String> {
     let trimmed = base_url.trim_end_matches('/');
     let mut urls = vec![trimmed.to_string()];
-    if !trimmed.ends_with("/cash-app/goose") {
-        urls.push(format!("{trimmed}/cash-app/goose"));
+    let service_path = service_path.trim_end_matches('/');
+    if !trimmed.ends_with(service_path) {
+        urls.push(format!("{trimmed}{service_path}"));
     }
     urls
 }
@@ -957,6 +961,7 @@ mod tests {
     fn kgoose_config() -> KgooseConfig {
         KgooseConfig {
             base_url: "https://example.test".to_string(),
+            service_path: crate::bb::skills_config::DEFAULT_KGOOSE_SERVICE_PATH.to_string(),
             playpen: Some("baxen".to_string()),
             goosemcp_playpen: None,
             timeout_secs: 600.0,

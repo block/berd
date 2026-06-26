@@ -5,6 +5,9 @@ use clap::builder::{PossibleValuesParser, ValueHint};
 use clap::{Arg, ArgAction, ArgGroup, Command};
 use serde_json::Value;
 
+use crate::bb::skills_config::{
+    normalize_kgoose_service_path, DEFAULT_KGOOSE_SERVICE_PATH, KGOOSE_SERVICE_PATH_ENV_VAR,
+};
 use crate::kgoose::{DEFAULT_KGOOSE_BASE_URL, DEFAULT_KGOOSE_TIMEOUT_SECS};
 use crate::runtime::{LoadedExtension, ParameterKind, RuntimeTool, ScalarKind, ToolParameter};
 
@@ -31,6 +34,7 @@ const BLOX_PRODUCTION_BASE_URL: &str = "http://kgoose.cashappservices.com";
 #[derive(Debug, Clone, PartialEq)]
 pub struct BootstrapArgs {
     pub base_url: String,
+    pub service_path: String,
     pub playpen: Option<String>,
     pub goosemcp_playpen: Option<String>,
     pub timeout_secs: f64,
@@ -44,6 +48,7 @@ pub struct BootstrapArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GlobalValueFlag {
     BaseUrl,
+    ServicePath,
     Playpen,
     GoosemcpPlaypen,
     Timeout,
@@ -54,6 +59,7 @@ impl GlobalValueFlag {
     fn from_name(name: &str) -> Option<Self> {
         match name {
             "--base-url" => Some(Self::BaseUrl),
+            "--kgoose-service-path" => Some(Self::ServicePath),
             "--playpen" => Some(Self::Playpen),
             "--goosemcp-playpen" => Some(Self::GoosemcpPlaypen),
             "--timeout" => Some(Self::Timeout),
@@ -65,6 +71,7 @@ impl GlobalValueFlag {
     fn name(self) -> &'static str {
         match self {
             Self::BaseUrl => "--base-url",
+            Self::ServicePath => "--kgoose-service-path",
             Self::Playpen => "--playpen",
             Self::GoosemcpPlaypen => "--goosemcp-playpen",
             Self::Timeout => "--timeout",
@@ -101,25 +108,9 @@ where
     S: Into<String>,
 {
     let env_base_url = read_optional_env("KGOOSE_BASE_URL")?;
-    let mut cli_base_url = None;
-    let mut playpen = match env::var("KGOOSE_PLAYPEN") {
-        Ok(value) => Some(value),
-        Err(env::VarError::NotPresent) => None,
-        Err(err) => anyhow::bail!("failed to read KGOOSE_PLAYPEN: {err}"),
-    };
-    let mut goosemcp_playpen = match env::var("GOOSEMCP_PLAYPEN") {
-        Ok(value) => Some(value),
-        Err(env::VarError::NotPresent) => None,
-        Err(err) => anyhow::bail!("failed to read GOOSEMCP_PLAYPEN: {err}"),
-    };
-    let mut timeout_secs = match env::var("KGOOSE_TIMEOUT") {
-        Ok(value) => parse_timeout(&value).context("parse KGOOSE_TIMEOUT")?,
-        Err(env::VarError::NotPresent) => DEFAULT_KGOOSE_TIMEOUT_SECS,
-        Err(err) => anyhow::bail!("failed to read KGOOSE_TIMEOUT: {err}"),
-    };
+    let mut values = BootstrapValueState::from_env()?;
 
     let mut command_tokens = Vec::new();
-    let mut write_extensions = None;
     let mut describe_commands = false;
     let mut summary_only = false;
     let mut version_only = false;
@@ -130,28 +121,12 @@ where
             let value = args
                 .next()
                 .with_context(|| format!("missing value for {}", flag.name()))?;
-            apply_global_value_flag(
-                flag,
-                value,
-                &mut cli_base_url,
-                &mut playpen,
-                &mut goosemcp_playpen,
-                &mut timeout_secs,
-                &mut write_extensions,
-            )?;
+            apply_global_value_flag(flag, value, &mut values)?;
             continue;
         }
 
         if let Some((flag, value)) = split_global_value_assignment(&arg) {
-            apply_global_value_flag(
-                flag,
-                value.to_string(),
-                &mut cli_base_url,
-                &mut playpen,
-                &mut goosemcp_playpen,
-                &mut timeout_secs,
-                &mut write_extensions,
-            )?;
+            apply_global_value_flag(flag, value.to_string(), &mut values)?;
             continue;
         }
 
@@ -170,15 +145,16 @@ where
     Ok(BootstrapArgs {
         base_url: resolve_base_url(
             env_base_url.as_deref(),
-            cli_base_url.as_deref(),
+            values.cli_base_url.as_deref(),
             read_optional_env(IS_BLOX_ENV_VAR)?.as_deref(),
             read_optional_env(BLOX_ENVIRONMENT_ENV_VAR)?.as_deref(),
         ),
-        playpen,
-        goosemcp_playpen,
-        timeout_secs,
+        service_path: values.service_path,
+        playpen: values.playpen,
+        goosemcp_playpen: values.goosemcp_playpen,
+        timeout_secs: values.timeout_secs,
         command_tokens,
-        write_extensions,
+        write_extensions: values.write_extensions,
         describe_commands,
         summary_only,
         version_only,
@@ -193,21 +169,63 @@ fn read_optional_env(name: &str) -> Result<Option<String>> {
     }
 }
 
+#[derive(Debug)]
+struct BootstrapValueState {
+    cli_base_url: Option<String>,
+    service_path: String,
+    playpen: Option<String>,
+    goosemcp_playpen: Option<String>,
+    timeout_secs: f64,
+    write_extensions: Option<String>,
+}
+
+impl BootstrapValueState {
+    fn from_env() -> Result<Self> {
+        let service_path = read_optional_env(KGOOSE_SERVICE_PATH_ENV_VAR)?
+            .map(|value| normalize_kgoose_service_path(&value))
+            .transpose()?
+            .unwrap_or_else(|| DEFAULT_KGOOSE_SERVICE_PATH.to_string());
+        let playpen = match env::var("KGOOSE_PLAYPEN") {
+            Ok(value) => Some(value),
+            Err(env::VarError::NotPresent) => None,
+            Err(err) => anyhow::bail!("failed to read KGOOSE_PLAYPEN: {err}"),
+        };
+        let goosemcp_playpen = match env::var("GOOSEMCP_PLAYPEN") {
+            Ok(value) => Some(value),
+            Err(env::VarError::NotPresent) => None,
+            Err(err) => anyhow::bail!("failed to read GOOSEMCP_PLAYPEN: {err}"),
+        };
+        let timeout_secs = match env::var("KGOOSE_TIMEOUT") {
+            Ok(value) => parse_timeout(&value).context("parse KGOOSE_TIMEOUT")?,
+            Err(env::VarError::NotPresent) => DEFAULT_KGOOSE_TIMEOUT_SECS,
+            Err(err) => anyhow::bail!("failed to read KGOOSE_TIMEOUT: {err}"),
+        };
+
+        Ok(Self {
+            cli_base_url: None,
+            service_path,
+            playpen,
+            goosemcp_playpen,
+            timeout_secs,
+            write_extensions: None,
+        })
+    }
+}
+
 fn apply_global_value_flag(
     flag: GlobalValueFlag,
     value: String,
-    cli_base_url: &mut Option<String>,
-    playpen: &mut Option<String>,
-    goosemcp_playpen: &mut Option<String>,
-    timeout_secs: &mut f64,
-    write_extensions: &mut Option<String>,
+    values: &mut BootstrapValueState,
 ) -> Result<()> {
     match flag {
-        GlobalValueFlag::BaseUrl => *cli_base_url = Some(value),
-        GlobalValueFlag::Playpen => *playpen = Some(value),
-        GlobalValueFlag::GoosemcpPlaypen => *goosemcp_playpen = Some(value),
-        GlobalValueFlag::Timeout => *timeout_secs = parse_timeout(&value)?,
-        GlobalValueFlag::WriteExtensions => *write_extensions = Some(value),
+        GlobalValueFlag::BaseUrl => values.cli_base_url = Some(value),
+        GlobalValueFlag::ServicePath => {
+            values.service_path = normalize_kgoose_service_path(&value)?
+        }
+        GlobalValueFlag::Playpen => values.playpen = Some(value),
+        GlobalValueFlag::GoosemcpPlaypen => values.goosemcp_playpen = Some(value),
+        GlobalValueFlag::Timeout => values.timeout_secs = parse_timeout(&value)?,
+        GlobalValueFlag::WriteExtensions => values.write_extensions = Some(value),
     }
 
     Ok(())
@@ -276,7 +294,7 @@ pub fn build_tools_command(
         .subcommand_help_heading("Extensions")
         .after_help(leak_str(format!("Examples:\n  {}", config.example)))
         .after_long_help(
-            "Environment:\n  KGOOSE_BASE_URL\n  KGOOSE_PLAYPEN\n  GOOSEMCP_PLAYPEN\n  KGOOSE_TIMEOUT\n  STS_ACCESS_TOKEN",
+            "Environment:\n  KGOOSE_BASE_URL\n  KGOOSE_SERVICE_PATH\n  KGOOSE_PLAYPEN\n  GOOSEMCP_PLAYPEN\n  KGOOSE_TIMEOUT\n  STS_ACCESS_TOKEN",
         );
 
     for arg in global_args() {
@@ -341,6 +359,13 @@ fn global_args() -> Vec<Arg> {
             .env("KGOOSE_PLAYPEN")
             .value_name("NAME")
             .help("Route the kgoose service with `Baggage: kgoose-playpen=<name>`."),
+        Arg::new("kgoose-service-path")
+            .long("kgoose-service-path")
+            .global(true)
+            .hide(true)
+            .env(KGOOSE_SERVICE_PATH_ENV_VAR)
+            .value_name("PATH")
+            .help("Path prefix for kgoose endpoints. [default: /cash-app/goose]"),
         Arg::new("goosemcp-playpen")
             .long("goosemcp-playpen")
             .global(true)
@@ -644,6 +669,7 @@ mod tests {
         BLOX_ENVIRONMENT_PRODUCTION, BLOX_ENVIRONMENT_STAGING, BLOX_PRODUCTION_BASE_URL,
         BLOX_STAGING_BASE_URL, EXTENSION_DESCRIBE_COMMAND_ABOUT, EXTENSION_DESCRIBE_COMMAND_NAME,
     };
+    use crate::bb::skills_config::DEFAULT_KGOOSE_SERVICE_PATH;
     use crate::kgoose::DEFAULT_KGOOSE_BASE_URL;
     use crate::runtime::{
         ExtensionSummary, LoadedExtension, ParameterKind, RuntimeTool, ScalarKind, ToolParameter,
@@ -666,6 +692,7 @@ mod tests {
         .expect("bootstrap args");
 
         assert_eq!(parsed.base_url, "http://127.0.0.1:8080");
+        assert_eq!(parsed.service_path, DEFAULT_KGOOSE_SERVICE_PATH);
         assert_eq!(parsed.playpen.as_deref(), Some("baxen"));
         assert_eq!(parsed.timeout_secs, 12.5);
         assert!(!parsed.describe_commands);
@@ -692,6 +719,7 @@ mod tests {
             bootstrap_args(["utils", "--describe-commands", "--summary"]).expect("bootstrap args");
 
         assert_eq!(parsed.base_url, DEFAULT_KGOOSE_BASE_URL);
+        assert_eq!(parsed.service_path, DEFAULT_KGOOSE_SERVICE_PATH);
         assert!(parsed.describe_commands);
         assert!(parsed.summary_only);
         assert_eq!(parsed.command_tokens, vec!["utils"]);
@@ -702,6 +730,7 @@ mod tests {
         let parsed = bootstrap_args(["utils", "calculate"]).expect("bootstrap args");
 
         assert_eq!(parsed.base_url, DEFAULT_KGOOSE_BASE_URL);
+        assert_eq!(parsed.service_path, DEFAULT_KGOOSE_SERVICE_PATH);
         assert_eq!(parsed.command_tokens, vec!["utils", "calculate"]);
     }
 
@@ -711,6 +740,20 @@ mod tests {
             .expect("bootstrap args");
 
         assert_eq!(parsed.base_url, "http://127.0.0.1:8080");
+        assert_eq!(parsed.command_tokens, vec!["utils", "calculate"]);
+    }
+
+    #[test]
+    fn bootstrap_args_accepts_service_path_override() {
+        let parsed = bootstrap_args([
+            "--kgoose-service-path",
+            "cash-app/goose-square/",
+            "utils",
+            "calculate",
+        ])
+        .expect("bootstrap args");
+
+        assert_eq!(parsed.service_path, "/cash-app/goose-square");
         assert_eq!(parsed.command_tokens, vec!["utils", "calculate"]);
     }
 

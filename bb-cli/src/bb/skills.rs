@@ -455,6 +455,15 @@ pub fn skills_global_args(command: Command) -> Command {
                 .help("Use the checked-in BuilderBot local development config")
                 .action(ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("kgoose-service-path")
+                .long("kgoose-service-path")
+                .global(true)
+                .hide(true)
+                .env(super::skills_config::KGOOSE_SERVICE_PATH_ENV_VAR)
+                .value_name("PATH")
+                .help("Path prefix for kgoose endpoints. [default: /cash-app/goose]"),
+        )
 }
 
 pub fn run(matches: &ArgMatches) -> Result<()> {
@@ -616,6 +625,7 @@ fn config_with_login_org(config: &SkillsConfig) -> Result<SkillsConfig> {
         &config.kgoose_base_url,
         resolved.org.as_deref(),
         config.local_dev,
+        &config.kgoose_service_path,
     )?;
     Ok(resolved)
 }
@@ -630,12 +640,14 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
             println!("BuilderBot CLI auth");
             println!("  profile: {}", config.profile);
             println!("  kgoose base: {}", config.kgoose_base_url);
+            println!("  kgoose service path: {}", config.kgoose_service_path);
             println!("  authenticated: no");
             return Ok(());
         }
         return print_json(&json!({
             "authenticated": false,
             "kgoose_base_url": config.kgoose_base_url,
+            "kgoose_service_path": config.kgoose_service_path,
             "profile": config.profile,
         }));
     };
@@ -644,6 +656,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         println!("BuilderBot CLI auth");
         println!("  profile: {}", config.profile);
         println!("  kgoose base: {}", config.kgoose_base_url);
+        println!("  kgoose service path: {}", config.kgoose_service_path);
         println!("  authenticated: yes");
         if let Some(subject) = &me.subject {
             println!("  subject: {subject}");
@@ -662,6 +675,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
     print_json(&json!({
         "authenticated": true,
         "kgoose_base_url": config.kgoose_base_url,
+        "kgoose_service_path": config.kgoose_service_path,
         "profile": config.profile,
         "subject": me.subject,
         "email": me.email,
@@ -687,6 +701,7 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
             .success("BuilderBot CLI auth browser login succeeded"),
     }
     println!("  kgoose base: {}", summary.kgoose_base_url);
+    println!("  kgoose service path: {}", summary.kgoose_service_path);
     println!("  storage: {}", summary.storage);
     if let Some(expires_at) = &summary.expires_at {
         println!("  expires at: {expires_at}");
@@ -730,6 +745,7 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
         return print_json(&json!({
             "profile": config.profile,
             "kgoose_base_url": config.kgoose_base_url,
+            "kgoose_service_path": config.kgoose_service_path,
             "storage": storage.kind(),
             "server_revoked": server_revoked,
             "removed": removed,
@@ -752,6 +768,7 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
     }
     println!("  profile: {}", config.profile);
     println!("  kgoose base: {}", config.kgoose_base_url);
+    println!("  kgoose service path: {}", config.kgoose_service_path);
     println!("  storage: {}", storage.kind());
     Ok(())
 }
@@ -1605,6 +1622,7 @@ fn doctor(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     println!("  profile: {}", config.profile);
     println!("  local dev: {}", yes_no(config.local_dev));
     println!("  kgoose base: {}", config.kgoose_base_url);
+    println!("  kgoose service path: {}", config.kgoose_service_path);
     println!("  config: {}", config.config_path.display());
     println!("  bb home: {}", config.bb_home.display());
     println!("  skills home: {}", config.skills_home.display());

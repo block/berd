@@ -20,7 +20,8 @@ use super::org_routing::resolve_org_kgoose_base_url;
 use super::skills_models::SkillsPreferences;
 
 pub const KGOOSE_BASE_URL_ENV_VAR: &str = "KGOOSE_BASE_URL";
-pub const KGOOSE_SERVICE_PATH: &str = "/cash-app/goose";
+pub const KGOOSE_SERVICE_PATH_ENV_VAR: &str = "KGOOSE_SERVICE_PATH";
+pub const DEFAULT_KGOOSE_SERVICE_PATH: &str = "/cash-app/goose";
 pub const LOCAL_DEV_CONFIG_FILE_NAME: &str = "bb-local-dev-config.yaml";
 pub const BB_HOME_ENV_VAR: &str = "BB_HOME";
 pub const BB_SKILLS_HOME_ENV_VAR: &str = "BB_SKILLS_HOME";
@@ -37,6 +38,7 @@ pub const PREFERENCES_FILE_NAME: &str = "config.yaml";
 #[derive(Debug, Clone)]
 pub struct SkillsConfig {
     pub kgoose_base_url: String,
+    pub kgoose_service_path: String,
     pub playpen: Option<String>,
     pub org: Option<String>,
     pub bb_home: PathBuf,
@@ -89,8 +91,15 @@ impl SkillsConfig {
             .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
         let profile_config = file_config.profiles.get(&profile);
 
+        let kgoose_service_path = matches
+            .get_one::<String>("kgoose-service-path")
+            .cloned()
+            .or(read_optional_env(KGOOSE_SERVICE_PATH_ENV_VAR)?)
+            .map(|value| normalize_kgoose_service_path(&value))
+            .transpose()?
+            .unwrap_or_else(|| DEFAULT_KGOOSE_SERVICE_PATH.to_string());
         let raw_kgoose_base_url = read_optional_env(KGOOSE_BASE_URL_ENV_VAR)?
-            .map(|value| normalize_kgoose_base_url(&value))
+            .map(|value| normalize_kgoose_base_url_with_service_path(&value, &kgoose_service_path))
             .unwrap_or_else(|| DEFAULT_KGOOSE_BASE_URL.to_string());
         let playpen = read_optional_env(BB_KGOOSE_PLAYPEN_ENV_VAR)?
             .or(read_optional_env(KGOOSE_PLAYPEN_ENV_VAR)?)
@@ -139,13 +148,19 @@ impl SkillsConfig {
         let preferences = read_preferences_file(&preferences_path)?;
         let org = preferences.org.clone();
         let kgoose_base_url = if org_routing {
-            resolve_org_kgoose_base_url(&raw_kgoose_base_url, org.as_deref(), local_dev)?
+            resolve_org_kgoose_base_url(
+                &raw_kgoose_base_url,
+                org.as_deref(),
+                local_dev,
+                &kgoose_service_path,
+            )?
         } else {
             raw_kgoose_base_url
         };
 
         Ok(Self {
             kgoose_base_url,
+            kgoose_service_path,
             playpen,
             org,
             bb_home,
@@ -288,19 +303,27 @@ pub fn read_optional_env(name: &str) -> Result<Option<String>> {
     }
 }
 
-pub fn normalize_kgoose_base_url(value: &str) -> String {
-    value
-        .trim()
+pub fn normalize_kgoose_service_path(value: &str) -> Result<String> {
+    let path = value.trim().trim_matches('/');
+    if path.is_empty() {
+        anyhow::bail!("{KGOOSE_SERVICE_PATH_ENV_VAR} must not be empty");
+    }
+    Ok(format!("/{path}"))
+}
+
+pub fn normalize_kgoose_base_url_with_service_path(value: &str, service_path: &str) -> String {
+    let trimmed = value.trim().trim_end_matches('/');
+    trimmed
+        .strip_suffix(service_path.trim_end_matches('/'))
+        .unwrap_or(trimmed)
         .trim_end_matches('/')
-        .strip_suffix(KGOOSE_SERVICE_PATH)
-        .unwrap_or_else(|| value.trim().trim_end_matches('/'))
         .to_string()
 }
 
-pub fn kgoose_service_url(base_url: &str) -> String {
+pub fn kgoose_service_url(base_url: &str, service_path: &str) -> String {
     format!(
         "{}{}",
-        normalize_kgoose_base_url(base_url),
-        KGOOSE_SERVICE_PATH
+        normalize_kgoose_base_url_with_service_path(base_url, service_path),
+        service_path.trim_end_matches('/')
     )
 }

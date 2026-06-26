@@ -135,6 +135,7 @@ impl MockServer {
             .env_remove("KGOOSE_BASE_URL")
             .env_remove("KGOOSE_DEBUG")
             .env_remove("KGOOSE_PLAYPEN")
+            .env_remove("KGOOSE_SERVICE_PATH")
             .env_remove("KGOOSE_TIMEOUT")
             .env_remove("STS_ACCESS_TOKEN")
             .env_remove("BB_HOME")
@@ -153,6 +154,7 @@ impl MockServer {
             .env_remove("KGOOSE_BASE_URL")
             .env_remove("KGOOSE_DEBUG")
             .env_remove("KGOOSE_PLAYPEN")
+            .env_remove("KGOOSE_SERVICE_PATH")
             .env_remove("KGOOSE_TIMEOUT")
             .env_remove("STS_ACCESS_TOKEN")
             .env("BB_HOME", bb_home)
@@ -194,6 +196,7 @@ pub fn bb_command() -> Command {
         .env_remove("KGOOSE_BASE_URL")
         .env_remove("KGOOSE_DEBUG")
         .env_remove("KGOOSE_PLAYPEN")
+        .env_remove("KGOOSE_SERVICE_PATH")
         .env_remove("KGOOSE_TIMEOUT")
         .env_remove("STS_ACCESS_TOKEN");
     command
