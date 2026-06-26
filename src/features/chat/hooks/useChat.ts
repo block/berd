@@ -82,7 +82,10 @@ export function useChat(
   systemPromptOverride?: string,
   personaInfo?: { id: string; name: string },
   options?: {
-    onMessageAccepted?: (sessionId: string) => void;
+    onMessageAccepted?: (
+      sessionId: string,
+      text: string,
+    ) => boolean | undefined;
     ensurePrepared?: EnsurePrepared;
   },
 ) {
@@ -186,8 +189,11 @@ export function useChat(
               effectivePersonaInfo?.id,
             ),
           onUserMessageCommitted: () => {
-            options?.onMessageAccepted?.(sessionId);
-            clearDraft(sessionId);
+            const shouldClearDraft =
+              options?.onMessageAccepted?.(sessionId, text) !== false;
+            if (shouldClearDraft) {
+              clearDraft(sessionId);
+            }
           },
         });
       } catch {

@@ -100,7 +100,10 @@ vi.mock("../useChat", () => ({
     _personaInfo?: { id: string; name: string },
     options?: {
       ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
-      onMessageAccepted?: (sessionId: string) => void;
+      onMessageAccepted?: (
+        sessionId: string,
+        text: string,
+      ) => boolean | undefined;
     },
   ) => {
     const optionsWithSessionId = { ...options, __sessionId: _sessionId };
@@ -221,7 +224,10 @@ describe("useChatSessionController", () => {
     mockUseChatSendMessage.mockImplementation(
       async (options?: {
         ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
-        onMessageAccepted?: (sessionId: string) => void;
+        onMessageAccepted?: (
+          sessionId: string,
+          text: string,
+        ) => boolean | undefined;
         __sessionId?: string;
       }) => {
         await options?.ensurePrepared?.();
@@ -401,6 +407,105 @@ describe("useChatSessionController", () => {
       });
       expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
         "unsaved draft",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not restore a debounced draft after an accepted send clears it", async () => {
+    vi.useFakeTimers();
+    try {
+      mockUseChatSendMessage.mockImplementationOnce(
+        async (options?: {
+          ensurePrepared?: () => Promise<boolean | undefined>;
+          onMessageAccepted?: (
+            sessionId: string,
+            text: string,
+          ) => boolean | undefined;
+          __sessionId?: string;
+        }) => {
+          options?.onMessageAccepted?.(
+            options.__sessionId ?? "session-1",
+            "hello",
+          );
+          await options?.ensurePrepared?.();
+        },
+      );
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleDraftChange("hello");
+      });
+
+      await act(async () => {
+        await result.current.handleSend("hello");
+      });
+
+      expect(
+        useChatStore.getState().draftsBySession["session-1"],
+      ).toBeUndefined();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(
+        useChatStore.getState().draftsBySession["session-1"],
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves a newer draft when an older send is accepted later", async () => {
+    vi.useFakeTimers();
+    try {
+      let acceptCommittedMessage!: (text: string) => void;
+      mockUseChatSendMessage.mockImplementationOnce(
+        (options?: {
+          onMessageAccepted?: (
+            sessionId: string,
+            text: string,
+          ) => boolean | undefined;
+          __sessionId?: string;
+        }) => {
+          acceptCommittedMessage = (text: string) => {
+            const sessionId = options?.__sessionId ?? "session-1";
+            const shouldClearDraft =
+              options?.onMessageAccepted?.(sessionId, text) !== false;
+            if (shouldClearDraft) {
+              useChatStore.getState().clearDraft(sessionId);
+            }
+          };
+        },
+      );
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleDraftChange("first");
+      });
+      act(() => {
+        result.current.handleSend("first");
+      });
+      act(() => {
+        result.current.handleDraftChange("");
+        result.current.handleDraftChange("second");
+      });
+
+      act(() => {
+        acceptCommittedMessage("first");
+      });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        "second",
       );
     } finally {
       vi.useRealTimers();
@@ -790,10 +895,16 @@ describe("useChatSessionController", () => {
     mockUseChatSendMessage.mockImplementationOnce(
       async (options?: {
         ensurePrepared?: () => Promise<boolean | undefined>;
-        onMessageAccepted?: (sessionId: string) => void;
+        onMessageAccepted?: (
+          sessionId: string,
+          text: string,
+        ) => boolean | undefined;
         __sessionId?: string;
       }) => {
-        options?.onMessageAccepted?.(options.__sessionId ?? "session-1");
+        options?.onMessageAccepted?.(
+          options.__sessionId ?? "session-1",
+          "hello",
+        );
         await options?.ensurePrepared?.();
       },
     );
@@ -865,10 +976,16 @@ describe("useChatSessionController", () => {
     mockUseChatSendMessage.mockImplementation(
       async (options?: {
         ensurePrepared?: () => Promise<boolean | undefined>;
-        onMessageAccepted?: (sessionId: string) => void;
+        onMessageAccepted?: (
+          sessionId: string,
+          text: string,
+        ) => boolean | undefined;
         __sessionId?: string;
       }) => {
-        options?.onMessageAccepted?.(options.__sessionId ?? "session-1");
+        options?.onMessageAccepted?.(
+          options.__sessionId ?? "session-1",
+          "hello",
+        );
         await options?.ensurePrepared?.();
       },
     );

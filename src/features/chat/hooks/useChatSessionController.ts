@@ -1069,13 +1069,116 @@ export function useChatSessionController({
   const personaInfo = selectedPersona
     ? { id: selectedPersona.id, name: selectedPersona.displayName }
     : undefined;
+  const pendingDraftStoreWriteRef = useRef<{
+    sessionId: string;
+    text: string;
+    generation: number;
+  } | null>(null);
+  const draftStoreWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const draftGenerationRef = useRef(0);
+  const submittedDraftsBySessionRef = useRef<
+    Record<string, Array<{ text: string; generation: number }>>
+  >({});
+  const cancelPendingDraftStoreWrite = useCallback(
+    (targetSessionId: string, targetGeneration?: number) => {
+      const pending = pendingDraftStoreWriteRef.current;
+      if (!pending || pending.sessionId !== targetSessionId) {
+        return;
+      }
+      if (
+        targetGeneration !== undefined &&
+        pending.generation !== targetGeneration
+      ) {
+        return;
+      }
+      if (draftStoreWriteTimerRef.current !== null) {
+        clearTimeout(draftStoreWriteTimerRef.current);
+        draftStoreWriteTimerRef.current = null;
+      }
+      pendingDraftStoreWriteRef.current = null;
+    },
+    [],
+  );
+  const flushPendingDraftStoreWrite = useCallback(() => {
+    if (draftStoreWriteTimerRef.current !== null) {
+      clearTimeout(draftStoreWriteTimerRef.current);
+      draftStoreWriteTimerRef.current = null;
+    }
+    const pending = pendingDraftStoreWriteRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingDraftStoreWriteRef.current = null;
+    useChatStore.getState().setDraft(pending.sessionId, pending.text);
+  }, []);
+  const recordSubmittedDraft = useCallback(
+    (targetSessionId: string, text: string) => {
+      const pending = pendingDraftStoreWriteRef.current;
+      const storedDraft =
+        useChatStore.getState().draftsBySession[targetSessionId] ?? "";
+      const generation =
+        pending?.sessionId === targetSessionId && pending.text === text
+          ? pending.generation
+          : storedDraft === text
+            ? draftGenerationRef.current
+            : null;
+      if (generation === null) {
+        return;
+      }
+
+      const submittedDrafts =
+        submittedDraftsBySessionRef.current[targetSessionId] ?? [];
+      submittedDrafts.push({ text, generation });
+      submittedDraftsBySessionRef.current[targetSessionId] =
+        submittedDrafts.slice(-10);
+    },
+    [],
+  );
+  const takeSubmittedDraftGeneration = useCallback(
+    (targetSessionId: string, text: string) => {
+      const submittedDrafts =
+        submittedDraftsBySessionRef.current[targetSessionId];
+      if (!submittedDrafts?.length) {
+        return null;
+      }
+
+      const submittedIndex = submittedDrafts.findIndex(
+        (submitted) => submitted.text === text,
+      );
+      if (submittedIndex === -1) {
+        return null;
+      }
+
+      const [{ generation }] = submittedDrafts.splice(submittedIndex, 1);
+      if (submittedDrafts.length === 0) {
+        delete submittedDraftsBySessionRef.current[targetSessionId];
+      }
+      return generation;
+    },
+    [],
+  );
   const handleMessageAccepted = useCallback(
-    (acceptedSessionId: string) => {
+    (acceptedSessionId: string, submittedText: string) => {
+      const submittedDraftGeneration = takeSubmittedDraftGeneration(
+        acceptedSessionId,
+        submittedText,
+      );
+      if (submittedDraftGeneration !== null) {
+        cancelPendingDraftStoreWrite(
+          acceptedSessionId,
+          submittedDraftGeneration,
+        );
+      }
+      const hasNewerDraftEdit =
+        submittedDraftGeneration !== null &&
+        draftGenerationRef.current > submittedDraftGeneration;
       onMessageAccepted?.(acceptedSessionId);
       const pendingValue =
         pendingDefaultReasoningEffortBySessionRef.current[acceptedSessionId];
       if (!pendingValue) {
-        return;
+        return hasNewerDraftEdit ? false : undefined;
       }
 
       const queuedSave = reasoningEffortDefaultSaveQueueRef.current
@@ -1100,8 +1203,13 @@ export function useChatSessionController({
         .catch((error) => {
           console.error("Failed to save default reasoning effort:", error);
         });
+      return hasNewerDraftEdit ? false : undefined;
     },
-    [onMessageAccepted],
+    [
+      cancelPendingDraftStoreWrite,
+      onMessageAccepted,
+      takeSubmittedDraftGeneration,
+    ],
   );
   const {
     messages,
@@ -1196,6 +1304,7 @@ export function useChatSessionController({
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
       sessionOverride?: Pick<ChatSession, "intent" | "targetAgentPath">,
+      options: { recordDraftSubmission?: boolean } = {},
     ) => {
       const builderSendOptions = composeBuilderSendOptions(
         sessionOverride ?? session,
@@ -1217,7 +1326,14 @@ export function useChatSessionController({
         return false;
       }
 
+      const recordDraftSubmission = () => {
+        if (options.recordDraftSubmission !== false && sessionId) {
+          recordSubmittedDraft(sessionId, text);
+        }
+      };
+
       if (!canAutoCompactBeforeSend(overridePersona)) {
+        recordDraftSubmission();
         if (shouldPassSendOptions) {
           void sendMessage(text, overridePersona, attachments, nextSendOptions);
         } else {
@@ -1232,6 +1348,7 @@ export function useChatSessionController({
           return false;
         }
 
+        recordDraftSubmission();
         if (shouldPassSendOptions) {
           void sendMessage(text, overridePersona, attachments, nextSendOptions);
         } else {
@@ -1245,8 +1362,10 @@ export function useChatSessionController({
       canAutoCompactBeforeSend,
       compactConversation,
       isQueuedSendBlocked,
+      recordSubmittedDraft,
       sendMessage,
       session,
+      sessionId,
     ],
   );
   const isLoadingHistory = useChatStore((s) =>
@@ -1263,10 +1382,27 @@ export function useChatSessionController({
   } | null>(null);
   const queueChatState =
     sessionId && session?.creationState == null ? chatState : "thinking";
+  const sendQueuedMessageWithAutoCompact = useCallback(
+    (
+      text: string,
+      overridePersona?: { id: string; name?: string },
+      attachments?: ChatAttachmentDraft[],
+      sendOptions?: ChatSendOptions,
+    ) =>
+      sendWithAutoCompact(
+        text,
+        overridePersona,
+        attachments,
+        sendOptions,
+        undefined,
+        { recordDraftSubmission: false },
+      ),
+    [sendWithAutoCompact],
+  );
   const queue = useMessageQueue(
     stateSessionId,
     queueChatState,
-    sendWithAutoCompact,
+    sendQueuedMessageWithAutoCompact,
     readOnly,
     isQueuedSendBlocked,
   );
@@ -1401,6 +1537,7 @@ export function useChatSessionController({
             (chatState !== "idle" || isQueuedSendBlocked) &&
             !queue.queuedMessage
           ) {
+            recordSubmittedDraft(sessionId, text);
             queue.enqueue(text, personaId, attachments, sendOptions);
             return true;
           }
@@ -1419,6 +1556,7 @@ export function useChatSessionController({
         (chatState !== "idle" || isQueuedSendBlocked) &&
         !queue.queuedMessage
       ) {
+        recordSubmittedDraft(sessionId, text);
         queue.enqueue(text, personaId, attachments, sendOptions);
         return true;
       }
@@ -1441,6 +1579,7 @@ export function useChatSessionController({
       isQueuedSendBlocked,
       queue,
       readOnly,
+      recordSubmittedDraft,
       session?.intent,
       sessionId,
       selectedPersona,
@@ -1563,31 +1702,18 @@ export function useChatSessionController({
       : storedSelectedSkills;
   const hasSelectedAgentBuilderSkill =
     hasAgentBuilderSkillDraft(selectedSkills);
-  const pendingDraftStoreWriteRef = useRef<{
-    sessionId: string;
-    text: string;
-  } | null>(null);
-  const draftStoreWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const flushPendingDraftStoreWrite = useCallback(() => {
-    if (draftStoreWriteTimerRef.current !== null) {
-      clearTimeout(draftStoreWriteTimerRef.current);
-      draftStoreWriteTimerRef.current = null;
-    }
-    const pending = pendingDraftStoreWriteRef.current;
-    if (!pending) {
-      return;
-    }
-    pendingDraftStoreWriteRef.current = null;
-    useChatStore.getState().setDraft(pending.sessionId, pending.text);
-  }, []);
   const handleDraftChange = useCallback(
     (text: string) => {
       if (pendingDraftStoreWriteRef.current?.sessionId !== stateSessionId) {
         flushPendingDraftStoreWrite();
       }
-      pendingDraftStoreWriteRef.current = { sessionId: stateSessionId, text };
+      const generation = draftGenerationRef.current + 1;
+      draftGenerationRef.current = generation;
+      pendingDraftStoreWriteRef.current = {
+        sessionId: stateSessionId,
+        text,
+        generation,
+      };
       if (text.length === 0) {
         flushPendingDraftStoreWrite();
         return;
@@ -1615,6 +1741,7 @@ export function useChatSessionController({
     pendingDraftStoreWriteRef.current = {
       sessionId,
       text: pending.text,
+      generation: pending.generation,
     };
     flushPendingDraftStoreWrite();
   }, [flushPendingDraftStoreWrite, session?.clientSessionId, sessionId]);
