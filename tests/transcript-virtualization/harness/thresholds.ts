@@ -122,6 +122,7 @@ export const REAL_BRIDGE_PROOF_PROFILE: RealBridgeProofProfile = {
     scrollCorrectionP95Px: [
       "long-10k",
       "tool-chain-storm",
+      "dynamic-media-code",
       "mcp-dynamic-rows",
       "composer-growth-session-switch",
       "pr928-fragment-tail",

@@ -258,6 +258,24 @@ function readMockPaddingBlockSize(element: HTMLElement): number {
   return 0;
 }
 
+function expectFlowPositionedVirtualRow(row: HTMLElement) {
+  expect(row).toHaveClass("flow-root");
+  expect(row.style.position).toBe("");
+  expect(row.style.top).toBe("");
+  expect(row.style.left).toBe("");
+  expect(row.style.right).toBe("");
+  expect(row.style.transform).toBe("");
+}
+
+function readPixelStyleValue(element: HTMLElement, property: "height"): number {
+  const value = element.style[property];
+  if (!value.endsWith("px")) {
+    return Number.NaN;
+  }
+
+  return Number(value.slice(0, -2));
+}
+
 function createDomRect(height: number): DOMRect {
   return {
     bottom: height,
@@ -484,8 +502,7 @@ describe("VirtualMessageTimeline", () => {
       "data-transcript-message-id",
       "fragmented",
     );
-    expect(firstFragment.style.left).toBe("0px");
-    expect(firstFragment.style.right).toBe("0px");
+    expectFlowPositionedVirtualRow(firstFragment);
     expect(middleFragment).not.toHaveAttribute("data-transcript-message-id");
     expect(lastFragment).toHaveAttribute(
       "data-virtual-row-fragment-role",
@@ -675,7 +692,13 @@ describe("VirtualMessageTimeline", () => {
 
     const list = screen.getByTestId("virtual-message-timeline-list");
     const history = screen.getByTestId("virtual-message-timeline-history");
-    await waitFor(() => expect(history).toHaveStyle({ height: "198px" }));
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId("virtual-message-timeline-flow-spacer").length,
+      ).toBeGreaterThan(0),
+    );
+    expect(history.style.height).toBe("");
+    expect(history.style.position).toBe("relative");
     expect(list).toHaveAttribute(
       TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
       TRANSCRIPT_SELECTION_SURFACE_VALUE,
@@ -685,6 +708,25 @@ describe("VirtualMessageTimeline", () => {
       TRANSCRIPT_SELECTION_SURFACE_VALUE,
     );
     expect(list).toHaveStyle({ paddingBottom: "0px" });
+    expect(
+      history.querySelector<HTMLElement>(
+        '[data-virtual-row-kind="date-separator"]',
+      ),
+    ).toHaveClass("flow-root");
+
+    const lastRenderedRowEnd = Math.max(
+      ...Array.from(
+        history.querySelectorAll<HTMLElement>("[data-virtual-row-virtual-end]"),
+      ).map((row) =>
+        Number(row.getAttribute("data-virtual-row-virtual-end") ?? 0),
+      ),
+    );
+    const trailingSpacer = screen
+      .getAllByTestId("virtual-message-timeline-flow-spacer")
+      .at(-1) as HTMLElement;
+    expect(
+      lastRenderedRowEnd + readPixelStyleValue(trailingSpacer, "height"),
+    ).toBe(198);
   });
 
   it("keeps long assistant fragment rows in bounded virtual mode", async () => {
@@ -720,10 +762,15 @@ describe("VirtualMessageTimeline", () => {
       "data-virtual-row-kind",
       "assistant-content-fragment",
     );
-    expect(fragmentedRow.style.top).toBe(
-      `${fragmentedRow.getAttribute("data-virtual-row-virtual-start")}px`,
-    );
-    expect(fragmentedRow.style.transform).toBe("");
+    expectFlowPositionedVirtualRow(fragmentedRow);
+    expect(
+      Number(fragmentedRow.getAttribute("data-virtual-row-virtual-start")),
+    ).toBeGreaterThan(0);
+    expect(
+      screen
+        .getAllByTestId("virtual-message-timeline-flow-spacer")
+        .some((spacer) => readPixelStyleValue(spacer, "height") > 0),
+    ).toBe(true);
     expect(screen.queryByTestId("bubble-message-0")).not.toBeInTheDocument();
 
     const list = screen.getByTestId("virtual-message-timeline-list");

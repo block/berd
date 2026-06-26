@@ -91,7 +91,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   const isOffscreenRealMeasurement = offscreenMeasurementKind === "real";
   const isVirtualLayout = layoutMode === "virtual" && virtualItem;
   const suppressVirtualRowSelection = Boolean(
-    isVirtualLayout && virtualItem.protected && !virtualItem.visible,
+    virtualItem?.protected && !virtualItem.visible,
   );
   const suppressRowSelection =
     suppressVirtualRowSelection || isOffscreenRealMeasurement;
@@ -115,7 +115,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         userSelect: suppressRowSelection ? "none" : undefined,
         WebkitUserSelect: suppressRowSelection ? "none" : undefined,
       }
-    : isOffscreenRealMeasurement
+    : suppressRowSelection || isOffscreenRealMeasurement
       ? {
           pointerEvents: "none",
           userSelect: "none",
@@ -128,6 +128,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     previousRowKind,
     layoutMode,
   });
+  const flowContainmentClassName = layoutMode === "flow" ? "flow-root" : null;
   const rowTestId = isOffscreenRealMeasurement
     ? `virtual-offscreen-real-row-${row.rowId}`
     : `virtual-transcript-row-${row.rowId}`;
@@ -272,7 +273,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
-        className={cn(spacingClassName)}
+        className={cn(spacingClassName, flowContainmentClassName)}
       >
         <MessageDateSeparator label={dateLabel} />
       </div>
@@ -290,6 +291,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         style={rowStyle}
         className={cn(
           spacingClassName,
+          flowContainmentClassName,
           "rounded-lg transition-[background-color,box-shadow]",
           isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
         )}
@@ -331,6 +333,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         style={rowStyle}
         className={cn(
           spacingClassName,
+          flowContainmentClassName,
           "rounded-lg transition-[background-color,box-shadow]",
           isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
         )}
@@ -345,7 +348,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
-        className={cn(spacingClassName)}
+        className={cn(spacingClassName, flowContainmentClassName)}
       >
         <ToolChainDetailMessage payload={row.toolChainDetail} />
       </div>
@@ -370,6 +373,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         style={rowStyle}
         className={cn(
           spacingClassName,
+          flowContainmentClassName,
           "rounded-lg transition-[background-color,box-shadow]",
           isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
         )}

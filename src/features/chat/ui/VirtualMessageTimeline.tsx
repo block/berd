@@ -3198,7 +3198,7 @@ export function VirtualMessageTimeline({
       row={row}
       index={index}
       previousRowKind={stableRows[index - 1]?.kind}
-      layoutMode={virtualItem ? "virtual" : "flow"}
+      layoutMode="flow"
       virtualItem={virtualItem}
       measurementPlan={measurementPlanByRowId.get(row.rowId)}
       dateLabel={formatDateSeparator(snapshot, index, {
@@ -3250,14 +3250,6 @@ export function VirtualMessageTimeline({
   const renderedOffscreenRealRows = offscreenRealMeasurementRows.map(
     renderOffscreenRealRow,
   );
-  const renderedVirtualRows = isBoundedVirtualMode
-    ? virtualTimelineSnapshot.range.virtualItems.map((virtualItem) =>
-        renderRow(virtualItem.row, virtualItem.index, virtualItem),
-      )
-    : virtualRows.map((row, index) => renderRow(row, index));
-  const renderedLiveStreamingTailRows = liveStreamingTailRows.map(
-    (row, tailIndex) => renderRow(row, liveStreamingTailStartIndex + tailIndex),
-  );
   const lastRenderedVirtualItem = isBoundedVirtualMode
     ? virtualTimelineSnapshot.range.virtualItems.at(-1)
     : undefined;
@@ -3277,9 +3269,8 @@ export function VirtualMessageTimeline({
   );
   const virtualHistoryStyle = isBoundedVirtualMode
     ? {
-        height: effectiveVirtualScrollHeight,
-        position: "relative" as const,
         overflowAnchor: "none" as const,
+        position: "relative" as const,
       }
     : undefined;
   const messageListStyle = isBoundedVirtualMode
@@ -3290,6 +3281,49 @@ export function VirtualMessageTimeline({
     : {
         paddingBottom: messageListBottomPaddingPx,
       };
+  const renderVirtualFlowSpacerRows = () => {
+    const nodes: ReactNode[] = [];
+    let cursor = 0;
+
+    // Keep mounted transcript text in normal document flow. The virtual engine
+    // still owns the pixel model; inert spacers represent unmounted ranges.
+    for (const virtualItem of virtualTimelineSnapshot.range.virtualItems) {
+      const gapSize = Math.max(0, virtualItem.start - cursor);
+      if (gapSize > 0) {
+        nodes.push(
+          <div
+            key={`virtual-flow-spacer-before:${virtualItem.key}`}
+            aria-hidden="true"
+            data-testid="virtual-message-timeline-flow-spacer"
+            style={{ flexShrink: 0, height: gapSize }}
+          />,
+        );
+      }
+
+      nodes.push(renderRow(virtualItem.row, virtualItem.index, virtualItem));
+      cursor = Math.max(cursor, virtualItem.end);
+    }
+
+    const trailingGapSize = Math.max(0, effectiveVirtualScrollHeight - cursor);
+    if (trailingGapSize > 0) {
+      nodes.push(
+        <div
+          key="virtual-flow-spacer-after"
+          aria-hidden="true"
+          data-testid="virtual-message-timeline-flow-spacer"
+          style={{ flexShrink: 0, height: trailingGapSize }}
+        />,
+      );
+    }
+
+    return nodes;
+  };
+  const renderedVirtualRows = isBoundedVirtualMode
+    ? renderVirtualFlowSpacerRows()
+    : virtualRows.map((row, index) => renderRow(row, index));
+  const renderedLiveStreamingTailRows = liveStreamingTailRows.map(
+    (row, tailIndex) => renderRow(row, liveStreamingTailStartIndex + tailIndex),
+  );
 
   useLayoutEffect(() => {
     if (!isBoundedVirtualMode) {
