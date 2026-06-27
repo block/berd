@@ -106,7 +106,20 @@ describe("ToolCallAdapter — expanded body", () => {
   it("renders the tool name and status badge in the header", () => {
     renderAdapter();
     expect(
-      screen.getByRole("button", { name: /write_file/i }),
+      screen.getByRole("button", { name: /Write_file/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("sentence-cases the tool title and renames shell to Running command", () => {
+    renderAdapter({
+      name: "shell · git status --short --branch",
+      arguments: { command: "git status --short --branch" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Running command · git status --short --branch/i,
+      }),
     ).toBeInTheDocument();
   });
 

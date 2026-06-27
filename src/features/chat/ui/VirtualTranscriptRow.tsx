@@ -19,6 +19,7 @@ import {
 } from "../transcript/row-state";
 import type { TranscriptRowDescriptor } from "../transcript/projection";
 import type { TranscriptVirtualItem } from "../transcript/virtual";
+import { AgentWorkPanel } from "./AgentWorkPanel";
 import { MessageBubble } from "./MessageBubble";
 import {
   MessageDateSeparator,
@@ -197,23 +198,31 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     onEditProject,
     onOpenContextPanel,
   } = bubbleCallbacks ?? EMPTY_MESSAGE_BUBBLE_CALLBACKS;
+  const responseStartMessageId = row.responseStartMessageId ?? row.messageId;
+  const handleJumpToResponseStartForRow =
+    onJumpToResponseStart && responseStartMessageId
+      ? () => onJumpToResponseStart(responseStartMessageId)
+      : undefined;
+
   const registerElement = useCallback(
     (element: HTMLDivElement | null) => {
       elementRef.current = element;
       registerRowElement?.(row.rowId, element);
       if (
-        message &&
-        (row.kind === "message" || row.fragment?.messageScrollTarget)
+        row.messageId &&
+        (row.kind === "message" ||
+          row.kind === "agent-work" ||
+          row.fragment?.messageScrollTarget)
       ) {
-        registerMessageElement?.(message.id, element);
+        registerMessageElement?.(row.messageId, element);
       }
     },
     [
-      message,
       registerMessageElement,
       registerRowElement,
       row.fragment?.messageScrollTarget,
       row.kind,
+      row.messageId,
       row.rowId,
     ],
   );
@@ -311,7 +320,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           }
           onJumpToResponseStart={
             message.role === "assistant" && !isStreaming
-              ? onJumpToResponseStart
+              ? handleJumpToResponseStartForRow
               : undefined
           }
           onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}
@@ -322,6 +331,22 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onEditProject={onEditProject}
           onOpenContextPanel={onOpenContextPanel}
         />
+      </div>
+    );
+  } else if (row.kind === "agent-work" && row.agentWork) {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        style={rowStyle}
+        className={cn(
+          spacingClassName,
+          "rounded-lg transition-[background-color,box-shadow]",
+          isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
+        )}
+      >
+        <AgentWorkPanel payload={row.agentWork} />
       </div>
     );
   } else if (row.kind === "tool-chain" && row.toolChainSummary) {
@@ -390,7 +415,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onEditMessage={message.role === "user" ? onEditMessage : undefined}
           onJumpToResponseStart={
             message.role === "assistant" && !isStreaming
-              ? onJumpToResponseStart
+              ? handleJumpToResponseStartForRow
               : undefined
           }
           onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}

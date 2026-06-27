@@ -1082,6 +1082,36 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("replay replaces cumulative thought snapshots instead of appending them", async () => {
+    const replaySessionId = "replay-thought-session";
+    useChatStore.setState({
+      loadingSessionIds: new Set<string>([replaySessionId]),
+    });
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "assistant-thought-1",
+        content: { type: "text", text: "Plan" },
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "assistant-thought-1",
+        content: { type: "text", text: "Plan next step" },
+      },
+    } as never);
+
+    const buffer = getReplayBuffer(replaySessionId);
+    expect(buffer?.[0]?.content).toEqual([
+      { type: "thinking", text: "Plan next step" },
+    ]);
+  });
+
   it("replay keeps tool and MCP app content on an assistant message when tool events arrive before text", async () => {
     const replaySessionId = "replay-acp-session";
     useChatStore.setState({

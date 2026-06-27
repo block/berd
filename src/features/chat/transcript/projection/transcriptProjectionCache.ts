@@ -32,6 +32,7 @@ export class DefaultTranscriptProjectionCache
     const items = buildTranscriptItems({
       messages: input.messages,
       streamingMessageId: input.streamingMessageId,
+      enableAgentWork: input.enableAgentWork,
       nowBucket: input.nowBucket,
       localeKey: input.localeKey,
       calendarRevisionToken: this.getCalendarRevisionToken(),
@@ -68,7 +69,7 @@ export class DefaultTranscriptProjectionCache
         if (!searchableTextByMessageId.has(item.messageId)) {
           searchableTextByMessageId.set(item.messageId, item.searchableText);
         }
-      } else if (item.kind === "tool-chain") {
+      } else if (item.kind === "agent-work" || item.kind === "tool-chain") {
         messageById.set(item.messageId, item.message);
       }
     }

@@ -367,6 +367,9 @@
   },
   "tools": {
     "content": "Contenido",
+    "error": "Error",
+    "input": "Entrada",
+    "result": "Resultado",
     "fileNotFound": "Archivo no encontrado: {{path}}",
     "inputSummary": {
       "command": "Comando",
@@ -386,6 +389,14 @@
     "structuredContent": "Contenido estructurado",
     "structuredOutput": "Salida estructurada",
     "structuredOutputLines": "{{count}} líneas"
+  },
+  "agent_work": {
+    "label": "Trabajo del agente",
+    "redactedThinking": "Pensamiento redactado",
+    "summary": {
+      "steps_one": "{{count}} paso",
+      "steps_other": "{{count}} pasos"
+    }
   },
   "tool_chain": {
     "summary": {

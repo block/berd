@@ -2,7 +2,13 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
+import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import { MessageTimeline } from "../MessageTimeline";
+import { REDUCED_MOTION_QUERY } from "../messageTimelineShared";
 import type { Message } from "@/shared/types/messages";
 
 const resizeObserverCallbacks: ResizeObserverCallback[] = [];
@@ -26,6 +32,10 @@ function triggerResizeObservers() {
 }
 
 beforeEach(() => {
+  localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+  expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
+    true,
+  );
   resizeObserverCallbacks.length = 0;
   Object.defineProperty(globalThis, "ResizeObserver", {
     configurable: true,
@@ -260,6 +270,226 @@ function getTimelineScroller() {
 }
 
 describe("MessageTimeline", () => {
+  it("renders projected agent work rows in the legacy timeline", () => {
+    const userMessage = message("user-1", "user", "Please inspect");
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "shell · git status",
+          arguments: { command: "git status" },
+          status: "completed",
+        },
+        {
+          type: "toolResponse",
+          id: "tool-1",
+          name: "shell · git status",
+          result: "ok",
+          isError: false,
+        },
+        { type: "text", text: "Done." },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <MessageTimeline messages={[userMessage, assistantMessage]} />,
+    );
+
+    expect(screen.getByText("Agent work")).toBeInTheDocument();
+    expect(screen.getByText("Done.")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Thought for a few seconds/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides reasoning boxes while the agent work transcript experiment is off", () => {
+    expect(
+      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, false),
+    ).toBe(true);
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "shell · git status",
+          arguments: { command: "git status" },
+          status: "completed",
+        },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <MessageTimeline
+        messages={[
+          message("user-1", "user", "Please inspect"),
+          assistantMessage,
+        ]}
+      />,
+    );
+
+    expect(
+      screen.queryByText(/Thought for a few seconds/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent work")).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId(
+        "virtual-transcript-row-message:assistant-1:tool-chain",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a hoisted final answer streaming while its original assistant turn streams", () => {
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        { type: "text", text: "Streaming answer" },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <MessageTimeline
+        messages={[
+          message("user-1", "user", "Please inspect"),
+          assistantMessage,
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    expect(screen.getByTestId("message-assistant-1:answer")).toHaveAttribute(
+      "data-streaming",
+      "true",
+    );
+  });
+
+  it("jumps from the final answer back to the agent work response start", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "matchMedia").mockReturnValue({
+      matches: true,
+      media: REDUCED_MOTION_QUERY,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    });
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "shell · git status",
+          arguments: { command: "git status" },
+          status: "completed",
+        },
+        { type: "text", text: "Done." },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <MessageTimeline
+        messages={[
+          message("user-1", "user", "Please inspect"),
+          assistantMessage,
+        ]}
+      />,
+    );
+
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1200,
+      clientHeight: 400,
+    });
+    setElementRect(scroller, { top: 100, bottom: 500, height: 400 });
+    const agentWorkRow = screen.getByTestId(
+      "virtual-transcript-row-message:assistant-1:agent-work",
+    );
+    setElementRect(agentWorkRow, { top: 40, bottom: 240, height: 200 });
+    const scrollTo = attachScrollTo(scroller);
+
+    await user.click(
+      screen.getByRole("button", { name: "Jump to response start" }),
+    );
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(424);
+  });
+
+  it("shows the floating response-start button when reading a final answer with agent work above", () => {
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "shell · git status",
+          arguments: { command: "git status" },
+          status: "completed",
+        },
+        { type: "text", text: "Done." },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <MessageTimeline
+        messages={[
+          message("user-1", "user", "Please inspect"),
+          assistantMessage,
+        ]}
+      />,
+    );
+
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1200,
+      clientHeight: 400,
+    });
+    setElementRect(scroller, { top: 100, bottom: 500, height: 400 });
+    setElementRect(
+      screen.getByTestId(
+        "virtual-transcript-row-message:assistant-1:agent-work",
+      ),
+      { top: -120, bottom: 80, height: 200 },
+    );
+    setElementRect(
+      screen.getByTestId("virtual-transcript-row-message:assistant-1:answer"),
+      { top: 300, bottom: 700, height: 400 },
+    );
+
+    fireEvent.scroll(scroller);
+
+    expect(
+      screen.getByRole("button", { name: "Jump to current response start" }),
+    ).toBeInTheDocument();
+  });
+
   it("follows streaming content without treating native smooth-scroll progress as detachment", async () => {
     const messages = [
       message("user-1", "user", "Question"),

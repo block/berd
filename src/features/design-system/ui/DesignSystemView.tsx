@@ -180,6 +180,7 @@ import {
   type DesignSystemSection,
 } from "./designSystemSections";
 import { ComponentPlayground } from "./explorer/ComponentPlayground";
+import { ConversationAnatomyPage } from "./ConversationAnatomyPage";
 import globalsCssSource from "../../../shared/styles/globals.css?raw";
 
 type ButtonVariant = NonNullable<
@@ -5212,6 +5213,8 @@ function renderSection(section: DesignSystemSection) {
   switch (section) {
     case "overview":
       return <OverviewPage />;
+    case "conversation-anatomy":
+      return <ConversationAnatomyPage />;
     case "component-accordion":
       return <AccordionPage />;
     case "component-alert-dialog":

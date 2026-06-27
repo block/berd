@@ -13,10 +13,17 @@ import {
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { MessageBubble } from "./MessageBubble";
 import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
-import { getTextContent, type Message } from "@/shared/types/messages";
+import type { Message } from "@/shared/types/messages";
+import {
+  createTranscriptProjectionCache,
+  toDateBucket,
+  type TranscriptRowDescriptor,
+} from "@/features/chat/transcript/projection";
+import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
   hasAssistiveMomentBeenShown,
@@ -28,12 +35,12 @@ import {
 import {
   easeOutCubic,
   JUMP_TO_LATEST_SCROLL_MS,
-  MessageDateSeparator,
   MessageTimelineEmptyState,
   MessageTimelineFooterControlRow,
   MessageTimelineJumpToLatestButton,
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
+  type MessageBubbleCallbacks,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
 import {
@@ -80,33 +87,22 @@ interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   showPlaceholder?: boolean;
 }
 
-function isSameDay(a: number, b: number): boolean {
-  const da = new Date(a);
-  const db = new Date(b);
-  return (
-    da.getFullYear() === db.getFullYear() &&
-    da.getMonth() === db.getMonth() &&
-    da.getDate() === db.getDate()
-  );
-}
-
-function formatDateSeparator(
-  timestamp: number,
-  todayLabel: string,
-  yesterdayLabel: string,
-  formatDate: (
-    value: Date | string | number,
-    options?: Intl.DateTimeFormatOptions,
-  ) => string,
+function formatRowDateSeparator(
+  row: TranscriptRowDescriptor,
+  labels: {
+    today: string;
+    yesterday: string;
+    formatDate: (
+      value: Date | string | number,
+      options?: Intl.DateTimeFormatOptions,
+    ) => string;
+  },
 ): string {
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (isSameDay(timestamp, now.getTime())) return todayLabel;
-  if (isSameDay(timestamp, yesterday.getTime())) return yesterdayLabel;
-
-  return formatDate(timestamp, {
+  const date = row.date;
+  if (!date) return "";
+  if (date.labelKey === "today") return labels.today;
+  if (date.labelKey === "yesterday") return labels.yesterday;
+  return labels.formatDate(date.timestamp, {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -135,12 +131,18 @@ export function MessageTimeline({
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
+  const agentWorkExperiment = useExperiment(
+    AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
+  );
+  const enableAgentWork = agentWorkExperiment?.enabled === true;
   const containerRef = useRef<HTMLDivElement>(null);
   // The composer is docked in flow at the bottom of the chat panel; its
   // measured height changes the scrollable viewport while clearance padding
   // keeps the last message from pressing into the composer.
   const footerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const rowRefs = useRef<Record<string, HTMLElement | null>>({});
+  const projectionCacheRef = useRef(createTranscriptProjectionCache());
   const isNearBottomRef = useRef(true);
   const isPinnedToBottomRef = useRef(true);
   const userDetachedRef = useRef(false);
@@ -181,27 +183,36 @@ export function MessageTimeline({
     ? FOOTER_DOCK_CLEARANCE_PX
     : (tailPaddingPx ?? 16);
   messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
+  const nowBucket = toDateBucket(Date.now());
+  const localeKey = "default";
+  const snapshot = useMemo(
+    () =>
+      projectionCacheRef.current.update({
+        sessionId: "legacy-message-timeline",
+        sessionEpoch: 1,
+        messages,
+        streamingMessageId: streamingMessageId ?? null,
+        enableAgentWork,
+        nowBucket,
+        localeKey,
+      }),
+    [enableAgentWork, messages, nowBucket, streamingMessageId],
+  );
   const visibleMessages = useMemo(
     () =>
       messages.filter(
         (m) =>
           m.metadata?.userVisible !== false &&
-          !(
-            m.role === "assistant" &&
-            m.content.length === 0 &&
-            m.metadata?.completionStatus === "inProgress"
-          ),
+          snapshot.rowByMessageId.has(m.id),
       ),
-    [messages],
+    [messages, snapshot.rowByMessageId],
   );
   const resolvedScrollTargetMessageId = useMemo(() => {
-    if (scrollTargetMessageId) {
-      const exactMatch = visibleMessages.find(
-        (message) => message.id === scrollTargetMessageId,
-      );
-      if (exactMatch) {
-        return exactMatch.id;
-      }
+    if (
+      scrollTargetMessageId &&
+      snapshot.rowByMessageId.has(scrollTargetMessageId)
+    ) {
+      return scrollTargetMessageId;
     }
 
     const trimmedQuery = scrollTargetQuery?.trim().toLocaleLowerCase();
@@ -209,11 +220,17 @@ export function MessageTimeline({
       return null;
     }
 
-    const textMatch = visibleMessages.find((message) =>
-      getTextContent(message).toLocaleLowerCase().includes(trimmedQuery),
-    );
-    return textMatch?.id ?? null;
-  }, [scrollTargetMessageId, scrollTargetQuery, visibleMessages]);
+    for (const [
+      messageId,
+      searchableText,
+    ] of snapshot.searchableTextByMessageId) {
+      if (searchableText.toLocaleLowerCase().includes(trimmedQuery)) {
+        return messageId;
+      }
+    }
+
+    return null;
+  }, [scrollTargetMessageId, scrollTargetQuery, snapshot]);
 
   const getBottomScrollTop = useCallback(
     (container: HTMLDivElement) => getTimelineBottomScrollTop(container),
@@ -273,7 +290,7 @@ export function MessageTimeline({
 
     const containerRect = container.getBoundingClientRect();
     // Anchor at the visible bottom edge, lifted above the composer padding so
-    // it targets the message the reader is actually finishing. The button is
+    // it targets the message row the reader is actually finishing. The button is
     // drawn a little higher than this line (see GUTTER_RESPONSE_START_LIFT_RATIO
     // in the shared component), but the target stays bottom-anchored.
     const anchorY =
@@ -281,37 +298,46 @@ export function MessageTimeline({
       messageListBottomPaddingPxRef.current -
       GUTTER_RESPONSE_START_THRESHOLD_PX;
     let candidateId: string | null = null;
-    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
-      const message = visibleMessages[index];
-      if (
-        !message ||
-        message.role !== "assistant" ||
-        message.id === streamingMessageId
-      ) {
+
+    for (let index = snapshot.rows.length - 1; index >= 0; index -= 1) {
+      const row = snapshot.rows[index];
+      if (!row?.messageId) {
         continue;
       }
-      const target = messageRefs.current[message.id];
-      if (!target) {
+      const message = snapshot.messageById.get(row.messageId);
+      if (message?.role !== "assistant") {
         continue;
       }
-      const rect = target.getBoundingClientRect();
-      // The message must straddle the bottom anchor line where the chevron
-      // floats.
-      const coversAnchor = rect.top <= anchorY && rect.bottom > anchorY;
+      const responseStartMessageId =
+        row.responseStartMessageId ?? row.messageId;
+      if (responseStartMessageId === streamingMessageId) {
+        continue;
+      }
+      const rowElement = rowRefs.current[row.rowId];
+      if (!rowElement) {
+        continue;
+      }
+      const rowRect = rowElement.getBoundingClientRect();
+      const coversAnchor = rowRect.top <= anchorY && rowRect.bottom > anchorY;
       if (!coversAnchor) {
         continue;
       }
-      // The message must already be above the viewport's top edge so there is
-      // somewhere useful to jump back to.
+
+      const responseStartElement = messageRefs.current[responseStartMessageId];
+      if (!responseStartElement) {
+        continue;
+      }
+      const responseStartRect = responseStartElement.getBoundingClientRect();
       const topAboveViewport =
-        rect.top < containerRect.top - GUTTER_RESPONSE_START_THRESHOLD_PX;
-      if (coversAnchor && topAboveViewport) {
-        candidateId = message.id;
+        responseStartRect.top <
+        containerRect.top - GUTTER_RESPONSE_START_THRESHOLD_PX;
+      if (topAboveViewport) {
+        candidateId = responseStartMessageId;
         break;
       }
     }
     setGutterResponseStartMessageId(candidateId);
-  }, [streamingMessageId, visibleMessages]);
+  }, [snapshot.messageById, snapshot.rows, streamingMessageId]);
 
   useLayoutEffect(() => {
     syncGutterResponseStartVisibility();
@@ -1144,50 +1170,60 @@ export function MessageTimeline({
     scrollToBottomWithControlledSmooth();
   };
 
-  const handleJumpToResponseStart = (messageId: string) => {
-    const container = containerRef.current;
-    const target = messageRefs.current[messageId];
-    if (!container || !target) {
-      return;
-    }
+  const handleJumpToResponseStart = useCallback(
+    (messageId: string) => {
+      const container = containerRef.current;
+      const target = messageRefs.current[messageId];
+      if (!container || !target) {
+        return;
+      }
 
-    cancelJumpToLatestAnimation();
-    responseStartHintSeenMessageIdsRef.current.add(messageId);
-    if (
-      responseStartHintMessageId === messageId &&
-      hasAssistiveMomentBeenShown(ASSISTIVE_UX_RULES.chatJumpToResponseStart.id)
-    ) {
-      recordAssistiveMomentAccepted(
-        ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+      cancelJumpToLatestAnimation();
+      responseStartHintSeenMessageIdsRef.current.add(messageId);
+      if (
+        responseStartHintMessageId === messageId &&
+        hasAssistiveMomentBeenShown(
+          ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+        )
+      ) {
+        recordAssistiveMomentAccepted(
+          ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+        );
+      }
+      setResponseStartHintMessageId((current) =>
+        current === messageId ? null : current,
       );
-    }
-    setResponseStartHintMessageId((current) =>
-      current === messageId ? null : current,
-    );
-    setDetachedFromLatest(true);
-    stickyScrollUntilRef.current = 0;
-    isNearBottomRef.current = false;
-    isPinnedToBottomRef.current = false;
+      setDetachedFromLatest(true);
+      stickyScrollUntilRef.current = 0;
+      isNearBottomRef.current = false;
+      isPinnedToBottomRef.current = false;
 
-    const containerRect = container.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const targetScrollTop = Math.max(
-      0,
-      container.scrollTop + targetRect.top - containerRect.top - 16,
-    );
-    scrollToTargetWithControlledSmooth(targetScrollTop, {
-      suppressFollowResume: true,
-    });
-  };
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const targetScrollTop = Math.max(
+        0,
+        container.scrollTop + targetRect.top - containerRect.top - 16,
+      );
+      scrollToTargetWithControlledSmooth(targetScrollTop, {
+        suppressFollowResume: true,
+      });
+    },
+    [
+      cancelJumpToLatestAnimation,
+      responseStartHintMessageId,
+      scrollToTargetWithControlledSmooth,
+      setDetachedFromLatest,
+    ],
+  );
 
-  const handleResponseStartHintClose = (messageId: string) => {
+  const handleResponseStartHintClose = useCallback((messageId: string) => {
     responseStartHintSeenMessageIdsRef.current.add(messageId);
     setResponseStartHintMessageId((current) =>
       current === messageId ? null : current,
     );
-  };
+  }, []);
 
-  const handleResponseStartHintDismiss = (messageId: string) => {
+  const handleResponseStartHintDismiss = useCallback((messageId: string) => {
     responseStartHintSeenMessageIdsRef.current.add(messageId);
     recordAssistiveMomentRetired(
       ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
@@ -1196,7 +1232,46 @@ export function MessageTimeline({
     setResponseStartHintMessageId((current) =>
       current === messageId ? null : current,
     );
-  };
+  }, []);
+
+  const registerRowElement = useCallback(
+    (rowId: string, element: HTMLElement | null) => {
+      rowRefs.current[rowId] = element;
+    },
+    [],
+  );
+  const registerMessageElement = useCallback(
+    (messageId: string, element: HTMLDivElement | null) => {
+      messageRefs.current[messageId] = element;
+    },
+    [],
+  );
+  const bubbleCallbacks = useMemo<MessageBubbleCallbacks>(
+    () => ({
+      onRetryMessage,
+      onEditMessage,
+      onSendMcpAppMessage,
+      onMcpAppAutoScroll: requestMcpAppAutoScroll,
+      onRunShellCommand,
+      onEditProject,
+      onOpenContextPanel,
+      onJumpToResponseStart: handleJumpToResponseStart,
+      onJumpToResponseStartHintClose: handleResponseStartHintClose,
+      onJumpToResponseStartHintDismiss: handleResponseStartHintDismiss,
+    }),
+    [
+      onRetryMessage,
+      onEditMessage,
+      onSendMcpAppMessage,
+      requestMcpAppAutoScroll,
+      onRunShellCommand,
+      onEditProject,
+      onOpenContextPanel,
+      handleJumpToResponseStart,
+      handleResponseStartHintClose,
+      handleResponseStartHintDismiss,
+    ],
+  );
 
   const hasFooterStatus = footerStatus != null;
   const jumpToLatestLabel = t("timeline.jumpToLatest");
@@ -1224,73 +1299,41 @@ export function MessageTimeline({
       className="mx-auto w-full max-w-[var(--chat-transcript-container-max-width)] flex-1 px-[var(--chat-transcript-inline-padding)] pt-4"
       style={{ paddingBottom: messageListBottomPaddingPx }}
     >
-      {visibleMessages.map((message, index) => {
-        const prev = index > 0 ? visibleMessages[index - 1] : null;
-        const showDateSeparator =
-          !prev || !isSameDay(prev.created, message.created);
-
-        return (
-          <div
-            key={message.id}
-            ref={(el) => {
-              messageRefs.current[message.id] = el;
-            }}
-            className={cn(
-              index === 0 ? "mt-0" : "mt-4",
-              "rounded-lg transition-[background-color,box-shadow]",
-              pulsingMessageId === message.id &&
-                "bg-accent/25 ring-2 ring-accent/35 ring-inset",
-            )}
-          >
-            {showDateSeparator && (
-              <MessageDateSeparator
-                label={formatDateSeparator(
-                  message.created,
-                  t("timeline.today"),
-                  t("timeline.yesterday"),
-                  formatDate,
-                )}
-              />
-            )}
-            <MessageBubble
-              message={message}
-              isStreaming={message.id === streamingMessageId}
-              actionsAlwaysVisible={
-                message.role === "assistant" &&
-                message.id === latestAssistantMessageId &&
-                message.id !== streamingMessageId
-              }
-              onRetryMessage={
-                message.role === "assistant" ? onRetryMessage : undefined
-              }
-              onEditMessage={
-                message.role === "user" ? onEditMessage : undefined
-              }
-              onJumpToResponseStart={
-                message.role === "assistant" &&
-                message.id !== streamingMessageId
-                  ? handleJumpToResponseStart
-                  : undefined
-              }
-              showJumpToResponseStartHint={
-                message.id === responseStartHintMessageId
-              }
-              onJumpToResponseStartHintClose={handleResponseStartHintClose}
-              onJumpToResponseStartHintDismiss={handleResponseStartHintDismiss}
-              onSendMcpAppMessage={onSendMcpAppMessage}
-              onMcpAppAutoScroll={requestMcpAppAutoScroll}
-              onRunShellCommand={onRunShellCommand}
-              onEditProject={onEditProject}
-              onOpenContextPanel={onOpenContextPanel}
-            />
-          </div>
-        );
-      })}
+      {snapshot.rows.map((row, index) => (
+        <VirtualTranscriptRow
+          key={row.reactKey}
+          row={row}
+          index={index}
+          previousRowKind={snapshot.rows[index - 1]?.kind}
+          dateLabel={formatRowDateSeparator(row, {
+            today: t("timeline.today"),
+            yesterday: t("timeline.yesterday"),
+            formatDate,
+          })}
+          message={
+            row.messageId ? snapshot.messageById.get(row.messageId) : undefined
+          }
+          isStreaming={
+            streamingMessageId != null &&
+            (row.responseStartMessageId ?? row.messageId) === streamingMessageId
+          }
+          actionsAlwaysVisible={
+            row.messageId === latestAssistantMessageId &&
+            (row.responseStartMessageId ?? row.messageId) !== streamingMessageId
+          }
+          showJumpToResponseStartHint={
+            row.messageId === responseStartHintMessageId
+          }
+          isPulsing={row.messageId === pulsingMessageId}
+          bubbleCallbacks={bubbleCallbacks}
+          registerRowElement={registerRowElement}
+          registerMessageElement={registerMessageElement}
+        />
+      ))}
     </div>
   );
 
-  const showPlaceholderContent =
-    showPlaceholder || visibleMessages.length === 0;
+  const showPlaceholderContent = showPlaceholder || snapshot.rows.length === 0;
   const content = showPlaceholderContent ? (
     <TranscriptSearchSkip>
       {placeholder ?? <MessageTimelineEmptyState />}

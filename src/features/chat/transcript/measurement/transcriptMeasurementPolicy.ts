@@ -19,6 +19,7 @@ export type TranscriptRowKind =
   | "assistant-message-chrome"
   | "assistant-content-fragment"
   | "assistant-message-actions"
+  | "agent-work"
   | "tool-chain"
   | "tool-chain-detail"
   | "top-loading-sentinel";

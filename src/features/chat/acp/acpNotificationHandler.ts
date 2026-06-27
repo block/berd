@@ -7,6 +7,7 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getBufferedMessage } from "@/features/chat/hooks/replayBuffer";
 import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
 import type {
+  MessageContent,
   MessageMetadata,
   ToolCallLocation,
   ToolKind,
@@ -190,6 +191,23 @@ function getReplayAssistantMessageMetadata(
   };
 }
 
+function upsertThinkingContent(content: MessageContent[], text: string): void {
+  const last = content[content.length - 1];
+  if (last?.type !== "thinking") {
+    content.push({ type: "thinking", text });
+    return;
+  }
+
+  if (text.startsWith(last.text)) {
+    last.text = text;
+    return;
+  }
+  if (last.text.endsWith(text)) {
+    return;
+  }
+  last.text += text;
+}
+
 function handleReplay(sessionId: string, update: SessionUpdate): void {
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
@@ -208,6 +226,19 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         }
       } else if (update.content.type === "image") {
         msg.content.push({ ...update.content });
+      }
+      break;
+    }
+
+    case "agent_thought_chunk": {
+      if (update.content.type === "text" && "text" in update.content) {
+        const msg = ensureReplayAssistantMessage(
+          sessionId,
+          getReplayMessageId(update),
+          getReplayCreated(update),
+          getReplayAssistantMessageMetadata(sessionId, update),
+        );
+        upsertThinkingContent(msg.content, update.content.text);
       }
       break;
     }
@@ -418,6 +449,18 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
         // set first so appendToStreamingMessage targets the right message.
         store.setStreamingMessageId(sessionId, messageId);
         store.appendToStreamingMessage(sessionId, { ...update.content });
+      }
+      break;
+    }
+
+    case "agent_thought_chunk": {
+      if (update.content.type === "text" && "text" in update.content) {
+        const messageId = ensureLiveAssistantMessage(
+          sessionId,
+          getChunkMessageId(update) ?? undefined,
+        );
+        store.setStreamingMessageId(sessionId, messageId);
+        store.updateStreamingThinking(sessionId, update.content.text);
       }
       break;
     }

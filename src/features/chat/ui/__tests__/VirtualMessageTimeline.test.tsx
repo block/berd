@@ -1,6 +1,11 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
+import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import type { Message } from "@/shared/types/messages";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import {
@@ -122,6 +127,10 @@ vi.mock("../MessageBubble", async () => {
 });
 
 beforeEach(() => {
+  localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+  expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
+    true,
+  );
   resizeObserverCallbacks.length = 0;
   Object.defineProperty(globalThis, "ResizeObserver", {
     configurable: true,
@@ -445,7 +454,7 @@ describe("VirtualMessageTimeline", () => {
     expect(scroller).not.toHaveClass("scrollbar-none");
   });
 
-  it("renders assistant fragment rows and keeps mixed content on whole-message fallback", async () => {
+  it("renders assistant fragment rows and projects mixed content into agent work", async () => {
     mockTranscriptElementMeasurements();
     const diagnosticsSpy = vi.fn();
     // Three paragraphs of 22 lines each (66 content lines + 2 blank separators = 68 lines)
@@ -490,8 +499,8 @@ describe("VirtualMessageTimeline", () => {
     const lastFragment = screen.getByTestId(
       "virtual-transcript-row-message:fragmented:block-2",
     );
-    const fallbackRow = screen.getByTestId(
-      "virtual-transcript-row-message:mixed",
+    const agentWorkRow = screen.getByTestId(
+      "virtual-transcript-row-message:mixed:agent-work",
     );
 
     expect(firstFragment).toHaveAttribute(
@@ -511,24 +520,21 @@ describe("VirtualMessageTimeline", () => {
     // Non-code-continuation fragments are spaced blocks, not zero-spaced continuations.
     expect(middleFragment).toHaveClass("pt-4");
     expect(lastFragment).toHaveClass("pt-4");
-    expect(fallbackRow).toHaveAttribute("data-virtual-row-kind", "message");
-    expect(fallbackRow).toHaveAttribute("data-transcript-message-id", "mixed");
+    expect(agentWorkRow).toHaveAttribute("data-virtual-row-kind", "agent-work");
+    expect(agentWorkRow).toHaveAttribute("data-transcript-message-id", "mixed");
 
     expect(
       screen
         .getAllByTestId("bubble-fragmented")
         .map((element) => element.getAttribute("data-fragment-role")),
     ).toEqual(["start", "middle", "end"]);
-    expect(screen.getByTestId("bubble-mixed")).toHaveAttribute(
-      "data-fragment-role",
-      "whole",
-    );
+    expect(screen.getByText("Agent work")).toBeInTheDocument();
 
     const list = screen.getByTestId("virtual-message-timeline-list");
     expect(list).toHaveAttribute("data-virtual-fragment-rows", "3");
     expect(list).toHaveAttribute(
       "data-virtual-whole-message-fallback-rows",
-      "1",
+      "0",
     );
 
     await waitFor(() =>
@@ -536,7 +542,7 @@ describe("VirtualMessageTimeline", () => {
         expect.objectContaining({
           fragmentRowCount: 3,
           completedFragmentRowCount: 3,
-          wholeMessageFallbackRowCount: 1,
+          wholeMessageFallbackRowCount: 0,
           pr928WholeRowSplitProofs: 1,
         }),
       ),
@@ -917,6 +923,43 @@ describe("VirtualMessageTimeline", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
 
     expect(scroller.scrollTop).toBe(4700);
+  });
+
+  it("handles scroll targets for agent-work-led assistant turns", async () => {
+    mockTranscriptElementMeasurements();
+    const onScrollTargetHandled = vi.fn();
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[activeToolMessage("assistant-work")]}
+        scrollTargetMessageId="assistant-work"
+        onScrollTargetHandled={onScrollTargetHandled}
+      />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(scroller, {
+      scrollTop: 0,
+      scrollHeight: 500,
+      clientHeight: 300,
+    });
+    Object.defineProperty(scroller, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        ...createDomRect(300),
+        bottom: 300,
+        top: 0,
+      }),
+    });
+
+    const agentWorkRow = await screen.findByTestId(
+      "virtual-transcript-row-message:assistant-work:agent-work",
+    );
+    expect(agentWorkRow).toHaveAttribute("data-virtual-row-kind", "agent-work");
+    await waitFor(() =>
+      expect(onScrollTargetHandled).toHaveBeenCalledWith("assistant-work"),
+    );
   });
 
   it("falls back to the mounted live tail element for active streaming scroll targets", async () => {
@@ -1718,7 +1761,7 @@ describe("VirtualMessageTimeline", () => {
     );
 
     const activeToolRow = await screen.findByTestId(
-      "virtual-transcript-row-message:active-tool:tool-chain",
+      "virtual-transcript-row-message:active-tool:agent-work",
     );
     expect(activeToolRow).toHaveAttribute(
       "data-virtual-row-measurement-policy",
@@ -1753,14 +1796,14 @@ describe("VirtualMessageTimeline", () => {
     );
     expect(
       offscreenHost.querySelector(
-        '[data-virtual-row-offscreen-shell-id="message:active-tool:tool-chain"]',
+        '[data-virtual-row-offscreen-shell-id="message:active-tool:agent-work"]',
       ),
     ).toBeNull();
     expect(
       screen
         .queryByTestId("virtual-offscreen-real-measurement-host")
         ?.querySelector(
-          '[data-virtual-row-offscreen-real-id="message:active-tool:tool-chain"]',
+          '[data-virtual-row-offscreen-real-id="message:active-tool:agent-work"]',
         ) ?? null,
     ).toBeNull();
   });

@@ -8,6 +8,11 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageBubble } from "../MessageBubble";
+import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import type {
@@ -118,6 +123,10 @@ function expectNoVisibleText(container: HTMLElement, text: string) {
 
 describe("MessageBubble", () => {
   beforeEach(() => {
+    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+    expect(
+      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true),
+    ).toBe(true);
     useAgentStore.setState({ personas: [] });
     useProviderCatalogStore.getState().setEntries(providerCatalogEntries);
     vi.mocked(openPath).mockClear();
@@ -730,7 +739,7 @@ describe("MessageBubble", () => {
       },
     ]);
     render(<MessageBubble message={msg} />);
-    expect(screen.getByText("readFile")).toBeInTheDocument();
+    expect(screen.getByText(/readfile/i)).toBeInTheDocument();
   });
 
   it("renders metadata attachments and opens them on click", async () => {
@@ -782,7 +791,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={msg} />);
 
     expect(screen.getByText("Working on it.")).toBeInTheDocument();
-    expect(screen.getByText("readFile")).toBeInTheDocument();
+    expect(screen.getByText(/readfile/i)).toBeInTheDocument();
     expect(screen.getByText("Done.")).toBeInTheDocument();
   });
 
@@ -808,7 +817,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={msg} />);
 
     expect(screen.getByText("Checking that now.")).toBeInTheDocument();
-    expect(screen.getAllByText("readFile")).toHaveLength(1);
+    expect(screen.getAllByText(/readfile/i)).toHaveLength(1);
   });
 
   it("keeps expanded tool steps open when a streamed chain grows", async () => {
@@ -888,12 +897,12 @@ describe("MessageBubble", () => {
     )?.textContent;
 
     expect(bubbleText).toContain("Lemme check...");
-    expect(bubbleText).toContain("readFile");
+    expect(bubbleText).toContain("ReadFile");
     expect(bubbleText).toContain("Results from checking.");
     expect(bubbleText?.indexOf("Lemme check...")).toBeLessThan(
-      bubbleText?.indexOf("readFile") ?? Number.POSITIVE_INFINITY,
+      bubbleText?.indexOf("ReadFile") ?? Number.POSITIVE_INFINITY,
     );
-    expect(bubbleText?.indexOf("readFile")).toBeLessThan(
+    expect(bubbleText?.indexOf("ReadFile")).toBeLessThan(
       bubbleText?.indexOf("Results from checking.") ?? Number.POSITIVE_INFINITY,
     );
   });
@@ -920,7 +929,7 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={msg} />);
 
-    expect(screen.getAllByText("readFile")).toHaveLength(1);
+    expect(screen.getAllByText(/readfile/i)).toHaveLength(1);
     expect(screen.queryByText("Tool result")).not.toBeInTheDocument();
   });
 
@@ -928,6 +937,18 @@ describe("MessageBubble", () => {
     const msg = assistantMessage([{ type: "thinking", text: "deep thoughts" }]);
     render(<MessageBubble message={msg} />);
     expect(screen.getByText(/thought for/i)).toBeInTheDocument();
+  });
+
+  it("hides thinking content when the agent work transcript experiment is disabled", () => {
+    expect(
+      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, false),
+    ).toBe(true);
+    const msg = assistantMessage([{ type: "thinking", text: "deep thoughts" }]);
+
+    render(<MessageBubble message={msg} />);
+
+    expect(screen.queryByText(/thought for/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("deep thoughts")).not.toBeInTheDocument();
   });
 
   it("prefers the message persona name over the provider identity", () => {
@@ -1105,14 +1126,14 @@ describe("MessageBubble", () => {
 
     expect(screen.getByText("Create PDF about whales")).toBeInTheDocument();
     expect(screen.getByText("Write whales.pdf")).toBeInTheDocument();
-    expect(screen.queryByText("python3 create_whales.py")).toBeNull();
-    expect(screen.queryByText("ls -lh whales.pdf")).toBeNull();
+    expect(screen.queryByText(/python3 create_whales\.py/i)).toBeNull();
+    expect(screen.queryByText(/ls -lh whales\.pdf/i)).toBeNull();
     expect(screen.getByText("Show internal steps (2)")).toBeInTheDocument();
 
     await user.click(screen.getByText("Show internal steps (2)"));
 
-    expect(screen.getByText("python3 create_whales.py")).toBeInTheDocument();
-    expect(screen.getByText("ls -lh whales.pdf")).toBeInTheDocument();
+    expect(screen.getByText(/python3 create_whales\.py/i)).toBeInTheDocument();
+    expect(screen.getByText(/ls -lh whales\.pdf/i)).toBeInTheDocument();
   });
 
   function notificationMessage(

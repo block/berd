@@ -63,6 +63,8 @@ export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
+export const AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID = "agent-work-transcript";
+
 export const SESSION_COST_EXPERIMENT_ID = "session-cost-display";
 
 export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
@@ -127,6 +129,12 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.transcriptVirtualRenderer.title",
     descriptionKey: "experiments.transcriptVirtualRenderer.description",
     defaultEnabled: true,
+  },
+  {
+    id: AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
+    titleKey: "experiments.agentWorkTranscript.title",
+    descriptionKey: "experiments.agentWorkTranscript.description",
+    defaultEnabled: false,
   },
   {
     id: GOOSECTL_EXPERIMENT_ID,

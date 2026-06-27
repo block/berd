@@ -1293,6 +1293,8 @@
   /* Animation utilities */
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-collapsible-down: collapsible-down 0.2s ease-out;
+  --animate-collapsible-up: collapsible-up 0.2s ease-out;
   --animate-accordion-content-open: accordion-content-open 0.2s
     cubic-bezier(0.25, 1, 0.5, 1) both;
   --animate-accordion-content-close: accordion-content-close 0.2s ease-out both;
@@ -1343,6 +1345,22 @@
   @keyframes accordion-up {
     from {
       height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height);
     }
     to {
       height: 0;
@@ -1709,6 +1727,21 @@ body,
   .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]:hover::-webkit-scrollbar-thumb,
   .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]:focus-within::-webkit-scrollbar-thumb {
     background: transparent;
+  }
+
+  .scrollbar-visible {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: auto;
+  }
+  .scrollbar-visible::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
   }
 
   .scrollbar-none {

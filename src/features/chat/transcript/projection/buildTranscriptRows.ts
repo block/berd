@@ -1,6 +1,7 @@
 import { classifyTranscriptMeasurementPolicy } from "../measurement";
 import type { MessageContent } from "@/shared/types/messages";
 import type {
+  TranscriptAgentWorkPayload,
   TranscriptItemDescriptor,
   TranscriptRowCapabilities,
   TranscriptRowDescriptor,
@@ -66,6 +67,7 @@ export function buildTranscriptRows(
           reactKey: item.rowId,
           kind: "message",
           messageId: item.messageId,
+          responseStartMessageId: item.responseStartMessageId,
           blockIds: item.blockIds,
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
@@ -88,6 +90,34 @@ export function buildTranscriptRows(
           messageId: item.messageId,
           blockIds: item.blockIds,
           fragment: item.fragment,
+          renderRevision: item.renderRevision,
+          heightRevision: item.heightRevision,
+          layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
+          estimatedHeight: item.estimatedHeight,
+          spacingBefore: 0,
+          anchorPriority: item.anchorPriority,
+          measurementPolicy: item.measurementPolicy,
+          layoutPendingPolicy: item.layoutPendingPolicy,
+          capabilities: item.capabilities,
+          measurementSafetyReasons: item.measurementSafetyReasons,
+          keepAlivePriority: item.keepAlivePriority,
+        };
+        break;
+      case "agent-work":
+        row = {
+          rowId: item.rowId,
+          reactKey: item.rowId,
+          kind: "agent-work",
+          messageId: item.messageId,
+          agentWork: {
+            workId: item.workId,
+            message: item.message,
+            content: item.content,
+            isActiveWork: item.isActiveWork,
+            thoughtCount: item.thoughtCount,
+            toolCount: item.toolCount,
+            textCount: item.textCount,
+          },
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
           layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
@@ -178,6 +208,7 @@ export function canReuseTranscriptRowDescriptor(
     previous.reactKey === next.reactKey &&
     previous.kind === next.kind &&
     previous.messageId === next.messageId &&
+    previous.responseStartMessageId === next.responseStartMessageId &&
     previous.renderRevision === next.renderRevision &&
     previous.heightRevision === next.heightRevision &&
     previous.layoutRevision === next.layoutRevision &&
@@ -190,6 +221,7 @@ export function canReuseTranscriptRowDescriptor(
     previous.blockIds === next.blockIds &&
     previous.fragment === next.fragment &&
     previous.date === next.date &&
+    previous.agentWork === next.agentWork &&
     previous.toolChainSummary === next.toolChainSummary &&
     previous.toolChainDetail === next.toolChainDetail &&
     previous.capabilities === next.capabilities &&
@@ -203,9 +235,11 @@ export function canReuseTranscriptRowDescriptor(
     previous.reactKey === next.reactKey &&
     previous.kind === next.kind &&
     previous.messageId === next.messageId &&
+    previous.responseStartMessageId === next.responseStartMessageId &&
     stringArraysEqual(previous.blockIds, next.blockIds) &&
     fragmentsEqual(previous.fragment, next.fragment) &&
     datePayloadsEqual(previous.date, next.date) &&
+    agentWorkPayloadsEqual(previous.agentWork, next.agentWork) &&
     toolChainPayloadsEqual(previous.toolChainSummary, next.toolChainSummary) &&
     toolChainPayloadsEqual(previous.toolChainDetail, next.toolChainDetail) &&
     previous.renderRevision === next.renderRevision &&
@@ -286,6 +320,29 @@ function isFragmentContinuation(row: TranscriptRowDescriptor): boolean {
   return (
     row.kind === "assistant-content-fragment" &&
     row.fragment?.isCodeContinuationChunk === true
+  );
+}
+
+function agentWorkPayloadsEqual(
+  left: TranscriptAgentWorkPayload | undefined,
+  right: TranscriptAgentWorkPayload | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return (
+    left.workId === right.workId &&
+    left.content.length === right.content.length &&
+    left.content.every((content, index) =>
+      fragmentContentEqual(content, right.content[index]),
+    ) &&
+    left.isActiveWork === right.isActiveWork &&
+    left.thoughtCount === right.thoughtCount &&
+    left.toolCount === right.toolCount &&
+    left.textCount === right.textCount
   );
 }
 

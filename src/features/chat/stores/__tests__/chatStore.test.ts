@@ -214,6 +214,25 @@ describe("chatStore", () => {
     expect(useChatStore.getState().sessionStateById.s1).toBe(afterRuntime);
   });
 
+  it("appends streamed thinking only within the targeted session", () => {
+    const streaming = makeMessage({
+      id: "stream-1",
+      content: [{ type: "text", text: "Visible reply" }],
+    });
+
+    useChatStore.getState().setMessages("s1", [streaming]);
+    useChatStore.getState().setStreamingMessageId("s1", "stream-1");
+    useChatStore.getState().updateStreamingThinking("s1", "Plan");
+    useChatStore.getState().updateStreamingThinking("s1", " next step");
+
+    const updated = useChatStore.getState().messagesBySession.s1[0];
+    expect(updated.content).toEqual([
+      { type: "text", text: "Visible reply" },
+      { type: "thinking", text: "Plan next step" },
+    ]);
+    expect(getRuntime("s2").streamingMessageId).toBeNull();
+  });
+
   it("transitions a session to error without affecting another session", () => {
     const store = useChatStore.getState();
 

@@ -35,12 +35,18 @@ export function buildTranscriptArtifactIndex({
   const changedArtifactKeys = new Set<string>();
 
   for (const item of items) {
-    if (item.kind !== "message" && item.kind !== "tool-chain") {
+    if (
+      item.kind !== "message" &&
+      item.kind !== "agent-work" &&
+      item.kind !== "tool-chain"
+    ) {
       continue;
     }
 
     const visibleContent =
-      item.kind === "tool-chain" ? item.message.content : item.visibleContent;
+      item.kind === "tool-chain" || item.kind === "agent-work"
+        ? item.message.content
+        : item.visibleContent;
 
     visibleContent.forEach((content, contentIndex) => {
       if (content.type !== "toolRequest") {

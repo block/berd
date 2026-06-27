@@ -1,5 +1,6 @@
 export type DesignSystemSection =
   | "overview"
+  | "conversation-anatomy"
   | "color"
   | "shape"
   | "spacing"
@@ -76,6 +77,7 @@ export const DESIGN_SYSTEM_CORE_SECTIONS: Array<{
   label: string;
 }> = [
   { id: "overview", label: "Overview" },
+  { id: "conversation-anatomy", label: "Conversation Anatomy" },
   { id: "color", label: "Color" },
   { id: "shape", label: "Shape" },
   { id: "spacing", label: "Spacing" },
@@ -93,6 +95,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-badge", label: "Badge" },
   { id: "component-breadcrumb", label: "Breadcrumb" },
   { id: "component-checkbox", label: "Checkbox" },
+  { id: "component-collapsible", label: "Collapsible" },
   { id: "component-command", label: "Command" },
   { id: "component-confirm-dialog", label: "Confirm Dialog" },
   { id: "component-contextual-tip", label: "Contextual Tip" },
@@ -142,7 +145,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-card", label: "Card" },
   { id: "component-carousel", label: "Carousel" },
   { id: "component-chart-container", label: "Chart Container" },
-  { id: "component-collapsible", label: "Collapsible" },
   { id: "component-split-button", label: "Split Button" },
   { id: "component-context-menu", label: "Context Menu" },
   { id: "component-drawer", label: "Drawer" },

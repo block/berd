@@ -164,6 +164,7 @@ interface QueueCachedMeasurementsOptions {
 }
 
 const SUPPORTED_ROW_KINDS = new Set<TranscriptRowDescriptor["kind"]>([
+  "agent-work",
   "assistant-content-fragment",
   "date-separator",
   "message",

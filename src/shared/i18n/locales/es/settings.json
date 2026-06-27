@@ -223,6 +223,10 @@
       "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
       "title": "Renderizador virtual de transcripciones"
     },
+    "agentWorkTranscript": {
+      "description": "Agrupa razonamiento, llamadas a herramientas y progreso en un panel de trabajo del agente con la respuesta final separada.",
+      "title": "Transcripción de trabajo del agente"
+    },
     "sessionCost": {
       "title": "Mostrar el costo de la sesión",
       "description": "Muestra un costo estimado (USD) para el chat actual junto al indicador de contexto. Solo estimaciones, basadas en precios de lista del modelo, no en tu costo real negociado o facturado."

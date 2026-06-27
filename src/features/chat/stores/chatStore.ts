@@ -300,6 +300,7 @@ interface ChatStoreActions {
     text: string,
   ) => void;
   updateStreamingText: (sessionId: string, text: string) => void;
+  updateStreamingThinking: (sessionId: string, text: string) => void;
   startAssistantStreamAfterIntervention: (sessionId: string) => void;
   setChatState: (sessionId: string, state: ChatState) => void;
   setError: (sessionId: string, error: string | null) => void;
@@ -761,6 +762,61 @@ const createChatStore: StateCreator<
       get().sessionStateById[sessionId]?.streamingMessageId ?? null;
     if (!streamingMessageId) return;
     get().appendStreamingText(sessionId, streamingMessageId, text);
+  },
+
+  updateStreamingThinking: (sessionId, text) => {
+    set((state) => {
+      const streamingMessageId =
+        state.sessionStateById[sessionId]?.streamingMessageId ?? null;
+      if (!streamingMessageId) return state;
+      const messages = state.messagesBySession[sessionId];
+      if (!messages) return state;
+
+      let changed = false;
+      const updatedMessages = messages.map((message) => {
+        if (message.id !== streamingMessageId) return message;
+
+        const lastContent = message.content[message.content.length - 1];
+        if (lastContent?.type !== "thinking") {
+          changed = true;
+          return {
+            ...message,
+            content: [...message.content, { type: "thinking" as const, text }],
+          };
+        }
+
+        // Goose Core can emit thought updates either as deltas or as repeated /
+        // cumulative snapshots depending on provider and replay path. Treat an
+        // exact repeat as a no-op and a cumulative snapshot as replacement;
+        // otherwise append the delta.
+        let nextText: string;
+        if (text === lastContent.text) {
+          return message;
+        }
+        if (text.startsWith(lastContent.text)) {
+          nextText = text;
+        } else {
+          nextText = lastContent.text + text;
+        }
+
+        changed = true;
+        const newContent = [...message.content];
+        newContent[newContent.length - 1] = {
+          type: "thinking" as const,
+          text: nextText,
+        };
+        return { ...message, content: newContent };
+      });
+
+      if (!changed) return state;
+
+      return {
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: updatedMessages,
+        },
+      };
+    });
   },
 
   startAssistantStreamAfterIntervention: (sessionId) => {

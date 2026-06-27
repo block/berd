@@ -5,6 +5,7 @@ import type {
   MessageContent,
   MessageMetadata,
   ToolRequestContent,
+  ToolResponseContent,
 } from "@/shared/types/messages";
 import { buildMessageRevisions } from "./messageRevisions";
 import { createTranscriptProjectionCache } from "./transcriptProjectionCache";
@@ -372,7 +373,485 @@ describe("transcript projection cache", () => {
     expect(snapshot.completedStreamingFragmentRowCount).toBe(0);
   });
 
-  it("keeps unsupported assistant content on whole-message fallback rows", () => {
+  it("projects reasoning and tools into an ordered agent work row", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-reasoning-tools",
+      "assistant",
+      [
+        { type: "thinking", text: "I should inspect the files first." },
+        toolRequest("tool-1"),
+        { type: "thinking", text: "Now I should compare the results." },
+        toolRequest("tool-2"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-reasoning-tools",
+      "message:assistant-reasoning-tools:agent-work",
+    ]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-reasoning-tools:agent-work",
+    );
+    expect(workRow.kind).toBe("agent-work");
+    expect(workRow.agentWork?.thoughtCount).toBe(2);
+    expect(workRow.agentWork?.toolCount).toBe(2);
+    expect(snapshot.wholeMessageFallbackRowCount).toBe(0);
+    expect(snapshot.toolChainRowCount).toBe(0);
+  });
+
+  it("dedupes adjacent duplicate reasoning-only assistant messages", () => {
+    const cache = createTranscriptProjectionCache();
+    const firstThought = messageWithContent(
+      "assistant-thought-1",
+      "assistant",
+      [{ type: "thinking", text: "I should inspect the files first." }],
+      utc(2026, 6, 4, 10),
+    );
+    const duplicateThought = messageWithContent(
+      "assistant-thought-2",
+      "assistant",
+      [{ type: "thinking", text: "I should inspect the files first." }],
+      utc(2026, 6, 4, 10) + 1,
+    );
+    const nextThought = messageWithContent(
+      "assistant-thought-3",
+      "assistant",
+      [{ type: "thinking", text: "Now I should compare the results." }],
+      utc(2026, 6, 4, 10) + 2,
+    );
+
+    const snapshot = update(cache, [
+      firstThought,
+      duplicateThought,
+      nextThought,
+    ]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-thought-1",
+      "message:assistant-thought-1:agent-work",
+      "message:assistant-thought-3:agent-work",
+    ]);
+  });
+
+  it("removes duplicated provider-context reasoning from following tool rows", () => {
+    const cache = createTranscriptProjectionCache();
+    const displayedThought = messageWithContent(
+      "assistant-thought-display",
+      "assistant",
+      [{ type: "thinking", text: "I should inspect the files first." }],
+      utc(2026, 6, 4, 10),
+    );
+    const toolWithProviderContextThought = messageWithContent(
+      "assistant-tool-with-provider-thought",
+      "assistant",
+      [
+        { type: "thinking", text: "I should inspect the files first." },
+        toolRequest("tool-1"),
+      ],
+      utc(2026, 6, 4, 10) + 1,
+    );
+
+    const snapshot = update(cache, [
+      displayedThought,
+      toolWithProviderContextThought,
+    ]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-thought-display",
+      "message:assistant-thought-display:agent-work",
+      "message:assistant-tool-with-provider-thought:agent-work",
+    ]);
+    const toolWork = rowById(
+      snapshot,
+      "message:assistant-tool-with-provider-thought:agent-work",
+    );
+    expect(toolWork.agentWork?.thoughtCount).toBe(0);
+    expect(toolWork.agentWork?.toolCount).toBe(1);
+  });
+
+  it("dedupes repeated leading reasoning across tool responses", () => {
+    const cache = createTranscriptProjectionCache();
+    const thought = "I should inspect branches before deleting anything.";
+    const firstTool = messageWithContent(
+      "assistant-first-tool-with-thought",
+      "assistant",
+      [{ type: "thinking", text: thought }, toolRequest("tool-1")],
+      utc(2026, 6, 4, 10),
+    );
+    const firstToolResponse = messageWithContent(
+      "tool-response-1",
+      "user",
+      [toolResponse("tool-1")],
+      utc(2026, 6, 4, 10) + 1,
+    );
+    const secondTool = messageWithContent(
+      "assistant-second-tool-with-duplicate-thought",
+      "assistant",
+      [{ type: "thinking", text: thought }, toolRequest("tool-2")],
+      utc(2026, 6, 4, 10) + 2,
+    );
+
+    const snapshot = update(cache, [firstTool, firstToolResponse, secondTool]);
+    const firstWork = rowById(
+      snapshot,
+      "message:assistant-first-tool-with-thought:agent-work",
+    );
+    const secondWork = rowById(
+      snapshot,
+      "message:assistant-second-tool-with-duplicate-thought:agent-work",
+    );
+
+    expect(firstWork.agentWork?.thoughtCount).toBe(1);
+    expect(firstWork.agentWork?.toolCount).toBe(1);
+    expect(secondWork.agentWork?.thoughtCount).toBe(0);
+    expect(secondWork.agentWork?.toolCount).toBe(1);
+  });
+
+  it("dedupes repeated reasoning inside one work message across tool calls", () => {
+    const cache = createTranscriptProjectionCache();
+    const thought =
+      "I should inspect branches before deleting anything because this is destructive and I need to gather current branch status first.";
+    const assistant = messageWithContent(
+      "assistant-one-message-repeated-thought-around-tools",
+      "assistant",
+      [
+        { type: "thinking", text: thought },
+        toolRequest("tool-1"),
+        { type: "thinking", text: thought },
+        toolRequest("tool-2"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-one-message-repeated-thought-around-tools:agent-work",
+    );
+
+    expect(workRow.agentWork?.thoughtCount).toBe(1);
+    expect(workRow.agentWork?.toolCount).toBe(2);
+    expect(
+      workRow.agentWork?.content.filter(
+        (content) => content.type === "thinking",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("collapses repeated reasoning inside a single work message", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-duplicated-thinking-block",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: [
+            "**Resolving conflicts in tests**",
+            "",
+            "I need to resolve conflicts by including both the HEAD new tests and our own. I should remove any markers that are causing confusion. Maybe I'll use Python to replace the conflict block with both the HEAD block and ours. It's important to be precise about the changes I make. It sounds straightforward, but I want to ensure everything is done correctly and nothing gets overlooked!Resolving conflicts in tests",
+            "",
+            "I need to resolve conflicts by including both the HEAD new tests and our own. I should remove any markers that are causing confusion. Maybe I'll use Python to replace the conflict block with both the HEAD block and ours. It's important to be precise about the changes I make. It sounds straightforward, but I want to ensure everything is done correctly and nothing gets overlooked!",
+          ].join("\n"),
+        },
+        toolRequest("tool-1"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-duplicated-thinking-block:agent-work",
+    );
+
+    expect(workRow.agentWork?.thoughtCount).toBe(1);
+    const thought = workRow.agentWork?.content.find(
+      (content) => content.type === "thinking",
+    );
+    expect(thought?.text).toContain("**Resolving conflicts in tests**");
+    expect(thought?.text.match(/I need to resolve conflicts/g)).toHaveLength(1);
+    expect(thought?.text).not.toContain(
+      "overlooked!Resolving conflicts in tests",
+    );
+  });
+
+  it("splits titled reasoning sections inside one work message", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-multi-section-thinking",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: [
+            "**Inspecting code issues**",
+            "",
+            "I need to address the first issue before editing.",
+            "**Refining URL handling**",
+            "",
+            "I should consider how URL handling behaves without a secret.",
+            "**Considering URL manipulation**",
+            "",
+            "I can use the URL crate to adjust query pairs safely.",
+          ].join("\n"),
+        },
+        toolRequest("tool-1"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-multi-section-thinking:agent-work",
+    );
+    const thoughts = workRow.agentWork?.content.filter(
+      (content) => content.type === "thinking",
+    );
+
+    expect(workRow.agentWork?.thoughtCount).toBe(3);
+    expect(thoughts).toHaveLength(3);
+    expect(thoughts?.map((thought) => thought.text)).toEqual([
+      "**Inspecting code issues**\n\nI need to address the first issue before editing.",
+      "**Refining URL handling**\n\nI should consider how URL handling behaves without a secret.",
+      "**Considering URL manipulation**\n\nI can use the URL crate to adjust query pairs safely.",
+    ]);
+  });
+
+  it("does not split inline bold inside reasoning text", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-inline-bold-thinking",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: "I should inspect **get_goose_serve_url** before editing the helper.",
+        },
+        toolRequest("tool-1"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-inline-bold-thinking:agent-work",
+    );
+
+    expect(workRow.agentWork?.thoughtCount).toBe(1);
+    expect(
+      workRow.agentWork?.content.filter(
+        (content) => content.type === "thinking",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("dedupes a later thought that first appeared as a section", () => {
+    const cache = createTranscriptProjectionCache();
+    const firstThought = messageWithContent(
+      "assistant-combined-sections",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: [
+            "**Evaluating PR process**",
+            "",
+            "I need to figure out how to respond since the user wants to create a PR.",
+            "**Committing changes for PR**",
+            "",
+            "I’m thinking about how to proceed with the user’s request for a PR.",
+          ].join("\n"),
+        },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+    const repeatedSectionWithTool = messageWithContent(
+      "assistant-repeated-section-with-tool",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: [
+            "**Committing changes for PR**",
+            "",
+            "I’m thinking about how to proceed with the user’s request for a PR.",
+          ].join("\n"),
+        },
+        toolRequest("tool-1"),
+      ],
+      utc(2026, 6, 4, 10) + 1,
+    );
+
+    const snapshot = update(cache, [firstThought, repeatedSectionWithTool]);
+    const firstWork = rowById(
+      snapshot,
+      "message:assistant-combined-sections:agent-work",
+    );
+    const secondWork = rowById(
+      snapshot,
+      "message:assistant-repeated-section-with-tool:agent-work",
+    );
+
+    expect(firstWork.agentWork?.thoughtCount).toBe(2);
+    expect(secondWork.agentWork?.thoughtCount).toBe(0);
+    expect(secondWork.agentWork?.toolCount).toBe(1);
+  });
+
+  it("dedupes repeated titled reasoning sections after splitting", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-repeated-section-thinking",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: [
+            "**Inspecting code issues**",
+            "",
+            "I need to address the first issue before editing.",
+            "**Refining URL handling**",
+            "",
+            "I should consider how URL handling behaves without a secret.",
+          ].join("\n"),
+        },
+        toolRequest("tool-1"),
+        {
+          type: "thinking",
+          text: [
+            "**Refining URL handling**",
+            "",
+            "I should consider how URL handling behaves without a secret.",
+          ].join("\n"),
+        },
+        toolRequest("tool-2"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-repeated-section-thinking:agent-work",
+    );
+    const thoughts = workRow.agentWork?.content.filter(
+      (content) => content.type === "thinking",
+    );
+
+    expect(workRow.agentWork?.thoughtCount).toBe(2);
+    expect(workRow.agentWork?.toolCount).toBe(2);
+    expect(thoughts?.map((thought) => thought.text)).toEqual([
+      "**Inspecting code issues**\n\nI need to address the first issue before editing.",
+      "**Refining URL handling**\n\nI should consider how URL handling behaves without a secret.",
+    ]);
+  });
+
+  it("dedupes adjacent reasoning when one copy has a glued title", () => {
+    const cache = createTranscriptProjectionCache();
+    const thought =
+      "I need to resolve conflicts by including both the HEAD new tests and our own. I should remove any markers that are causing confusion. Maybe I'll use Python to replace the conflict block with both the HEAD block and ours. It's important to be precise about the changes I make. It sounds straightforward, but I want to ensure everything is done correctly and nothing gets overlooked!";
+    const assistant = messageWithContent(
+      "assistant-adjacent-glued-title-thinking",
+      "assistant",
+      [
+        {
+          type: "thinking",
+          text: `**Resolving conflicts in tests**\n\n${thought}Resolving conflicts in tests`,
+        },
+        { type: "thinking", text: thought },
+        toolRequest("tool-1"),
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-adjacent-glued-title-thinking:agent-work",
+    );
+
+    expect(workRow.agentWork?.thoughtCount).toBe(1);
+    const thinkingBlocks = workRow.agentWork?.content.filter(
+      (content) => content.type === "thinking",
+    );
+    expect(thinkingBlocks).toHaveLength(1);
+    expect(thinkingBlocks?.[0]?.text).not.toContain(
+      "overlooked!Resolving conflicts in tests",
+    );
+  });
+
+  it("keeps mixed assistant content as a message row when agent work is disabled", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-reasoning-tools-text",
+      "assistant",
+      [
+        { type: "thinking", text: "I should inspect the files first." },
+        toolRequest("tool-1"),
+        { type: "text", text: "Here are my findings." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant], null, false);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-reasoning-tools-text",
+      "message:assistant-reasoning-tools-text",
+    ]);
+    expect(messageRow(snapshot, "assistant-reasoning-tools-text").kind).toBe(
+      "message",
+    );
+    const item = snapshot.items.find(
+      (candidate) => candidate.kind === "message",
+    );
+    expect(item?.kind).toBe("message");
+    if (item?.kind === "message") {
+      expect(item.visibleContent.map((content) => content.type)).toEqual([
+        "toolRequest",
+        "text",
+      ]);
+    }
+  });
+
+  it("keeps final text outside the agent work row", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-reasoning-tools-text",
+      "assistant",
+      [
+        { type: "thinking", text: "I should inspect the files first." },
+        toolRequest("tool-1"),
+        { type: "text", text: "Here are my findings." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-reasoning-tools-text",
+      "message:assistant-reasoning-tools-text:agent-work",
+      "message:assistant-reasoning-tools-text:answer",
+    ]);
+    expect(
+      rowById(snapshot, "message:assistant-reasoning-tools-text:agent-work")
+        .kind,
+    ).toBe("agent-work");
+    expect(
+      rowById(snapshot, "message:assistant-reasoning-tools-text:answer").kind,
+    ).toBe("message");
+    expect(snapshot.toolChainRowCount).toBe(0);
+  });
+
+  it("keeps pre-tool progress text inside the agent work row", () => {
     const cache = createTranscriptProjectionCache();
     const assistant = messageWithContent(
       "assistant-mixed",
@@ -387,10 +866,12 @@ describe("transcript projection cache", () => {
     const snapshot = update(cache, [assistant]);
     const row = messageRow(snapshot, "assistant-mixed");
 
-    expect(row.kind).toBe("message");
-    expect(row.rowId).toBe("message:assistant-mixed");
+    expect(row.kind).toBe("agent-work");
+    expect(row.rowId).toBe("message:assistant-mixed:agent-work");
+    expect(row.agentWork?.textCount).toBe(1);
+    expect(row.agentWork?.toolCount).toBe(1);
     expect(snapshot.fragmentRowCount).toBe(0);
-    expect(snapshot.wholeMessageFallbackRowCount).toBe(1);
+    expect(snapshot.wholeMessageFallbackRowCount).toBe(0);
   });
 
   it("does not change row identity for visible-neutral metadata updates", () => {
@@ -562,7 +1043,7 @@ describe("transcript projection cache", () => {
     expect(row.reactKey).toBe(row.rowId);
   });
 
-  it("keeps tool-chain detail rows spacing-free in the row model", () => {
+  it("applies row spacing to agent work rows after user messages", () => {
     const cache = createTranscriptProjectionCache();
     const user = message("user-1", "user", "prompt", utc(2026, 6, 4, 10));
     const assistant = messageWithContent(
@@ -582,14 +1063,10 @@ describe("transcript projection cache", () => {
     );
 
     const snapshot = update(cache, [user, assistant]);
-    const summary = rowById(snapshot, "message:assistant-1:tool-chain");
-    const detail = rowById(snapshot, "message:assistant-1:tool-chain-detail");
+    const row = rowById(snapshot, "message:assistant-1:agent-work");
 
-    expect(summary.spacingBefore).toBe(16);
-    expect(summary.layoutRevision).toBe("layout-spacing:16");
-    expect(detail.spacingBefore).toBe(0);
-    expect(detail.layoutRevision).toBe("layout-spacing:0");
-    expect(detail.estimatedHeight).toBe(0);
+    expect(row.spacingBefore).toBe(16);
+    expect(row.layoutRevision).toBe("layout-spacing:16");
   });
 
   it("uses measurement policy decisions for MCP app rows", () => {
@@ -681,7 +1158,7 @@ describe("transcript projection cache", () => {
     ).toEqual(artifactKeys);
     expect(
       first.artifactIndex.artifactKeysByRowId.get(
-        "message:assistant-1:tool-chain",
+        "message:assistant-1:agent-work",
       ),
     ).toEqual(artifactKeys);
     expect(first.artifactIndex.artifacts[0]?.artifactKey).toMatch(
@@ -730,8 +1207,7 @@ describe("transcript projection cache", () => {
       messageRow(first, "assistant-2"),
     );
     expect([...second.changedRowIds]).toEqual([
-      "message:assistant-1:tool-chain",
-      "message:assistant-1:tool-chain-detail",
+      "message:assistant-1:agent-work",
     ]);
     expect(second.artifactIndex.artifacts).toHaveLength(1);
     expect(second.artifactIndex.artifacts[0]?.line).toBe(9);
@@ -858,8 +1334,15 @@ function update(
   cache: ReturnType<typeof createTranscriptProjectionCache>,
   messages: readonly Message[],
   streamingMessageId: string | null = null,
+  enableAgentWork = true,
 ): TranscriptProjectionSnapshot {
-  return updateSession(cache, SESSION_ID, messages, streamingMessageId);
+  return updateSession(
+    cache,
+    SESSION_ID,
+    messages,
+    streamingMessageId,
+    enableAgentWork,
+  );
 }
 
 function updateSession(
@@ -867,12 +1350,14 @@ function updateSession(
   sessionId: string,
   messages: readonly Message[],
   streamingMessageId: string | null = null,
+  enableAgentWork = true,
 ): TranscriptProjectionSnapshot {
   return cache.update({
     sessionId,
     sessionEpoch: 1,
     messages,
     streamingMessageId,
+    enableAgentWork,
     nowBucket: NOW_BUCKET,
     localeKey: LOCALE_KEY,
   });
@@ -950,6 +1435,16 @@ function toolRequest(
     status: "completed",
     toolKind: "edit",
     locations,
+  };
+}
+
+function toolResponse(id: string): ToolResponseContent {
+  return {
+    type: "toolResponse",
+    id,
+    name: "write_file",
+    result: "ok",
+    isError: false,
   };
 }
 

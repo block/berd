@@ -223,6 +223,10 @@
       "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",
       "title": "Transcript virtual renderer"
     },
+    "agentWorkTranscript": {
+      "description": "Groups thinking, tool calls, and progress into an Agent work panel with a separate final answer row.",
+      "title": "Agent work transcript"
+    },
     "sessionCost": {
       "title": "Show session cost",
       "description": "Display an estimated running cost (USD) for the current chat next to the context indicator. Estimates only, based on model list prices — not your actual negotiated or billed cost."

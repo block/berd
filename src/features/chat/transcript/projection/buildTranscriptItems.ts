@@ -2,7 +2,9 @@ import type {
   Message,
   MessageContent,
   MessageMetadata,
+  ReasoningContent,
   TextContent,
+  ThinkingContent,
 } from "@/shared/types/messages";
 import {
   classifyTranscriptMeasurementPolicy,
@@ -14,6 +16,7 @@ import {
   type RevisionParts,
 } from "./messageRevisions";
 import type {
+  TranscriptAgentWorkItem,
   TranscriptAnchorPriority,
   TranscriptAssistantContentFragmentItem,
   TranscriptAssistantContentFragmentRole,
@@ -27,6 +30,7 @@ import type {
 interface BuildTranscriptItemsInput {
   messages: readonly Message[];
   streamingMessageId: string | null;
+  enableAgentWork: boolean;
   nowBucket: string;
   localeKey: string;
   calendarRevisionToken: string;
@@ -111,6 +115,7 @@ export function invalidateTranscriptItemDescriptorCache(): void {
 export function buildTranscriptItems({
   messages,
   streamingMessageId,
+  enableAgentWork,
   nowBucket,
   localeKey,
   calendarRevisionToken,
@@ -118,13 +123,20 @@ export function buildTranscriptItems({
   const items: TranscriptItemDescriptor[] = [];
   let previousDateBucket: string | null = null;
   let cachedDateBucketRange: DateBucketRange | null = null;
+  // Reasoning signatures displayed during the current agent/tool sequence. Tool
+  // responses are stored as user messages, but product-wise they are still part
+  // of the assistant's work turn, so they should not reset this set.
+  let displayedReasoningSignatures = new Set<string>();
 
   for (const message of messages) {
     if (!isVisibleTranscriptMessage(message)) {
       continue;
     }
 
-    const visibleContent = getUserVisibleMessageContent(message.content);
+    const userVisibleContent = getUserVisibleMessageContent(message.content);
+    const visibleContent = enableAgentWork
+      ? expandReasoningContentSections(userVisibleContent)
+      : stripAssistantReasoningContent(message, userVisibleContent);
     if (message.role === "user" && visibleContent.length === 0) {
       continue;
     }
@@ -165,7 +177,49 @@ export function buildTranscriptItems({
     }
 
     const isStreaming = message.id === streamingMessageId;
-    const toolChainItems = buildToolChainItems({ message, visibleContent });
+    const contentForProjection: readonly MessageContent[] =
+      enableAgentWork && message.role === "assistant"
+        ? filterDuplicateDisplayedReasoning(
+            visibleContent,
+            displayedReasoningSignatures,
+          )
+        : visibleContent;
+
+    if (enableAgentWork && message.role === "assistant") {
+      for (const signature of getLeadingReasoningSignatures(
+        contentForProjection,
+      )) {
+        displayedReasoningSignatures.add(signature);
+      }
+    } else if (
+      enableAgentWork &&
+      !isToolResponseOnlyContent(contentForProjection)
+    ) {
+      displayedReasoningSignatures = new Set<string>();
+    }
+
+    // A message that was nothing but duplicate reasoning collapses to empty and
+    // is dropped entirely.
+    if (message.role === "assistant" && contentForProjection.length === 0) {
+      continue;
+    }
+
+    if (enableAgentWork) {
+      const agentWorkItems = buildAgentWorkItems({
+        message,
+        visibleContent: contentForProjection,
+        isStreaming,
+      });
+      if (agentWorkItems) {
+        items.push(...agentWorkItems);
+        continue;
+      }
+    }
+
+    const toolChainItems = buildToolChainItems({
+      message,
+      visibleContent: contentForProjection,
+    });
     if (toolChainItems) {
       items.push(...toolChainItems);
       continue;
@@ -173,7 +227,7 @@ export function buildTranscriptItems({
 
     const fragmentItems = buildAssistantTextFragmentItems({
       message,
-      visibleContent,
+      visibleContent: contentForProjection,
       isStreaming,
     });
 
@@ -184,7 +238,7 @@ export function buildTranscriptItems({
 
     const cachedProjectedItem = getCachedProjectedMessageItem({
       message,
-      visibleContent,
+      visibleContent: contentForProjection,
       isStreaming,
     });
     if (cachedProjectedItem) {
@@ -194,7 +248,7 @@ export function buildTranscriptItems({
 
     const cachedStaticTextItem = getCachedStaticTextMessageItem({
       message,
-      visibleContent,
+      visibleContent: contentForProjection,
       isStreaming,
     });
     if (cachedStaticTextItem) {
@@ -202,23 +256,23 @@ export function buildTranscriptItems({
       continue;
     }
 
-    const blockIds = getBlockIds(visibleContent);
+    const blockIds = getBlockIds(contentForProjection);
     const measurementDecision = getMessageMeasurementDecision({
       message,
-      visibleContent,
+      visibleContent: contentForProjection,
       isStreaming,
     });
-    const revisions = buildMessageRevisions(message, visibleContent);
+    const revisions = buildMessageRevisions(message, contentForProjection);
 
     items.push(
       createMessageItem({
         message,
-        visibleContent,
+        visibleContent: contentForProjection,
         blockIds,
-        searchableText: getSearchableText(message, visibleContent),
+        searchableText: getSearchableText(message, contentForProjection),
         isStreaming,
         revisions,
-        estimatedHeight: estimateMessageHeight(message, visibleContent),
+        estimatedHeight: estimateMessageHeight(message, contentForProjection),
         measurementDecision,
       }),
     );
@@ -336,6 +390,7 @@ function createMessageItem({
   revisions,
   estimatedHeight,
   measurementDecision,
+  responseStartMessageId,
 }: {
   message: Message;
   visibleContent: readonly MessageContent[];
@@ -345,12 +400,14 @@ function createMessageItem({
   revisions: RevisionParts;
   estimatedHeight: number;
   measurementDecision: TranscriptMeasurementPolicyDecision;
+  responseStartMessageId?: string;
 }): TranscriptMessageItem {
   return {
     itemId: `message:${message.id}`,
     kind: "message",
     rowId: `message:${message.id}`,
     messageId: message.id,
+    responseStartMessageId,
     message,
     visibleContent,
     blockIds,
@@ -577,6 +634,40 @@ function shouldUseStreamingFragmentIds({
   return completionStatus === "inProgress" || completionStatus === "stopped";
 }
 
+type ToolContent = Extract<
+  MessageContent,
+  { type: "toolRequest" | "toolResponse" }
+>;
+type ReasoningLikeContent = Extract<
+  MessageContent,
+  { type: "thinking" | "reasoning" | "redactedThinking" }
+>;
+type TextLikeContent = Extract<MessageContent, { type: "text" }>;
+
+function isToolContent(block: MessageContent): block is ToolContent {
+  return block.type === "toolRequest" || block.type === "toolResponse";
+}
+
+function isReasoningContent(
+  block: MessageContent,
+): block is ReasoningLikeContent {
+  return (
+    block.type === "thinking" ||
+    block.type === "reasoning" ||
+    block.type === "redactedThinking"
+  );
+}
+
+function stripAssistantReasoningContent(
+  message: Message,
+  visibleContent: readonly MessageContent[],
+): readonly MessageContent[] {
+  if (message.role !== "assistant") {
+    return visibleContent;
+  }
+  return visibleContent.filter((block) => !isReasoningContent(block));
+}
+
 function canProjectToolChainRows(
   message: Message,
   visibleContent: readonly MessageContent[],
@@ -584,9 +675,546 @@ function canProjectToolChainRows(
   if (message.role !== "assistant" || visibleContent.length === 0) {
     return false;
   }
-  return visibleContent.every(
-    (block) => block.type === "toolRequest" || block.type === "toolResponse",
+  return visibleContent.every(isToolContent);
+}
+
+function isTextContent(block: MessageContent): block is TextLikeContent {
+  return block.type === "text";
+}
+
+function normalizeReasoningText(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+const REASONING_DUPLICATE_MIN_LENGTH = 80;
+
+interface ReasoningHeaderMatch {
+  title: string;
+  headerText: string;
+  body: string;
+}
+
+function getLeadingReasoningHeader(text: string): ReasoningHeaderMatch | null {
+  const trimmedStartLength = text.length - text.trimStart().length;
+  const withoutLeadingWhitespace = text.slice(trimmedStartLength);
+  const headerMatch = withoutLeadingWhitespace.match(
+    /^(?:\*\*([^\n*]{1,120})\*\*|#{1,6}\s+([^\n]{1,120}))\s*\n{1,}/,
   );
+  if (!headerMatch) {
+    return null;
+  }
+
+  const title = (headerMatch[1] ?? headerMatch[2] ?? "").trim();
+  if (!title) {
+    return null;
+  }
+
+  const headerText = text.slice(0, trimmedStartLength + headerMatch[0].length);
+  return {
+    title,
+    headerText,
+    body: text.slice(trimmedStartLength + headerMatch[0].length),
+  };
+}
+
+function canonicalizeReasoningBody(text: string): string {
+  const header = getLeadingReasoningHeader(text);
+  return normalizeReasoningText(header ? header.body : text);
+}
+
+function canonicalizeReasoningCandidate(
+  text: string,
+  title: string | null,
+): string {
+  let signature = canonicalizeReasoningBody(text);
+  const titleSignature = title ? normalizeReasoningText(title) : null;
+  if (!titleSignature) {
+    return signature;
+  }
+
+  if (signature.startsWith(titleSignature)) {
+    signature = signature.slice(titleSignature.length).trim();
+  }
+  if (signature.endsWith(titleSignature)) {
+    signature = signature.slice(0, -titleSignature.length).trim();
+  }
+  return signature;
+}
+
+function areDuplicateReasoningBodies(
+  left: string,
+  right: string,
+  title: string | null,
+): boolean {
+  const leftSignature = canonicalizeReasoningCandidate(left, title);
+  const rightSignature = canonicalizeReasoningCandidate(right, title);
+  return (
+    leftSignature.length >= REASONING_DUPLICATE_MIN_LENGTH &&
+    leftSignature === rightSignature
+  );
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripReasoningBoundaryTitleArtifacts(
+  body: string,
+  title: string | null,
+): string {
+  if (!title) {
+    return body;
+  }
+
+  const escapedTitle = escapeRegExp(title);
+  return body
+    .replace(new RegExp(`^\\s*(?:\\*\\*)?${escapedTitle}(?:\\*\\*)?\\s*`), "")
+    .replace(new RegExp(`\\s*(?:\\*\\*)?${escapedTitle}(?:\\*\\*)?\\s*$`), "");
+}
+
+function collapseDuplicatedReasoningBody(
+  body: string,
+  title: string | null,
+): string {
+  const strippedBody = stripReasoningBoundaryTitleArtifacts(body, title);
+  const trimmedBody = strippedBody.trim();
+  if (trimmedBody.length < REASONING_DUPLICATE_MIN_LENGTH * 2) {
+    return strippedBody;
+  }
+
+  const splitCandidates = new Set<number>();
+  const blankLinePattern = /\n\s*\n/g;
+  for (const match of trimmedBody.matchAll(blankLinePattern)) {
+    splitCandidates.add(match.index + match[0].length);
+  }
+
+  if (title) {
+    const escapedTitle = escapeRegExp(title);
+    const titlePattern = new RegExp(
+      `(?:\\*\\*)?${escapedTitle}(?:\\*\\*)?`,
+      "g",
+    );
+    for (const match of trimmedBody.matchAll(titlePattern)) {
+      splitCandidates.add(match.index);
+      splitCandidates.add(match.index + match[0].length);
+    }
+  }
+
+  for (const splitIndex of Array.from(splitCandidates).sort((a, b) => a - b)) {
+    const left = trimmedBody.slice(0, splitIndex).trim();
+    const right = trimmedBody.slice(splitIndex).trim();
+    if (!left || !right) continue;
+    if (areDuplicateReasoningBodies(left, right, title)) {
+      return left;
+    }
+  }
+
+  return strippedBody;
+}
+
+function sanitizeReasoningTextForDisplay(text: string): string {
+  const header = getLeadingReasoningHeader(text);
+  if (!header) {
+    return collapseDuplicatedReasoningBody(text, null);
+  }
+
+  const collapsedBody = collapseDuplicatedReasoningBody(
+    header.body,
+    header.title,
+  );
+  return `${header.headerText}${collapsedBody.trimStart()}`;
+}
+
+function getCanonicalReasoningSignature(text: string): string | null {
+  const sanitizedText = sanitizeReasoningTextForDisplay(text);
+  const header = getLeadingReasoningHeader(sanitizedText);
+  const canonicalText = canonicalizeReasoningCandidate(
+    sanitizedText,
+    header?.title ?? null,
+  );
+  return canonicalText || null;
+}
+
+function getReasoningSignature(block: MessageContent): string | null {
+  if (!isReasoningContent(block)) return null;
+  if (block.type === "redactedThinking") return "[redacted]";
+  return getCanonicalReasoningSignature(block.text);
+}
+
+// Signatures of the leading run of reasoning blocks at the start of a message.
+// Used to detect when a provider re-emits thoughts it already sent as standalone
+// thinking, even when one backend block contains several titled sections.
+function getLeadingReasoningSignatures(
+  content: readonly MessageContent[],
+): readonly string[] {
+  const signatures: string[] = [];
+  for (const block of content) {
+    const signature = getReasoningSignature(block);
+    if (!signature) break;
+    signatures.push(signature);
+  }
+  return signatures;
+}
+
+// Strip leading reasoning blocks from a message when they exactly repeat the
+// reasoning we already displayed on the previous assistant message. Returns []
+// when the whole message was nothing but that duplicate reasoning (caller drops
+// it). Anything that isn't a leading exact-duplicate is left untouched.
+function isToolResponseOnlyContent(
+  content: readonly MessageContent[],
+): boolean {
+  return (
+    content.length > 0 &&
+    content.every((block) => block.type === "toolResponse")
+  );
+}
+
+function filterDuplicateDisplayedReasoning(
+  content: readonly MessageContent[],
+  displayedReasoningSignatures: ReadonlySet<string>,
+): readonly MessageContent[] {
+  if (displayedReasoningSignatures.size === 0 || content.length === 0) {
+    return content;
+  }
+
+  let firstNonDuplicateIndex = 0;
+  for (const block of content) {
+    const signature = getReasoningSignature(block);
+    if (!signature || !displayedReasoningSignatures.has(signature)) {
+      break;
+    }
+    firstNonDuplicateIndex += 1;
+  }
+
+  if (firstNonDuplicateIndex === 0) {
+    return content;
+  }
+
+  return content.slice(firstNonDuplicateIndex);
+}
+
+function isReasoningSectionHeaderLine(line: string): boolean {
+  return /^(?:\*\*[^\n*]{1,120}\*\*|#{1,6}\s+[^\n]{1,120})\s*$/.test(
+    line.trim(),
+  );
+}
+
+function splitReasoningContentSections(
+  block: ThinkingContent | ReasoningContent,
+): Array<ThinkingContent | ReasoningContent> {
+  const lines = block.text.split("\n");
+  const sections: string[] = [];
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const startsNewSection =
+      isReasoningSectionHeaderLine(line) &&
+      currentLines.some((currentLine) => currentLine.trim().length > 0);
+
+    if (startsNewSection) {
+      const section = currentLines.join("\n").trimEnd();
+      if (section.trim()) {
+        sections.push(section);
+      }
+      currentLines = [line];
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+
+  const finalSection = currentLines.join("\n").trimEnd();
+  if (finalSection.trim()) {
+    sections.push(finalSection);
+  }
+
+  if (sections.length <= 1) {
+    return [block];
+  }
+
+  return sections.map((text) => ({ ...block, text }));
+}
+
+function expandReasoningContentSections(
+  content: readonly MessageContent[],
+): MessageContent[] {
+  const expanded: MessageContent[] = [];
+  for (const block of content) {
+    if (block.type === "thinking" || block.type === "reasoning") {
+      expanded.push(...splitReasoningContentSections(block));
+    } else {
+      expanded.push(block);
+    }
+  }
+  return expanded;
+}
+
+function compactWorkContent(
+  content: readonly MessageContent[],
+): MessageContent[] {
+  const compacted: MessageContent[] = [];
+  const displayedReasoningSignatures = new Set<string>();
+
+  for (const block of content) {
+    const blocksToCompact =
+      block.type === "thinking" || block.type === "reasoning"
+        ? splitReasoningContentSections(block)
+        : [block];
+
+    for (const blockToCompact of blocksToCompact) {
+      const sanitizedBlock =
+        blockToCompact.type === "thinking" ||
+        blockToCompact.type === "reasoning"
+          ? {
+              ...blockToCompact,
+              text: sanitizeReasoningTextForDisplay(blockToCompact.text),
+            }
+          : blockToCompact;
+      const reasoningSignature =
+        sanitizedBlock.type === "thinking" ||
+        sanitizedBlock.type === "reasoning"
+          ? getCanonicalReasoningSignature(sanitizedBlock.text)
+          : null;
+      if (reasoningSignature) {
+        if (displayedReasoningSignatures.has(reasoningSignature)) {
+          continue;
+        }
+        displayedReasoningSignatures.add(reasoningSignature);
+      }
+
+      const previous = compacted[compacted.length - 1];
+
+      if (previous?.type === "text" && sanitizedBlock.type === "text") {
+        compacted[compacted.length - 1] = {
+          type: "text",
+          text: `${previous.text}${sanitizedBlock.text}`,
+        };
+        continue;
+      }
+
+      compacted.push(sanitizedBlock);
+    }
+  }
+
+  return compacted;
+}
+
+function buildMessageItemForContent({
+  message,
+  content,
+  isStreaming,
+  idSuffix,
+  responseStartMessageId,
+}: {
+  message: Message;
+  content: readonly MessageContent[];
+  isStreaming: boolean;
+  idSuffix: string;
+  responseStartMessageId?: string;
+}): TranscriptMessageItem {
+  const syntheticMessage: Message = {
+    ...message,
+    id: `${message.id}:${idSuffix}`,
+    content: [...content],
+  };
+  const revisions = buildMessageRevisions(syntheticMessage, content);
+  const measurementDecision = getMessageMeasurementDecision({
+    message: syntheticMessage,
+    visibleContent: content,
+    isStreaming,
+  });
+
+  return createMessageItem({
+    message: syntheticMessage,
+    visibleContent: content,
+    blockIds: getBlockIds(content),
+    searchableText: getSearchableText(syntheticMessage, content),
+    isStreaming,
+    revisions,
+    estimatedHeight: estimateMessageHeight(syntheticMessage, content),
+    measurementDecision,
+    responseStartMessageId,
+  });
+}
+
+function isWorkContent(block: MessageContent): boolean {
+  return isToolContent(block) || isReasoningContent(block);
+}
+
+function compactTextContent(
+  content: readonly TextLikeContent[],
+): MessageContent[] {
+  const text = content
+    .map((block) => block.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+  return text ? [{ type: "text", text }] : [];
+}
+
+function estimateAgentWorkHeight(content: readonly MessageContent[]): number {
+  const workCount = content.filter(
+    (block) => isToolContent(block) || isReasoningContent(block),
+  ).length;
+  return Math.min(420, Math.max(96, 72 + workCount * 28));
+}
+
+function buildAgentWorkItem({
+  message,
+  content,
+  isStreaming,
+}: {
+  message: Message;
+  content: readonly MessageContent[];
+  isStreaming: boolean;
+}): TranscriptAgentWorkItem {
+  const workMessage: Message = {
+    ...message,
+    id: `${message.id}:work`,
+    content: [...content],
+  };
+  const revisions = buildMessageRevisions(workMessage, content);
+  const thoughtCount = content.filter(isReasoningContent).length;
+  const toolCount = content.filter(
+    (block) => block.type === "toolRequest",
+  ).length;
+  const textCount = content.filter(isTextContent).length;
+  const isActiveWork =
+    isStreaming ||
+    content.some(
+      (block) =>
+        block.type === "toolRequest" &&
+        (block.status === "pending" || block.status === "in_progress"),
+    );
+  const measurementDecision = classifyTranscriptMeasurementPolicy({
+    rowKind: "agent-work",
+    message: workMessage,
+    content,
+    capabilities: {
+      stateful: true,
+      hasToolContent: toolCount > 0,
+      hasReasoningContent: thoughtCount > 0,
+      hasDynamicAsyncLayout: true,
+      hasActiveToolWork: isActiveWork,
+      hasActiveTimer: isActiveWork,
+      hasStreamingContent: isStreaming,
+    },
+  });
+
+  return {
+    itemId: `message:${message.id}:agent-work`,
+    kind: "agent-work",
+    rowId: `message:${message.id}:agent-work`,
+    messageId: message.id,
+    message: workMessage,
+    workId: message.id,
+    content,
+    isActiveWork,
+    thoughtCount,
+    toolCount,
+    textCount,
+    renderRevision: ["agent-work", message.id, revisions.renderRevision].join(
+      ":",
+    ),
+    heightRevision: [
+      "agent-work-height",
+      message.id,
+      revisions.heightRevision,
+    ].join(":"),
+    estimatedHeight: estimateAgentWorkHeight(content),
+    capabilities: measurementDecision.capabilities,
+    measurementPolicy: measurementDecision.policy,
+    layoutPendingPolicy: measurementDecision.layoutPendingPolicy,
+    measurementSafetyReasons: measurementDecision.reasons,
+    anchorPriority: isStreaming ? "streaming" : "stable",
+    keepAlivePriority: measurementDecision.keepAlivePriority,
+  };
+}
+
+function buildAgentWorkItems({
+  message,
+  visibleContent,
+  isStreaming,
+}: {
+  message: Message;
+  visibleContent: readonly MessageContent[];
+  isStreaming: boolean;
+}): readonly TranscriptItemDescriptor[] | null {
+  if (message.role !== "assistant" || visibleContent.length === 0) {
+    return null;
+  }
+
+  if (
+    !visibleContent.every(
+      (block) =>
+        isToolContent(block) ||
+        isReasoningContent(block) ||
+        isTextContent(block),
+    )
+  ) {
+    return null;
+  }
+
+  // The agent's final answer is the contiguous run of text blocks at the END of
+  // the message, ignoring any trailing reasoning/thinking blocks the model emits
+  // AFTER its answer (GPT 5.5 does this). Those trailing thoughts stay in the
+  // work panel so they don't drag the answer into it.
+  let lastNonReasoningIndex = visibleContent.length - 1;
+  while (
+    lastNonReasoningIndex >= 0 &&
+    isReasoningContent(visibleContent[lastNonReasoningIndex] as MessageContent)
+  ) {
+    lastNonReasoningIndex -= 1;
+  }
+
+  let answerStartIndex = lastNonReasoningIndex + 1;
+  if (
+    lastNonReasoningIndex >= 0 &&
+    isTextContent(visibleContent[lastNonReasoningIndex] as MessageContent)
+  ) {
+    answerStartIndex = lastNonReasoningIndex;
+    while (
+      answerStartIndex - 1 >= 0 &&
+      isTextContent(visibleContent[answerStartIndex - 1] as MessageContent)
+    ) {
+      answerStartIndex -= 1;
+    }
+  }
+
+  const answerBlocks = visibleContent.slice(
+    answerStartIndex,
+    lastNonReasoningIndex + 1,
+  );
+  const workBlocks = [
+    ...visibleContent.slice(0, answerStartIndex),
+    ...visibleContent.slice(lastNonReasoningIndex + 1),
+  ];
+
+  const workContent = compactWorkContent(workBlocks);
+  if (!workContent.some(isWorkContent)) {
+    return null;
+  }
+
+  const finalTextContent = compactTextContent(
+    answerBlocks.filter(isTextContent),
+  );
+  const items: TranscriptItemDescriptor[] = [
+    buildAgentWorkItem({ message, content: workContent, isStreaming }),
+  ];
+
+  if (finalTextContent.length > 0) {
+    items.push(
+      buildMessageItemForContent({
+        message,
+        content: finalTextContent,
+        isStreaming,
+        idSuffix: "answer",
+        responseStartMessageId: message.id,
+      }),
+    );
+  }
+
+  return items;
 }
 
 function isActiveToolChain(visibleContent: readonly MessageContent[]): boolean {

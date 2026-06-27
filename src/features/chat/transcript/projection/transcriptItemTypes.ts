@@ -53,6 +53,16 @@ export interface TranscriptDateSeparatorPayload {
   firstMessageId: string;
 }
 
+export interface TranscriptAgentWorkPayload {
+  workId: string;
+  message: Message;
+  content: readonly MessageContent[];
+  isActiveWork: boolean;
+  thoughtCount: number;
+  toolCount: number;
+  textCount: number;
+}
+
 export interface TranscriptToolChainPayload {
   chainId: string;
   message: Message;
@@ -72,9 +82,11 @@ export interface TranscriptRowDescriptor {
   reactKey: string;
   kind: TranscriptRowKind;
   messageId?: string;
+  responseStartMessageId?: string;
   blockIds?: readonly string[];
   fragment?: TranscriptAssistantContentFragmentPayload;
   date?: TranscriptDateSeparatorPayload;
+  agentWork?: TranscriptAgentWorkPayload;
   toolChainSummary?: TranscriptToolChainPayload;
   toolChainDetail?: TranscriptToolChainDetailPayload;
   renderRevision: string;
@@ -105,6 +117,7 @@ export interface TranscriptMessageItem {
   kind: "message";
   rowId: string;
   messageId: string;
+  responseStartMessageId?: string;
   message: Message;
   visibleContent: readonly MessageContent[];
   blockIds: readonly string[];
@@ -160,6 +173,29 @@ export interface TranscriptAssistantContentFragmentItem {
   keepAlivePriority: TranscriptKeepAlivePriority;
 }
 
+export interface TranscriptAgentWorkItem {
+  itemId: string;
+  kind: "agent-work";
+  rowId: string;
+  messageId: string;
+  message: Message;
+  workId: string;
+  content: readonly MessageContent[];
+  isActiveWork: boolean;
+  thoughtCount: number;
+  toolCount: number;
+  textCount: number;
+  renderRevision: string;
+  heightRevision: string;
+  estimatedHeight: number;
+  capabilities: TranscriptRowCapabilities;
+  measurementPolicy: TranscriptMeasurementPolicy;
+  layoutPendingPolicy: TranscriptLayoutPendingPolicy;
+  measurementSafetyReasons: readonly TranscriptMeasurementSafetyReason[];
+  anchorPriority: TranscriptAnchorPriority;
+  keepAlivePriority: TranscriptKeepAlivePriority;
+}
+
 export interface TranscriptToolChainItem {
   itemId: string;
   kind: "tool-chain";
@@ -204,6 +240,7 @@ export type TranscriptItemDescriptor =
   | TranscriptDateSeparatorItem
   | TranscriptMessageItem
   | TranscriptAssistantContentFragmentItem
+  | TranscriptAgentWorkItem
   | TranscriptToolChainItem
   | TranscriptToolChainDetailItem;
 
@@ -260,6 +297,7 @@ export interface TranscriptProjectionCacheUpdateInput {
   sessionEpoch: number;
   messages: readonly Message[];
   streamingMessageId: string | null;
+  enableAgentWork: boolean;
   nowBucket: string;
   localeKey: string;
   previous?: TranscriptProjectionSnapshot;

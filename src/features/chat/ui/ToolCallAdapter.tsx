@@ -23,6 +23,7 @@ import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 
 interface ToolCallAdapterProps {
+  className?: string;
   name: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
@@ -40,6 +41,9 @@ interface ToolCallAdapterProps {
   showChevron?: boolean;
   /** When true, the card sizes to its content rather than filling its parent. */
   fitWidth?: boolean;
+  titleClassName?: string;
+  chevronClassName?: string;
+  agentWorkLayout?: boolean;
 }
 
 function useElapsedTime(status: ToolCallStatus, startedAt?: number) {
@@ -254,6 +258,55 @@ function InputSummary({
   );
 }
 
+function formatToolValue(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function AgentWorkToolSection({
+  label,
+  value,
+  destructive = false,
+}: {
+  label: string;
+  value: string | null;
+  destructive?: boolean;
+}) {
+  if (!value || value.trim().length === 0) return null;
+
+  return (
+    <section className="space-y-1.5">
+      <div className="text-xs font-normal text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "scrollbar-visible max-h-32 overflow-auto rounded-sm bg-muted/30 px-3 py-2 text-muted-foreground [scrollbar-gutter:stable]",
+          destructive && "text-destructive",
+        )}
+      >
+        <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-current">
+          {value}
+        </pre>
+      </div>
+    </section>
+  );
+}
+
+function sentenceCaseToolTitle(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return name;
+
+  const shellTitle = trimmed.replace(
+    /^shell(?=\s*(?:·|$))/i,
+    "Running command",
+  );
+  return shellTitle.charAt(0).toLocaleUpperCase() + shellTitle.slice(1);
+}
+
 function splitHeaderTitleByPath(name: string, fileLabel: string) {
   const index = name.toLowerCase().lastIndexOf(fileLabel.toLowerCase());
   if (index === -1) return null;
@@ -265,6 +318,7 @@ function splitHeaderTitleByPath(name: string, fileLabel: string) {
 }
 
 export function ToolCallAdapter({
+  className,
   name,
   arguments: args,
   status,
@@ -278,6 +332,9 @@ export function ToolCallAdapter({
   showStatusBadge = true,
   showChevron = true,
   fitWidth = false,
+  titleClassName,
+  chevronClassName,
+  agentWorkLayout = false,
 }: ToolCallAdapterProps) {
   const { t } = useTranslation("chat");
   const elapsed = useElapsedTime(status, startedAt);
@@ -290,13 +347,14 @@ export function ToolCallAdapter({
     status === "in_progress" && elapsed >= 3 ? elapsed : undefined;
 
   const { resolveMarkdownHref, openResolvedPath } = useArtifactActionsContext();
+  const displayName = sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");
   const headerFileLabel = pathRow?.value;
   const headerFilePath = pathRow?.title ?? pathRow?.value;
   const headerTitleParts =
     headerFileLabel && headerFilePath
-      ? splitHeaderTitleByPath(name, headerFileLabel)
+      ? splitHeaderTitleByPath(displayName, headerFileLabel)
       : null;
   const headerFileCandidate = useMemo(
     () => (headerFilePath ? resolveMarkdownHref(headerFilePath) : null),
@@ -358,7 +416,7 @@ export function ToolCallAdapter({
     </>
   ) : canHoistResultIntoHeader ? (
     <>
-      <span>{name}</span>
+      <span>{displayName}</span>
       <span aria-hidden="true" className="text-muted-foreground">
         {" · "}
       </span>
@@ -367,13 +425,34 @@ export function ToolCallAdapter({
       </span>
     </>
   ) : (
-    name
+    displayName
   );
 
   const showCombinedSurface = summaryRows.length > 0 || hasStructuredArgs;
+  const commandRow = summaryRows.find((row) => row.renderAs === "bash");
+  const nonCommandRows = summaryRows.filter((row) => row !== commandRow);
+  const inputDetails =
+    nonCommandRows.length > 0
+      ? nonCommandRows
+          .map((row) => {
+            const label = t(`tools.inputSummary.${row.kind}`);
+            return `${label}: ${row.title ?? row.value}`;
+          })
+          .join("\n")
+      : null;
+  const rawInputDetails =
+    hasStructuredArgs && !commandRow ? formatToolValue(args) : null;
+  const resultDetails = isError
+    ? formatToolValue(result)
+    : showResultBody
+      ? formatToolValue(result)
+      : null;
+  const structuredDetails = hasStructuredContent
+    ? formatToolValue(structuredContent)
+    : null;
 
   return (
-    <div className="w-full min-w-0 max-w-full">
+    <div className={cn("w-full min-w-0 max-w-full", className)}>
       <Tool open={open} onOpenChange={onOpenChange}>
         <ToolHeader
           type="dynamic-tool"
@@ -383,12 +462,34 @@ export function ToolCallAdapter({
           showIcon={false}
           showStatusBadge={showStatusBadge}
           showChevron={showChevron}
+          titleClassName={titleClassName}
+          chevronClassName={chevronClassName}
           splitTrigger={canOpenHeaderFile}
           layout={fitWidth ? "fit" : "fill"}
           elapsedSeconds={elapsedSeconds}
         />
         <ToolContent>
-          {showCombinedSurface ? (
+          {agentWorkLayout ? (
+            <div className="space-y-3 py-1">
+              <AgentWorkToolSection
+                label={t("tools.inputSummary.command")}
+                value={commandRow?.value ?? null}
+              />
+              <AgentWorkToolSection
+                label={t("tools.input")}
+                value={inputDetails ?? rawInputDetails}
+              />
+              <AgentWorkToolSection
+                label={isError ? t("tools.error") : t("tools.result")}
+                value={resultDetails}
+                destructive={isError}
+              />
+              <AgentWorkToolSection
+                label={t("tools.structuredContent")}
+                value={structuredDetails}
+              />
+            </div>
+          ) : showCombinedSurface ? (
             <ToolSurface tone="muted" className="bg-muted">
               <ToolInput
                 input={args}

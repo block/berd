@@ -68,6 +68,8 @@ export type ToolPart = ToolUIPart | DynamicToolUIPart;
 export type ToolHeaderProps = {
   title?: ReactNode;
   className?: string;
+  titleClassName?: string;
+  chevronClassName?: string;
   showIcon?: boolean;
   showStatusBadge?: boolean;
   /** When false, hides the trailing disclosure chevron in the header. */
@@ -150,6 +152,8 @@ export const getStatusBadge = (
 
 export const ToolHeader = ({
   className,
+  titleClassName,
+  chevronClassName,
   title,
   type,
   state,
@@ -177,6 +181,7 @@ export const ToolHeader = ({
   const titleClasses = cn(
     "min-w-0 truncate text-left text-sm font-medium",
     isFitLayout ? "flex-none max-w-full" : "flex-1",
+    titleClassName,
   );
 
   const trailing = (
@@ -188,7 +193,12 @@ export const ToolHeader = ({
         </span>
       )}
       {showChevron && (
-        <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90" />
+        <ChevronDownIcon
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90",
+            chevronClassName,
+          )}
+        />
       )}
     </>
   );

@@ -370,6 +370,9 @@
   },
   "tools": {
     "content": "Content",
+    "error": "Error",
+    "input": "Input",
+    "result": "Result",
     "fileNotFound": "File not found: {{path}}",
     "inputSummary": {
       "command": "Command",
@@ -389,6 +392,14 @@
     "structuredContent": "Structured content",
     "structuredOutput": "Structured output",
     "structuredOutputLines": "{{count}} lines"
+  },
+  "agent_work": {
+    "label": "Agent work",
+    "redactedThinking": "Thinking redacted",
+    "summary": {
+      "steps_one": "{{count}} step",
+      "steps_other": "{{count}} steps"
+    }
   },
   "tool_chain": {
     "summary": {

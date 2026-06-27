@@ -9,6 +9,8 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getCatalogEntryFromEntries } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import {
   getProviderIcon,
   formatProviderLabel,
@@ -261,6 +263,7 @@ function renderContentBlock(
     editProjectLabel?: string;
     changeFolderLabel?: string;
     stateKey?: string;
+    renderReasoning?: boolean;
   },
   isStreamingMsg?: boolean,
   isUserMessage?: boolean,
@@ -341,6 +344,9 @@ function renderContentBlock(
     }
     case "thinking":
     case "reasoning": {
+      if (options.renderReasoning === false) {
+        return null;
+      }
       const text = (content as ThinkingContent | ReasoningContentType).text;
       return (
         <Reasoning
@@ -355,6 +361,9 @@ function renderContentBlock(
       );
     }
     case "redactedThinking":
+      if (options.renderReasoning === false) {
+        return null;
+      }
       return (
         <div
           key={`redacted-${index}`}
@@ -423,6 +432,10 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps) {
   const { t } = useTranslation(["chat", "common"]);
   const { formatDate } = useLocaleFormatting();
+  const agentWorkExperiment = useExperiment(
+    AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
+  );
+  const shouldRenderReasoning = agentWorkExperiment?.enabled === true;
   const { role, content: rawContent, created } = message;
   // Only user messages carry annotated blocks; skip the filter for others.
   const content = contentOverride
@@ -517,6 +530,7 @@ export const MessageBubble = memo(function MessageBubble({
               editProjectLabel: t("toolbar.editProjectFolders"),
               changeFolderLabel: t("toolbar.changeFolder"),
               stateKey: `${c.type}-${i}`,
+              renderReasoning: shouldRenderReasoning,
             }),
           )}
         </div>
@@ -743,6 +757,7 @@ export const MessageBubble = memo(function MessageBubble({
                     onRunShellCommand,
                     runItCodeRenderers,
                     stateKey: section.key,
+                    renderReasoning: shouldRenderReasoning,
                   },
                   isStreaming,
                   isUser,

@@ -34,6 +34,8 @@ import {
   type TranscriptProjectionSnapshot,
   type TranscriptRowDescriptor,
 } from "../transcript/projection";
+import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import {
   createTranscriptShellBlockAttributes,
   createTranscriptShellMeasurementPlan,
@@ -672,9 +674,7 @@ function splitLiveStreamingTail({
   const liveStartMessageId =
     previousMessage?.role === "user" ? previousMessage.id : streamingMessage.id;
   let liveStartIndex = rows.findIndex(
-    (row) =>
-      row.messageId === liveStartMessageId &&
-      (row.kind === "message" || row.kind === "assistant-content-fragment"),
+    (row) => row.messageId === liveStartMessageId && isMessageTurnRow(row),
   );
   if (liveStartIndex < 0) {
     return null;
@@ -802,14 +802,21 @@ function updateHeapGrowthMetric(
   );
 }
 
+function isMessageTurnRow(row: TranscriptRowDescriptor): boolean {
+  return (
+    Boolean(row.messageId) &&
+    (row.kind === "message" ||
+      row.kind === "assistant-content-fragment" ||
+      row.kind === "agent-work")
+  );
+}
+
 function getRowsForMessage(
   rows: readonly TranscriptRowDescriptor[],
   messageId: string,
 ): readonly TranscriptRowDescriptor[] {
   return rows.filter(
-    (row) =>
-      row.messageId === messageId &&
-      (row.kind === "message" || row.kind === "assistant-content-fragment"),
+    (row) => row.messageId === messageId && isMessageTurnRow(row),
   );
 }
 
@@ -942,6 +949,10 @@ export function VirtualMessageTimeline({
 }: VirtualMessageTimelineProps) {
   const { t, i18n } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
+  const agentWorkExperiment = useExperiment(
+    AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
+  );
+  const enableAgentWork = agentWorkExperiment?.enabled === true;
   const projectionCacheRef = useRef<TranscriptProjectionCache | null>(null);
   const sessionLifecycleRef = useRef({ sessionId, sessionEpoch: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1069,6 +1080,7 @@ export function VirtualMessageTimeline({
         sessionEpoch,
         messages,
         streamingMessageId: streamingMessageId ?? null,
+        enableAgentWork,
         nowBucket,
         localeKey,
       }) ??
@@ -1077,10 +1089,12 @@ export function VirtualMessageTimeline({
         sessionEpoch,
         messages,
         streamingMessageId: streamingMessageId ?? null,
+        enableAgentWork,
         nowBucket,
         localeKey,
       }),
     [
+      enableAgentWork,
       localeKey,
       messages,
       nowBucket,
@@ -1303,10 +1317,7 @@ export function VirtualMessageTimeline({
     virtualTimelineSnapshot.range.protectedRowIds.filter(
       (rowId) => !protectedVisibleRowIds.has(rowId),
     ).length;
-  const hasMessageRows = stableRows.some(
-    (row) =>
-      row.kind === "message" || row.kind === "assistant-content-fragment",
-  );
+  const hasMessageRows = stableRows.some(isMessageTurnRow);
   const resolvedScrollTargetMessageId = useMemo(
     () =>
       resolveScrollTargetMessageId(
@@ -2286,34 +2297,39 @@ export function VirtualMessageTimeline({
     requestBottomScroll();
   }, [footerHeightPx, hasFooter, requestBottomScroll, tailPaddingPx]);
 
-  const latestMessage = useMemo(() => {
+  const latestMessageEntry = useMemo(() => {
     for (let index = stableRows.length - 1; index >= 0; index -= 1) {
       const row = stableRows[index];
-      if (
-        (row.kind === "message" || row.kind === "assistant-content-fragment") &&
-        row.messageId
-      ) {
-        return stableMessageByRowId.get(row.rowId) ?? null;
+      if (!row?.messageId || !isMessageTurnRow(row)) {
+        continue;
+      }
+
+      const message = stableMessageByRowId.get(row.rowId);
+      if (message) {
+        return { message, messageId: row.messageId };
       }
     }
     return null;
   }, [stableMessageByRowId, stableRows]);
-  const latestMessageId = latestMessage?.id;
-  const latestAssistantMessage = useMemo(() => {
+  const latestMessage = latestMessageEntry?.message;
+  const latestMessageId = latestMessageEntry?.messageId;
+  const latestAssistantMessageEntry = useMemo(() => {
     for (let index = stableRows.length - 1; index >= 0; index -= 1) {
       const row = stableRows[index];
-      if (row.kind !== "message" && row.kind !== "assistant-content-fragment") {
+      if (!row?.messageId || !isMessageTurnRow(row)) {
         continue;
       }
 
       const message = stableMessageByRowId.get(row.rowId);
       if (message?.role === "assistant") {
-        return message;
+        return { message, messageId: row.messageId };
       }
     }
     return null;
   }, [stableMessageByRowId, stableRows]);
-  const latestAssistantMessageId = latestAssistantMessage?.id ?? null;
+  const latestAssistantMessage = latestAssistantMessageEntry?.message;
+  const latestAssistantMessageId =
+    latestAssistantMessageEntry?.messageId ?? null;
 
   // Derive which assistant message the floating gutter chevron should jump to.
   // The chevron floats near the bottom of the transcript (just above the
@@ -2349,26 +2365,23 @@ export function VirtualMessageTimeline({
     if (!anchorRow?.messageId) {
       return null;
     }
-    if (
-      anchorRow.kind !== "message" &&
-      anchorRow.kind !== "assistant-content-fragment" &&
-      anchorRow.kind !== "tool-chain" &&
-      anchorRow.kind !== "tool-chain-detail"
-    ) {
+    if (!isMessageTurnRow(anchorRow)) {
       return null;
     }
     const message = stableMessageByRowId.get(anchorRow.rowId);
     if (message?.role !== "assistant") {
       return null;
     }
-    if (anchorRow.messageId === streamingMessageId) {
+    const responseStartMessageId =
+      anchorRow.responseStartMessageId ?? anchorRow.messageId;
+    if (responseStartMessageId === streamingMessageId) {
       return null;
     }
 
     // Resolve the top of the whole message (its first row). Once that top has
     // scrolled above the viewport edge, the shared gutter button handles the
     // fade as a regular CSS visibility transition.
-    const startRowId = snapshot.rowByMessageId.get(anchorRow.messageId);
+    const startRowId = snapshot.rowByMessageId.get(responseStartMessageId);
     const startIndex = startRowId
       ? snapshot.rowIndexById.get(startRowId)
       : undefined;
@@ -2381,13 +2394,13 @@ export function VirtualMessageTimeline({
     // The start row is mounted: compare its offset to the scroll position.
     if (startItem) {
       return scrollTop - startItem.start > GUTTER_RESPONSE_START_THRESHOLD_PX
-        ? anchorRow.messageId
+        ? responseStartMessageId
         : null;
     }
     // The start row has scrolled out of the rendered window above us, so the
     // message's top is definitively above the viewport.
     if (startIndex != null && startIndex < anchorItem.index) {
-      return anchorRow.messageId;
+      return responseStartMessageId;
     }
 
     return null;
@@ -3208,11 +3221,12 @@ export function VirtualMessageTimeline({
       })}
       message={row.messageId ? stableMessageByRowId.get(row.rowId) : undefined}
       isStreaming={
-        streamingMessageId != null && row.messageId === streamingMessageId
+        streamingMessageId != null &&
+        (row.responseStartMessageId ?? row.messageId) === streamingMessageId
       }
       actionsAlwaysVisible={
         row.messageId === latestAssistantMessageId &&
-        row.messageId !== streamingMessageId
+        (row.responseStartMessageId ?? row.messageId) !== streamingMessageId
       }
       showJumpToResponseStartHint={row.messageId === responseStartHintMessageId}
       isPulsing={row.messageId === pulsingMessageId}
