@@ -1836,7 +1836,7 @@ describe("ChatInput", () => {
       />,
     );
 
-    expect(screen.getByTitle("Press Enter again to steer")).toBeInTheDocument();
+    expect(screen.getByTitle("Steer queued message")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /steer/i }));
 
@@ -1846,7 +1846,7 @@ describe("ChatInput", () => {
     ).toBeInTheDocument();
   });
 
-  it("steers a queued message on a second plain enter", async () => {
+  it("does not steer a queued message from an empty composer on enter", async () => {
     const onSend = vi.fn();
     const onSteerQueuedMessage = vi.fn();
     const user = userEvent.setup();
@@ -1862,7 +1862,7 @@ describe("ChatInput", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -1885,6 +1885,38 @@ describe("ChatInput", () => {
 
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue("another draft");
+  });
+
+  it("steers the current draft when a queued message already exists", async () => {
+    const onSend = vi.fn();
+    const onSteerMessage = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerMessage={onSteerMessage}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerMessage
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ text: "queued msg" }}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "new steering draft");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerMessage).toHaveBeenCalledWith(
+      "new steering draft",
+      undefined,
+      undefined,
+    );
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
   it("queues on cmd-enter when enter is configured to steer", async () => {
@@ -1933,7 +1965,7 @@ describe("ChatInput", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("does not send when queue is full", async () => {
+  it("does not send or clear the draft when queue is full", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();
     render(
@@ -1948,6 +1980,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue("another message");
   });
 
   it("does not stop dictation when send is blocked", async () => {

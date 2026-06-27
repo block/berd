@@ -346,7 +346,7 @@
     "selectProject": "Seleccionar proyecto",
     "sendMessage": "Enviar mensaje",
     "steer": "Guiar",
-    "steerQueuedWithEnter": "Pulsa Enter de nuevo para guiar",
+    "steerQueued": "Guiar mensaje en cola",
     "agentBuilderPrepareFailed": "No se pudo preparar el borrador del agente.",
     "agentBuilderPreparing": "Preparando borrador de agente...",
     "sessionStarting": "Iniciando sesión...",

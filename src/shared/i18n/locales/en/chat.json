@@ -349,7 +349,7 @@
     "selectProject": "Select project",
     "sendMessage": "Send message",
     "steer": "Steer",
-    "steerQueuedWithEnter": "Press Enter again to steer",
+    "steerQueued": "Steer queued message",
     "agentBuilderPrepareFailed": "Couldn't prepare agent draft.",
     "agentBuilderPreparing": "Preparing agent draft...",
     "sessionStarting": "Starting session...",

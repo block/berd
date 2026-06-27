@@ -1081,6 +1081,9 @@ export function useChatSessionController({
   const submittedDraftsBySessionRef = useRef<
     Record<string, Array<{ text: string; generation: number }>>
   >({});
+  const draftPreservingSubmissionsBySessionRef = useRef<
+    Record<string, string[]>
+  >({});
   const cancelPendingDraftStoreWrite = useCallback(
     (targetSessionId: string, targetGeneration?: number) => {
       const pending = pendingDraftStoreWriteRef.current;
@@ -1113,6 +1116,16 @@ export function useChatSessionController({
     pendingDraftStoreWriteRef.current = null;
     useChatStore.getState().setDraft(pending.sessionId, pending.text);
   }, []);
+  const recordDraftPreservingSubmission = useCallback(
+    (targetSessionId: string, text: string) => {
+      const preservedSubmissions =
+        draftPreservingSubmissionsBySessionRef.current[targetSessionId] ?? [];
+      preservedSubmissions.push(text);
+      draftPreservingSubmissionsBySessionRef.current[targetSessionId] =
+        preservedSubmissions.slice(-10);
+    },
+    [],
+  );
   const recordSubmittedDraft = useCallback(
     (targetSessionId: string, text: string) => {
       const pending = pendingDraftStoreWriteRef.current;
@@ -1125,6 +1138,7 @@ export function useChatSessionController({
             ? draftGenerationRef.current
             : null;
       if (generation === null) {
+        recordDraftPreservingSubmission(targetSessionId, text);
         return;
       }
 
@@ -1134,7 +1148,7 @@ export function useChatSessionController({
       submittedDraftsBySessionRef.current[targetSessionId] =
         submittedDrafts.slice(-10);
     },
-    [],
+    [recordDraftPreservingSubmission],
   );
   const takeSubmittedDraftGeneration = useCallback(
     (targetSessionId: string, text: string) => {
@@ -1159,6 +1173,54 @@ export function useChatSessionController({
     },
     [],
   );
+  const takeDraftPreservingSubmission = useCallback(
+    (targetSessionId: string, text: string) => {
+      const preservedSubmissions =
+        draftPreservingSubmissionsBySessionRef.current[targetSessionId];
+      if (!preservedSubmissions?.length) {
+        return false;
+      }
+
+      const submittedIndex = preservedSubmissions.indexOf(text);
+      if (submittedIndex === -1) {
+        return false;
+      }
+
+      preservedSubmissions.splice(submittedIndex, 1);
+      if (preservedSubmissions.length === 0) {
+        delete draftPreservingSubmissionsBySessionRef.current[targetSessionId];
+      }
+      return true;
+    },
+    [],
+  );
+  const moveDraftPreservingSubmissions = useCallback(
+    (fromSessionId: string, toSessionId: string) => {
+      const preservedSubmissions =
+        draftPreservingSubmissionsBySessionRef.current[fromSessionId];
+      if (!preservedSubmissions?.length) {
+        return;
+      }
+
+      const targetSubmissions =
+        draftPreservingSubmissionsBySessionRef.current[toSessionId] ?? [];
+      draftPreservingSubmissionsBySessionRef.current[toSessionId] = [
+        ...targetSubmissions,
+        ...preservedSubmissions,
+      ].slice(-10);
+      delete draftPreservingSubmissionsBySessionRef.current[fromSessionId];
+    },
+    [],
+  );
+  const getDraftSnapshot = useCallback((targetSessionId: string) => {
+    const pending = pendingDraftStoreWriteRef.current;
+    if (pending?.sessionId === targetSessionId) {
+      return pending;
+    }
+
+    const text = useChatStore.getState().draftsBySession[targetSessionId] ?? "";
+    return { sessionId: targetSessionId, text, generation: null };
+  }, []);
   const handleMessageAccepted = useCallback(
     (acceptedSessionId: string, submittedText: string) => {
       const submittedDraftGeneration = takeSubmittedDraftGeneration(
@@ -1171,14 +1233,31 @@ export function useChatSessionController({
           submittedDraftGeneration,
         );
       }
+      const wasSubmittedWithoutDraftOwnership =
+        submittedDraftGeneration === null &&
+        takeDraftPreservingSubmission(acceptedSessionId, submittedText);
+      const draftSnapshot = getDraftSnapshot(acceptedSessionId);
       const hasNewerDraftEdit =
         submittedDraftGeneration !== null &&
         draftGenerationRef.current > submittedDraftGeneration;
+      if (
+        submittedDraftGeneration === null &&
+        !wasSubmittedWithoutDraftOwnership &&
+        draftSnapshot.generation !== null &&
+        draftSnapshot.text === submittedText
+      ) {
+        cancelPendingDraftStoreWrite(
+          acceptedSessionId,
+          draftSnapshot.generation,
+        );
+      }
       onMessageAccepted?.(acceptedSessionId);
       const pendingValue =
         pendingDefaultReasoningEffortBySessionRef.current[acceptedSessionId];
+      const shouldPreserveDraft =
+        hasNewerDraftEdit || wasSubmittedWithoutDraftOwnership;
       if (!pendingValue) {
-        return hasNewerDraftEdit ? false : undefined;
+        return shouldPreserveDraft ? false : undefined;
       }
 
       const queuedSave = reasoningEffortDefaultSaveQueueRef.current
@@ -1203,11 +1282,13 @@ export function useChatSessionController({
         .catch((error) => {
           console.error("Failed to save default reasoning effort:", error);
         });
-      return hasNewerDraftEdit ? false : undefined;
+      return shouldPreserveDraft ? false : undefined;
     },
     [
       cancelPendingDraftStoreWrite,
+      getDraftSnapshot,
       onMessageAccepted,
+      takeDraftPreservingSubmission,
       takeSubmittedDraftGeneration,
     ],
   );
@@ -1537,7 +1618,7 @@ export function useChatSessionController({
             (chatState !== "idle" || isQueuedSendBlocked) &&
             !queue.queuedMessage
           ) {
-            recordSubmittedDraft(sessionId, text);
+            recordDraftPreservingSubmission(sessionId, text);
             queue.enqueue(text, personaId, attachments, sendOptions);
             return true;
           }
@@ -1556,7 +1637,7 @@ export function useChatSessionController({
         (chatState !== "idle" || isQueuedSendBlocked) &&
         !queue.queuedMessage
       ) {
-        recordSubmittedDraft(sessionId, text);
+        recordDraftPreservingSubmission(sessionId, text);
         queue.enqueue(text, personaId, attachments, sendOptions);
         return true;
       }
@@ -1579,7 +1660,7 @@ export function useChatSessionController({
       isQueuedSendBlocked,
       queue,
       readOnly,
-      recordSubmittedDraft,
+      recordDraftPreservingSubmission,
       session?.intent,
       sessionId,
       selectedPersona,
@@ -1734,6 +1815,7 @@ export function useChatSessionController({
     if (!sessionId || !clientSessionId || clientSessionId === sessionId) {
       return;
     }
+    moveDraftPreservingSubmissions(clientSessionId, sessionId);
     const pending = pendingDraftStoreWriteRef.current;
     if (pending?.sessionId !== clientSessionId) {
       return;
@@ -1744,7 +1826,12 @@ export function useChatSessionController({
       generation: pending.generation,
     };
     flushPendingDraftStoreWrite();
-  }, [flushPendingDraftStoreWrite, session?.clientSessionId, sessionId]);
+  }, [
+    flushPendingDraftStoreWrite,
+    moveDraftPreservingSubmissions,
+    session?.clientSessionId,
+    sessionId,
+  ]);
   const handleSkillsChange = useCallback(
     (skills: typeof selectedSkills) => {
       useChatStore

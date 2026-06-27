@@ -512,6 +512,101 @@ describe("useChatSessionController", () => {
     }
   });
 
+  it("preserves an in-progress draft when a queued message drains", async () => {
+    vi.useFakeTimers();
+    try {
+      let acceptCommittedMessage!: (text: string) => void;
+      mockUseChatSendMessage.mockImplementationOnce(
+        (options?: {
+          onMessageAccepted?: (
+            sessionId: string,
+            text: string,
+          ) => boolean | undefined;
+          __sessionId?: string;
+        }) => {
+          acceptCommittedMessage = (text: string) => {
+            const sessionId = options?.__sessionId ?? "session-1";
+            const shouldClearDraft =
+              options?.onMessageAccepted?.(sessionId, text) !== false;
+            if (shouldClearDraft) {
+              useChatStore.getState().clearDraft(sessionId);
+            }
+          };
+        },
+      );
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleDraftChange("message after the queue");
+      });
+      act(() => {
+        result.current.handleSend("queued follow-up");
+      });
+      act(() => {
+        acceptCommittedMessage("queued follow-up");
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        "message after the queue",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a same-text draft pending when a matching queued message drains", async () => {
+    vi.useFakeTimers();
+    try {
+      let acceptCommittedMessage!: (text: string) => void;
+      mockUseChatSendMessage.mockImplementationOnce(
+        (options?: {
+          onMessageAccepted?: (
+            sessionId: string,
+            text: string,
+          ) => boolean | undefined;
+          __sessionId?: string;
+        }) => {
+          acceptCommittedMessage = (text: string) => {
+            const sessionId = options?.__sessionId ?? "session-1";
+            const shouldClearDraft =
+              options?.onMessageAccepted?.(sessionId, text) !== false;
+            if (shouldClearDraft) {
+              useChatStore.getState().clearDraft(sessionId);
+            }
+          };
+        },
+      );
+      mockUseChatRuntime.chatState = "streaming";
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleDraftChange("same text");
+      });
+      act(() => {
+        result.current.handleSend("same text");
+      });
+      const [, , drainQueuedMessage] = latestMessageQueueArgs();
+      act(() => {
+        (drainQueuedMessage as (text: string) => void)("same text");
+      });
+      act(() => {
+        acceptCommittedMessage("same text");
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        "same text",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("flushes a debounced draft to the backend session id when a draft session is promoted", () => {
     vi.useFakeTimers();
     try {

@@ -363,7 +363,6 @@ export function ChatInput({
     !attachmentWorkPending;
   const canSteerCurrentMessage =
     hasComposedMessage &&
-    !hasQueuedMessage &&
     !disabled &&
     !sendDisabled &&
     !attachmentWorkPending &&
@@ -746,15 +745,9 @@ export function ChatInput({
           streamingShortcutPreference.mode,
           event.metaKey || event.ctrlKey,
         );
-        if (action === "steer") {
-          if (canSteerCurrentMessage) {
-            void handleSteerCurrentMessage();
-            return;
-          }
-          if (hasQueuedMessage && !hasDraftContent && canSteerQueuedMessage) {
-            handleSteerQueuedMessage();
-            return;
-          }
+        if (action === "steer" && canSteerCurrentMessage) {
+          void handleSteerCurrentMessage();
+          return;
         }
       }
       void handleSend();
@@ -783,30 +776,13 @@ export function ChatInput({
     if (eventMatchesShortcutCommand(event.nativeEvent, "chat.sendMessage")) {
       event.preventDefault();
       if (isStreaming) {
-        if (
-          !event.metaKey &&
-          !event.ctrlKey &&
-          hasQueuedMessage &&
-          !hasDraftContent &&
-          canSteerQueuedMessage
-        ) {
-          handleSteerQueuedMessage();
-          return;
-        }
-
         const action = getStreamingShortcutAction(
           streamingShortcutPreference.mode,
           event.metaKey,
         );
-        if (action === "steer") {
-          if (canSteerCurrentMessage) {
-            void handleSteerCurrentMessage();
-            return;
-          }
-          if (canSteerQueuedMessage) {
-            handleSteerQueuedMessage();
-            return;
-          }
+        if (action === "steer" && canSteerCurrentMessage) {
+          void handleSteerCurrentMessage();
+          return;
         }
       }
 
@@ -1260,7 +1236,7 @@ export function ChatInput({
                       onClick={handleSteerQueuedMessage}
                       className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
                       aria-label={t("toolbar.steer")}
-                      title={t("toolbar.steerQueuedWithEnter")}
+                      title={t("toolbar.steerQueued")}
                     >
                       <IconCornerDownLeft
                         className="size-3"
