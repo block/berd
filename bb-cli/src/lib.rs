@@ -27,8 +27,9 @@ use serde_json::{Map, Value};
 use crate::bb::auth_storage::stored_session_credential_header_value;
 use crate::bb::org_routing::resolve_org_kgoose_base_url;
 use crate::bb::skills_config::{
-    default_bb_home, default_preferences_path, read_optional_env, read_preferences_file,
-    BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_PROFILE_NAME,
+    default_bb_home, default_preferences_path, normalize_kgoose_service_path, read_optional_env,
+    read_preferences_file, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_KGOOSE_SERVICE_PATH,
+    DEFAULT_PROFILE_NAME,
 };
 use crate::catalog::{load_extensions_catalog, write_extensions_catalog};
 use crate::kgoose::{CallToolResponse, HttpKgooseClient, KgooseClient, KgooseConfig};
@@ -339,6 +340,9 @@ fn apply_builderbot_mode_if_needed(config: &mut KgooseConfig, builderbot_mode: b
         resolve_org_kgoose_base_url(&config.base_url, Some(org), false, &config.service_path)?;
     config.session_credential =
         resolve_kgoose_session_credential(&config.base_url, &config.service_path)?;
+    if config.service_path == DEFAULT_KGOOSE_SERVICE_PATH {
+        config.service_path = normalize_kgoose_service_path("api")?;
+    }
     Ok(())
 }
 

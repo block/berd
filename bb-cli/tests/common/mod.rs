@@ -21,6 +21,8 @@ use serde_json::{json, Value};
 pub const LIST_EXTENSIONS_PATH: &str = "/cash-app/goose/v3/list-extensions";
 pub const LIST_TOOLS_PATH: &str = "/cash-app/goose/v3/list-tools";
 pub const CALL_TOOL_PATH: &str = "/cash-app/goose/v3/call-tool";
+pub const BB_TOOLS_LIST_TOOLS_PATH: &str = "/api/v3/list-tools";
+pub const BB_TOOLS_CALL_TOOL_PATH: &str = "/api/v3/call-tool";
 
 #[derive(Debug, Clone)]
 pub struct RecordedRequest {

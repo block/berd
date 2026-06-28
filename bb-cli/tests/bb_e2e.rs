@@ -14,7 +14,8 @@ use zip::write::SimpleFileOptions;
 
 use common::{
     bb_command, calculate_tool_schema, list_tools_response, output_text, temp_test_dir,
-    write_bb_org_config, write_extensions_catalog, MockResponse, MockServer, LIST_TOOLS_PATH,
+    write_bb_org_config, write_extensions_catalog, MockResponse, MockServer,
+    BB_TOOLS_CALL_TOOL_PATH, BB_TOOLS_LIST_TOOLS_PATH,
 };
 
 // ---------------------------------------------------------------------------
@@ -2010,7 +2011,7 @@ fn bb_tools_help_surfaces_schema_derived_flags() {
     assert!(stdout.contains("--round-up"));
     assert!(stdout.contains("--no-round-up"));
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, LIST_TOOLS_PATH);
+    assert_eq!(requests[0].path, BB_TOOLS_LIST_TOOLS_PATH);
     assert_eq!(requests[0].body["extension_name"], json!("utils"));
 }
 
@@ -2073,6 +2074,8 @@ fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
             .map(String::as_str),
         Some("stored-bb-tools-session")
     );
+    assert_eq!(requests[0].path, BB_TOOLS_LIST_TOOLS_PATH);
+    assert_eq!(requests[1].path, BB_TOOLS_CALL_TOOL_PATH);
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
