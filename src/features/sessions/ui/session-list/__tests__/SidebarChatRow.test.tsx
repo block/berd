@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
@@ -467,6 +467,29 @@ describe("SidebarChatRow", () => {
     expect(
       screen.getByRole("menuitem", { name: /pin chat/i }),
     ).toBeInTheDocument();
+  });
+
+  it("opens the chat options as a cursor-anchored context menu on right-click", async () => {
+    const { container } = render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) {
+      throw new Error("Sidebar chat row was not rendered");
+    }
+
+    fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
+
+    expect(
+      await screen.findByRole("menuitem", { name: /rename/i }),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-slot="context-menu-content"]'),
+    ).toHaveAttribute("data-variant", "inverse");
+    expect(
+      document.querySelector('[data-slot="dropdown-menu-content"]'),
+    ).not.toBeInTheDocument();
   });
 
   it("does not show selection actions in the chat options menu", async () => {
