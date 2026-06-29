@@ -32,6 +32,13 @@ type SidebarLayoutPreference = {
   heightCustomized: boolean;
 };
 
+type SidebarCollapseReason = "manual" | "viewport";
+
+type SidebarCollapseState = {
+  collapsed: boolean;
+  reason: SidebarCollapseReason | null;
+};
+
 function getExpandedSidebarFitWidth(sidebarWidth: number) {
   return (
     sidebarWidth + APP_SHELL_HORIZONTAL_CHROME_WIDTH + MIN_MAIN_CONTENT_WIDTH
@@ -202,9 +209,11 @@ async function syncWindowMinimumSize() {
 
 export function useResizableSidebar() {
   const [initialSidebarLayout] = useState(getInitialSidebarLayout);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
-    shouldCollapseSidebarForViewport(getViewportWidth()),
-  );
+  const [sidebarCollapseState, setSidebarCollapseState] =
+    useState<SidebarCollapseState>(() => {
+      const collapsed = shouldCollapseSidebarForViewport(getViewportWidth());
+      return { collapsed, reason: collapsed ? "viewport" : null };
+    });
   const [viewportWidth, setViewportWidth] = useState(getViewportWidth);
   const [sidebarLayout, setSidebarLayout] = usePersistedState(
     SIDEBAR_LAYOUT_STORAGE_KEY,
@@ -220,6 +229,7 @@ export function useResizableSidebar() {
     viewportWidth,
   );
   const sidebarHeight = sidebarLayout.height;
+  const sidebarCollapsed = sidebarCollapseState.collapsed;
   const patchSidebarLayout = useCallback(
     (patch: Partial<SidebarLayoutPreference>) => {
       setSidebarLayout((layout) => {
@@ -253,11 +263,11 @@ export function useResizableSidebar() {
       console.warn("Failed to resize window before expanding sidebar:", error);
     }
 
-    setSidebarCollapsed(false);
+    setSidebarCollapseState({ collapsed: false, reason: null });
   }, [preferredSidebarWidth]);
 
   const collapseSidebar = useCallback(() => {
-    setSidebarCollapsed(true);
+    setSidebarCollapseState({ collapsed: true, reason: "manual" });
   }, []);
 
   const toggleSidebar = useCallback(() => {
@@ -293,7 +303,7 @@ export function useResizableSidebar() {
             patchSidebarLayout({ width: SIDEBAR_MIN_WIDTH });
           } else {
             shouldCollapse = false;
-            setSidebarCollapsed(false);
+            setSidebarCollapseState({ collapsed: false, reason: null });
             patchSidebarLayout({ width: clampSidebarWidth(newWidth) });
           }
         }
@@ -309,7 +319,9 @@ export function useResizableSidebar() {
 
       const cleanup = () => {
         setIsResizing(false);
-        if (shouldCollapse) setSidebarCollapsed(true);
+        if (shouldCollapse) {
+          setSidebarCollapseState({ collapsed: true, reason: "manual" });
+        }
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", cleanup);
         window.removeEventListener("blur", cleanup);
@@ -360,7 +372,9 @@ export function useResizableSidebar() {
           error,
         );
       })
-      .finally(() => setSidebarCollapsed(false));
+      .finally(() =>
+        setSidebarCollapseState({ collapsed: false, reason: null }),
+      );
   }, [patchSidebarLayout]);
 
   const handleHeightResizeDoubleClick = useCallback(() => {
@@ -389,9 +403,25 @@ export function useResizableSidebar() {
           ? currentViewportWidth
           : nextViewportWidth,
       );
-      setSidebarCollapsed((currentCollapsed) => {
-        if (currentCollapsed) return currentCollapsed;
-        return shouldCollapseSidebarForViewport(nextViewportWidth);
+      setSidebarCollapseState((currentState) => {
+        const shouldCollapse =
+          shouldCollapseSidebarForViewport(nextViewportWidth);
+
+        if (shouldCollapse) {
+          return currentState.collapsed
+            ? currentState
+            : { collapsed: true, reason: "viewport" };
+        }
+
+        if (currentState.collapsed && currentState.reason === "viewport") {
+          return { collapsed: false, reason: null };
+        }
+
+        if (!currentState.collapsed && currentState.reason !== null) {
+          return { collapsed: false, reason: null };
+        }
+
+        return currentState;
       });
 
       if (!markResizeActive) return;

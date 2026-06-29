@@ -301,6 +301,53 @@ describe("useResizableSidebar", () => {
     });
   });
 
+  it("reopens when a viewport-forced collapse has room again", async () => {
+    setWindowWidth(740);
+    const { result } = renderHook(() => useResizableSidebar());
+
+    await waitFor(() => {
+      expect(result.current.isCollapsed).toBe(true);
+    });
+
+    act(() => {
+      setWindowWidth(1024);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.isCollapsed).toBe(false);
+    });
+    expect(result.current.sidebarOuterWidth).toBeGreaterThan(0);
+  });
+
+  it("keeps a manually collapsed sidebar closed when the window widens", async () => {
+    const { result } = renderHook(() => useResizableSidebar());
+
+    act(() => {
+      result.current.toggleCollapse();
+    });
+
+    expect(result.current.isCollapsed).toBe(true);
+
+    act(() => {
+      setWindowWidth(740);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.isCollapsed).toBe(true);
+    });
+
+    act(() => {
+      setWindowWidth(1024);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.isCollapsed).toBe(true);
+    });
+  });
+
   it("treats OS window resize as transient resizing state", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useResizableSidebar());
