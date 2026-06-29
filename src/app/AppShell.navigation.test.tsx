@@ -291,6 +291,9 @@ vi.mock("./ui/AppShellContent", () => ({
     onExitSearch,
     onArchiveChat,
     onOpenAgent,
+    onTagHomeComposerAgent,
+    onTagHomeComposerProject,
+    onTagHomeComposerSkill,
     onSelectSession,
   }) => {
     const activeView = targetLocation.view;
@@ -414,6 +417,38 @@ vi.mock("./ui/AppShellContent", () => ({
           onClick={() => onOpenAgent?.("persona-unresolved")}
         >
           Start chat with unresolved agent
+        </button>
+        <button
+          type="button"
+          onClick={() => onTagHomeComposerAgent?.("persona-resolves")}
+        >
+          Tag home composer agent
+        </button>
+        <button
+          type="button"
+          onClick={() => onTagHomeComposerProject?.("project-1")}
+        >
+          Tag home composer project
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onTagHomeComposerSkill?.({
+              id: "global:/Users/test/.agents/skills/code-review/SKILL.md",
+              name: "code-review",
+              description: "Review code before PR",
+              instructions: "",
+              path: "/Users/test/.agents/skills/code-review",
+              fileLocation: "/Users/test/.agents/skills/code-review/SKILL.md",
+              sourceKind: "global",
+              sourceLabel: "Personal",
+              projectLinks: [],
+              readonly: false,
+              color: null,
+            })
+          }
+        >
+          Tag home composer skill
         </button>
         <button
           type="button"
@@ -2323,6 +2358,141 @@ describe("AppShell global navigation", () => {
         },
       );
     });
+  });
+
+  it("tags a Home agent starter in the composer instead of opening a blank chat", async () => {
+    useAgentStore.setState({
+      selectedProvider: "goose",
+      providers: [{ id: "goose", label: "Goose" }],
+      personas: [
+        {
+          id: "persona-resolves",
+          displayName: "Reviewer",
+          systemPrompt: "Review code.",
+          provider: "goose",
+          model: "goose-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer agent" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+      expect(screen.getByText("Reviewer")).toBeInTheDocument();
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("tags a Home skill starter in the composer instead of opening a blank chat", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer skill" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+      expect(screen.getByText("code-review")).toBeInTheDocument();
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("tags a Home project starter in the composer instead of opening a blank chat", async () => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-1",
+          path: "/tmp/project.yaml",
+          name: "Project One",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "",
+          workingDirs: ["/workspace/project"],
+          useWorktrees: false,
+          order: 0,
+          archivedAt: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: null,
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer project" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("applies later Home starters after consuming the previous starter request", async () => {
+    useAgentStore.setState({
+      selectedProvider: "goose",
+      providers: [{ id: "goose", label: "Goose" }],
+      personas: [
+        {
+          id: "persona-resolves",
+          displayName: "Reviewer",
+          systemPrompt: "Review code.",
+          provider: "goose",
+          model: "goose-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-1",
+          path: "/tmp/project.yaml",
+          name: "Project One",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "",
+          workingDirs: ["/workspace/project"],
+          useWorktrees: false,
+          order: 0,
+          archivedAt: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: null,
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer agent" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Reviewer")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer project" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Project One")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
   it("opens search with Cmd+K", async () => {

@@ -75,6 +75,7 @@ function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
 function renderWidget(
   overrides: {
     onStartProjectChat?: (projectId: string) => void;
+    onTagProjectInComposer?: (projectId: string) => void;
     renderPaused?: boolean;
     shouldIgnoreActivation?: () => boolean;
   } = {},
@@ -176,6 +177,44 @@ describe("ProjectArtifactWidget", () => {
     );
 
     expect(onStartProjectChat).toHaveBeenCalledWith("project-1");
+  });
+
+  it("tags the project in the composer when the tag handler is available", () => {
+    const onStartProjectChat = vi.fn();
+    const onTagProjectInComposer = vi.fn();
+    renderWidget({ onStartProjectChat, onTagProjectInComposer });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start chat in Alpha Project" }),
+    );
+
+    expect(onTagProjectInComposer).toHaveBeenCalledWith("project-1");
+    expect(onStartProjectChat).not.toHaveBeenCalled();
+  });
+
+  it("does not bubble composer-tagging clicks to the widget frame", () => {
+    const onTagProjectInComposer = vi.fn();
+    const onFrameClick = vi.fn();
+    render(
+      <fieldset
+        aria-label="Project widget frame"
+        onClick={onFrameClick}
+        onKeyDown={() => {}}
+      >
+        <ProjectArtifactWidget
+          instance={instance}
+          onUpdateState={vi.fn()}
+          onTagProjectInComposer={onTagProjectInComposer}
+        />
+      </fieldset>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start chat in Alpha Project" }),
+    );
+
+    expect(onTagProjectInComposer).toHaveBeenCalledWith("project-1");
+    expect(onFrameClick).not.toHaveBeenCalled();
   });
 
   it("suppresses activation when the drag guard is active", () => {

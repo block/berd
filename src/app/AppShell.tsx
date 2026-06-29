@@ -127,6 +127,7 @@ import {
   GlobalComposerPill,
   type GlobalComposerHandoffRect,
   type GlobalComposerModelSelection,
+  type GlobalComposerStarterRequest,
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
@@ -409,6 +410,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     useState(0);
   const [globalComposerPlacement, setGlobalComposerPlacement] =
     useState<GlobalComposerPlacement>("docked");
+  const [globalComposerStarterRequest, setGlobalComposerStarterRequest] =
+    useState<GlobalComposerStarterRequest | null>(null);
+  const globalComposerStarterRequestIdRef = useRef(0);
   const [chatComposerHandoffRequest, setChatComposerHandoffRequest] =
     useState(0);
   const [chatComposerHandoffSessionId, setChatComposerHandoffSessionId] =
@@ -1759,6 +1763,61 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       });
     },
     [createNewProjectDraft, createNewTab, projects, guardAppNavigation],
+  );
+
+  const primeGlobalComposerFromHomeStarter = useCallback(
+    (request: Omit<GlobalComposerStarterRequest, "id">) => {
+      guardAppNavigation(() => {
+        clearGlobalComposerHandoffTimer();
+        setChatComposerHandoffSessionId(null);
+        setGlobalComposerHandoffSourceRect(null);
+        setGlobalComposerHandoffTargetRect(null);
+        setGlobalComposerPlacement("docked");
+        globalComposerStarterRequestIdRef.current += 1;
+        setGlobalComposerStarterRequest({
+          ...request,
+          id: globalComposerStarterRequestIdRef.current,
+        });
+        setGlobalComposerFocusRequest((focusRequest) => focusRequest + 1);
+      });
+    },
+    [clearGlobalComposerHandoffTimer, guardAppNavigation],
+  );
+
+  const handleTagHomeComposerSkill = useCallback(
+    (skill: SkillInfo) => {
+      primeGlobalComposerFromHomeStarter({
+        skill: toChatSkillDraft(skill),
+      });
+    },
+    [primeGlobalComposerFromHomeStarter],
+  );
+
+  const handleTagHomeComposerAgent = useCallback(
+    (agentId: string) => {
+      primeGlobalComposerFromHomeStarter({
+        personaId: agentId,
+      });
+    },
+    [primeGlobalComposerFromHomeStarter],
+  );
+
+  const handleTagHomeComposerProject = useCallback(
+    (projectId: string) => {
+      primeGlobalComposerFromHomeStarter({
+        projectId,
+      });
+    },
+    [primeGlobalComposerFromHomeStarter],
+  );
+
+  const handleGlobalComposerStarterRequestConsumed = useCallback(
+    (requestId: number) => {
+      setGlobalComposerStarterRequest((current) =>
+        current?.id === requestId ? null : current,
+      );
+    },
+    [],
   );
 
   const handleStartChatWithAgent = useCallback(
@@ -3303,6 +3362,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onOpenAgent={handleStartChatWithAgent}
               onOpenAutomation={handleOpenAutomationFromSearch}
               onOpenSkill={handleStartChatWithSkill}
+              onTagHomeComposerAgent={handleTagHomeComposerAgent}
+              onTagHomeComposerProject={handleTagHomeComposerProject}
+              onTagHomeComposerSkill={handleTagHomeComposerSkill}
               onHydratePinnedChatSessions={hydratePinnedChatSessions}
               onStartProviderTroubleshootingChat={
                 handleStartProviderTroubleshootingChat
@@ -3336,6 +3398,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                 mainLeftOffsetPx={sidebarDockedOuterWidth}
                 handoffSourceRect={globalComposerHandoffSourceRect}
                 handoffTargetRect={globalComposerHandoffTargetRect}
+                starterRequest={globalComposerStarterRequest}
+                onStarterRequestConsumed={
+                  handleGlobalComposerStarterRequestConsumed
+                }
                 reasoningEffort={{
                   config: homeSession?.reasoningEffort,
                   onChange: handleGlobalComposerReasoningEffortChange,

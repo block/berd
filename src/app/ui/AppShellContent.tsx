@@ -101,6 +101,9 @@ interface AppShellContentProps {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
+  onTagHomeComposerAgent: (agentId: string) => void;
+  onTagHomeComposerProject: (projectId: string) => void;
+  onTagHomeComposerSkill: (skill: SkillInfo) => void;
   onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
@@ -155,6 +158,9 @@ export function AppShellContent({
   onOpenAgent,
   onOpenAutomation,
   onOpenSkill,
+  onTagHomeComposerAgent,
+  onTagHomeComposerProject,
+  onTagHomeComposerSkill,
   onHydratePinnedChatSessions,
   onStartProviderTroubleshootingChat,
   onReturnToAgentDraft,
@@ -182,6 +188,9 @@ export function AppShellContent({
       onOpenProject={onStartChatFromProjectId}
       onOpenAgent={onOpenAgent}
       onOpenSkill={onOpenSkill}
+      onTagAgentInComposer={onTagHomeComposerAgent}
+      onTagProjectInComposer={onTagHomeComposerProject}
+      onTagSkillInComposer={onTagHomeComposerSkill}
       onSelectSession={onSelectSession}
       onStartProjectChat={onStartProjectChat}
       onCreatePersona={onCreatePersona}

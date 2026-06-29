@@ -58,6 +58,9 @@ export interface WidgetRenderProps {
   onOpenProject?: (projectId: string) => void;
   onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;
+  onTagAgentInComposer?: (agentId: string) => void;
+  onTagProjectInComposer?: (projectId: string) => void;
+  onTagSkillInComposer?: (skill: SkillInfo) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
@@ -97,6 +100,9 @@ export interface WidgetNavigationHandlers {
   onOpenProject?: (projectId: string) => void;
   onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;
+  onTagAgentInComposer?: (agentId: string) => void;
+  onTagProjectInComposer?: (projectId: string) => void;
+  onTagSkillInComposer?: (skill: SkillInfo) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;

@@ -131,6 +131,7 @@ export const SkillPinWidget = memo(function SkillPinWidget({
   instance,
   shouldIgnoreActivation,
   onOpenSkill,
+  onTagSkillInComposer,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const skillId = getSkillId(instance.state);
@@ -149,7 +150,7 @@ export const SkillPinWidget = memo(function SkillPinWidget({
 
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (skill) {
-      onOpenSkill?.(skill);
+      (onTagSkillInComposer ?? onOpenSkill)?.(skill);
     }
   });
 

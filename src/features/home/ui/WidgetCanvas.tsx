@@ -299,6 +299,9 @@ export function WidgetCanvas({
   recenterTitle,
   viewportLeftOcclusionPx = 0,
   onOpenAgent,
+  onTagAgentInComposer,
+  onTagProjectInComposer,
+  onTagSkillInComposer,
   onOpenProject,
   onOpenSkill,
   onSelectSession,
@@ -655,6 +658,9 @@ export function WidgetCanvas({
                   gestureHandlers={dragSuppression.frameHandlers}
                   onVisualLiftReset={handleVisualLiftReset}
                   onOpenAgent={onOpenAgent}
+                  onTagAgentInComposer={onTagAgentInComposer}
+                  onTagProjectInComposer={onTagProjectInComposer}
+                  onTagSkillInComposer={onTagSkillInComposer}
                   onOpenProject={onOpenProject}
                   onOpenSkill={onOpenSkill}
                   onSelectSession={onSelectSession}

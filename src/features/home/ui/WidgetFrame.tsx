@@ -55,6 +55,9 @@ export function WidgetFrame({
   gestureHandlers = {},
   onVisualLiftReset = () => {},
   onOpenAgent,
+  onTagAgentInComposer,
+  onTagProjectInComposer,
+  onTagSkillInComposer,
   onOpenProject,
   onOpenSkill,
   onSelectSession,
@@ -161,6 +164,9 @@ export function WidgetFrame({
           onUpdateState={handleUpdateState}
           shouldIgnoreActivation={shouldIgnoreActivation}
           onOpenAgent={onOpenAgent}
+          onTagAgentInComposer={onTagAgentInComposer}
+          onTagProjectInComposer={onTagProjectInComposer}
+          onTagSkillInComposer={onTagSkillInComposer}
           onOpenProject={onOpenProject}
           onOpenSkill={onOpenSkill}
           onSelectSession={onSelectSession}

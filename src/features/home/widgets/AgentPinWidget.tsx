@@ -19,6 +19,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   canvasGestureActive = false,
   shouldIgnoreActivation,
   onOpenAgent,
+  onTagAgentInComposer,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const personas = useAgentStore((state) => state.personas);
@@ -34,7 +35,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   const avatarMedia = useAvatarMedia(persona?.avatar);
   const fallbackIconSrc = resolveAgentIcon(personaId);
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () =>
-    onOpenAgent?.(personaId),
+    (onTagAgentInComposer ?? onOpenAgent)?.(personaId),
   );
   const avatarHostRef = useRef<HTMLDivElement | null>(null);
   const captureGestureSnapshot = useCallback(() => {

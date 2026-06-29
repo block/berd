@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEventHandler,
   type PointerEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,6 +51,7 @@ export function ProjectArtifactWidget({
   widgetResizePreviewActive = false,
   renderPaused = false,
   shouldIgnoreActivation,
+  onTagProjectInComposer,
   onStartProjectChat,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
@@ -119,9 +121,18 @@ export function ProjectArtifactWidget({
     captureGestureSnapshot,
   );
 
-  const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
-    if (project) onStartProjectChat?.(project.id);
-  });
+  const handleGuardedClick = useWidgetActivationGuard(
+    shouldIgnoreActivation,
+    () => {
+      if (project) (onTagProjectInComposer ?? onStartProjectChat)?.(project.id);
+    },
+  );
+  const handleClick: MouseEventHandler<HTMLButtonElement> = (event) => {
+    if (onTagProjectInComposer) {
+      event.stopPropagation();
+    }
+    handleGuardedClick(event);
+  };
   const rememberPointerPosition = (event: PointerEvent<HTMLButtonElement>) => {
     lastPointerPosition.current = {
       time: event.timeStamp,

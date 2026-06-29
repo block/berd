@@ -20,6 +20,9 @@ export interface HomeViewProps {
   onOpenProject?: (projectId: string) => void;
   onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;
+  onTagAgentInComposer?: (agentId: string) => void;
+  onTagProjectInComposer?: (projectId: string) => void;
+  onTagSkillInComposer?: (skill: SkillInfo) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
@@ -35,6 +38,9 @@ export function HomeView({
   onOpenProject,
   onOpenSkill,
   onOpenAgent,
+  onTagAgentInComposer,
+  onTagProjectInComposer,
+  onTagSkillInComposer,
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
@@ -187,6 +193,9 @@ export function HomeView({
           onOpenProject={onOpenProject}
           onOpenSkill={onOpenSkill}
           onOpenAgent={onOpenAgent}
+          onTagAgentInComposer={onTagAgentInComposer}
+          onTagProjectInComposer={onTagProjectInComposer}
+          onTagSkillInComposer={onTagSkillInComposer}
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
           onOpenAutomation={onOpenAutomation}

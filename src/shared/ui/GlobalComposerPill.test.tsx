@@ -459,6 +459,56 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("tags a starter persona in the composer", async () => {
+    setPersonas();
+
+    renderGlobalComposer(vi.fn(), {
+      starterRequest: { id: 1, personaId: "persona-1" },
+    });
+
+    expect(await screen.findByText("Research Scout")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  it("tags a starter skill in the composer", async () => {
+    renderGlobalComposer(vi.fn(), {
+      starterRequest: {
+        id: 1,
+        skill: {
+          id: "global:/Users/test/.agents/skills/code-review/SKILL.md",
+          name: "code-review",
+          description: "Review code before PR",
+          sourceLabel: "Personal",
+        },
+      },
+    });
+
+    expect(await screen.findByText("code-review")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  it("tags a starter project in the composer", async () => {
+    renderGlobalComposer(vi.fn(), {
+      starterRequest: { id: 1, projectId: "project-1" },
+    });
+
+    expect(await screen.findByText("Project One")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  it("reports starter requests as consumed after applying them", async () => {
+    setPersonas();
+    const onStarterRequestConsumed = vi.fn();
+
+    renderGlobalComposer(vi.fn(), {
+      starterRequest: { id: 7, personaId: "persona-1" },
+      onStarterRequestConsumed,
+    });
+
+    expect(await screen.findByText("Research Scout")).toBeInTheDocument();
+    expect(onStarterRequestConsumed).toHaveBeenCalledWith(7);
+  });
+
   it("does not leak a previous persona's provider/model when switching to a provider-less persona", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({

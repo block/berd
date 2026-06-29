@@ -49,7 +49,11 @@ function instance(skillId: string): WidgetInstance {
   };
 }
 
-function renderPin(skillId: string, onOpenSkill = vi.fn()) {
+function renderPin(
+  skillId: string,
+  onOpenSkill = vi.fn(),
+  onTagSkillInComposer?: (skill: SkillInfo) => void,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -73,6 +77,7 @@ function renderPin(skillId: string, onOpenSkill = vi.fn()) {
         instance={instance(skillId)}
         onUpdateState={vi.fn()}
         onOpenSkill={onOpenSkill}
+        onTagSkillInComposer={onTagSkillInComposer}
       />,
       { wrapper: Wrapper },
     ),
@@ -122,6 +127,26 @@ describe("SkillPinWidget", () => {
         sourceLabel: "Personal",
       }),
     );
+  });
+
+  it("tags the skill in the composer instead of opening the skill directly when requested", async () => {
+    const onOpenSkill = vi.fn();
+    const onTagSkillInComposer = vi.fn();
+    renderPin(
+      "global:/Users/tulsi/.agents/skills/agent-browser",
+      onOpenSkill,
+      onTagSkillInComposer,
+    );
+
+    const button = await screen.findByRole("button", {
+      name: "Start chat with agent-browser",
+    });
+    fireEvent.click(button);
+
+    expect(onTagSkillInComposer).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "agent-browser" }),
+    );
+    expect(onOpenSkill).not.toHaveBeenCalled();
   });
 
   it("refreshes the shared skill query when skills change", async () => {

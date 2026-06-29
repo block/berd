@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,7 +51,13 @@ function persona(overrides: Partial<Persona> = {}): Persona {
   };
 }
 
-function renderPin() {
+function renderPin({
+  onOpenAgent = vi.fn(),
+  onTagAgentInComposer,
+}: {
+  onOpenAgent?: (agentId: string) => void;
+  onTagAgentInComposer?: (agentId: string) => void;
+} = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -69,7 +75,8 @@ function renderPin() {
     <AgentPinWidget
       instance={instance}
       onUpdateState={vi.fn()}
-      onOpenAgent={vi.fn()}
+      onOpenAgent={onOpenAgent}
+      onTagAgentInComposer={onTagAgentInComposer}
     />,
     { wrapper: Wrapper },
   );
@@ -157,5 +164,18 @@ describe("AgentPinWidget", () => {
     expect(label).toHaveTextContent("Agent One");
     expect(label).toHaveClass("opacity-100");
     expect(label).not.toHaveClass("opacity-0", "group-hover:opacity-100");
+  });
+
+  it("tags the agent in the composer instead of opening the agent directly when requested", () => {
+    const onOpenAgent = vi.fn();
+    const onTagAgentInComposer = vi.fn();
+    renderPin({ onOpenAgent, onTagAgentInComposer });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start chat with Agent One" }),
+    );
+
+    expect(onTagAgentInComposer).toHaveBeenCalledWith("agent-1");
+    expect(onOpenAgent).not.toHaveBeenCalled();
   });
 });

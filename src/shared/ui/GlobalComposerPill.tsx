@@ -76,6 +76,13 @@ export interface GlobalComposerHandoffRect {
   height: number;
 }
 
+export interface GlobalComposerStarterRequest {
+  id: number;
+  personaId?: string | null;
+  projectId?: string | null;
+  skill?: ChatSkillDraft;
+}
+
 interface GlobalComposerPillProps {
   focusRequest?: number;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
@@ -94,6 +101,8 @@ interface GlobalComposerPillProps {
   mainLeftOffsetPx?: number;
   handoffSourceRect?: GlobalComposerHandoffRect | null;
   handoffTargetRect?: GlobalComposerHandoffRect | null;
+  starterRequest?: GlobalComposerStarterRequest | null;
+  onStarterRequestConsumed?: (requestId: number) => void;
 }
 
 interface ModelSelection {
@@ -175,6 +184,8 @@ export function GlobalComposerPill({
   mainLeftOffsetPx = 0,
   handoffSourceRect,
   handoffTargetRect,
+  starterRequest = null,
+  onStarterRequestConsumed,
 }: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
   const { providers, providersLoading, selectedProvider, setSelectedProvider } =
@@ -206,6 +217,7 @@ export function GlobalComposerPill({
   const lastFocusRequestRef = useRef(
     placement === "centered" ? 0 : focusRequest,
   );
+  const lastStarterRequestIdRef = useRef(0);
   const [previousSuggestedPersonaId, setPreviousSuggestedPersonaId] = useState<
     string | null
   >(suggestedPersonaId);
@@ -402,6 +414,41 @@ export function GlobalComposerPill({
     lastFocusRequestRef.current = focusRequest;
     textareaRef.current?.focus();
   }, [focusRequest]);
+
+  useEffect(() => {
+    if (
+      !starterRequest ||
+      starterRequest.id <= lastStarterRequestIdRef.current
+    ) {
+      if (starterRequest) {
+        onStarterRequestConsumed?.(starterRequest.id);
+      }
+      return;
+    }
+
+    lastStarterRequestIdRef.current = starterRequest.id;
+    if (starterRequest.personaId !== undefined) {
+      setSelectedPersonaId(starterRequest.personaId);
+      personaSelectionSourceRef.current = starterRequest.personaId
+        ? "user"
+        : "none";
+      userTouchedRoutePersonaRef.current = true;
+      personaOverrideUserOverrideForRef.current = null;
+    }
+    if (starterRequest.projectId !== undefined) {
+      setSelectedProjectId(starterRequest.projectId);
+    }
+    const skill = starterRequest.skill;
+    if (skill) {
+      setSelectedSkills((current) =>
+        current.some((selected) => selected.id === skill.id)
+          ? current
+          : [...current, skill],
+      );
+    }
+    textareaRef.current?.focus();
+    onStarterRequestConsumed?.(starterRequest.id);
+  }, [onStarterRequestConsumed, starterRequest]);
 
   const handleRemoveSelectedSkill = useCallback((skillId: string) => {
     setSelectedSkills((current) =>
@@ -924,7 +971,7 @@ export function GlobalComposerPill({
         </div>
       ) : null}
       {(selectedPersona || selectedSkills.length > 0) && (
-        <div className="px-2">
+        <div className="px-2 pt-1">
           <ChatInputSelectionChips
             personas={selectedPersona ? [selectedPersona] : []}
             activePersonaId={selectedPersona?.id ?? null}
