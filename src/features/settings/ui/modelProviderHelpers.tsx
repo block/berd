@@ -4,13 +4,6 @@ import type {
   ProviderSetupMethod,
 } from "@/shared/types/providers";
 
-export const MAX_SETUP_OUTPUT_LINES = 8;
-
-export interface SetupOutputLine {
-  id: number;
-  text: string;
-}
-
 export function getDefaultFieldValue(field: ProviderField): ProviderFieldValue {
   return {
     key: field.key,

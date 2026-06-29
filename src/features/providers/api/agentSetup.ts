@@ -3,59 +3,96 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type { FixType } from "@/shared/api/doctor";
 
-interface AgentSetupOutput {
+// The backend (`src-tauri/src/commands/agent_setup.rs`) is the source of truth
+// for an agent provider's install / update / auth progress. The frontend only
+// kicks an operation off (`startAgentSetup`), observes it (`onAgentSetupState`
+// + `listAgentSetupStatus` rehydration), and clears the terminal entry it
+// consumes (`clearAgentSetupStatus`). This is what lets progress survive
+// navigation *and* a full window reload.
+
+export type AgentSetupAction = "install" | "update" | "auth";
+
+export type AgentSetupPhase =
+  | "idle"
+  | "checking"
+  | "installing"
+  | "authenticating";
+
+export type AgentSetupStatus = "running" | "succeeded" | "failed";
+
+// One provider's in-flight (or just-finished) setup operation. Mirrors the
+// Rust `SetupOperation` (camelCase serde); `updatedAtMs` is backend-only GC
+// bookkeeping the UI ignores.
+export interface AgentSetupOperation {
+  action: AgentSetupAction;
+  phase: AgentSetupPhase;
+  status: AgentSetupStatus;
+  output: string[];
+  error: string | null;
+}
+
+export interface AgentSetupUpdateCommand {
+  // `'updateMain'` or `'updateBridge'`, paired with the readout's command.
+  fixType: Extract<FixType, "updateMain" | "updateBridge">;
+  command: string;
+}
+
+// The execution recipe captured at click time. The card derives this from the
+// doctor report's actionable readouts, so the backend never has to re-derive
+// them while still running the chain autonomously (survives reload).
+export interface AgentSetupPlan {
+  // The install recipe to seed the install loop with, or null for a pure
+  // update / auth.
+  installFixType: Extract<FixType, "command" | "bridge"> | null;
+  updateCommands: AgentSetupUpdateCommand[];
+  // Whether the backend probes PATH after the fix to confirm the agent landed.
+  // `hasBinary && !isBuiltIn`: a built-in or binary-less provider has nothing to
+  // resolve on disk, so the backend skips verification and takes a clean run as
+  // success (the readiness derivation that drives this stays here in the card).
+  verifyInstall: boolean;
+}
+
+interface AgentSetupStateEvent {
   providerId: string;
-  line: string;
+  operation: AgentSetupOperation;
 }
 
-export async function checkAgentInstalled(
+// Kick off (idempotently) a provider's setup operation. Returns the seeded
+// snapshot; if one is already running for this provider the backend no-ops and
+// returns the live snapshot.
+export async function startAgentSetup(
   providerId: string,
-): Promise<boolean> {
-  return invoke("check_agent_installed", { providerId });
+  action: AgentSetupAction,
+  plan: AgentSetupPlan,
+): Promise<AgentSetupOperation> {
+  return invoke("start_agent_setup", { providerId, action, plan });
 }
 
-/// Install a missing agent component. `fixType` selects which recipe runs:
-/// `'command'` (the default) installs the agent's own CLI, `'bridge'` installs
-/// its ACP adapter. A bridge-missing check reports `fixType="bridge"`, so the
-/// serial fix chain forwards that here instead of always installing the CLI.
-export async function installAgent(
+export async function getAgentSetupStatus(
   providerId: string,
-  fixType: FixType = "command",
-): Promise<void> {
-  return invoke("install_agent", { providerId, fixType });
+): Promise<AgentSetupOperation | null> {
+  return invoke("get_agent_setup_status", { providerId });
 }
 
-export async function authenticateAgent(providerId: string): Promise<void> {
-  return invoke("authenticate_agent", { providerId });
+// One call rehydrates every card on mount — cheaper than N `get`s when the
+// providers screen mounts many cards.
+export async function listAgentSetupStatus(): Promise<
+  [string, AgentSetupOperation][]
+> {
+  return invoke("list_agent_setup_status");
 }
 
-/// The install recipe the agent still needs after the last install, or null.
-/// Drives runInstall's install loop so a from-scratch two-binary agent installs
-/// its CLI *and* its ACP bridge in one click instead of needing a second press.
-export async function nextAgentInstallFix(
-  providerId: string,
-): Promise<FixType | null> {
-  return invoke("next_agent_install_fix", { providerId });
+export async function clearAgentSetupStatus(providerId: string): Promise<void> {
+  return invoke("clear_agent_setup_status", { providerId });
 }
 
-/// Run a per-readout source-aware update command for an agent. `fixType` is
-/// `'updateMain'` or `'updateBridge'` and `commandOverride` is the readout's
-/// `updateCommand` (e.g. `npm install -g <pkg>@latest`).
-export async function updateAgent(
-  providerId: string,
-  fixType: FixType,
-  commandOverride: string,
-): Promise<void> {
-  return invoke("update_agent", { providerId, fixType, commandOverride });
-}
-
-export function onAgentSetupOutput(
-  providerId: string,
-  callback: (line: string) => void,
+// Subscribe to the single per-change snapshot event. Each event carries the
+// full bounded operation, so the store replaces its view wholesale (no
+// incremental merge to get wrong).
+export function onAgentSetupState(
+  callback: (providerId: string, operation: AgentSetupOperation) => void,
 ): Promise<UnlistenFn> {
-  return listen<AgentSetupOutput>("agent-setup:output", (event) => {
-    if (event.payload.providerId === providerId) {
-      callback(event.payload.line);
-    }
+  return listen<AgentSetupStateEvent>("agent-setup:state", (event) => {
+    callback(event.payload.providerId, event.payload.operation);
   });
 }

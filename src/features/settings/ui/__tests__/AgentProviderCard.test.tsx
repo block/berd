@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,24 +7,30 @@ import { I18nProvider } from "@/shared/i18n";
 import { AgentProviderCard } from "../AgentProviderCard";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { DoctorCheck } from "@/shared/api/doctor";
+import type { AgentSetupOperation } from "@/features/providers/api/agentSetup";
+import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
 import enSettings from "@/shared/i18n/locales/en/settings.json";
 import { AGENT_SETUP_FAILURE_SIMULATION_KEY } from "@/features/providers/lib/agentSetupFailureSimulation";
 
-const checkAgentInstalled = vi.fn();
-const installAgent = vi.fn();
-const authenticateAgent = vi.fn();
-const updateAgent = vi.fn();
-const onAgentSetupOutput = vi.fn();
-const nextAgentInstallFix = vi.fn();
+// Setup progress is now backend-owned: the card kicks an operation off through
+// the store (`startAgentSetup`) and renders the snapshot the store mirrors from
+// `agent-setup:state`. The multi-step install loop / update ordering / verify
+// chain itself lives in Rust (`agent_setup.rs` unit tests cover its
+// transitions), so these tests assert the *plan* the card builds and the view
+// it renders from the store, not the in-card orchestration that used to exist.
+const startAgentSetup = vi.fn();
+const getAgentSetupStatus = vi.fn();
+const listAgentSetupStatus = vi.fn();
+const clearAgentSetupStatus = vi.fn();
+const onAgentSetupState = vi.fn();
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
-  checkAgentInstalled: (...args: unknown[]) => checkAgentInstalled(...args),
-  installAgent: (...args: unknown[]) => installAgent(...args),
-  authenticateAgent: (...args: unknown[]) => authenticateAgent(...args),
-  updateAgent: (...args: unknown[]) => updateAgent(...args),
-  onAgentSetupOutput: (...args: unknown[]) => onAgentSetupOutput(...args),
-  nextAgentInstallFix: (...args: unknown[]) => nextAgentInstallFix(...args),
+  startAgentSetup: (...args: unknown[]) => startAgentSetup(...args),
+  getAgentSetupStatus: (...args: unknown[]) => getAgentSetupStatus(...args),
+  listAgentSetupStatus: (...args: unknown[]) => listAgentSetupStatus(...args),
+  clearAgentSetupStatus: (...args: unknown[]) => clearAgentSetupStatus(...args),
+  onAgentSetupState: (...args: unknown[]) => onAgentSetupState(...args),
 }));
 
 const rerunDoctorReport = vi.fn();
@@ -35,6 +41,37 @@ vi.mock("@/shared/api/useDoctorReport", () => ({
   invalidateDoctorReport: (...args: unknown[]) =>
     invalidateDoctorReport(...args),
 }));
+
+function makeOperation(
+  overrides: Partial<AgentSetupOperation> = {},
+): AgentSetupOperation {
+  return {
+    action: "install",
+    phase: "installing",
+    status: "running",
+    output: [],
+    error: null,
+    ...overrides,
+  };
+}
+
+// Drive the store the way the backend's `agent-setup:state` event would.
+function emitOperation(providerId: string, operation: AgentSetupOperation) {
+  act(() => {
+    useAgentSetupStore.getState().setOperation(providerId, operation);
+  });
+}
+
+// `startSetup` optimistically mirrors the backend's seeded running snapshot.
+// Wait for that to land before emitting a terminal state, so the later
+// `agent-setup:state` event isn't clobbered by the in-flight optimistic write.
+async function waitForRunning(providerId: string) {
+  await waitFor(() =>
+    expect(useAgentSetupStore.getState().getStatus(providerId)?.status).toBe(
+      "running",
+    ),
+  );
+}
 
 function renderCard(ui: ReactElement) {
   const queryClient = new QueryClient({
@@ -100,13 +137,15 @@ describe("AgentProviderCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.removeItem(AGENT_SETUP_FAILURE_SIMULATION_KEY);
-    checkAgentInstalled.mockResolvedValue(false);
-    onAgentSetupOutput.mockResolvedValue(vi.fn());
+    // The backend seeds a running snapshot and returns it; the store mirrors it.
+    startAgentSetup.mockResolvedValue(makeOperation());
+    clearAgentSetupStatus.mockResolvedValue(undefined);
+    listAgentSetupStatus.mockResolvedValue([]);
+    onAgentSetupState.mockResolvedValue(vi.fn());
     rerunDoctorReport.mockResolvedValue(undefined);
     invalidateDoctorReport.mockResolvedValue(undefined);
-    // Default: nothing further to install after the seeded recipe, so every
-    // existing single-install assertion stays a one-pass install.
-    nextAgentInstallFix.mockResolvedValue(null);
+    // Each test starts with an empty backend-state mirror.
+    useAgentSetupStore.setState({ operations: new Map() });
   });
 
   it("shows the checking indicator only during the shared report's first load", async () => {
@@ -134,8 +173,8 @@ describe("AgentProviderCard", () => {
     expect(
       screen.getByRole("button", { name: /sign in/i }),
     ).toBeInTheDocument();
-    // No per-card probe runs on mount anymore.
-    expect(checkAgentInstalled).not.toHaveBeenCalled();
+    // Nothing is kicked off just by rendering.
+    expect(startAgentSetup).not.toHaveBeenCalled();
   });
 
   it("does not re-spin on a warm-cache revisit", () => {
@@ -150,13 +189,39 @@ describe("AgentProviderCard", () => {
     expect(
       screen.queryByRole("status", { name: "Checking..." }),
     ).not.toBeInTheDocument();
-    expect(checkAgentInstalled).not.toHaveBeenCalled();
+    expect(startAgentSetup).not.toHaveBeenCalled();
+  });
+
+  it("restores an in-progress operation from the store on mount", () => {
+    // A reloaded / remounted card reads the backend-owned snapshot straight
+    // from the store: spinner + accumulated output, no click required.
+    useAgentSetupStore.setState({
+      operations: new Map([
+        [
+          "claude-acp",
+          makeOperation({
+            output: ["npm install -g claude…", "added 1 package"],
+          }),
+        ],
+      ]),
+    });
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({ supportsAuth: false })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+      />,
+    );
+
+    expect(
+      screen.getByRole("status", { name: "Setup in progress" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("added 1 package")).toBeInTheDocument();
   });
 
   it("signs in an installed-but-unauthenticated agent", async () => {
     const user = userEvent.setup();
-    authenticateAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
 
     renderCard(
       <AgentProviderCard
@@ -181,9 +246,12 @@ describe("AgentProviderCard", () => {
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(authenticateAgent).toHaveBeenCalledWith("claude-acp");
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "auth", {
+        installFixType: null,
+        updateCommands: [],
+        verifyInstall: true,
+      });
     });
-    expect(installAgent).not.toHaveBeenCalled();
   });
 
   it("offers install when the report reports the binary missing", () => {
@@ -206,10 +274,8 @@ describe("AgentProviderCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("offers install without sign in when the agent is not installed", async () => {
+  it("starts an install (CLI recipe, no updates) without sign in when not installed", async () => {
     const user = userEvent.setup();
-    installAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
 
     renderCard(
       <AgentProviderCard
@@ -234,16 +300,17 @@ describe("AgentProviderCard", () => {
     await user.click(screen.getByRole("button", { name: /install claude/i }));
 
     await waitFor(() => {
-      expect(installAgent).toHaveBeenCalledWith("claude-acp", "command");
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "install", {
+        installFixType: "command",
+        updateCommands: [],
+        verifyInstall: true,
+      });
     });
-    expect(authenticateAgent).not.toHaveBeenCalled();
   });
 
-  it("verifies install through the local CLI check and reports failure when the binary is still missing", async () => {
+  it("renders the backend-reported install verification failure with troubleshooting", async () => {
     const user = userEvent.setup();
     const onStartTroubleshootingChat = vi.fn();
-    installAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(false);
 
     renderCard(
       <AgentProviderCard
@@ -263,13 +330,26 @@ describe("AgentProviderCard", () => {
       await screen.findByRole("button", { name: /install claude/i }),
     );
 
-    // A plain install (no bridge-missing check) dispatches the main-CLI recipe.
     await waitFor(() => {
-      expect(installAgent).toHaveBeenCalledWith("claude-acp", "command");
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "install", {
+        installFixType: "command",
+        updateCommands: [],
+        verifyInstall: true,
+      });
     });
-    await waitFor(() => {
-      expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
-    });
+
+    // The backend reports the verification-failure sentinel; the card localizes
+    // it and offers troubleshooting.
+    await waitForRunning("claude-acp");
+    emitOperation(
+      "claude-acp",
+      makeOperation({
+        phase: "idle",
+        status: "failed",
+        error: "installVerificationFailed",
+      }),
+    );
+
     expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: /troubleshoot in chat/i }),
@@ -292,20 +372,6 @@ describe("AgentProviderCard", () => {
   it("explains npm setup failures and starts a troubleshooting chat with raw output", async () => {
     const user = userEvent.setup();
     const onStartTroubleshootingChat = vi.fn();
-    let outputHandler: ((line: string) => void) | undefined;
-
-    onAgentSetupOutput.mockImplementation(
-      async (_providerId: string, callback: (line: string) => void) => {
-        outputHandler = callback;
-        return vi.fn();
-      },
-    );
-    installAgent.mockImplementation(async () => {
-      outputHandler?.("npm error code EEXIST");
-      outputHandler?.("npm error path /opt/homebrew/bin/claude");
-      outputHandler?.("npm error EEXIST: file already exists");
-      throw new Error("Command exited with code 1");
-    });
 
     renderCard(
       <AgentProviderCard
@@ -324,6 +390,23 @@ describe("AgentProviderCard", () => {
     await user.click(
       await screen.findByRole("button", { name: /install claude/i }),
     );
+    await waitFor(() => expect(startAgentSetup).toHaveBeenCalled());
+
+    // The backend streamed npm output and failed with a command error.
+    await waitForRunning("claude-acp");
+    emitOperation(
+      "claude-acp",
+      makeOperation({
+        phase: "idle",
+        status: "failed",
+        error: "Command exited with code 1",
+        output: [
+          "npm error code EEXIST",
+          "npm error path /opt/homebrew/bin/claude",
+          "npm error EEXIST: file already exists",
+        ],
+      }),
+    );
 
     expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
 
@@ -337,6 +420,48 @@ describe("AgentProviderCard", () => {
         prompt: expect.stringContaining("/opt/homebrew/bin/claude"),
       }),
     );
+  });
+
+  it("retries a failed setup without clearing the backend entry first", async () => {
+    const user = userEvent.setup();
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "not_installed",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+      />,
+    );
+
+    emitOperation(
+      "claude-acp",
+      makeOperation({
+        action: "install",
+        phase: "idle",
+        status: "failed",
+        error: "Command exited with code 1",
+      }),
+    );
+
+    expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
+    clearAgentSetupStatus.mockClear();
+    startAgentSetup.mockClear();
+
+    await user.click(screen.getByRole("button", { name: /^retry$/i }));
+
+    await waitFor(() => {
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "install", {
+        installFixType: "command",
+        updateCommands: [],
+        verifyInstall: true,
+      });
+    });
+    expect(clearAgentSetupStatus).not.toHaveBeenCalled();
   });
 
   it("surfaces install source and version from the shared report", () => {
@@ -359,7 +484,6 @@ describe("AgentProviderCard", () => {
 
   it("wires the top-right Update button to the per-readout update command", async () => {
     const user = userEvent.setup();
-    updateAgent.mockResolvedValue(undefined);
 
     renderCard(
       <AgentProviderCard
@@ -393,27 +517,73 @@ describe("AgentProviderCard", () => {
     await user.click(screen.getByRole("button", { name: /update claude/i }));
 
     await waitFor(() => {
-      expect(updateAgent).toHaveBeenCalledWith(
-        "claude-acp",
-        "updateMain",
-        "npm install -g @anthropic-ai/claude-code@latest",
-      );
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "update", {
+        installFixType: null,
+        updateCommands: [
+          {
+            fixType: "updateMain",
+            command: "npm install -g @anthropic-ai/claude-code@latest",
+          },
+        ],
+        verifyInstall: true,
+      });
     });
-    expect(installAgent).not.toHaveBeenCalled();
 
-    // After a successful update we re-run the freshness pass (not a bare
+    // On the backend reporting success we re-run the freshness pass (not a bare
     // invalidate) so the version badges repopulate instead of blanking out.
+    await waitForRunning("claude-acp");
+    emitOperation(
+      "claude-acp",
+      makeOperation({ action: "update", status: "succeeded", phase: "idle" }),
+    );
     await waitFor(() => {
       expect(rerunDoctorReport).toHaveBeenCalled();
     });
     expect(invalidateDoctorReport).not.toHaveBeenCalled();
   });
 
+  it("keeps the setup retry surface when the post-success doctor refresh fails", async () => {
+    const onProviderReady = vi.fn();
+    rerunDoctorReport.mockRejectedValueOnce(new Error("doctor refresh failed"));
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        onProviderReady={onProviderReady}
+      />,
+    );
+
+    emitOperation(
+      "claude-acp",
+      makeOperation({ action: "install", status: "succeeded", phase: "idle" }),
+    );
+
+    await waitFor(() => {
+      expect(rerunDoctorReport).toHaveBeenCalled();
+    });
+    expect(onProviderReady).not.toHaveBeenCalled();
+    expect(clearAgentSetupStatus).not.toHaveBeenCalled();
+    expect(useAgentSetupStore.getState().getStatus("claude-acp")).toMatchObject(
+      {
+        action: "install",
+        status: "failed",
+        error: "doctor refresh failed",
+      },
+    );
+    expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^retry$/i }),
+    ).toBeInTheDocument();
+  });
+
   it("renders update and sign in as separate actions for an unauthenticated stale agent", async () => {
     const user = userEvent.setup();
-    updateAgent.mockResolvedValue(undefined);
-    authenticateAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
 
     renderCard(
       <AgentProviderCard
@@ -452,20 +622,35 @@ describe("AgentProviderCard", () => {
     await user.click(screen.getByRole("button", { name: /update claude/i }));
 
     await waitFor(() => {
-      expect(updateAgent).toHaveBeenCalledWith(
-        "claude-acp",
-        "updateMain",
-        "npm install -g @anthropic-ai/claude-code@latest",
-      );
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "update", {
+        installFixType: null,
+        updateCommands: [
+          {
+            fixType: "updateMain",
+            command: "npm install -g @anthropic-ai/claude-code@latest",
+          },
+        ],
+        verifyInstall: true,
+      });
     });
-    expect(authenticateAgent).not.toHaveBeenCalled();
+
+    // The update finished and its terminal entry was consumed, so both the
+    // update and sign-in actions return; sign in is its own separate action.
+    await waitForRunning("claude-acp");
+    act(() => {
+      useAgentSetupStore.getState().clear("claude-acp");
+    });
 
     await user.click(
       await screen.findByRole("button", { name: /sign in to claude/i }),
     );
 
     await waitFor(() => {
-      expect(authenticateAgent).toHaveBeenCalledWith("claude-acp");
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "auth", {
+        installFixType: null,
+        updateCommands: [],
+        verifyInstall: true,
+      });
     });
   });
 
@@ -526,11 +711,8 @@ describe("AgentProviderCard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("Fix installs the missing component and applies pending updates in one pass", async () => {
+  it("Fix builds a plan that installs the missing bridge and applies pending updates", async () => {
     const user = userEvent.setup();
-    installAgent.mockResolvedValue(undefined);
-    updateAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
 
     renderCard(
       <AgentProviderCard
@@ -571,31 +753,23 @@ describe("AgentProviderCard", () => {
 
     await user.click(screen.getByRole("button", { name: /fix codex/i }));
 
-    // One click installs the missing bridge and brings the stale CLI current.
-    // The install step must dispatch the *bridge* recipe (the check's
-    // fixType="bridge"), not the static main-CLI recipe — otherwise codex-acp
-    // is silently skipped while the already-present CLI is reinstalled.
+    // The plan seeds the *bridge* recipe (the check's fixType="bridge") so the
+    // backend installs codex-acp rather than reinstalling the present CLI, and
+    // carries the pending update so the stale CLI is brought current too. The
+    // install-loop ordering itself is covered by the Rust unit tests.
     await waitFor(() => {
-      expect(installAgent).toHaveBeenCalledWith("codex-acp", "bridge");
+      expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
+        installFixType: "bridge",
+        updateCommands: [
+          { fixType: "updateMain", command: "brew upgrade codex" },
+        ],
+        verifyInstall: true,
+      });
     });
-    await waitFor(() => {
-      expect(updateAgent).toHaveBeenCalledWith(
-        "codex-acp",
-        "updateMain",
-        "brew upgrade codex",
-      );
-    });
-    expect(authenticateAgent).not.toHaveBeenCalled();
   });
 
-  it("installs both binaries of a from-scratch two-binary agent without chaining into auth", async () => {
+  it("seeds the install plan with the main-CLI recipe for a from-scratch agent", async () => {
     const user = userEvent.setup();
-    installAgent.mockResolvedValue(undefined);
-    authenticateAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
-    // From scratch the crate reports the main CLI first (fixType="command");
-    // once it lands the now-visible bridge surfaces, then nothing remains.
-    nextAgentInstallFix.mockResolvedValueOnce("bridge").mockResolvedValue(null);
 
     renderCard(
       <AgentProviderCard
@@ -624,100 +798,15 @@ describe("AgentProviderCard", () => {
 
     await user.click(screen.getByRole("button", { name: /install codex/i }));
 
-    // One click installs the main CLI then the now-visible bridge, in order.
+    // From scratch the plan seeds "command"; the backend's install loop then
+    // re-probes and installs the now-visible bridge (Rust-tested).
     await waitFor(() => {
-      expect(installAgent).toHaveBeenCalledTimes(2);
+      expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
+        installFixType: "command",
+        updateCommands: [],
+        verifyInstall: true,
+      });
     });
-    expect(installAgent).toHaveBeenNthCalledWith(1, "codex-acp", "command");
-    expect(installAgent).toHaveBeenNthCalledWith(2, "codex-acp", "bridge");
-    expect(authenticateAgent).not.toHaveBeenCalled();
-  });
-
-  it("installs a single-binary agent in one pass without a spurious bridge call", async () => {
-    const user = userEvent.setup();
-    installAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
-    // Single-binary agents (Copilot/Cursor) resolve their only binary; the
-    // re-probe reports nothing further to install.
-    nextAgentInstallFix.mockResolvedValue(null);
-
-    renderCard(
-      <AgentProviderCard
-        provider={createProvider({
-          id: "copilot-acp",
-          displayName: "Copilot",
-          binaryName: "copilot",
-          supportsInstall: true,
-          supportsAuth: false,
-          supportsAuthStatus: false,
-        })}
-        statusLoading={false}
-        readiness={"not_installed" satisfies AgentProviderReadiness}
-        versionCheck={createVersionCheck({
-          id: "ai-agent-copilot",
-          label: "Copilot",
-          status: "fail",
-          path: null,
-          bridgePath: null,
-          fixType: "command",
-          main: null,
-          bridge: null,
-        })}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /install copilot/i }));
-
-    await waitFor(() => {
-      expect(checkAgentInstalled).toHaveBeenCalledWith("copilot-acp");
-    });
-    expect(installAgent).toHaveBeenCalledTimes(1);
-    expect(installAgent).toHaveBeenCalledWith("copilot-acp", "command");
-    expect(installAgent).not.toHaveBeenCalledWith("copilot-acp", "bridge");
-  });
-
-  it("stops the install loop when the re-probe makes no progress", async () => {
-    const user = userEvent.setup();
-    installAgent.mockResolvedValue(undefined);
-    checkAgentInstalled.mockResolvedValue(true);
-    // An install that didn't take leaves the same fix pending; the ranFixTypes
-    // guard must short-circuit so the loop terminates instead of spinning.
-    nextAgentInstallFix.mockResolvedValue("command");
-
-    renderCard(
-      <AgentProviderCard
-        provider={createProvider({
-          id: "codex-acp",
-          displayName: "Codex",
-          binaryName: "codex-acp",
-          supportsInstall: true,
-          supportsAuth: false,
-          supportsAuthStatus: false,
-        })}
-        statusLoading={false}
-        readiness={"not_installed" satisfies AgentProviderReadiness}
-        versionCheck={createVersionCheck({
-          id: "ai-agent-codex",
-          label: "Codex",
-          status: "fail",
-          path: null,
-          bridgePath: null,
-          fixType: "command",
-          main: null,
-          bridge: null,
-        })}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /install codex/i }));
-
-    // The loop runs the seeded recipe once and stops; the chain then reaches
-    // the post-install verification rather than hanging on a repeating fix.
-    await waitFor(() => {
-      expect(checkAgentInstalled).toHaveBeenCalledWith("codex-acp");
-    });
-    expect(installAgent).toHaveBeenCalledTimes(1);
-    expect(installAgent).toHaveBeenCalledWith("codex-acp", "command");
   });
 
   it("flags the missing ACP bridge in danger text when only the main CLI is installed", () => {
@@ -787,9 +876,8 @@ describe("AgentProviderCard", () => {
     expect(screen.queryByText(/not installed/i)).not.toBeInTheDocument();
   });
 
-  it("runs every actionable readout sequentially when both main and bridge are out of date", async () => {
+  it("carries every actionable readout in the update plan when main and bridge are stale", async () => {
     const user = userEvent.setup();
-    updateAgent.mockResolvedValue(undefined);
 
     renderCard(
       <AgentProviderCard
@@ -826,20 +914,21 @@ describe("AgentProviderCard", () => {
     await user.click(screen.getByRole("button", { name: /update claude/i }));
 
     await waitFor(() => {
-      expect(updateAgent).toHaveBeenCalledTimes(2);
+      expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "update", {
+        installFixType: null,
+        updateCommands: [
+          {
+            fixType: "updateMain",
+            command: "curl -fsSL https://example.com/install.sh | bash",
+          },
+          {
+            fixType: "updateBridge",
+            command: "npm install -g claude-agent-acp@latest",
+          },
+        ],
+        verifyInstall: true,
+      });
     });
-    expect(updateAgent).toHaveBeenNthCalledWith(
-      1,
-      "claude-acp",
-      "updateMain",
-      "curl -fsSL https://example.com/install.sh | bash",
-    );
-    expect(updateAgent).toHaveBeenNthCalledWith(
-      2,
-      "claude-acp",
-      "updateBridge",
-      "npm install -g claude-agent-acp@latest",
-    );
   });
 
   it("hides the update affordance for self-updating tools", () => {
@@ -894,7 +983,9 @@ describe("AgentProviderCard", () => {
 
     await user.click(screen.getByRole("button", { name: /install claude/i }));
 
-    expect(installAgent).not.toHaveBeenCalled();
+    // The dev hook injects a real terminal failure into the store without
+    // touching the backend.
+    expect(startAgentSetup).not.toHaveBeenCalled();
     expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
     expect(screen.getByText(/\/tmp\/claude-agent-acp/i)).toBeInTheDocument();
   });

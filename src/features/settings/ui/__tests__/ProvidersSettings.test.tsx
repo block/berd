@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
+import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import {
@@ -14,9 +16,10 @@ import { ProvidersSettings } from "../ProvidersSettings";
 
 const mocks = vi.hoisted(() => ({
   useCredentials: vi.fn(),
-  checkAgentInstalled: vi.fn(),
-  installAgent: vi.fn(),
-  nextAgentInstallFix: vi.fn(),
+  startAgentSetup: vi.fn(),
+  clearAgentSetupStatus: vi.fn(),
+  listAgentSetupStatus: vi.fn(),
+  onAgentSetupState: vi.fn(),
   useAgentProviderStatus: vi.fn(),
 }));
 
@@ -29,13 +32,13 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
 }));
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
-  checkAgentInstalled: (...args: unknown[]) =>
-    mocks.checkAgentInstalled(...args),
-  installAgent: (...args: unknown[]) => mocks.installAgent(...args),
-  nextAgentInstallFix: (...args: unknown[]) =>
-    mocks.nextAgentInstallFix(...args),
-  authenticateAgent: vi.fn(),
-  onAgentSetupOutput: vi.fn(async () => vi.fn()),
+  startAgentSetup: (...args: unknown[]) => mocks.startAgentSetup(...args),
+  clearAgentSetupStatus: (...args: unknown[]) =>
+    mocks.clearAgentSetupStatus(...args),
+  listAgentSetupStatus: (...args: unknown[]) =>
+    mocks.listAgentSetupStatus(...args),
+  getAgentSetupStatus: vi.fn(),
+  onAgentSetupState: (...args: unknown[]) => mocks.onAgentSetupState(...args),
 }));
 
 function renderProviders(ui: ReactElement) {
@@ -132,9 +135,20 @@ describe("ProvidersSettings", () => {
       },
       config: { schemaVersion: 1 },
     });
-    mocks.checkAgentInstalled.mockResolvedValue(true);
-    mocks.installAgent.mockResolvedValue(undefined);
-    mocks.nextAgentInstallFix.mockResolvedValue(null);
+    useAgentSetupStore.setState({ operations: new Map() });
+    useDistroStore.setState({ loaded: false, manifest: { present: false } });
+    mocks.clearAgentSetupStatus.mockResolvedValue(undefined);
+    mocks.listAgentSetupStatus.mockResolvedValue([]);
+    mocks.onAgentSetupState.mockResolvedValue(vi.fn());
+    // The backend reports the operation finished; the card then runs its
+    // post-success refresh and marks the provider ready.
+    mocks.startAgentSetup.mockResolvedValue({
+      action: "install",
+      phase: "idle",
+      status: "succeeded",
+      output: [],
+      error: null,
+    });
     mocks.useAgentProviderStatus.mockReturnValue({
       readyAgentIds: new Set<string>(["goose"]),
       agentReadiness: new Map<string, AgentProviderReadiness>([
@@ -231,9 +245,9 @@ describe("ProvidersSettings", () => {
     const user = userEvent.setup();
     const onReturnToAgentDraft = vi.fn();
     // Claude starts absent from the shared report (useAgentProviderStatus mock
-    // omits it), so the card renders "Install Claude". The post-install
-    // verification probe then confirms the CLI landed on PATH.
-    mocks.checkAgentInstalled.mockResolvedValue(true);
+    // omits it), so the card renders "Install Claude". `startAgentSetup`
+    // resolves to a succeeded operation, so the card runs its post-success
+    // refresh and marks the provider ready, surfacing the return action.
 
     renderProviders(
       <ProvidersSettings onReturnToAgentDraft={onReturnToAgentDraft} />,

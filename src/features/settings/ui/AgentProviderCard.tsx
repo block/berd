@@ -1,12 +1,7 @@
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
@@ -19,18 +14,14 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { ArrowUpCircle } from "lucide-react";
-import {
-  checkAgentInstalled,
-  installAgent,
-  authenticateAgent,
-  onAgentSetupOutput,
-  updateAgent,
-  nextAgentInstallFix,
+import type {
+  AgentSetupAction,
+  AgentSetupUpdateCommand,
 } from "@/features/providers/api/agentSetup";
+import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import {
   describeAgentVersion,
   missingAgentComponents,
-  type AgentBinaryReadout,
 } from "../lib/agentVersionDisplay";
 import { rerunDoctorReport } from "@/shared/api/useDoctorReport";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
@@ -40,7 +31,6 @@ import { AgentVersionInfo } from "./AgentVersionInfo";
 import {
   analyzeAgentSetupFailure,
   buildAgentSetupTroubleshootingRequest,
-  type AgentSetupFailureAnalysis,
   type AgentSetupTroubleshootingRequest,
 } from "@/features/providers/lib/agentSetupTroubleshooting";
 import {
@@ -48,15 +38,6 @@ import {
   getSimulatedAgentSetupFailureLines,
 } from "@/features/providers/lib/agentSetupFailureSimulation";
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
-
-type SetupPhase = "idle" | "checking" | "installing" | "authenticating";
-
-interface OutputLine {
-  id: number;
-  text: string;
-}
-
-const MAX_OUTPUT_LINES = 50;
 
 interface AgentProviderCardProps {
   provider: ProviderDisplayInfo;
@@ -89,23 +70,39 @@ export function AgentProviderCard({
   const supportsInstall = provider.supportsInstall === true;
   const supportsAuth = provider.supportsAuth === true;
   const hasBinary = !!provider.binaryName;
+  // The backend can't see the catalog, so it relies on the plan to decide
+  // whether to probe PATH after a fix. A built-in or binary-less provider has
+  // nothing to resolve on disk, so verification is skipped and a clean run is
+  // success — the same short-circuit the old in-card `refreshInstallStatus` did.
+  const verifyInstall = hasBinary && !isBuiltIn;
   const setupFailureSimulation = getAgentSetupFailureSimulation(provider.id);
   const forceMissingForSimulation = Boolean(setupFailureSimulation);
-  const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
-  const [setupOutput, setSetupOutput] = useState<OutputLine[]>([]);
-  const [setupError, setSetupError] = useState<string | null>(null);
-  const [setupFailureAnalysis, setSetupFailureAnalysis] =
-    useState<AgentSetupFailureAnalysis | null>(null);
+
+  // Setup progress is backend-owned: read the latest snapshot from the store
+  // (kept current by the app-level `agent-setup:state` listener) so this card is
+  // a pure view that rehydrates on remount and survives a full window reload.
+  const operation = useAgentSetupStore((state) =>
+    state.operations.get(provider.id),
+  );
+  const startSetup = useAgentSetupStore((state) => state.startSetup);
+  const setOperation = useAgentSetupStore((state) => state.setOperation);
+  const clearSetupStatus = useAgentSetupStore((state) => state.clear);
+
+  // Keep the spinner up while we run the (frontend-only) post-success
+  // `rerunDoctorReport`, so the card doesn't flash back to "Install"/"Sign in"
+  // between the backend reporting success and the doctor report repainting.
+  const [finalizing, setFinalizing] = useState(false);
+  const reportedRef = useRef(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
-  const setupOutputLinesRef = useRef<OutputLine[]>([]);
-  const lineCounterRef = useRef(0);
-  const isMountedRef = useRef(true);
-  const unlistenRef = useRef<(() => void) | null>(null);
-  const lastSetupActionRef = useRef<"install" | "update" | "auth" | null>(null);
 
   const icon = getProviderIcon(provider.id, "size-6");
-  const isActive = setupPhase !== "idle";
+
+  const status = operation?.status;
+  const phase = operation?.phase ?? "idle";
+  const isRunning = status === "running";
+  const isActive = isRunning || finalizing;
+  const outputLines = operation?.output ?? [];
 
   // Resolve display state from the shared report, with local-only overrides
   // (dev failure simulation, built-in/no-binary agents that are always
@@ -128,7 +125,7 @@ export function AgentProviderCard({
     : null;
   // Per-readout updates the crate can actually run (a newer version *and* a
   // runnable source-aware command). Drives both the Update/Fix label and the
-  // commands runUpdates / runInstall apply.
+  // commands the setup plan carries.
   const actionableReadouts =
     versionDisplay?.readouts.filter(
       (r) => r.updateAvailable && r.updateFixType && r.updateCommand,
@@ -140,291 +137,171 @@ export function AgentProviderCard({
   const missingComponents = versionCheck
     ? missingAgentComponents(versionCheck, provider.binaryName)
     : [];
-  // Which install recipe the serial fix chain's install step should run. The
-  // crate flags a missing ACP bridge (main CLI present) with fixType="bridge",
-  // so dispatch that recipe instead of the static main-CLI one; anything else
-  // (an absent check, or the update/auth fix types) falls back to "command".
-  const installFixType: FixType =
+  // Which install recipe the backend's install loop should seed with. The crate
+  // flags a missing ACP bridge (main CLI present) with fixType="bridge", so
+  // dispatch that recipe instead of the static main-CLI one; anything else (an
+  // absent check, or the update/auth fix types) falls back to "command".
+  const installFixType: Extract<FixType, "command" | "bridge"> =
     versionCheck?.fixType === "bridge" ? "bridge" : "command";
 
-  const clearListener = useCallback(() => {
-    unlistenRef.current?.();
-    unlistenRef.current = null;
-  }, []);
+  // Build the per-readout update commands the backend runs after the install
+  // loop. Readout *derivation* stays here (it already has the doctor report);
+  // only the resulting recipe crosses to Rust.
+  function buildUpdateCommands(): AgentSetupUpdateCommand[] {
+    return actionableReadouts.flatMap((readout) =>
+      (readout.updateFixType === "updateMain" ||
+        readout.updateFixType === "updateBridge") &&
+      readout.updateCommand
+        ? [{ fixType: readout.updateFixType, command: readout.updateCommand }]
+        : [],
+    );
+  }
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      clearListener();
-    };
-  }, [clearListener]);
+  // Dev-only: inject a *real* terminal failure into the store so the whole
+  // downstream view path (analysis, troubleshoot builder) runs for real,
+  // without invoking the backend (which can't see the localStorage hook).
+  function runSimulatedFailure(action: AgentSetupAction) {
+    if (!setupFailureSimulation) return;
+    setOperation(provider.id, {
+      action,
+      phase: "idle",
+      status: "failed",
+      output: getSimulatedAgentSetupFailureLines(
+        provider,
+        setupFailureSimulation,
+      ),
+      error: "Command exited with code 1",
+    });
+  }
 
-  // Targeted post-install/auth verification (single user-initiated probe, not a
-  // mount-time storm). The shared report is the source of truth for display;
-  // this only confirms the CLI landed on PATH so we can surface a clear error.
-  const refreshInstallStatus = useCallback(async (): Promise<boolean> => {
-    if (forceMissingForSimulation) return false;
-    if (isBuiltIn || !hasBinary) return true;
-    try {
-      return await checkAgentInstalled(provider.id);
-    } catch {
-      return false;
+  function handleInstall() {
+    if (!supportsInstall) return;
+    if (setupFailureSimulation) {
+      runSimulatedFailure("install");
+      return;
     }
-  }, [forceMissingForSimulation, hasBinary, isBuiltIn, provider.id]);
+    // Pass the pending updates so a partial install with stale binaries (the
+    // "Fix" state) is brought fully current in one pass; for a plain "Install"
+    // this list is empty.
+    void startSetup(provider.id, "install", {
+      installFixType,
+      updateCommands: buildUpdateCommands(),
+      verifyInstall,
+    });
+  }
+
+  function handleUpdate() {
+    if (!hasActionableUpdate) return;
+    if (setupFailureSimulation) {
+      runSimulatedFailure("update");
+      return;
+    }
+    void startSetup(provider.id, "update", {
+      installFixType: null,
+      updateCommands: buildUpdateCommands(),
+      verifyInstall,
+    });
+  }
+
+  function handleAuth() {
+    if (!supportsAuth) return;
+    if (setupFailureSimulation) {
+      runSimulatedFailure("auth");
+      return;
+    }
+    void startSetup(provider.id, "auth", {
+      installFixType: null,
+      updateCommands: [],
+      verifyInstall,
+    });
+  }
+
+  // When the backend reports success, run the React-Query refresh the backend
+  // can't (it owns no query cache), exactly once, then clear the terminal entry
+  // so it doesn't re-trigger on a later remount.
+  useEffect(() => {
+    if (status !== "succeeded") {
+      reportedRef.current = false;
+      return;
+    }
+    if (reportedRef.current) return;
+    reportedRef.current = true;
+
+    const succeededOperation = operation;
+    const action = succeededOperation?.action;
+    setFinalizing(true);
+    void (async () => {
+      try {
+        // `rerunDoctorReport` (not a bare invalidate) re-runs the freshness
+        // pass so version/install-source/update badges repopulate instead of
+        // blanking out.
+        await rerunDoctorReport(queryClient);
+        if (action === "auth" || (action === "install" && !supportsAuth)) {
+          onProviderReady?.(provider.id);
+        }
+        clearSetupStatus(provider.id);
+      } catch (nextError) {
+        const message = formatAcpErrorMessage(
+          nextError,
+          "Couldn't refresh provider status",
+        );
+        console.error("Failed to finalize agent provider setup:", nextError);
+        setOperation(provider.id, {
+          action: action ?? "install",
+          phase: "idle",
+          status: "failed",
+          output: succeededOperation?.output ?? [],
+          error: message,
+        });
+      } finally {
+        setFinalizing(false);
+      }
+    })();
+  }, [
+    status,
+    operation?.action,
+    operation,
+    supportsAuth,
+    provider.id,
+    queryClient,
+    clearSetupStatus,
+    setOperation,
+    onProviderReady,
+  ]);
 
   useEffect(() => {
-    if (outputRef.current && outputLengthRef.current !== setupOutput.length) {
-      outputLengthRef.current = setupOutput.length;
+    if (outputRef.current && outputLengthRef.current !== outputLines.length) {
+      outputLengthRef.current = outputLines.length;
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
   });
 
-  const appendOutput = useCallback((line: string) => {
-    lineCounterRef.current += 1;
-    const entry: OutputLine = { id: lineCounterRef.current, text: line };
-    const next = [...setupOutputLinesRef.current, entry];
-    const trimmed =
-      next.length > MAX_OUTPUT_LINES ? next.slice(-MAX_OUTPUT_LINES) : next;
-    setupOutputLinesRef.current = trimmed;
-    setSetupOutput(trimmed);
-  }, []);
-
-  const resetSetupState = useCallback(() => {
-    setSetupError(null);
-    setSetupFailureAnalysis(null);
-    setSetupOutput([]);
-    setupOutputLinesRef.current = [];
-    lineCounterRef.current = 0;
-  }, []);
-
-  async function handleInstallOnly() {
-    lastSetupActionRef.current = "install";
-    resetSetupState();
-    // Pass the pending updates so a partial install with stale binaries (the
-    // "Fix" state) is brought fully current in one pass; for a plain "Install"
-    // this list is empty and the loop is a no-op.
-    await runInstall(actionableReadouts);
-  }
-
-  async function handleUpdateOnly() {
-    lastSetupActionRef.current = "update";
-    resetSetupState();
-    await runUpdates(actionableReadouts);
-  }
-
-  async function handleAuthOnly() {
-    lastSetupActionRef.current = "auth";
-    resetSetupState();
-    await runAuth();
-  }
-
-  async function runInstall(updateReadouts: AgentBinaryReadout[] = []) {
-    if (!supportsInstall) return;
-    setSetupPhase("installing");
-
-    clearListener();
-    const unlisten = await onAgentSetupOutput(provider.id, appendOutput);
-    if (!isMountedRef.current) {
-      unlisten();
-      return;
-    }
-    unlistenRef.current = unlisten;
-
-    try {
-      if (setupFailureSimulation) {
-        for (const line of getSimulatedAgentSetupFailureLines(
-          provider,
-          setupFailureSimulation,
-        )) {
-          appendOutput(line);
-        }
-        throw new Error("Command exited with code 1");
-      }
-
-      // Install every missing component the report surfaces, one recipe per
-      // pass. A two-binary agent installed from scratch reports its main CLI
-      // first (fixType="command"); once it lands, the now-visible bridge
-      // surfaces as fixType="bridge". Re-probe after each install and run the
-      // next install fix the crate reports, so a from-scratch Codex installs
-      // codex + codex-acp under one click. The bridge-only "Fix" path is
-      // unchanged: it seeds "bridge", and the re-probe then returns null (or
-      // auth) so the loop runs exactly once. A `ranFixTypes` guard runs each
-      // recipe at most once, bounding the loop to ≤2 passes and terminating a
-      // stuck install (re-probe returning the same type) instead of spinning;
-      // refreshInstallStatus below then surfaces the verification error.
-      let pendingFix: FixType | null = installFixType;
-      const ranFixTypes = new Set<FixType>();
-      while (pendingFix && !ranFixTypes.has(pendingFix)) {
-        ranFixTypes.add(pendingFix);
-        await installAgent(provider.id, pendingFix);
-        if (!isMountedRef.current) return;
-        pendingFix = await nextAgentInstallFix(provider.id);
-        if (!isMountedRef.current) return;
-      }
-
-      // "Fix": when the agent is partially installed *and* has updates pending
-      // (e.g. Codex's main CLI is on PATH with a newer release available but
-      // the codex-acp bridge isn't installed), bring the already-present
-      // binaries up to date in the same click so nothing is left stale. The
-      // listener stays attached so this output streams too.
-      for (const readout of updateReadouts) {
-        if (!readout.updateFixType || !readout.updateCommand) continue;
-        await updateAgent(
-          provider.id,
-          readout.updateFixType,
-          readout.updateCommand,
-        );
-        if (!isMountedRef.current) return;
-      }
-
-      clearListener();
-      if (!isMountedRef.current) return;
-
-      if (hasBinary && provider.binaryName) {
-        setSetupPhase("checking");
-        const installed = await refreshInstallStatus();
-        if (!isMountedRef.current) return;
-        if (!installed) {
-          const message = t(
-            "providers.agents.errors.installVerificationFailed",
-          );
-          setSetupError(message);
-          setSetupFailureAnalysis(
-            analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
-          );
-          setSetupPhase("idle");
-          return;
-        }
-      }
-
-      // The binary may now be present; refresh every surface from one report.
-      // Use `rerunDoctorReport` (not bare `invalidateDoctorReport`) so the
-      // freshness pass re-runs and version/install-source/update badges
-      // repopulate — invalidation alone refetches through the fast,
-      // freshness-off `runDoctor` queryFn and blanks them out.
-      await rerunDoctorReport(queryClient);
-      if (!isMountedRef.current) return;
-
-      if (!supportsAuth) {
-        onProviderReady?.(provider.id);
-      }
-      setSetupPhase("idle");
-    } catch (err) {
-      clearListener();
-      if (!isMountedRef.current) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setSetupError(message);
-      setSetupFailureAnalysis(
-        analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
-      );
-      setSetupPhase("idle");
-    }
-  }
-
-  async function runAuth() {
-    if (!supportsAuth) return;
-    setSetupPhase("authenticating");
-
-    clearListener();
-    const unlisten = await onAgentSetupOutput(provider.id, appendOutput);
-    if (!isMountedRef.current) {
-      unlisten();
-      return;
-    }
-    unlistenRef.current = unlisten;
-
-    try {
-      await authenticateAgent(provider.id);
-      clearListener();
-      if (!isMountedRef.current) return;
-      const installed = await refreshInstallStatus();
-      if (!isMountedRef.current) return;
-      if (!installed) {
-        const message = t("providers.agents.errors.installVerificationFailed");
-        setSetupError(message);
-        setSetupFailureAnalysis(
-          analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
-        );
-        setSetupPhase("idle");
-        return;
-      }
-      // Auth state changed: refresh all surfaces, and keep the progress UI up
-      // until the report reflects the new state so the card doesn't flash back
-      // to "sign in" before the refetch settles. `rerunDoctorReport` also
-      // re-kicks the freshness pass so version badges don't blank out.
-      await rerunDoctorReport(queryClient);
-      if (!isMountedRef.current) return;
-      setSetupPhase("idle");
-    } catch (err) {
-      clearListener();
-      if (!isMountedRef.current) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setSetupError(message);
-      setSetupFailureAnalysis(
-        analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
-      );
-      setSetupPhase("idle");
-    }
-  }
-
-  // Run every actionable readout's source-aware update command in sequence.
-  // The doctor crate derives each command from `(install_source, package_id)`
-  // (e.g. `npm install -g <pkg>@latest`, `brew upgrade <pkg>`), so a Claude
-  // Code card with `claude` (native) + `claude-agent-acp` (npm) updates each
-  // binary with the correct recipe under one click. Never chains into auth —
-  // the agent is already set up; we're only refreshing binaries.
-  async function runUpdates(readouts: AgentBinaryReadout[]) {
-    if (readouts.length === 0) return;
-    setSetupPhase("installing");
-
-    clearListener();
-    const unlisten = await onAgentSetupOutput(provider.id, appendOutput);
-    if (!isMountedRef.current) {
-      unlisten();
-      return;
-    }
-    unlistenRef.current = unlisten;
-
-    try {
-      for (const readout of readouts) {
-        if (!readout.updateFixType || !readout.updateCommand) continue;
-        await updateAgent(
-          provider.id,
-          readout.updateFixType,
-          readout.updateCommand,
-        );
-        if (!isMountedRef.current) return;
-      }
-      clearListener();
-      if (!isMountedRef.current) return;
-      // Re-run the freshness pass so the updated versions repopulate the
-      // readout instead of collapsing to a bare "Installed via <source>".
-      await rerunDoctorReport(queryClient);
-      if (!isMountedRef.current) return;
-      setSetupPhase("idle");
-    } catch (err) {
-      clearListener();
-      if (!isMountedRef.current) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setSetupError(message);
-      setSetupFailureAnalysis(
-        analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
-      );
-      setSetupPhase("idle");
-    }
-  }
+  // Failure surface, derived from the store's raw `{ error, output }`. The
+  // backend reports `installVerificationFailed` as a sentinel the card
+  // localizes; any other error is the raw command failure.
+  const rawError = status === "failed" ? (operation?.error ?? null) : null;
+  const setupError =
+    rawError === "installVerificationFailed"
+      ? t("providers.agents.errors.installVerificationFailed")
+      : rawError;
+  const setupFailureAnalysis = setupError
+    ? analyzeAgentSetupFailure(
+        setupError,
+        outputLines.map((text) => ({ text })),
+      )
+    : null;
 
   function handleRetry() {
-    switch (lastSetupActionRef.current) {
+    const action = operation?.action;
+    switch (action) {
       case "auth":
-        void handleAuthOnly();
+        handleAuth();
         return;
       case "update":
-        void handleUpdateOnly();
+        handleUpdate();
         return;
       default:
-        void handleInstallOnly();
+        handleInstall();
     }
   }
 
@@ -489,7 +366,7 @@ export function AgentProviderCard({
         type="button"
         variant="ghost"
         size="xs"
-        onClick={() => void handleAuthOnly()}
+        onClick={() => handleAuth()}
         className="flex-shrink-0 text-muted-foreground"
         aria-label={t("providers.agents.signInLabel", {
           name: provider.displayName,
@@ -507,13 +384,13 @@ export function AgentProviderCard({
             t("providers.agents.fix"),
             t("providers.agents.fixLabel", { name: provider.displayName }),
             <IconTool aria-hidden="true" />,
-            () => void handleInstallOnly(),
+            () => handleInstall(),
           )
         : renderActionButton(
             t("providers.agents.install"),
             t("providers.agents.installLabel", { name: provider.displayName }),
             <IconPlus aria-hidden="true" />,
-            () => void handleInstallOnly(),
+            () => handleInstall(),
           );
     }
 
@@ -522,7 +399,7 @@ export function AgentProviderCard({
         t("providers.agents.applyUpdates"),
         t("providers.agents.updateLabel", { name: provider.displayName }),
         <ArrowUpCircle aria-hidden="true" />,
-        () => void handleUpdateOnly(),
+        () => handleUpdate(),
       );
     }
 
@@ -601,11 +478,11 @@ export function AgentProviderCard({
   }
 
   function renderSetupOutput(scrollToEnd = false) {
-    if (setupOutput.length === 0) return null;
+    if (outputLines.length === 0) return null;
 
     return (
       <ProviderSetupOutput
-        lines={setupOutput}
+        lines={outputLines.map((text, index) => ({ id: index, text }))}
         scrollRef={scrollToEnd ? outputRef : undefined}
       />
     );
@@ -615,11 +492,11 @@ export function AgentProviderCard({
     if (!isActive) return null;
 
     const phaseLabel =
-      setupPhase === "installing"
+      phase === "installing"
         ? t("providers.agents.progress.installing", {
             name: provider.displayName,
           })
-        : setupPhase === "authenticating"
+        : phase === "authenticating"
           ? t("providers.waitingForSignIn")
           : t("providers.agents.progress.verifyingInstallation");
 

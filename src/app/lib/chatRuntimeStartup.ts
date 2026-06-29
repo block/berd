@@ -7,6 +7,8 @@ import {
 } from "@/features/providers/runtimeProviderConstraints";
 import { getModelCacheRefreshProviderIds } from "@/features/providers/modelCacheRefresh";
 import { getModelProviders } from "@/features/providers/providerCatalog";
+import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
+import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AcpProvider } from "@/shared/api/acp";
@@ -51,6 +53,27 @@ export async function runChatRuntimeStartup(): Promise<void> {
   const runtimeConfigStore = useRuntimeConfigStore.getState();
 
   modelCacheStore.loadPersisted();
+
+  // Subscribe to backend-owned agent setup state and rehydrate it once, at the
+  // app level, so a card mid-install (or its eventual result) is restored after
+  // navigating away or fully reloading the window. Attaching this before any
+  // card mounts is what makes reload survival work.
+  void useAgentSetupStore
+    .getState()
+    .init()
+    .catch((err) => {
+      console.error("Failed to initialize agent setup state on startup:", err);
+    });
+
+  // Same for backend-owned model-provider native sign-in state, so a sign-in
+  // mid-flight (or its eventual result) is restored after navigating away or
+  // fully reloading the window.
+  void useModelSetupStore
+    .getState()
+    .init()
+    .catch((err) => {
+      console.error("Failed to initialize model setup state on startup:", err);
+    });
 
   const applyCuratedProviders = (validated = true) => {
     const providerAllowlist = parseProviderAllowlist(

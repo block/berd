@@ -216,6 +216,8 @@ pub fn run() {
             app.manage(commands::automations::AutomationStreamState::default());
             app.manage(commands::terminal::TerminalState::default());
             app.manage(commands::window_session::WindowSessionRegistry::default());
+            app.manage(commands::agent_setup::AgentSetupRegistry::default());
+            app.manage(commands::model_setup::ModelSetupRegistry::default());
             let layout_app_data_dir = app_data_dir;
             let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
                 layout_app_data_dir,
@@ -357,15 +359,17 @@ pub fn run() {
             commands::migration::backup_goose_config,
             commands::migration::mark_migration_complete,
             commands::migration::dismiss_migration_banner,
-            commands::model_setup::authenticate_model_provider,
+            commands::model_setup::start_model_setup,
+            commands::model_setup::get_model_setup_status,
+            commands::model_setup::list_model_setup_status,
+            commands::model_setup::clear_model_setup_status,
             commands::notifications::show_completion_notification,
             commands::openai_realtime::get_openai_realtime_status,
             commands::openai_realtime::create_openai_realtime_session,
-            commands::agent_setup::check_agent_installed,
-            commands::agent_setup::install_agent,
-            commands::agent_setup::authenticate_agent,
-            commands::agent_setup::update_agent,
-            commands::agent_setup::next_agent_install_fix,
+            commands::agent_setup::start_agent_setup,
+            commands::agent_setup::get_agent_setup_status,
+            commands::agent_setup::list_agent_setup_status,
+            commands::agent_setup::clear_agent_setup_status,
             commands::path_resolver::resolve_path,
             commands::path_resolver::check_directories_exist,
             commands::diagnostics::probe_kgoose_connectivity,

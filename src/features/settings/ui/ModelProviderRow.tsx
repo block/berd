@@ -16,10 +16,7 @@ import {
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
 import { IconCheck } from "@tabler/icons-react";
-import {
-  authenticateModelProvider,
-  onModelSetupOutput,
-} from "@/features/providers/api/modelSetup";
+import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import type {
   ProviderDisplayInfo,
@@ -27,8 +24,6 @@ import type {
   ProviderFieldValue,
 } from "@/shared/types/providers";
 import {
-  MAX_SETUP_OUTPUT_LINES,
-  type SetupOutputLine,
   resolveFieldValue,
   createDraftValues,
   getSetupMessage,
@@ -101,14 +96,42 @@ export function ModelProviderRow({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [error, setError] = useState("");
-  const [authenticating, setAuthenticating] = useState(false);
-  const [setupOutput, setSetupOutput] = useState<SetupOutputLine[]>([]);
-  const [setupError, setSetupError] = useState("");
   const [showSavedState, setShowSavedState] = useState(false);
-  const setupLineCounter = useRef(0);
   const hasLoadedConfig = useRef(false);
   const shouldRestorePanelFocus = useRef(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Native sign-in progress is backend-owned: read the latest snapshot from the
+  // store (kept current by the app-level `model-setup:state` listener) so this
+  // row is a pure view that rehydrates on remount and survives a full window
+  // reload — the `goose configure` flow keeps running on the backend regardless
+  // of which row is mounted.
+  const operation = useModelSetupStore((state) =>
+    state.operations.get(provider.id),
+  );
+  const startSetup = useModelSetupStore((state) => state.startSetup);
+  const setOperation = useModelSetupStore((state) => state.setOperation);
+  const clearSetupStatus = useModelSetupStore((state) => state.clear);
+
+  // Keep the spinner up while we run the (frontend-only) post-success refresh
+  // (`onCompleteNativeSetup` re-reads provider status over ACP), so the row
+  // doesn't flash back to "Connect" between the backend reporting success and
+  // the connected state landing.
+  const [finalizing, setFinalizing] = useState(false);
+  const reportedRef = useRef(false);
+  const outputRef = useRef<HTMLDivElement>(null);
+  const outputLengthRef = useRef(0);
+
+  const status = operation?.status;
+  const isRunning = status === "running";
+  const authenticating = isRunning || finalizing;
+  const setupOutputLines = operation?.output ?? [];
+  // Failure surface, derived from the store's raw error (the backend reports the
+  // raw `goose configure` failure verbatim).
+  const setupError =
+    status === "failed"
+      ? (operation?.error ?? "Couldn't complete sign-in")
+      : "";
 
   const icon = getProviderIcon(provider.id, "size-4");
   const fields = provider.fields ?? [];
@@ -153,10 +176,69 @@ export function ModelProviderRow({
     }
   }, [expanded, hasFields, loadConfig]);
 
-  if (isConnected && (authenticating || setupError)) {
-    setAuthenticating(false);
-    setSetupError("");
-  }
+  // When the backend reports the sign-in succeeded, run the frontend-only
+  // refresh the backend can't (re-read provider status over ACP + refresh
+  // models), exactly once, then clear the terminal entry so it doesn't
+  // re-trigger on a later remount.
+  useEffect(() => {
+    if (status !== "succeeded") {
+      reportedRef.current = false;
+      return;
+    }
+    if (reportedRef.current) return;
+    reportedRef.current = true;
+
+    const succeededOperation = operation;
+    setFinalizing(true);
+    void (async () => {
+      try {
+        await onCompleteNativeSetup(provider.id);
+        onProviderConnected?.(provider.id);
+        clearSetupStatus(provider.id);
+      } catch (nextError) {
+        const message = formatAcpErrorMessage(
+          nextError,
+          "Couldn't refresh provider status",
+        );
+        console.error("Failed to finalize model provider sign-in:", nextError);
+        setOperation(provider.id, {
+          phase: "idle",
+          status: "failed",
+          output: succeededOperation?.output ?? [],
+          error: message,
+        });
+      } finally {
+        setFinalizing(false);
+      }
+    })();
+  }, [
+    status,
+    operation,
+    provider.id,
+    onCompleteNativeSetup,
+    onProviderConnected,
+    setOperation,
+    clearSetupStatus,
+  ]);
+
+  // A provider that became connected through another path shouldn't keep
+  // showing a stale terminal error; drop a lingering failed entry once it's
+  // connected (running entries are left to finish).
+  useEffect(() => {
+    if (isConnected && status === "failed") {
+      clearSetupStatus(provider.id);
+    }
+  }, [isConnected, status, provider.id, clearSetupStatus]);
+
+  useEffect(() => {
+    if (
+      outputRef.current &&
+      outputLengthRef.current !== setupOutputLines.length
+    ) {
+      outputLengthRef.current = setupOutputLines.length;
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  });
 
   useLayoutEffect(() => {
     if (!shouldRestorePanelFocus.current) {
@@ -167,49 +249,23 @@ export function ModelProviderRow({
     panelRef.current?.focus({ preventScroll: true });
   });
 
-  function appendSetupOutput(line: string) {
-    setupLineCounter.current += 1;
-    setSetupOutput((current) =>
-      [
-        ...current,
-        {
-          id: setupLineCounter.current,
-          text: line,
-        },
-      ].slice(-MAX_SETUP_OUTPUT_LINES),
-    );
-  }
-
-  async function runNativeConnect() {
+  function runNativeConnect() {
     if (!provider.nativeConnectQuery) {
       return;
     }
 
     setExpanded(true);
-    setAuthenticating(true);
-    setSetupError("");
-    setSetupOutput([]);
     setEditingKey(null);
     setError("");
     setShowSavedState(false);
 
-    const unlisten = await onModelSetupOutput(provider.id, appendSetupOutput);
-
-    try {
-      const result = await authenticateModelProvider(
-        provider.id,
-        provider.nativeConnectQuery,
-      );
-      await onCompleteNativeSetup(provider.id, result);
-      onProviderConnected?.(provider.id);
-    } catch (nextError) {
-      setSetupError(
-        formatAcpErrorMessage(nextError, "Couldn't complete sign-in"),
-      );
-    } finally {
-      unlisten();
-      setAuthenticating(false);
-    }
+    // Kick off the backend-owned `goose configure` sign-in; the store mirrors
+    // its progress and the success effect runs the post-success refresh. The
+    // operation keeps running (and is observable) even if this row unmounts or
+    // the window reloads.
+    void startSetup(provider.id, {
+      providerLabel: provider.nativeConnectQuery,
+    });
   }
 
   function handleToggle() {
@@ -221,7 +277,6 @@ export function ModelProviderRow({
     });
     setEditingKey(null);
     setError("");
-    setSetupError("");
   }
 
   function handleStartEdit(key: string) {
@@ -407,7 +462,10 @@ export function ModelProviderRow({
             </div>
           ) : null}
           <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
-          <ProviderSetupOutput lines={setupOutput} />
+          <ProviderSetupOutput
+            lines={setupOutputLines.map((text, index) => ({ id: index, text }))}
+            scrollRef={outputRef}
+          />
           {setupError ? (
             <p className="text-xs text-destructive">{setupError}</p>
           ) : null}
