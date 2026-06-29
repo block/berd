@@ -1,3 +1,21 @@
 packages:
   - "."
   - "sdk"
+
+overrides:
+  "@babel/core": "7.29.6"
+  dompurify: "3.4.11"
+  uuid: ">=11.1.1 <12.0.0"
+  hono: "4.12.25"
+  "@hono/node-server": ">=1.19.13"
+  js-yaml: "4.2.0"
+  path-to-regexp: ">=8.4.0"
+  mermaid: "11.15.0"
+  fast-uri: "3.1.2"
+  qs: "6.15.2"
+  express-rate-limit: "8.5.2"
+  ip-address: "10.2.0"
+  defu: "6.1.5"
+  flatted: "3.4.2"
+  picomatch: "4.0.4"
+  ws: "8.21.0"
