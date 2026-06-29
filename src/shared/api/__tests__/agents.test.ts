@@ -703,6 +703,35 @@ Research carefully.
     });
   });
 
+  it("imports browser-renamed duplicate persona markdown downloads", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = `---
+name: scout
+display_name: "Scout"
+---
+
+Research carefully.
+`;
+
+    await importPersonas(raw, "scout.persona (1).md");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      target: { scope: "global" },
+      properties: {
+        sprout: {
+          name: "scout",
+        },
+      },
+    });
+    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+  });
+
   it("imports app avatar refs from legacy persona JSON", async () => {
     mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
 
@@ -848,6 +877,144 @@ Research carefully.
       target: { scope: "global" },
     });
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
+  });
+
+  it("preserves native agent JSON app avatar refs when ACP import omits them", async () => {
+    const importedSource = {
+      ...agentSource,
+      path: "/Users/test/.agents/agents/scout-imported.md",
+      properties: {
+        color: "blue",
+      },
+    };
+    const updatedSource = {
+      ...importedSource,
+      properties: {
+        color: "blue",
+        avatar: appAvatarRef,
+      },
+    };
+    mockGooseSourcesImport.mockResolvedValue({ sources: [importedSource] });
+    mockGooseSourcesUpdate.mockResolvedValue({ source: updatedSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = JSON.stringify({
+      version: 1,
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      properties: {
+        color: "blue",
+        avatar: appAvatarRef,
+      },
+    });
+
+    const [persona] = await importPersonas(raw, "scout.agent.json");
+    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+      data: string;
+    };
+
+    expect(JSON.parse(importRequest.data)).toMatchObject({
+      properties: {
+        color: "blue",
+        avatar: appAvatarRef,
+      },
+    });
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+      type: "agent",
+      path: importedSource.path,
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      properties: {
+        color: "blue",
+        avatar: appAvatarRef,
+      },
+    });
+    expect(persona.avatar).toBe(appAvatarRef);
+    expect(persona.sourceProperties?.avatar).toBe(appAvatarRef);
+  });
+
+  it("keeps native agent JSON imports successful when avatar repair fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const importedSource = {
+      ...agentSource,
+      path: "/Users/test/.agents/agents/scout-imported.md",
+      properties: {
+        color: "blue",
+      },
+    };
+    mockGooseSourcesImport.mockResolvedValue({ sources: [importedSource] });
+    mockGooseSourcesUpdate.mockRejectedValue(new Error("update failed"));
+
+    const { importPersonas } = await import("../agents");
+    const raw = JSON.stringify({
+      version: 1,
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      properties: {
+        avatar: appAvatarRef,
+      },
+    });
+
+    const [persona] = await importPersonas(raw, "scout.agent.json");
+
+    expect(persona.avatar).toBe(appAvatarRef);
+    expect(persona.sourceProperties).toEqual({
+      color: "blue",
+      avatar: appAvatarRef,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Failed to preserve imported agent avatar:",
+      expect.any(Error),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("strips unsafe native agent JSON avatar values before ACP import", async () => {
+    mockGooseSourcesImport.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            color: "blue",
+          },
+        },
+      ],
+    });
+
+    const { importPersonas } = await import("../agents");
+    const raw = JSON.stringify({
+      version: 1,
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      avatar: "file:///tmp/scout.png",
+      properties: {
+        color: "blue",
+        avatar: "data:image/png;base64,aWNvbg==",
+      },
+      metadata: {
+        avatar: "javascript:alert(1)",
+        tone: "direct",
+      },
+    });
+
+    const [persona] = await importPersonas(raw, "scout.agent.json");
+    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+      data: string;
+    };
+    const importedPayload = JSON.parse(importRequest.data);
+
+    expect(importedPayload.avatar).toBeUndefined();
+    expect(importedPayload.properties).toEqual({ color: "blue" });
+    expect(importedPayload.metadata).toEqual({ tone: "direct" });
+    expect(mockGooseSourcesUpdate).not.toHaveBeenCalled();
+    expect(persona.avatar).toBeNull();
   });
 
   it("rejects malformed persona imports with friendly errors", async () => {

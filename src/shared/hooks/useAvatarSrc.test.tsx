@@ -183,6 +183,20 @@ describe("useAvatarSrc", () => {
     expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores malformed app-avatar refs without cached lookup", () => {
+    const { result } = renderHook(
+      () => useAvatarMediaState("app-avatar:../secret"),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current).toMatchObject({
+      media: undefined,
+      loading: false,
+      unavailable: false,
+    });
+    expect(getCachedAvatarForRefMock).not.toHaveBeenCalled();
+  });
+
   it("rechecks uncached app-avatar refs after the backend warms them", async () => {
     getCachedAvatarForRefMock
       .mockResolvedValueOnce(null)

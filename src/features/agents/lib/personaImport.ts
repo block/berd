@@ -1,4 +1,8 @@
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import {
+  isJsonImportFileName,
+  isPersonaMarkdownImportFileName,
+} from "@/shared/lib/personaImportFileName";
 
 const JSON_MIME_TYPES = new Set([
   "",
@@ -33,9 +37,8 @@ export function formatPersonaImportFileSize(bytes: number): string {
 export function validatePersonaImportFile(
   file: Pick<File, "name" | "type"> & { size?: number },
 ): ImportMessageDescriptor | null {
-  const lowerName = file.name.toLowerCase();
-  const isJson = lowerName.endsWith(".json");
-  const isPersonaMarkdown = lowerName.endsWith(".persona.md");
+  const isJson = isJsonImportFileName(file.name);
+  const isPersonaMarkdown = isPersonaMarkdownImportFileName(file.name);
   if (!isJson && !isPersonaMarkdown) {
     return {
       key: "view.importInvalidExtension",

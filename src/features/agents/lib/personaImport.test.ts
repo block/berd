@@ -21,6 +21,15 @@ describe("validatePersonaImportFile", () => {
     ).toBeNull();
   });
 
+  it("accepts browser-renamed duplicate persona markdown downloads", () => {
+    expect(
+      validatePersonaImportFile({
+        name: "scout.persona (1).md",
+        type: "text/markdown",
+      }),
+    ).toBeNull();
+  });
+
   it("rejects plain markdown imports", () => {
     expect(
       validatePersonaImportFile({

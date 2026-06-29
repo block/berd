@@ -9,6 +9,10 @@ import type {
   Avatar,
 } from "@/shared/types/agents";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
+import {
+  isPersonaMarkdownImportFileName,
+  isSupportedPersonaImportFileName,
+} from "@/shared/lib/personaImportFileName";
 
 const AGENT_SOURCE_TYPE = "agent" as const;
 const AGENT_DESCRIPTION = "Agent";
@@ -136,10 +140,7 @@ function mergedPersonaProperties(
   return properties;
 }
 function isSupportedImportFile(fileName: string): boolean {
-  const lowerName = fileName.toLowerCase();
-  return (
-    lowerName.endsWith(PERSONA_MD_EXTENSION) || lowerName.endsWith(".json")
-  );
+  return isSupportedPersonaImportFileName(fileName);
 }
 
 function legacyAvatarToProperty(value: unknown): string | undefined {
@@ -158,7 +159,7 @@ function legacyAvatarToProperty(value: unknown): string | undefined {
 }
 
 function isPersonaMarkdownFile(fileName: string): boolean {
-  return fileName.toLowerCase().endsWith(PERSONA_MD_EXTENSION);
+  return isPersonaMarkdownImportFileName(fileName);
 }
 
 function slugifyPersonaName(value: string): string {
@@ -395,6 +396,48 @@ function legacyPersonaToCreateRequest(parsed: Record<string, unknown>) {
   };
 }
 
+function sanitizedNativeAgentImport(parsed: Record<string, unknown>): {
+  data: string;
+  avatar?: string;
+} {
+  const sanitized = { ...parsed };
+  const properties = propertyToRecord(parsed.properties);
+  const metadata = propertyToRecord(parsed.metadata);
+  const sanitizedProperties: AgentSourceProperties = properties
+    ? { ...properties }
+    : {};
+  const sanitizedMetadata = metadata ? { ...metadata } : undefined;
+  const avatar =
+    legacyAvatarToProperty(properties?.avatar) ??
+    legacyAvatarToProperty(metadata?.avatar) ??
+    legacyAvatarToProperty(parsed.avatar);
+
+  if ("avatar" in sanitized) {
+    delete sanitized.avatar;
+  }
+  if ("avatar" in sanitizedProperties) {
+    delete sanitizedProperties.avatar;
+  }
+  if (sanitizedMetadata && "avatar" in sanitizedMetadata) {
+    delete sanitizedMetadata.avatar;
+  }
+  if (avatar) {
+    sanitizedProperties.avatar = avatar;
+  }
+
+  if (properties || avatar) {
+    sanitized.properties = sanitizedProperties;
+  }
+  if (sanitizedMetadata) {
+    sanitized.metadata = sanitizedMetadata;
+  }
+
+  return {
+    data: JSON.stringify(sanitized),
+    avatar,
+  };
+}
+
 function personaMarkdownProperties(
   parsed: Record<string, unknown>,
 ): AgentSourceProperties {
@@ -539,6 +582,40 @@ function requireAgentSource(source: SourceEntry): AgentSourceEntry {
   }
 
   return source;
+}
+
+async function preserveImportedAvatar(
+  source: AgentSourceEntry,
+  avatar: string | undefined,
+): Promise<AgentSourceEntry> {
+  if (!avatar || normalizeAvatarUrl(source.properties?.avatar) === avatar) {
+    return source;
+  }
+
+  const properties = {
+    ...(source.properties ?? {}),
+    avatar,
+  };
+
+  try {
+    const client = await getClient();
+    const response = await client.goose.GooseUnstableSourcesUpdate({
+      type: AGENT_SOURCE_TYPE,
+      path: source.path,
+      name: source.name,
+      description: source.description,
+      content: source.content,
+      properties,
+    });
+
+    return requireAgentSource(response.source);
+  } catch (error) {
+    console.warn("Failed to preserve imported agent avatar:", error);
+    return {
+      ...source,
+      properties,
+    };
+  }
 }
 
 async function findPersonaSource(path: string): Promise<AgentSourceEntry> {
@@ -747,11 +824,17 @@ export async function importPersonas(
   const parsed = readImportJson(fileContents);
 
   if (parsed.type === AGENT_SOURCE_TYPE) {
+    const nativeImport = sanitizedNativeAgentImport(parsed);
     const response = await client.goose.GooseUnstableSourcesImport({
-      data: fileContents,
+      data: nativeImport.data,
       target: { scope: "global" },
     });
-    return response.sources.filter(isAgentSource).map(toPersona);
+    const sources = await Promise.all(
+      response.sources
+        .filter(isAgentSource)
+        .map((source) => preserveImportedAvatar(source, nativeImport.avatar)),
+    );
+    return sources.map(toPersona);
   }
 
   const response = await client.goose.GooseUnstableSourcesCreate(
