@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { BerdIcon } from "./BerdIcon";
+import { GooseIcon } from "./GooseIcon";
 
 export function ClaudeIcon({ className = "" }: { className?: string }) {
   return (
@@ -421,7 +421,9 @@ export function CopilotIcon({ className = "" }: { className?: string }) {
 }
 
 const PROVIDER_ICON_MAP: Record<string, (className: string) => ReactNode> = {
-  goose: (className) => <BerdIcon className={`${className} text-foreground`} />,
+  goose: (className) => (
+    <GooseIcon className={`${className} text-foreground`} />
+  ),
   "claude-acp": (className) => <ClaudeIcon className={className} />,
   "claude-code": (className) => <ClaudeIcon className={className} />,
   claude: (className) => <ClaudeIcon className={className} />,
