@@ -100,19 +100,19 @@
     "clipboardUnavailable": "Clipboard API not available"
   },
   "rendererError": {
-    "description": "Goose hit a renderer error. Reload the window to try again.",
+    "description": "Berd hit a renderer error. Reload the window to try again.",
     "reload": "Reload",
     "title": "Something went wrong"
   },
   "startup": {
-    "loadingLabel": "Starting Goose",
+    "loadingLabel": "Starting Berd",
     "error": {
       "gooseServe": {
-        "title": "Goose couldn't start",
+        "title": "Berd couldn't start",
         "description": "The local Goose service didn't start. Try again, or copy the startup details and open the logs folder to share them with support."
       },
       "networkWarp": {
-        "title": "Goose can't reach Block's internal services",
+        "title": "Berd can't reach Block's internal services",
         "description": "It looks like you aren't connected to Cloudflare WARP.",
         "steps": {
           "connect": "Connect to WARP",
@@ -121,11 +121,11 @@
       },
       "runtimeConfig": {
         "title": "Configuration unavailable",
-        "description": "Goose couldn't load its runtime configuration. Try again, or copy the startup details and share them with support."
+        "description": "Berd couldn't load its runtime configuration. Try again, or copy the startup details and share them with support."
       },
       "unknown": {
-        "title": "Goose couldn't start",
-        "description": "Goose couldn't finish starting. Try again, or copy the startup details and open the logs folder to share them with support."
+        "title": "Berd couldn't start",
+        "description": "Berd couldn't finish starting. Try again, or copy the startup details and open the logs folder to share them with support."
       },
       "copyDetails": "Copy details",
       "openLogsFolder": "Open logs folder",

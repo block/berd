@@ -93,13 +93,13 @@ describe("useMessageQueue", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
   });
 
-  it("leaves goosectl-origin queued messages for the goosectl drain", () => {
+  it("leaves berdctl-origin queued messages for the berdctl drain", () => {
     const sendMessage = vi.fn();
     useChatStore.getState().enqueueMessage("s1", {
-      text: "queued from goosectl",
+      text: "queued from berdctl",
       sendOptions: {
-        userMessageMetadata: { origin: "goosectl_cross_session" },
-        acpGooseMetadata: { origin: "goosectl_cross_session" },
+        userMessageMetadata: { origin: "berdctl_cross_session" },
+        acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
     });
 
@@ -113,10 +113,10 @@ describe("useMessageQueue", () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
-      text: "queued from goosectl",
+      text: "queued from berdctl",
       sendOptions: {
-        userMessageMetadata: { origin: "goosectl_cross_session" },
-        acpGooseMetadata: { origin: "goosectl_cross_session" },
+        userMessageMetadata: { origin: "berdctl_cross_session" },
+        acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
     });
   });

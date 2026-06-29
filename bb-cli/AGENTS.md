@@ -1,6 +1,6 @@
 # AGENTS.md / CLAUDE.md
 
-Instructions for agents working in the `goose-internal/bb-cli` package.
+Instructions for agents working in the `berd/bb-cli` package.
 
 ## Workflow
 
@@ -79,7 +79,7 @@ sq agent-tools linear --help
 - `docs/sq-overview.md` covers the repo and packaged CLI at a high level.
 - `docs/sq-integration.md` covers how `sq` discovers and integrates the packaged module.
 - `docs/RELEASING-sq.md` covers the Homebrew-backed `sq` command-pack release path.
-- `docs/RELEASING-bb.md` covers building the `bb` CLI binary consumed by Goose.app.
+- `docs/RELEASING-bb.md` covers building the `bb` CLI binary consumed by Berd.app.
 
 External docs: https://clig.dev/llms.txt -> guide you can consult to write better command-line programs, taking traditional UNIX principles and updating them for the modern day.
 

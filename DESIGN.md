@@ -1,6 +1,6 @@
 ---
-name: Goose Internal
-description: A desktop agent workspace documented from the actual Goose Internal design-system tokens.
+name: Berd
+description: A desktop agent workspace documented from the actual Berd design-system tokens.
 colors:
   bg-primary: "#1a1a1a"
   text-primary-foreground: "#ffffff"
@@ -112,13 +112,13 @@ components:
     padding: "0.125rem 0.5rem"
 ---
 
-# Design System: Goose Internal
+# Design System: Berd
 
 ## 1. Overview
 
 **Creative North Star: "The Grounded Workbench"**
 
-This file documents the actual Goose Internal design-system source in [globals.css](/Users/morganm/Development/goose-internal/src/shared/styles/globals.css), especially the `:root` semantic tokens and the Tailwind `@theme inline` aliases. The frontmatter lists the Tailwind-facing tokens agents should use in component code, such as `text-foreground`, `bg-background`, `border-border`, and `text-muted-foreground`. The prose explains the lower-level CSS variable chain behind them.
+This file documents the actual Berd design-system source in [globals.css](/Users/morganm/Development/berd/src/shared/styles/globals.css), especially the `:root` semantic tokens and the Tailwind `@theme inline` aliases. The frontmatter lists the Tailwind-facing tokens agents should use in component code, such as `text-foreground`, `bg-background`, `border-border`, and `text-muted-foreground`. The prose explains the lower-level CSS variable chain behind them.
 
 The current implementation provides useful product bones: semantic color tokens, shared UI primitives, a persistent sidebar, compact top bar, and a strong chat composer pattern. This document is not a blanket endorsement of every current surface. The Automations feature UI is explicitly excluded as design precedent because it did not receive the same craft pass.
 
@@ -187,7 +187,7 @@ The source palette is a semantic token system backed by a gray scale and small s
 **Body Font:** `font-sans`.
 **Label/Mono Font:** `font-sans` for labels, `font-mono` for code, paths, terminal output, and identifiers.
 
-The current repo does not define or bundle Cash Sans. [globals.css](/Users/morganm/Development/goose-internal/src/shared/styles/globals.css:455) maps `font-sans` and `font-display` through `--font-sans` / `--font-display` to `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`; it also leaves an `@font-face` placeholder. If Goose Internal should use Cash Sans, add it to the actual design system first, then `font-sans` and `font-display` will pick it up.
+The current repo does not define or bundle Cash Sans. [globals.css](/Users/morganm/Development/berd/src/shared/styles/globals.css:455) maps `font-sans` and `font-display` through `--font-sans` / `--font-display` to `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`; it also leaves an `@font-face` placeholder. If Berd should use Cash Sans, add it to the actual design system first, then `font-sans` and `font-display` will pick it up.
 
 ### Hierarchy
 
@@ -206,7 +206,7 @@ The current repo does not define or bundle Cash Sans. [globals.css](/Users/morga
 
 ## 4. Elevation
 
-Goose Internal uses semantic shadow tokens plus borders and tonal layering. Most surfaces are flat at rest. Shadows appear on hover, popovers, dialogs, and overlays where depth clarifies stacking.
+Berd uses semantic shadow tokens plus borders and tonal layering. Most surfaces are flat at rest. Shadows appear on hover, popovers, dialogs, and overlays where depth clarifies stacking.
 
 ### Shadow Vocabulary
 
@@ -255,7 +255,7 @@ Corner radii use a 5-step scale built on Tailwind's standard utility names: `rou
 
 ### Buttons
 
-Use [Button](/Users/morganm/Development/goose-internal/src/shared/ui/button.tsx) and its variants before adding feature-level styling.
+Use [Button](/Users/morganm/Development/berd/src/shared/ui/button.tsx) and its variants before adding feature-level styling.
 
 - **Shape:** `rounded-full` for all buttons — text and icon-only alike. The base `Button` applies this automatically; feature code should not override the radius. Buttons are exempt from the geometric nesting rule — their effective radius is half their height, not a scale step.
 - **Primary:** `bg-primary text-primary-foreground`, mapping through semantic primary surface and readable-on-primary text tokens.
@@ -265,7 +265,7 @@ Use [Button](/Users/morganm/Development/goose-internal/src/shared/ui/button.tsx)
 
 ### Chips
 
-Use [Badge](/Users/morganm/Development/goose-internal/src/shared/ui/badge.tsx), composer chips, or a shared variant.
+Use [Badge](/Users/morganm/Development/berd/src/shared/ui/badge.tsx), composer chips, or a shared variant.
 
 - **Shape:** `rounded-xs` (6px). Badges and status chips deliberately differ from buttons in shape because they differ in semantic purpose — buttons are interactive controls and use `rounded-full` to read as "press me"; badges are static labels conveying state and use `rounded-xs` so they read as "tag" rather than "control." This affordance separation reduces the chance of users attempting to click a static status indicator.
 - **Color:** `bg-muted`, `text-foreground`, `text-muted`, and state tokens when the chip communicates state.
@@ -273,7 +273,7 @@ Use [Badge](/Users/morganm/Development/goose-internal/src/shared/ui/badge.tsx), 
 
 ### Cards / Containers
 
-Use [Card](/Users/morganm/Development/goose-internal/src/shared/ui/card.tsx) only when a meaningful object boundary exists.
+Use [Card](/Users/morganm/Development/berd/src/shared/ui/card.tsx) only when a meaningful object boundary exists.
 
 - **Shape:** `rounded-md` (18px) on the base `Card` primitive, matching the sidenav panel. Use `rounded-lg` (24px) for the largest framing cards and `rounded-sm` (12px) for sub-cards nested inside another card.
 - **Color:** `bg-card text-card-foreground`, mapping through `--card` and `--card-foreground` to semantic card surface and text tokens.
@@ -283,7 +283,7 @@ Use [Card](/Users/morganm/Development/goose-internal/src/shared/ui/card.tsx) onl
 
 ### Inputs / Fields
 
-Use [Input](/Users/morganm/Development/goose-internal/src/shared/ui/input.tsx), shared textareas, or shared selector components.
+Use [Input](/Users/morganm/Development/berd/src/shared/ui/input.tsx), shared textareas, or shared selector components.
 
 - **Shape:** `rounded-input` for default inputs.
 - **Color:** `border-input`, `hover:border-foreground/20`, `text-foreground`, and `placeholder:text-placeholder`.
@@ -332,7 +332,7 @@ Use Radix-backed shared primitives for dialogs, sheets, drawers, dropdowns, popo
 
 - **Don't** use the Automations feature UI as design precedent for new product work.
 - **Don't** invent friendly alias tokens like "ink" or "paper" in docs, components, or feature code.
-- **Don't** make Goose Internal feel like a generic chatbot wrapper.
+- **Don't** make Berd feel like a generic chatbot wrapper.
 - **Don't** make it feel like a dark terminal skin.
 - **Don't** create a dashboard stuffed with metrics.
 - **Don't** create a marketing site wearing product chrome.

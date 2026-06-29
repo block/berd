@@ -61,8 +61,8 @@ export function getReplayUserMetadata(
     return undefined;
   }
 
-  return goose.origin === "goosectl_cross_session"
-    ? { origin: "goosectl_cross_session" }
+  return goose.origin === "berdctl_cross_session"
+    ? { origin: "berdctl_cross_session" }
     : undefined;
 }
 

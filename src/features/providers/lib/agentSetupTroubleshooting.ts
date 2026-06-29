@@ -94,7 +94,7 @@ export function buildAgentSetupTroubleshootingRequest({
   const contextLines = [
     `Provider id: ${provider.id}`,
     provider.binaryName ? `Expected CLI on PATH: ${provider.binaryName}` : null,
-    `Goose summary: ${userMessage}`,
+    `Berd summary: ${userMessage}`,
     `Command error: ${commandError}`,
     `Failure kind: ${analysis.kind}`,
   ].filter((line): line is string => Boolean(line));
@@ -102,7 +102,7 @@ export function buildAgentSetupTroubleshootingRequest({
   return {
     title: `Troubleshoot ${provider.displayName} setup`,
     prompt: [
-      `I tried to set up ${provider.displayName} from Goose Internal > AI providers, and setup failed.`,
+      `I tried to set up ${provider.displayName} from Berd > AI providers, and setup failed.`,
       "",
       "Please help me troubleshoot this on my machine. First diagnose the likely cause, then inspect the relevant local npm, PATH, and CLI state, and only suggest or run a fix after explaining the tradeoff.",
       "",

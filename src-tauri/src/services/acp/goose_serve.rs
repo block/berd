@@ -110,7 +110,7 @@ impl GooseServeProcess {
         kill_stale_serve_process().await;
 
         let port = reserve_free_port()?;
-        let secret_key = format!("goose-internal-{}", uuid::Uuid::new_v4().simple());
+        let secret_key = format!("berd-{}", uuid::Uuid::new_v4().simple());
 
         // Use a stable working directory for the long-lived server process.
         // Individual sessions will set their own cwd via the ACP protocol.
@@ -148,17 +148,17 @@ impl GooseServeProcess {
             }
         }
 
-        #[cfg(feature = "goosectl")]
-        let goosectl_paths = resolve_goosectl_spawn_paths(&app_handle, &mut prepend_dirs);
+        #[cfg(feature = "berdctl")]
+        let berdctl_paths = resolve_berdctl_spawn_paths(&app_handle, &mut prepend_dirs);
 
         apply_shell_env_with_extended_path(&mut command, &shell_env, &prepend_dirs);
         // Set after the shell-env copy so a same-named var in the user's
         // shell cannot clobber the values.
-        #[cfg(feature = "goosectl")]
-        apply_goosectl_env(
+        #[cfg(feature = "berdctl")]
+        apply_berdctl_env(
             &mut command,
-            goosectl_paths.app_data_dir.as_deref(),
-            goosectl_paths.goosectl_bin.as_deref(),
+            berdctl_paths.app_data_dir.as_deref(),
+            berdctl_paths.berdctl_bin.as_deref(),
         );
         if let Some(config_path) = distro_config_path.as_deref() {
             apply_additional_config_files_env(&mut command, &shell_env, config_path);
@@ -310,7 +310,7 @@ where
 // Stale-process record helpers — best-effort orphan cleanup
 // ---------------------------------------------------------------------------
 
-const PROCESS_RECORD_DIR_NAME: &str = "goose-internal-serve";
+const PROCESS_RECORD_DIR_NAME: &str = "berd-serve";
 const PROCESS_RECORD_EXTENSION: &str = "json";
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -338,7 +338,7 @@ fn process_record_path() -> PathBuf {
 fn legacy_pid_file_path() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let hash = fnv1a(exe.to_string_lossy().as_bytes());
-    std::env::temp_dir().join(format!("goose-internal-serve-{hash:016x}.pid"))
+    std::env::temp_dir().join(format!("berd-serve-{hash:016x}.pid"))
 }
 
 /// FNV-1a hash — deterministic across runs (unlike `DefaultHasher`).
@@ -574,87 +574,87 @@ fn process_executable_name(pid: libc::pid_t) -> Option<String> {
     path.file_name()?.to_str().map(String::from)
 }
 
-/// Paths resolved by `resolve_goosectl_spawn_paths`, consumed by
-/// `apply_goosectl_env` after PATH assembly.
-#[cfg(feature = "goosectl")]
-struct GoosectlSpawnPaths {
-    goosectl_bin: Option<PathBuf>,
+/// Paths resolved by `resolve_berdctl_spawn_paths`, consumed by
+/// `apply_berdctl_env` after PATH assembly.
+#[cfg(feature = "berdctl")]
+struct BerdctlSpawnPaths {
+    berdctl_bin: Option<PathBuf>,
     app_data_dir: Option<PathBuf>,
 }
 
-/// Resolve the bundled goosectl CLI and the app data dir before PATH
+/// Resolve the bundled berdctl CLI and the app data dir before PATH
 /// assembly: the shim dir only goes on PATH when the shim was actually
-/// created, and the same resolved paths feed `apply_goosectl_env` after
+/// created, and the same resolved paths feed `apply_berdctl_env` after
 /// the shell-env copy.
-#[cfg(feature = "goosectl")]
-fn resolve_goosectl_spawn_paths(
+#[cfg(feature = "berdctl")]
+fn resolve_berdctl_spawn_paths(
     app_handle: &tauri::AppHandle,
     prepend_dirs: &mut Vec<PathBuf>,
-) -> GoosectlSpawnPaths {
-    let goosectl_bin = resolve_goosectl_bin();
+) -> BerdctlSpawnPaths {
+    let berdctl_bin = resolve_berdctl_bin();
     let app_data_dir = match app_handle.path().app_data_dir() {
         Ok(app_data_dir) => Some(app_data_dir),
         Err(error) => {
             log::warn!(
-                "Skipping goosectl PATH shim and GOOSECTL_LOCK: failed to resolve app data dir: {error}"
+                "Skipping berdctl PATH shim and BERDCTL_LOCK: failed to resolve app data dir: {error}"
             );
             None
         }
     };
-    if let (Some(cli_path), Some(app_data_dir)) = (goosectl_bin.as_deref(), app_data_dir.as_deref())
+    if let (Some(cli_path), Some(app_data_dir)) = (berdctl_bin.as_deref(), app_data_dir.as_deref())
     {
         let shim_dir = app_data_dir.join("bin");
-        match create_goosectl_shim(&shim_dir, cli_path) {
+        match create_berdctl_shim(&shim_dir, cli_path) {
             // After the distro bin dir so that dir keeps its
             // pinned PATH-front position.
             Ok(()) => prepend_dirs.push(shim_dir),
-            Err(error) => log::warn!("Skipping goosectl PATH shim: {error}"),
+            Err(error) => log::warn!("Skipping berdctl PATH shim: {error}"),
         }
     }
-    GoosectlSpawnPaths {
-        goosectl_bin,
+    BerdctlSpawnPaths {
+        berdctl_bin,
         app_data_dir,
     }
 }
 
 /// Point goosed — and the harness children that inherit its environment — at
-/// this app instance's goosectl discovery file and the bundled goosectl
+/// this app instance's berdctl discovery file and the bundled berdctl
 /// CLI. Both values are static paths knowable before the broker exists; the
 /// broker starts lazily and writes the discovery file itself. A `None`
 /// app_data_dir (the caller already warned about it) skips
-/// GOOSECTL_LOCK.
-#[cfg(feature = "goosectl")]
-fn apply_goosectl_env(
+/// BERDCTL_LOCK.
+#[cfg(feature = "berdctl")]
+fn apply_berdctl_env(
     command: &mut Command,
     app_data_dir: Option<&Path>,
-    goosectl_bin: Option<&Path>,
+    berdctl_bin: Option<&Path>,
 ) {
     if let Some(app_data_dir) = app_data_dir {
         command.env(
-            "GOOSECTL_LOCK",
-            tauri_plugin_goosectl::discovery_file_path(app_data_dir, std::process::id()),
+            "BERDCTL_LOCK",
+            tauri_plugin_berdctl::discovery_file_path(app_data_dir, std::process::id()),
         );
     }
 
-    if let Some(goosectl_bin) = goosectl_bin {
-        command.env("GOOSECTL_BIN", goosectl_bin);
+    if let Some(berdctl_bin) = berdctl_bin {
+        command.env("BERDCTL_BIN", berdctl_bin);
     } else {
-        log::warn!("Skipping GOOSECTL_BIN: could not resolve the goosectl binary path");
+        log::warn!("Skipping BERDCTL_BIN: could not resolve the berdctl binary path");
     }
 }
 
 /// Create or refresh the PATH shim that lets harness children run a bare
-/// `goosectl`: a `goosectl` symlink in `shim_dir` pointing at `cli_path`.
+/// `berdctl`: a `berdctl` symlink in `shim_dir` pointing at `cli_path`.
 /// The symlink is recreated on every spawn because the resolved bundle path
 /// changes under App Translocation and app updates; when multiple dev app
 /// instances share an app_data_dir the last spawner wins, which is
 /// acceptable. A symlink (not a copy) keeps the signed bundled binary and
 /// its updates authoritative.
-#[cfg(feature = "goosectl")]
-fn create_goosectl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
+#[cfg(feature = "berdctl")]
+fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
     if !cli_path.exists() {
         return Err(format!(
-            "goosectl binary not found at {}",
+            "berdctl binary not found at {}",
             cli_path.display()
         ));
     }
@@ -662,7 +662,7 @@ fn create_goosectl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> 
     std::fs::create_dir_all(shim_dir)
         .map_err(|error| format!("failed to create {}: {error}", shim_dir.display()))?;
 
-    let link = shim_dir.join("goosectl");
+    let link = shim_dir.join("berdctl");
     // `remove_file` deletes a symlink itself rather than its target.
     match std::fs::remove_file(&link) {
         Ok(()) => {}
@@ -686,16 +686,16 @@ fn create_goosectl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> 
 /// Mirrors `get_goose_command`: explicit env override (exported by `just
 /// dev`, where externalBin is empty) wins; otherwise the externalBin sidecar
 /// sits next to the app executable.
-#[cfg(feature = "goosectl")]
-fn resolve_goosectl_bin() -> Option<PathBuf> {
-    if let Ok(override_path) = std::env::var("GOOSECTL_BIN") {
+#[cfg(feature = "berdctl")]
+fn resolve_berdctl_bin() -> Option<PathBuf> {
+    if let Ok(override_path) = std::env::var("BERDCTL_BIN") {
         if !override_path.is_empty() {
             return Some(PathBuf::from(override_path));
         }
     }
 
     let exe = std::env::current_exe().ok()?;
-    Some(exe.parent()?.join("goosectl"))
+    Some(exe.parent()?.join("berdctl"))
 }
 
 pub fn get_goose_command(app_handle: &tauri::AppHandle) -> Result<Command, String> {
@@ -851,8 +851,8 @@ mod tests {
     #[test]
     fn acp_websocket_url_includes_secret_key_token() {
         assert_eq!(
-            acp_websocket_url(12345, "goose internal/secret"),
-            "ws://127.0.0.1:12345/acp?token=goose+internal%2Fsecret"
+            acp_websocket_url(12345, "berd/secret"),
+            "ws://127.0.0.1:12345/acp?token=berd%2Fsecret"
         );
     }
 
@@ -903,7 +903,7 @@ mod tests {
         assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
     }
 
-    // The distro bin dir keeps the PATH-front position; the goosectl shim
+    // The distro bin dir keeps the PATH-front position; the berdctl shim
     // dir follows it, and both precede the login-shell PATH.
     #[test]
     fn apply_shell_env_keeps_distro_bin_first_with_shim_dir_second() {
@@ -930,9 +930,9 @@ mod tests {
         assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
     }
 
-    #[cfg(feature = "goosectl")]
-    mod goosectl_shim {
-        use super::super::create_goosectl_shim;
+    #[cfg(feature = "berdctl")]
+    mod berdctl_shim {
+        use super::super::create_berdctl_shim;
         use std::path::Path;
 
         fn write_fake_cli(dir: &Path, name: &str) -> std::path::PathBuf {
@@ -944,12 +944,12 @@ mod tests {
         #[test]
         fn shim_symlink_points_at_resolved_cli_path() {
             let temp = tempfile::tempdir().expect("temp dir");
-            let cli_path = write_fake_cli(temp.path(), "goosectl");
+            let cli_path = write_fake_cli(temp.path(), "berdctl");
             let shim_dir = temp.path().join("bin");
 
-            create_goosectl_shim(&shim_dir, &cli_path).expect("shim creation should succeed");
+            create_berdctl_shim(&shim_dir, &cli_path).expect("shim creation should succeed");
 
-            let link = shim_dir.join("goosectl");
+            let link = shim_dir.join("berdctl");
             assert!(link.symlink_metadata().expect("shim exists").is_symlink());
             assert_eq!(std::fs::read_link(&link).expect("read link"), cli_path);
         }
@@ -958,13 +958,13 @@ mod tests {
         fn shim_symlink_is_refreshed_when_target_path_changes() {
             let temp = tempfile::tempdir().expect("temp dir");
             let shim_dir = temp.path().join("bin");
-            let old_cli = write_fake_cli(temp.path(), "goosectl-old");
-            let new_cli = write_fake_cli(temp.path(), "goosectl-new");
+            let old_cli = write_fake_cli(temp.path(), "berdctl-old");
+            let new_cli = write_fake_cli(temp.path(), "berdctl-new");
 
-            create_goosectl_shim(&shim_dir, &old_cli).expect("first shim creation");
-            create_goosectl_shim(&shim_dir, &new_cli).expect("shim refresh");
+            create_berdctl_shim(&shim_dir, &old_cli).expect("first shim creation");
+            create_berdctl_shim(&shim_dir, &new_cli).expect("shim refresh");
 
-            let link = shim_dir.join("goosectl");
+            let link = shim_dir.join("berdctl");
             assert_eq!(std::fs::read_link(&link).expect("read link"), new_cli);
         }
 
@@ -973,7 +973,7 @@ mod tests {
             let temp = tempfile::tempdir().expect("temp dir");
             let shim_dir = temp.path().join("bin");
 
-            let result = create_goosectl_shim(&shim_dir, &temp.path().join("missing"));
+            let result = create_berdctl_shim(&shim_dir, &temp.path().join("missing"));
 
             assert!(result.is_err());
             assert!(!shim_dir.exists());

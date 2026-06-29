@@ -90,20 +90,20 @@ function renderBootError(message: string) {
   );
 }
 
-function OptionalGoosectlBridge() {
+function OptionalBerdctlBridge() {
   const [Bridge, setBridge] = React.useState<React.ComponentType | null>(null);
 
   React.useEffect(() => {
     let mounted = true;
-    import("@/features/goosectl/bridge/GoosectlBridge")
-      .then(({ GoosectlBridge }) => {
+    import("@/features/berdctl/bridge/BerdctlBridge")
+      .then(({ BerdctlBridge }) => {
         if (mounted) {
-          setBridge(() => GoosectlBridge);
+          setBridge(() => BerdctlBridge);
         }
       })
       .catch((error) => {
-        console.error("Failed to load goosectl bridge:", error);
-        reportRendererError("goosectl_bridge_load_failed", error);
+        console.error("Failed to load berdctl bridge:", error);
+        reportRendererError("berdctl_bridge_load_failed", error);
       });
     return () => {
       mounted = false;
@@ -163,7 +163,7 @@ if (bootError) {
       <RendererErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <LocalMediaCacheEvents />
-          <OptionalGoosectlBridge />
+          <OptionalBerdctlBridge />
           <RendererTelemetry />
           <I18nProvider>
             <ThemeProvider>

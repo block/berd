@@ -13,7 +13,7 @@ const desktopPageContext = {
   path: "",
   referrer: "",
   search: "",
-  title: "Goose Internal",
+  title: "Berd",
   url: "",
 };
 
@@ -69,7 +69,7 @@ const isProduction = vi.fn();
 const isStaging = vi.fn();
 const originalFetch = globalThis.fetch;
 const TRANSPORT_BRIDGE_INSTALLED_KEY =
-  "__gooseInternalTelemetryTransportBridgeInstalled";
+  "__berdTelemetryTransportBridgeInstalled";
 
 type GlobalWithTelemetryTransport = typeof globalThis & {
   [TRANSPORT_BRIDGE_INSTALLED_KEY]?: boolean;
@@ -349,7 +349,7 @@ describe("telemetry", () => {
 
   it("logs development events when the localStorage debug toggle is enabled without sending", async () => {
     setEnv("development");
-    localStorage.setItem("goose.telemetry.debug", "1");
+    localStorage.setItem("berd.telemetry.debug", "1");
     const consoleInfo = vi
       .spyOn(console, "info")
       .mockImplementation(() => undefined);

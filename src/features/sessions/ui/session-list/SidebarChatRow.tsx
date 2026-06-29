@@ -70,7 +70,7 @@ import {
 } from "@/shared/ui/context-menu";
 import { Input } from "@/shared/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
-import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { ActiveChatBerdIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarUnreadDot } from "./SidebarUnreadDot";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { toast } from "sonner";
@@ -238,7 +238,7 @@ export function SidebarChatRow({
       role="status"
       aria-label={t("status.chatActive")}
     >
-      <ActiveChatGooseIndicator size={16} />
+      <ActiveChatBerdIndicator size={16} />
     </span>
   ) : hasUnread ? (
     <span
@@ -781,7 +781,7 @@ export function SidebarChatRow({
                   role="status"
                   aria-label={t("status.chatActive")}
                 >
-                  <ActiveChatGooseIndicator size={16} />
+                  <ActiveChatBerdIndicator size={16} />
                 </span>
               ) : hasUnread ? (
                 <span

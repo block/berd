@@ -787,7 +787,7 @@ export function GeneralSettings() {
       <SettingsSection title={t("about.title")}>
         <AboutInfoRow
           label={t("about.fields.name")}
-          value={appInfo?.name ?? "Goose"}
+          value={appInfo?.name ?? "Berd"}
         />
         <AboutInfoRow
           label={t("about.fields.version")}

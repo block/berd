@@ -4,12 +4,12 @@ Date: 2026-06-08
 
 ## Summary
 
-Assistive UX is a product and architecture pattern for moments where Goose helps
+Assistive UX is a product and architecture pattern for moments where Berd helps
 users shape the app around their work. These moments can teach that a control
 exists, suggest a better default, or change a setting after the app has strong
 evidence that the user wants that behavior.
 
-The goal is not to add more tips. The goal is to make Goose attentive without
+The goal is not to add more tips. The goal is to make Berd attentive without
 being intrusive:
 
 ```text

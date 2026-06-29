@@ -50,7 +50,7 @@ describe("StartupDiagnosticView", () => {
     render(<StartupDiagnosticView issue={issue} onRetry={vi.fn()} />);
 
     expect(
-      screen.getByRole("heading", { name: "Goose couldn't start" }),
+      screen.getByRole("heading", { name: "Berd couldn't start" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

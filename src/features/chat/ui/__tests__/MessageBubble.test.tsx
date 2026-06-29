@@ -317,20 +317,20 @@ describe("MessageBubble", () => {
     expect(label.closest(".bg-message-user-bg")).not.toHaveClass("py-2.5");
   });
 
-  it("labels goosectl cross-session user messages", () => {
+  it("labels berdctl cross-session user messages", () => {
     const message = userMessage("from another session");
     message.metadata = {
       ...message.metadata,
-      origin: "goosectl_cross_session",
+      origin: "berdctl_cross_session",
     };
 
     render(<MessageBubble message={message} />);
 
-    const label = screen.getByText("Sent by Goose from another session");
+    const label = screen.getByText("Sent by Berd from another session");
     expect(label).toBeInTheDocument();
     expect(label).toHaveAttribute(
       "data-role",
-      "goosectl-cross-session-message-label",
+      "berdctl-cross-session-message-label",
     );
     expect(label.closest(".bg-message-user-bg")).toHaveTextContent(
       "from another session",
@@ -342,13 +342,13 @@ describe("MessageBubble", () => {
     message.metadata = {
       ...message.metadata,
       delivery: "steer",
-      origin: "goosectl_cross_session",
+      origin: "berdctl_cross_session",
     };
 
     render(<MessageBubble message={message} />);
 
     expect(
-      screen.getByText("Sent by Goose from another session"),
+      screen.getByText("Sent by Berd from another session"),
     ).toBeInTheDocument();
     expect(screen.getByText("Steered")).toBeInTheDocument();
   });

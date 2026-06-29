@@ -341,7 +341,7 @@ export function SessionWindowApp({
   return (
     <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
       <SessionWindowTopBar
-        title={session?.title ?? "Goose"}
+        title={session?.title ?? "Berd"}
         contextPanelLabel={contextPanelLabel}
         contextPanelOpen={isContextPanelOpen}
         showContextPanelToggle={Boolean(session)}

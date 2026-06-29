@@ -26,15 +26,15 @@ const releaseMacosDir = resolve(repoRoot, "release/macos");
 const tempDirs: string[] = [];
 
 function makeTempDir() {
-  const dir = mkdtempSync(resolve(tmpdir(), "goose-release-test-"));
+  const dir = mkdtempSync(resolve(tmpdir(), "berd-release-test-"));
   tempDirs.push(dir);
   return dir;
 }
 
 function writeReleaseArtifacts() {
   mkdirSync(releaseMacosDir, { recursive: true });
-  writeFileSync(resolve(releaseMacosDir, "Goose.app.tar.gz"), "archive");
-  writeFileSync(resolve(releaseMacosDir, "Goose.app.tar.gz.sig"), "signature");
+  writeFileSync(resolve(releaseMacosDir, "Berd.app.tar.gz"), "archive");
+  writeFileSync(resolve(releaseMacosDir, "Berd.app.tar.gz.sig"), "signature");
 }
 
 function makeFakeCurl() {
@@ -85,8 +85,8 @@ function readCurlUploads(logPath: string) {
 
 describe("release scripts", () => {
   afterEach(() => {
-    rmSync(resolve(releaseMacosDir, "Goose.app.tar.gz"), { force: true });
-    rmSync(resolve(releaseMacosDir, "Goose.app.tar.gz.sig"), { force: true });
+    rmSync(resolve(releaseMacosDir, "Berd.app.tar.gz"), { force: true });
+    rmSync(resolve(releaseMacosDir, "Berd.app.tar.gz.sig"), { force: true });
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { force: true, recursive: true });
     }
@@ -158,20 +158,20 @@ describe("release scripts", () => {
     expect(readCurlUploads(fakeCurl.logPath)).toEqual([
       {
         body: "archive",
-        filename: "Goose.app.tar.gz",
-        url: "https://example.com/artifactory/mdx/goose-internal/v1.2.3/Goose.app.tar.gz",
+        filename: "Berd.app.tar.gz",
+        url: "https://example.com/artifactory/mdx/goose-internal/v1.2.3/Berd.app.tar.gz",
       },
       {
         body: "signature",
-        filename: "Goose.app.tar.gz.sig",
-        url: "https://example.com/artifactory/mdx/goose-internal/v1.2.3/Goose.app.tar.gz.sig",
+        filename: "Berd.app.tar.gz.sig",
+        url: "https://example.com/artifactory/mdx/goose-internal/v1.2.3/Berd.app.tar.gz.sig",
       },
     ]);
     expect(stdout).toContain(
       "Skipping latest.json (publish_latest=false) - existing installs stay on their current version",
     );
     expect(stdout).toContain(
-      "Archive still available at https://example.com/artifactory/mdx/goose-internal/v1.2.3/Goose.app.tar.gz for manual download",
+      "Archive still available at https://example.com/artifactory/mdx/goose-internal/v1.2.3/Berd.app.tar.gz for manual download",
     );
   });
 
@@ -196,8 +196,8 @@ describe("release scripts", () => {
 
     const uploads = readCurlUploads(fakeCurl.logPath);
     expect(uploads.map((upload) => upload.filename)).toEqual([
-      "Goose.app.tar.gz",
-      "Goose.app.tar.gz.sig",
+      "Berd.app.tar.gz",
+      "Berd.app.tar.gz.sig",
       expect.stringMatching(/^tmp/),
     ]);
     expect(uploads[2].url).toBe(
@@ -207,7 +207,7 @@ describe("release scripts", () => {
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.platforms["darwin-aarch64"]).toEqual({
       signature: "signature",
-      url: "https://example.com/artifactory/mdx/goose-internal/v1.2.3/Goose.app.tar.gz",
+      url: "https://example.com/artifactory/mdx/goose-internal/v1.2.3/Berd.app.tar.gz",
     });
     expect(manifest.pub_date).toEqual(expect.stringMatching(/Z$/));
   });

@@ -13,7 +13,7 @@
 //!   * It detects the reap itself by watching the WebContent process id: when
 //!     the id changes, WebKit has spun up a fresh renderer in place of one it
 //!     killed, so we log a warning with the last-known footprint.
-//!   * It mirrors each sample to the frontend via the `goose:renderer-stats`
+//!   * It mirrors each sample to the frontend via the `berd:renderer-stats`
 //!     event so the UI can surface the number if it wants to.
 //!
 //! Attribution note: the WebContent process is an XPC service re-parented to
@@ -33,7 +33,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Event emitted to the frontend with each renderer memory sample.
 #[cfg(target_os = "macos")]
-pub const RENDERER_STATS_EVENT: &str = "goose:renderer-stats";
+pub const RENDERER_STATS_EVENT: &str = "berd:renderer-stats";
 
 /// Wait this long after startup before the first sample, so the WKWebView and
 /// its WebContent process have been created.
@@ -46,7 +46,7 @@ const SAMPLE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Minimum interval between high-memory RSS warning lines. Sampling stays more
 /// frequent so the UI and reap detector remain responsive without filling
-/// `goose.log`.
+/// `berd.log`.
 #[cfg(target_os = "macos")]
 const MEMORY_WARNING_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 

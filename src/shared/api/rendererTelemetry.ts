@@ -5,11 +5,11 @@ import { listen } from "@tauri-apps/api/event";
  * Renderer (WKWebView WebContent) memory telemetry bridge.
  *
  * The Rust `renderer_monitor` service samples the WebContent process RSS and
- * emits `goose:renderer-stats`; it also logs silent OOM reaps. This module is
+ * emits `berd:renderer-stats`; it also logs silent OOM reaps. This module is
  * the frontend counterpart: it lets the UI observe those samples and forward
  * its own lifecycle signals (e.g. an unexpected reload) into `goose.log`.
  */
-export const RENDERER_STATS_EVENT = "goose:renderer-stats";
+export const RENDERER_STATS_EVENT = "berd:renderer-stats";
 
 export interface RendererStatsPayload {
   pid: number;

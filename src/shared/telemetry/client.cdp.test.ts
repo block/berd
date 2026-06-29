@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn();
 const TRANSPORT_BRIDGE_INSTALLED_KEY =
-  "__gooseInternalTelemetryTransportBridgeInstalled";
+  "__berdTelemetryTransportBridgeInstalled";
 
 type GlobalWithTelemetryTransport = typeof globalThis & {
   [TRANSPORT_BRIDGE_INSTALLED_KEY]?: boolean;
@@ -115,7 +115,7 @@ describe("telemetry CDP payload", () => {
     expect(message.track.event_name).toBe(
       "goose_internal_app_lifecycle_launched",
     );
-    expect(message.context.app.registry_name).toBe("goose-internal");
+    expect(message.context.app.registry_name).toBe("berd");
     expect(message.context.app.public_version).toBe(properties.app_version);
     expect(message.context.page).toEqual({
       title: telemetry.TELEMETRY_DESKTOP_PAGE_CONTEXT.title,

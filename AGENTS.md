@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Guidelines for agents working on Goose.
+Guidelines for agents working on Berd.
 
-Goose is a standalone Tauri 2 + React 19 desktop. ACP is the main interface
+Berd is a standalone Tauri 2 + React 19 desktop. ACP is the main interface
 we use for the actual agent loop - creating and running sessions, finding available
 models, and setting configuration. When available, we work over ACP methods, but the
 UI can handle operations that are not yet in ACP or are client specific.
@@ -17,10 +17,10 @@ UI can handle operations that are not yet in ACP or are client specific.
 - `scripts/ensure-local-goose.sh` — managed local Goose checkout for dev
 - `scripts/prepare-goose-sidecar.sh` — stages the pinned or explicit Goose binary for Tauri bundling
 - `scripts/update-goose-backend-lock.sh` — resolves and records a new Goose backend pin
-- `src/features/goosectl/` — goosectl command registry
-- `src-tauri/plugins/goosectl/` — goosectl broker
-- `src-tauri/crates/goosectl/` — bundled goosectl CLI
-- `distro/skills/goosectl/` — seeded skill agents use to discover goosectl
+- `src/features/berdctl/` — berdctl command registry
+- `src-tauri/plugins/berdctl/` — berdctl broker
+- `src-tauri/crates/berdctl/` — bundled berdctl CLI
+- `distro/skills/berdctl/` — seeded skill agents use to discover berdctl
 
 ## Startup assets
 
@@ -61,15 +61,15 @@ requires it.
 - Frontend changes: `just check`
 - Vitest-covered behavior: `just test`
 - `src-tauri/`, Tauri config, sidecars, or Rust: `just tauri-check`
-- goosectl commands: `pnpm generate:goosectl-contract`, `pnpm vitest run
-  src/features/goosectl`, and `cargo test -p goosectl` (from `src-tauri/`)
+- berdctl commands: `pnpm generate:berdctl-contract`, `pnpm vitest run
+  src/features/berdctl`, and `cargo test -p berdctl` (from `src-tauri/`)
 - Broad/release/packaging changes: `just ci`
 
-## goosectl
+## berdctl
 
-goosectl lets agents control the app: CLI → broker → renderer registry.
-Design and reasoning: `docs/goosectl-architecture.md`. To add or change a
-command, use `.agents/skills/goosectl-new-command/SKILL.md`
+berdctl lets agents control the app: CLI → broker → renderer registry.
+Design and reasoning: `docs/berdctl-architecture.md`. To add or change a
+command, use `.agents/skills/berdctl-new-command/SKILL.md`
 (`just new-command <noun> <verb>`).
 
 Invariants (1, 3, 4 are gated by test failures; 2, 5, 6 are review rules —
@@ -81,7 +81,7 @@ the doc has the whys and the enforcement map):
 2. Single dispatch point in the renderer.
 3. Bounds live in zod; clap only mirrors them.
 4. Help is hand-authored in the command module (summary, description,
-   helpFooter, `.describe()` per field); `cargo test -p goosectl` fails on
+   helpFooter, `.describe()` per field); `cargo test -p berdctl` fails on
    empty/TODO prose.
 5. UI-visible verbs only; prefer reversible mutations, but one-way visible
    product actions like creating a session or sending a prompt are allowed.
@@ -92,9 +92,9 @@ the doc has the whys and the enforcement map):
    the constants are equal.
 
 The CLI is built from the contract at startup: command modules (zod schemas
-+ help prose) → `pnpm generate:goosectl-contract` → `api-surface.json` (the
++ help prose) → `pnpm generate:berdctl-contract` → `api-surface.json` (the
 client-neutral wire surface, with JSON Schema per action) +
-`cli-surface.json` (the CLI projection) → embedded by the goosectl crate,
+`cli-surface.json` (the CLI projection) → embedded by the berdctl crate,
 whose `tree.rs` builds the clap tree at runtime (`validate.rs` gates
 consistency via the crate's tests). Never hand-edit the contract JSONs.
 

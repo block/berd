@@ -81,7 +81,7 @@ import { useAgentBuilderCoordinator } from "@/features/agents/hooks/useAgentBuil
 import {
   type ArchiveChatWithCleanupOptions,
   useRegisterAppNavigationController,
-} from "@/features/goosectl/navigation";
+} from "@/features/berdctl/navigation";
 import { AgentBuilderLeaveDraftDialog } from "@/features/agents/ui/AgentBuilderLeaveDraftDialog";
 import { AutomationBuilderLeaveDialog } from "@/features/automations/ui/AutomationBuilderLeaveDialog";
 import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";

@@ -123,7 +123,7 @@ describe("getNotificationPrefs", () => {
 
   it("returns stored values merged with defaults", () => {
     localStorage.setItem(
-      "goose:notifications",
+      "berd:notifications",
       JSON.stringify({ enabled: false }),
     );
     expect(getNotificationPrefs()).toEqual({
@@ -134,7 +134,7 @@ describe("getNotificationPrefs", () => {
   });
 
   it("returns defaults when stored value is invalid JSON", () => {
-    localStorage.setItem("goose:notifications", "not-json");
+    localStorage.setItem("berd:notifications", "not-json");
     expect(getNotificationPrefs()).toEqual({
       enabled: true,
       inApp: true,
@@ -200,7 +200,7 @@ Expected: FAIL — module `../notificationPrefs` not found.
 Create `src/features/settings/lib/notificationPrefs.ts`:
 
 ```typescript
-const STORAGE_KEY = "goose:notifications";
+const STORAGE_KEY = "berd:notifications";
 
 export interface NotificationPrefs {
   enabled: boolean;
@@ -450,7 +450,7 @@ export function useCompletionNotifications(
             if (!prefs.desktop) continue;
             import("@tauri-apps/plugin-notification").then(
               ({ sendNotification }) => {
-                sendNotification({ title: "Goose", body });
+                sendNotification({ title: "Berd", body });
               },
             );
           } else {

@@ -144,15 +144,21 @@ describe("acpSendMessage", () => {
       1,
       sessionId,
       "goose_internal_style_guidelines",
-      configuredPrompt,
+      "",
     );
     expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
       2,
       sessionId,
+      "berd_style_guidelines",
+      configuredPrompt,
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      3,
+      sessionId,
       "client_system_prompt",
       "You are Starfriend.",
     );
-    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(2);
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(3);
   });
 
   it("adds the default style guidelines when enabled without config", async () => {
@@ -175,6 +181,12 @@ describe("acpSendMessage", () => {
       1,
       "acp-session-default-style",
       "goose_internal_style_guidelines",
+      "",
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      2,
+      "acp-session-default-style",
+      "berd_style_guidelines",
       DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT,
     );
   });

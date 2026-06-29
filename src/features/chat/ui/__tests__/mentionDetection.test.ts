@@ -248,8 +248,8 @@ describe("useMentionDetection file ordering", () => {
 
   it("opens fresh @ mentions on the configured default category", () => {
     const file = fileItem({
-      resolvedPath: "/project/goose-internal/src/main.ts",
-      displayPath: "goose-internal/src/main.ts",
+      resolvedPath: "/project/berd/src/main.ts",
+      displayPath: "berd/src/main.ts",
       filename: "main.ts",
       source: "project",
     });
@@ -272,15 +272,15 @@ describe("useMentionDetection file ordering", () => {
 
   it("keeps slashes inside @ file paths in the file mention query", () => {
     const file = fileItem({
-      resolvedPath: "/project/goose-internal/src/main.ts",
-      displayPath: "goose-internal/src/main.ts",
+      resolvedPath: "/project/berd/src/main.ts",
+      displayPath: "berd/src/main.ts",
       filename: "main.ts",
       source: "project",
     });
     const { result } = renderHook(() => useMentionDetection([], [], [file]));
 
     act(() => {
-      result.current.detectMention("@goose-internal/src", 19);
+      result.current.detectMention("@berd/src", 9);
     });
     act(() => {
       result.current.setAtMentionCategory("files");
@@ -288,15 +288,15 @@ describe("useMentionDetection file ordering", () => {
 
     expect(result.current.mentionOpen).toBe(true);
     expect(result.current.mentionTrigger).toBe("@");
-    expect(result.current.mentionQuery).toBe("goose-internal/src");
+    expect(result.current.mentionQuery).toBe("berd/src");
     expect(result.current.atMentionCategory).toBe("files");
   });
 
   it("matches the project root shortcut when the root folder query has a trailing slash", () => {
     const projectRoot = fileItem({
-      resolvedPath: "/Users/morganm/Development/goose-internal",
+      resolvedPath: "/Users/morganm/Development/berd",
       displayPath: "Project root",
-      filename: "goose-internal",
+      filename: "berd",
       kind: "folder",
       source: "project",
       shortcut: "projectRoot",
@@ -305,7 +305,7 @@ describe("useMentionDetection file ordering", () => {
       useMentionDetection([], [], [projectRoot]),
     );
 
-    openFilesMention(result, "@goose-internal/");
+    openFilesMention(result, "@berd/");
 
     expect(result.current.filteredFiles).toEqual([projectRoot]);
   });
@@ -397,17 +397,17 @@ describe("useMentionDetection file ordering", () => {
   it("does not fuzzy-match dotted path queries across unrelated path fields", () => {
     const releaseNotes = fileItem({
       resolvedPath:
-        "/Users/kalvin/Development/squareup/goose-internal/scripts/generate-release-notes.sh",
+        "/Users/kalvin/Development/squareup/berd/scripts/generate-release-notes.sh",
       displayPath:
-        "/Users/kalvin/Development/squareup/goose-internal/scripts/generate-release-notes.sh",
+        "/Users/kalvin/Development/squareup/berd/scripts/generate-release-notes.sh",
       filename: "generate-release-notes.sh",
       source: "session",
     });
     const unrelatedContext = fileItem({
       resolvedPath:
-        "/Users/kalvin/Development/squareup/goose-internal/src/features/home/lib/homePinLabelPreference.ts",
+        "/Users/kalvin/Development/squareup/berd/src/features/home/lib/homePinLabelPreference.ts",
       displayPath:
-        "/Users/kalvin/Development/squareup/goose-internal/src/features/home/lib/homePinLabelPreference.ts",
+        "/Users/kalvin/Development/squareup/berd/src/features/home/lib/homePinLabelPreference.ts",
       filename: "homePinLabelPreference.ts",
       source: "session",
     });

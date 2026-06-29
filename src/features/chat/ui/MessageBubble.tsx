@@ -584,8 +584,8 @@ export const MessageBubble = memo(function MessageBubble({
       (assistantDisplayName || personaGutterImage || assistantProviderIcon),
   );
   const isSteeredMessage = isUser && message.metadata?.delivery === "steer";
-  const isGoosectlCrossSessionMessage =
-    isUser && message.metadata?.origin === "goosectl_cross_session";
+  const isBerdctlCrossSessionMessage =
+    isUser && message.metadata?.origin === "berdctl_cross_session";
   const messageAttachments = message.metadata?.attachments ?? [];
   const messageChips = message.metadata?.chips ?? [];
   const timestamp = (
@@ -696,14 +696,14 @@ export const MessageBubble = memo(function MessageBubble({
           )}
           onClick={handleContentClick}
         >
-          {isGoosectlCrossSessionMessage || isSteeredMessage ? (
+          {isBerdctlCrossSessionMessage || isSteeredMessage ? (
             <div className="mb-1 flex flex-col items-start gap-0.5 text-xs font-normal leading-4 text-muted-foreground">
-              {isGoosectlCrossSessionMessage ? (
+              {isBerdctlCrossSessionMessage ? (
                 <span
-                  data-role="goosectl-cross-session-message-label"
+                  data-role="berdctl-cross-session-message-label"
                   className="leading-4"
                 >
-                  {t("message.goosectlCrossSessionLabel")}
+                  {t("message.berdctlCrossSessionLabel")}
                 </span>
               ) : null}
               {isSteeredMessage ? (

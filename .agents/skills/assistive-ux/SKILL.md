@@ -1,11 +1,11 @@
 ---
 name: assistive-ux
-description: Use when adding, reviewing, designing, testing, or managing Assistive UX moments in Goose Internal, including discover, suggest, and autoApply guidance, adaptive settings, behavior signals, retirement rules, or changes under src/shared/assistive-ux.
+description: Use when adding, reviewing, designing, testing, or managing Assistive UX moments in Berd, including discover, suggest, and autoApply guidance, adaptive settings, behavior signals, retirement rules, or changes under src/shared/assistive-ux.
 ---
 
 # Assistive UX
 
-Use this skill for Goose Internal product intelligence moments that teach,
+Use this skill for Berd product intelligence moments that teach,
 suggest, or adapt settings based on user behavior.
 
 Before changing code, read `docs/assistive-ux.md`. Treat that doc as the source

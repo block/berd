@@ -6,7 +6,7 @@
 
 ## Problem
 
-When Goose Internal is minimized or the user is viewing a different chat session, there is no signal that an agent has finished generating. Users must actively check back. The open-source Goose desktop app already has this feature; internal users expect parity.
+When Berd is minimized or the user is viewing a different chat session, there is no signal that an agent has finished generating. Users must actively check back. The open-source Goose desktop app already has this feature; internal users expect parity.
 
 ## Scope
 
@@ -59,7 +59,7 @@ The active session is read from `useChatSessionStore.getState().activeSessionId`
 Uses `tauri-plugin-notification` — the official Tauri 2 cross-platform plugin.
 
 ```
-Title: "Goose"
+Title: "Berd"
 Body:  "<session title> finished"              (completionStatus: "completed")
        "<session title> encountered an error"  (completionStatus: "error")
        "<session title> was stopped"           (completionStatus: "stopped")
@@ -82,7 +82,7 @@ Uses sonner's default auto-dismiss timeout (no custom duration).
 
 ### Storage
 
-A single JSON blob in localStorage under key `"goose:notifications"`:
+A single JSON blob in localStorage under key `"berd:notifications"`:
 
 ```json
 { "enabled": true, "inApp": true, "desktop": true }

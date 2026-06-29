@@ -2,7 +2,7 @@
 # Build and stage the BuilderBot bb CLI as an app resource.
 #
 # The packaged path is:
-#   Goose.app/Contents/Resources/bb
+#   Berd.app/Contents/Resources/bb
 #
 set -euo pipefail
 

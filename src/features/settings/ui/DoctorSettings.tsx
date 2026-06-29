@@ -110,7 +110,7 @@ export function formatDebugReport(report: DoctorReport): string {
   };
 
   const lines: string[] = [
-    "Goose Doctor Report",
+    "Berd Doctor Report",
     `Date: ${new Date().toISOString()}`,
     "=".repeat(60),
   ];

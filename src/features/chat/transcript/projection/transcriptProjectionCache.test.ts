@@ -1001,7 +1001,7 @@ describe("transcript projection cache", () => {
       ...original,
       metadata: {
         ...original.metadata,
-        origin: "goosectl_cross_session" as const,
+        origin: "berdctl_cross_session" as const,
       },
     };
 

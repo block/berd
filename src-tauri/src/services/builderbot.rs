@@ -2,7 +2,7 @@ use reqwest::{header::ACCEPT, StatusCode};
 use serde_json::Value;
 use std::{env, sync::OnceLock, time::Duration};
 
-const BUILDERBOT_BASE_URL_ENV: &str = "GOOSE_INTERNAL_BUILDERBOT_BASE_URL";
+const BUILDERBOT_BASE_URL_ENV: &str = "BERD_BUILDERBOT_BASE_URL";
 const DEFAULT_BUILDERBOT_BASE_URL: &str = "https://builderbot.sqprod.co/";
 const BUILDERBOT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ERROR_BODY_CHARS: usize = 500;

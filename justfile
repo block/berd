@@ -2,13 +2,12 @@
 # gets the same Vite port.
 vite_port := `python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)"`
 
-# Use one shared Tauri target dir across goose-internal worktrees without
-# sharing with upstream Goose, whose `goose` binary collides with this crate's
-# `Goose` binary on case-insensitive macOS filesystems.
-tauri_cargo_target_dir := `if [ -n "${GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR:-}" ]; then printf '%s\n' "$GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR"; elif [ -n "${XDG_CACHE_HOME:-}" ]; then printf '%s/goose-internal-tauri/cargo-target\n' "$XDG_CACHE_HOME"; elif [ "$(uname -s)" = "Darwin" ]; then printf '%s/Library/Caches/goose-internal-tauri/cargo-target\n' "$HOME"; else printf '%s/.cache/goose-internal-tauri/cargo-target\n' "$HOME"; fi`
+# Use one shared Tauri target dir across Berd worktrees while keeping it
+# separate from the managed upstream Goose checkout.
+tauri_cargo_target_dir := `if [ -n "${BERD_TAURI_CARGO_TARGET_DIR:-}" ]; then printf '%s\n' "$BERD_TAURI_CARGO_TARGET_DIR"; elif [ -n "${XDG_CACHE_HOME:-}" ]; then printf '%s/berd-tauri/cargo-target\n' "$XDG_CACHE_HOME"; elif [ "$(uname -s)" = "Darwin" ]; then printf '%s/Library/Caches/berd-tauri/cargo-target\n' "$HOME"; else printf '%s/.cache/berd-tauri/cargo-target\n' "$HOME"; fi`
 
 # Cargo features for the full dev/CI posture of the app crate.
-app_features := "goosectl,app-test-driver"
+app_features := "berdctl,app-test-driver"
 
 # Default recipe
 default:
@@ -16,7 +15,7 @@ default:
 
 # ── Dev Environment ──────────────────────────────────────────
 
-# Sync and build the pinned managed local Goose checkout used for Goose Internal development.
+# Sync and build the pinned managed local Goose checkout used for Berd development.
 goose-sync:
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
@@ -40,16 +39,16 @@ setup: _setup-dev-deps
 
 # ── Build & Check ────────────────────────────────────────────
 
-# Run the frontend non-test checks: design-system guardrails, goosectl contract freshness, formatting, lint, i18n, and TypeScript.
-check: design-system-check goosectl-contract-check frontend-fmt-check lint i18n-check typecheck
+# Run the frontend non-test checks: design-system guardrails, berdctl contract freshness, formatting, lint, i18n, and TypeScript.
+check: design-system-check berdctl-contract-check frontend-fmt-check lint i18n-check typecheck
 
-# Regenerate the goosectl CLI contract artifacts from the command registry.
-goosectl-contract-generate:
-    pnpm generate:goosectl-contract
+# Regenerate the berdctl CLI contract artifacts from the command registry.
+berdctl-contract-generate:
+    pnpm generate:berdctl-contract
 
-# Check that the generated goosectl contract artifacts are up to date.
-goosectl-contract-check:
-    pnpm generate:goosectl-contract --check
+# Check that the generated berdctl contract artifacts are up to date.
+berdctl-contract-check:
+    pnpm generate:berdctl-contract --check
 
 # Format frontend and Tauri/Rust files.
 fmt:
@@ -78,7 +77,7 @@ design-system-manifest-check:
 design-system-audit:
     pnpm design-system:audit
 
-# Check that app color usage follows the shadcn + Goose token contract.
+# Check that app color usage follows the shadcn + Berd token contract.
 design-system-tokens:
     pnpm design-system:tokens
 
@@ -97,7 +96,7 @@ lint:
 # Run react-doctor static analysis as an advisory report (fully offline, no telemetry).
 # Forwards extra flags, e.g. `just react-doctor --verbose` or `just react-doctor --json`.
 react-doctor *ARGS:
-    pnpm exec react-doctor --project goose-internal --no-score --blocking none {{ ARGS }}
+    pnpm exec react-doctor --project berd --no-score --blocking none {{ ARGS }}
 
 # Check frontend i18n string conventions.
 i18n-check:
@@ -119,8 +118,8 @@ tauri-fmt-check:
 clippy:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy --features {{ app_features }} -- -D warnings
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p goosectl -- -D warnings
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p tauri-plugin-goosectl --features server -- -D warnings
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p berdctl -- -D warnings
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p tauri-plugin-berdctl --features server -- -D warnings
 
 # Build the frontend.
 build:
@@ -130,12 +129,12 @@ build:
 tauri-check:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check --features {{ app_features }}
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check -p goosectl
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check -p berdctl
 
 # Run the Rust plugin tests with external sidecars disabled.
 tauri-test:
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p tauri-plugin-goosectl --features server
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p goosectl
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p tauri-plugin-berdctl --features server
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p berdctl
 
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check tauri-test clippy test build
@@ -165,28 +164,28 @@ bundle:
     set -euo pipefail
 
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
 
     # Derive a git-based version so non-release bundles don't ship the 0.1.0
     # placeholder. Injected via a temp --config overlay to keep the tree clean.
     eval "$(./scripts/resolve-app-version.sh)"
-    echo "Building Goose ${GOOSE_APP_VERSION} (${GOOSE_APP_VERSION_RICH})"
-    VERSION_CONFIG="$(mktemp -t goose-tauri-version.XXXXXX.json)"
+    echo "Building Berd ${BERD_APP_VERSION} (${BERD_APP_VERSION_RICH})"
+    VERSION_CONFIG="$(mktemp -t berd-tauri-version.XXXXXX.json)"
     trap 'rm -f "$VERSION_CONFIG"' EXIT
-    jq -n --arg v "$GOOSE_APP_VERSION" '{ version: $v }' > "$VERSION_CONFIG"
+    jq -n --arg v "$BERD_APP_VERSION" '{ version: $v }' > "$VERSION_CONFIG"
 
-    TAURI_BUILD_ARGS=(pnpm tauri build --features goosectl --config "$VERSION_CONFIG")
+    TAURI_BUILD_ARGS=(pnpm tauri build --features berdctl --config "$VERSION_CONFIG")
     if [[ "$(uname -s)" = "Darwin" ]]; then
       TAURI_BUILD_ARGS+=(--bundles app)
     fi
 
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
-      VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH" \
+      VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       "${TAURI_BUILD_ARGS[@]}"
 
     if [[ "$(uname -s)" = "Darwin" ]]; then
-      APP_PATH="{{ tauri_cargo_target_dir }}/release/bundle/macos/Goose.app"
+      APP_PATH="{{ tauri_cargo_target_dir }}/release/bundle/macos/Berd.app"
       # Local Tauri builds are ad-hoc signed before resources are sealed. Re-sign
       # after app bundling so the local DMG contains a verifiable app bundle.
       codesign --force --deep --sign - "$APP_PATH"
@@ -196,7 +195,7 @@ bundle:
         arm64) DMG_ARCH="aarch64" ;;
         *) DMG_ARCH="$(uname -m)" ;;
       esac
-      ./scripts/package-macos-dmg.sh "$APP_PATH" "$DMG_DIR/Goose_${GOOSE_APP_VERSION}_${DMG_ARCH}.dmg"
+      ./scripts/package-macos-dmg.sh "$APP_PATH" "$DMG_DIR/berd_${BERD_APP_VERSION}_${DMG_ARCH}.dmg"
     fi
 
 # Build macOS app and DMG bundles.
@@ -217,22 +216,22 @@ bundle-debug:
     set -euo pipefail
 
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
 
     # Use a temporary config overlay so normal release bundles keep devtools
     # disabled, and fold in the git-derived version so the bundle doesn't ship
     # the 0.1.0 placeholder.
     eval "$(./scripts/resolve-app-version.sh)"
-    echo "Building Goose ${GOOSE_APP_VERSION} (${GOOSE_APP_VERSION_RICH})"
-    DEBUG_CONFIG="$(mktemp -t goose-tauri-debug.XXXXXX.json)"
+    echo "Building Berd ${BERD_APP_VERSION} (${BERD_APP_VERSION_RICH})"
+    DEBUG_CONFIG="$(mktemp -t berd-tauri-debug.XXXXXX.json)"
     trap 'rm -f "$DEBUG_CONFIG"' EXIT
-    jq --arg v "$GOOSE_APP_VERSION" '.version = $v | .app.windows[0].devtools = true' \
+    jq --arg v "$BERD_APP_VERSION" '.version = $v | .app.windows[0].devtools = true' \
       src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
-      VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH" \
-      pnpm tauri build --features goosectl,devtools --config "$DEBUG_CONFIG"
+      VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
+      pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"
 
 # ── Test ─────────────────────────────────────────────────────
 
@@ -274,15 +273,15 @@ dev:
     # placeholder. The rich string carries the telemetry/agent-context version;
     # the numeric one is injected into Tauri's config below.
     eval "$(./scripts/resolve-app-version.sh)"
-    export VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH"
-    echo "Using app version: ${GOOSE_APP_VERSION} (${GOOSE_APP_VERSION_RICH})"
+    export VITE_APP_VERSION="$BERD_APP_VERSION_RICH"
+    echo "Using app version: ${BERD_APP_VERSION} (${BERD_APP_VERSION_RICH})"
 
-    # tauri dev only builds the root package; the goosectl CLI workspace
-    # member needs an explicit build, resolved at runtime via GOOSECTL_BIN
+    # tauri dev only builds the root package; the berdctl CLI workspace
+    # member needs an explicit build, resolved at runtime via BERDCTL_BIN
     # because tauri.dev.conf.json blanks externalBin.
-    (cd src-tauri && cargo build -p goosectl)
-    export GOOSECTL_BIN="${CARGO_TARGET_DIR}/debug/goosectl"
-    echo "Using goosectl CLI: ${GOOSECTL_BIN}"
+    (cd src-tauri && cargo build -p berdctl)
+    export BERDCTL_BIN="${CARGO_TARGET_DIR}/debug/berdctl"
+    echo "Using berdctl CLI: ${BERDCTL_BIN}"
 
     if [[ ! -x resources/bb ]]; then
         ./scripts/prepare-bb-cli-resource.sh
@@ -310,7 +309,7 @@ dev:
     fi
 
     EXTRA_CONFIG_ARGS=(--config src-tauri/tauri.dev.conf.json --config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}")
-    EXTRA_CONFIG_ARGS+=(--config "{\"version\":\"${GOOSE_APP_VERSION}\"}")
+    EXTRA_CONFIG_ARGS+=(--config "{\"version\":\"${BERD_APP_VERSION}\"}")
 
     ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
     mkdir -p "$ICON_DIR"
@@ -325,9 +324,9 @@ dev:
     DEV_APP_ICON="$ICON_DIR/icon-${DEV_ICON_SLUG}-${DEV_ICON_CACHE_KEY}.icns"
     if node scripts/generate-dev-icon.mjs src-tauri/icons/icon.icns "$DEV_ICON_PNG" "$DEV_ICON_LABEL" && \
        node scripts/generate-dev-icon.mjs src-tauri/icons/icon.icns "$DEV_APP_ICON" "$DEV_ICON_LABEL"; then
-        export GOOSE_INTERNAL_DEV_APP_NAME="Goose (${DEV_ICON_LABEL})"
-        export GOOSE_INTERNAL_DEV_APP_ICON="$DEV_ICON_PNG"
-        DEV_ICON_CONFIG="$(node -e 'const [label, icns, png] = process.argv.slice(1); process.stdout.write(JSON.stringify({ productName: `Goose (${label})`, bundle: { icon: [icns, png] } }));' "$DEV_ICON_LABEL" "$DEV_APP_ICON" "$DEV_ICON_PNG")"
+        export BERD_DEV_APP_NAME="Berd (${DEV_ICON_LABEL})"
+        export BERD_DEV_APP_ICON="$DEV_ICON_PNG"
+        DEV_ICON_CONFIG="$(node -e 'const [label, icns, png] = process.argv.slice(1); process.stdout.write(JSON.stringify({ productName: `Berd (${label})`, bundle: { icon: [icns, png] } }));' "$DEV_ICON_LABEL" "$DEV_APP_ICON" "$DEV_ICON_PNG")"
         echo "Using badged dev icon: ${DEV_ICON_PNG} (${DEV_ICON_LABEL})"
         EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
@@ -350,9 +349,9 @@ release-notes from="" to="HEAD":
 
 # ── Utilities ────────────────────────────────────────────────
 
-# Scaffold a new goosectl command (see .agents/skills/goosectl-new-command/SKILL.md).
+# Scaffold a new berdctl command (see .agents/skills/berdctl-new-command/SKILL.md).
 new-command noun verb:
-    node scripts/new-goosectl-command.mjs {{ noun }} {{ verb }}
+    node scripts/new-berdctl-command.mjs {{ noun }} {{ verb }}
 
 clean:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" cargo clean
@@ -360,7 +359,7 @@ clean:
 
 stage-sidecar:
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
 
 avatars-manifest source version:
     pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"
@@ -405,7 +404,7 @@ reset-migration:
     esac
 
     removed=0
-    for ident in com.squareup.goose-internal com.squareup.goose-internal.dev; do
+    for ident in com.squareup.berd com.squareup.berd.dev; do
         marker="$base/$ident/migration.json"
         if [[ -f "$marker" ]]; then
             rm -v "$marker"
@@ -414,5 +413,5 @@ reset-migration:
     done
 
     if [[ $removed -eq 0 ]]; then
-        echo "No migration marker found under $base/com.squareup.goose-internal{,.dev}/."
+        echo "No migration marker found under $base/com.squareup.berd{,.dev}/."
     fi

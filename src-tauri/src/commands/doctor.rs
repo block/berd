@@ -41,7 +41,7 @@ const DOCTOR_FRESH_REPORT_TIMEOUT: Duration = Duration::from_secs(45);
 const LOCAL_DOCTOR_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const DOCTOR_TIMEOUT_CHECK_ID: &str = "doctor-timeout";
 const APP_CONFIG_PASS_MESSAGE: &str =
-    "Checked config YAML, additional config files, thinking settings, and Goose binary override";
+    "Checked goose config YAML, additional config files, thinking settings, and goose binary override";
 const CLAUDE_THINKING_CONFIG_KEYS: &[&str] = &[
     "CLAUDE_THINKING_TYPE",
     "CLAUDE_THINKING_ENABLED",
@@ -123,7 +123,7 @@ impl DoctorReport {
     /// (sensitive settings are reported as keys only, never values), so the
     /// output is safe to include verbatim.
     pub fn to_diagnostic_text(&self) -> String {
-        let mut out = String::from("Goose Internal doctor report\n");
+        let mut out = String::from("Berd doctor report\n");
 
         let mut category_order: Vec<&str> = Vec::new();
         for check in &self.checks {
@@ -548,7 +548,7 @@ impl AppConfigReport {
         let message = match self.findings.as_slice() {
             [] => APP_CONFIG_PASS_MESSAGE.to_string(),
             [finding] => finding.clone(),
-            _ => format!("Found {} Goose config findings", self.findings.len()),
+            _ => format!("Found {} goose config findings", self.findings.len()),
         };
 
         build_local_result(check, status, &message, None, Some(self.lines.join("\n")))
@@ -623,7 +623,7 @@ fn push_thinking_settings(
         report.push(
             "Thinking Settings",
             CheckStatus::Pass,
-            "No risky thinking settings found in Goose config or the sidecar environment",
+            "No risky thinking settings found in goose config or the sidecar environment",
             None,
             None,
         );
@@ -638,7 +638,7 @@ fn push_thinking_settings(
     report.push(
         "Thinking Settings",
         CheckStatus::Warn,
-        "Risky thinking settings are configured; if Claude or Opus models fail or compact immediately, remove these keys and restart Goose Internal",
+        "Risky thinking settings are configured; if Claude or Opus models fail or compact immediately, remove these keys and restart the goose backend",
         None,
         Some(format!("found keys with values hidden:\n{detail}")),
     );
@@ -694,21 +694,21 @@ fn push_goose_config_file(report: &mut AppConfigReport, path: &Path) {
         ConfigFileValidation::Valid => report.push(
             "Config YAML",
             CheckStatus::Pass,
-            "Goose config YAML is readable",
+            "goose config YAML is readable",
             Some(path.display().to_string()),
             None,
         ),
         ConfigFileValidation::Missing => report.push(
             "Config YAML",
             CheckStatus::Warn,
-            "Goose config is missing; model setup may need to run before sessions can start",
+            "goose config is missing; model setup may need to run before sessions can start",
             Some(path.display().to_string()),
             None,
         ),
         ConfigFileValidation::Invalid(error) => report.push(
             "Config YAML",
             CheckStatus::Fail,
-            "Goose config YAML is invalid; Goose may fail to start",
+            "goose config YAML is invalid; the goose backend may fail to start",
             Some(path.display().to_string()),
             Some(error),
         ),
@@ -723,7 +723,7 @@ fn push_additional_config_files(
         report.push(
             "Additional Config Files",
             CheckStatus::Pass,
-            "No additional Goose config files are configured",
+            "No additional goose config files are configured",
             None,
             None,
         );
@@ -768,7 +768,7 @@ fn push_additional_config_files(
             "Additional Config Files",
             CheckStatus::Pass,
             format!(
-                "{} additional Goose config file(s) are readable",
+                "{} additional goose config file(s) are readable",
                 config_files.paths.len()
             ),
             Some(path),
@@ -778,7 +778,7 @@ fn push_additional_config_files(
         report.push(
             "Additional Config Files",
             CheckStatus::Fail,
-            "One or more additional Goose config files are missing or invalid",
+            "One or more additional goose config files are missing or invalid",
             Some(path),
             Some(errors.join("\n")),
         )
@@ -824,7 +824,7 @@ fn push_goose_bin_override(report: &mut AppConfigReport, value: Option<std::ffi:
         report.push(
             "Goose Binary Override",
             CheckStatus::Pass,
-            "No GOOSE_BIN override is configured; the bundled Goose binary will be used",
+            "No GOOSE_BIN override is configured; the bundled goose backend binary will be used",
             None,
             None,
         );
@@ -836,7 +836,7 @@ fn push_goose_bin_override(report: &mut AppConfigReport, value: Option<std::ffi:
         report.push(
             "Goose Binary Override",
             CheckStatus::Fail,
-            "GOOSE_BIN is set but empty; Goose Internal cannot resolve a Goose binary override",
+            "GOOSE_BIN is set but empty; Goose cannot resolve a goose backend binary override",
             None,
             None,
         );
@@ -847,14 +847,14 @@ fn push_goose_bin_override(report: &mut AppConfigReport, value: Option<std::ffi:
         Ok(()) => report.push(
             "Goose Binary Override",
             CheckStatus::Pass,
-            "GOOSE_BIN points to an executable file",
+            "GOOSE_BIN points to an executable goose backend binary",
             Some(path.display().to_string()),
             None,
         ),
         Err(error) => report.push(
             "Goose Binary Override",
             CheckStatus::Fail,
-            "GOOSE_BIN points to an invalid Goose binary override",
+            "GOOSE_BIN points to an invalid goose backend binary override",
             Some(path.display().to_string()),
             Some(error),
         ),
@@ -1118,7 +1118,7 @@ fn doctor_timeout_report(timeout_duration: Duration) -> DoctorReport {
             path: None,
             bridge_path: None,
             raw_output: Some(format!(
-                "checked: app-side doctor timeout\ntimeout_seconds: {}\nmessage: Goose Internal stopped waiting for Doctor checks so the page could render. The upstream doctor crate may still have an unbounded subprocess running.",
+                "checked: app-side doctor timeout\ntimeout_seconds: {}\nmessage: Berd stopped waiting for Doctor checks so the page could render. The upstream doctor crate may still have an unbounded subprocess running.",
                 timeout_duration.as_secs()
             )),
             auth_status: None,
@@ -1389,14 +1389,14 @@ mod tests {
         report.push(
             "Config YAML",
             CheckStatus::Pass,
-            "Goose config YAML is readable",
+            "goose config YAML is readable",
             Some("/tmp/config.yaml".to_string()),
             None,
         );
         report.push(
             "Goose Binary Override",
             CheckStatus::Fail,
-            "GOOSE_BIN points to an invalid Goose binary override",
+            "GOOSE_BIN points to an invalid goose backend binary override",
             Some("/tmp/goose".to_string()),
             Some("file is not executable".to_string()),
         );
@@ -1406,7 +1406,7 @@ mod tests {
         assert_eq!(check.status, CheckStatus::Fail);
         assert_eq!(
             check.message,
-            "GOOSE_BIN points to an invalid Goose binary override"
+            "GOOSE_BIN points to an invalid goose backend binary override"
         );
         let output = check.raw_output.as_deref().expect("raw output");
         assert!(output.contains("Config YAML [pass]"));

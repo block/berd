@@ -115,7 +115,7 @@ function sha256(body: string) {
 }
 
 function makeTempDir() {
-  const dir = mkdtempSync(resolve(tmpdir(), "goose-avatar-test-"));
+  const dir = mkdtempSync(resolve(tmpdir(), "berd-avatar-test-"));
   tempDirs.push(dir);
   return dir;
 }

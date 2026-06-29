@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-archive the signed + notarized + stapled Goose.app, minisign the archive
+# Re-archive the signed + notarized + stapled Berd.app, minisign the archive
 # with the Tauri updater key, and publish it to Artifactory so installed
 # binaries pick up the new version on their next poll.
 #
@@ -58,11 +58,11 @@ rm -f "$ARCHIVE"
 echo "+++ :closed_lock_with_key: Signing updater archive with minisign"
 # tauri signer reads TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 # from env, same as `tauri build` does when createUpdaterArtifacts is on.
-# goose-internal stores the key under GOOSE2_TAURI_* so it's clearly scoped
-# to this app; remap inline for this one invocation instead of exporting
-# globally. Use a one-shot CLI package because this step only downloads signed
-# artifacts and should not depend on node_modules from the build step. Include
-# the native package explicitly so pnpm dlx cannot omit the optional binding.
+# The existing Buildkite secrets are scoped under GOOSE2_TAURI_*; remap inline
+# for this one invocation instead of exporting globally. Use a one-shot CLI
+# package because this step only downloads signed artifacts and should not
+# depend on node_modules from the build step. Include the native package
+# explicitly so pnpm dlx cannot omit the optional binding.
 TAURI_CLI_VERSION="2.11.2"
 case "$(uname -m)" in
   arm64|aarch64) TAURI_CLI_NATIVE_PACKAGE="@tauri-apps/cli-darwin-arm64@$TAURI_CLI_VERSION" ;;

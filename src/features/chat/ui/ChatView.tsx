@@ -22,7 +22,7 @@ import { toast } from "sonner";
 import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatInput } from "./ChatInput";
-import { LoadingGoose } from "./LoadingGoose";
+import { LoadingBerd } from "./LoadingBerd";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
@@ -54,7 +54,7 @@ import {
 import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
-import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { ActiveChatBerdIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { getTextContent } from "@/shared/types/messages";
 import { getConversationBeforeForMessageFork } from "@/features/sessions/lib/sessionFork";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
@@ -989,7 +989,7 @@ export function ChatView({
         CHAT_RESPONDING_PILL_CLASS,
       )}
     >
-      <ActiveChatGooseIndicator
+      <ActiveChatBerdIndicator
         size={14}
         className={CHAT_RESPONDING_GOOSE_CLASS}
       />
@@ -1003,11 +1003,11 @@ export function ChatView({
           CHAT_RESPONDING_PILL_CLASS,
         )}
       >
-        <ActiveChatGooseIndicator
+        <ActiveChatBerdIndicator
           size={14}
           className={CHAT_RESPONDING_GOOSE_CLASS}
         />
-        <LoadingGoose
+        <LoadingBerd
           key="loading-indicator"
           chatState={loadingChatState}
           className="mb-0 px-0"

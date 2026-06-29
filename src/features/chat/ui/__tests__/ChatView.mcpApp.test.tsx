@@ -136,8 +136,8 @@ vi.mock("../ChatInput", () => ({
   },
 }));
 
-vi.mock("../LoadingGoose", () => ({
-  LoadingGoose: () => null,
+vi.mock("../LoadingBerd", () => ({
+  LoadingBerd: () => null,
 }));
 
 vi.mock("../ChatLoadingSkeleton", () => ({

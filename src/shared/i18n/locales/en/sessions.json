@@ -30,7 +30,7 @@
     "importComplete": "Import complete",
     "importCompleteDescription_one": "Imported {{title}} with {{displayCount}} message.",
     "importCompleteDescription_other": "Imported {{title}} with {{displayCount}} messages.",
-    "importDisconnectedError": "Goose disconnected while {{phase}} ({{fileSize}}). The import did not return a result; the backend may have restarted, crashed, or rejected the large payload. The underlying server error is only available in the Goose logs.",
+    "importDisconnectedError": "Berd disconnected while {{phase}} ({{fileSize}}). The import did not return a result; the backend may have restarted, crashed, or rejected the large payload. The underlying server error is only available in the Berd logs.",
     "importFailed": "Import failed",
     "importFailedDescription": "{{fileName}} {{message}}",
     "importFailedFallback": "could not be imported.",
@@ -41,7 +41,7 @@
       "refreshing": "Refreshing history"
     },
     "importPhaseDescription": {
-      "importing": "sending the session to Goose",
+      "importing": "sending the session to Berd",
       "reading": "reading the selected file",
       "refreshing": "refreshing session history"
     },

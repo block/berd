@@ -1,5 +1,5 @@
 {
-  "name": "goose-internal",
+  "name": "berd",
   "private": true,
   "version": "0.4.12",
   "type": "module",
@@ -11,7 +11,7 @@
     "design-system:coverage": "node ./scripts/design-system-coverage.mjs",
     "design-system:generate": "node ./scripts/design-system-manifest.mjs",
     "design-system:manifest-check": "node ./scripts/design-system-manifest.mjs --check",
-    "generate:goosectl-contract": "node ./scripts/generate-goosectl-contract.mjs",
+    "generate:berdctl-contract": "node ./scripts/generate-berdctl-contract.mjs",
     "design-system:tokens": "node ./scripts/design-system-tokens.mjs",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",

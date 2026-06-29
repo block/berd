@@ -54,7 +54,7 @@ docker_run_args=(
   -e RUSTUP_HOME=/usr/local/rustup
   -e PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   -e GOOSE_DEV_ROOT=/work/.docker-cache/goose-dev
-  -e GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR=/work/.docker-cache/tauri-target
+  -e BERD_TAURI_CARGO_TARGET_DIR=/work/.docker-cache/tauri-target
   -v "$repo_root:/work"
   -w /work
 )

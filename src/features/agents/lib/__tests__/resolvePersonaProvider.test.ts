@@ -41,7 +41,11 @@ describe("resolvePersonaProvider", () => {
     ).toEqual({ id: "openai", label: "OpenAI" });
   });
 
-  it("resolves Goose as an implicit provider", () => {
+  it("resolves goose as an implicit provider while accepting legacy Berd", () => {
+    expect(resolvePersonaProvider(persona({ provider: "berd" }), [])).toEqual({
+      id: "goose",
+      label: "Goose",
+    });
     expect(resolvePersonaProvider(persona({ provider: "Goose" }), [])).toEqual({
       id: "goose",
       label: "Goose",

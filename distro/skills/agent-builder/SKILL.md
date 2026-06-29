@@ -1,14 +1,14 @@
 ---
 name: agent-builder
 description: >-
-  Create, edit, or inspect Goose agents/personas stored as Agent Markdown files with YAML frontmatter under ~/.agents/agents. Use when user needs to manage goose agents or personas.
+  Create, edit, or inspect Berd agents/personas stored as Agent Markdown files with YAML frontmatter under ~/.agents/agents. Use when user needs to manage Berd agents or personas.
 metadata:
-  gooseInternalBundled: true
+  berdBundled: true
 ---
 
 # Agent Builder
 
-Use this skill when managing Goose agents/personas in Agent Markdown format.
+Use this skill when managing Berd agents/personas in Agent Markdown format.
 
 ## Storage
 

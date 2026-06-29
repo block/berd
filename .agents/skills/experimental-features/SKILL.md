@@ -1,11 +1,11 @@
 ---
 name: experimental-features
-description: Use when adding, reviewing, configuring, graduating, or removing Goose Internal experiments.
+description: Use when adding, reviewing, configuring, graduating, or removing Berd experiments.
 ---
 
 # Experimental Features
 
-Use experiments for opt-in, user-local in-progress Goose UI or workflow behavior.
+Use experiments for opt-in, user-local in-progress Berd UI or workflow behavior.
 Do not use experiments for secrets, credentials, backend authority, packaged
 policy, or app state that should survive graduation as a normal preference.
 

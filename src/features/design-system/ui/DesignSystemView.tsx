@@ -93,7 +93,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
-import { GooseLogo } from "@/shared/ui/GooseLogo";
+import { BerdLogo } from "@/shared/ui/BerdLogo";
 import { FormItem } from "@/shared/ui/form";
 import {
   HoverCard,
@@ -260,8 +260,8 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
   "File Context Menu":
     "File-specific action menu composition for copying paths and related file operations.",
   Form: "Form composition primitives that connect fields, labels, descriptions, and validation messages.",
-  "Goose Logo":
-    "Animated brand mark wrapper around GooseIcon. The sidebar uses GooseIcon directly, so this wrapper currently has no product imports.",
+  "Berd Logo":
+    "Animated Berd brand mark wrapper around the shared icon asset. The sidebar uses the icon directly, so this wrapper currently has no product imports.",
   "Hover Card":
     "Hover-triggered supporting information with popover surface and motion tokens.",
   "Image Lightbox":
@@ -2274,9 +2274,9 @@ function ThemeControls() {
           <SelectValue placeholder="Theme" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="system">System · Goose Default</SelectItem>
-          <SelectItem value="light">Light · Goose Light</SelectItem>
-          <SelectItem value="dark">Dark · Goose Dark</SelectItem>
+          <SelectItem value="system">System · Berd Default</SelectItem>
+          <SelectItem value="light">Light · Berd Light</SelectItem>
+          <SelectItem value="dark">Dark · Berd Dark</SelectItem>
         </SelectContent>
       </Select>
 
@@ -2487,7 +2487,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
-          <BreadcrumbCurrentPage>goose</BreadcrumbCurrentPage>
+          <BreadcrumbCurrentPage>Berd</BreadcrumbCurrentPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
@@ -2653,13 +2653,13 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   Form: () => (
     <FormItem className="w-72">
       <Label htmlFor="design-system-form-preview">Workspace name</Label>
-      <Input id="design-system-form-preview" defaultValue="Goose" />
+      <Input id="design-system-form-preview" defaultValue="Berd" />
       <p className="text-sm text-muted-foreground">
         Helper text and validation share form slots.
       </p>
     </FormItem>
   ),
-  "Goose Logo": () => <GooseLogo />,
+  "Berd Logo": () => <BerdLogo />,
   "Hover Card": () => (
     <HoverCard>
       <HoverCardTrigger asChild>
@@ -2683,7 +2683,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   "Input Group": () => (
     <InputGroup className="w-80">
       <InputGroupAddon>@</InputGroupAddon>
-      <InputGroupInput defaultValue="goose" />
+      <InputGroupInput defaultValue="Berd" />
     </InputGroup>
   ),
   "Input OTP": () => (
@@ -3159,7 +3159,7 @@ function OverviewPage() {
   return (
     <>
       <PageIntro
-        title="Goose design system inventory"
+        title="Berd design system inventory"
         description="A small internal map of components, theme behavior, token values, and style drift. Component facts now come from a generated manifest."
       />
       <div className="grid gap-4 md:grid-cols-4">
@@ -3280,7 +3280,7 @@ function ButtonPage() {
     <>
       <PageIntro
         title="Button"
-        description="Button variants and sizes running inside the real Goose app shell, with the active theme and primary color applied."
+        description="Button variants and sizes running inside the real Berd app shell, with the active theme and primary color applied."
       />
       <ComponentSpec name="Button" />
 
@@ -3429,7 +3429,7 @@ function ButtonGroupPage() {
       <ComponentSpec name="Button Group" />
 
       <ComponentPlayground
-        description="This is the shadcn-studio Button Group component using Goose Button children."
+        description="This is the shadcn-studio Button Group component using Berd Button children."
         preview={
           <ButtonGroup
             orientation={playgroundOrientation}
@@ -3728,7 +3728,7 @@ function ToggleGroupPage() {
     <>
       <PageIntro
         title="Toggle Group"
-        description="Adjacent choice controls for short options with Radix keyboard behavior and Goose tokens."
+        description="Adjacent choice controls for short options with Radix keyboard behavior and Berd tokens."
       />
       <ComponentSpec name="Toggle Group" />
 
@@ -3869,7 +3869,7 @@ function SelectPage() {
     <>
       <PageIntro
         title="Select"
-        description="Single-value choice controls backed by Radix state and Goose overlay tokens."
+        description="Single-value choice controls backed by Radix state and Berd overlay tokens."
       />
       <ComponentSpec name="Select" />
 
@@ -4438,8 +4438,8 @@ function FormPage() {
   return <GenericComponentPage name="Form" />;
 }
 
-function GooseLogoPage() {
-  return <GenericComponentPage name="Goose Logo" />;
+function BerdLogoPage() {
+  return <GenericComponentPage name="Berd Logo" />;
 }
 
 function HoverCardPage() {
@@ -5271,8 +5271,8 @@ function renderSection(section: DesignSystemSection) {
       return <FileContextMenuPage />;
     case "component-form":
       return <FormPage />;
-    case "component-goose-logo":
-      return <GooseLogoPage />;
+    case "component-berd-logo":
+      return <BerdLogoPage />;
     case "component-hover-card":
       return <HoverCardPage />;
     case "component-image-lightbox":

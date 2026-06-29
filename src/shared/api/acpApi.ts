@@ -432,7 +432,7 @@ export async function prompt(
   return client.prompt({ sessionId, prompt: content, _meta: meta });
 }
 
-const UNKNOWN_EXPECTED_RUN_ID = "__goose_internal_unknown_active_run__";
+const UNKNOWN_EXPECTED_RUN_ID = "__berd_unknown_active_run__";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

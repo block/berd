@@ -121,12 +121,12 @@ describe("getReplayCreated", () => {
 });
 
 describe("getReplayUserMetadata", () => {
-  it("restores known goosectl cross-session origin metadata", () => {
+  it("restores known berdctl cross-session origin metadata", () => {
     expect(
       getReplayUserMetadata({
-        _meta: { goose: { origin: "goosectl_cross_session" } },
+        _meta: { goose: { origin: "berdctl_cross_session" } },
       }),
-    ).toEqual({ origin: "goosectl_cross_session" });
+    ).toEqual({ origin: "berdctl_cross_session" });
   });
 
   it("ignores unknown origins", () => {

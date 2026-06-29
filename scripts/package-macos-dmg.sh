@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Create a styled macOS DMG from a built Goose.app bundle.
+# Create a styled macOS DMG from a built Berd.app bundle.
 
 set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: scripts/package-macos-dmg.sh path/to/Goose.app path/to/Goose.dmg
+Usage: scripts/package-macos-dmg.sh path/to/Berd.app path/to/Berd.dmg
 
 Creates a styled drag-to-Applications DMG with a generated background image.
 USAGE
@@ -17,9 +17,9 @@ USAGE
 app_path="$1"
 out_dmg="$2"
 app_name="$(basename "$app_path")"
-vol_name="${VOL_NAME:-Goose}"
-work_root="$(mktemp -d "${TMPDIR:-/tmp}/goose-dmg.XXXXXX")"
-rw_dmg="$work_root/rw-Goose.dmg"
+vol_name="${VOL_NAME:-Berd}"
+work_root="$(mktemp -d "${TMPDIR:-/tmp}/Berd-dmg.XXXXXX")"
+rw_dmg="$work_root/rw-Berd.dmg"
 dmg_root="$work_root/root"
 background="$work_root/background.png"
 applescript="$work_root/style-dmg.applescript"

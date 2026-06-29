@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
 
-const DATABASE_FILENAME: &str = "goose-internal.sqlite";
+const DATABASE_FILENAME: &str = "berd.sqlite";
 const MIN_CENTER: f64 = -1_000_000.0;
 const MAX_CENTER: f64 = 1_000_000.0;
 const MIN_SIZE: f64 = 1.0;

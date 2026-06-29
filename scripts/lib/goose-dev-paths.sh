@@ -16,12 +16,12 @@
 
 default_goose_dev_root() {
   if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
-    printf '%s/goose-internal-dev\n' "$XDG_CACHE_HOME"
+    printf '%s/berd-dev\n' "$XDG_CACHE_HOME"
     return
   fi
   case "$(uname -s)" in
-    Darwin) printf '%s/Library/Caches/goose-internal-dev\n' "$HOME" ;;
-    *) printf '%s/.cache/goose-internal-dev\n' "$HOME" ;;
+    Darwin) printf '%s/Library/Caches/berd-dev\n' "$HOME" ;;
+    *) printf '%s/.cache/berd-dev\n' "$HOME" ;;
   esac
 }
 

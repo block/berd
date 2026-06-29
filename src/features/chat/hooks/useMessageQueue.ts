@@ -33,14 +33,14 @@ function getQueuedMessageKey(
   });
 }
 
-function isGoosectlCrossSessionQueuedMessage(
+function isBerdctlCrossSessionQueuedMessage(
   queuedMessage: {
     sendOptions?: ChatSendOptions;
   } | null,
 ): boolean {
   return (
     queuedMessage?.sendOptions?.userMessageMetadata?.origin ===
-    "goosectl_cross_session"
+    "berdctl_cross_session"
   );
 }
 
@@ -112,7 +112,7 @@ export function useMessageQueue(
       isSendBlocked ||
       !queuedMessage ||
       !queuedMessageKey ||
-      isGoosectlCrossSessionQueuedMessage(queuedMessage) ||
+      isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
       hasReachedRetryLimit ||
       alreadyAttemptedThisIdleCycle
     ) {

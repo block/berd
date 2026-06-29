@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 export const LOCAL_MEDIA_CACHES_CLEARED_EVENT =
-  "goose:local-media-caches-cleared";
+  "berd:local-media-caches-cleared";
 
 export interface LocalMediaCachesClearedPayload {
   avatars: boolean;

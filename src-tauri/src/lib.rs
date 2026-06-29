@@ -21,9 +21,11 @@ use tauri_plugin_window_state::StateFlags;
 const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 28.0);
 const APP_LOG_MAX_FILE_SIZE_BYTES: u128 = 10 * 1024 * 1024;
 #[cfg(target_os = "macos")]
-const DEV_APP_NAME_ENV: &str = "GOOSE_INTERNAL_DEV_APP_NAME";
+const APP_DISPLAY_NAME: &str = "Berd";
 #[cfg(target_os = "macos")]
-const DEV_APP_ICON_ENV: &str = "GOOSE_INTERNAL_DEV_APP_ICON";
+const DEV_APP_NAME_ENV: &str = "BERD_DEV_APP_NAME";
+#[cfg(target_os = "macos")]
+const DEV_APP_ICON_ENV: &str = "BERD_DEV_APP_ICON";
 
 fn install_panic_logging_hook() {
     std::panic::set_hook(Box::new(|info| {
@@ -38,10 +40,8 @@ fn install_panic_logging_hook() {
 }
 
 #[cfg(target_os = "macos")]
-fn set_dev_process_name() {
-    let Ok(app_name) = std::env::var(DEV_APP_NAME_ENV) else {
-        return;
-    };
+fn set_process_name() {
+    let app_name = std::env::var(DEV_APP_NAME_ENV).unwrap_or_else(|_| APP_DISPLAY_NAME.to_string());
     let app_name = app_name.trim();
     if app_name.is_empty() {
         return;
@@ -81,7 +81,7 @@ fn set_dev_dock_icon() {
 pub fn run() {
     install_panic_logging_hook();
     #[cfg(target_os = "macos")]
-    set_dev_process_name();
+    set_process_name();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -93,7 +93,7 @@ pub fn run() {
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("goose".into()),
+                        file_name: Some("berd".into()),
                     }),
                 ])
                 .build(),
@@ -112,8 +112,8 @@ pub fn run() {
     #[cfg(feature = "app-test-driver")]
     let builder = builder.plugin(tauri_plugin_app_test_driver::init());
 
-    #[cfg(feature = "goosectl")]
-    let builder = builder.plugin(tauri_plugin_goosectl::init());
+    #[cfg(feature = "berdctl")]
+    let builder = builder.plugin(tauri_plugin_berdctl::init());
 
     builder
         .setup(|app| {
@@ -162,8 +162,10 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
+            services::app_data_migration::migrate_legacy_app_data(app.handle());
+
             let app_data_dir = app.path().app_data_dir()?;
-            services::goosectl_discovery::sweep_stale_discovery_files(&app_data_dir);
+            services::berdctl_discovery::sweep_stale_discovery_files(&app_data_dir);
 
             app.manage(commands::runtime_config::RuntimeConfigState::new(
                 app_data_dir.clone(),
@@ -236,26 +238,27 @@ pub fn run() {
             services::renderer_monitor::start(app.handle().clone());
 
             // Build a custom macOS application menu so that the app submenu,
-            // "About" item, and "Quit" item use the capitalised product name
-            // "Goose" instead of the lowercase Cargo binary name "goose".
+            // "About" item, and "Quit" item use the product name "Berd"
+            // instead of the Cargo binary name.
             #[cfg(target_os = "macos")]
             {
                 set_dev_dock_icon();
                 refresh_traffic_light_position_on_window_changes(app);
                 attach_main_window_lifecycle(app);
 
-                let app_menu = SubmenuBuilder::new(app, "Goose")
-                    .about(Some(
-                        AboutMetadataBuilder::new().name(Some("Goose")).build(),
-                    ))
+                let app_menu = SubmenuBuilder::new(app, "Berd")
+                    .about_with_text(
+                        "About Berd",
+                        Some(AboutMetadataBuilder::new().name(Some("Berd")).build()),
+                    )
                     .separator()
                     .services()
                     .separator()
-                    .hide()
+                    .hide_with_text("Hide Berd")
                     .hide_others()
                     .show_all()
                     .separator()
-                    .quit_with_text("Quit Goose")
+                    .quit_with_text("Quit Berd")
                     .build()?;
                 let edit_menu = SubmenuBuilder::new(app, "Edit")
                     .undo()

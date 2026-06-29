@@ -28,31 +28,31 @@ describe("TopBar", () => {
     setWindowWidth(DEFAULT_WINDOW_WIDTH);
   });
 
-  it("navigates home when the goose logo is clicked", async () => {
+  it("navigates home when the Berd logo is clicked", async () => {
     const user = userEvent.setup();
     const onGoHome = vi.fn();
 
     renderTopBar({ onGoHome });
 
-    await user.click(screen.getByRole("button", { name: /goose home/i }));
+    await user.click(screen.getByRole("button", { name: /Berd home/i }));
 
     expect(onGoHome).toHaveBeenCalledOnce();
   });
 
-  it("keeps the goose home logo at its top-bar brand size", () => {
+  it("keeps the Berd home logo at its top-bar brand size", () => {
     renderTopBar({ onGoHome: vi.fn() });
 
-    const button = screen.getByRole("button", { name: /goose home/i });
+    const button = screen.getByRole("button", { name: /Berd home/i });
     const icon = button.querySelector('[role="img"]');
 
     expect(icon).toHaveClass("size-5");
   });
 
-  it("omits the goose home logo when onGoHome is not provided", () => {
+  it("omits the Berd home logo when onGoHome is not provided", () => {
     renderTopBar();
 
     expect(
-      screen.queryByRole("button", { name: /goose home/i }),
+      screen.queryByRole("button", { name: /Berd home/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -78,13 +78,13 @@ describe("TopBar", () => {
     renderTopBar({
       breadcrumbs: [
         { label: "Chat" },
-        { label: "Goose Internal" },
+        { label: "Berd" },
         { label: "Model and system info" },
       ],
     });
 
     expect(screen.queryByText("Chat")).not.toBeInTheDocument();
-    expect(screen.queryByText("Goose Internal")).not.toBeInTheDocument();
+    expect(screen.queryByText("Berd")).not.toBeInTheDocument();
     expect(screen.getByText("Model and system info")).toBeInTheDocument();
   });
 
@@ -99,7 +99,7 @@ describe("TopBar", () => {
     });
 
     expect(
-      screen.getByRole("button", { name: /goose home/i }),
+      screen.getByRole("button", { name: /Berd home/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /search/i })).toBeInTheDocument();
     expect(

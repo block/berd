@@ -1,6 +1,6 @@
 # Release Notes Guidelines
 
-You are writing release notes for `goose-internal` (internal desktop app). You will be
+You are writing release notes for Berd (`berd`, the internal desktop app). You will be
 given the commit hashes that landed in this release, inspect them for context.
 
 ## Audience
@@ -11,7 +11,7 @@ engineers.
 ## What to include
 
 - Only changes that are directly user-facing or meaningful to someone using
-  Goose.
+  Berd.
 - Prioritize improvements, fixes, and features users would notice.
 - Put feedback-driven or highly requested items near the top.
 - Include quality-of-life improvements if they are easy to understand.

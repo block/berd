@@ -243,7 +243,7 @@ const systemErrorMessage = message("system-error", "system", [
   {
     type: "systemNotification",
     notificationType: "error",
-    text: "Goose could not access this project folder.",
+    text: "Could not access this project folder.",
     action: { type: "openContextPanel" },
   },
 ]);

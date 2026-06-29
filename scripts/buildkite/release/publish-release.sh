@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Download signed+notarized build artifacts from the build step, stamp the
 # release version into their filenames, and publish them as a GitHub release
-# on squareup/goose-internal tagged v<version>.
+# on squareup/berd tagged v<version>.
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 RELEASE_VERSION="$(meta version)"
 TAG="v${RELEASE_VERSION}"
-TITLE="Goose v${RELEASE_VERSION}"
+TITLE="Berd v${RELEASE_VERSION}"
 APP_COMMIT="${BUILDKITE_COMMIT:-$(git rev-parse HEAD)}"
 GOOSE_BACKEND_COMMIT="$(jq -r '.commit' "$REPO_ROOT/goose-backend.lock.json")"
 if [[ -n "${BUILDKITE_BUILD_URL:-}" ]]; then
@@ -40,27 +40,27 @@ DMG_SRC="$STAGED/${APP_BUNDLE_NAME}.dmg"
 
 # Stamp the version into the asset filenames so downloads carry it. Switch to
 # space-free names here for friendlier download URLs.
-APP_ZIP="$STAGED/Goose_${RELEASE_VERSION}.app.zip"
-DMG="$STAGED/Goose_${RELEASE_VERSION}_aarch64.dmg"
+APP_ZIP="$STAGED/${APP_BUNDLE_NAME}_${RELEASE_VERSION}.app.zip"
+DMG="$STAGED/${APP_BUNDLE_NAME}_${RELEASE_VERSION}_aarch64.dmg"
 mv "$APP_ZIP_SRC" "$APP_ZIP"
 mv "$DMG_SRC"     "$DMG"
 
-echo "+++ :github: Creating release $TAG on $GOOSE_INTERNAL_REPO"
-if gh release view "$TAG" --repo "$GOOSE_INTERNAL_REPO" >/dev/null 2>&1; then
+echo "+++ :github: Creating release $TAG on $BERD_REPO"
+if gh release view "$TAG" --repo "$BERD_REPO" >/dev/null 2>&1; then
   echo "Release $TAG already exists; re-uploading assets with --clobber"
   gh release edit "$TAG" \
-    --repo "$GOOSE_INTERNAL_REPO" \
+    --repo "$BERD_REPO" \
     --target "${BUILDKITE_COMMIT:-main}" \
     --title "$TITLE" \
     --notes "$NOTES"
-  gh release upload "$TAG" --repo "$GOOSE_INTERNAL_REPO" --clobber "$APP_ZIP" "$DMG"
+  gh release upload "$TAG" --repo "$BERD_REPO" --clobber "$APP_ZIP" "$DMG"
 else
   gh release create "$TAG" \
-    --repo "$GOOSE_INTERNAL_REPO" \
+    --repo "$BERD_REPO" \
     --target "${BUILDKITE_COMMIT:-main}" \
     --title "$TITLE" \
     --notes "$NOTES" \
     "$APP_ZIP" "$DMG"
 fi
 
-echo "+++ :white_check_mark: Published $TAG to $GOOSE_INTERNAL_REPO"
+echo "+++ :white_check_mark: Published $TAG to $BERD_REPO"

@@ -655,7 +655,7 @@ pub fn open_session_window(
 
     let url = format!("index.html?sessionKey={}", session_query_key(&session_id));
     let builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
-        .title("Goose")
+        .title("Berd")
         .inner_size(900.0, 700.0)
         .min_inner_size(608.0, 600.0);
 

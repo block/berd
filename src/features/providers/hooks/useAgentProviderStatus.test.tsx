@@ -307,7 +307,7 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
   });
 
-  it("keeps the served Goose provider ready even when the goose CLI check fails", async () => {
+  it("keeps the served goose provider ready even when the goose CLI check fails", async () => {
     // The `ai-agent-goose` check probes the external `goose` CLI (`goose acp
     // --help`). A broken/stale CLI fails that probe, but the in-app Goose
     // provider is served by the bundled `goosed` sidecar and must not be gated
@@ -316,9 +316,9 @@ describe("useAgentProviderStatus", () => {
       report([
         check({
           id: "ai-agent-goose",
-          label: "Goose",
+          label: "goose CLI",
           status: "fail",
-          message: "Goose ACP subcommand not available — upgrade required",
+          message: "goose ACP subcommand not available — upgrade required",
           path: "/usr/local/bin/goose",
           bridgePath: null,
         }),
@@ -335,12 +335,12 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.readyAgentIds.has("goose")).toBe(true);
   });
 
-  it("keeps the served Goose provider ready when the goose CLI check warns or has no path", async () => {
+  it("keeps the served goose provider ready when the goose CLI check warns or has no path", async () => {
     runDoctor.mockResolvedValue(
       report([
         check({
           id: "ai-agent-goose",
-          label: "Goose",
+          label: "goose CLI",
           status: "warn",
           path: null,
           bridgePath: null,
@@ -365,7 +365,7 @@ describe("useAgentProviderStatus", () => {
       report([
         check({
           id: "ai-agent-goose",
-          label: "Goose",
+          label: "goose CLI",
           status: "fail",
           path: "/usr/local/bin/goose",
           installedVersion: "1.7.0",

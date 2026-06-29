@@ -9,7 +9,8 @@ use crate::services::distro_bundle::DistroBundle;
 const DISTRO_AGENTS_DIR_NAME: &str = "agents";
 const GLOBAL_AGENTS_DIR_NAME: &str = ".agents";
 const AGENTS_DIR_NAME: &str = "agents";
-const MARKER_FILE_NAME: &str = ".goose-internal-bundled-agents.json";
+const MARKER_FILE_NAME: &str = ".berd-bundled-agents.json";
+const LEGACY_MARKER_FILE_NAME: &str = ".goose-internal-bundled-agents.json";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SeedBundledAgentsResult {
@@ -31,8 +32,10 @@ struct AgentFrontmatter {
 
 #[derive(Deserialize)]
 struct AgentMetadata {
+    #[serde(rename = "berdBundled")]
+    berd_bundled: Option<bool>,
     #[serde(rename = "gooseInternalBundled")]
-    goose_internal_bundled: Option<bool>,
+    legacy_bundled: Option<bool>,
 }
 
 pub fn seed_bundled_agents(bundle: &DistroBundle) -> Result<SeedBundledAgentsResult, String> {
@@ -171,7 +174,9 @@ fn is_installed_bundled_agent(agent_file: &Path) -> Result<bool, String> {
     Ok(agent_frontmatter(&contents)
         .and_then(|frontmatter| yaml_serde::from_str::<AgentFrontmatter>(frontmatter).ok())
         .and_then(|frontmatter| frontmatter.metadata)
-        .and_then(|metadata| metadata.goose_internal_bundled)
+        .map(|metadata| {
+            metadata.berd_bundled.unwrap_or(false) || metadata.legacy_bundled.unwrap_or(false)
+        })
         .unwrap_or(false))
 }
 
@@ -228,13 +233,26 @@ fn marker_path(target_root: &Path) -> PathBuf {
     target_root.join(MARKER_FILE_NAME)
 }
 
+fn legacy_marker_path(target_root: &Path) -> PathBuf {
+    target_root.join(LEGACY_MARKER_FILE_NAME)
+}
+
 fn read_seed_marker(target_root: &Path) -> Result<SeedMarker, String> {
     let path = marker_path(target_root);
-    if !path.exists() {
-        return Ok(SeedMarker::default());
+    if path.exists() {
+        return read_seed_marker_file(&path);
     }
 
-    let contents = fs::read_to_string(&path).map_err(|err| {
+    let legacy_path = legacy_marker_path(target_root);
+    if legacy_path.exists() {
+        return read_seed_marker_file(&legacy_path);
+    }
+
+    Ok(SeedMarker::default())
+}
+
+fn read_seed_marker_file(path: &Path) -> Result<SeedMarker, String> {
+    let contents = fs::read_to_string(path).map_err(|err| {
         format!(
             "Failed to read bundled agent marker '{}': {err}",
             path.display()
@@ -263,7 +281,14 @@ fn write_seed_marker(target_root: &Path, marker: &SeedMarker) -> Result<(), Stri
             "Failed to write bundled agent marker '{}': {err}",
             path.display()
         )
-    })
+    })?;
+
+    let legacy_path = legacy_marker_path(target_root);
+    if legacy_path.exists() {
+        let _ = fs::remove_file(legacy_path);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -283,7 +308,7 @@ mod tests {
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  gooseInternalBundled: true\n---\nBuild carefully.",
+            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  berdBundled: true\n---\nBuild carefully.",
         );
 
         let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
@@ -292,7 +317,7 @@ mod tests {
         assert_eq!(result.avatar_refs_to_warm, vec!["app-avatar:gloopies-20"]);
         assert_eq!(
             fs::read_to_string(target.path().join("builderbot.md")).unwrap(),
-            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  gooseInternalBundled: true\n---\nBuild carefully."
+            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  berdBundled: true\n---\nBuild carefully."
         );
     }
 
@@ -303,7 +328,7 @@ mod tests {
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nBuild carefully.",
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nBuild carefully.",
         );
 
         seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
@@ -317,13 +342,36 @@ mod tests {
     }
 
     #[test]
+    fn reads_and_migrates_legacy_seed_marker() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        write_agent(
+            source.path(),
+            "builderbot.md",
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nBundled.",
+        );
+        fs::write(
+            target.path().join(LEGACY_MARKER_FILE_NAME),
+            "{\"seededFiles\":[\"builderbot.md\"]}",
+        )
+        .unwrap();
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 0);
+        assert!(!target.path().join("builderbot.md").exists());
+        assert!(target.path().join(MARKER_FILE_NAME).exists());
+        assert!(!target.path().join(LEGACY_MARKER_FILE_NAME).exists());
+    }
+
+    #[test]
     fn treats_existing_user_agent_as_already_handled() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nBundled.",
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nBundled.",
         );
         write_agent(
             target.path(),
@@ -355,7 +403,7 @@ mod tests {
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  gooseInternalBundled: true\n---\nBundled.",
+            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  berdBundled: true\n---\nBundled.",
         );
         fs::create_dir_all(target.path()).unwrap();
         fs::write(target.path().join("builderbot.md"), [0xff]).unwrap();
@@ -381,13 +429,13 @@ mod tests {
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nOriginal.",
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nOriginal.",
         );
 
         seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
         fs::write(
             target.path().join("builderbot.md"),
-            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nUser edited.",
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nUser edited.",
         )
         .unwrap();
 
@@ -396,8 +444,20 @@ mod tests {
         assert_eq!(result.seeded_count, 1);
         assert_eq!(
             fs::read_to_string(target.path().join("builderbot.md")).unwrap(),
-            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nOriginal."
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nOriginal."
         );
+    }
+
+    #[test]
+    fn recognizes_legacy_bundled_agent_marker() {
+        let target = tempdir().unwrap();
+        write_agent(
+            target.path(),
+            "builderbot.md",
+            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nOriginal.",
+        );
+
+        assert!(is_installed_bundled_agent(&target.path().join("builderbot.md")).unwrap());
     }
 
     #[test]
@@ -407,7 +467,7 @@ mod tests {
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  gooseInternalBundled: true\n---\nOriginal.",
+            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  berdBundled: true\n---\nOriginal.",
         );
 
         seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();

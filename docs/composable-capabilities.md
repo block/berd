@@ -4,7 +4,7 @@ Date: 2026-06-05
 
 ## Summary
 
-Goose should support both beginners and pro engineers without forcing every
+Berd should support both beginners and pro engineers without forcing every
 workflow into a separate hard-coded screen. The codebase should make product
 surfaces composable: a team-authored view can combine reusable feature pieces
 today, and a future user-authored view builder can reuse the same pieces later.
@@ -47,7 +47,7 @@ enough behavior to work correctly wherever it is rendered.
 
 ## Why This Matters
 
-Goose's product vision is progressive disclosure. A beginner may only need to
+Berd's product vision is progressive disclosure. A beginner may only need to
 see that their first pull request was created, plus a short summary and a clear
 next action. A pro engineer may need a review queue, status, diff, comments,
 actions, filters, and agent help in one dense workspace.
@@ -274,8 +274,8 @@ Beginner moments:
 
 ```text
 User creates their first PR.
-Goose shows a readable summary.
-Goose gives a simple open/share action.
+Berd shows a readable summary.
+Berd gives a simple open/share action.
 Diff and review tools stay available but not prominent.
 ```
 
@@ -283,7 +283,7 @@ Pro workflow:
 
 ```text
 User opens a PR inbox.
-Goose shows review queue, status, diffs, comments, actions, and filters.
+Berd shows review queue, status, diffs, comments, actions, and filters.
 Chat can sit beside the PR context and help with review or summary.
 ```
 
@@ -316,7 +316,7 @@ TerminalSurface
 ChatSurface
 ```
 
-That lets Goose reuse chat in a full screen, beside a PR, inside a project, or
+That lets Berd reuse chat in a full screen, beside a PR, inside a project, or
 inside a focused workflow without dragging every full-screen concern into each
 surface.
 
@@ -328,13 +328,13 @@ feature-owned visual language.
 Rules:
 
 1. Use existing shared UI primitives before creating new ones.
-2. Use semantic tokens and Goose extension tokens from the design system.
+2. Use semantic tokens and Berd extension tokens from the design system.
 3. Do not add one-off colors, spacing systems, shadows, or interaction patterns
    inside a feature.
 4. If a capability needs a new reusable visual treatment, propose it as a design
    system primitive or token.
 5. Keep density choices surface-specific. A pro inbox can be denser than a
-   beginner card, but both should still feel like Goose.
+   beginner card, but both should still feel like Berd.
 
 ## When To Extract A Capability
 
@@ -385,7 +385,7 @@ Before building a new composed workflow, answer:
 
 ## Future Direction
 
-If team-authored composed views prove useful, Goose can later add a lightweight
+If team-authored composed views prove useful, Berd can later add a lightweight
 capability registry for user-authored views. At that point, each registered
 capability would need stable metadata:
 
@@ -400,5 +400,5 @@ state contract
 ```
 
 That should come after several real capabilities exist. The near-term goal is to
-make Goose easier for the team to compose without overbuilding the future view
+make Berd easier for the team to compose without overbuilding the future view
 builder.

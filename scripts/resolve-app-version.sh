@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Resolve the app version for a build and print shell assignments to stdout:
 #
-#   GOOSE_APP_VERSION       plain numeric x.y.z — safe to feed Tauri's `version`
+#   BERD_APP_VERSION       plain numeric x.y.z — safe to feed Tauri's `version`
 #                           (CFBundleShortVersionString garbles pre-release/+build
 #                           suffixes, so this stays strictly numeric).
-#   GOOSE_APP_VERSION_RICH  the most descriptive version string available, for
+#   BERD_APP_VERSION_RICH  the most descriptive version string available, for
 #                           telemetry and agent context; may carry a
 #                           `-dev.<commits>+g<sha>` suffix on non-release builds.
 #
 # Consume with:  eval "$(scripts/resolve-app-version.sh)"
 #
 # Precedence:
-#   1. Explicit override — first arg, else $GOOSE_APP_VERSION_OVERRIDE. The
+#   1. Explicit override — first arg, else $BERD_APP_VERSION_OVERRIDE. The
 #      release pipeline owns the version, so it can pass the operator-entered
 #      value straight through.
 #   2. git describe --tags — the latest vX.Y.Z tag. When the build is ahead of
@@ -27,12 +27,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 emit() {
-  printf "GOOSE_APP_VERSION='%s'\n" "$1"
-  printf "GOOSE_APP_VERSION_RICH='%s'\n" "$2"
+  printf "BERD_APP_VERSION='%s'\n" "$1"
+  printf "BERD_APP_VERSION_RICH='%s'\n" "$2"
 }
 
 # 1. Explicit override (release path passes the operator-entered version).
-override="${1:-${GOOSE_APP_VERSION_OVERRIDE:-}}"
+override="${1:-${BERD_APP_VERSION_OVERRIDE:-}}"
 if [[ -n "$override" ]]; then
   emit "${override%%[-+]*}" "$override"
   exit 0

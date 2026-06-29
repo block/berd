@@ -170,8 +170,8 @@ function renderLongPathProjectChatInput() {
       availableProjects={[
         {
           id: "project-1",
-          name: "goose-internal",
-          workingDirs: ["/Users/wesb/Development/squareup/goose-internal"],
+          name: "berd",
+          workingDirs: ["/Users/wesb/Development/squareup/berd"],
         },
       ]}
     />,
@@ -1137,7 +1137,7 @@ describe("ChatInput", () => {
 
   it("keeps path mentions open when typing after a long project root completion", async () => {
     const user = userEvent.setup();
-    const projectRoot = "/Users/wesb/Development/squareup/goose-internal";
+    const projectRoot = "/Users/wesb/Development/squareup/berd";
     mockSearchFilesForMentions.mockImplementation(async ({ query }) =>
       query === `${projectRoot}/src`
         ? [
@@ -1157,7 +1157,7 @@ describe("ChatInput", () => {
     await user.type(input, "@@");
     expect(
       await screen.findByRole("option", {
-        name: /goose-internal project root/i,
+        name: /berd project root/i,
       }),
     ).toBeInTheDocument();
 
@@ -1266,8 +1266,8 @@ describe("ChatInput", () => {
     const user = userEvent.setup();
     mockSearchFilesForMentions.mockResolvedValue([
       {
-        resolvedPath: "/Users/wesb/Development/squareup/goose-internal/sdk",
-        displayPath: "goose-internal/sdk",
+        resolvedPath: "/Users/wesb/Development/squareup/berd/sdk",
+        displayPath: "berd/sdk",
         filename: "sdk",
         kind: "folder",
         source: "project",
@@ -1276,7 +1276,7 @@ describe("ChatInput", () => {
     render(
       <ChatInput
         onSend={vi.fn()}
-        fileMentionRoots={["/Users/wesb/Development/squareup/goose-internal"]}
+        fileMentionRoots={["/Users/wesb/Development/squareup/berd"]}
       />,
     );
 
@@ -1285,7 +1285,7 @@ describe("ChatInput", () => {
 
     expect(
       await screen.findByRole("option", {
-        name: /goose-internal project root/i,
+        name: /berd project root/i,
       }),
     ).toBeInTheDocument();
     expect(
@@ -1293,36 +1293,34 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
 
     await user.clear(input);
-    await user.type(input, "@@goose-internal");
+    await user.type(input, "@@berd");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
-        roots: ["/Users/wesb/Development/squareup/goose-internal"],
-        query: "/Users/wesb/Development/squareup/goose-internal",
+        roots: ["/Users/wesb/Development/squareup/berd"],
+        query: "/Users/wesb/Development/squareup/berd",
         maxResults: 12,
       });
     });
     const rootQueryOptions = await screen.findAllByRole("option");
-    expect(rootQueryOptions[0]).toHaveAccessibleName(
-      /goose-internal project root/i,
-    );
+    expect(rootQueryOptions[0]).toHaveAccessibleName(/berd project root/i);
     expect(
-      screen.getByRole("option", { name: /sdk goose-internal\s*\/sdk/i }),
+      screen.getByRole("option", { name: /sdk berd\s*\/sdk/i }),
     ).toBeInTheDocument();
 
     await user.clear(input);
-    await user.type(input, "@@goose-internal/");
+    await user.type(input, "@@berd/");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
-        roots: ["/Users/wesb/Development/squareup/goose-internal"],
-        query: "/Users/wesb/Development/squareup/goose-internal/",
+        roots: ["/Users/wesb/Development/squareup/berd"],
+        query: "/Users/wesb/Development/squareup/berd/",
         maxResults: 12,
       });
     });
     expect(
       await screen.findByRole("option", {
-        name: /goose-internal project root/i,
+        name: /berd project root/i,
       }),
     ).toBeInTheDocument();
   });
@@ -2017,7 +2015,7 @@ describe("ChatInput", () => {
           availableProjects: [
             {
               id: "project-1",
-              name: "Goose Internal",
+              name: "berd",
               workingDirs: ["/workspace/goose"],
             },
           ],
@@ -2047,10 +2045,7 @@ describe("ChatInput", () => {
     expect(modelTrigger).toHaveClass("h-8", "w-10");
     expect(projectTrigger).toHaveClass("h-8", "w-10");
     expect(modelTrigger).toHaveAttribute("title", "GPT-4o");
-    expect(projectTrigger).toHaveAttribute(
-      "title",
-      "Goose Internal - /workspace/goose",
-    );
+    expect(projectTrigger).toHaveAttribute("title", "berd - /workspace/goose");
   });
 
   it("keeps the model picker open when clicked after the project picker", async () => {
@@ -2069,7 +2064,7 @@ describe("ChatInput", () => {
           availableProjects: [
             {
               id: "project-1",
-              name: "Goose Internal",
+              name: "berd",
               workingDirs: ["/workspace/goose"],
             },
           ],

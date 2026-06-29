@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "Goose"
+name = "Berd"
 version = "0.4.12"
 dependencies = [
  "base64 0.22.1",
@@ -37,9 +37,9 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-app-test-driver",
+ "tauri-plugin-berdctl",
  "tauri-plugin-deep-link",
  "tauri-plugin-dialog",
- "tauri-plugin-goosectl",
  "tauri-plugin-log",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
@@ -461,6 +461,17 @@ name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
+name = "berdctl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "indexmap 2.13.1",
+ "serde",
+ "serde_json",
+ "ureq",
+]
 
 [[package]]
 name = "bit-set"
@@ -2035,17 +2046,6 @@ dependencies = [
  "glib-sys",
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "goosectl"
-version = "0.1.0"
-dependencies = [
- "clap",
- "indexmap 2.13.1",
- "serde",
- "serde_json",
- "ureq",
 ]
 
 [[package]]
@@ -5432,6 +5432,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-berdctl"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tauri-plugin-deep-link"
 version = "2.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5492,21 +5507,6 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
  "url",
-]
-
-[[package]]
-name = "tauri-plugin-goosectl"
-version = "0.1.0"
-dependencies = [
- "axum",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "tokio",
- "uuid",
 ]
 
 [[package]]

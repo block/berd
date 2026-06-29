@@ -511,7 +511,7 @@ describe("McpAppView nested tool calls", () => {
     expect(borderlessChrome?.className).not.toContain("overflow-hidden");
   });
 
-  it("passes Goose2 package identity in host context", async () => {
+  it("passes berd package identity in host context", async () => {
     render(
       <McpAppView
         payload={createPayload()}
@@ -699,7 +699,7 @@ describe("McpAppView nested tool calls", () => {
           },
           locale: navigator.language,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          userAgent: expect.stringMatching(/^goose-internal\//),
+          userAgent: expect.stringMatching(/^berd\//),
           platform: "desktop",
           deviceCapabilities: {
             touch: false,

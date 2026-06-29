@@ -1,5 +1,5 @@
 /**
- * Telemetry client for goose-internal.
+ * Telemetry client for Berd.
  *
  * This is the PAE (Product Analytics Eventing) path: declared
  * `@squareup/message-schemas-web` events emitted via `trackWithSchema`.
@@ -22,7 +22,7 @@
  * crash-safety for free.
  *
  * Dev-only logging can be enabled with `VITE_TELEMETRY_DEBUG=1` or
- * `localStorage.setItem("goose.telemetry.debug", "1")`. In development this
+ * `localStorage.setItem("berd.telemetry.debug", "1")`. In development this
  * logs the event that would have been tracked while keeping real dispatch
  * disabled.
  */
@@ -51,20 +51,20 @@ import { installTelemetryTransportBridge } from "./transport";
 
 // Injected by vite.config.ts from VITE_APP_VERSION, falling back to package.json.
 const appVersion = import.meta.env.VITE_APP_VERSION ?? "0.0.0";
-const TELEMETRY_DEBUG_STORAGE_KEY = "goose.telemetry.debug";
+const TELEMETRY_DEBUG_STORAGE_KEY = "berd.telemetry.debug";
 type TrackSchemaOptions = Options<TrackSchemaMessageProps>;
 
 export const TELEMETRY_DESKTOP_PAGE_CONTEXT: Record<string, string> = {
   path: "",
   referrer: "",
   search: "",
-  title: "Goose Internal",
+  title: "Berd",
   url: "",
 };
 
 const client = new CDP({
   application: {
-    name: "goose-internal",
+    name: "berd",
     version: appVersion,
   },
   environment: getEnvironment(),

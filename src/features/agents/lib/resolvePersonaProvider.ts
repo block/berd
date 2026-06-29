@@ -36,7 +36,10 @@ export function resolvePersonaProvider(
     return matchingProvider;
   }
 
-  if (normalizedPersonaProvider === "goose") {
+  if (
+    normalizedPersonaProvider === "goose" ||
+    normalizedPersonaProvider === "berd"
+  ) {
     return IMPLICIT_GOOSE_PROVIDER;
   }
 

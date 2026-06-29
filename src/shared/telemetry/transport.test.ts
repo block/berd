@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const originalFetch = globalThis.fetch;
 const TRANSPORT_BRIDGE_INSTALLED_KEY =
-  "__gooseInternalTelemetryTransportBridgeInstalled";
+  "__berdTelemetryTransportBridgeInstalled";
 const STAGING_BATCH_URL =
   "https://api.squareupstaging.com/1.0/unifiedevents/batch";
 const PRODUCTION_BATCH_URL = "https://api.squareup.com/1.0/unifiedevents/batch";

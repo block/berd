@@ -423,7 +423,7 @@ mod tests {
                 ),
                 (
                     "path".to_string(),
-                    DiagnosticFieldValue::String("/tmp/goose.log".to_string()),
+                    DiagnosticFieldValue::String("/tmp/berd.log".to_string()),
                 ),
                 (
                     "apiKey".to_string(),
@@ -440,7 +440,7 @@ mod tests {
         assert!(line.contains("event=window_error"));
         assert!(line.contains("elapsed_ms=42"));
         assert!(line.contains("message=\"boom with spaces\""));
-        assert!(line.contains("path=/tmp/goose.log"));
+        assert!(line.contains("path=/tmp/berd.log"));
         assert!(line.contains("apiKey=\"[redacted]\""));
         assert!(line.contains("lineCount=3"));
         assert!(!line.contains('{'));

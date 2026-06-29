@@ -1,10 +1,10 @@
-//! macOS-only detection for when Goose is launched from installer media (a
+//! macOS-only detection for when Berd is launched from installer media (a
 //! mounted disk image, a read-only or App Translocation location, or some
 //! other non-installed download location) rather than from an Applications
 //! folder.
 //!
 //! When that happens we surface a native first-launch prompt offering to move
-//! Goose into `/Applications` and relaunch from there. This mirrors the
+//! Berd into `/Applications` and relaunch from there. This mirrors the
 //! widely-copied Potion Factory `LetsMove` flow: never prompt when the app is
 //! already installed, treat read-only/disk-image/translocated locations as
 //! "running from installer media", and on acceptance copy the bundle, clear
@@ -163,7 +163,7 @@ enum MoveScenario {
     ExistingUnknown,
 }
 
-/// Derive the [`MoveScenario`] from whether `/Applications/Goose.app` exists and
+/// Derive the [`MoveScenario`] from whether `/Applications/Berd.app` exists and
 /// the two versions. Pure so it can be unit-tested over the full truth table.
 fn scenario_for(
     target_exists: bool,
@@ -204,15 +204,13 @@ struct AlertCopy {
 /// trigger regardless of the version situation.
 fn location_note(location: RunLocation) -> &'static str {
     match location {
-        RunLocation::DiskImage => "\n\nYou're currently running Goose from a disk image.",
+        RunLocation::DiskImage => "\n\nYou're currently running Berd from a disk image.",
         RunLocation::Translocated => {
             "\n\nmacOS is running this copy from a temporary, read-only location."
         }
-        RunLocation::ReadOnlyVolume => {
-            "\n\nYou're currently running Goose from a read-only volume."
-        }
+        RunLocation::ReadOnlyVolume => "\n\nYou're currently running Berd from a read-only volume.",
         RunLocation::OtherNonInstalled => {
-            "\n\nYou're currently running Goose from outside your Applications folder."
+            "\n\nYou're currently running Berd from outside your Applications folder."
         }
         RunLocation::InstalledInApplications => "",
     }
@@ -227,32 +225,32 @@ fn alert_copy(scenario: &MoveScenario, location: RunLocation) -> AlertCopy {
         MoveScenario::FreshInstall => AlertCopy {
             message: "Move to Applications folder?".to_string(),
             informative: format!(
-                "Goose can move itself to your Applications folder and relaunch from there. \
+                "Berd can move itself to your Applications folder and relaunch from there. \
                  This keeps automatic updates working and avoids problems with running from \
                  installer media.{note}"
             ),
             primary_button: "Move to Applications Folder".to_string(),
         },
         MoveScenario::Upgrade { from, to } => AlertCopy {
-            message: "Upgrade Goose in your Applications folder?".to_string(),
+            message: "Upgrade Berd in your Applications folder?".to_string(),
             informative: format!(
-                "You have Goose {from} installed. This copy is the newer version {to}. \
-                 Goose can replace the installed copy and relaunch from it.{note}"
+                "You have Berd {from} installed. This copy is the newer version {to}. \
+                 Berd can replace the installed copy and relaunch from it.{note}"
             ),
             primary_button: "Upgrade and Relaunch".to_string(),
         },
         MoveScenario::Downgrade { from, to } => AlertCopy {
             message: "Replace the newer version in your Applications folder?".to_string(),
             informative: format!(
-                "You have Goose {from} installed, which is newer than this copy ({to}). \
-                 Goose can replace the installed copy and relaunch from it.{note}"
+                "You have Berd {from} installed, which is newer than this copy ({to}). \
+                 Berd can replace the installed copy and relaunch from it.{note}"
             ),
             primary_button: "Replace and Relaunch".to_string(),
         },
         MoveScenario::Reinstall { version } => AlertCopy {
-            message: format!("Reinstall Goose {version} in your Applications folder?"),
+            message: format!("Reinstall Berd {version} in your Applications folder?"),
             informative: format!(
-                "Goose {version} is already installed in your Applications folder. Goose can \
+                "Berd {version} is already installed in your Applications folder. Berd can \
                  replace the installed copy and relaunch from it.{note}"
             ),
             primary_button: "Reinstall and Relaunch".to_string(),
@@ -260,7 +258,7 @@ fn alert_copy(scenario: &MoveScenario, location: RunLocation) -> AlertCopy {
         MoveScenario::ExistingUnknown => AlertCopy {
             message: "Replace the copy in your Applications folder?".to_string(),
             informative: format!(
-                "Goose is already installed in your Applications folder. Goose can replace the \
+                "Berd is already installed in your Applications folder. Berd can replace the \
                  installed copy and relaunch from it.{note}"
             ),
             primary_button: "Replace and Relaunch".to_string(),
@@ -275,10 +273,10 @@ fn alert_copy(scenario: &MoveScenario, location: RunLocation) -> AlertCopy {
 /// wording stays testable alongside the rest of the dialog copy.
 fn move_failed_alert_copy(error: &str) -> (String, String) {
     (
-        "Couldn't move Goose to your Applications folder".to_string(),
+        "Couldn't move Berd to your Applications folder".to_string(),
         format!(
-            "Goose will keep running from its current location. You can move it yourself by \
-             dragging Goose into your Applications folder, then opening it from there.\n\n\
+            "Berd will keep running from its current location. You can move it yourself by \
+             dragging Berd into your Applications folder, then opening it from there.\n\n\
              Details: {error}"
         ),
     )
@@ -303,7 +301,7 @@ mod macos {
 
     const SUPPRESSION_MARKER: &str = "suppress-move-to-applications";
 
-    /// Detect whether Goose is running from installer media and, if so, offer
+    /// Detect whether Berd is running from installer media and, if so, offer
     /// to move it into `/Applications`. Intended to run as the very first step
     /// of app setup, before any heavier startup work. On acceptance this
     /// relaunches from the installed copy and exits the current process.
@@ -350,7 +348,7 @@ mod macos {
         let scenario = scenario_for(target.exists(), running.as_ref(), installed.as_ref());
 
         log::info!(
-            "Goose appears to be running from installer media ({location:?}, {scenario:?}); \
+            "Berd appears to be running from installer media ({location:?}, {scenario:?}); \
              prompting to move to /Applications"
         );
 
@@ -373,11 +371,11 @@ mod macos {
 
         match move_to_applications_and_relaunch(&bundle_path, &volume, location) {
             Ok(()) => {
-                log::info!("Relaunching Goose from /Applications");
+                log::info!("Relaunching Berd from /Applications");
                 std::process::exit(0);
             }
             Err(error) => {
-                log::warn!("Failed to move Goose to /Applications: {error}");
+                log::warn!("Failed to move Berd to /Applications: {error}");
                 show_move_failed_alert(&error.to_string());
             }
         }
@@ -621,16 +619,16 @@ mod tests {
 
     #[test]
     fn bundle_path_resolves_to_dot_app_ancestor() {
-        let exe = Path::new("/Applications/Goose.app/Contents/MacOS/Goose");
+        let exe = Path::new("/Applications/Berd.app/Contents/MacOS/Berd");
         assert_eq!(
             bundle_path_from_executable(exe),
-            Some(PathBuf::from("/Applications/Goose.app"))
+            Some(PathBuf::from("/Applications/Berd.app"))
         );
     }
 
     #[test]
     fn bundle_path_is_none_without_dot_app() {
-        let exe = Path::new("/Users/someone/code/goose/target/release/Goose");
+        let exe = Path::new("/Users/someone/code/berd/target/release/Berd");
         assert_eq!(bundle_path_from_executable(exe), None);
     }
 
@@ -638,20 +636,20 @@ mod tests {
     fn applications_folder_detection_is_component_aware() {
         let home = Path::new("/Users/someone");
         assert!(is_in_applications_folder(
-            Path::new("/Applications/Goose.app"),
+            Path::new("/Applications/Berd.app"),
             Some(home)
         ));
         assert!(is_in_applications_folder(
-            Path::new("/Users/someone/Applications/Goose.app"),
+            Path::new("/Users/someone/Applications/Berd.app"),
             Some(home)
         ));
         // A directory that merely starts with the same characters is not a match.
         assert!(!is_in_applications_folder(
-            Path::new("/ApplicationsOther/Goose.app"),
+            Path::new("/ApplicationsOther/Berd.app"),
             Some(home)
         ));
         assert!(!is_in_applications_folder(
-            Path::new("/Volumes/Goose/Goose.app"),
+            Path::new("/Volumes/Berd/Berd.app"),
             Some(home)
         ));
     }
@@ -659,15 +657,15 @@ mod tests {
     #[test]
     fn translocation_detected_by_path_component() {
         let translocated =
-            Path::new("/private/var/folders/ab/cd/T/AppTranslocation/UUID/d/Goose.app");
+            Path::new("/private/var/folders/ab/cd/T/AppTranslocation/UUID/d/Berd.app");
         assert!(is_translocated_path(translocated));
-        assert!(!is_translocated_path(Path::new("/Volumes/Goose/Goose.app")));
+        assert!(!is_translocated_path(Path::new("/Volumes/Berd/Berd.app")));
     }
 
     #[test]
     fn classify_installed_app_does_not_prompt() {
         let location = classify(
-            Path::new("/Applications/Goose.app"),
+            Path::new("/Applications/Berd.app"),
             Some(Path::new("/Users/someone")),
             &volume("/", false),
         );
@@ -678,9 +676,9 @@ mod tests {
     #[test]
     fn classify_disk_image() {
         let location = classify(
-            Path::new("/Volumes/Goose/Goose.app"),
+            Path::new("/Volumes/Berd/Berd.app"),
             None,
-            &volume("/Volumes/Goose", true),
+            &volume("/Volumes/Berd", true),
         );
         assert_eq!(location, RunLocation::DiskImage);
         assert!(location.should_prompt_move());
@@ -689,7 +687,7 @@ mod tests {
     #[test]
     fn classify_translocation_takes_priority_over_volume() {
         let location = classify(
-            Path::new("/private/var/folders/ab/cd/T/AppTranslocation/UUID/d/Goose.app"),
+            Path::new("/private/var/folders/ab/cd/T/AppTranslocation/UUID/d/Berd.app"),
             None,
             &volume("/private/var/folders/ab/cd/T/AppTranslocation/UUID/d", true),
         );
@@ -699,7 +697,7 @@ mod tests {
     #[test]
     fn classify_read_only_non_volume() {
         let location = classify(
-            Path::new("/mnt/ro/Goose.app"),
+            Path::new("/mnt/ro/Berd.app"),
             None,
             &volume("/mnt/ro", true),
         );
@@ -709,7 +707,7 @@ mod tests {
     #[test]
     fn classify_writable_download_is_other_non_installed() {
         let location = classify(
-            Path::new("/Users/someone/Downloads/Goose.app"),
+            Path::new("/Users/someone/Downloads/Berd.app"),
             Some(Path::new("/Users/someone")),
             &volume("/", false),
         );
@@ -849,7 +847,7 @@ mod tests {
             },
             RunLocation::DiskImage,
         );
-        assert!(reinstall.message.contains("Reinstall Goose 0.5.0"));
+        assert!(reinstall.message.contains("Reinstall Berd 0.5.0"));
         assert!(reinstall.primary_button.contains("Reinstall and Relaunch"));
 
         let unknown = alert_copy(&MoveScenario::ExistingUnknown, RunLocation::DiskImage);
@@ -886,10 +884,10 @@ mod tests {
     #[test]
     fn move_failed_alert_copy_surfaces_error_and_manual_path() {
         let (message, informative) = move_failed_alert_copy("ditto exited with exit status: 1");
-        assert!(message.contains("Couldn't move Goose"));
+        assert!(message.contains("Couldn't move Berd"));
         // The user is told the app keeps working and how to move it by hand.
         assert!(informative.contains("keep running"));
-        assert!(informative.contains("dragging Goose"));
+        assert!(informative.contains("dragging Berd"));
         // The underlying error is included for support/debugging.
         assert!(informative.contains("ditto exited with exit status: 1"));
     }
@@ -897,13 +895,13 @@ mod tests {
     #[test]
     fn shell_single_quote_wraps_plain_paths() {
         assert_eq!(
-            shell_single_quote("/Applications/Goose.app"),
-            "'/Applications/Goose.app'"
+            shell_single_quote("/Applications/Berd.app"),
+            "'/Applications/Berd.app'"
         );
         // Spaces and shell metacharacters are inert inside single quotes.
         assert_eq!(
-            shell_single_quote("/Volumes/My Goose & Co/Goose.app"),
-            "'/Volumes/My Goose & Co/Goose.app'"
+            shell_single_quote("/Volumes/My Berd & Co/Berd.app"),
+            "'/Volumes/My Berd & Co/Berd.app'"
         );
     }
 
@@ -911,9 +909,9 @@ mod tests {
     fn shell_single_quote_neutralizes_embedded_quotes() {
         // A bundle renamed to break out of double quotes — the threat from the
         // review — stays a single inert argument under single-quote escaping.
-        let malicious = r#"/Volumes/x/Goose";rm -rf ~;".app"#;
+        let malicious = r#"/Volumes/x/Berd";rm -rf ~;".app"#;
         let quoted = shell_single_quote(malicious);
-        assert_eq!(quoted, r#"'/Volumes/x/Goose";rm -rf ~;".app'"#);
+        assert_eq!(quoted, r#"'/Volumes/x/Berd";rm -rf ~;".app'"#);
         // A literal single quote becomes the classic close/escape/reopen
         // sequence rather than ending the quoted string early.
         assert_eq!(shell_single_quote("a'b"), r#"'a'\''b'"#);

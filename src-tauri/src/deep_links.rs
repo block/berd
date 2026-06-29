@@ -1,16 +1,16 @@
 use percent_encoding::percent_decode_str;
-#[cfg(feature = "goosectl")]
+#[cfg(feature = "berdctl")]
 use serde::Serialize;
-#[cfg(feature = "goosectl")]
+#[cfg(feature = "berdctl")]
 use tauri::Emitter;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
-#[cfg(feature = "goosectl")]
-const SESSION_DEEP_LINK_ERROR_EVENT: &str = "goose:session-deep-link-error";
+#[cfg(feature = "berdctl")]
+const SESSION_DEEP_LINK_ERROR_EVENT: &str = "berd:session-deep-link-error";
 
-#[cfg(feature = "goosectl")]
+#[cfg(feature = "berdctl")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionDeepLinkErrorPayload {
@@ -20,7 +20,7 @@ struct SessionDeepLinkErrorPayload {
 
 pub(crate) fn install<R: Runtime>(app: &tauri::App<R>) {
     // Handles links delivered while the app is already running. Startup
-    // session links are drained by GoosectlBridge after the renderer command
+    // session links are drained by BerdctlBridge after the renderer command
     // registry has mounted.
     let deep_link_app = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
@@ -51,7 +51,7 @@ fn focus_main_window<R: Runtime>(app: &AppHandle<R>, reveal: bool) {
 }
 
 fn parse_session_deep_link(url: &Url) -> Option<String> {
-    if url.scheme() != "goose-internal" {
+    if url.scheme() != "berd" {
         return None;
     }
 
@@ -69,11 +69,11 @@ fn parse_session_deep_link(url: &Url) -> Option<String> {
         .filter(|session_id| !session_id.is_empty())
 }
 
-#[cfg(feature = "goosectl")]
+#[cfg(feature = "berdctl")]
 fn open_session<R: Runtime>(app: AppHandle<R>, session_id: String) -> bool {
     tauri::async_runtime::spawn(async move {
         let requested_session_id = session_id.clone();
-        let result = tauri_plugin_goosectl::dispatch_app_command(
+        let result = tauri_plugin_berdctl::dispatch_app_command(
             app.clone(),
             "sessions".to_string(),
             serde_json::json!({
@@ -95,13 +95,13 @@ fn open_session<R: Runtime>(app: AppHandle<R>, session_id: String) -> bool {
     true
 }
 
-#[cfg(feature = "goosectl")]
+#[cfg(feature = "berdctl")]
 fn session_deep_link_error_payload(
     session_id: &str,
-    error: &tauri_plugin_goosectl::AppCommandDispatchError,
+    error: &tauri_plugin_berdctl::AppCommandDispatchError,
 ) -> SessionDeepLinkErrorPayload {
     let message = match error {
-        tauri_plugin_goosectl::AppCommandDispatchError::Command { message, .. }
+        tauri_plugin_berdctl::AppCommandDispatchError::Command { message, .. }
             if !message.trim().is_empty() =>
         {
             message.clone()
@@ -114,7 +114,7 @@ fn session_deep_link_error_payload(
     }
 }
 
-#[cfg(feature = "goosectl")]
+#[cfg(feature = "berdctl")]
 fn emit_session_deep_link_error<R: Runtime>(
     app: &AppHandle<R>,
     payload: SessionDeepLinkErrorPayload,
@@ -124,9 +124,9 @@ fn emit_session_deep_link_error<R: Runtime>(
     }
 }
 
-#[cfg(not(feature = "goosectl"))]
+#[cfg(not(feature = "berdctl"))]
 fn open_session<R: Runtime>(_app: AppHandle<R>, _session_id: String) -> bool {
-    log::warn!("Ignoring session deep link because the goosectl feature is disabled");
+    log::warn!("Ignoring session deep link because the berdctl feature is disabled");
     false
 }
 
@@ -140,16 +140,13 @@ mod tests {
 
     #[test]
     fn parses_session_host_route() {
-        assert_eq!(
-            parse("goose-internal://session/abc-123"),
-            Some("abc-123".to_string())
-        );
+        assert_eq!(parse("berd://session/abc-123"), Some("abc-123".to_string()));
     }
 
     #[test]
     fn parses_session_path_route() {
         assert_eq!(
-            parse("goose-internal:///session/abc-123"),
+            parse("berd:///session/abc-123"),
             Some("abc-123".to_string())
         );
     }
@@ -157,45 +154,45 @@ mod tests {
     #[test]
     fn percent_decodes_session_id() {
         assert_eq!(
-            parse("goose-internal://session/id%2Fwith%20spaces"),
+            parse("berd://session/id%2Fwith%20spaces"),
             Some("id/with spaces".to_string())
         );
     }
 
     #[test]
     fn ignores_non_session_links() {
-        assert_eq!(parse("goose-internal://connect-return"), None);
+        assert_eq!(parse("berd://connect-return"), None);
         assert_eq!(parse("https://example.com/session/abc"), None);
-        assert_eq!(parse("goose-internal://session/"), None);
-        assert_eq!(parse("goose-internal:///session/"), None);
-        assert_eq!(parse("goose-internal://session/a/b"), None);
-        assert_eq!(parse("goose-internal://session/%FF"), None);
+        assert_eq!(parse("berd://session/"), None);
+        assert_eq!(parse("berd:///session/"), None);
+        assert_eq!(parse("berd://session/a/b"), None);
+        assert_eq!(parse("berd://session/%FF"), None);
     }
 
-    #[cfg(feature = "goosectl")]
+    #[cfg(feature = "berdctl")]
     #[test]
     fn builds_dispatch_error_payloads() {
         assert_eq!(
             session_deep_link_error_payload(
                 "missing-session",
-                &tauri_plugin_goosectl::AppCommandDispatchError::Command {
+                &tauri_plugin_berdctl::AppCommandDispatchError::Command {
                     code: "session_not_found".to_string(),
                     message:
-                        "No session \"missing-session\"; list sessions with `goosectl session list`."
+                        "No session \"missing-session\"; list sessions with `berdctl session list`."
                             .to_string(),
                 },
             ),
             SessionDeepLinkErrorPayload {
                 session_id: "missing-session".to_string(),
                 message:
-                    "No session \"missing-session\"; list sessions with `goosectl session list`."
+                    "No session \"missing-session\"; list sessions with `berdctl session list`."
                         .to_string(),
             }
         );
         assert_eq!(
             session_deep_link_error_payload(
                 "missing-session",
-                &tauri_plugin_goosectl::AppCommandDispatchError::Command {
+                &tauri_plugin_berdctl::AppCommandDispatchError::Command {
                     code: "backend_read_failed".to_string(),
                     message: "Backend down".to_string(),
                 },
@@ -208,7 +205,7 @@ mod tests {
         assert_eq!(
             session_deep_link_error_payload(
                 "missing-session",
-                &tauri_plugin_goosectl::AppCommandDispatchError::Timeout,
+                &tauri_plugin_berdctl::AppCommandDispatchError::Timeout,
             ),
             SessionDeepLinkErrorPayload {
                 session_id: "missing-session".to_string(),

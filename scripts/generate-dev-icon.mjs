@@ -201,7 +201,7 @@ function recolorDevIcon(image) {
       (pixels[i] * 0.2126 + pixels[i + 1] * 0.7152 + pixels[i + 2] * 0.0722) /
       255;
 
-    // Keep the white goose mark intact; recolor the dark rounded-square body.
+    // Keep the white mark intact; recolor the dark rounded-square body.
     if (alpha <= 0.08 || luminance >= 0.48) continue;
 
     pixels[i] = DEV_BLUE[0];
@@ -334,7 +334,7 @@ try pngData.write(to: URL(fileURLWithPath: outputPath))
 
   const swiftModuleCacheDir = join(
     tmpdir(),
-    "goose-dev-icon-swift-module-cache",
+    "berd-dev-icon-swift-module-cache",
   );
   mkdirSync(swiftModuleCacheDir, { recursive: true });
 
@@ -377,8 +377,8 @@ function encodeIcns(entries) {
   return Buffer.concat([header, ...chunks], totalLength);
 }
 
-const tempDir = mkdtempSync(join(tmpdir(), "goose-dev-icon-"));
-const keepTemp = process.env.GOOSE_DEV_ICON_KEEP_TEMP === "1";
+const tempDir = mkdtempSync(join(tmpdir(), "berd-dev-icon-"));
+const keepTemp = process.env.BERD_DEV_ICON_KEEP_TEMP === "1";
 
 try {
   const basePng = join(tempDir, "base.png");
@@ -395,7 +395,7 @@ try {
     writeFileSync(outputPath, readFileSync(badgedPng));
     console.log(`Generated: ${outputPath}`);
   } else {
-    const iconsetPath = join(tempDir, "goose-dev.iconset");
+    const iconsetPath = join(tempDir, "berd-dev.iconset");
     mkdirSync(iconsetPath);
 
     const sizes = [

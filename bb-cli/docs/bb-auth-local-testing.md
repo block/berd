@@ -19,7 +19,7 @@ For the target login sequence, see [BuilderBot Auth Flow](bb-auth-flow.md).
 
 ## Build
 
-From `goose-internal/bb-cli`:
+From `berd/bb-cli`:
 
 ```bash
 source ./bin/activate-hermit

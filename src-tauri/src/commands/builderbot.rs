@@ -266,7 +266,7 @@ fn sanitize_routing_rule_update(reference: &str, request: Value) -> Result<Value
 }
 
 fn current_builderbot_user() -> Option<String> {
-    env::var("GOOSE_INTERNAL_BUILDERBOT_USER")
+    env::var("BERD_BUILDERBOT_USER")
         .ok()
         .or_else(|| env::var("USER").ok())
         .map(|value| value.trim().to_string())
@@ -275,7 +275,7 @@ fn current_builderbot_user() -> Option<String> {
 
 fn require_builderbot_user() -> Result<String, String> {
     current_builderbot_user().ok_or_else(|| {
-        "Unable to determine your Builderbot user. Set GOOSE_INTERNAL_BUILDERBOT_USER and try again."
+        "Unable to determine your Builderbot user. Set BERD_BUILDERBOT_USER and try again."
             .to_string()
     })
 }

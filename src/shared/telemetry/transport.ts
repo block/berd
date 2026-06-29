@@ -6,7 +6,7 @@ const TELEMETRY_BATCH_URLS = new Set([
 ]);
 
 const TRANSPORT_BRIDGE_INSTALLED_KEY =
-  "__gooseInternalTelemetryTransportBridgeInstalled";
+  "__berdTelemetryTransportBridgeInstalled";
 
 interface NativeTelemetryBatchResponse {
   status: number;

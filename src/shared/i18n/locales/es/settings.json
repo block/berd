@@ -27,7 +27,7 @@
     },
     "theme": {
       "darkLabel": "Oscuro",
-      "description": "Elige cómo se ve Goose: claro, oscuro o según tu sistema.",
+      "description": "Elige cómo se ve Berd: claro, oscuro o según tu sistema.",
       "label": "Tema",
       "lightLabel": "Claro",
       "systemDescription": "Coincide con tu dispositivo.",
@@ -59,8 +59,8 @@
         "saveError": "No se pudo guardar la configuración de compactación automática."
       },
       "builtIn": "Integrado",
-      "description": "Elige cuándo el agente Goose compacta el contexto anterior durante las sesiones. Esto se aplica a todos los chats de Goose.",
-      "label": "Goose (Agente)"
+      "description": "Elige cuándo el harness Goose compacta el contexto anterior durante las sesiones. Esto se aplica a los chats que usan Goose.",
+      "label": "Goose (harness)"
     },
     "title": "Compactación"
   },
@@ -70,7 +70,7 @@
   },
   "extensions": {
     "title": "Extensiones",
-    "description": "Conecta Goose con apps, servicios y capacidades integradas.",
+    "description": "Conecta Berd con apps, servicios y capacidades integradas.",
     "search": "Buscar extensiones",
     "empty": "No hay extensiones configuradas.",
     "emptyCustom": "No hay extensiones personalizadas configuradas.",
@@ -180,8 +180,8 @@
     }
   },
   "experiments": {
-    "goosectl": {
-      "description": "Permite a los agentes controlar la app mediante la línea de comandos goosectl incluida: abrir, crear, renombrar, mover y archivar chats, y gestionar proyectos, agentes y skills. Las acciones se aplican de inmediato; archivar es reversible.",
+    "berdctl": {
+      "description": "Permite a los agentes controlar la app mediante la línea de comandos berdctl incluida: abrir, crear, renombrar, mover y archivar chats, y gestionar proyectos, agentes y skills. Las acciones se aplican de inmediato; archivar es reversible.",
       "title": "Control de la app por el agente"
     },
     "autoEnable": {
@@ -204,7 +204,7 @@
       "shortcutPlaceholder": "Ctrl+;",
       "title": "Navegación de paneles"
     },
-    "description": "Activa funciones de Goose en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
+    "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
     "gooseStyleGuidelines": {
       "description": "Agrega un prompt del sistema adicional con guía de estilo a proveedores administrados por Goose antes de cada mensaje del usuario.",
@@ -243,7 +243,7 @@
   },
   "general": {
     "agentToolsTips": {
-      "description": "Goose mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
+      "description": "Berd mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
       "label": "Consejos de chat"
     },
     "atMentionDefault": {
@@ -277,14 +277,14 @@
       "versionUnknown": "Versión incluida no disponible"
     },
     "language": {
-      "description": "Elige cómo Goose formatea y muestra la interfaz.",
+      "description": "Elige cómo Berd formatea y muestra la interfaz.",
       "english": "Inglés",
       "label": "Idioma",
       "spanish": "Español",
       "system": "Predeterminado del sistema ({{language}})"
     },
     "followUpBehavior": {
-      "description": "Pon seguimientos en cola mientras Goose responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",
+      "description": "Pon seguimientos en cola mientras Berd responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",
       "label": "Comportamiento de seguimiento",
       "queue": "Cola",
       "steer": "Guiar (solo arnés de Goose)"
@@ -347,7 +347,7 @@
   },
   "connections": {
     "title": "Conexiones",
-    "description": "Inicia sesión en apps y servicios que Goose puede usar en tu nombre.",
+    "description": "Inicia sesión en apps y servicios que Berd puede usar en tu nombre.",
     "tabs": {
       "companyManaged": "Administradas por la empresa",
       "custom": "Personalizadas",
@@ -412,7 +412,7 @@
       "beakYeah": "Excited",
       "dingDongGoose": "Ding Dong",
       "paidInBread": "A Bit of Everything",
-      "politeHonk": "Goose",
+      "politeHonk": "Berd",
       "quickPeep": "Chime",
       "silent": "Silencio",
       "youHaveGotGoose": "Twinkle"
@@ -424,25 +424,25 @@
       "checking": "Comprobando...",
       "restart": "Reiniciar",
       "retry": "Intentar de nuevo",
-      "update": "Actualizar Goose"
+      "update": "Actualizar Berd"
     },
     "card": {
       "checkPrompt": "Busca si hay una nueva versión disponible.",
-      "description": "Mantén Goose actualizado con las últimas funciones y correcciones.",
+      "description": "Mantén Berd actualizado con las últimas funciones y correcciones.",
       "title": "Actualizaciones de software",
       "currentVersion": "Versión {{version}}"
     },
-    "description": "Goose comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
+    "description": "Berd comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
     "details": {
       "available": "La actualización {{version}} está lista para descargarse.",
       "checking": "Comprobando el canal de actualizaciones...",
       "downloading": "Descargando la actualización firmada más reciente.",
       "error": "El último intento de actualización falló.",
-      "idle": "Goose buscará actualizaciones automáticamente cada pocas horas.",
+      "idle": "Berd buscará actualizaciones automáticamente cada pocas horas.",
       "installing": "Instalando la actualización descargada.",
       "ready": "La actualización {{version}} está instalada y se aplicará al reiniciar.",
       "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
-      "upToDate": "Goose está actualizado."
+      "upToDate": "Berd está actualizado."
     },
     "errors": {
       "detail": "Detalles: {{detail}}",
@@ -472,7 +472,7 @@
         "title": "La actualización falló"
       },
       "ready": {
-        "description": "Goose {{version}} se aplicará al reiniciar.",
+        "description": "Berd {{version}} se aplicará al reiniciar.",
         "title": "Actualización lista"
       }
     }
@@ -485,7 +485,7 @@
   "providers": {
     "agents": {
       "applyUpdates": "Actualizar",
-      "description": "Goose está integrado en tu espacio de trabajo. Instala otros para ampliar tu configuración.",
+      "description": "Berd está integrado en tu espacio de trabajo. Instala otros para ampliar tu configuración.",
       "errors": {
         "genericSetupFailure": "La configuración tuvo un tropiezo.",
         "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal.",
@@ -606,7 +606,7 @@
     },
     "disconnect": "Desconectar",
     "models": {
-      "description": "Necesitas al menos un proveedor de modelos para usar el agente Goose. Algunos agentes pueden traer sus propias conexiones de modelo.",
+      "description": "Necesitas al menos un proveedor de modelos para usar el harness Goose. Algunos agentes pueden traer sus propias conexiones de modelo.",
       "details": {
         "configuredUrl": "URL configurada"
       },
@@ -615,8 +615,8 @@
         "connected": {
           "cloudCredentials": "Conectado mediante tus credenciales de nube.",
           "local": "Ejecutándose localmente.",
-          "oauthBrowser": "Conectado mediante el inicio de sesión de Goose.",
-          "oauthDeviceCode": "Conectado mediante el inicio de sesión por código de dispositivo de Goose."
+          "oauthBrowser": "Conectado mediante el inicio de sesión de Berd.",
+          "oauthDeviceCode": "Conectado mediante el inicio de sesión por código de dispositivo de Berd."
         },
         "fieldDescription": {
           "cloudCredentials": "Agrega los datos requeridos para usar este proveedor.",
@@ -629,7 +629,7 @@
         "pending": {
           "cloudCredentials": "Configura tus credenciales de nube en el entorno de tu terminal antes de usar este proveedor.",
           "local": "Este proveedor se ejecuta localmente y no necesita ajustes guardados.",
-          "oauthGuided": "Goose te guiará por el inicio de sesión.",
+          "oauthGuided": "Berd te guiará por el inicio de sesión.",
           "oauthTerminal": "Ejecuta `goose configure` en tu terminal para terminar de iniciar sesión."
         }
       },

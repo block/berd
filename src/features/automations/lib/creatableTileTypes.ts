@@ -1,8 +1,8 @@
 import creatableTileTypes from "../../../../resources/creatable-tile-types.json";
 
 // Shared policy for kgoose TileType proto values this app can safely create.
-// Goose Internal does not currently vend generated TileType bindings, so both
-// frontend and Tauri load this JSON policy instead of duplicating enum tables.
+// Berd does not currently vend generated TileType bindings, so both frontend
+// and Tauri load this JSON policy instead of duplicating enum tables.
 const CREATABLE_TILE_TYPES = new Set(
   creatableTileTypes.flatMap(({ id, aliases }) => [
     // The numeric enum id is accepted as a string spelling too.

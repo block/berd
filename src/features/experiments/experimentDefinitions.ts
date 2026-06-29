@@ -51,7 +51,7 @@ export interface ExperimentDefinition {
   config?: Record<string, ExperimentConfigControl>;
 }
 
-export const GOOSECTL_EXPERIMENT_ID = "goosectl";
+export const BERDCTL_EXPERIMENT_ID = "berdctl";
 
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
@@ -140,9 +140,9 @@ export const EXPERIMENT_DEFINITIONS = [
     defaultEnabled: false,
   },
   {
-    id: GOOSECTL_EXPERIMENT_ID,
-    titleKey: "experiments.goosectl.title",
-    descriptionKey: "experiments.goosectl.description",
+    id: BERDCTL_EXPERIMENT_ID,
+    titleKey: "experiments.berdctl.title",
+    descriptionKey: "experiments.berdctl.description",
   },
   {
     id: SESSION_COST_EXPERIMENT_ID,

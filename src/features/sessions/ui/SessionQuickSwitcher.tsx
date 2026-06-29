@@ -14,7 +14,7 @@ import {
   buildQuickSwitchResults,
   type QuickSwitchResult,
 } from "@/features/sessions/lib/sessionQuickSwitch";
-import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { ActiveChatBerdIndicator } from "@/shared/ui/SessionActivityIndicator";
 import {
   CommandDialog,
   CommandEmpty,
@@ -139,7 +139,7 @@ export function SessionQuickSwitcher({
           >
             <HighlightedTitle title={session.title} positions={positions} />
             {session.isRunning ? (
-              <ActiveChatGooseIndicator className="ml-auto" />
+              <ActiveChatBerdIndicator className="ml-auto" />
             ) : null}
           </CommandItem>
         ))}

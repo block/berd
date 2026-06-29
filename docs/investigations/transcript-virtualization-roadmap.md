@@ -1,17 +1,17 @@
 # Transcript Virtualization Roadmap
 
-This PR adds an opt-in virtual transcript renderer for Goose chat. It is a
-display-layer change: Goose still loads the full session history, but the chat UI
+This PR adds an opt-in virtual transcript renderer for Berd chat. It is a
+display-layer change: Berd still loads the full session history, but the chat UI
 only mounts the transcript rows needed around the current scroll window.
 
 The purpose of the experiment is to make already-loaded long conversations
-cheaper to render and smoother to scroll while preserving the existing Goose chat
+cheaper to render and smoother to scroll while preserving the existing Berd chat
 UI: message spacing, tool cards, MCP app views, reasoning blocks, code blocks,
 images, selected text behavior, and bottom-following behavior.
 
 ## Included In This PR
 
-- A transcript projection layer that turns Goose chat content into stable virtual
+- A transcript projection layer that turns Berd chat content into stable virtual
   rows.
 - A TanStack-based virtual timeline that mounts only the visible row window plus
   overscan.
@@ -152,7 +152,7 @@ flowchart TD
 ## Not Yet Nexus Parity
 
 The experiment is not complete Nexus-style chat virtualization yet. The biggest
-remaining gap is that Goose still restores the entire session into memory before
+remaining gap is that Berd still restores the entire session into memory before
 rendering. Nexus-like behavior requires coordinating the renderer with transcript
 loading, pagination, and message granularity so large sessions do not need to be
 fully present in the renderer before the user can interact with them.
@@ -163,7 +163,7 @@ and performance contracts are hardened.
 ## Path To Nexus Parity
 
 1. Add incremental transcript loading.
-   Goose should be able to open a large session by loading the newest useful
+   Berd should be able to open a large session by loading the newest useful
    window first, then fetch older history on demand as the user scrolls upward.
    Scroll position must remain anchored when older content is prepended.
 
@@ -184,7 +184,7 @@ and performance contracts are hardened.
    mounted, unmounted, prepended, and streaming rows.
 
 5. Add production performance gates.
-   Before default-on rollout, Goose needs repeatable thresholds for restore time,
+   Before default-on rollout, Berd needs repeatable thresholds for restore time,
    scroll smoothness, long-task budget, append/prepend stability, and dynamic row
    measurement churn on representative transcripts.
 

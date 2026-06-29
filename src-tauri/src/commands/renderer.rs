@@ -1,7 +1,7 @@
 //! Frontend-facing renderer telemetry command.
 //!
 //! Lets the web UI forward lifecycle signals it can observe (e.g. an
-//! unexpected page reload after a renderer reap) into `goose.log`, alongside
+//! unexpected page reload after a renderer reap) into `berd.log`, alongside
 //! the backend's `renderer_monitor` memory samples.
 
 /// Append a renderer lifecycle event from the frontend to the app log.

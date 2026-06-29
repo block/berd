@@ -460,7 +460,7 @@ mod tests {
                 display_name: Some("Block".to_string()),
             }),
             workspace: Some(RuntimeIdentity {
-                id: "goose-internal".to_string(),
+                id: "berd".to_string(),
                 display_name: None,
             }),
             provider_allowlist: Some(vec!["databricks_v2".to_string(), "openai".to_string()]),
@@ -472,7 +472,7 @@ mod tests {
             }),
             feedback: Some(RuntimeFeedbackConfig {
                 enabled: Some(true),
-                project_key: Some("GOOSE".to_string()),
+                project_key: Some("BERD".to_string()),
             }),
             kgoose: Some(RuntimeKgooseConfig {
                 base_url: Some("https://kgoose.example.test/".to_string()),

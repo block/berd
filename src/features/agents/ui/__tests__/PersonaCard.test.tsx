@@ -8,7 +8,7 @@ import type { Persona } from "@/shared/types/agents";
 function makePersona(overrides: Partial<Persona> = {}): Persona {
   return {
     id: "p1",
-    displayName: "Goose Default",
+    displayName: "Berd Default",
     systemPrompt: "You are a helpful assistant that writes code.",
     isBuiltin: false,
     writable: true,
@@ -76,7 +76,7 @@ describe("PersonaCard", () => {
     render(<PersonaCard persona={persona} onSelect={onSelect} />);
 
     const viewButton = screen.getByRole("button", {
-      name: /^view goose default$/i,
+      name: /^view Berd default$/i,
     });
     expect(viewButton).toHaveClass("bg-surface-agent-tile-action-bg");
     expect(viewButton.parentElement).toHaveClass(
@@ -96,7 +96,7 @@ describe("PersonaCard", () => {
     render(<PersonaCard persona={persona} onStartChat={onStartChat} />);
 
     await user.click(
-      screen.getByRole("button", { name: /^chat with goose default$/i }),
+      screen.getByRole("button", { name: /^chat with Berd default$/i }),
     );
     expect(onStartChat).toHaveBeenCalledWith(persona);
   });

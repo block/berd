@@ -29,8 +29,10 @@ const CONNECTIONS_REFETCH_INTERVAL_MS = 5_000;
 
 const DEFAULT_G2_BASE_URL = "https://g2.sqprod.co";
 const G2_BASE_URL =
-  import.meta.env.VITE_GOOSE_INTERNAL_G2_BASE_URL ?? DEFAULT_G2_BASE_URL;
-const RETURN_URL = "goose-internal://connect-return";
+  import.meta.env.VITE_BERD_G2_BASE_URL ??
+  import.meta.env.VITE_GOOSE_INTERNAL_G2_BASE_URL ??
+  DEFAULT_G2_BASE_URL;
+const RETURN_URL = "berd://connect-return";
 
 export type ConnectionsTab = "companyManaged" | "custom" | "gooseCapabilities";
 

@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 
-export const SESSION_DEEP_LINK_ERROR_EVENT = "goose:session-deep-link-error";
+export const SESSION_DEEP_LINK_ERROR_EVENT = "berd:session-deep-link-error";
 
 export interface SessionDeepLinkErrorPayload {
   sessionId: string;

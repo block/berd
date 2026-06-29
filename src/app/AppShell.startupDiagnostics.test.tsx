@@ -146,7 +146,7 @@ describe("AppShell startup diagnostics", () => {
     expect(screen.getByTestId("app-shell-content")).toBeInTheDocument();
     expect(mocks.defaultModelRepair).toHaveBeenCalledWith(true);
     expect(
-      screen.queryByRole("heading", { name: "Goose couldn't start" }),
+      screen.queryByRole("heading", { name: "Berd couldn't start" }),
     ).not.toBeInTheDocument();
   });
 
@@ -156,7 +156,7 @@ describe("AppShell startup diagnostics", () => {
     const { container } = renderAppShell();
 
     expect(
-      screen.getByRole("status", { name: "Starting Goose" }),
+      screen.getByRole("status", { name: "Starting Berd" }),
     ).toBeInTheDocument();
     expect(
       container.querySelector('img[src*="startup-loading"]'),
@@ -174,7 +174,7 @@ describe("AppShell startup diagnostics", () => {
     renderAppShell();
 
     expect(
-      screen.getByRole("heading", { name: "Goose couldn't start" }),
+      screen.getByRole("heading", { name: "Berd couldn't start" }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("app-shell-content")).not.toBeInTheDocument();
 

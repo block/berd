@@ -1,5 +1,5 @@
 {
-  "appName": "goose",
+  "appName": "Berd",
   "actions": {
     "backToMainNavigation": "Atrás",
     "back": "Atrás",
@@ -51,7 +51,7 @@
     "agents": "Agentes",
     "automations": "Automatizaciones",
     "builderbot": "Builderbot",
-    "gooseHome": "Inicio de Goose",
+    "gooseHome": "Inicio de Berd",
     "home": "Inicio",
     "main": "Navegación principal",
     "sessionList": "Proyectos y chats",

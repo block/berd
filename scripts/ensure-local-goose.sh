@@ -9,7 +9,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/ensure-local-goose.sh [--print-bin | --check-bin]
 
-Syncs and builds the pinned Goose backend checkout for Goose Internal development.
+Syncs and builds the pinned Goose backend checkout for Berd development.
 By default, the repo root goose-backend.lock.json controls the upstream repo,
 ref, commit, cargo package, and binary name.
 
@@ -84,7 +84,7 @@ goose_package="${GOOSE_DEV_PACKAGE:-${lock_package:-goose-cli}}"
 goose_bin="${GOOSE_DEV_BIN:-${lock_bin:-goose}}"
 allow_dirty="${GOOSE_DEV_ALLOW_DIRTY:-0}"
 
-log() { echo "[goose-internal-goose-dev] $*" >&2; }
+log() { echo "[berd-goose-dev] $*" >&2; }
 
 fail_or_skip() {
   local message="$1"
@@ -103,17 +103,12 @@ fail_or_skip() {
 # helper so regenerate-sdk-schema.sh can land its build in the same target
 # dir without a parallel copy of this logic.
 #
-# Pinning a dedicated cargo target dir matters here: we must NOT share with
-# this repo's src-tauri crate. That crate's binary is named `Goose` and
-# upstream's is named `goose`, which collide on macOS APFS (case-insensitive
-# by default), so whichever cargo build runs last clobbers the other. The
-# original symptom: `just dev` builds the goose backend, then Tauri builds
-# `Goose` over it, and at runtime `GOOSE_BIN` points at the Tauri app --
-# which proceeds to relaunch itself recursively, opening new windows
-# forever. A dedicated target dir under the dev cache root preserves the
-# shared-cache benefit across goose-internal worktrees (they still all hit
-# the same location) without ever sharing with src-tauri or any other
-# workspace that honours `$HOME/.cargo/config.toml`'s `[build] target-dir`.
+# Pinning a dedicated cargo target dir keeps the managed upstream Goose
+# checkout isolated from this repo's Tauri workspace. A dedicated target dir
+# under the dev cache root preserves the shared-cache benefit across Berd
+# worktrees (they still all hit the same location) without ever sharing with
+# src-tauri or any other workspace that honours `$HOME/.cargo/config.toml`'s
+# `[build] target-dir`.
 # shellcheck source=lib/goose-dev-paths.sh
 source "$script_dir/lib/goose-dev-paths.sh"
 export CARGO_TARGET_DIR="$goose_cargo_target_dir"

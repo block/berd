@@ -12,9 +12,9 @@ use serde_json::Value;
 use std::{env, fmt, sync::OnceLock, time::Duration};
 use tokio::time::timeout;
 
-const KGOOSE_BASE_URL_ENV: &str = "GOOSE_INTERNAL_KGOOSE_BASE_URL";
-const KGOOSE_PATH_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PATH";
-const KGOOSE_PLAYPEN_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PLAYPEN";
+const KGOOSE_BASE_URL_ENV: &str = "BERD_KGOOSE_BASE_URL";
+const KGOOSE_PATH_ENV: &str = "BERD_KGOOSE_PATH";
+const KGOOSE_PLAYPEN_ENV: &str = "BERD_KGOOSE_PLAYPEN";
 const DEFAULT_KGOOSE_BASE_URL: &str = "https://kgoose.stage.sqprod.co/";
 const DEFAULT_KGOOSE_PATH: &str = "cash-app/goose";
 const KGOOSE_NETWORK_ACCESS_MESSAGE: &str =
@@ -650,7 +650,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    // All tests that mutate GOOSE_INTERNAL_KGOOSE_* must use this lock.
+    // All tests that mutate BERD_KGOOSE_* must use this lock.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]

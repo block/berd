@@ -395,7 +395,7 @@ async fn run_native_connect(
     plan: &ModelSetupPlan,
 ) -> Result<(), String> {
     if cfg!(target_os = "windows") {
-        return Err("Native Goose sign-in is not supported on Windows yet".to_string());
+        return Err("Native Berd sign-in is not supported on Windows yet".to_string());
     }
 
     let goose_command = get_goose_command(app)?;
@@ -441,7 +441,7 @@ async fn run_shell_command(
         app_handle,
         registry,
         provider_id,
-        "Starting Goose sign-in...",
+        "Starting Berd sign-in...",
     );
 
     let mut child = tokio::process::Command::new(shell)
@@ -516,7 +516,7 @@ async fn run_shell_command(
         Ok(())
     } else {
         let code = status.code().unwrap_or(-1);
-        Err(format!("Goose sign-in exited with code {code}"))
+        Err(format!("Berd sign-in exited with code {code}"))
     }
 }
 

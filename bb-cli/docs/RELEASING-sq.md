@@ -1,6 +1,6 @@
 # Releasing the `sq` command pack
 
-`goose-internal/bb-cli` publishes an `sq` command pack as a single executable
+`berd/bb-cli` publishes an `sq` command pack as a single executable
 module:
 
 ```text
@@ -59,7 +59,7 @@ update:
 
 ## One-Time GitHub Setup
 
-For formula bumping to work, `goose-internal` needs access to the Homebrew update
+For formula bumping to work, `berd` needs access to the Homebrew update
 secrets:
 
 1. `HOMEBREW_FORMULAS_APP_ID`
@@ -98,7 +98,7 @@ The current shape in `../homebrew-formulas/sq-kgoose.rb` is:
 class SqKgoose < Formula
   version "0.1.0"
   stable do
-    url "https://github.com/squareup/goose-internal.git", tag: version.to_s
+    url "https://github.com/squareup/berd.git", tag: version.to_s
   end
 
   @sq_pack = {

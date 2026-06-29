@@ -221,6 +221,6 @@ describe("avatars api", () => {
     await expect(listenAvatarCacheWarmed(vi.fn())).resolves.toEqual(
       expect.any(Function),
     );
-    expect(AVATAR_CACHE_WARMED_EVENT).toBe("goose:avatar-cache-warmed");
+    expect(AVATAR_CACHE_WARMED_EVENT).toBe("berd:avatar-cache-warmed");
   });
 });

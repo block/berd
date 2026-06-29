@@ -244,7 +244,7 @@ describe("useCompletionNotifications", () => {
         {
           body: "Review fixes finished",
           sessionId: "session-1",
-          sound: "goose-sounds-4.mp3",
+          sound: "berd-sounds-4.mp3",
         },
       ),
     );

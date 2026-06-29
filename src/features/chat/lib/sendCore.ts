@@ -48,7 +48,7 @@ export interface SendCoreOptions {
   /** Pending-assistant provider; defaults to the active agent's provider. */
   providerId?: string;
   /**
-   * Fire-and-forget background send used by goosectl; keeps prompt whitespace
+   * Fire-and-forget background send used by berdctl; keeps prompt whitespace
    * intact and skips foreground dispatch perf logs.
    */
   background?: boolean;

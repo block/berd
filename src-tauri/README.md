@@ -1,32 +1,32 @@
 # src-tauri
 
-The Tauri 2 shell: the app crate (`src/`), the goosectl workspace crates
+The Tauri 2 shell: the app crate (`src/`), the berdctl workspace crates
 (`crates/`, `plugins/`), and the app's IPC permission grants
-(`capabilities/`). Design and reasoning: `docs/goosectl-architecture.md`.
+(`capabilities/`). Design and reasoning: `docs/berdctl-architecture.md`.
 
-## goosectl crates
+## berdctl crates
 
-| | `crates/goosectl` | `plugins/goosectl` |
+| | `crates/berdctl` | `plugins/berdctl` |
 |---|---|---|
 | What | Standalone CLI binary | Tauri plugin (the broker) |
 | Runs | Outside the app, in agent shells | Inside the app binary |
 | Does | clap tree, `--help`, local errors, exit codes | Loopback HTTP server, global caps, renderer bridge |
-| Ships as | `externalBin` sidecar (`prepare-goosectl-sidecar.sh` → `binaries/goosectl-<triple>`) | Compiled in via `tauri_plugin_goosectl::init()` |
+| Ships as | `externalBin` sidecar (`prepare-berdctl-sidecar.sh` → `binaries/berdctl-<triple>`) | Compiled in via `tauri_plugin_berdctl::init()` |
 
-The CLI embeds the contract artifacts (`crates/goosectl/api-surface.json` +
+The CLI embeds the contract artifacts (`crates/berdctl/api-surface.json` +
 `cli-surface.json`) and builds its clap tree at startup. It locates the
-broker through the `GOOSECTL_LOCK` discovery file, verifies
+broker through the `BERDCTL_LOCK` discovery file, verifies
 `protocolVersion`/generation via `GET /v1/ping`, and sends
 `POST /v1/call {"command", "args"}`. The broker forwards to the renderer
-over Tauri IPC (`goosectl:request` event out, `submit_result` back).
+over Tauri IPC (`berdctl:request` event out, `submit_result` back).
 Command dispatch, zod validation, guards, and execution live in the
-renderer registry (`src/features/goosectl/`). The two crates share no code;
+renderer registry (`src/features/berdctl/`). The two crates share no code;
 `PROTOCOL_VERSION` is duplicated in both `discovery.rs` files and in
 `commands/contract.ts`.
 
-## `plugins/goosectl/permissions/`
+## `plugins/berdctl/permissions/`
 
-Tauri 2's IPC ACL: a webview can only `invoke("plugin:goosectl|…")` if its
+Tauri 2's IPC ACL: a webview can only `invoke("plugin:berdctl|…")` if its
 capability grants a permission allowing that command.
 
 - `build.rs` — `tauri_plugin::Builder::new(COMMANDS)` declares the plugin's
@@ -35,9 +35,9 @@ capability grants a permission allowing that command.
   permission pairs per command, plus `reference.md`. Do not edit.
 - `permissions/schemas/schema.json` — generated schema for editor
   validation of the TOMLs.
-- `permissions/default.toml` — hand-authored `goosectl:default` permission
+- `permissions/default.toml` — hand-authored `berdctl:default` permission
   set bundling the four allows.
-- `capabilities/default.json` — grants `goosectl:default` to the main
+- `capabilities/default.json` — grants `berdctl:default` to the main
   window.
 
 This ACL gates webview → Rust IPC only; the localhost HTTP side is governed
@@ -51,6 +51,6 @@ Stock Tauri 2 plugin layout. Docs:
 [Capabilities](https://v2.tauri.app/security/capabilities/).
 
 Adding a broker IPC command: append to `COMMANDS` in
-`plugins/goosectl/build.rs`, rebuild, add the `allow-*` to `default.toml`.
+`plugins/berdctl/build.rs`, rebuild, add the `allow-*` to `default.toml`.
 App-control commands are added in the renderer registry via
-`.agents/skills/goosectl-new-command/SKILL.md`, not here.
+`.agents/skills/berdctl-new-command/SKILL.md`, not here.

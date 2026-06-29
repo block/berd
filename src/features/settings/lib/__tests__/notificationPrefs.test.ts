@@ -14,8 +14,8 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 
@@ -28,8 +28,8 @@ describe("getNotificationPrefs", () => {
       enabled: false,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 
@@ -42,8 +42,8 @@ describe("getNotificationPrefs", () => {
       enabled: false,
       inApp: false,
       desktop: false,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 
@@ -56,7 +56,7 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
       desktopSound: "silent",
     });
   });
@@ -67,8 +67,8 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 
@@ -80,8 +80,8 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 });
@@ -97,8 +97,8 @@ describe("setNotificationPrefs", () => {
       enabled: false,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 
@@ -109,8 +109,8 @@ describe("setNotificationPrefs", () => {
       enabled: true,
       inApp: false,
       desktop: false,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
   });
 

@@ -100,19 +100,19 @@
     "clipboardUnavailable": "La API del portapapeles no está disponible"
   },
   "rendererError": {
-    "description": "Goose tuvo un error del renderizador. Recarga la ventana para intentarlo de nuevo.",
+    "description": "Berd tuvo un error del renderizador. Recarga la ventana para intentarlo de nuevo.",
     "reload": "Recargar",
     "title": "Algo salió mal"
   },
   "startup": {
-    "loadingLabel": "Iniciando Goose",
+    "loadingLabel": "Iniciando Berd",
     "error": {
       "gooseServe": {
-        "title": "Goose no pudo iniciarse",
+        "title": "Berd no pudo iniciarse",
         "description": "El servicio local de Goose no se inició. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
       },
       "networkWarp": {
-        "title": "Goose no puede acceder a los servicios internos de Block",
+        "title": "Berd no puede acceder a los servicios internos de Block",
         "description": "Parece que no estás conectado a Cloudflare WARP.",
         "steps": {
           "connect": "Conéctate a WARP",
@@ -121,11 +121,11 @@
       },
       "runtimeConfig": {
         "title": "Configuración no disponible",
-        "description": "Goose no pudo cargar su configuración de tiempo de ejecución. Inténtalo de nuevo, o copia los detalles de inicio y compártelos con soporte."
+        "description": "Berd no pudo cargar su configuración de tiempo de ejecución. Inténtalo de nuevo, o copia los detalles de inicio y compártelos con soporte."
       },
       "unknown": {
-        "title": "Goose no pudo iniciarse",
-        "description": "Goose no pudo terminar de iniciarse. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
+        "title": "Berd no pudo iniciarse",
+        "description": "Berd no pudo terminar de iniciarse. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
       },
       "copyDetails": "Copiar detalles",
       "openLogsFolder": "Abrir carpeta de logs",

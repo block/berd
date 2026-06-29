@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::commands::{artifacts, avatars};
 
-const LOCAL_MEDIA_CACHES_CLEARED_EVENT: &str = "goose:local-media-caches-cleared";
+const LOCAL_MEDIA_CACHES_CLEARED_EVENT: &str = "berd:local-media-caches-cleared";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

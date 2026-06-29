@@ -1,18 +1,18 @@
 ---
 name: goose-help
 description: >-
-  Help users understand, use, or troubleshoot Goose Internal. Use when the user
+  Help users understand, use, or troubleshoot Berd. Use when the user
   asks how to do something in the app, configure agents, skills, providers,
   extensions, projects, avatars, automations, settings, updates, connections,
-  models, sessions, or Doctor, or when Goose Internal appears broken, stuck, or
+  models, sessions, or Doctor, or when Berd appears broken, stuck, or
   confusing.
 metadata:
-  gooseInternalBundled: true
+  berdBundled: true
 ---
 
-# Goose Help
+# Berd help
 
-Use this skill to help users operate and troubleshoot Goose Internal from a
+Use this skill to help users operate and troubleshoot Berd from a
 normal chat.
 
 ## First Principles

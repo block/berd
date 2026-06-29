@@ -8,11 +8,11 @@ env:
   MACOS_ENVIRONMENT_RUBY_VERSION: "3.3.9"
 # The macos-environment plugin activates Xcode and sets up RVM/bundler so the
 # upload-mobile-release plugin's pre-command can find `fastlane` if it ever
-# needs to. Goose only builds macOS, but the plugin's signing/upload helpers
+# needs to. berd only builds macOS, but the plugin's signing/upload helpers
 # still rely on the environment it primes.
 common:
 steps:
-  - input: ":mac: Cut a Goose release"
+  - input: ":mac: Cut a Berd release"
     key: "release-input"
     fields:
       - text: "version"
@@ -21,7 +21,7 @@ steps:
         required: true
       - select: "Promote to auto-update channel?"
         key: "publish_latest"
-        hint: "Updates latest.json so every installed Goose auto-updates to this build on next poll. Set to No for test builds."
+        hint: "Updates latest.json so every installed Berd auto-updates to this build on next poll. Set to No for test builds."
         default: "true"
         required: true
         options:
@@ -38,28 +38,28 @@ steps:
       - squareup/apple-codesign#v1:
           identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"
           artifacts:
-            - path: "release/macos/Goose.app"
+            - path: "release/macos/Berd.app"
               entitlements: src-tauri/entitlements.plist
-            - path: "release/macos/Goose.app.zip"
+            - path: "release/macos/Berd.app.zip"
               package:
-                from: "release/macos/Goose.app"
+                from: "release/macos/Berd.app"
               sign: false
               notarize: false
               staple: false
-            - path: "release/macos/Goose.dmg"
+            - path: "release/macos/Berd.dmg"
               package:
-                from: "release/macos/Goose.app"
-                volname: "Goose"
+                from: "release/macos/Berd.app"
+                volname: "Berd"
       - squareup/upload-mobile-release#v3:
           skip_bundle_version_validation: true
           team_ids:
             - "EYF346PHUG"
           mobile_releases:
-            - id: "goose2-macos"
-              project: "goose2"
+            - id: "berd-macos"
+              project: "berd"
               platform: "mac_zip"
               variant: "release"
-              file: "release/macos/Goose.app.zip"
+              file: "release/macos/Berd.app.zip"
               version: "scripts/buildkite/release/release-version.sh"
 
   - label: ":arrows_counterclockwise: Publish updater feed"

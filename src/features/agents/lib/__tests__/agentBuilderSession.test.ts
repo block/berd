@@ -270,7 +270,7 @@ describe("agentBuilderSession", () => {
     });
   });
 
-  it("seeds the draft with the stored Goose provider and model preference", async () => {
+  it("seeds the draft with the stored goose provider and model preference", async () => {
     window.localStorage.setItem("goose:defaultProvider", "goose");
     setStoredModelPreference("goose", {
       modelId: "goose-gpt-5-5",

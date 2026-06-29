@@ -1,6 +1,6 @@
-# Goose bundled app defaults
+# Berd bundled app defaults
 
-`distro/` contains generic resources and defaults that ship with the single Goose Internal app build. It is not a customer/org profile system.
+`distro/` contains generic resources and defaults that ship with the single Berd app build. It is not a customer/org profile system.
 
 ## Supported files
 
@@ -39,7 +39,7 @@ Current `distro.json` example:
 - `kgoose?: { baseUrl?: string, path?: string }`
   - generic default KGoose endpoint used by KGoose-backed features until runtime config owns this source
   - `baseUrl` must use `http` or `https`
-  - environment variables `GOOSE_INTERNAL_KGOOSE_BASE_URL` and `GOOSE_INTERNAL_KGOOSE_PATH` override these values for local testing
+  - environment variables `BERD_KGOOSE_BASE_URL` and `BERD_KGOOSE_PATH` override these values for local testing
 
 ## Runtime effects
 
@@ -53,9 +53,9 @@ When bundled defaults are present, the Tauri shell:
 - installs `distro/agents/<name>.md` entries into `~/.agents/agents/<name>.md`
 - warms installed bundled agent `app-avatar:` media when network access is available
 
-Bundled skills reinstall existing copies only when the installed `SKILL.md` frontmatter has `metadata.gooseInternalBundled: true`. Existing unmarked user skills are left untouched.
+Bundled skills reinstall existing copies only when the installed `SKILL.md` frontmatter has the `metadata.berdBundled: true` marker. For existing installs, the app still recognizes the legacy `metadata.gooseInternalBundled: true` marker. Existing unmarked user skills are left untouched.
 
-Bundled agents use the same `metadata.gooseInternalBundled: true` convention. The app records which bundled agent files were seeded so deleted starter agents do not reappear on later launches. Existing unmarked user agents are left untouched.
+Bundled agents use the `metadata.berdBundled: true` marker. The app records seeded files in `.berd-bundled-agents.json` so deleted starter agents do not reappear on later launches, and migrates the legacy `.goose-internal-bundled-agents.json` marker when present. For existing installs, the app still recognizes legacy `metadata.gooseInternalBundled: true` agent frontmatter. Existing unmarked user agents are left untouched.
 
 ## Scope guidance
 

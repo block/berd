@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Goose macOS Tauri bundle for release. Leaves an unsigned
+# Build the Berd macOS Tauri bundle for release. Leaves an unsigned
 # .app at release/macos/ for the squareup/apple-codesign plugin to sign,
 # notarize, staple, and package in its post-command hook.
 #
@@ -63,19 +63,19 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 
 # Stage the goose backend and CLIs as Tauri resources/sidecars, then build for
 # an explicit aarch64 target so output paths are stable regardless of agent
-# architecture. The goosectl staged name must carry that same triple.
+# architecture. The berdctl staged name must carry that same triple.
 # Production telemetry is an explicit release opt-in; generic builds default to
 # development. No TAURI_SIGNING_PRIVATE_KEY needed — signing happens in
 # publish-updater.sh.
 TARGET_TRIPLE="aarch64-apple-darwin"
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
-./scripts/prepare-goosectl-sidecar.sh "$TARGET_TRIPLE"
+./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
 VITE_APP_VERSION="$RELEASE_VERSION" \
 VITE_ENVIRONMENT=production \
 VITE_UPDATER_ENABLED=true \
-  pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features goosectl \
+  pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features berdctl \
     --config src-tauri/tauri.release.conf.json
 
 UNSIGNED_APP="src-tauri/target/${TARGET_TRIPLE}/release/bundle/macos/${APP_BUNDLE_NAME}.app"

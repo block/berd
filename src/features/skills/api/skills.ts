@@ -118,7 +118,7 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
     sourceLabel:
       sourceKind === "global" ? "Personal" : projectName || "Project",
     projectLinks,
-    readonly: props.gooseInternalBundled === true,
+    readonly: props.berdBundled === true || props.gooseInternalBundled === true,
     color: readStoredColor(source.properties),
   };
 }
@@ -251,8 +251,9 @@ export async function updateSkill(
 ): Promise<SkillInfo> {
   const client = await getClient();
   // properties replaces the full bag, so only send fields skills own
-  // client-side. projectDir/projectName/gooseInternalBundled are derived
-  // by the backend at list time, not persisted through this path.
+  // client-side. projectDir/projectName/berdBundled and legacy
+  // gooseInternalBundled are derived by the backend at list time, not
+  // persisted through this path.
   const response = await client.goose.GooseUnstableSourcesUpdate({
     type: SKILL_SOURCE_TYPE,
     path,

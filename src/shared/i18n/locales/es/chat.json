@@ -67,7 +67,7 @@
     "voiceInputFailedTitle": "Falló el dictado por voz",
     "voiceInputNoMicrophoneDescription": "Conecta o selecciona un micrófono y vuelve a intentar el dictado por voz.",
     "voiceInputNoMicrophoneTitle": "No se encontró ningún micrófono",
-    "voiceInputPermissionDescription": "Permite el acceso al micrófono para Goose en Configuración del Sistema y vuelve a intentar el dictado por voz.",
+    "voiceInputPermissionDescription": "Permite el acceso al micrófono para Berd en Configuración del Sistema y vuelve a intentar el dictado por voz.",
     "voiceInputPermissionTitle": "El acceso al micrófono está bloqueado",
     "voiceInputUnavailableDescription": "Otra app puede estar usando tu micrófono, o macOS no pudo iniciar la grabación. Cierra otras apps de grabación y vuelve a intentarlo.",
     "voiceInputUnavailableTitle": "El micrófono no está disponible"
@@ -263,7 +263,7 @@
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
     "redactedThinking": "(pensamiento redactado)",
-    "goosectlCrossSessionLabel": "Enviado por Goose desde otra sesión",
+    "berdctlCrossSessionLabel": "Enviado por Berd desde otra sesión",
     "steerLabel": "Guiado"
   },
   "persona": {

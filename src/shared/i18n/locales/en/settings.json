@@ -27,7 +27,7 @@
     },
     "theme": {
       "darkLabel": "Dark",
-      "description": "Choose how Goose looks: light, dark, or matched to your system.",
+      "description": "Choose how Berd looks: light, dark, or matched to your system.",
       "label": "Theme",
       "lightLabel": "Light",
       "systemDescription": "Matches your device.",
@@ -59,8 +59,8 @@
         "saveError": "Couldn't save your auto-compact setting. Try again."
       },
       "builtIn": "Built in",
-      "description": "Choose when the Goose agent compacts older context during sessions. This applies to all goose chats.",
-      "label": "Goose agent"
+      "description": "Choose when the Goose harness compacts older context during sessions. This applies to chats using Goose.",
+      "label": "Goose harness"
     },
     "title": "Compaction"
   },
@@ -70,7 +70,7 @@
   },
   "extensions": {
     "title": "Extensions",
-    "description": "Connect Goose to apps, services, and built-in capabilities.",
+    "description": "Connect Berd to apps, services, and built-in capabilities.",
     "search": "Search extensions",
     "empty": "No extensions configured.",
     "emptyCustom": "No custom extensions configured.",
@@ -150,7 +150,7 @@
     "empty": "Couldn't load checks. Try again.",
     "rerun": "Run again",
     "runFix": "Run fix command?",
-    "runFixDescription": "Goose will run:",
+    "runFixDescription": "Berd will run:",
     "running": "Running checks...",
     "longRunning": "Still running after {{seconds}}s. We'll stop waiting after {{timeoutSeconds}}s if a check is stuck.",
     "title": "Doctor",
@@ -180,8 +180,8 @@
     }
   },
   "experiments": {
-    "goosectl": {
-      "description": "Lets agents control the app through the bundled goosectl command line: open, create, rename, move, and archive chats, and manage projects, agents, and skills. Actions apply immediately; archiving is reversible.",
+    "berdctl": {
+      "description": "Lets agents control the app through the bundled berdctl command line: open, create, rename, move, and archive chats, and manage projects, agents, and skills. Actions apply immediately; archiving is reversible.",
       "title": "In-app agent control"
     },
     "autoEnable": {
@@ -204,7 +204,7 @@
       "shortcutPlaceholder": "Ctrl+;",
       "title": "Pane jump navigation"
     },
-    "description": "Opt into in-progress Goose features on this device. Experiments can change, break, or disappear.",
+    "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
     "gooseStyleGuidelines": {
       "description": "Adds an extra style-guidance system prompt to Goose-managed providers before each user message.",
@@ -243,7 +243,7 @@
   },
   "general": {
     "agentToolsTips": {
-      "description": "Goose will show tips in chat for relevant tools, skills, or workflows.",
+      "description": "Berd will show tips in chat for relevant tools, skills, or workflows.",
       "label": "Chat tips"
     },
     "atMentionDefault": {
@@ -277,14 +277,14 @@
       "versionUnknown": "Bundled version unavailable"
     },
     "language": {
-      "description": "Sets the language Goose uses across menus, buttons, and messages.",
+      "description": "Sets the language Berd uses across menus, buttons, and messages.",
       "english": "English",
       "label": "Language",
       "spanish": "Spanish",
       "system": "System default ({{language}})"
     },
     "followUpBehavior": {
-      "description": "Queue follow-ups while Goose responds or steer the current run. Press Cmd+Enter to do the opposite for one message.",
+      "description": "Queue follow-ups while Berd responds or steer the current run. Press Cmd+Enter to do the opposite for one message.",
       "label": "Follow-up behavior",
       "queue": "Queue",
       "steer": "Steer (Goose harness only)"
@@ -347,7 +347,7 @@
   },
   "connections": {
     "title": "Connections",
-    "description": "Sign in to apps and services Goose can use on your behalf.",
+    "description": "Sign in to apps and services Berd can use on your behalf.",
     "tabs": {
       "companyManaged": "Company-managed",
       "custom": "Custom",
@@ -412,7 +412,7 @@
       "beakYeah": "Excited",
       "dingDongGoose": "Ding Dong",
       "paidInBread": "A Bit of Everything",
-      "politeHonk": "Goose",
+      "politeHonk": "Berd",
       "quickPeep": "Chime",
       "silent": "Silent",
       "youHaveGotGoose": "Twinkle"
@@ -424,25 +424,25 @@
       "checking": "Checking...",
       "restart": "Restart to Update",
       "retry": "Try Again",
-      "update": "Update Goose"
+      "update": "Update Berd"
     },
     "card": {
       "checkPrompt": "Check if a new version is available.",
-      "description": "Keep Goose up to date with the latest features and fixes.",
+      "description": "Keep Berd up to date with the latest features and fixes.",
       "title": "App Version",
       "currentVersion": "Version {{version}}"
     },
-    "description": "Goose checks for signed app updates in the background and waits for you to restart.",
+    "description": "Berd checks for signed app updates in the background and waits for you to restart.",
     "details": {
       "available": "Update {{version}} is ready to download.",
       "checking": "Checking the update channel...",
       "downloading": "Downloading the latest signed update.",
       "error": "The last update attempt failed.",
-      "idle": "Goose will check automatically every few hours.",
+      "idle": "Berd will check automatically every few hours.",
       "installing": "Installing the downloaded update.",
       "ready": "Update {{version}} is installed and will apply after restart.",
       "unavailable": "Updates are only available in signed Tauri release builds.",
-      "upToDate": "Goose is up to date."
+      "upToDate": "Berd is up to date."
     },
     "errors": {
       "detail": "Details: {{detail}}",
@@ -472,7 +472,7 @@
         "title": "Update failed"
       },
       "ready": {
-        "description": "Goose {{version}} will apply after restart.",
+        "description": "Berd {{version}} will apply after restart.",
         "title": "Update ready"
       }
     }
@@ -615,8 +615,8 @@
         "connected": {
           "cloudCredentials": "Connected through your cloud credentials.",
           "local": "Running locally.",
-          "oauthBrowser": "Connected through Goose sign-in.",
-          "oauthDeviceCode": "Connected through Goose device-code sign-in."
+          "oauthBrowser": "Connected through Berd sign-in.",
+          "oauthDeviceCode": "Connected through Berd device-code sign-in."
         },
         "fieldDescription": {
           "cloudCredentials": "Add your cloud credentials to use this provider.",
@@ -629,7 +629,7 @@
         "pending": {
           "cloudCredentials": "Configure your cloud credentials in your terminal before using this provider.",
           "local": "This provider runs locally and doesn't need saved settings.",
-          "oauthGuided": "Goose will guide you through sign-in.",
+          "oauthGuided": "Berd will guide you through sign-in.",
           "oauthTerminal": "Run `goose configure` in your terminal to finish sign-in."
         }
       },

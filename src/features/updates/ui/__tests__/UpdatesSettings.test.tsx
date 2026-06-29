@@ -66,7 +66,7 @@ describe("UpdatesSettings", () => {
     expect(screen.getByText("App Version")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Keep Goose up to date with the latest features and fixes.",
+        "Keep Berd up to date with the latest features and fixes.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -112,7 +112,7 @@ describe("UpdatesSettings", () => {
 
     renderWithProviders(<UpdatesSettings />);
 
-    expect(screen.getByText("Goose is up to date.")).toBeInTheDocument();
+    expect(screen.getByText("Berd is up to date.")).toBeInTheDocument();
   });
 
   it("restarts when an update is ready", async () => {

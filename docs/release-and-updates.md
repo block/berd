@@ -2,11 +2,11 @@
 
 ## Overview
 
-Goose uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/) to deliver in-app updates. The flow:
+Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/) to deliver in-app updates. The flow:
 
 1. The Buildkite release pipeline builds a signed `.app` and the `squareup/apple-codesign` plugin signs, notarizes, and staples it.
 2. A separate pipeline step downloads the Apple-codesigned `.app.zip`, re-archives it as `.app.tar.gz`, signs it with an Ed25519 key, and publishes the updater feed (`latest.json` + versioned archive) to Artifactory.
-3. Signed release builds check `latest.json` on startup and every 6 hours. When a newer version is found, Goose downloads and installs it in the background, then shows “restart to apply”. Restart stays user-controlled.
+3. Signed release builds check `latest.json` on startup and every 6 hours. When a newer version is found, Berd downloads and installs it in the background, then shows “restart to apply”. Restart stays user-controlled.
 
 The updater feed is hosted on Artifactory rather than GitHub Releases because Artifactory supports unauthenticated reads — critical for a private repo where GitHub Releases URLs return 404 for unauthenticated clients. Artifactory also provides versioned archive history and a `publish_latest` gate for safe rollout (test builds can upload versioned archives without overwriting `latest.json`).
 
@@ -14,9 +14,9 @@ The updater feed is hosted on Artifactory rather than GitHub Releases because Ar
 
 | Resource | Location |
 |----------|----------|
-| Version tags | `v<X.Y.Z>` on `squareup/goose-internal` |
+| Version tags | `v<X.Y.Z>` on `squareup/berd` |
 | Updater endpoint | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json` |
-| Versioned archive | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/v<VERSION>/Goose.app.tar.gz` |
+| Versioned archive | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/v<VERSION>/Berd.app.tar.gz` |
 | DMG / zip downloads | Available on versioned (`v<X.Y.Z>`) GitHub releases |
 
 ## One-time Setup
@@ -24,17 +24,17 @@ The updater feed is hosted on Artifactory rather than GitHub Releases because Ar
 ### Generate Ed25519 key pair
 
 ```bash
-pnpm exec tauri signer generate -- --write-keys ~/.tauri/goose-release.key
+pnpm exec tauri signer generate -- --write-keys ~/.tauri/berd-release.key
 ```
 
-This creates `~/.tauri/goose-release.key` (private) and `~/.tauri/goose-release.key.pub` (public).
+This creates `~/.tauri/berd-release.key` (private) and `~/.tauri/berd-release.key.pub` (public).
 
 ### Required Buildkite secrets
 
 | Secret | Description |
 |--------|-------------|
-| `GOOSE2_UPDATER_PUBLIC_KEY` | Ed25519 public key (contents of `~/.tauri/goose-release.key.pub`) |
-| `GOOSE2_TAURI_SIGNING_PRIVATE_KEY` | Ed25519 private key (contents of `~/.tauri/goose-release.key`) |
+| `GOOSE2_UPDATER_PUBLIC_KEY` | Ed25519 public key (contents of `~/.tauri/berd-release.key.pub`) |
+| `GOOSE2_TAURI_SIGNING_PRIVATE_KEY` | Ed25519 private key (contents of `~/.tauri/berd-release.key`) |
 | `GOOSE2_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the private key (set during `signer generate`) |
 | `MOBUILD_ARTIFACTORY_UPLOAD_TOKEN` | Write access to `mdx/` on Artifactory via the `mobuild` service account |
 | `ARTIFACTORY_USER` | Optional Artifactory user override; defaults to `mobuild` |
@@ -72,7 +72,7 @@ The updater provider (`src/features/updates/hooks/UpdaterProvider.tsx`) is mount
 
 3. **Check** — Calls `check()` from `@tauri-apps/plugin-updater`, which fetches `latest.json` from the configured Artifactory endpoint and compares the remote version against the running version. A 15-second timeout prevents hangs.
 
-4. **Install** — If a newer version is found, Goose stores the Tauri `Update` object and calls `update.downloadAndInstall()` in the background. The Ed25519 signature is verified against the public key baked into the release config.
+4. **Install** — If a newer version is found, Berd stores the Tauri `Update` object and calls `update.downloadAndInstall()` in the background. The Ed25519 signature is verified against the public key baked into the release config.
 
 5. **Ready** — Once installation finishes, the provider moves to `ready`, shows a toast, and surfaces a compact top-bar restart indicator.
 

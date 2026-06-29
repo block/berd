@@ -30,7 +30,7 @@
       "label": "Fijar un agente",
       "description": "Fija un agente para acceso rápido",
       "kicker": "Agente",
-      "fallbackName": "Goose",
+      "fallbackName": "Berd",
       "openAria": "Iniciar chat con {{name}}"
     },
     "chatPin": {
@@ -100,12 +100,12 @@
       },
       "notes": {
         "welcome": {
-          "title": "Te damos la bienvenida a Goose para Block",
+          "title": "Te damos la bienvenida a Berd para Block",
           "body": "Creado para Block para explorar un espacio de trabajo de IA para todas las facetas del trabajo. Esto es solo el comienzo."
         },
         "buildAgent": {
           "title": "Crea un agente",
-          "body": "Dale a Goose un rol, modelo e instrucciones para el trabajo que repites.",
+          "body": "Dale a Berd un rol, modelo e instrucciones para el trabajo que repites.",
           "action": "Crear agente"
         },
         "startProject": {
@@ -114,8 +114,8 @@
           "action": "Nuevo proyecto"
         },
         "skills": {
-          "title": "Enséñale una habilidad a Goose",
-          "body": "Guarda instrucciones y recursos para que Goose sepa cómo aplicarlos cuando la tarea lo pida.",
+          "title": "Enséñale una habilidad a Berd",
+          "body": "Guarda instrucciones y recursos para que Berd sepa cómo aplicarlos cuando la tarea lo pida.",
           "action": "Explorar habilidades"
         },
         "shapeHome": {
@@ -124,7 +124,7 @@
         },
         "automations": {
           "title": "Gestiona automatizaciones",
-          "body": "Las automatizaciones de G2 ahora viven en Goose. Puedes ver, crear y gestionar trabajo programado aquí.",
+          "body": "Las automatizaciones de G2 ahora viven en Berd. Puedes ver, crear y gestionar trabajo programado aquí.",
           "action": "Abrir automatizaciones"
         }
       }

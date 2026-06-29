@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for goose-internal release scripts.
+# Shared helpers for Berd release scripts.
 #
 # Source from any script: `source "$(dirname "$0")/lib.sh"`
 #
@@ -16,10 +16,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 RELEASE_DIR="${REPO_ROOT}/release"
 
-APP_NAME="goose-internal"
-APP_BUNDLE_NAME="Goose"
+APP_NAME="berd"
+APP_BUNDLE_NAME="Berd"
 
-GOOSE_INTERNAL_REPO="${GOOSE_INTERNAL_REPO:-squareup/goose-internal}"
+BERD_REPO="${BERD_REPO:-squareup/berd}"
 
 meta() {
   local key="$1"

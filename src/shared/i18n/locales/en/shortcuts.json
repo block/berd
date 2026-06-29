@@ -45,7 +45,7 @@
     "description": "Customize keyboard shortcuts",
     "customize": "Customize",
     "title": "Keyboard shortcuts",
-    "pageDescription": "Customize the keyboard shortcuts used across Goose.",
+    "pageDescription": "Customize the keyboard shortcuts used across Berd.",
     "searchPlaceholder": "Search shortcuts",
     "empty": "No shortcuts match your search",
     "recording": "Press shortcut…",

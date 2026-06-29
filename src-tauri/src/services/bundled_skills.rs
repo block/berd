@@ -97,7 +97,9 @@ fn is_installed_bundled_skill(skill_dir: &Path) -> Result<bool, String> {
     Ok(skill_frontmatter(&contents)
         .and_then(|frontmatter| yaml_serde::from_str::<SkillFrontmatter>(frontmatter).ok())
         .and_then(|frontmatter| frontmatter.metadata)
-        .and_then(|metadata| metadata.goose_internal_bundled)
+        .map(|metadata| {
+            metadata.berd_bundled.unwrap_or(false) || metadata.legacy_bundled.unwrap_or(false)
+        })
         .unwrap_or(false))
 }
 
@@ -114,8 +116,10 @@ struct SkillFrontmatter {
 
 #[derive(Deserialize)]
 struct SkillMetadata {
+    #[serde(rename = "berdBundled")]
+    berd_bundled: Option<bool>,
     #[serde(rename = "gooseInternalBundled")]
-    goose_internal_bundled: Option<bool>,
+    legacy_bundled: Option<bool>,
 }
 
 fn install_skill_dir(source: &Path, target: &Path) -> Result<(), String> {
@@ -256,12 +260,12 @@ mod tests {
         write_skill(
             source.path(),
             "agent-builder",
-            "---\nname: agent-builder\nmetadata:\n  gooseInternalBundled: true\n---\nupdated",
+            "---\nname: agent-builder\nmetadata:\n  berdBundled: true\n---\nupdated",
         );
         write_skill(
             target.path(),
             "agent-builder",
-            "---\nname: agent-builder\nmetadata:\n  gooseInternalBundled: true\n---\nold",
+            "---\nname: agent-builder\nmetadata:\n  berdBundled: true\n---\nold",
         );
 
         let seeded = seed_bundled_skills_from_dir(source.path(), target.path()).unwrap();
@@ -269,8 +273,20 @@ mod tests {
         assert_eq!(seeded, 1);
         assert_eq!(
             fs::read_to_string(target.path().join("agent-builder").join(SKILL_FILE_NAME)).unwrap(),
-            "---\nname: agent-builder\nmetadata:\n  gooseInternalBundled: true\n---\nupdated"
+            "---\nname: agent-builder\nmetadata:\n  berdBundled: true\n---\nupdated"
         );
+    }
+
+    #[test]
+    fn recognizes_legacy_bundled_skill_marker() {
+        let target = tempdir().unwrap();
+        write_skill(
+            target.path(),
+            "agent-builder",
+            "---\nname: agent-builder\nmetadata:\n  gooseInternalBundled: true\n---\nold",
+        );
+
+        assert!(is_installed_bundled_skill(&target.path().join("agent-builder")).unwrap());
     }
 
     #[test]

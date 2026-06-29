@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 
 const ARTIFACTORY_BASE: &str =
     "https://global.block-artifacts.com/artifactory/goose-internal/avatars/";
-const AVATAR_CACHE_WARMED_EVENT: &str = "goose:avatar-cache-warmed";
+const AVATAR_CACHE_WARMED_EVENT: &str = "berd:avatar-cache-warmed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const CATALOG_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -1013,7 +1013,7 @@ fn collection_asset_order(collection: &AvatarCollection) -> HashMap<&str, usize>
 }
 
 fn avatar_download_concurrency() -> usize {
-    std::env::var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY")
+    std::env::var("BERD_AVATAR_DOWNLOAD_CONCURRENCY")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
@@ -1838,13 +1838,13 @@ mod tests {
 
     #[test]
     fn download_concurrency_defaults_to_eight() {
-        std::env::remove_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY");
+        std::env::remove_var("BERD_AVATAR_DOWNLOAD_CONCURRENCY");
         assert_eq!(avatar_download_concurrency(), 8);
-        std::env::set_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY", "2");
+        std::env::set_var("BERD_AVATAR_DOWNLOAD_CONCURRENCY", "2");
         assert_eq!(avatar_download_concurrency(), 2);
-        std::env::set_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY", "0");
+        std::env::set_var("BERD_AVATAR_DOWNLOAD_CONCURRENCY", "0");
         assert_eq!(avatar_download_concurrency(), 8);
-        std::env::remove_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY");
+        std::env::remove_var("BERD_AVATAR_DOWNLOAD_CONCURRENCY");
     }
 
     #[test]

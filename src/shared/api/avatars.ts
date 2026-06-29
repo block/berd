@@ -216,7 +216,7 @@ export function cachedAssetToMedia(asset: {
   };
 }
 
-export const AVATAR_CACHE_WARMED_EVENT = "goose:avatar-cache-warmed";
+export const AVATAR_CACHE_WARMED_EVENT = "berd:avatar-cache-warmed";
 export const AVATAR_CACHED_REF_QUERY_KEY_PREFIX = [
   "avatars",
   "cached-ref",

@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatInput } from "@/features/chat/ui/ChatInput";
-import { LoadingGoose } from "@/features/chat/ui/LoadingGoose";
+import { LoadingBerd } from "@/features/chat/ui/LoadingBerd";
 import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
 import { useAutomationBuilderSession } from "@/features/automations/hooks/useAutomationBuilderSession";
 import { AutomationDraftRail } from "@/features/automations/ui/AutomationDraftRail";
@@ -107,7 +107,7 @@ export function AutomationBuilderView({
   }, [setDraftRailWidth]);
   const composerFooter = (
     <>
-      {builder.isStreaming ? <LoadingGoose chatState="thinking" /> : null}
+      {builder.isStreaming ? <LoadingBerd chatState="thinking" /> : null}
       <div className="px-4">
         <div className="pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)] rounded-md bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
           <ChatInput

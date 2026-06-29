@@ -53,7 +53,7 @@ const SKILL_BUILDER_SKILL: SkillInfo = {
   id: "builtin:skill-builder",
   name: "skill-builder",
   description:
-    "Create, edit, or inspect Goose skills stored as skill folders with SKILL.md files.",
+    "Create, edit, or inspect Berd skills stored as skill folders with SKILL.md files.",
   instructions: "",
   path: "builtin://skills/skill-builder",
   fileLocation: "builtin://skills/skill-builder",

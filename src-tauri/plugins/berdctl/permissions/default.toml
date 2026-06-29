@@ -1,0 +1,14 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+Default permissions for the app control plugin (the loopback HTTP broker for
+the berdctl CLI). Grants the main window access to the broker lifecycle,
+timeout, and bridge-result commands.
+"""
+permissions = [
+  "allow-start",
+  "allow-stop",
+  "allow-set-timeouts",
+  "allow-submit-result",
+]

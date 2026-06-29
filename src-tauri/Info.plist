@@ -6,14 +6,14 @@
   <array>
     <dict>
       <key>CFBundleURLName</key>
-      <string>com.squareup.goose-internal.url-handler</string>
+      <string>xyz.block.berd.url-handler</string>
       <key>CFBundleURLSchemes</key>
       <array>
-        <string>goose-internal</string>
+        <string>berd</string>
       </array>
     </dict>
   </array>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Goose uses your microphone to capture voice input for dictation.</string>
+  <string>Berd uses your microphone to capture voice input for dictation.</string>
 </dict>
 </plist>

@@ -42,10 +42,11 @@ pub(super) fn is_builderbot_automation_type(value: &str) -> bool {
 }
 
 // Shared policy for kgoose TileType proto values this app can safely create.
-// Goose Internal does not currently vend generated Rust TileType bindings, so
+// Berd does not currently vend generated Rust TileType bindings, so
 // frontend and Tauri load this JSON policy instead of duplicating enum tables.
 const CREATABLE_TILE_TYPES_JSON: &str =
     include_str!("../../../../resources/creatable-tile-types.json");
+const AUTOMATION_METADATA_CLIENT: &str = "berd";
 static CREATABLE_TILE_TYPES: LazyLock<Vec<CreatableTileType>> = LazyLock::new(|| {
     let tile_types: Vec<CreatableTileType> = serde_json::from_str(CREATABLE_TILE_TYPES_JSON)
         .expect("resources/creatable-tile-types.json is malformed");
@@ -296,9 +297,10 @@ fn sanitize_chat_context(chat_context: ChatContext) -> Result<Value, String> {
 fn sanitize_metadata(metadata: Metadata) -> Result<Value, String> {
     let mut sanitized = Map::new();
     if let Some(client) = metadata.client {
+        let _ = trim_required_string(&client, "client")?;
         sanitized.insert(
             "client".to_string(),
-            Value::String(trim_required_string(&client, "client")?),
+            Value::String(AUTOMATION_METADATA_CLIENT.to_string()),
         );
     }
     if let Some(feature) = metadata.feature {
@@ -488,7 +490,7 @@ mod tests {
     use super::{
         is_builderbot_automation_type, sanitize_create_automation_tile_request,
         sanitize_push_automation_builder_messages_request, sanitize_update_automation_request,
-        validate_last_event_id,
+        validate_last_event_id, AUTOMATION_METADATA_CLIENT,
     };
     use serde_json::json;
 
@@ -609,7 +611,7 @@ mod tests {
             },
             "sessionName": "New automation",
             "metadata": {
-                "client": "goose-internal",
+                "client": "berd",
                 "feature": "automations-builder"
             },
             "profileConfig": {
@@ -655,6 +657,7 @@ mod tests {
             request["messages"][1]["messageContents"][0]["toolResponse"]["id"],
             "tool-1"
         );
+        assert_eq!(request["metadata"]["client"], AUTOMATION_METADATA_CLIENT);
         assert_eq!(
             request["profileConfig"]["userProfile"]["preferredModel"]["name"],
             "goose-claude-4-6-opus"

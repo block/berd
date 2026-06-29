@@ -34,7 +34,7 @@ export type DesignSystemSection =
   | "component-dropdown-menu"
   | "component-file-context-menu"
   | "component-form"
-  | "component-goose-logo"
+  | "component-berd-logo"
   | "component-hover-card"
   | "component-image-lightbox"
   | "component-input-group"
@@ -149,7 +149,7 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-split-button", label: "Split Button" },
   { id: "component-drawer", label: "Drawer" },
   { id: "component-form", label: "Form" },
-  { id: "component-goose-logo", label: "Goose Logo" },
+  { id: "component-berd-logo", label: "Berd Logo" },
   { id: "component-hover-card", label: "Hover Card" },
   { id: "component-input-group", label: "Input Group" },
   { id: "component-input-otp", label: "Input OTP" },

@@ -320,7 +320,7 @@ function basePushRequest(sessionId?: string) {
     chatContext: withTimezone({ source: "SOURCE_REGULAR_CHAT" }),
     sessionName: "New automation",
     metadata: {
-      client: "goose-internal",
+      client: "berd",
       feature: "automations-builder",
     },
     profileConfig: {

@@ -4,7 +4,7 @@ import startupLoadingChatGif from "@/app/assets/startup-loading-chat.gif";
 import startupLoadingPoster from "@/app/assets/startup-loading-poster.png";
 import { cn } from "@/shared/lib/cn";
 
-const ACTIVE_CHAT_GOOSE_SIZE_PX = 14;
+const ACTIVE_CHAT_BERD_SIZE_PX = 14;
 
 interface SessionActivityIndicatorProps {
   isRunning?: boolean;
@@ -13,9 +13,9 @@ interface SessionActivityIndicatorProps {
   className?: string;
 }
 
-export function ActiveChatGooseIndicator({
+export function ActiveChatBerdIndicator({
   className,
-  size = ACTIVE_CHAT_GOOSE_SIZE_PX,
+  size = ACTIVE_CHAT_BERD_SIZE_PX,
 }: {
   className?: string;
   size?: number;
@@ -54,7 +54,7 @@ export function SessionActivityIndicator({
             className,
           )}
         >
-          <ActiveChatGooseIndicator size={ACTIVE_CHAT_GOOSE_SIZE_PX} />
+          <ActiveChatBerdIndicator size={ACTIVE_CHAT_BERD_SIZE_PX} />
         </span>
       );
     }
@@ -68,7 +68,7 @@ export function SessionActivityIndicator({
           className,
         )}
       >
-        <ActiveChatGooseIndicator size={ACTIVE_CHAT_GOOSE_SIZE_PX} />
+        <ActiveChatBerdIndicator size={ACTIVE_CHAT_BERD_SIZE_PX} />
       </span>
     );
   }

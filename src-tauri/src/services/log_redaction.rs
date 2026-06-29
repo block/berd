@@ -33,7 +33,7 @@ pub(crate) fn redact_log_line(line: &str) -> String {
     .fold(line.to_string(), redact_sensitive_key)
 }
 
-/// Sanitize one line of the Tauri shell log (`goose.log`) for export.
+/// Sanitize one line of the Tauri shell log (`berd.log`) for export.
 ///
 /// Returns `None` for lines that echo the goosed sidecar's captured
 /// stdout/stderr — those are dropped because they can carry conversation/LLM

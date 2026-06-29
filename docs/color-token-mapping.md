@@ -4,13 +4,13 @@ Date: 2026-05-21
 
 ## The New Rule
 
-Use Tailwind utilities backed by the shadcn token contract first. Use Goose tokens only when the color is product-specific and does not exist in shadcn's shared vocabulary.
+Use Tailwind utilities backed by the shadcn token contract first. Use Berd tokens only when the color is product-specific and does not exist in shadcn's shared vocabulary.
 
 In practice:
 
 1. Shared UI should use shadcn names: `background`, `foreground`, `card`, `popover`, `muted`, `accent`, `primary`, `destructive`, `border`, `input`, and `ring`.
 2. Sidebar UI should use shadcn sidebar names: `sidebar`, `sidebar-foreground`, `sidebar-accent`, `sidebar-border`, and `sidebar-ring`.
-3. Goose-specific surfaces keep Goose names only when shadcn has no matching role: `canvas-*`, `surface-composer`, composer chips, status colors, project tint, and dot-grid variables.
+3. Berd-specific surfaces keep product-specific names only when shadcn has no matching role: `canvas-*`, `surface-composer`, composer chips, status colors, project tint, and dot-grid variables.
 
 This follows the shadcn theming model: core tokens describe component anatomy and state, while Tailwind classes are the authoring API.
 
@@ -41,11 +41,11 @@ This follows the shadcn theming model: core tokens describe component anatomy an
 
 The current sidebar value is intentionally slightly off-white/translucent, not pure white.
 
-## Goose Extensions We Keep
+## Berd Extensions We Keep
 
 | Token family | Why it exists | Tailwind examples |
 | --- | --- | --- |
-| `canvas-base`, `canvas-project-tint` | Goose's dot-grid app canvas and project tinting are product-specific. | `bg-canvas-base` |
+| `canvas-base`, `canvas-project-tint` | Berd's dot-grid app canvas and project tinting are product-specific. | `bg-canvas-base` |
 | `sidebar` | Frosted app chrome/sidebar/context-panel shell treatment. | `bg-sidebar` |
 | `surface-composer`, `surface-composer-glass`, `surface-composer-hover` | Composer-specific translucent surfaces and their hover counterpart. | `bg-surface-composer` |
 | `surface-chat-composer`, `surface-chat-composer-hover` | Floating chat composer shell over the transcript; muted translucent gray. | `bg-surface-chat-composer` |
@@ -77,11 +77,11 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `background-primary`, `text-on-primary` | `primary`, `primary-foreground` | Same job as shadcn primary. |
 | `background-danger-strong`, `text-on-danger-strong` | `destructive`, `destructive-foreground` | Same job as shadcn destructive. |
 | `background-danger`, `text-danger` | `destructive/10`, `destructive` | Destructive tint plus destructive text. |
-| `background-success`, `text-success` old pair | `success/10`, `success` | Keep status as a small Goose extension, not broad background tokens. |
+| `background-success`, `text-success` old pair | `success/10`, `success` | Keep status as a small Berd extension, not broad background tokens. |
 | `background-warning`, `text-warning` old pair | `warning/10`, `warning` | Same status-extension pattern. |
 | `background-info`, `text-info` old pair | `info/10`, `info` | Same status-extension pattern. |
 | `surface-card` | `card` | Card is a shadcn core token. |
-| `surface-user-bubble` | `message-user-bg` | User bubble fill is message-specific, so it gets a narrow Goose token instead of reviving `surface-*`. |
+| `surface-user-bubble` | `message-user-bg` | User bubble fill is message-specific, so it gets a narrow Berd token instead of reviving `surface-*`. |
 | `surface-overlay`, `background-popover`, `text-on-popover` | `popover`, `popover-foreground` | Floating surfaces should use shadcn popover. |
 | `border-default`, `border-soft`, `border-strong` | `border`, usually with opacity like `border-border/80` | One structural border token is enough for now. |
 | `border-input` old alias | `input` | shadcn input token. |
@@ -151,5 +151,5 @@ discoverable and tracked.
 | Is this a sidebar row state? | `sidebar-accent` / `sidebar-accent-foreground` |
 | Is this a focus outline? | `ring` |
 | Is this a form/control border? | `input` |
-| Is this a Goose-only product surface or identity chip? | Use the smallest Goose extension token that names that product job. |
+| Is this a Berd-only product surface or identity chip? | Use the smallest Berd extension token that names that product job. |
 | Is this a pseudo-element, highlight, filter, or opacity that no utility class can target? | Define a `:root`/dark token and consume it with `var(...)`. See [Tokens Consumed In Raw CSS](#tokens-consumed-in-raw-css). |

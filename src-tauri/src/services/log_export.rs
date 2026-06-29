@@ -4,8 +4,8 @@
 //! Two log sources are collected, via a strict **filename allowlist** — never a
 //! directory sweep:
 //!
-//! 1. This app's Tauri shell log (`app_log_dir()`): `goose.log` plus rotated
-//!    `goose.<N>.log` files. Each line is run through
+//! 1. This app's Tauri shell log (`app_log_dir()`): `berd.log` plus rotated
+//!    `berd.<N>.log` files. Each line is run through
 //!    [`sanitize_app_log_line`], which drops the captured goosed
 //!    stdout/stderr lines (they can carry conversation/LLM content), applies
 //!    the secret-key redactor to what remains, and includes app diagnostic
@@ -50,14 +50,14 @@ const PER_FILE_TAIL_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_LOG_AGE: Duration = Duration::from_secs(60 * 60);
 
 /// Filename used for the diagnostic-log attachment part.
-pub(crate) const LOG_ZIP_FILENAME: &str = "goose-logs.zip";
+pub(crate) const LOG_ZIP_FILENAME: &str = "berd-logs.zip";
 
 /// Resolved on-disk log directories. Resolving needs the Tauri `AppHandle`, but
 /// the (potentially slow) filesystem enumeration in [`build_logs_zip`] does not,
 /// so resolution and collection are split to keep the blocking work portable.
 pub(crate) struct LogDirs {
-    /// Tauri shell-log directory (`app_log_dir()`): holds `goose.log` and
-    /// rotated `goose.<N>.log` files.
+    /// Tauri shell-log directory (`app_log_dir()`): holds `berd.log` and
+    /// rotated `berd.<N>.log` files.
     app_log_dir: PathBuf,
     /// goosed state log directory (`<goose-state>/logs`). We only ever descend
     /// into its `cli`/`server` subtrees.
@@ -221,7 +221,7 @@ fn write_zip(entries: Vec<ZipEntry>) -> Result<Vec<u8>, String> {
     Ok(cursor.into_inner())
 }
 
-/// Allowlist the Tauri shell log files: `goose.log` and rotated `goose.<N>.log`.
+/// Allowlist the Tauri shell log files: `berd.log` and rotated `berd.<N>.log`.
 /// Files last modified before `cutoff` are skipped (recency filter).
 fn enumerate_app_shell_logs(dir: &Path, cutoff: SystemTime) -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -247,13 +247,13 @@ fn enumerate_app_shell_logs(dir: &Path, cutoff: SystemTime) -> Vec<PathBuf> {
     paths
 }
 
-/// `goose.log` or `goose.<digits>.log` (rotated). Nothing else.
+/// `berd.log` or `berd.<digits>.log` (rotated). Nothing else.
 fn is_app_shell_log(name: &str) -> bool {
-    if name == "goose.log" {
+    if name == "berd.log" {
         return true;
     }
     match name
-        .strip_prefix("goose.")
+        .strip_prefix("berd.")
         .and_then(|r| r.strip_suffix(".log"))
     {
         Some(middle) => !middle.is_empty() && middle.bytes().all(|b| b.is_ascii_digit()),
@@ -476,12 +476,12 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn allowlists_only_goose_shell_logs() {
-        assert!(is_app_shell_log("goose.log"));
-        assert!(is_app_shell_log("goose.0.log"));
-        assert!(is_app_shell_log("goose.12.log"));
-        assert!(!is_app_shell_log("goose.log.bak"));
-        assert!(!is_app_shell_log("goose.abc.log"));
+    fn allowlists_only_berd_shell_logs() {
+        assert!(is_app_shell_log("berd.log"));
+        assert!(is_app_shell_log("berd.0.log"));
+        assert!(is_app_shell_log("berd.12.log"));
+        assert!(!is_app_shell_log("berd.log.bak"));
+        assert!(!is_app_shell_log("berd.abc.log"));
         assert!(!is_app_shell_log("other.log"));
         assert!(!is_app_shell_log("llm_request.0.jsonl"));
     }
@@ -494,7 +494,7 @@ mod tests {
         assert!(is_hard_excluded("sessions.db-wal"));
         assert!(is_hard_excluded("sessions.db-shm"));
         assert!(!is_hard_excluded("20260101_120000.log"));
-        assert!(!is_hard_excluded("goose.log"));
+        assert!(!is_hard_excluded("berd.log"));
     }
 
     #[test]
@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn read_tail_returns_recent_bytes_on_line_boundary() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("goose.log");
+        let path = temp.path().join("berd.log");
         fs::write(&path, b"first line\nsecond line\nthird line\n").unwrap();
 
         // Plenty of budget, small file: full contents returned.
@@ -598,7 +598,7 @@ mod tests {
         let shell_ts = now_utc.format("[%Y-%m-%d][%H:%M:%S]").to_string();
         let goosed_ts = now_utc.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
         fs::write(
-            app_log_dir.join("goose.log"),
+            app_log_dir.join("berd.log"),
             format!(
                 "{shell_ts}[INFO] hello token=abc\n\
                  {shell_ts}[INFO] [diagnostic] category=gooseServe event=ready port=1234 api_key=abc\n\
@@ -619,7 +619,7 @@ mod tests {
             app_log_dir,
             goose_state_logs_dir: state_logs,
         };
-        let bytes = build_logs_zip(Some(&dirs), Some("Goose Internal doctor report\n")).unwrap();
+        let bytes = build_logs_zip(Some(&dirs), Some("Berd doctor report\n")).unwrap();
 
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let mut names = Vec::new();
@@ -627,14 +627,14 @@ mod tests {
             names.push(archive.by_index(i).unwrap().name().to_string());
         }
 
-        assert!(names.iter().any(|n| n == "app-shell/goose.log"));
+        assert!(names.iter().any(|n| n == "app-shell/berd.log"));
         assert!(names
             .iter()
             .any(|n| n == "goosed-logs/cli/2026-01-01/run.log"));
         assert!(names.iter().any(|n| n == "doctor/report.txt"));
         assert!(names.iter().all(|n| !n.contains("llm_request")));
 
-        let mut app_log_entry = archive.by_name("app-shell/goose.log").unwrap();
+        let mut app_log_entry = archive.by_name("app-shell/berd.log").unwrap();
         let mut app_log_text = String::new();
         app_log_entry.read_to_string(&mut app_log_text).unwrap();
         assert!(app_log_text.contains("[diagnostic]"));
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn build_logs_zip_includes_doctor_report_without_log_dirs() {
-        let bytes = build_logs_zip(None, Some("Goose Internal doctor report\nall good"))
+        let bytes = build_logs_zip(None, Some("Berd doctor report\nall good"))
             .expect("doctor-only zip should build");
 
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();

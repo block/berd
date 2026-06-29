@@ -1,48 +1,48 @@
 export const SILENT_NOTIFICATION_SOUND = "silent";
-export const DEFAULT_NOTIFICATION_SOUND = "goose-sounds-4.mp3";
+export const DEFAULT_NOTIFICATION_SOUND = "berd-sounds-4.mp3";
 
 export const NOTIFICATION_SOUNDS = [
   {
     id: DEFAULT_NOTIFICATION_SOUND,
     labelKey: "notifications.sounds.politeHonk",
-    resource: "goose-sounds-4.mp3",
-    url: new URL("../../../resources/goose-sounds-4.mp3", import.meta.url).href,
+    resource: "berd-sounds-4.mp3",
+    url: new URL("../../../resources/berd-sounds-4.mp3", import.meta.url).href,
   },
   {
-    id: "goose-sounds-0.mp3",
+    id: "berd-sounds-0.mp3",
     labelKey: "notifications.sounds.quickPeep",
-    resource: "goose-sounds-0.mp3",
-    url: new URL("../../../resources/goose-sounds-0.mp3", import.meta.url).href,
+    resource: "berd-sounds-0.mp3",
+    url: new URL("../../../resources/berd-sounds-0.mp3", import.meta.url).href,
   },
   {
-    id: "goose-sounds-1.mp3",
+    id: "berd-sounds-1.mp3",
     labelKey: "notifications.sounds.youHaveGotGoose",
-    resource: "goose-sounds-1.mp3",
-    url: new URL("../../../resources/goose-sounds-1.mp3", import.meta.url).href,
+    resource: "berd-sounds-1.mp3",
+    url: new URL("../../../resources/berd-sounds-1.mp3", import.meta.url).href,
   },
   {
-    id: "goose-sounds-2.mp3",
+    id: "berd-sounds-2.mp3",
     labelKey: "notifications.sounds.dingDongGoose",
-    resource: "goose-sounds-2.mp3",
-    url: new URL("../../../resources/goose-sounds-2.mp3", import.meta.url).href,
+    resource: "berd-sounds-2.mp3",
+    url: new URL("../../../resources/berd-sounds-2.mp3", import.meta.url).href,
   },
   {
-    id: "goose-sounds-3.mp3",
+    id: "berd-sounds-3.mp3",
     labelKey: "notifications.sounds.paidInBread",
-    resource: "goose-sounds-3.mp3",
-    url: new URL("../../../resources/goose-sounds-3.mp3", import.meta.url).href,
+    resource: "berd-sounds-3.mp3",
+    url: new URL("../../../resources/berd-sounds-3.mp3", import.meta.url).href,
   },
   {
-    id: "goose-sounds-5.mp3",
+    id: "berd-sounds-5.mp3",
     labelKey: "notifications.sounds.beakYeah",
-    resource: "goose-sounds-5.mp3",
-    url: new URL("../../../resources/goose-sounds-5.mp3", import.meta.url).href,
+    resource: "berd-sounds-5.mp3",
+    url: new URL("../../../resources/berd-sounds-5.mp3", import.meta.url).href,
   },
   {
-    id: "goose-sounds-6.mp3",
+    id: "berd-sounds-6.mp3",
     labelKey: "notifications.sounds.badNewsBird",
-    resource: "goose-sounds-6.mp3",
-    url: new URL("../../../resources/goose-sounds-6.mp3", import.meta.url).href,
+    resource: "berd-sounds-6.mp3",
+    url: new URL("../../../resources/berd-sounds-6.mp3", import.meta.url).href,
   },
 ] as const;
 

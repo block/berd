@@ -13,7 +13,7 @@ const validConfig = {
     displayName: "Block",
   },
   workspace: {
-    id: "goose-internal",
+    id: "berd",
   },
   providerAllowlist: ["databricks_v2", "openai"],
   featureToggles: {

@@ -176,7 +176,7 @@ mod macos_completion {
         let center = UNUserNotificationCenter::currentNotificationCenter();
 
         let content = UNMutableNotificationContent::new();
-        content.setTitle(&NSString::from_str("Goose"));
+        content.setTitle(&NSString::from_str("Berd"));
         content.setBody(&NSString::from_str(&request.body));
 
         let key = NSString::from_str("sessionId");
@@ -264,7 +264,7 @@ fn show_macos_fallback_completion_notification(
         sound,
     } = request;
 
-    let builder = app.notification().builder().title("Goose").body(body);
+    let builder = app.notification().builder().title("Berd").body(body);
     play_macos_completion_notification_sound(&app, sound.as_deref());
     builder.show().map_err(|error| error.to_string())
 }
@@ -365,7 +365,7 @@ fn show_platform_completion_notification(
         body,
         sound,
     } = request;
-    let mut builder = app.notification().builder().title("Goose").body(body);
+    let mut builder = app.notification().builder().title("Berd").body(body);
     if let Some(sound) = sound {
         builder = builder.sound(sound);
     }
@@ -381,15 +381,15 @@ mod tests {
 
     #[test]
     fn bundled_completion_sound_exists_for_dev_resolution() {
-        assert!(dev_completion_notification_sound_path("goose-sounds-4.mp3").exists());
+        assert!(dev_completion_notification_sound_path("berd-sounds-4.mp3").exists());
     }
 
     #[test]
     fn sound_resource_name_must_be_plain_filename() {
-        assert!(is_plain_sound_resource_name("goose-sounds-4.mp3"));
+        assert!(is_plain_sound_resource_name("berd-sounds-4.mp3"));
         assert!(!is_plain_sound_resource_name(""));
-        assert!(!is_plain_sound_resource_name("../goose-sounds-4.mp3"));
-        assert!(!is_plain_sound_resource_name("/tmp/goose-sounds-4.mp3"));
+        assert!(!is_plain_sound_resource_name("../berd-sounds-4.mp3"));
+        assert!(!is_plain_sound_resource_name("/tmp/berd-sounds-4.mp3"));
     }
 
     #[test]

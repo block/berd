@@ -615,7 +615,7 @@ describe("acpNotificationHandler", () => {
         _meta: {
           goose: {
             messageId: "user-replay-1",
-            origin: "goosectl_cross_session",
+            origin: "berdctl_cross_session",
           },
         },
       },
@@ -625,7 +625,7 @@ describe("acpNotificationHandler", () => {
       id: "user-replay-1",
       role: "user",
       metadata: {
-        origin: "goosectl_cross_session",
+        origin: "berdctl_cross_session",
       },
     });
   });

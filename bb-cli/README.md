@@ -1,7 +1,7 @@
 # bb-cli
 
 `bb-cli` packages Rust-powered CLI binaries for BuilderBot/kgoose workflows
-inside the `goose-internal` repo:
+inside the `berd` repo:
 
 - `agent-tools`, the `sq agent-tools` command for the kgoose
   `ToolEndpointService`.
@@ -20,7 +20,7 @@ at `target/debug/bb`.
 
 ## Local Development
 
-From the `goose-internal` repo root, activate the Hermit-managed toolchain:
+From the `berd` repo root, activate the Hermit-managed toolchain:
 
 ```bash
 source ./bin/activate-hermit
@@ -29,7 +29,7 @@ just bb-cli-test
 just bb-cli-lint
 ```
 
-From `goose-internal/bb-cli`, the original package-local recipes are still
+From `berd/bb-cli`, the original package-local recipes are still
 available:
 
 ```bash
@@ -152,4 +152,4 @@ to `http://kgoose.cashappservices.com` or
 
 For release packaging, keep the `sqbin` output shape intact so the Homebrew formula can build from `bb-cli` and install the whole directory into `prefix/"etc"`.
 There is a short `sq` release checklist in `docs/RELEASING-sq.md`.
-The `bb` CLI build path is documented separately in `docs/RELEASING-bb.md`; Goose.app owns app packaging and command-link installation.
+The `bb` CLI build path is documented separately in `docs/RELEASING-bb.md`; Berd.app owns app packaging and command-link installation.

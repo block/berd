@@ -14,7 +14,7 @@ import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { BreadcrumbTrail } from "@/shared/ui/breadcrumb";
 import { Button } from "@/shared/ui/button";
-import { GooseIcon } from "@/shared/ui/icons/GooseIcon";
+import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 
 type TopBarLeadingChromeInset = "compact" | "trafficLights";
 type TopBarBreadcrumbDisplay = "full" | "compact" | "current";
@@ -154,7 +154,7 @@ export function TopBar({
             aria-label={t("navigation.gooseHome")}
             title={t("navigation.gooseHome")}
           >
-            <GooseIcon className="size-5" />
+            <BerdIcon className="size-5" />
           </Button>
         ) : null}
         <Button

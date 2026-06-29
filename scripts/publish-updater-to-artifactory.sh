@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Upload Goose's auto-updater payload to Artifactory so internal installs
-# poll it and self-update. Running Goose reads `GOOSE2_UPDATER_ENDPOINT`
+# Upload Berd's auto-updater payload to Artifactory so internal installs
+# poll it and self-update. Running Berd reads `GOOSE2_UPDATER_ENDPOINT`
 # from its compiled-in config, which for internal builds points at
 # `.../mdx/goose-internal/latest.json` served by this script.
 #
@@ -8,12 +8,12 @@
 # notarized + stapled .app re-tarred, archive minisign-signed with
 # GOOSE2_TAURI_SIGNING_PRIVATE_KEY):
 #
-#   $RELEASE_DIR/macos/Goose.app.tar.gz        Updater archive of the signed .app
-#   $RELEASE_DIR/macos/Goose.app.tar.gz.sig    Minisign signature of the archive
+#   $RELEASE_DIR/macos/Berd.app.tar.gz        Updater archive of the signed .app
+#   $RELEASE_DIR/macos/Berd.app.tar.gz.sig    Minisign signature of the archive
 #
 # Uploads:
-#   mdx/goose-internal/v<version>/Goose.app.tar.gz      Versioned archive
-#   mdx/goose-internal/v<version>/Goose.app.tar.gz.sig  Versioned signature
+#   mdx/goose-internal/v<version>/Berd.app.tar.gz      Versioned archive
+#   mdx/goose-internal/v<version>/Berd.app.tar.gz.sig  Versioned signature
 #   mdx/goose-internal/latest.json                      Stable manifest installs poll
 #
 # The final manifest upload is gated on the pipeline's publish_latest input so
@@ -31,7 +31,7 @@ source "$SCRIPT_DIR/buildkite/release/lib.sh"
 RELEASE_VERSION="$(meta version)"
 : "${MOBUILD_ARTIFACTORY_UPLOAD_TOKEN:?MOBUILD_ARTIFACTORY_UPLOAD_TOKEN is required}"
 
-# Reads on mdx/ are unauthenticated, so a running Goose install can poll the
+# Reads on mdx/ are unauthenticated, so a running Berd install can poll the
 # manifest without Block credentials. Writes require the `mobuild` service
 # account via the upload token above.
 ARTIFACTORY_BASE="${ARTIFACTORY_BASE:-https://global.block-artifacts.com/artifactory/mdx/goose-internal}"
@@ -56,7 +56,7 @@ trap 'rm -f "$MANIFEST"' EXIT
 # string.
 jq -n \
   --arg version   "$RELEASE_VERSION" \
-  --arg notes     "Goose v$RELEASE_VERSION internal build." \
+  --arg notes     "Berd v$RELEASE_VERSION internal build." \
   --arg pub_date  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg signature "$(cat "$SIGNATURE_SRC")" \
   --arg url       "$ARCHIVE_URL" \

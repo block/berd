@@ -68,7 +68,7 @@
     "voiceInputFailedTitle": "Voice dictation failed",
     "voiceInputNoMicrophoneDescription": "Connect or select a microphone, then try voice dictation again.",
     "voiceInputNoMicrophoneTitle": "No microphone found",
-    "voiceInputPermissionDescription": "Allow microphone access for Goose in System Settings, then try voice dictation again.",
+    "voiceInputPermissionDescription": "Allow microphone access for Berd in System Settings, then try voice dictation again.",
     "voiceInputPermissionTitle": "Microphone access is blocked",
     "voiceInputUnavailableDescription": "Another app may be using your microphone, or macOS could not start recording. Close other recording apps and try again.",
     "voiceInputUnavailableTitle": "Microphone is unavailable"
@@ -264,7 +264,7 @@
     "mcpAppLoading": "Loading MCP App…",
     "mcpAppRenderError": "Unable to render MCP App inline.",
     "redactedThinking": "(thinking redacted)",
-    "goosectlCrossSessionLabel": "Sent by Goose from another session",
+    "berdctlCrossSessionLabel": "Sent by Berd from another session",
     "steerLabel": "Steered"
   },
   "persona": {

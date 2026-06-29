@@ -1,4 +1,6 @@
 pub mod acp;
+pub(crate) mod app_data_migration;
+pub(crate) mod berdctl_discovery;
 pub(crate) mod builderbot;
 pub mod bundled_agents;
 pub mod bundled_skills;
@@ -6,7 +8,6 @@ pub(crate) mod diagnostic_log;
 pub(crate) mod dir_env;
 pub mod distro_bundle;
 pub(crate) mod goose_config;
-pub(crate) mod goosectl_discovery;
 #[cfg(target_os = "macos")]
 pub(crate) mod installer_media;
 pub(crate) mod kgoose;

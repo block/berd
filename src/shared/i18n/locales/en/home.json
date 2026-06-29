@@ -30,7 +30,7 @@
       "label": "Pin an agent",
       "description": "Pin an agent for quick access",
       "kicker": "Agent",
-      "fallbackName": "Goose",
+      "fallbackName": "Berd",
       "openAria": "Start chat with {{name}}"
     },
     "chatPin": {
@@ -100,12 +100,12 @@
       },
       "notes": {
         "welcome": {
-          "title": "Welcome to Goose for Block",
+          "title": "Welcome to Berd for Block",
           "body": "Built for Block to explore one AI workspace for all facets of work. This is just the beginning."
         },
         "buildAgent": {
           "title": "Build an agent",
-          "body": "Give Goose a role, model, and instructions for work you repeat.",
+          "body": "Give Berd a role, model, and instructions for work you repeat.",
           "action": "Build agent"
         },
         "startProject": {
@@ -114,8 +114,8 @@
           "action": "New project"
         },
         "skills": {
-          "title": "Teach Goose a skill",
-          "body": "Save how-to instructions and resources so Goose can apply them when a task calls for it.",
+          "title": "Teach Berd a skill",
+          "body": "Save how-to instructions and resources so Berd can apply them when a task calls for it.",
           "action": "Explore skills"
         },
         "shapeHome": {
@@ -124,7 +124,7 @@
         },
         "automations": {
           "title": "Manage automations",
-          "body": "G2 automations live in Goose now. View, create, and manage scheduled work here.",
+          "body": "G2 automations live in Berd now. View, create, and manage scheduled work here.",
           "action": "Open automations"
         }
       }

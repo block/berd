@@ -35,8 +35,8 @@ describe("NotificationSettings", () => {
       enabled: true,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
     setPrefs.mockClear();
     window.localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
@@ -67,8 +67,8 @@ describe("NotificationSettings", () => {
       enabled: false,
       inApp: true,
       desktop: true,
-      inAppSound: "goose-sounds-4.mp3",
-      desktopSound: "goose-sounds-4.mp3",
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
     });
     renderWithProviders(<NotificationSettings />);
     expect(

@@ -9,7 +9,7 @@ import type { ChatSendOptions } from "../types";
  * conversation is complete when the user opens the session.
  *
  * Returns once the send is dispatched, not when the turn completes — the
- * caller (goosectl sessions.create) must not block on the agent's answer.
+ * caller (berdctl sessions.create) must not block on the agent's answer.
  *
  * `providerId` is the target session's provider (callers have it from
  * session creation); it stamps the pending-assistant hint for the response.

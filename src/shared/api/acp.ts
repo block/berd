@@ -106,12 +106,34 @@ function resolveProvidersCatalog(providers: AcpProvider[]): AcpProvider[] {
     .filter((provider): provider is AcpProvider => provider !== null);
 }
 
+const BERD_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY = "berd_style_guidelines";
+const LEGACY_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY =
+  "goose_internal_style_guidelines";
+
 function getEnabledGooseStyleGuidelinesPrompt(): string | null {
   const experiment = getExperiment(GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID);
   if (!experiment?.enabled) return null;
 
   const prompt = experiment.config.prompt;
   return typeof prompt === "string" && prompt.trim() ? prompt : null;
+}
+
+async function appendBerdStyleGuidelinesPrompt(
+  sessionId: string,
+  prompt: string,
+): Promise<void> {
+  // Clear the pre-rename app-owned key first so existing sessions do not keep
+  // duplicate Additional Instructions under both goose-internal and berd keys.
+  await directAcp.appendSessionSystemPrompt(
+    sessionId,
+    LEGACY_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY,
+    "",
+  );
+  await directAcp.appendSessionSystemPrompt(
+    sessionId,
+    BERD_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY,
+    prompt,
+  );
 }
 
 /** Send a message to an ACP agent. Response streams via Tauri events. */
@@ -146,11 +168,7 @@ export async function acpSendMessage(
   if (isGooseManaged) {
     const styleGuidelinesPrompt = getEnabledGooseStyleGuidelinesPrompt();
     if (styleGuidelinesPrompt) {
-      await directAcp.appendSessionSystemPrompt(
-        sessionId,
-        "goose_internal_style_guidelines",
-        styleGuidelinesPrompt,
-      );
+      await appendBerdStyleGuidelinesPrompt(sessionId, styleGuidelinesPrompt);
     }
     await directAcp.appendSessionSystemPrompt(
       sessionId,

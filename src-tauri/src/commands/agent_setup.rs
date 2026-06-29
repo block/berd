@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, State};
 /// Block's internal Artifactory npm registry. Direct access to
 /// `registry.npmjs.org` is blocked by Cloudflare WARP, so npm-backed agent
 /// installs must route through this proxy. The doctor crate exposes an optional
-/// `npm_registry` param but bakes in no registry of its own, so goose-internal
+/// `npm_registry` param but bakes in no registry of its own, so Berd
 /// supplies this URL at every fix/run call site (BOT-686).
 pub(crate) const BLOCK_NPM_REGISTRY_URL: &str =
     "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";

@@ -741,10 +741,10 @@ describe("WidgetCanvas", () => {
       onOpenAutomations,
     });
 
-    expect(screen.getByText("Welcome to Goose for Block")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to Berd for Block")).toBeInTheDocument();
     expect(screen.getByText("Build an agent")).toBeInTheDocument();
     expect(screen.getByText("Start a project")).toBeInTheDocument();
-    expect(screen.getByText("Teach Goose a skill")).toBeInTheDocument();
+    expect(screen.getByText("Teach Berd a skill")).toBeInTheDocument();
     expect(screen.getByText("Make Home yours")).toBeInTheDocument();
     expect(screen.getByText("Manage automations")).toBeInTheDocument();
 

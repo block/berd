@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_WEBM="${ROOT}/src/app/assets/goose-startup-loading.webm"
+SRC_WEBM="${ROOT}/src/app/assets/berd-startup-loading.webm"
 ASSETS="${ROOT}/src/app/assets"
 # Match native WebM resolution so the GIF is not upscaled or over-downscaled.
 SIZE=250
@@ -27,7 +27,7 @@ ffmpeg -y -c:v libvpx-vp9 -i "${SRC_WEBM}" \
   "${ASSETS}/startup-loading-poster.png"
 
 if [[ -d "${ROOT}/public" ]]; then
-  cp "${ASSETS}/startup-loading-poster.png" "${ROOT}/public/goose-startup-loading-poster.png"
+  cp "${ASSETS}/startup-loading-poster.png" "${ROOT}/public/berd-startup-loading-poster.png"
 fi
 
 echo "Wrote startup-loading.gif, startup-loading-chat.gif, and startup-loading-poster.png (${SIZE}px)"

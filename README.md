@@ -1,7 +1,7 @@
-# Goose
+# Berd
 
-Goose is the standalone internal desktop packaging of the Goose 2 Tauri app.
-It is a Tauri 2 + React 19 app that talks to Goose through the ACP WebSocket
+Berd is the standalone internal desktop app for agent work. It is a Tauri 2 +
+React 19 app that talks to the upstream Goose backend through the ACP WebSocket
 served by a `goose serve` sidecar.
 
 ## Getting started
@@ -16,7 +16,7 @@ and prepares the Goose backend pinned by `goose-backend.lock.json` in your
 platform cache directory. `just dev` reuses that stamped pinned binary and fails
 if the lockfile commit no longer matches the cached build.
 
-If you already have a Goose binary you want to test, set `GOOSE_BIN=/path/to/goose`
+If you already have an upstream Goose binary you want to test, set `GOOSE_BIN=/path/to/goose`
 before running `just dev`; that is an explicit local override and bypasses the
 managed pinned checkout.
 
@@ -36,8 +36,8 @@ just goose-sync                          # fetch/build the new pinned commit
 
 ## Bundling
 
-Tauri bundles Goose as an external sidecar. By default `just bundle` stages the
-pinned managed Goose binary from `goose-backend.lock.json` and then runs
+Tauri bundles the Goose backend as an external sidecar. By default `just bundle`
+stages the pinned managed Goose binary from `goose-backend.lock.json` and then runs
 `pnpm tauri build`:
 
 ```bash
@@ -118,7 +118,7 @@ Startup artifacts publish as versioned create-only catalog releases. Source file
 
 ```bash
 export ARTIFACTORY_IDENTITY_TOKEN=...
-ASSET_ROOT=/path/to/goose-internal-assets
+ASSET_ROOT=/path/to/berd-assets
 just artifacts-publish "$ASSET_ROOT/assets"
 ```
 
@@ -132,7 +132,7 @@ just artifacts-promote 20260521T121530123Z
 To generate a local manifest without uploading:
 
 ```bash
-ASSET_ROOT=/path/to/goose-internal-assets
+ASSET_ROOT=/path/to/berd-assets
 just artifacts-manifest "$ASSET_ROOT/assets" 20260521T121530123Z
 ```
 

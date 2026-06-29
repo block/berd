@@ -310,6 +310,16 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Berd Logo",
+    source: "src/shared/ui/BerdLogo.tsx",
+    exports: ["BerdLogo"],
+    slots: [],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: [],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Bottom Fade",
     source: "src/shared/ui/BottomFade.tsx",
     exports: ["BottomFade"],
@@ -1593,16 +1603,6 @@ export const designSystemComponentManifest = [
     ],
   },
   {
-    name: "Goose Logo",
-    source: "src/shared/ui/GooseLogo.tsx",
-    exports: ["GooseLogo"],
-    slots: [],
-    cva: [],
-    tokenClasses: [],
-    stateClasses: [],
-    sourceTokenClasses: [],
-  },
-  {
     name: "Hover Card",
     source: "src/shared/ui/hover-card.tsx",
     exports: ["HoverCard", "HoverCardContent", "HoverCardTrigger"],
@@ -2437,7 +2437,7 @@ export const designSystemComponentManifest = [
   {
     name: "Session Activity Indicator",
     source: "src/shared/ui/SessionActivityIndicator.tsx",
-    exports: ["ActiveChatGooseIndicator", "SessionActivityIndicator"],
+    exports: ["ActiveChatBerdIndicator", "SessionActivityIndicator"],
     slots: [],
     cva: [],
     tokenClasses: ["bg-success"],

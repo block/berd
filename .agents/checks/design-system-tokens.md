@@ -1,6 +1,6 @@
 ---
 name: design-system-tokens
-description: Ensure UI color changes use the Goose shadcn-first token contract instead of raw palette values or broad custom tokens.
+description: Ensure UI color changes use the Berd shadcn-first token contract instead of raw palette values or broad custom tokens.
 severity-default: medium
 tools: [Grep, Read]
 ---
@@ -16,7 +16,7 @@ be chosen. The short version:
 - Sidebar and app chrome should use the shadcn sidebar token family:
   `sidebar`, `sidebar-foreground`, `sidebar-accent`, `sidebar-border`, and
   `sidebar-ring`.
-- Goose-specific tokens are allowed only for product-specific surfaces that do
+- Berd-specific tokens are allowed only for product-specific surfaces that do
   not map cleanly to shadcn, such as `canvas-*`, `surface-composer`,
   `surface-editor-panel`, `message-user-bg`, `chip-*-bg`, `chip-*-fg`,
   `success`, `warning`, `info`, and clock/status/chart tokens.
@@ -27,7 +27,7 @@ be chosen. The short version:
   `border-neutral-*`, `ring-blue-*`, `fill-slate-*`, or `stroke-stone-*`.
   Suggest the closest semantic token instead, such as `text-muted-foreground`,
   `bg-accent`, `border-border`, `border-input`, or `ring-ring`.
-- **Deleted broad Goose token families** such as `background-default`,
+- **Deleted broad Berd token families** such as `background-default`,
   `background-hover`, `text-default`, `text-muted`, `border-default`,
   `border-focus`, `surface-card`, `surface-overlay`, `surface-chrome`,
   `sidebar-nav-bg-hover`, or `sidebar-nav-fg`. Suggest the mapping in
@@ -36,8 +36,8 @@ be chosen. The short version:
   example, do not introduce a new token that means "normal page background",
   "hover gray", "secondary text", "card surface", "popover surface",
   "default border", "input border", or "focus ring"; use shadcn tokens.
-- **Goose extension tokens without a narrow product job.** If a new token is
-  added, it should name a real Goose-specific surface or identity role, and the
+- **Berd extension tokens without a narrow product job.** If a new token is
+  added, it should name a real Berd-specific surface or identity role, and the
   PR should update both `docs/color-token-mapping.md` and
   `scripts/design-system-tokens.mjs`.
 - **Component-level one-off color decisions** where the same role already
@@ -53,7 +53,7 @@ be chosen. The short version:
 - Approved sidebar utilities such as `bg-sidebar`, `text-sidebar-foreground`,
   `hover:bg-sidebar-accent`, `border-sidebar-border`, and
   `ring-sidebar-ring`.
-- Approved narrow Goose extension utilities documented in
+- Approved narrow Berd extension utilities documented in
   `docs/color-token-mapping.md`, such as `bg-canvas-base`,
   `bg-surface-composer`, `bg-message-user-bg`, chip tokens, status tokens, and
   clock/chart tokens.

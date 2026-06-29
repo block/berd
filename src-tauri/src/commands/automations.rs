@@ -36,7 +36,7 @@ const UPDATE_TILE_ENDPOINT: &str = "v3/update-tile";
 const NON_GENERIC_AUTOMATION_TILE_ERROR: &str =
     "Changes can't be made because expected an automation but found a tile";
 const DELETE_UNMANAGED_AUTOMATION_ERROR: &str =
-    "This automation can't be deleted because it isn't managed by Goose";
+    "This automation can't be deleted because it isn't managed by Berd";
 
 #[derive(Default)]
 pub struct AutomationStreamState {
@@ -350,7 +350,7 @@ fn validate_generic_automation_tile(
         .and_then(string_or_number_as_lowercase)
         .ok_or_else(|| "kgoose did not return a valid tile type for automation".to_string())?;
     if is_builderbot_automation_type(&tile_type) {
-        return Err("Refusing to mutate builderbot automations in goose-internal".to_string());
+        return Err("Refusing to mutate builderbot automations in Berd".to_string());
     }
 
     Ok(())
