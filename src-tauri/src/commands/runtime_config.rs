@@ -293,6 +293,7 @@ fn default_runtime_config() -> RuntimeConfig {
     }
 }
 
+#[cfg(debug_assertions)]
 fn invalid_fake_runtime_config(message: String) -> RuntimeConfigLoadResult {
     RuntimeConfigLoadResult::Unavailable {
         source: RuntimeConfigSource::FakeEndpoint,
