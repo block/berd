@@ -104,6 +104,19 @@ pub fn get_generic_password(
     account: &str,
     access_group: &str,
 ) -> Result<Option<Vec<u8>>> {
+    get_generic_password_with_access_group(service, account, Some(access_group))
+}
+
+/// Get a generic password from the default keychain scope.
+pub fn get_generic_password_unscoped(service: &str, account: &str) -> Result<Option<Vec<u8>>> {
+    get_generic_password_with_access_group(service, account, None)
+}
+
+fn get_generic_password_with_access_group(
+    service: &str,
+    account: &str,
+    access_group: Option<&str>,
+) -> Result<Option<Vec<u8>>> {
     let mut query = build_query(service, account, access_group);
     query.set(
         unsafe { CFString::wrap_under_get_rule(kSecReturnData) },
@@ -135,6 +148,20 @@ pub fn set_generic_password(
     service: &str,
     account: &str,
     access_group: &str,
+    value: &[u8],
+) -> Result<()> {
+    set_generic_password_with_access_group(service, account, Some(access_group), value)
+}
+
+/// Set (add or update) a generic password in the default keychain scope.
+pub fn set_generic_password_unscoped(service: &str, account: &str, value: &[u8]) -> Result<()> {
+    set_generic_password_with_access_group(service, account, None, value)
+}
+
+fn set_generic_password_with_access_group(
+    service: &str,
+    account: &str,
+    access_group: Option<&str>,
     value: &[u8],
 ) -> Result<()> {
     let value_data = CFData::from_buffer(value);
@@ -183,6 +210,20 @@ pub fn set_generic_password(
 /// Delete a generic password from the keychain, scoped to the given access group.
 /// Returns `true` if an item was deleted, `false` if it was not found.
 pub fn delete_generic_password(service: &str, account: &str, access_group: &str) -> Result<bool> {
+    delete_generic_password_with_access_group(service, account, Some(access_group))
+}
+
+/// Delete a generic password from the default keychain scope.
+/// Returns `true` if an item was deleted, `false` if it was not found.
+pub fn delete_generic_password_unscoped(service: &str, account: &str) -> Result<bool> {
+    delete_generic_password_with_access_group(service, account, None)
+}
+
+fn delete_generic_password_with_access_group(
+    service: &str,
+    account: &str,
+    access_group: Option<&str>,
+) -> Result<bool> {
     let query = build_query(service, account, access_group);
     let status = unsafe { SecItemDelete(query.as_concrete_TypeRef()) };
 
@@ -200,7 +241,7 @@ pub fn delete_generic_password(service: &str, account: &str, access_group: &str)
 fn build_query(
     service: &str,
     account: &str,
-    access_group: &str,
+    access_group: Option<&str>,
 ) -> CFMutableDictionary<CFString, CFType> {
     let mut dict = CFMutableDictionary::new();
     dict.set(
@@ -215,10 +256,12 @@ fn build_query(
         unsafe { CFString::wrap_under_get_rule(kSecAttrAccount) },
         CFString::new(account).as_CFType(),
     );
-    dict.set(
-        unsafe { CFString::wrap_under_get_rule(kSecAttrAccessGroup) },
-        CFString::new(access_group).as_CFType(),
-    );
+    if let Some(access_group) = access_group {
+        dict.set(
+            unsafe { CFString::wrap_under_get_rule(kSecAttrAccessGroup) },
+            CFString::new(access_group).as_CFType(),
+        );
+    }
     dict
 }
 

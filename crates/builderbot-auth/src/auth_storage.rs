@@ -5,6 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 #[cfg(any(debug_assertions, test))]
 use std::sync::Mutex;
+#[cfg(target_os = "macos")]
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -304,10 +306,17 @@ impl SessionCredentialStorage for KeyringSessionCredentialStorage {
 fn keyring_get(key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>> {
     use crate::keychain;
 
-    let access_group = keychain::shared_auth_access_group()?;
-    match keychain::get_generic_password(KEYRING_SERVICE, &key.account(), &access_group)
-        .context("read BuilderBot auth session from keyring")?
-    {
+    let value = match keychain_scope()? {
+        KeychainScope::Shared(access_group) => {
+            keychain::get_generic_password(KEYRING_SERVICE, &key.account(), &access_group)
+        }
+        KeychainScope::UnscopedDev => {
+            keychain::get_generic_password_unscoped(KEYRING_SERVICE, &key.account())
+        }
+    }
+    .context("read BuilderBot auth session from keyring")?;
+
+    match value {
         Some(value) => {
             let value =
                 String::from_utf8(value).context("BuilderBot auth keyring entry was not UTF-8")?;
@@ -322,13 +331,19 @@ fn keyring_set(key: &SessionStorageKey, credential: &StoredSessionCredential) ->
     use crate::keychain;
 
     let value = serde_json::to_string(credential).context("serialize auth session")?;
-    let access_group = keychain::shared_auth_access_group()?;
-    keychain::set_generic_password(
-        KEYRING_SERVICE,
-        &key.account(),
-        &access_group,
-        value.as_bytes(),
-    )
+    match keychain_scope()? {
+        KeychainScope::Shared(access_group) => keychain::set_generic_password(
+            KEYRING_SERVICE,
+            &key.account(),
+            &access_group,
+            value.as_bytes(),
+        ),
+        KeychainScope::UnscopedDev => keychain::set_generic_password_unscoped(
+            KEYRING_SERVICE,
+            &key.account(),
+            value.as_bytes(),
+        ),
+    }
     .context("write BuilderBot auth session to keyring")
 }
 
@@ -336,9 +351,51 @@ fn keyring_set(key: &SessionStorageKey, credential: &StoredSessionCredential) ->
 fn keyring_delete(key: &SessionStorageKey) -> Result<bool> {
     use crate::keychain;
 
-    let access_group = keychain::shared_auth_access_group()?;
-    keychain::delete_generic_password(KEYRING_SERVICE, &key.account(), &access_group)
-        .context("delete BuilderBot auth session from keyring")
+    match keychain_scope()? {
+        KeychainScope::Shared(access_group) => {
+            keychain::delete_generic_password(KEYRING_SERVICE, &key.account(), &access_group)
+        }
+        KeychainScope::UnscopedDev => {
+            keychain::delete_generic_password_unscoped(KEYRING_SERVICE, &key.account())
+        }
+    }
+    .context("delete BuilderBot auth session from keyring")
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+enum KeychainScope {
+    Shared(String),
+    UnscopedDev,
+}
+
+#[cfg(target_os = "macos")]
+enum KeychainScopeDecision {
+    Scope(KeychainScope),
+    Error(String),
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_scope() -> Result<KeychainScope> {
+    static SCOPE: OnceLock<KeychainScopeDecision> = OnceLock::new();
+    match SCOPE.get_or_init(resolve_keychain_scope) {
+        KeychainScopeDecision::Scope(scope) => Ok(scope.clone()),
+        KeychainScopeDecision::Error(error) => Err(anyhow!(error.clone())),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_keychain_scope() -> KeychainScopeDecision {
+    match crate::keychain::shared_auth_access_group() {
+        Ok(access_group) => KeychainScopeDecision::Scope(KeychainScope::Shared(access_group)),
+        Err(error) if cfg!(debug_assertions) => {
+            log::debug!(
+                "BuilderBot shared auth keychain access group is unavailable in a dev build; using unscoped macOS Keychain storage: {error:#}"
+            );
+            KeychainScopeDecision::Scope(KeychainScope::UnscopedDev)
+        }
+        Err(error) => KeychainScopeDecision::Error(format!("{error:#}")),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
