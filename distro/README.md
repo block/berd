@@ -39,7 +39,7 @@ Current `distro.json` example:
 - `kgoose?: { baseUrl?: string, path?: string }`
   - generic default KGoose endpoint used by KGoose-backed features until runtime config owns this source
   - `baseUrl` must use `http` or `https`
-  - environment variables `BERD_KGOOSE_BASE_URL` and `BERD_KGOOSE_PATH` override these values for local testing
+  - environment variables `KGOOSE_BASE_URL` and `KGOOSE_SERVICE_PATH` override these values for local testing
 
 ## Runtime effects
 

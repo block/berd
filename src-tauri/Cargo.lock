@@ -5509,7 +5509,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "log",
- "reqwest",
+ "reqwest 0.13.3",
  "serde",
  "serde_json",
  "tauri",
@@ -5579,21 +5579,6 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
  "url",
-]
-
-[[package]]
-name = "tauri-plugin-goosectl"
-version = "0.1.0"
-dependencies = [
- "axum",
- "log",
- "reqwest 0.13.3",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "tokio",
- "uuid",
 ]
 
 [[package]]

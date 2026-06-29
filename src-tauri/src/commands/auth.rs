@@ -17,9 +17,10 @@ use builderbot_auth::auth_storage::{
     StoredSessionCredential,
 };
 use builderbot_auth::config::{
-    default_bb_home, default_preferences_path, kgoose_service_url, normalize_kgoose_base_url,
-    read_optional_env, read_preferences_file, write_preferences_file, BB_HOME_ENV_VAR,
-    BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_KGOOSE_SERVICE_PATH, DEFAULT_PROFILE_NAME,
+    default_bb_home, default_preferences_path, kgoose_service_url,
+    normalize_kgoose_base_url_with_service_path, normalize_kgoose_service_path, read_optional_env,
+    read_preferences_file, write_preferences_file, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR,
+    DEFAULT_KGOOSE_SERVICE_PATH, DEFAULT_PROFILE_NAME, KGOOSE_SERVICE_PATH_ENV_VAR,
 };
 use builderbot_auth::org_routing::{normalize_org, resolve_org_kgoose_base_url};
 use serde::{Deserialize, Serialize};
@@ -388,8 +389,9 @@ pub(crate) fn route_kgoose_base_url_for_shared_org(base_url: &str) -> Result<Str
         .unwrap_or_else(default_bb_home);
     let preferences = read_preferences_file(&default_preferences_path(&bb_home))?;
     let org = preferences.org.as_deref().map(normalize_org).transpose()?;
+    let kgoose_service_path = resolve_kgoose_service_path()?;
 
-    resolve_org_kgoose_base_url(base_url, org.as_deref(), false, DEFAULT_KGOOSE_SERVICE_PATH)
+    resolve_org_kgoose_base_url(base_url, org.as_deref(), false, &kgoose_service_path)
 }
 
 pub(crate) fn shared_session_credential_for_kgoose_base_url(
@@ -431,8 +433,8 @@ fn resolve_auth_context(org_override: Option<&str>, persist_org: bool) -> Result
 
     let org = preferences.org.as_deref().map(normalize_org).transpose()?;
     let profile = resolve_profile(&bb_home)?;
-    let raw_kgoose_base_url = resolve_raw_kgoose_base_url()?;
-    let kgoose_service_path = DEFAULT_KGOOSE_SERVICE_PATH.to_string();
+    let kgoose_service_path = resolve_kgoose_service_path()?;
+    let raw_kgoose_base_url = resolve_raw_kgoose_base_url(&kgoose_service_path)?;
     let kgoose_base_url = resolve_org_kgoose_base_url(
         &raw_kgoose_base_url,
         org.as_deref(),
@@ -476,10 +478,17 @@ fn resolve_profile(bb_home: &Path) -> Result<String> {
         .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string()))
 }
 
-fn resolve_raw_kgoose_base_url() -> Result<String> {
+fn resolve_raw_kgoose_base_url(kgoose_service_path: &str) -> Result<String> {
     Ok(read_trimmed_env(KGOOSE_BASE_URL_ENV_VAR)?
-        .map(|value| normalize_kgoose_base_url(&value))
+        .map(|value| normalize_kgoose_base_url_with_service_path(&value, kgoose_service_path))
         .unwrap_or_else(|| DEFAULT_KGOOSE_BASE_URL.to_string()))
+}
+
+fn resolve_kgoose_service_path() -> Result<String> {
+    read_trimmed_env(KGOOSE_SERVICE_PATH_ENV_VAR)?
+        .map(|value| normalize_kgoose_service_path(&value))
+        .transpose()
+        .map(|path| path.unwrap_or_else(|| DEFAULT_KGOOSE_SERVICE_PATH.to_string()))
 }
 
 fn resolve_playpen() -> Result<Option<String>> {
@@ -715,6 +724,7 @@ mod tests {
         env::remove_var(BB_SKILLS_PROFILE_ENV_VAR);
         env::remove_var(BB_SKILLS_CONFIG_ENV_VAR);
         env::remove_var(KGOOSE_BASE_URL_ENV_VAR);
+        env::remove_var(KGOOSE_SERVICE_PATH_ENV_VAR);
         env::remove_var(BB_KGOOSE_PLAYPEN_ENV_VAR);
         env::remove_var(KGOOSE_PLAYPEN_ENV_VAR);
         env::remove_var(BB_AUTH_STORAGE_ENV_VAR);
@@ -733,13 +743,27 @@ mod tests {
     }
 
     fn write_test_session(storage_path: PathBuf, base_url: &str, session_credential: &str) {
+        write_test_session_with_service_path(
+            storage_path,
+            base_url,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+            session_credential,
+        );
+    }
+
+    fn write_test_session_with_service_path(
+        storage_path: PathBuf,
+        base_url: &str,
+        service_path: &str,
+        session_credential: &str,
+    ) {
         let storage = FileSessionCredentialStorage::new(storage_path);
         storage
             .set(
                 &SessionStorageKey::from_profile_and_kgoose_base_url(
                     DEFAULT_PROFILE_NAME,
                     base_url,
-                    DEFAULT_KGOOSE_SERVICE_PATH,
+                    service_path,
                 ),
                 &StoredSessionCredential {
                     session_credential: session_credential.to_string(),
@@ -786,6 +810,31 @@ mod tests {
             "https://test.blockstaging.build/cash-app/goose"
         );
         assert_eq!(preferences.org.as_deref(), Some("test"));
+
+        clear_auth_env();
+    }
+
+    #[test]
+    fn resolve_auth_context_honors_custom_kgoose_service_path() {
+        let _guard = env_lock().lock().expect("env lock");
+        clear_auth_env();
+        let dir = tempdir().expect("tempdir");
+        env::set_var(BB_HOME_ENV_VAR, dir.path());
+        env::set_var(
+            KGOOSE_BASE_URL_ENV_VAR,
+            "https://blockstaging.build/cash-app/goose-square",
+        );
+        env::set_var(KGOOSE_SERVICE_PATH_ENV_VAR, "cash-app/goose-square");
+
+        let context = resolve_auth_context(Some(" Test "), true).expect("resolve auth context");
+
+        assert_eq!(context.org.as_deref(), Some("test"));
+        assert_eq!(context.kgoose_base_url, "https://test.blockstaging.build");
+        assert_eq!(context.kgoose_service_path, "/cash-app/goose-square");
+        assert_eq!(
+            context.kgoose_service_url,
+            "https://test.blockstaging.build/cash-app/goose-square"
+        );
 
         clear_auth_env();
     }
@@ -875,6 +924,34 @@ mod tests {
             ),
             Some("Morgan".to_string())
         );
+    }
+
+    #[test]
+    fn shared_kgoose_auth_uses_custom_service_path_storage_key() {
+        let _guard = env_lock().lock().expect("env lock");
+        clear_auth_env();
+        let dir = tempdir().expect("tempdir");
+        let storage_path = dir.path().join("sessions.json");
+        env::set_var(BB_HOME_ENV_VAR, dir.path());
+        env::set_var(KGOOSE_BASE_URL_ENV_VAR, "https://blockstaging.build");
+        env::set_var(KGOOSE_SERVICE_PATH_ENV_VAR, "/cash-app/goose-square");
+        env::set_var(BB_AUTH_STORAGE_ENV_VAR, "file");
+        env::set_var(BB_AUTH_STORAGE_FILE_ENV_VAR, &storage_path);
+        write_test_preferences(dir.path(), "test");
+        write_test_session_with_service_path(
+            storage_path,
+            "https://test.blockstaging.build",
+            "/cash-app/goose-square",
+            "custom-path-session",
+        );
+
+        let session =
+            shared_session_credential_for_kgoose_base_url("https://test.blockstaging.build")
+                .expect("read shared session");
+
+        assert_eq!(session.as_deref(), Some("custom-path-session"));
+
+        clear_auth_env();
     }
 
     #[test]

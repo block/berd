@@ -3,7 +3,10 @@ use crate::commands::{
     runtime_config::{RuntimeConfig, RuntimeKgooseConfig},
 };
 use crate::services::distro_bundle::{DistroBundleState, KgooseDistroConfig};
-use builderbot_auth::{auth::SESSION_CREDENTIAL_HEADER, config::KGOOSE_SERVICE_PATH};
+use builderbot_auth::{
+    auth::SESSION_CREDENTIAL_HEADER,
+    config::{normalize_kgoose_service_path, DEFAULT_KGOOSE_SERVICE_PATH},
+};
 use bytes::Bytes;
 use reqwest::{
     header::{HeaderValue, ACCEPT, CACHE_CONTROL, CONTENT_TYPE},
@@ -16,9 +19,9 @@ use serde_json::Value;
 use std::{env, fmt, sync::OnceLock, time::Duration};
 use tokio::time::timeout;
 
-const KGOOSE_BASE_URL_ENV: &str = "BERD_KGOOSE_BASE_URL";
-const KGOOSE_PATH_ENV: &str = "BERD_KGOOSE_PATH";
-const KGOOSE_PLAYPEN_ENV: &str = "BERD_KGOOSE_PLAYPEN";
+const KGOOSE_BASE_URL_ENV: &str = "KGOOSE_BASE_URL";
+const KGOOSE_PATH_ENV: &str = "KGOOSE_SERVICE_PATH";
+const KGOOSE_PLAYPEN_ENV: &str = "KGOOSE_PLAYPEN";
 const DEFAULT_KGOOSE_BASE_URL: &str = "https://kgoose.stage.sqprod.co/";
 const DEFAULT_KGOOSE_PATH: &str = "cash-app/goose";
 const KGOOSE_NETWORK_ACCESS_MESSAGE: &str =
@@ -587,14 +590,21 @@ fn add_shared_session_credential(
 fn kgoose_base_url_from_request_url(url: &reqwest::Url) -> String {
     let mut base_url = url.clone();
     let path = base_url.path().trim_end_matches('/');
+    let service_path = active_kgoose_service_path();
     let base_path = path
-        .find(KGOOSE_SERVICE_PATH)
+        .find(&service_path)
         .map(|index| path[..index].to_string())
         .unwrap_or_default();
     base_url.set_path(&base_path);
     base_url.set_query(None);
     base_url.set_fragment(None);
     base_url.as_str().trim_end_matches('/').to_string()
+}
+
+fn active_kgoose_service_path() -> String {
+    env_value(KGOOSE_PATH_ENV)
+        .and_then(|value| normalize_kgoose_service_path(&value).ok())
+        .unwrap_or_else(|| DEFAULT_KGOOSE_SERVICE_PATH.to_string())
 }
 
 fn playpen_baggage() -> Option<String> {
@@ -945,6 +955,8 @@ mod tests {
 
     #[test]
     fn derives_kgoose_base_url_from_request_url_for_auth_lookup() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let url = reqwest::Url::parse(
             "https://test.kgoose.sqprod.co/base/cash-app/goose/v3/whoami?ignored=true",
         )
@@ -953,6 +965,22 @@ mod tests {
         assert_eq!(
             kgoose_base_url_from_request_url(&url),
             "https://test.kgoose.sqprod.co/base"
+        );
+    }
+
+    #[test]
+    fn derives_kgoose_base_url_from_request_url_with_custom_service_path() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
+        env::set_var(KGOOSE_PATH_ENV, "cash-app/goose-square");
+        let url = reqwest::Url::parse(
+            "https://test.kgoose.sqprod.co/cash-app/goose-square/v3/whoami?ignored=true",
+        )
+        .expect("parse URL");
+
+        assert_eq!(
+            kgoose_base_url_from_request_url(&url),
+            "https://test.kgoose.sqprod.co"
         );
     }
 
