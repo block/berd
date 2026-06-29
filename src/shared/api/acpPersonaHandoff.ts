@@ -15,23 +15,10 @@
  * re-injects.
  */
 
-import { DEFAULT_PROVIDER_ID } from "@/features/migration/lib/constants";
+import { getDefaultGooseModelProviderId } from "@/features/runtime-config/defaults";
 import { getCatalogEntry } from "@/features/providers/providerCatalog";
 
 export const GOOSE_PROVIDER_ID = "goose";
-
-/**
- * Real model provider the Goose agent resolves to on the wire. `"goose"` is a
- * UI agent sentinel meaning "the Goose-managed default", not a registry
- * provider, so it must be translated to a concrete provider before it reaches
- * the backend's `session/new` (which resolves providers strictly against the
- * registry and rejects the sentinel with `Unknown provider 'goose'`).
- *
- * Aliased to `DEFAULT_PROVIDER_ID` so the app default lives in one place. The
- * runtime provider allowlist controls whether this default appears in the Goose
- * model picker.
- */
-export const DEFAULT_GOOSE_MODEL_PROVIDER_ID = DEFAULT_PROVIDER_ID;
 
 /**
  * Translate a UI provider id into the value sent to the backend. Only the
@@ -41,7 +28,7 @@ export const DEFAULT_GOOSE_MODEL_PROVIDER_ID = DEFAULT_PROVIDER_ID;
  */
 export function toWireProviderId(providerId: string): string {
   return providerId === GOOSE_PROVIDER_ID
-    ? DEFAULT_GOOSE_MODEL_PROVIDER_ID
+    ? getDefaultGooseModelProviderId()
     : providerId;
 }
 

@@ -37,7 +37,7 @@ pub async fn whoami(
     state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<WhoAmIResponse, String> {
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     let response = kgoose.post_json(WHOAMI_ENDPOINT, json!({})).await?;
     serde_json::from_value(response)

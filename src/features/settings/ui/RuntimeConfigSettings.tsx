@@ -3,6 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Save, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  applyRuntimeProviderConfig,
+  defaultModelInventoryModeForLoadResult,
+} from "@/features/providers/runtimeProviderConfig";
 import { rerunDoctorReport } from "@/shared/api/useDoctorReport";
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -66,6 +70,19 @@ export function RuntimeConfigSettings() {
     });
   }
 
+  async function applyLiveRuntimeConfig(nextResult: RuntimeConfigLoadResult) {
+    const runtimeConfig =
+      nextResult.status === "ready"
+        ? nextResult.config
+        : useRuntimeConfigStore.getState().config;
+    await applyRuntimeProviderConfig(runtimeConfig, {
+      seedModelsFresh:
+        nextResult.status === "ready" && nextResult.source === "fakeEndpoint",
+      defaultModelInventoryMode:
+        defaultModelInventoryModeForLoadResult(nextResult),
+    });
+  }
+
   async function handleSave() {
     setPendingAction("save");
     try {
@@ -74,6 +91,7 @@ export function RuntimeConfigSettings() {
       if (nextResult.status !== "ready") {
         throw new Error(nextResult.message);
       }
+      await applyLiveRuntimeConfig(nextResult);
       setError(null);
       refreshDoctorReport();
       toast.success(t("runtimeConfig.saveSuccess"));
@@ -89,7 +107,8 @@ export function RuntimeConfigSettings() {
   async function handleClear() {
     setPendingAction("clear");
     try {
-      await clearFakeConfig();
+      const nextResult = await clearFakeConfig();
+      await applyLiveRuntimeConfig(nextResult);
       setError(null);
       refreshDoctorReport();
       toast.success(t("runtimeConfig.clearSuccess"));
@@ -105,7 +124,8 @@ export function RuntimeConfigSettings() {
   async function handleRefresh() {
     setPendingAction("refresh");
     try {
-      await refreshConfig();
+      const nextResult = await refreshConfig();
+      await applyLiveRuntimeConfig(nextResult);
       setError(null);
       refreshDoctorReport();
       toast.success(t("runtimeConfig.refreshSuccess"));

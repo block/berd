@@ -90,6 +90,10 @@ vi.mock("@/shared/api/agents", () => ({
   readAgentSourceFile: mocks.readAgentSourceFile,
 }));
 
+vi.mock("@/features/runtime-config/defaults", () => ({
+  getDefaultGooseModelId: () => "goose-gpt-5-5",
+}));
+
 import {
   discardDraftAgentSession,
   hasAgentBuilderSessionUserContent,
@@ -102,7 +106,6 @@ import {
 import { resetAgentBuilderSourceLifecycleForTests } from "../agentBuilderSourceLifecycle";
 import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { DEFAULT_MODEL_ID } from "@/features/migration/lib/constants";
 
 const draftSource = {
   type: "agent",
@@ -357,7 +360,7 @@ describe("agentBuilderSession", () => {
           draft: true,
           builderSessionId: "sess-1",
           provider: "goose",
-          model: DEFAULT_MODEL_ID,
+          model: "goose-gpt-5-5",
         }),
       }),
     );

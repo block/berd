@@ -5,6 +5,7 @@ import { filterModelProvidersForRuntimeConfig } from "../runtimeProviderConstrai
 import { getModelProviders } from "../providerCatalog";
 import { getModelCacheRefreshProviderIds } from "../modelCacheRefresh";
 import { getProviderModelSelectionHint } from "../modelSelectionHints";
+import { defaultModelInventoryModeForLoadResult } from "../runtimeProviderConfig";
 import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
 
 const EMPTY_MODELS: ModelOption[] = [];
@@ -21,6 +22,7 @@ export function useProviderModels() {
     (state) => state.refreshAllModelProviders,
   );
   const runtimeConfig = useRuntimeConfigStore((state) => state.config);
+  const runtimeConfigResult = useRuntimeConfigStore((state) => state.result);
 
   const configuredModelProviderIds = useMemo(
     () =>
@@ -31,8 +33,12 @@ export function useProviderModels() {
     [runtimeConfig],
   );
   const modelCacheRefreshProviderIds = useMemo(
-    () => getModelCacheRefreshProviderIds(runtimeConfig),
-    [runtimeConfig],
+    () =>
+      getModelCacheRefreshProviderIds(runtimeConfig, {
+        defaultModelInventoryMode:
+          defaultModelInventoryModeForLoadResult(runtimeConfigResult),
+      }),
+    [runtimeConfig, runtimeConfigResult],
   );
 
   const getModelsForProvider = useCallback(

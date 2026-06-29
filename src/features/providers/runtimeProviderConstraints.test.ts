@@ -13,11 +13,11 @@ describe("filterModelProvidersForRuntimeConfig", () => {
       group: "default",
     },
     {
-      id: "anthropic",
-      displayName: "Anthropic",
+      id: "block_openai_compatible",
+      displayName: "Block AI Gateway",
       category: "model",
-      description: "Claude models",
-      setupMethod: "single_api_key",
+      description: "Block models",
+      setupMethod: "none",
       group: "default",
     },
     {
@@ -28,14 +28,6 @@ describe("filterModelProvidersForRuntimeConfig", () => {
       setupMethod: "single_api_key",
       group: "default",
     },
-    {
-      id: "ollama",
-      displayName: "Ollama",
-      category: "model",
-      description: "Local models",
-      setupMethod: "local",
-      group: "default",
-    },
   ] as const;
 
   it("returns all providers when runtime config is unavailable", () => {
@@ -44,7 +36,7 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     );
   });
 
-  it("uses the app default provider allowlist until runtime config overrides it", () => {
+  it("uses runtime goose providers as the authoritative model provider set", () => {
     expect(
       filterModelProvidersForRuntimeConfig(
         [...providers],
@@ -53,29 +45,22 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     ).toEqual([providers[0]]);
   });
 
-  it("returns all providers when no allowlist is configured", () => {
+  it("updates providers when runtime config changes", () => {
     expect(
       filterModelProvidersForRuntimeConfig([...providers], {
-        schemaVersion: 1,
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          defaultModelProviderId: "block_openai_compatible",
+          modelProviders: [
+            {
+              id: "block_openai_compatible",
+              displayName: "Block AI Gateway",
+              models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+            },
+          ],
+        },
       }),
-    ).toEqual(providers);
-  });
-
-  it("filters providers to the runtime config allowlist", () => {
-    expect(
-      filterModelProvidersForRuntimeConfig([...providers], {
-        schemaVersion: 1,
-        providerAllowlist: ["openai", "ollama"],
-      }),
-    ).toEqual([providers[2], providers[3]]);
-  });
-
-  it("ignores whitespace and empty allowlist items", () => {
-    expect(
-      filterModelProvidersForRuntimeConfig([...providers], {
-        schemaVersion: 1,
-        providerAllowlist: ["  anthropic ", "", "openai"],
-      }),
-    ).toEqual([providers[1], providers[2]]);
+    ).toEqual([providers[1]]);
   });
 });

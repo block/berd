@@ -14,16 +14,22 @@ export interface CachedProviderModels {
   providerId: string;
   models: ModelOption[];
   fetchedAt: number;
+  runtimeManaged?: boolean;
   error?: string;
 }
 
 interface ProviderModelCacheState {
   providers: Map<string, CachedProviderModels>;
   refreshingProviderIds: Set<string>;
+  runtimeManagedProviderIds: Set<string>;
 }
 
 interface ProviderModelCacheActions {
   loadPersisted: () => void;
+  seedRuntimeModels: (
+    modelsByProviderId: Map<string, ModelOption[]>,
+    options?: { fresh?: boolean; runtimeManagedProviderIds?: Set<string> },
+  ) => void;
   getModelsForProvider: (providerId: string) => ModelOption[];
   getError: (providerId: string) => string | null;
   refreshProviderModels: (
@@ -79,6 +85,27 @@ function persistModels(providers: Map<string, CachedProviderModels>): void {
   }
 }
 
+function runtimeManagedProviderIdsFrom(
+  providers: Map<string, CachedProviderModels>,
+): Set<string> {
+  return new Set(
+    [...providers.values()]
+      .filter((entry) => entry.runtimeManaged)
+      .map((entry) => entry.providerId),
+  );
+}
+
+function readPersistedProviderState(): Pick<
+  ProviderModelCacheState,
+  "providers" | "runtimeManagedProviderIds"
+> {
+  const providers = readPersistedModels();
+  return {
+    providers,
+    runtimeManagedProviderIds: runtimeManagedProviderIdsFrom(providers),
+  };
+}
+
 async function fetchProviderSupportedModels(
   providerId: string,
 ): Promise<string[]> {
@@ -95,6 +122,9 @@ function isStale(entry: CachedProviderModels | undefined): boolean {
   if (!entry) {
     return true;
   }
+  if (entry.runtimeManaged) {
+    return false;
+  }
   return Date.now() - entry.fetchedAt > MODEL_CACHE_TTL_MS;
 }
 
@@ -108,11 +138,54 @@ function bumpRefreshVersion(providerId: string): void {
 
 export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
   (set, get) => ({
-    providers: readPersistedModels(),
+    ...readPersistedProviderState(),
     refreshingProviderIds: new Set(),
 
     loadPersisted: () => {
-      set({ providers: readPersistedModels() });
+      set(readPersistedProviderState());
+    },
+
+    seedRuntimeModels: (modelsByProviderId, options = {}) => {
+      set((state) => {
+        const providers = new Map(state.providers);
+        const nextRuntimeManagedProviderIds = new Set(
+          state.runtimeManagedProviderIds,
+        );
+        const runtimeProviderIds = new Set(modelsByProviderId.keys());
+        const runtimeManagedProviderIds =
+          options.runtimeManagedProviderIds ?? runtimeProviderIds;
+
+        for (const providerId of runtimeProviderIds) {
+          bumpRefreshVersion(providerId);
+          const models = modelsByProviderId.get(providerId) ?? [];
+          const runtimeManaged = runtimeManagedProviderIds.has(providerId);
+          providers.set(providerId, {
+            providerId,
+            models,
+            fetchedAt: runtimeManaged || options.fresh ? Date.now() : 0,
+            ...(runtimeManaged ? { runtimeManaged } : {}),
+          });
+          if (runtimeManaged) {
+            nextRuntimeManagedProviderIds.add(providerId);
+          } else {
+            nextRuntimeManagedProviderIds.delete(providerId);
+          }
+        }
+
+        for (const providerId of [...nextRuntimeManagedProviderIds]) {
+          if (!runtimeProviderIds.has(providerId)) {
+            bumpRefreshVersion(providerId);
+            nextRuntimeManagedProviderIds.delete(providerId);
+            providers.delete(providerId);
+          }
+        }
+
+        persistModels(providers);
+        return {
+          providers,
+          runtimeManagedProviderIds: nextRuntimeManagedProviderIds,
+        };
+      });
     },
 
     getModelsForProvider: (providerId) =>
@@ -123,6 +196,12 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
     refreshProviderModels: async (providerId, options = {}) => {
       const current = get();
       const existing = current.providers.get(providerId);
+      if (
+        existing?.runtimeManaged ||
+        current.runtimeManagedProviderIds.has(providerId)
+      ) {
+        return;
+      }
       if (!options.force && !isStale(existing)) {
         return;
       }
@@ -218,6 +297,16 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
     invalidateProvider: (providerId) => {
       bumpRefreshVersion(providerId);
       set((state) => {
+        if (state.runtimeManagedProviderIds.has(providerId)) {
+          const existing = state.providers.get(providerId);
+          if (!existing || existing.runtimeManaged) {
+            return {};
+          }
+          const providers = new Map(state.providers);
+          providers.set(providerId, { ...existing, runtimeManaged: true });
+          persistModels(providers);
+          return { providers };
+        }
         const providers = new Map(state.providers);
         providers.delete(providerId);
         persistModels(providers);

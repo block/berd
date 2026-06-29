@@ -7,6 +7,10 @@ import {
 } from "@/features/providers/runtimeProviderConstraints";
 import { getModelCacheRefreshProviderIds } from "@/features/providers/modelCacheRefresh";
 import { getModelProviders } from "@/features/providers/providerCatalog";
+import {
+  applyRuntimeProviderConfig,
+  defaultModelInventoryModeForLoadResult,
+} from "@/features/providers/runtimeProviderConfig";
 import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
@@ -104,6 +108,11 @@ export async function runChatRuntimeStartup(): Promise<void> {
     if (result.status !== "ready") {
       console.warn("Runtime config unavailable; using app defaults:", result);
     }
+
+    const runtimeConfig = useRuntimeConfigStore.getState().config;
+    await applyRuntimeProviderConfig(runtimeConfig, {
+      defaultModelInventoryMode: defaultModelInventoryModeForLoadResult(result),
+    });
   };
 
   const loadPersonas = async () => {
@@ -124,8 +133,12 @@ export async function runChatRuntimeStartup(): Promise<void> {
   };
 
   const refreshProviderModels = async () => {
+    const runtimeConfigResult = useRuntimeConfigStore.getState().result;
     await modelCacheStore.refreshAllModelProviders(
-      getModelCacheRefreshProviderIds(useRuntimeConfigStore.getState().config),
+      getModelCacheRefreshProviderIds(useRuntimeConfigStore.getState().config, {
+        defaultModelInventoryMode:
+          defaultModelInventoryModeForLoadResult(runtimeConfigResult),
+      }),
     );
   };
 

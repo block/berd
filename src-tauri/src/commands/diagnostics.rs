@@ -9,7 +9,7 @@ pub async fn probe_kgoose_connectivity(
     state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<KgooseProbeResult, String> {
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     kgoose.probe_connectivity().await
 }

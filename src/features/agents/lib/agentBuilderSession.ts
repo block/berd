@@ -10,7 +10,7 @@ import {
   getStoredModelPreference,
   getStoredModelPreferenceForProvider,
 } from "@/features/chat/lib/modelPreferences";
-import { DEFAULT_MODEL_ID } from "@/features/migration/lib/constants";
+import { getDefaultGooseModelId } from "@/features/runtime-config/defaults";
 import {
   createDraftAgentSource,
   deleteIfFreshPlaceholderDraft,
@@ -278,7 +278,7 @@ export async function preSeedDraftAgent(
   const model =
     getStoredModelPreferenceForProvider(provider)?.modelId ??
     getStoredModelPreference("goose")?.modelId ??
-    DEFAULT_MODEL_ID;
+    getDefaultGooseModelId();
   return createDraftAgentSource(sessionId, { provider, model });
 }
 

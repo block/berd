@@ -3,21 +3,48 @@ import {
   __resetAllPersonaHandoffs,
   buildPersonaHandoffPreamble,
   claimPersonaHandoff,
-  DEFAULT_GOOSE_MODEL_PROVIDER_ID,
   isExternalAgentProvider,
   isGooseManagedProvider,
   resetPersonaHandoff,
   toWireProviderId,
 } from "../acpPersonaHandoff";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import {
+  INITIAL_RUNTIME_CONFIG_RESULT,
+  useRuntimeConfigStore,
+} from "@/shared/runtime-config/runtimeConfigStore";
 
 beforeEach(() => {
   __resetAllPersonaHandoffs();
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: INITIAL_RUNTIME_CONFIG_RESULT,
+    config: DEFAULT_RUNTIME_CONFIG,
+  });
 });
 
 describe("toWireProviderId", () => {
-  it("translates the goose agent sentinel to the default model provider", () => {
-    expect(toWireProviderId("goose")).toBe(DEFAULT_GOOSE_MODEL_PROVIDER_ID);
-    expect(DEFAULT_GOOSE_MODEL_PROVIDER_ID).toBe("databricks_v2");
+  it("translates the goose agent sentinel to the runtime default model provider", () => {
+    expect(toWireProviderId("goose")).toBe("databricks_v2");
+
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          defaultModelProviderId: "runtime_provider",
+          defaultModelId: "runtime-model",
+          modelProviders: [
+            {
+              id: "runtime_provider",
+              displayName: "Runtime Provider",
+              models: [{ id: "runtime-model", name: "Runtime Model" }],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(toWireProviderId("goose")).toBe("runtime_provider");
   });
 
   it("passes real provider ids through unchanged", () => {

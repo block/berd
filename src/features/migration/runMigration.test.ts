@@ -51,6 +51,12 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
   },
 }));
 
+vi.mock("@/features/runtime-config/defaults", () => ({
+  getDefaultGooseModelProviderId: () => "databricks_v2",
+  getDefaultGooseModelId: () => "goose-gpt-5-5",
+  getDefaultGooseModelName: () => "GPT-5.5",
+}));
+
 const mockedInvoke = vi.mocked(invoke);
 
 describe("runMigration", () => {
@@ -218,21 +224,19 @@ describe("runMigration", () => {
 
   it("saves the configured Databricks default model and seeds the frontend preference", async () => {
     // Locks in the shape sent to `_goose/unstable/defaults/save` and the per-agent
-    // preference. The constants module ships a concrete Databricks model id;
-    // if the shipped default changes, this test should change with it.
+    // preference. If the shipped runtime default changes, this test should
+    // change with it.
     const { runMigration } = await import("./runMigration");
-    const { DEFAULT_PROVIDER_ID, DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME } =
-      await import("./lib/constants");
     await runMigration();
 
     expect(mockGooseDefaultsSave).toHaveBeenCalledWith({
-      providerId: DEFAULT_PROVIDER_ID,
-      modelId: DEFAULT_MODEL_ID,
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
     });
     expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
-      providerId: DEFAULT_PROVIDER_ID,
-      modelId: DEFAULT_MODEL_ID,
-      modelName: DEFAULT_MODEL_NAME,
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+      modelName: "GPT-5.5",
     });
     expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
   });
@@ -257,15 +261,13 @@ describe("runMigration", () => {
     mockGooseDefaultsSave.mockRejectedValueOnce(invalidParams);
 
     const { runMigration } = await import("./runMigration");
-    const { DEFAULT_PROVIDER_ID, DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME } =
-      await import("./lib/constants");
     const result = await runMigration();
 
     expect(mockGooseDefaultsSave).toHaveBeenCalledTimes(1);
     expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
-      providerId: DEFAULT_PROVIDER_ID,
-      modelId: DEFAULT_MODEL_ID,
-      modelName: DEFAULT_MODEL_NAME,
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+      modelName: "GPT-5.5",
     });
     expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
     expect(result.disabledExtensions).toEqual([]);

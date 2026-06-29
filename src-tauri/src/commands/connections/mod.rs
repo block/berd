@@ -12,7 +12,7 @@ pub async fn list_connections(
     state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<Value, String> {
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     list_oauth_extensions(&kgoose).await
 }

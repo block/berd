@@ -103,6 +103,28 @@ impl<'a> KgooseContext<'a> {
     }
 }
 
+pub(crate) fn build_bootstrap_url(
+    endpoint: &str,
+    distro_config: Option<&KgooseDistroConfig>,
+) -> Result<reqwest::Url, String> {
+    build_url(endpoint, None, distro_config)
+}
+
+pub(crate) async fn get_json_url_with_timeout(
+    url: reqwest::Url,
+    request_timeout: Duration,
+) -> Result<Value, String> {
+    let request = add_playpen_baggage(client().get(url.clone()).header(ACCEPT, "application/json"));
+    let response = request
+        .timeout(request_timeout)
+        .send()
+        .await
+        .map_err(|error| KgooseJsonError::request(&url, error).user_message())?;
+    response_to_json_value(url, response)
+        .await
+        .map_err(|error| error.user_message())
+}
+
 /// Posts JSON to a fully resolved external URL without distro routing or playpen baggage.
 pub(crate) async fn post_json_external_url(url: &str, body: Value) -> Result<Value, String> {
     let url = reqwest::Url::parse(url)

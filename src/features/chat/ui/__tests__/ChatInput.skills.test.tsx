@@ -12,7 +12,10 @@ import { ChatInput } from "./chatInputTestUtils";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { ChatSkillDraft } from "../../types";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 
 if (!HTMLElement.prototype.scrollIntoView) {
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -96,7 +99,7 @@ const CODE_REVIEW_SKILL = {
   sourceLabel: "Personal",
 };
 
-function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
   useRuntimeConfigStore.setState({
     loaded: true,
     result: {

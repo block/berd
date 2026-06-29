@@ -69,7 +69,8 @@ pub async fn submit_feedback_issue(
         ));
     }
     let runtime_config = runtime_config_state
-        .ready_config()
+        .ready_config(distro_state.inner())
+        .await
         .map_err(|error| feedback_error("configurationUnavailable", &error))?;
     if !feedback_enabled(&runtime_config) {
         return Err(feedback_error(
@@ -485,10 +486,10 @@ mod tests {
 
     fn runtime_config_with_feedback(feedback: Option<RuntimeFeedbackConfig>) -> RuntimeConfig {
         RuntimeConfig {
-            schema_version: 1,
+            schema_version: 2,
             customer: None,
             workspace: None,
-            provider_allowlist: None,
+            goose: super::super::runtime_config::default_goose_config(),
             feature_toggles: None,
             doctor: None,
             feedback,

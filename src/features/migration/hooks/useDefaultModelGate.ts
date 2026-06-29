@@ -6,10 +6,10 @@ import {
 import { getClient } from "@/shared/api/acpConnection";
 import { readDefaultModelStatus } from "../api/defaultModel";
 import {
-  DEFAULT_MODEL_ID,
-  DEFAULT_MODEL_NAME,
-  DEFAULT_PROVIDER_ID,
-} from "../lib/constants";
+  getDefaultGooseModelId,
+  getDefaultGooseModelName,
+  getDefaultGooseModelProviderId,
+} from "@/features/runtime-config/defaults";
 
 /**
  * Post-migration repair for installs left in the legacy broken state where
@@ -30,26 +30,31 @@ export function useDefaultModelGate(migrationReady: boolean): void {
         const initial = await readDefaultModelStatus();
         if (cancelled) return;
 
+        const defaultModelId = getDefaultGooseModelId();
+        const defaultProviderId = getDefaultGooseModelProviderId();
+        const defaultModelName = defaultModelId
+          ? getDefaultGooseModelName(defaultModelId)
+          : undefined;
         if (
-          !DEFAULT_MODEL_ID ||
+          !defaultModelId ||
           !initial.modelMissing ||
-          initial.providerId !== DEFAULT_PROVIDER_ID
+          initial.providerId !== defaultProviderId
         ) {
           return;
         }
 
         const client = await getClient();
         await client.goose.GooseUnstableDefaultsSave({
-          providerId: DEFAULT_PROVIDER_ID,
-          modelId: DEFAULT_MODEL_ID,
+          providerId: defaultProviderId,
+          modelId: defaultModelId,
         });
         if (cancelled) return;
 
         if (!getStoredModelPreference("goose")) {
           setStoredModelPreference("goose", {
-            providerId: DEFAULT_PROVIDER_ID,
-            modelId: DEFAULT_MODEL_ID,
-            modelName: DEFAULT_MODEL_NAME,
+            providerId: defaultProviderId,
+            modelId: defaultModelId,
+            modelName: defaultModelName ?? defaultModelId,
           });
         }
       } catch (error) {

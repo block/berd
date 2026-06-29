@@ -57,8 +57,8 @@ describe("modelRecommendations", () => {
     ).toEqual(["goose-gpt-5-5", "goose-claude-opus-4-8", "goose-gpt-5-5-mini"]);
   });
 
-  it("does not feature or rank generic provider models", () => {
-    const options = providerModelOptionsFromIds("codex-acp", [
+  it("does not feature or rank generic custom provider models", () => {
+    const options = providerModelOptionsFromIds("block_openai_compatible", [
       "z-model",
       "a-model",
     ]);

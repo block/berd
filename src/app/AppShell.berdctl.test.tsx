@@ -12,7 +12,10 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -200,7 +203,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   };
 }
 
-function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
   useRuntimeConfigStore.setState({
     loaded: true,
     result: {

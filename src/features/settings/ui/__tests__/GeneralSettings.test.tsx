@@ -98,7 +98,7 @@ function renderGeneralSettings(queryClient = createQueryClient()) {
 }
 
 function readyRuntimeConfigResult(
-  config: RuntimeConfig = { schemaVersion: 1 },
+  config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG,
 ): RuntimeConfigLoadResult {
   return {
     status: "ready",
@@ -107,7 +107,7 @@ function readyRuntimeConfigResult(
   };
 }
 
-function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
   useRuntimeConfigStore.setState({
     loaded: true,
     result: readyRuntimeConfigResult(config),
@@ -493,8 +493,8 @@ describe("GeneralSettings appearance section", () => {
 
   it("shows the development fake endpoint runtime config editor", () => {
     setReadyRuntimeConfig({
-      schemaVersion: 1,
-      providerAllowlist: ["openai"],
+      ...DEFAULT_RUNTIME_CONFIG,
+      featureToggles: { doctor: true },
     });
 
     renderGeneralSettings();
@@ -504,7 +504,7 @@ describe("GeneralSettings appearance section", () => {
       screen.getByRole("textbox", { name: "Fake endpoint JSON" }),
     ).toHaveValue(
       `${JSON.stringify(
-        { schemaVersion: 1, providerAllowlist: ["openai"] },
+        { ...DEFAULT_RUNTIME_CONFIG, featureToggles: { doctor: true } },
         null,
         2,
       )}\n`,
@@ -522,8 +522,8 @@ describe("GeneralSettings appearance section", () => {
   it("saves fake endpoint runtime config through the runtime config store", async () => {
     const user = userEvent.setup();
     const nextConfig = {
-      schemaVersion: 1,
-      providerAllowlist: ["databricks"],
+      ...DEFAULT_RUNTIME_CONFIG,
+      featureToggles: { doctor: true },
     } satisfies RuntimeConfig;
     renderGeneralSettings();
 
@@ -568,8 +568,8 @@ describe("GeneralSettings appearance section", () => {
   it("clears the fake endpoint runtime config response", async () => {
     const user = userEvent.setup();
     setReadyRuntimeConfig({
-      schemaVersion: 1,
-      providerAllowlist: ["openai"],
+      ...DEFAULT_RUNTIME_CONFIG,
+      featureToggles: { doctor: true },
     });
     renderGeneralSettings();
 

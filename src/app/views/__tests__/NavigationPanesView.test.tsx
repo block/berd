@@ -27,7 +27,10 @@ import {
 } from "@/app/layout/panes/paneSizeRules";
 import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 import { MAX_FLAT_SIDEBAR_CHATS } from "@/features/sidebar/lib/sidebarFlatChats";
 import {
   resetHomeWidgetStoreForTests,
@@ -143,7 +146,7 @@ function renderSidebar(props: Partial<NavigationPanesViewProps> = {}) {
   );
 }
 
-function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
   useRuntimeConfigStore.setState({
     loaded: true,
     result: {
@@ -1464,7 +1467,7 @@ describe("NavigationPanesView", () => {
 
   it("hides Doctor settings navigation when runtime config disables it", () => {
     setReadyRuntimeConfig({
-      schemaVersion: 1,
+      ...DEFAULT_RUNTIME_CONFIG,
       doctor: { enabled: false },
     });
 

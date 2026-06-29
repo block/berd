@@ -6,7 +6,10 @@ import {
   type ProfileCapabilityState,
 } from "./capabilities";
 import type { BuildFeature } from "./buildProfile";
-import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 
 const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   agentToolsTip: true,
@@ -15,9 +18,7 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   telemetry: true,
 };
 
-const readyRuntimeConfig = {
-  schemaVersion: 1,
-} satisfies RuntimeConfig;
+const readyRuntimeConfig = DEFAULT_RUNTIME_CONFIG satisfies RuntimeConfig;
 
 function resolve(
   input: Partial<Parameters<typeof resolveProfileCapabilities>[0]> = {},
@@ -102,7 +103,7 @@ describe("profile capabilities", () => {
       resolve({
         experiments: [{ id: BUILDERBOT_SURFACE_EXPERIMENT_ID, enabled: true }],
         runtimeConfig: {
-          schemaVersion: 1,
+          ...DEFAULT_RUNTIME_CONFIG,
           featureToggles: {
             agentToolsTip: false,
             automations: false,
@@ -122,7 +123,7 @@ describe("profile capabilities", () => {
     expect(
       resolve({
         runtimeConfig: {
-          schemaVersion: 1,
+          ...DEFAULT_RUNTIME_CONFIG,
           feedback: { enabled: false },
           doctor: { enabled: false },
         },

@@ -11,11 +11,11 @@ import { getDisplayName } from "@/features/extensions/types";
 import { getClient } from "@/shared/api/acpConnection";
 import { backupGooseConfig } from "./api/migration";
 import {
-  DEFAULT_MODEL_ID,
-  DEFAULT_MODEL_NAME,
-  DEFAULT_PROVIDER_ID,
-  KEEP_ENABLED,
-} from "./lib/constants";
+  getDefaultGooseModelId,
+  getDefaultGooseModelName,
+  getDefaultGooseModelProviderId,
+} from "@/features/runtime-config/defaults";
+import { KEEP_ENABLED } from "./lib/constants";
 import type { DisabledExtension, MigrationResult } from "./types";
 
 /**
@@ -54,26 +54,32 @@ export async function runMigration(): Promise<MigrationResult> {
     });
   }
 
+  const defaultProviderId = getDefaultGooseModelProviderId();
+  const defaultModelId = getDefaultGooseModelId();
+  const defaultModelName = defaultModelId
+    ? getDefaultGooseModelName(defaultModelId)
+    : undefined;
+
   // 4. Seed the local chat preference before touching backend defaults so the
-  //    frontend can prefer the bundled model even when provider auth or
+  //    frontend can prefer the runtime model even when provider auth or
   //    connectivity prevents saving the backend default.
-  if (DEFAULT_MODEL_ID && !getStoredModelPreference("goose")) {
+  if (defaultModelId && !getStoredModelPreference("goose")) {
     setStoredModelPreference("goose", {
-      providerId: DEFAULT_PROVIDER_ID,
-      modelId: DEFAULT_MODEL_ID,
-      modelName: DEFAULT_MODEL_NAME,
+      providerId: defaultProviderId,
+      modelId: defaultModelId,
+      modelName: defaultModelName ?? defaultModelId,
     });
   }
 
-  // 5. Pre-select Databricks (and the configured model when known) as the
-  //    goose default. Only include `modelId` when we have a real one;
+  // 5. Pre-select the runtime-configured Goose provider (and model when known)
+  //    as the goose default. Only include `modelId` when we have a real one;
   //    otherwise save the provider and let the user pick a model from
   //    the chat model picker on first run. Failures are logged and do not
   //    block the rest of migration.
   try {
     await client.goose.GooseUnstableDefaultsSave({
-      providerId: DEFAULT_PROVIDER_ID,
-      ...(DEFAULT_MODEL_ID ? { modelId: DEFAULT_MODEL_ID } : {}),
+      providerId: defaultProviderId,
+      ...(defaultModelId ? { modelId: defaultModelId } : {}),
     });
   } catch (error) {
     console.error("Failed to save migrated default model:", error);

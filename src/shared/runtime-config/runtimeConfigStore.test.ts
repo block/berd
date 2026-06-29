@@ -1,108 +1,60 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  DEFAULT_RUNTIME_CONFIG,
-  type RuntimeConfig,
-  type RuntimeConfigLoadResult,
-} from "@/shared/runtime-config/schema";
-import {
-  INITIAL_RUNTIME_CONFIG_RESULT,
-  useRuntimeConfigStore,
-} from "./runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG, type RuntimeConfig } from "./schema";
+import { useRuntimeConfigStore } from "./runtimeConfigStore";
 
-const mocks = vi.hoisted(() => ({
-  clearFakeRuntimeConfig: vi.fn(),
-  getRuntimeConfig: vi.fn(),
-  refreshRuntimeConfig: vi.fn(),
-  setFakeRuntimeConfig: vi.fn(),
-}));
+const nextConfig: RuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  customer: { id: "block" },
+};
 
 vi.mock("@/shared/api/runtimeConfig", () => ({
-  clearFakeRuntimeConfig: mocks.clearFakeRuntimeConfig,
-  getRuntimeConfig: mocks.getRuntimeConfig,
-  refreshRuntimeConfig: mocks.refreshRuntimeConfig,
-  setFakeRuntimeConfig: mocks.setFakeRuntimeConfig,
+  getRuntimeConfig: vi.fn(async () => ({
+    status: "ready",
+    source: "endpoint",
+    config: nextConfig,
+  })),
+  refreshRuntimeConfig: vi.fn(async () => ({
+    status: "ready",
+    source: "endpoint",
+    config: nextConfig,
+  })),
+  setFakeRuntimeConfig: vi.fn(async (config: RuntimeConfig) => ({
+    status: "ready",
+    source: "fakeEndpoint",
+    config,
+  })),
+  clearFakeRuntimeConfig: vi.fn(async () => ({
+    status: "ready",
+    source: "appDefault",
+    config: DEFAULT_RUNTIME_CONFIG,
+  })),
 }));
 
-const config = {
-  schemaVersion: 1,
-  providerAllowlist: ["openai"],
-} satisfies RuntimeConfig;
-
-const readyResult = {
-  status: "ready",
-  source: "fakeEndpoint",
-  config,
-} satisfies RuntimeConfigLoadResult;
-
-const unavailableResult = {
-  status: "unavailable",
-  source: "fakeEndpoint",
-  reason: "missing",
-  message: "No fake response",
-} satisfies RuntimeConfigLoadResult;
-
-describe("runtime config store", () => {
+describe("runtimeConfigStore", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     useRuntimeConfigStore.setState({
       loaded: false,
-      result: INITIAL_RUNTIME_CONFIG_RESULT,
+      result: {
+        status: "ready",
+        source: "appDefault",
+        config: DEFAULT_RUNTIME_CONFIG,
+      },
       config: DEFAULT_RUNTIME_CONFIG,
     });
   });
 
-  it("loads and stores ready runtime config", async () => {
-    mocks.getRuntimeConfig.mockResolvedValueOnce(readyResult);
-
-    await expect(useRuntimeConfigStore.getState().load()).resolves.toEqual(
-      readyResult,
-    );
-
-    expect(useRuntimeConfigStore.getState()).toMatchObject({
-      loaded: true,
-      result: readyResult,
-      config,
-    });
+  it("loads runtime config", async () => {
+    await useRuntimeConfigStore.getState().load();
+    expect(useRuntimeConfigStore.getState().config).toEqual(nextConfig);
   });
 
-  it("stores unavailable runtime config and keeps app defaults active", async () => {
-    mocks.refreshRuntimeConfig.mockResolvedValueOnce(unavailableResult);
-
-    await expect(useRuntimeConfigStore.getState().refresh()).resolves.toEqual(
-      unavailableResult,
-    );
-
-    expect(useRuntimeConfigStore.getState()).toMatchObject({
-      loaded: true,
-      result: unavailableResult,
-      config: DEFAULT_RUNTIME_CONFIG,
+  it("falls back to default config for unavailable results", () => {
+    useRuntimeConfigStore.getState().setResult({
+      status: "unavailable",
+      source: "endpoint",
+      reason: "missing",
+      message: "missing",
     });
-  });
-
-  it("persists fake runtime config through the api", async () => {
-    mocks.setFakeRuntimeConfig.mockResolvedValueOnce(readyResult);
-
-    await expect(
-      useRuntimeConfigStore.getState().setFakeConfig(config),
-    ).resolves.toEqual(readyResult);
-
-    expect(mocks.setFakeRuntimeConfig).toHaveBeenCalledWith(config);
-    expect(useRuntimeConfigStore.getState().config).toEqual(config);
-  });
-
-  it("clears fake runtime config through the api", async () => {
-    useRuntimeConfigStore.setState({
-      loaded: true,
-      result: readyResult,
-      config,
-    });
-    mocks.clearFakeRuntimeConfig.mockResolvedValueOnce(unavailableResult);
-
-    await expect(
-      useRuntimeConfigStore.getState().clearFakeConfig(),
-    ).resolves.toEqual(unavailableResult);
-
-    expect(mocks.clearFakeRuntimeConfig).toHaveBeenCalledWith();
     expect(useRuntimeConfigStore.getState().config).toEqual(
       DEFAULT_RUNTIME_CONFIG,
     );

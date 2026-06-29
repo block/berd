@@ -27,10 +27,10 @@ vi.mock("@/features/chat/lib/modelPreferences", () => ({
     mockSetStoredModelPreference(...args),
 }));
 
-vi.mock("../lib/constants", () => ({
-  DEFAULT_PROVIDER_ID: "databricks_v2",
-  DEFAULT_MODEL_ID: "goose-gpt-5-5",
-  DEFAULT_MODEL_NAME: "GPT-5.5",
+vi.mock("@/features/runtime-config/defaults", () => ({
+  getDefaultGooseModelProviderId: () => "databricks_v2",
+  getDefaultGooseModelId: () => "goose-gpt-5-5",
+  getDefaultGooseModelName: () => "GPT-5.5",
 }));
 
 describe("useDefaultModelGate", () => {

@@ -168,7 +168,9 @@ pub async fn start_automation_builder_stream(
 ) -> Result<(), String> {
     let session_id = trim_required_string(&session_id, "session id")?;
     let stream_id = trim_required_string(&stream_id, "stream id")?;
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state
+        .ready_config(distro_state.inner())
+        .await?;
     let kgoose = KgooseContext::new(distro_state.inner(), &runtime_config);
     let url = kgoose.build_sse_url(GET_MESSAGES_SSE_ENDPOINT, &session_id)?;
     let last_event_id = validate_last_event_id(last_event_id)?;
@@ -233,7 +235,7 @@ pub async fn update_automation_tile(
     request: Value,
 ) -> Result<Value, String> {
     let request = sanitize_update_automation_request(request)?;
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     let id = request
         .get("id")
@@ -251,7 +253,7 @@ pub async fn delete_automation_tile(
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     ensure_generic_automation_tile(&kgoose, &id, DELETE_UNMANAGED_AUTOMATION_ERROR).await?;
     kgoose
@@ -266,7 +268,7 @@ pub async fn refresh_automation_tile(
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     ensure_generic_automation_tile(&kgoose, &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
     kgoose
@@ -302,7 +304,7 @@ pub async fn get_automation_session_messages(
     session_id: String,
 ) -> Result<Value, String> {
     let session_id = trim_required_string(&session_id, "session id")?;
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(state.inner()).await?;
     let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     get_automation_messages_snapshot(&kgoose, &session_id).await
 }
@@ -330,7 +332,7 @@ async fn post_automation_json(
     endpoint: &str,
     body: Value,
 ) -> Result<Value, String> {
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state.ready_config(distro_state).await?;
     let kgoose = KgooseContext::new(distro_state, &runtime_config);
     kgoose.post_json(endpoint, body).await
 }

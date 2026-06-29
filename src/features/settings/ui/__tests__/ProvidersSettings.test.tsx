@@ -8,10 +8,11 @@ import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore"
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import {
-  INITIAL_RUNTIME_CONFIG_RESULT,
-  useRuntimeConfigStore,
-} from "@/shared/runtime-config/runtimeConfigStore";
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 import { ProvidersSettings } from "../ProvidersSettings";
 
 const mocks = vi.hoisted(() => ({
@@ -68,7 +69,7 @@ const providerCatalog: ProviderCatalogEntry[] = [
     group: "default",
   },
   {
-    id: "databricks",
+    id: "databricks_v2",
     displayName: "Databricks",
     category: "model",
     description: "Databricks Foundation Models",
@@ -121,6 +122,29 @@ const providerCatalog: ProviderCatalogEntry[] = [
   },
 ];
 
+// A runtime config that allows every model provider in the test catalog, so
+// the default test state shows all model providers. Individual tests override
+// the store to exercise allowlist filtering and unavailable fallback.
+const allModelProvidersConfig: RuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  goose: {
+    ...DEFAULT_RUNTIME_CONFIG.goose,
+    modelProviders: [
+      ...DEFAULT_RUNTIME_CONFIG.goose.modelProviders,
+      {
+        id: "openai",
+        displayName: "OpenAI",
+        models: [{ id: "gpt-5", name: "GPT-5" }],
+      },
+      {
+        id: "anthropic",
+        displayName: "Anthropic",
+        models: [{ id: "claude-opus", name: "Claude" }],
+      },
+    ],
+  },
+};
+
 describe("ProvidersSettings", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -131,9 +155,9 @@ describe("ProvidersSettings", () => {
       result: {
         status: "ready",
         source: "fakeEndpoint",
-        config: { schemaVersion: 1 },
+        config: allModelProvidersConfig,
       },
-      config: { schemaVersion: 1 },
+      config: allModelProvidersConfig,
     });
     useAgentSetupStore.setState({ operations: new Map() });
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
@@ -205,7 +229,7 @@ describe("ProvidersSettings", () => {
 
   it("matches main by ordering connected model providers first after status loads", () => {
     mocks.useCredentials.mockReturnValue({
-      configuredIds: new Set<string>(["openai", "databricks"]),
+      configuredIds: new Set<string>(["openai", "databricks_v2"]),
       loading: false,
       saving: false,
       savingProviderIds: new Set<string>(),
@@ -274,9 +298,9 @@ describe("ProvidersSettings", () => {
       result: {
         status: "ready",
         source: "fakeEndpoint",
-        config: { schemaVersion: 1, providerAllowlist: ["databricks"] },
+        config: DEFAULT_RUNTIME_CONFIG,
       },
-      config: { schemaVersion: 1, providerAllowlist: ["databricks"] },
+      config: DEFAULT_RUNTIME_CONFIG,
     });
     renderProviders(<ProvidersSettings />);
 
@@ -286,17 +310,22 @@ describe("ProvidersSettings", () => {
     expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
   });
 
-  it("shows all model providers when runtime config is unavailable", () => {
+  it("falls back to the default allowlist when runtime config is unavailable", () => {
     useRuntimeConfigStore.setState({
       loaded: true,
-      result: INITIAL_RUNTIME_CONFIG_RESULT,
-      config: { schemaVersion: 1 },
+      result: {
+        status: "unavailable",
+        source: "endpoint",
+        reason: "endpointUnavailable",
+        message: "runtime config unavailable",
+      },
+      config: DEFAULT_RUNTIME_CONFIG,
     });
 
     renderProviders(<ProvidersSettings />);
 
-    expect(screen.getByText("OpenAI")).toBeInTheDocument();
     expect(screen.getByText("Databricks")).toBeInTheDocument();
-    expect(screen.getByText("Anthropic")).toBeInTheDocument();
+    expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
   });
 });

@@ -55,6 +55,11 @@ impl DistroBundleState {
         Self { bundle }
     }
 
+    #[cfg(test)]
+    pub(crate) fn empty_for_tests() -> Self {
+        Self { bundle: None }
+    }
+
     pub fn info(&self) -> DistroBundleInfo {
         let Some(bundle) = &self.bundle else {
             return DistroBundleInfo {

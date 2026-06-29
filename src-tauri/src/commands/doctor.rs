@@ -1145,7 +1145,9 @@ pub async fn run_doctor(
     distro_state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<DoctorReport, String> {
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state
+        .ready_config(distro_state.inner())
+        .await?;
     Ok(run_doctor_or_timeout(
         run_doctor_impl(
             &LOCAL_DOCTOR_REGISTRY,
@@ -1172,7 +1174,9 @@ pub async fn run_doctor_fresh(
     distro_state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<DoctorReport, String> {
-    let runtime_config = runtime_config_state.ready_config()?;
+    let runtime_config = runtime_config_state
+        .ready_config(distro_state.inner())
+        .await?;
     run_doctor_fresh_or_timeout(
         run_doctor_impl(
             &LOCAL_DOCTOR_REGISTRY,
@@ -1266,10 +1270,10 @@ mod tests {
 
     fn runtime_config_with_doctor(doctor: Option<RuntimeDoctorConfig>) -> RuntimeConfig {
         RuntimeConfig {
-            schema_version: 1,
+            schema_version: 2,
             customer: None,
             workspace: None,
-            provider_allowlist: None,
+            goose: super::super::runtime_config::default_goose_config(),
             feature_toggles: None,
             doctor,
             feedback: None,

@@ -31,7 +31,10 @@ import {
 } from "@/features/experiments/experimentPreferences";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -131,7 +134,7 @@ async function waitForCreatedAgentBuilderTarget() {
   });
 }
 
-function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
   useRuntimeConfigStore.setState({
     loaded: true,
     result: {
@@ -2079,7 +2082,7 @@ describe("AppShell global navigation", () => {
   it("redirects a disabled deep-linked Doctor settings section to General", async () => {
     window.history.replaceState(null, "", "/settings?section=doctor");
     setReadyRuntimeConfig({
-      schemaVersion: 1,
+      ...DEFAULT_RUNTIME_CONFIG,
       doctor: { enabled: false },
     });
 

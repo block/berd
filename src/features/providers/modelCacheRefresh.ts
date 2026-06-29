@@ -1,17 +1,21 @@
-import type { RuntimeConfig } from "@/shared/runtime-config/schema";
-import { filterModelProvidersForRuntimeConfig } from "./runtimeProviderConstraints";
-import { getAgentProviders, getModelProviders } from "./providerCatalog";
+import type {
+  RuntimeConfig,
+  RuntimeModelInventoryMode,
+} from "@/shared/runtime-config/schema";
+import { runtimeRefreshableModelProviderIds } from "./runtimeProviderConfig";
+import { getAgentProviders } from "./providerCatalog";
 
 export function getModelCacheRefreshProviderIds(
   runtimeConfig: RuntimeConfig | null | undefined,
+  options: { defaultModelInventoryMode?: RuntimeModelInventoryMode } = {},
 ): string[] {
   const ids = new Set<string>();
 
-  for (const provider of filterModelProvidersForRuntimeConfig(
-    getModelProviders(),
+  for (const providerId of runtimeRefreshableModelProviderIds(
     runtimeConfig,
+    options.defaultModelInventoryMode,
   )) {
-    ids.add(provider.id);
+    ids.add(providerId);
   }
 
   for (const provider of getAgentProviders()) {

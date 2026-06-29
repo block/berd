@@ -15,7 +15,7 @@ const KNOWN_CASINGS: Record<string, string> = {
   openai: "OpenAI",
 };
 
-const GOOSE_MODEL_PROVIDER_IDS = new Set(["databricks_v2"]);
+const FALLBACK_GOOSE_MODEL_PROVIDER_IDS = new Set(["databricks_v2"]);
 
 function formatFamilyToken(token: string): string {
   const lower = token.toLowerCase();
@@ -140,7 +140,7 @@ function featuredGooseModelId(models: ModelOption[]): string | null {
 }
 
 export function isGooseModelProviderId(providerId: string): boolean {
-  return GOOSE_MODEL_PROVIDER_IDS.has(providerId);
+  return FALLBACK_GOOSE_MODEL_PROVIDER_IDS.has(providerId);
 }
 
 function rawModelIdToOption(providerId: string, id: string): ModelOption {

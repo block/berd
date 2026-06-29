@@ -1,6 +1,7 @@
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::Write;
@@ -25,8 +26,6 @@ use tokio::sync::OnceCell;
 
 const GOOSE_SERVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
-const DATABRICKS_HOST_ENV: &str = "DATABRICKS_HOST";
-const DEFAULT_DATABRICKS_HOST: &str = "https://block-lakehouse-production.cloud.databricks.com";
 const LOCALHOST: &str = "127.0.0.1";
 
 // ---------------------------------------------------------------------------
@@ -163,7 +162,10 @@ impl GooseServeProcess {
         if let Some(config_path) = distro_config_path.as_deref() {
             apply_additional_config_files_env(&mut command, &shell_env, config_path);
         }
-        set_databricks_host_env(&mut command);
+        match runtime_config_for_spawn(&app_handle).await {
+            Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
+            Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
+        }
 
         command
             .arg("serve")
@@ -798,9 +800,28 @@ fn apply_additional_config_files_env(
     );
 }
 
-fn set_databricks_host_env(command: &mut Command) {
-    log::info!("{DATABRICKS_HOST_ENV} set to bundled default");
-    command.env(DATABRICKS_HOST_ENV, DEFAULT_DATABRICKS_HOST);
+async fn runtime_config_for_spawn(app_handle: &tauri::AppHandle) -> Result<RuntimeConfig, String> {
+    let runtime_config_state = app_handle
+        .try_state::<RuntimeConfigState>()
+        .ok_or_else(|| "RuntimeConfigState is not registered".to_string())?;
+    let distro_state = app_handle
+        .try_state::<DistroBundleState>()
+        .ok_or_else(|| "DistroBundleState is not registered".to_string())?;
+    runtime_config_state
+        .ready_config(distro_state.inner())
+        .await
+}
+
+fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &RuntimeConfig) {
+    for provider in &runtime_config.goose.model_providers {
+        let Some(endpoint_env) = &provider.endpoint_env else {
+            continue;
+        };
+        for (key, value) in endpoint_env {
+            log::info!("setting goose runtime provider env {key}");
+            command.env(key, value);
+        }
+    }
 }
 
 fn set_path_list_env(

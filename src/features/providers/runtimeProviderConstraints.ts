@@ -5,8 +5,8 @@ export function parseProviderAllowlist(
   runtimeConfig: RuntimeConfig | null | undefined,
 ): Set<string> | null {
   const providerIds =
-    runtimeConfig?.providerAllowlist
-      ?.map((providerId) => providerId.trim())
+    runtimeConfig?.goose.modelProviders
+      .map((provider) => provider.id.trim())
       .filter(Boolean) ?? [];
 
   return providerIds.length > 0 ? new Set(providerIds) : null;

@@ -1,13 +1,27 @@
+use crate::services::distro_bundle::DistroBundleState;
+use crate::services::kgoose;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::State;
 
 const RUNTIME_CONFIG_DIR_NAME: &str = "runtime-config";
 const FAKE_RUNTIME_CONFIG_FILE_NAME: &str = "fake-endpoint.json";
+const ADMIN_RUNTIME_CONFIG_CACHE_FILE_NAME: &str = "admin-cache.json";
+pub(crate) const RUNTIME_CONFIG_ENDPOINT: &str = "desktop/v1/runtime-config";
+// TODO(runtime-admin-config): remove this flag to enable the kgoose-backed runtime config feature when the endpoint is ready.
+const ENABLE_ADMIN_RUNTIME_CONFIG: bool = false;
 const RUNTIME_CONFIG_SCHEMA_VERSION: u16 = 1;
-const DEFAULT_RUNTIME_PROVIDER_ALLOWLIST: &[&str] = &["databricks_v2"];
+const ADMIN_CACHE_SCHEMA_VERSION: u16 = 1;
+const ADMIN_RUNTIME_CONFIG_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const ADMIN_OWNED_CUSTOM_PROVIDER_ID: &str = "block_openai_compatible";
+const DEFAULT_RUNTIME_PROVIDER_ID: &str = "databricks_v2";
+const DEFAULT_RUNTIME_MODEL_ID: &str = "goose-gpt-5-5";
+const DEFAULT_DATABRICKS_HOST: &str = "https://block-lakehouse-production.cloud.databricks.com";
+const ALLOWED_ENDPOINT_ENV_KEYS: &[&str] = &["DATABRICKS_HOST"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -17,8 +31,7 @@ pub struct RuntimeConfig {
     pub customer: Option<RuntimeIdentity>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workspace: Option<RuntimeIdentity>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub provider_allowlist: Option<Vec<String>>,
+    pub goose: RuntimeGooseConfig,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub feature_toggles: Option<HashMap<String, bool>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -35,6 +48,70 @@ pub struct RuntimeIdentity {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeGooseConfig {
+    pub default_model_provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub default_model_id: Option<String>,
+    pub model_providers: Vec<RuntimeGooseModelProvider>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeGooseModelProvider {
+    pub id: String,
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub setup_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub aliases: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub native_connect_query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub custom_provider: Option<RuntimeCustomProvider>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub endpoint_env: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_inventory_mode: Option<String>,
+    pub models: Vec<RuntimeGooseModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeCustomProvider {
+    pub provider_id: String,
+    pub engine: String,
+    pub display_name: String,
+    pub api_url: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub base_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub models: Option<Vec<String>>,
+    pub requires_auth: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub supports_streaming: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub preserves_thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub headers: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeGooseModel {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub recommended: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -66,10 +143,20 @@ pub struct RuntimeKgooseConfig {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeConfigAdminCache {
+    cache_schema_version: u16,
+    fetched_at: String,
+    source_url: String,
+    config: RuntimeConfig,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeConfigSource {
     AppDefault,
+    CachedEndpoint,
     Endpoint,
     FakeEndpoint,
 }
@@ -100,6 +187,7 @@ pub enum RuntimeConfigLoadResult {
 
 pub struct RuntimeConfigState {
     fake_config_path: PathBuf,
+    admin_cache_path: PathBuf,
     cached: Mutex<Option<RuntimeConfigLoadResult>>,
 }
 
@@ -107,26 +195,37 @@ impl RuntimeConfigState {
     pub fn new(app_data_dir: PathBuf) -> Self {
         Self {
             fake_config_path: fake_runtime_config_path(&app_data_dir),
+            admin_cache_path: admin_cache_path(&app_data_dir),
             cached: Mutex::new(None),
         }
     }
 
-    pub fn get(&self) -> Result<RuntimeConfigLoadResult, String> {
-        let mut cached = self
+    pub async fn get(
+        &self,
+        distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfigLoadResult, String> {
+        if let Some(result) = self
             .cached
             .lock()
-            .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
-        if let Some(result) = cached.clone() {
+            .map_err(|_| "Runtime config cache lock poisoned".to_string())?
+            .clone()
+        {
             return Ok(result);
         }
-
-        let result = load_runtime_config_from_source(&self.fake_config_path);
-        *cached = Some(result.clone());
-        Ok(result)
+        let result = load_runtime_config_from_source(
+            &self.fake_config_path,
+            &self.admin_cache_path,
+            distro_state,
+        )
+        .await;
+        self.replace_cache(result)
     }
 
-    pub fn ready_config(&self) -> Result<RuntimeConfig, String> {
-        match self.get()? {
+    pub async fn ready_config(
+        &self,
+        distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfig, String> {
+        match self.get(distro_state).await? {
             RuntimeConfigLoadResult::Ready { config, .. } => Ok(*config),
             RuntimeConfigLoadResult::Unavailable {
                 reason, message, ..
@@ -136,8 +235,16 @@ impl RuntimeConfigState {
         }
     }
 
-    pub fn refresh(&self) -> Result<RuntimeConfigLoadResult, String> {
-        let result = load_runtime_config_from_source(&self.fake_config_path);
+    pub async fn refresh(
+        &self,
+        distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfigLoadResult, String> {
+        let result = load_runtime_config_from_source(
+            &self.fake_config_path,
+            &self.admin_cache_path,
+            distro_state,
+        )
+        .await;
         self.replace_cache(result)
     }
 
@@ -163,7 +270,10 @@ impl RuntimeConfigState {
     }
 
     #[cfg(debug_assertions)]
-    pub fn clear_fake_config(&self) -> Result<RuntimeConfigLoadResult, String> {
+    pub async fn clear_fake_config(
+        &self,
+        distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfigLoadResult, String> {
         match std::fs::remove_file(&self.fake_config_path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -171,15 +281,23 @@ impl RuntimeConfigState {
                 return Err(format!(
                     "Failed to remove fake runtime config '{}': {error}",
                     self.fake_config_path.display()
-                ));
+                ))
             }
         }
-
-        self.replace_cache(load_runtime_config_from_source(&self.fake_config_path))
+        let result = load_runtime_config_from_source(
+            &self.fake_config_path,
+            &self.admin_cache_path,
+            distro_state,
+        )
+        .await;
+        self.replace_cache(result)
     }
 
     #[cfg(not(debug_assertions))]
-    pub fn clear_fake_config(&self) -> Result<RuntimeConfigLoadResult, String> {
+    pub async fn clear_fake_config(
+        &self,
+        _distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfigLoadResult, String> {
         Ok(unsupported_fake_runtime_config())
     }
 
@@ -201,62 +319,161 @@ fn fake_runtime_config_path(app_data_dir: &Path) -> PathBuf {
         .join(RUNTIME_CONFIG_DIR_NAME)
         .join(FAKE_RUNTIME_CONFIG_FILE_NAME)
 }
-
-#[cfg(debug_assertions)]
-fn load_runtime_config_from_source(fake_config_path: &Path) -> RuntimeConfigLoadResult {
-    read_fake_runtime_config_from_path(fake_config_path)
+fn admin_cache_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir
+        .join(RUNTIME_CONFIG_DIR_NAME)
+        .join(ADMIN_RUNTIME_CONFIG_CACHE_FILE_NAME)
 }
 
-#[cfg(not(debug_assertions))]
-fn load_runtime_config_from_source(_fake_config_path: &Path) -> RuntimeConfigLoadResult {
+async fn load_runtime_config_from_source(
+    fake_config_path: &Path,
+    cache_path: &Path,
+    distro_state: &DistroBundleState,
+) -> RuntimeConfigLoadResult {
+    #[cfg(debug_assertions)]
+    if fake_config_path.exists() {
+        return read_fake_runtime_config_from_path(fake_config_path);
+    }
+
+    if ENABLE_ADMIN_RUNTIME_CONFIG {
+        match fetch_admin_runtime_config(distro_state).await {
+            Ok((config, source_url)) => {
+                if let Err(error) = write_admin_cache_to_path(cache_path, &config, &source_url) {
+                    log::warn!("failed to write admin runtime config cache: {error}");
+                }
+                return RuntimeConfigLoadResult::Ready {
+                    source: RuntimeConfigSource::Endpoint,
+                    config: Box::new(config),
+                };
+            }
+            Err(error) => log::warn!("failed to fetch admin runtime config: {error}"),
+        }
+    } else {
+        log::info!("admin runtime config disabled; using bundled default runtime config");
+        return default_runtime_config_result(RuntimeConfigSource::AppDefault);
+    }
+
+    match read_admin_cache_from_path(cache_path) {
+        Ok(cache) => {
+            log::info!(
+                "using cached admin runtime config fetchedAt={} sourceUrl={}",
+                cache.fetched_at,
+                cache.source_url
+            );
+            return RuntimeConfigLoadResult::Ready {
+                source: RuntimeConfigSource::CachedEndpoint,
+                config: Box::new(cache.config),
+            };
+        }
+        Err(error) => log::warn!("failed to read cached admin runtime config: {error}"),
+    }
+
     default_runtime_config_result(RuntimeConfigSource::AppDefault)
+}
+
+async fn fetch_admin_runtime_config(
+    distro_state: &DistroBundleState,
+) -> Result<(RuntimeConfig, String), String> {
+    let url = kgoose::build_bootstrap_url(RUNTIME_CONFIG_ENDPOINT, distro_state.kgoose_config())?;
+    let source_url = url.as_str().to_string();
+    let value =
+        kgoose::get_json_url_with_timeout(url, ADMIN_RUNTIME_CONFIG_REQUEST_TIMEOUT).await?;
+    let config: RuntimeConfig = serde_json::from_value(value)
+        .map_err(|error| format!("failed to parse admin runtime config: {error}"))?;
+    validate_runtime_config(&config)?;
+    Ok((config, source_url))
 }
 
 #[cfg(debug_assertions)]
 fn read_fake_runtime_config_from_path(path: &Path) -> RuntimeConfigLoadResult {
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return default_fake_runtime_config_result();
-        }
         Err(error) => {
             return RuntimeConfigLoadResult::Unavailable {
                 source: RuntimeConfigSource::FakeEndpoint,
-                reason: RuntimeConfigUnavailableReason::ReadFailed,
+                reason: if error.kind() == std::io::ErrorKind::NotFound {
+                    RuntimeConfigUnavailableReason::Missing
+                } else {
+                    RuntimeConfigUnavailableReason::ReadFailed
+                },
                 message: format!(
                     "Failed to read fake runtime config '{}': {error}",
                     path.display()
                 ),
-            };
+            }
         }
     };
-
     let config = match serde_json::from_str::<RuntimeConfig>(&contents) {
         Ok(config) => config,
         Err(error) => {
             return invalid_fake_runtime_config(format!(
                 "Failed to parse fake runtime config '{}': {error}",
                 path.display()
-            ));
+            ))
         }
     };
-
     if let Err(error) = validate_runtime_config(&config) {
         return invalid_fake_runtime_config(format!(
             "Fake runtime config '{}' failed validation: {error}",
             path.display()
         ));
     }
-
     RuntimeConfigLoadResult::Ready {
         source: RuntimeConfigSource::FakeEndpoint,
         config: Box::new(config),
     }
 }
 
-#[cfg(debug_assertions)]
-fn default_fake_runtime_config_result() -> RuntimeConfigLoadResult {
-    default_runtime_config_result(RuntimeConfigSource::FakeEndpoint)
+fn read_admin_cache_from_path(path: &Path) -> Result<RuntimeConfigAdminCache, String> {
+    let contents = std::fs::read_to_string(path).map_err(|error| {
+        format!(
+            "Failed to read admin runtime config cache '{}': {error}",
+            path.display()
+        )
+    })?;
+    let cache: RuntimeConfigAdminCache = serde_json::from_str(&contents).map_err(|error| {
+        format!(
+            "Failed to parse admin runtime config cache '{}': {error}",
+            path.display()
+        )
+    })?;
+    if cache.cache_schema_version != ADMIN_CACHE_SCHEMA_VERSION {
+        return Err(format!(
+            "admin runtime config cache schema must be {ADMIN_CACHE_SCHEMA_VERSION}"
+        ));
+    }
+    validate_runtime_config(&cache.config)?;
+    Ok(cache)
+}
+
+fn write_admin_cache_to_path(
+    path: &Path,
+    config: &RuntimeConfig,
+    source_url: &str,
+) -> Result<(), String> {
+    validate_runtime_config(config)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed to create admin runtime config cache directory '{}': {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let cache = RuntimeConfigAdminCache {
+        cache_schema_version: ADMIN_CACHE_SCHEMA_VERSION,
+        fetched_at: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        source_url: source_url.to_string(),
+        config: config.clone(),
+    };
+    let serialized = serde_json::to_vec_pretty(&cache)
+        .map_err(|error| format!("Failed to serialize admin runtime config cache: {error}"))?;
+    std::fs::write(path, serialized).map_err(|error| {
+        format!(
+            "Failed to write admin runtime config cache '{}': {error}",
+            path.display()
+        )
+    })
 }
 
 fn default_runtime_config_result(source: RuntimeConfigSource) -> RuntimeConfigLoadResult {
@@ -268,28 +485,54 @@ fn default_runtime_config_result(source: RuntimeConfigSource) -> RuntimeConfigLo
             message: format!("Default runtime config failed validation: {error}"),
         };
     }
-
     RuntimeConfigLoadResult::Ready {
         source,
         config: Box::new(config),
     }
 }
 
-fn default_runtime_config() -> RuntimeConfig {
+pub(crate) fn default_runtime_config() -> RuntimeConfig {
     RuntimeConfig {
         schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
         customer: None,
         workspace: None,
-        provider_allowlist: Some(
-            DEFAULT_RUNTIME_PROVIDER_ALLOWLIST
-                .iter()
-                .map(|provider| (*provider).to_string())
-                .collect(),
-        ),
+        goose: default_goose_config(),
         feature_toggles: None,
         doctor: None,
         feedback: None,
         kgoose: None,
+    }
+}
+
+pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
+    RuntimeGooseConfig {
+        default_model_provider_id: DEFAULT_RUNTIME_PROVIDER_ID.to_string(),
+        default_model_id: Some(DEFAULT_RUNTIME_MODEL_ID.to_string()),
+        model_providers: vec![RuntimeGooseModelProvider {
+            id: DEFAULT_RUNTIME_PROVIDER_ID.to_string(),
+            display_name: "Databricks AI Gateway".to_string(),
+            description: Some("Databricks AI Gateway models".to_string()),
+            setup_method: Some("host_with_oauth_fallback".to_string()),
+            group: Some("default".to_string()),
+            aliases: Some(vec![
+                "databricks_v2".to_string(),
+                "databricks".to_string(),
+                "databricks-ai-gateway".to_string(),
+            ]),
+            native_connect_query: Some("databricks".to_string()),
+            custom_provider: None,
+            endpoint_env: Some(HashMap::from([(
+                "DATABRICKS_HOST".to_string(),
+                DEFAULT_DATABRICKS_HOST.to_string(),
+            )])),
+            model_inventory_mode: None,
+            models: vec![RuntimeGooseModel {
+                id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
+                name: "GPT-5.5".to_string(),
+                recommended: Some(true),
+                context_limit: None,
+            }],
+        }],
     }
 }
 
@@ -321,7 +564,6 @@ fn write_fake_runtime_config_to_path(path: &Path, config: &RuntimeConfig) -> Res
             )
         })?;
     }
-
     let serialized = serde_json::to_vec_pretty(config)
         .map_err(|error| format!("Failed to serialize fake runtime config: {error}"))?;
     std::fs::write(path, serialized).map_err(|error| {
@@ -338,16 +580,13 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<(), String> {
             "schemaVersion must be {RUNTIME_CONFIG_SCHEMA_VERSION}"
         ));
     }
-
     if let Some(customer) = &config.customer {
         validate_identity(customer, "customer")?;
     }
     if let Some(workspace) = &config.workspace {
         validate_identity(workspace, "workspace")?;
     }
-    if let Some(provider_allowlist) = &config.provider_allowlist {
-        validate_provider_allowlist(provider_allowlist)?;
-    }
+    validate_goose_config(&config.goose)?;
     if let Some(feature_toggles) = &config.feature_toggles {
         validate_feature_toggles(feature_toggles)?;
     }
@@ -357,7 +596,234 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<(), String> {
     if let Some(kgoose) = &config.kgoose {
         validate_kgoose(kgoose)?;
     }
+    Ok(())
+}
 
+fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
+    validate_runtime_id(
+        &goose.default_model_provider_id,
+        "goose.defaultModelProviderId",
+    )?;
+    validate_optional_runtime_id(goose.default_model_id.as_deref(), "goose.defaultModelId")?;
+    if goose.model_providers.is_empty() {
+        return Err("goose.modelProviders must not be empty".to_string());
+    }
+    let mut provider_ids = HashSet::new();
+    let mut default_provider_models: Option<&Vec<RuntimeGooseModel>> = None;
+    for provider in &goose.model_providers {
+        validate_runtime_id(&provider.id, "goose.modelProviders.id")?;
+        if !provider_ids.insert(provider.id.clone()) {
+            return Err(format!(
+                "goose.modelProviders must not contain duplicate provider '{}'",
+                provider.id
+            ));
+        }
+        validate_non_empty(&provider.display_name, "goose.modelProviders.displayName")?;
+        validate_optional_non_empty(
+            provider.description.as_deref(),
+            "goose.modelProviders.description",
+        )?;
+        validate_optional_non_empty(
+            provider.setup_method.as_deref(),
+            "goose.modelProviders.setupMethod",
+        )?;
+        if let Some(setup_method) = provider.setup_method.as_deref() {
+            validate_provider_setup_method(setup_method)?;
+        }
+        validate_optional_non_empty(provider.group.as_deref(), "goose.modelProviders.group")?;
+        if let Some(group) = provider.group.as_deref() {
+            validate_provider_group(group)?;
+        }
+        if let Some(aliases) = &provider.aliases {
+            validate_provider_allowlist(aliases)?;
+        }
+        if let Some(custom_provider) = &provider.custom_provider {
+            validate_custom_provider(custom_provider, &provider.id)?;
+        }
+        if let Some(endpoint_env) = &provider.endpoint_env {
+            validate_endpoint_env(endpoint_env)?;
+        }
+        validate_optional_non_empty(
+            provider.model_inventory_mode.as_deref(),
+            "goose.modelProviders.modelInventoryMode",
+        )?;
+        if let Some(mode) = provider.model_inventory_mode.as_deref() {
+            validate_model_inventory_mode(mode)?;
+        }
+
+        if provider.id == goose.default_model_provider_id {
+            default_provider_models = Some(&provider.models);
+        }
+
+        let mut model_ids = HashSet::new();
+        for model in &provider.models {
+            validate_runtime_id(&model.id, "goose.modelProviders.models.id")?;
+            if !model_ids.insert(model.id.clone()) {
+                return Err(format!(
+                    "goose.modelProvider '{}' contains duplicate model '{}'",
+                    provider.id, model.id
+                ));
+            }
+            validate_non_empty(&model.name, "goose.modelProviders.models.name")?;
+            if matches!(model.context_limit, Some(limit) if limit <= 0) {
+                return Err("goose.modelProviders.models.contextLimit must be positive".to_string());
+            }
+        }
+    }
+    if !provider_ids.contains(&goose.default_model_provider_id) {
+        return Err("goose.defaultModelProviderId must reference goose.modelProviders".to_string());
+    }
+    if let Some(default_model_id) = &goose.default_model_id {
+        let default_models = default_provider_models
+            .ok_or_else(|| "goose.defaultModelProviderId must have model entries".to_string())?;
+        if !default_models
+            .iter()
+            .any(|model| model.id == default_model_id.as_str())
+        {
+            return Err(
+                "goose.defaultModelId must reference models for default provider".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_custom_provider(
+    provider: &RuntimeCustomProvider,
+    parent_provider_id: &str,
+) -> Result<(), String> {
+    validate_runtime_id(&provider.provider_id, "customProvider.providerId")?;
+    if provider.provider_id != parent_provider_id {
+        return Err("customProvider.providerId must match containing modelProvider id".to_string());
+    }
+    if provider.provider_id == ADMIN_OWNED_CUSTOM_PROVIDER_ID
+        && provider.engine != "openai_compatible"
+    {
+        return Err(
+            "admin custom provider block_openai_compatible must use engine openai_compatible"
+                .to_string(),
+        );
+    }
+    validate_non_empty(&provider.engine, "customProvider.engine")?;
+    validate_non_empty(&provider.display_name, "customProvider.displayName")?;
+    validate_non_empty(&provider.api_url, "customProvider.apiUrl")?;
+    let parsed = reqwest::Url::parse(&provider.api_url)
+        .map_err(|error| format!("customProvider.apiUrl must be a valid URL: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("customProvider.apiUrl must use http or https".to_string());
+    }
+    validate_optional_non_empty(provider.base_path.as_deref(), "customProvider.basePath")?;
+    if provider.requires_auth {
+        return Err("customProvider.requiresAuth must be false for runtime config".to_string());
+    }
+    if let Some(models) = &provider.models {
+        validate_provider_allowlist(models)?;
+    }
+    if let Some(headers) = &provider.headers {
+        validate_non_secret_map(headers, "customProvider.headers")?;
+    }
+    Ok(())
+}
+
+fn validate_provider_setup_method(value: &str) -> Result<(), String> {
+    if matches!(
+        value,
+        "none"
+            | "single_api_key"
+            | "config_fields"
+            | "host_with_oauth_fallback"
+            | "oauth_browser"
+            | "oauth_device_code"
+            | "cloud_credentials"
+            | "local"
+            | "cli_auth"
+    ) {
+        Ok(())
+    } else {
+        Err(format!(
+            "goose.modelProviders.setupMethod has unsupported value '{value}'"
+        ))
+    }
+}
+
+fn validate_provider_group(value: &str) -> Result<(), String> {
+    if matches!(value, "default" | "additional") {
+        Ok(())
+    } else {
+        Err(format!(
+            "goose.modelProviders.group has unsupported value '{value}'"
+        ))
+    }
+}
+
+fn validate_model_inventory_mode(value: &str) -> Result<(), String> {
+    if matches!(value, "authoritative" | "refreshable") {
+        Ok(())
+    } else {
+        Err(format!(
+            "goose.modelProviders.modelInventoryMode has unsupported value '{value}'"
+        ))
+    }
+}
+
+fn validate_endpoint_env(values: &HashMap<String, String>) -> Result<(), String> {
+    for (key, value) in values {
+        validate_non_empty(key, "endpointEnv keys")?;
+        validate_non_empty(value, &format!("endpointEnv.{key}"))?;
+        if !is_allowed_endpoint_env_key(key) {
+            return Err(format!(
+                "endpointEnv key '{key}' is not allowed for runtime config"
+            ));
+        }
+        if contains_endpoint_env_secret_token(value) {
+            return Err(format!(
+                "endpointEnv must not contain secret-looking value for key '{key}'"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_allowed_endpoint_env_key(key: &str) -> bool {
+    ALLOWED_ENDPOINT_ENV_KEYS.contains(&key)
+}
+
+fn contains_endpoint_env_secret_token(value: &str) -> bool {
+    let upper = value.to_ascii_uppercase();
+    [
+        "KEY",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "AUTHORIZATION",
+        "BEARER",
+    ]
+    .iter()
+    .any(|token| upper.contains(token))
+}
+
+fn validate_non_secret_map(values: &HashMap<String, String>, field: &str) -> Result<(), String> {
+    for (key, value) in values {
+        validate_non_empty(key, &format!("{field} keys"))?;
+        validate_non_empty(value, &format!("{field}.{key}"))?;
+        let lowered = format!("{} {}", key, value).to_ascii_lowercase();
+        for token in [
+            "secret",
+            "token",
+            "apikey",
+            "api-key",
+            "api_key",
+            "password",
+            "authorization",
+            "bearer",
+        ] {
+            if lowered.contains(token) {
+                return Err(format!(
+                    "{field} must not contain secret-looking key or value '{key}'"
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -368,7 +834,6 @@ fn validate_identity(identity: &RuntimeIdentity, field: &str) -> Result<(), Stri
         &format!("{field}.displayName"),
     )
 }
-
 fn validate_provider_allowlist(provider_allowlist: &[String]) -> Result<(), String> {
     let mut seen = HashSet::new();
     for provider_id in provider_allowlist {
@@ -384,14 +849,12 @@ fn validate_provider_allowlist(provider_allowlist: &[String]) -> Result<(), Stri
     }
     Ok(())
 }
-
 fn validate_feature_toggles(feature_toggles: &HashMap<String, bool>) -> Result<(), String> {
     for key in feature_toggles.keys() {
         validate_non_empty(key, "featureToggles keys")?;
     }
     Ok(())
 }
-
 fn validate_kgoose(kgoose: &RuntimeKgooseConfig) -> Result<(), String> {
     if let Some(base_url) = kgoose.base_url.as_deref() {
         validate_non_empty(base_url, "kgoose.baseUrl")?;
@@ -403,14 +866,27 @@ fn validate_kgoose(kgoose: &RuntimeKgooseConfig) -> Result<(), String> {
     }
     validate_optional_non_empty(kgoose.path.as_deref(), "kgoose.path")
 }
-
 fn validate_optional_non_empty(value: Option<&str>, field: &str) -> Result<(), String> {
     if let Some(value) = value {
         validate_non_empty(value, field)?;
     }
     Ok(())
 }
-
+fn validate_optional_runtime_id(value: Option<&str>, field: &str) -> Result<(), String> {
+    if let Some(value) = value {
+        validate_runtime_id(value, field)?;
+    }
+    Ok(())
+}
+fn validate_runtime_id(value: &str, field: &str) -> Result<(), String> {
+    validate_non_empty(value, field)?;
+    if value != value.trim() {
+        return Err(format!(
+            "{field} must not have leading or trailing whitespace"
+        ));
+    }
+    Ok(())
+}
 fn validate_non_empty(value: &str, field: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err(format!("{field} must not be empty"));
@@ -419,17 +895,19 @@ fn validate_non_empty(value: &str, field: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_runtime_config(
+pub async fn get_runtime_config(
     state: State<'_, RuntimeConfigState>,
+    distro_state: State<'_, DistroBundleState>,
 ) -> Result<RuntimeConfigLoadResult, String> {
-    state.get()
+    state.get(distro_state.inner()).await
 }
 
 #[tauri::command]
-pub fn refresh_runtime_config(
+pub async fn refresh_runtime_config(
     state: State<'_, RuntimeConfigState>,
+    distro_state: State<'_, DistroBundleState>,
 ) -> Result<RuntimeConfigLoadResult, String> {
-    state.refresh()
+    state.refresh(distro_state.inner()).await
 }
 
 #[tauri::command]
@@ -441,231 +919,476 @@ pub fn set_fake_runtime_config(
 }
 
 #[tauri::command]
-pub fn clear_fake_runtime_config(
+pub async fn clear_fake_runtime_config(
     state: State<'_, RuntimeConfigState>,
+    distro_state: State<'_, DistroBundleState>,
 ) -> Result<RuntimeConfigLoadResult, String> {
-    state.clear_fake_config()
+    state.clear_fake_config(distro_state.inner()).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::distro_bundle::DistroBundleState;
     use tempfile::tempdir;
 
     fn valid_config() -> RuntimeConfig {
         RuntimeConfig {
             schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
             customer: Some(RuntimeIdentity {
-                id: "block".to_string(),
-                display_name: Some("Block".to_string()),
+                id: "customer-1".to_string(),
+                display_name: Some("Customer One".to_string()),
             }),
             workspace: Some(RuntimeIdentity {
-                id: "berd".to_string(),
-                display_name: None,
+                id: "workspace-1".to_string(),
+                display_name: Some("Workspace One".to_string()),
             }),
-            provider_allowlist: Some(vec!["databricks_v2".to_string(), "openai".to_string()]),
+            goose: default_goose_config(),
             feature_toggles: Some(HashMap::from([("doctor".to_string(), true)])),
             doctor: Some(RuntimeDoctorConfig {
                 enabled: Some(true),
-                kgoose_connectivity: Some(true),
-                internal_tooling_checks: Some(false),
+                kgoose_connectivity: Some(false),
+                internal_tooling_checks: Some(true),
             }),
             feedback: Some(RuntimeFeedbackConfig {
                 enabled: Some(true),
-                project_key: Some("BERD".to_string()),
+                project_key: Some("BOT".to_string()),
             }),
             kgoose: Some(RuntimeKgooseConfig {
-                base_url: Some("https://kgoose.example.test/".to_string()),
+                base_url: Some("https://kgoose.example.test".to_string()),
                 path: Some("cash-app/goose".to_string()),
             }),
         }
     }
 
-    #[test]
-    fn validates_complete_runtime_config() {
-        assert!(validate_runtime_config(&valid_config()).is_ok());
+    fn custom_provider() -> RuntimeCustomProvider {
+        RuntimeCustomProvider {
+            provider_id: ADMIN_OWNED_CUSTOM_PROVIDER_ID.to_string(),
+            engine: "openai_compatible".to_string(),
+            display_name: "Block AI Gateway".to_string(),
+            api_url: "https://example.internal/openai/v1".to_string(),
+            base_path: Some("/v1".to_string()),
+            models: Some(vec!["goose-gpt-5-5".to_string()]),
+            requires_auth: false,
+            supports_streaming: Some(true),
+            preserves_thinking: Some(false),
+            headers: Some(HashMap::from([(
+                "X-Goose-Runtime".to_string(),
+                "enabled".to_string(),
+            )])),
+        }
     }
 
-    #[test]
-    fn rejects_invalid_runtime_config() {
-        let mut config = valid_config();
-        config.schema_version = 2;
-        assert_eq!(
-            validate_runtime_config(&config).unwrap_err(),
-            "schemaVersion must be 1"
-        );
-
-        let mut config = valid_config();
-        config.provider_allowlist = Some(vec!["openai".to_string(), " openai ".to_string()]);
-        assert!(validate_runtime_config(&config)
-            .unwrap_err()
-            .contains("duplicate entry 'openai'"));
-
-        let mut config = valid_config();
-        config.kgoose = Some(RuntimeKgooseConfig {
-            base_url: Some("file:///tmp/kgoose".to_string()),
-            path: None,
-        });
-        assert_eq!(
-            validate_runtime_config(&config).unwrap_err(),
-            "kgoose.baseUrl must use http or https"
-        );
+    fn temp_state() -> (tempfile::TempDir, RuntimeConfigState) {
+        let dir = tempdir().expect("temp dir");
+        let state = RuntimeConfigState::new(dir.path().to_path_buf());
+        (dir, state)
     }
 
-    #[test]
-    fn default_fake_runtime_config_is_valid() {
-        assert!(validate_runtime_config(&default_runtime_config()).is_ok());
+    fn empty_distro_state() -> DistroBundleState {
+        DistroBundleState::empty_for_tests()
     }
 
-    #[test]
-    fn default_runtime_config_uses_databricks_provider_allowlist() {
-        assert_eq!(
-            default_runtime_config().provider_allowlist,
-            Some(vec!["databricks_v2".to_string()])
-        );
+    fn expect_ready(result: RuntimeConfigLoadResult) -> (RuntimeConfigSource, RuntimeConfig) {
+        match result {
+            RuntimeConfigLoadResult::Ready { source, config } => (source, *config),
+            other => panic!("expected ready result, got {other:?}"),
+        }
     }
 
-    #[test]
-    fn fake_runtime_config_uses_default_when_no_config_is_saved() {
-        let dir = tempdir().unwrap();
-        let result = read_fake_runtime_config_from_path(&dir.path().join("missing.json"));
-
-        assert_eq!(
-            result,
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(default_runtime_config()),
-            }
-        );
-    }
-
-    #[test]
-    fn fake_runtime_config_round_trips_saved_config() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("nested").join("fake-endpoint.json");
-        let config = valid_config();
-
-        write_fake_runtime_config_to_path(&path, &config).unwrap();
-        let result = read_fake_runtime_config_from_path(&path);
-
-        assert_eq!(
-            result,
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(config),
-            }
-        );
-    }
-
-    #[test]
-    fn fake_runtime_config_reports_invalid_saved_config() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("fake-endpoint.json");
-        std::fs::write(
-            &path,
-            br#"{"schemaVersion":1,"providerAllowlist":["openai"," openai "]}"#,
-        )
-        .unwrap();
-
-        let result = read_fake_runtime_config_from_path(&path);
-
+    fn expect_unavailable(
+        result: RuntimeConfigLoadResult,
+    ) -> (RuntimeConfigSource, RuntimeConfigUnavailableReason, String) {
         match result {
             RuntimeConfigLoadResult::Unavailable {
                 source,
                 reason,
                 message,
-            } => {
-                assert_eq!(source, RuntimeConfigSource::FakeEndpoint);
-                assert_eq!(reason, RuntimeConfigUnavailableReason::Invalid);
-                assert!(message.contains("duplicate entry 'openai'"));
-            }
-            RuntimeConfigLoadResult::Ready { .. } => panic!("expected invalid config"),
+            } => (source, reason, message),
+            other => panic!("expected unavailable result, got {other:?}"),
         }
     }
 
     #[test]
-    fn state_caches_get_until_refresh() {
-        let dir = tempdir().unwrap();
-        let state = RuntimeConfigState::new(dir.path().to_path_buf());
-        let path = fake_runtime_config_path(dir.path());
-
-        assert_eq!(
-            state.get().unwrap(),
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(default_runtime_config()),
-            }
-        );
-
-        let config = valid_config();
-        write_fake_runtime_config_to_path(&path, &config).unwrap();
-        assert_eq!(
-            state.get().unwrap(),
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(default_runtime_config()),
-            }
-        );
-        assert_eq!(
-            state.refresh().unwrap(),
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(config),
-            }
-        );
+    fn validates_complete_runtime_config() {
+        validate_runtime_config(&valid_config()).expect("valid config");
     }
 
     #[test]
-    fn state_clear_fake_config_restores_default_response() {
-        let dir = tempdir().unwrap();
-        let state = RuntimeConfigState::new(dir.path().to_path_buf());
-        let path = fake_runtime_config_path(dir.path());
+    fn rejects_invalid_runtime_config() {
+        let mut invalid = valid_config();
+        invalid.schema_version = 2;
+        assert!(validate_runtime_config(&invalid)
+            .unwrap_err()
+            .contains("schemaVersion must be 1"));
 
-        write_fake_runtime_config_to_path(&path, &valid_config()).unwrap();
-        assert!(matches!(
-            state.refresh().unwrap(),
-            RuntimeConfigLoadResult::Ready {
-                config,
-                ..
-            } if config.as_ref() != &default_runtime_config()
-        ));
+        let mut invalid = valid_config();
+        invalid.goose.model_providers[0].aliases =
+            Some(vec!["databricks".to_string(), " databricks ".to_string()]);
+        assert!(validate_runtime_config(&invalid)
+            .unwrap_err()
+            .contains("duplicate entry 'databricks'"));
 
-        assert_eq!(
-            state.clear_fake_config().unwrap(),
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(default_runtime_config()),
-            }
+        let mut invalid = valid_config();
+        invalid.kgoose = Some(RuntimeKgooseConfig {
+            base_url: Some("file:///tmp/kgoose".to_string()),
+            path: None,
+        });
+        assert!(validate_runtime_config(&invalid)
+            .unwrap_err()
+            .contains("kgoose.baseUrl must use http or https"));
+    }
+
+    #[test]
+    fn default_runtime_config_is_valid() {
+        validate_runtime_config(&default_runtime_config()).expect("default config");
+    }
+
+    #[test]
+    fn read_fake_runtime_config_from_path_round_trips_and_reports_errors() {
+        let dir = tempdir().expect("temp dir");
+        let path = dir.path().join("fake.json");
+        write_fake_runtime_config_to_path(&path, &valid_config()).expect("write fake config");
+
+        let (source, config) = expect_ready(read_fake_runtime_config_from_path(&path));
+        assert_eq!(source, RuntimeConfigSource::FakeEndpoint);
+        assert_eq!(config, valid_config());
+
+        std::fs::write(&path, r#"{"schemaVersion":1}"#).expect("write invalid config");
+        let (source, reason, message) =
+            expect_unavailable(read_fake_runtime_config_from_path(&path));
+        assert_eq!(source, RuntimeConfigSource::FakeEndpoint);
+        assert_eq!(reason, RuntimeConfigUnavailableReason::Invalid);
+        assert!(message.contains("failed validation") || message.contains("Failed to parse"));
+
+        let missing = dir.path().join("missing.json");
+        let (source, reason, message) =
+            expect_unavailable(read_fake_runtime_config_from_path(&missing));
+        assert_eq!(source, RuntimeConfigSource::FakeEndpoint);
+        assert_eq!(reason, RuntimeConfigUnavailableReason::Missing);
+        assert!(message.contains("Failed to read fake runtime config"));
+    }
+
+    #[tokio::test]
+    async fn runtime_config_state_get_caches_until_refresh() {
+        let (_dir, state) = temp_state();
+        let distro_state = empty_distro_state();
+        let mut first = valid_config();
+        first.feature_toggles = Some(HashMap::from([("first".to_string(), true)]));
+        let mut second = valid_config();
+        second.feature_toggles = Some(HashMap::from([("second".to_string(), true)]));
+        write_fake_runtime_config_to_path(&state.fake_config_path, &first).expect("write first");
+
+        let (_, config) = expect_ready(state.get(&distro_state).await.expect("get first"));
+        assert_eq!(config.feature_toggles, first.feature_toggles);
+
+        write_fake_runtime_config_to_path(&state.fake_config_path, &second).expect("write second");
+        let (_, cached) = expect_ready(state.get(&distro_state).await.expect("get cached"));
+        assert_eq!(cached.feature_toggles, first.feature_toggles);
+
+        let (_, refreshed) = expect_ready(state.refresh(&distro_state).await.expect("refresh"));
+        assert_eq!(refreshed.feature_toggles, second.feature_toggles);
+    }
+
+    #[tokio::test]
+    async fn runtime_config_state_clear_fake_config_restores_default_and_removes_file() {
+        let (_dir, state) = temp_state();
+        let distro_state = empty_distro_state();
+        state
+            .set_fake_config(valid_config())
+            .expect("set fake config");
+        assert!(state.fake_config_path.exists());
+
+        let (source, config) = expect_ready(
+            state
+                .clear_fake_config(&distro_state)
+                .await
+                .expect("clear fake config"),
         );
-        assert!(!path.exists());
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
+        assert!(!state.fake_config_path.exists());
     }
 
-    #[test]
-    fn ready_config_uses_default_fake_config_when_no_config_is_saved() {
-        let dir = tempdir().unwrap();
-        let state = RuntimeConfigState::new(dir.path().to_path_buf());
+    #[tokio::test]
+    async fn runtime_config_state_ready_config_returns_default_when_none_saved() {
+        let (_dir, state) = temp_state();
+        let distro_state = empty_distro_state();
 
-        assert_eq!(state.ready_config().unwrap(), default_runtime_config());
+        let result = state.get(&distro_state).await.expect("get default");
+        let (source, config) = expect_ready(result);
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
+
+        let ready = state
+            .ready_config(&distro_state)
+            .await
+            .expect("ready default config");
+        assert_eq!(ready, default_runtime_config());
     }
 
-    #[test]
-    fn ready_config_reports_invalid_saved_fake_config() {
-        let dir = tempdir().unwrap();
-        let state = RuntimeConfigState::new(dir.path().to_path_buf());
-        let path = fake_runtime_config_path(dir.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            br#"{"schemaVersion":1,"providerAllowlist":["openai"," openai "]}"#,
-        )
-        .unwrap();
+    #[tokio::test]
+    async fn runtime_config_state_ready_config_surfaces_validation_errors() {
+        let (_dir, state) = temp_state();
+        let distro_state = empty_distro_state();
+        std::fs::create_dir_all(state.fake_config_path.parent().expect("parent"))
+            .expect("create dir");
+        std::fs::write(&state.fake_config_path, r#"{"schemaVersion":1}"#)
+            .expect("write invalid fake config");
 
         let error = state
-            .ready_config()
-            .expect_err("invalid config should block runtime consumers");
-
+            .ready_config(&distro_state)
+            .await
+            .expect_err("invalid fake config should fail ready_config");
         assert!(error.contains("Runtime config unavailable"));
         assert!(error.contains("Invalid"));
-        assert!(error.contains("duplicate entry 'openai'"));
+    }
+
+    #[test]
+    fn validate_goose_config_rejects_invalid_shapes() {
+        let mut goose = default_goose_config();
+        goose.model_providers.clear();
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("modelProviders must not be empty"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers.push(RuntimeGooseModelProvider {
+            id: DEFAULT_RUNTIME_PROVIDER_ID.to_string(),
+            display_name: "Duplicate".to_string(),
+            description: None,
+            setup_method: None,
+            group: None,
+            aliases: None,
+            native_connect_query: None,
+            custom_provider: None,
+            endpoint_env: None,
+            model_inventory_mode: None,
+            models: vec![],
+        });
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("duplicate provider 'databricks_v2'"));
+
+        let mut goose = default_goose_config();
+        goose.default_model_provider_id = "unknown".to_string();
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("defaultModelProviderId must reference"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].models = vec![
+            RuntimeGooseModel {
+                id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
+                name: "GPT-5.5".to_string(),
+                recommended: None,
+                context_limit: None,
+            },
+            RuntimeGooseModel {
+                id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
+                name: "GPT-5.5 duplicate".to_string(),
+                recommended: None,
+                context_limit: None,
+            },
+        ];
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("duplicate model 'goose-gpt-5-5'"));
+
+        let mut goose = default_goose_config();
+        goose.default_model_id = Some("unknown-model".to_string());
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("defaultModelId must reference"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].models[0].context_limit = Some(0);
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("contextLimit must be positive"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].setup_method = Some("magic".to_string());
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("setupMethod has unsupported value"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].group = Some("primary".to_string());
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("group has unsupported value"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].model_inventory_mode = Some("dynamic".to_string());
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("modelInventoryMode has unsupported value"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].custom_provider = Some(custom_provider());
+        goose.model_providers[0].id = "other_provider".to_string();
+        goose.default_model_provider_id = "other_provider".to_string();
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("providerId must match"));
+    }
+
+    #[test]
+    fn validate_goose_config_rejects_ids_with_boundary_whitespace() {
+        let mut goose = default_goose_config();
+        goose.default_model_provider_id = format!(" {DEFAULT_RUNTIME_PROVIDER_ID}");
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("goose.defaultModelProviderId must not have leading or trailing whitespace"));
+
+        let mut goose = default_goose_config();
+        goose.default_model_id = Some(format!("{DEFAULT_RUNTIME_MODEL_ID} "));
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("goose.defaultModelId must not have leading or trailing whitespace"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].id = format!("{DEFAULT_RUNTIME_PROVIDER_ID} ");
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("goose.modelProviders.id must not have leading or trailing whitespace"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].models[0].id = format!(" {DEFAULT_RUNTIME_MODEL_ID}");
+        assert!(validate_goose_config(&goose).unwrap_err().contains(
+            "goose.modelProviders.models.id must not have leading or trailing whitespace"
+        ));
+
+        let mut provider = custom_provider();
+        provider.provider_id = format!(" {ADMIN_OWNED_CUSTOM_PROVIDER_ID} ");
+        provider.engine = "not_openai".to_string();
+        assert!(
+            validate_custom_provider(&provider, ADMIN_OWNED_CUSTOM_PROVIDER_ID)
+                .unwrap_err()
+                .contains("customProvider.providerId must not have leading or trailing whitespace")
+        );
+    }
+
+    #[test]
+    fn validate_custom_provider_rejects_invalid_shapes() {
+        let mut provider = custom_provider();
+        validate_custom_provider(&provider, ADMIN_OWNED_CUSTOM_PROVIDER_ID)
+            .expect("valid custom provider");
+
+        provider.requires_auth = true;
+        assert!(
+            validate_custom_provider(&provider, ADMIN_OWNED_CUSTOM_PROVIDER_ID)
+                .unwrap_err()
+                .contains("requiresAuth must be false")
+        );
+
+        let mut provider = custom_provider();
+        provider.engine = "not_openai".to_string();
+        assert!(
+            validate_custom_provider(&provider, ADMIN_OWNED_CUSTOM_PROVIDER_ID)
+                .unwrap_err()
+                .contains("must use engine openai_compatible")
+        );
+
+        let mut provider = custom_provider();
+        provider.api_url = "file:///tmp/provider".to_string();
+        assert!(
+            validate_custom_provider(&provider, ADMIN_OWNED_CUSTOM_PROVIDER_ID)
+                .unwrap_err()
+                .contains("apiUrl must use http or https")
+        );
+    }
+
+    #[test]
+    fn validate_non_secret_map_rejects_secret_looking_keys_and_values() {
+        // Mirrored in src/shared/runtime-config/schema.test.ts to keep TS/Rust parity.
+        let benign = HashMap::from([("X-Goose-Runtime".to_string(), "enabled".to_string())]);
+        validate_non_secret_map(&benign, "headers").expect("benign map");
+
+        let secret_key = HashMap::from([("Authorization".to_string(), "enabled".to_string())]);
+        assert!(validate_non_secret_map(&secret_key, "headers")
+            .unwrap_err()
+            .contains("secret-looking"));
+
+        let secret_value =
+            HashMap::from([("X-Goose-Runtime".to_string(), "Bearer nope".to_string())]);
+        assert!(validate_non_secret_map(&secret_value, "headers")
+            .unwrap_err()
+            .contains("secret-looking"));
+    }
+
+    #[test]
+    fn validate_endpoint_env_allows_only_runtime_owned_keys_and_rejects_secret_values() {
+        // Mirrored in src/shared/runtime-config/schema.test.ts to keep TS/Rust parity.
+        let benign = HashMap::from([(
+            "DATABRICKS_HOST".to_string(),
+            "https://example.internal".to_string(),
+        )]);
+        validate_endpoint_env(&benign).expect("benign endpoint env");
+
+        for key in [
+            "HOME",
+            "SSL_CERT_FILE",
+            "NODE_OPTIONS",
+            "PYTHONPATH",
+            "GOOSE_CONFIG_FILE",
+            "PATH",
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "CUSTOM_PROXY",
+            "databricks_host",
+            "OPENAI_API_KEY",
+        ] {
+            let invalid = HashMap::from([(key.to_string(), "value".to_string())]);
+            assert!(
+                validate_endpoint_env(&invalid)
+                    .unwrap_err()
+                    .contains("is not allowed"),
+                "expected key {key} to be rejected"
+            );
+        }
+
+        let secret_value =
+            HashMap::from([("DATABRICKS_HOST".to_string(), "Bearer nope".to_string())]);
+        assert!(validate_endpoint_env(&secret_value)
+            .unwrap_err()
+            .contains("secret-looking"));
+    }
+
+    #[test]
+    fn admin_cache_round_trips_and_rejects_invalid_cache() {
+        let dir = tempdir().expect("temp dir");
+        let path = dir.path().join("admin-cache.json");
+        let config = valid_config();
+        write_admin_cache_to_path(&path, &config, "https://kgoose.example.test/runtime")
+            .expect("write cache");
+
+        let cache = read_admin_cache_from_path(&path).expect("read cache");
+        assert_eq!(cache.cache_schema_version, ADMIN_CACHE_SCHEMA_VERSION);
+        assert_eq!(cache.source_url, "https://kgoose.example.test/runtime");
+        assert_eq!(cache.config, config);
+
+        let mut cache_value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read file"))
+                .expect("cache json");
+        cache_value["cacheSchemaVersion"] = serde_json::json!(ADMIN_CACHE_SCHEMA_VERSION + 1);
+        std::fs::write(&path, serde_json::to_vec_pretty(&cache_value).unwrap())
+            .expect("write cache mismatch");
+        assert!(read_admin_cache_from_path(&path)
+            .unwrap_err()
+            .contains("cache schema must be"));
+
+        cache_value["cacheSchemaVersion"] = serde_json::json!(ADMIN_CACHE_SCHEMA_VERSION);
+        cache_value["config"]["schemaVersion"] = serde_json::json!(2);
+        std::fs::write(&path, serde_json::to_vec_pretty(&cache_value).unwrap())
+            .expect("write invalid embedded config");
+        assert!(read_admin_cache_from_path(&path)
+            .unwrap_err()
+            .contains("schemaVersion must be 1"));
     }
 }
