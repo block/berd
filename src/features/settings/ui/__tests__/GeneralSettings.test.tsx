@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +35,8 @@ import {
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
-const { mockOpenDialog, mockRuntimeConfigApi } = vi.hoisted(() => ({
+const { mockLogout, mockOpenDialog, mockRuntimeConfigApi } = vi.hoisted(() => ({
+  mockLogout: vi.fn(),
   mockOpenDialog: vi.fn(),
   mockRuntimeConfigApi: {
     clearFakeRuntimeConfig: vi.fn(),
@@ -46,6 +48,10 @@ const { mockOpenDialog, mockRuntimeConfigApi } = vi.hoisted(() => ({
 
 vi.mock("@/shared/api/localMediaCaches", () => ({
   clearLocalMediaCaches: vi.fn(),
+}));
+
+vi.mock("@/features/auth/api/auth", () => ({
+  logout: mockLogout,
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -87,11 +93,19 @@ function createQueryClient() {
   });
 }
 
-function renderGeneralSettings(queryClient = createQueryClient()) {
+function renderGeneralSettings({
+  authStatus,
+  onLoggedOut,
+  queryClient = createQueryClient(),
+}: {
+  authStatus?: ComponentProps<typeof GeneralSettings>["authStatus"];
+  onLoggedOut?: ComponentProps<typeof GeneralSettings>["onLoggedOut"];
+  queryClient?: QueryClient;
+} = {}) {
   renderWithProviders(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <GeneralSettings />
+        <GeneralSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -144,6 +158,55 @@ describe("GeneralSettings appearance section", () => {
     mockRuntimeConfigApi.clearFakeRuntimeConfig.mockResolvedValue(
       INITIAL_RUNTIME_CONFIG_RESULT,
     );
+  });
+
+  it("hides account details when no logged-in auth status is available", () => {
+    renderGeneralSettings();
+
+    expect(screen.queryByText("Account")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Log out" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows account details and logs out", async () => {
+    const user = userEvent.setup();
+    const nextStatus = {
+      loggedIn: false,
+      requiresOrg: false,
+      org: "test",
+      profile: "default",
+      kgooseBaseUrl: "https://test.blockstaging.build",
+    };
+    const onLoggedOut = vi.fn();
+    mockLogout.mockResolvedValueOnce(nextStatus);
+
+    renderGeneralSettings({
+      authStatus: {
+        loggedIn: true,
+        requiresOrg: false,
+        org: "test",
+        profile: "default",
+        kgooseBaseUrl: "https://test.blockstaging.build",
+        email: "kalvin@example.com",
+      },
+      onLoggedOut,
+    });
+
+    expect(screen.getByText("Account")).toBeInTheDocument();
+    expect(screen.getByText("kalvin@example.com")).toBeInTheDocument();
+    expect(screen.getByText("test")).toBeInTheDocument();
+    expect(
+      screen.queryByText("https://test.blockstaging.build"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Log out" }));
+
+    await waitFor(() => {
+      expect(mockLogout).toHaveBeenCalledTimes(1);
+      expect(toastSuccessMock).toHaveBeenCalledWith("Logged out.");
+      expect(onLoggedOut).toHaveBeenCalledWith(nextStatus);
+    });
   });
 
   it("selects default light and dark theme modes", async () => {
@@ -459,7 +522,7 @@ describe("GeneralSettings appearance section", () => {
     const user = userEvent.setup();
     const queryClient = createQueryClient();
     clearLocalMediaCachesMock.mockResolvedValue(undefined);
-    renderGeneralSettings(queryClient);
+    renderGeneralSettings({ queryClient });
 
     await user.click(getClearCachedMediaButton());
     await user.click(getClearCachedMediaButton());

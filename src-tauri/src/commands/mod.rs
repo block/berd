@@ -2,6 +2,7 @@ pub mod acp;
 pub mod agent_setup;
 pub mod agents;
 pub mod artifacts;
+pub mod auth;
 pub mod automations;
 pub mod avatars;
 pub mod builderbot;

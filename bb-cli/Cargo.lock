@@ -176,6 +176,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "builderbot-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "core-foundation",
+ "log",
+ "reqwest",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "url",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1561,19 +1577,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "security-framework"
-version = "3.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
-dependencies = [
- "bitflags",
- "core-foundation",
- "core-foundation-sys",
- "libc",
- "security-framework-sys",
-]
-
-[[package]]
 name = "security-framework-sys"
 version = "2.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1723,6 +1726,7 @@ name = "sq-kgoose"
 version = "0.7.11"
 dependencies = [
  "anyhow",
+ "builderbot-auth",
  "clap",
  "clap_complete",
  "pbjson",
@@ -1732,7 +1736,6 @@ dependencies = [
  "prost-types",
  "protoc-bin-vendored",
  "reqwest",
- "security-framework",
  "serde",
  "serde_json",
  "serde_yaml",

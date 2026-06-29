@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // client only needs `trackWithSchema`; there is no `user`/`_identify` to model.
 const trackWithSchema = vi.fn();
 const buildFeatures = vi.hoisted(() => ({
+  authGate: false,
   agentToolsTip: true,
   automations: true,
   builderbot: true,
@@ -94,6 +95,7 @@ function setEnv(env: "production" | "staging" | "development") {
 }
 
 beforeEach(() => {
+  buildFeatures.authGate = false;
   buildFeatures.agentToolsTip = true;
   buildFeatures.automations = true;
   buildFeatures.builderbot = true;

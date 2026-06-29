@@ -13,6 +13,7 @@ import {
   type ConnectionsTab,
 } from "@/features/connections/ui/ConnectionsSettings";
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
+import type { AuthStatus } from "@/features/auth/api/auth";
 import { PageShell } from "@/shared/ui/page-shell";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
@@ -21,7 +22,9 @@ import { useProfileCapability } from "@/shared/profile/capabilities";
 interface SettingsViewProps {
   activeSection: SectionId;
   activeConnectionsTab: ConnectionsTab;
+  authStatus?: AuthStatus;
   onConnectionsTabChange: (tab: ConnectionsTab) => void;
+  onLoggedOut?: (status: AuthStatus) => void;
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
@@ -31,7 +34,9 @@ interface SettingsViewProps {
 export function SettingsView({
   activeSection,
   activeConnectionsTab,
+  authStatus,
   onConnectionsTabChange,
+  onLoggedOut,
   onStartTroubleshootingChat,
   onReturnToAgentDraft,
 }: SettingsViewProps) {
@@ -71,7 +76,9 @@ export function SettingsView({
       )}
       {activeSection === "doctor" && doctorEnabled && <DoctorSettings />}
       {activeSection === "experiments" && <ExperimentsSettings />}
-      {activeSection === "general" && <GeneralSettings />}
+      {activeSection === "general" && (
+        <GeneralSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
+      )}
       {activeSection === "notifications" && <NotificationSettings />}
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}

@@ -21,7 +21,9 @@ exclude = ["plugins/app-test-driver"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+anyhow = "1"
 base64 = "0.22"
+builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"

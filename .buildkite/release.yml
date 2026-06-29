@@ -3,6 +3,7 @@ agents:
 
 env:
   GOOSE2_UPDATER_ENDPOINT: "https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json"
+  APPLE_TEAM_ID: "EYF346PHUG"
 
   MACOS_ENVIRONMENT_XCODE_VERSION: "26.3.0"
   MACOS_ENVIRONMENT_RUBY_VERSION: "3.3.9"
@@ -39,7 +40,7 @@ steps:
           identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"
           artifacts:
             - path: "release/macos/Berd.app"
-              entitlements: src-tauri/entitlements.plist
+              entitlements: release/macos/entitlements.plist
             - path: "release/macos/Berd.app.zip"
               package:
                 from: "release/macos/Berd.app"

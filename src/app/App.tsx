@@ -1,13 +1,20 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { AppShell } from "@/app/AppShell";
 import { TopBarActionsProvider } from "@/app/contexts/TopBarActionsContext";
 import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
+import { StartupLoadingView } from "@/app/ui/StartupLoadingView";
+import { useAuthGate } from "@/features/auth/hooks/useAuthGate";
+import { LoginView } from "@/features/auth/ui/LoginView";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useZoom } from "@/shared/hooks/useZoom";
 import { Toaster } from "@/shared/ui/sonner";
 
 export function App() {
   useZoom();
+  const authGateEnabled = getBuildFeatureState().authGate;
+  const authGate = useAuthGate(authGateEnabled);
+
   useEffect(() => {
     const preventWindowFileNavigation = (event: DragEvent) => {
       event.preventDefault();
@@ -31,12 +38,33 @@ export function App() {
     };
   }, []);
 
+  let content: ReactNode;
+  if (authGate.status === "loading") {
+    content = <StartupLoadingView />;
+  } else if (authGate.status === "loggedIn") {
+    content = (
+      <TopBarActionsProvider>
+        <AppShell
+          authStatus={authGate.authStatus}
+          onLoggedOut={authGate.completeLogin}
+        />
+      </TopBarActionsProvider>
+    );
+  } else {
+    content = (
+      <LoginView
+        authStatus={authGate.authStatus}
+        statusError={authGate.error}
+        onRetryStatus={authGate.retry}
+        onAuthenticated={authGate.completeLogin}
+      />
+    );
+  }
+
   return (
     <>
-      <TopBarActionsProvider>
-        <AppShell />
-      </TopBarActionsProvider>
-      <SelectedTextContextMenu />
+      {content}
+      {authGate.status === "loggedIn" ? <SelectedTextContextMenu /> : null}
       <Toaster />
     </>
   );

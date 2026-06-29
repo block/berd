@@ -16,6 +16,7 @@ path = "src/bin/bb.rs"
 
 [dependencies]
 anyhow = "1"
+builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 clap = { version = "4.5", features = ["env"] }
 clap_complete = "4.5"
 pbjson = "0.9"
@@ -38,6 +39,3 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 pbjson-build = "0.9"
 protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { version = "3.7.0", default-features = false }

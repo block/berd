@@ -1,5 +1,9 @@
-use crate::commands::runtime_config::{RuntimeConfig, RuntimeKgooseConfig};
+use crate::commands::{
+    auth,
+    runtime_config::{RuntimeConfig, RuntimeKgooseConfig},
+};
 use crate::services::distro_bundle::{DistroBundleState, KgooseDistroConfig};
+use builderbot_auth::{auth::SESSION_CREDENTIAL_HEADER, config::KGOOSE_SERVICE_PATH};
 use bytes::Bytes;
 use reqwest::{
     header::{HeaderValue, ACCEPT, CACHE_CONTROL, CONTENT_TYPE},
@@ -55,7 +59,8 @@ impl<'a> KgooseContext<'a> {
         body: Value,
     ) -> Result<Value, KgooseJsonError> {
         let url = self.build_url(endpoint)?;
-        let request = add_playpen_baggage(json_post_request(url.clone()));
+        let request = add_kgoose_request_headers(json_post_request(url.clone()), &url)
+            .map_err(KgooseJsonError::from)?;
         send_json_request_detailed(request, url, &body).await
     }
 
@@ -65,11 +70,13 @@ impl<'a> KgooseContext<'a> {
         form: Form,
     ) -> Result<Value, KgooseJsonError> {
         let url = self.build_url(endpoint)?;
-        let request = add_playpen_baggage(
+        let request = add_kgoose_request_headers(
             upload_client()
                 .post(url.clone())
                 .header(ACCEPT, "application/json"),
-        );
+            &url,
+        )
+        .map_err(KgooseJsonError::from)?;
         send_multipart_request_detailed(request, url, form).await
     }
 
@@ -403,9 +410,20 @@ pub(crate) struct KgooseProbeResult {
 }
 
 async fn probe_url(url: reqwest::Url) -> KgooseProbeResult {
-    let request = add_playpen_baggage(json_post_request(url.clone()))
-        .timeout(KGOOSE_PROBE_TIMEOUT)
-        .json(&serde_json::json!({}));
+    let request = match add_kgoose_request_headers(json_post_request(url.clone()), &url) {
+        Ok(request) => request
+            .timeout(KGOOSE_PROBE_TIMEOUT)
+            .json(&serde_json::json!({})),
+        Err(error) => {
+            return KgooseProbeResult {
+                likely_warp_failure: false,
+                status: None,
+                kind: "configuration",
+                url: url.as_str().to_string(),
+                message: error,
+            };
+        }
+    };
     match request.send().await {
         Ok(response) => {
             let status = response.status();
@@ -449,7 +467,7 @@ pub(crate) async fn open_sse_stream(
         .get(url.clone())
         .header(ACCEPT, "text/event-stream")
         .header(CACHE_CONTROL, "no-cache");
-    let request = add_playpen_baggage(request);
+    let request = add_kgoose_request_headers(request, &url)?;
     let request = match last_event_id {
         Some(last_event_id) => request.header("Last-Event-ID", last_event_id),
         None => request,
@@ -542,6 +560,43 @@ fn add_playpen_baggage(request: reqwest::RequestBuilder) -> reqwest::RequestBuil
     }
 }
 
+fn add_kgoose_request_headers(
+    request: reqwest::RequestBuilder,
+    url: &reqwest::Url,
+) -> Result<reqwest::RequestBuilder, String> {
+    let request = add_shared_session_credential(request, url)?;
+    Ok(add_playpen_baggage(request))
+}
+
+fn add_shared_session_credential(
+    request: reqwest::RequestBuilder,
+    url: &reqwest::Url,
+) -> Result<reqwest::RequestBuilder, String> {
+    let request_base_url = kgoose_base_url_from_request_url(url);
+    let Some(session_credential) =
+        auth::shared_session_credential_for_kgoose_base_url(&request_base_url)
+            .map_err(auth_error)?
+    else {
+        return Ok(request);
+    };
+    let header_value = HeaderValue::from_str(&session_credential)
+        .map_err(|error| format!("Invalid BuilderBot auth session credential: {error}"))?;
+    Ok(request.header(SESSION_CREDENTIAL_HEADER, header_value))
+}
+
+fn kgoose_base_url_from_request_url(url: &reqwest::Url) -> String {
+    let mut base_url = url.clone();
+    let path = base_url.path().trim_end_matches('/');
+    let base_path = path
+        .find(KGOOSE_SERVICE_PATH)
+        .map(|index| path[..index].to_string())
+        .unwrap_or_default();
+    base_url.set_path(&base_path);
+    base_url.set_query(None);
+    base_url.set_fragment(None);
+    base_url.as_str().trim_end_matches('/').to_string()
+}
+
 fn playpen_baggage() -> Option<String> {
     env_value(KGOOSE_PLAYPEN_ENV).map(|playpen| format!("kgoose-playpen={playpen}"))
 }
@@ -551,7 +606,7 @@ fn build_url(
     runtime_config: Option<&RuntimeKgooseConfig>,
     distro_config: Option<&KgooseDistroConfig>,
 ) -> Result<reqwest::Url, String> {
-    let base_url = config_value(
+    let mut base_url = config_value(
         KGOOSE_BASE_URL_ENV,
         runtime_config.and_then(|config| config.base_url.as_deref()),
         distro_config.and_then(|config| config.base_url.as_deref()),
@@ -560,6 +615,8 @@ fn build_url(
         "distro kgoose baseUrl",
         "default kgoose base URL",
     );
+    base_url.value =
+        auth::route_kgoose_base_url_for_shared_org(&base_url.value).map_err(auth_error)?;
     let path_prefix = config_value(
         KGOOSE_PATH_ENV,
         runtime_config.and_then(|config| config.path.as_deref()),
@@ -586,6 +643,10 @@ fn build_url(
     url.set_path(&path);
 
     Ok(url)
+}
+
+fn auth_error(error: anyhow::Error) -> String {
+    format!("BuilderBot auth failed: {error:#}")
 }
 
 struct ConfigValue {
@@ -661,25 +722,39 @@ fn truncate_error_body(body: &str) -> String {
 mod tests {
     use super::{
         build_sse_url, build_url, is_access_request_error_kind,
-        is_multipart_access_request_error_kind, playpen_baggage, probe_url, truncate_error_body,
-        KgooseDistroConfig, KgooseJsonError, KgooseRequestErrorKind, KGOOSE_BASE_URL_ENV,
-        KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
+        is_multipart_access_request_error_kind, kgoose_base_url_from_request_url, playpen_baggage,
+        probe_url, truncate_error_body, KgooseDistroConfig, KgooseJsonError,
+        KgooseRequestErrorKind, KGOOSE_BASE_URL_ENV, KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
     };
     use crate::commands::runtime_config::RuntimeKgooseConfig;
+    use crate::test_support::env_lock;
+    use builderbot_auth::config::BB_HOME_ENV_VAR;
     use reqwest::StatusCode;
     use std::env;
-    use std::sync::Mutex;
+    use tempfile::{tempdir, TempDir};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    // All tests that mutate BERD_KGOOSE_* must use this lock.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    fn clear_kgoose_env_and_isolate_bb_home() -> TempDir {
+        env::remove_var(KGOOSE_BASE_URL_ENV);
+        env::remove_var(KGOOSE_PATH_ENV);
+        env::remove_var(KGOOSE_PLAYPEN_ENV);
+        env::remove_var("BB_AUTH_STORAGE");
+        env::remove_var("BB_AUTH_STORAGE_FILE");
+        env::remove_var("BB_KGOOSE_PLAYPEN");
+        env::remove_var("BB_SKILLS_CONFIG");
+        env::remove_var("BB_SKILLS_PROFILE");
+        env::remove_var("KGOOSE_BASE_URL");
+        env::remove_var("KGOOSE_PLAYPEN");
+        let bb_home = tempdir().expect("temp BB_HOME");
+        env::set_var(BB_HOME_ENV_VAR, bb_home.path());
+        bb_home
+    }
 
     #[test]
     fn builds_default_kgoose_url() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        env::remove_var(KGOOSE_BASE_URL_ENV);
-        env::remove_var(KGOOSE_PATH_ENV);
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
 
         assert_eq!(
             build_url("v3/get-user-tiles", None, None).unwrap().as_str(),
@@ -689,9 +764,8 @@ mod tests {
 
     #[test]
     fn builds_distro_kgoose_url() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        env::remove_var(KGOOSE_BASE_URL_ENV);
-        env::remove_var(KGOOSE_PATH_ENV);
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let config = KgooseDistroConfig {
             base_url: Some("https://kgoose.sqprod.co/base/".to_string()),
             path: Some("/prod/path/".to_string()),
@@ -707,9 +781,8 @@ mod tests {
 
     #[test]
     fn runtime_config_overrides_distro_kgoose_url() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        env::remove_var(KGOOSE_BASE_URL_ENV);
-        env::remove_var(KGOOSE_PATH_ENV);
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let runtime_config = RuntimeKgooseConfig {
             base_url: Some("https://runtime.example.test/base/".to_string()),
             path: Some("/runtime/path/".to_string()),
@@ -729,7 +802,8 @@ mod tests {
 
     #[test]
     fn env_overrides_distro_kgoose_url_without_double_slashes() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         env::set_var(KGOOSE_BASE_URL_ENV, "https://example.test/base/");
         env::set_var(KGOOSE_PATH_ENV, "/custom/path/");
         let config = KgooseDistroConfig {
@@ -743,27 +817,22 @@ mod tests {
                 .as_str(),
             "https://example.test/base/custom/path/v3/get-tile"
         );
-
-        env::remove_var(KGOOSE_BASE_URL_ENV);
-        env::remove_var(KGOOSE_PATH_ENV);
     }
 
     #[test]
     fn rejects_non_http_base_url() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         env::set_var(KGOOSE_BASE_URL_ENV, "file:///tmp");
 
         let error = build_url("v3/get-user-tiles", None, None).unwrap_err();
         assert!(error.contains(KGOOSE_BASE_URL_ENV));
-
-        env::remove_var(KGOOSE_BASE_URL_ENV);
     }
 
     #[test]
     fn attributes_bad_distro_base_url_to_distro_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        env::remove_var(KGOOSE_BASE_URL_ENV);
-        env::remove_var(KGOOSE_PATH_ENV);
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let config = KgooseDistroConfig {
             base_url: Some("file:///tmp".to_string()),
             path: Some("prod/path".to_string()),
@@ -863,9 +932,8 @@ mod tests {
 
     #[test]
     fn builds_sse_url_with_encoded_session_id() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        env::remove_var(KGOOSE_BASE_URL_ENV);
-        env::remove_var(KGOOSE_PATH_ENV);
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
 
         assert_eq!(
             build_sse_url("v3/get-messages-sse", "session/1", None, None)
@@ -876,23 +944,34 @@ mod tests {
     }
 
     #[test]
+    fn derives_kgoose_base_url_from_request_url_for_auth_lookup() {
+        let url = reqwest::Url::parse(
+            "https://test.kgoose.sqprod.co/base/cash-app/goose/v3/whoami?ignored=true",
+        )
+        .expect("parse URL");
+
+        assert_eq!(
+            kgoose_base_url_from_request_url(&url),
+            "https://test.kgoose.sqprod.co/base"
+        );
+    }
+
+    #[test]
     fn builds_playpen_baggage_from_trimmed_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         env::set_var(KGOOSE_PLAYPEN_ENV, " kalvin ");
 
         assert_eq!(playpen_baggage(), Some("kgoose-playpen=kalvin".to_string()));
-
-        env::remove_var(KGOOSE_PLAYPEN_ENV);
     }
 
     #[test]
     fn omits_empty_playpen_baggage() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         env::set_var(KGOOSE_PLAYPEN_ENV, " ");
 
         assert_eq!(playpen_baggage(), None);
-
-        env::remove_var(KGOOSE_PLAYPEN_ENV);
     }
 
     async fn spawn_probe_server(raw_response: &'static [u8]) -> reqwest::Url {
@@ -909,8 +988,10 @@ mod tests {
         reqwest::Url::parse(&format!("http://{}/", addr)).unwrap()
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn probe_flags_redirect_to_access_as_warp_failure() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let url = spawn_probe_server(
             b"HTTP/1.1 302 Found\r\nLocation: https://sqprod.cloudflareaccess.com/\r\nContent-Length: 0\r\n\r\n",
         )
@@ -923,8 +1004,10 @@ mod tests {
         assert_eq!(result.kind, "http_status");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn probe_does_not_flag_upstream_404_as_warp_failure() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let url = spawn_probe_server(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
 
         let result = probe_url(url).await;
@@ -934,8 +1017,10 @@ mod tests {
         assert_eq!(result.kind, "http_status");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn probe_flags_connect_failure_as_warp_failure() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         // Bind then drop the listener so the port is almost certainly free.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

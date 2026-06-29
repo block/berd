@@ -1,10 +1,12 @@
 export type BuildFeature =
+  | "authGate"
   | "agentToolsTip"
   | "automations"
   | "builderbot"
   | "telemetry";
 
 const BUILD_FEATURES: Record<BuildFeature, boolean> = {
+  authGate: import.meta.env.VITE_AUTH_GATE === "1",
   agentToolsTip: true,
   automations: true,
   builderbot: true,

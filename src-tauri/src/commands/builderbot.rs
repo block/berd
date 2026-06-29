@@ -1,6 +1,7 @@
+use crate::commands::auth::verified_auth_context;
 use crate::services::builderbot;
 use serde_json::{json, Map, Value};
-use std::{cmp::Reverse, collections::HashSet, env};
+use std::{cmp::Reverse, collections::HashSet};
 
 const DEFAULT_LIST_LIMIT: u32 = 50;
 const MAX_LIST_LIMIT: u32 = 100;
@@ -8,7 +9,8 @@ const MAX_LIST_LIMIT: u32 = 100;
 #[tauri::command]
 pub async fn get_builderbot_tasks(limit: Option<u32>) -> Result<Value, String> {
     let limit = normalize_limit(limit);
-    let user = require_builderbot_user()?;
+    let auth = verified_auth_context().await?;
+    let user = auth.user.clone();
     let common_query = vec![("limit", limit.to_string()), ("status", "all".to_string())];
     let mut authored_query = common_query.clone();
     authored_query.push(("author", user.clone()));
@@ -16,8 +18,8 @@ pub async fn get_builderbot_tasks(limit: Option<u32>) -> Result<Value, String> {
     assigned_query.push(("assignee", user.clone()));
 
     let (authored_response, assigned_response) = tokio::try_join!(
-        builderbot::get_json("/api/v1/tasks", &authored_query),
-        builderbot::get_json("/api/v1/tasks", &assigned_query)
+        builderbot::get_json("/api/v1/tasks", &authored_query, &auth.session_credential),
+        builderbot::get_json("/api/v1/tasks", &assigned_query, &auth.session_credential)
     )?;
     let mut response = merge_task_responses(authored_response, assigned_response, limit);
     attach_current_user(&mut response, &user);
@@ -27,9 +29,15 @@ pub async fn get_builderbot_tasks(limit: Option<u32>) -> Result<Value, String> {
 #[tauri::command]
 pub async fn get_builderbot_scheduled_triggers(limit: Option<u32>) -> Result<Value, String> {
     let limit = normalize_limit(limit);
-    let user = require_builderbot_user()?;
+    let auth = verified_auth_context().await?;
+    let user = auth.user.clone();
     let query = user_owned_list_query(limit, &user);
-    let mut response = builderbot::get_json("/api/v1/scheduled-triggers", &query).await?;
+    let mut response = builderbot::get_json(
+        "/api/v1/scheduled-triggers",
+        &query,
+        &auth.session_credential,
+    )
+    .await?;
     attach_current_user(&mut response, &user);
     Ok(response)
 }
@@ -37,9 +45,11 @@ pub async fn get_builderbot_scheduled_triggers(limit: Option<u32>) -> Result<Val
 #[tauri::command]
 pub async fn get_builderbot_routing_rules(limit: Option<u32>) -> Result<Value, String> {
     let limit = normalize_limit(limit);
-    let user = require_builderbot_user()?;
+    let auth = verified_auth_context().await?;
+    let user = auth.user.clone();
     let query = user_owned_list_query(limit, &user);
-    let mut response = builderbot::get_json("/api/v1/routing-rules", &query).await?;
+    let mut response =
+        builderbot::get_json("/api/v1/routing-rules", &query, &auth.session_credential).await?;
     attach_current_user(&mut response, &user);
     Ok(response)
 }
@@ -49,12 +59,13 @@ pub async fn update_builderbot_scheduled_trigger(
     reference: String,
     request: Value,
 ) -> Result<Value, String> {
-    let _user = require_builderbot_user()?;
+    let auth = verified_auth_context().await?;
     let reference = trim_builderbot_reference(&reference)?;
     let endpoint = format!("/api/v1/scheduled-triggers/{reference}");
     builderbot::put_json(
         &endpoint,
         sanitize_scheduled_trigger_update(&reference, request)?,
+        &auth.session_credential,
     )
     .await
 }
@@ -64,12 +75,13 @@ pub async fn update_builderbot_routing_rule(
     reference: String,
     request: Value,
 ) -> Result<Value, String> {
-    let _user = require_builderbot_user()?;
+    let auth = verified_auth_context().await?;
     let reference = trim_builderbot_reference(&reference)?;
     let endpoint = format!("/api/v1/routing-rules/{reference}");
     builderbot::put_json(
         &endpoint,
         sanitize_routing_rule_update(&reference, request)?,
+        &auth.session_credential,
     )
     .await
 }
@@ -263,21 +275,6 @@ fn sanitize_routing_rule_update(reference: &str, request: Value) -> Result<Value
         return Err("Builderbot routing rule update has no editable fields.".to_string());
     }
     Ok(Value::Object(sanitized))
-}
-
-fn current_builderbot_user() -> Option<String> {
-    env::var("BERD_BUILDERBOT_USER")
-        .ok()
-        .or_else(|| env::var("USER").ok())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn require_builderbot_user() -> Result<String, String> {
-    current_builderbot_user().ok_or_else(|| {
-        "Unable to determine your Builderbot user. Set BERD_BUILDERBOT_USER and try again."
-            .to_string()
-    })
 }
 
 fn attach_current_user(response: &mut Value, user: &str) {

@@ -1,4 +1,8 @@
-use reqwest::{header::ACCEPT, StatusCode};
+use builderbot_auth::auth::SESSION_CREDENTIAL_HEADER;
+use reqwest::{
+    header::{HeaderValue, ACCEPT},
+    StatusCode,
+};
 use serde_json::Value;
 use std::{env, sync::OnceLock, time::Duration};
 
@@ -7,12 +11,17 @@ const DEFAULT_BUILDERBOT_BASE_URL: &str = "https://builderbot.sqprod.co/";
 const BUILDERBOT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ERROR_BODY_CHARS: usize = 500;
 
-pub(crate) async fn get_json(endpoint: &str, query: &[(&str, String)]) -> Result<Value, String> {
+pub(crate) async fn get_json(
+    endpoint: &str,
+    query: &[(&str, String)],
+    session_credential: &str,
+) -> Result<Value, String> {
     let url = build_url(endpoint, query)?;
-    let response = client()
+    let request = client()
         .get(url.clone())
         .header(ACCEPT, "application/json")
-        .timeout(BUILDERBOT_REQUEST_TIMEOUT)
+        .timeout(BUILDERBOT_REQUEST_TIMEOUT);
+    let response = add_session_credential(request, session_credential)?
         .send()
         .await
         .map_err(|error| {
@@ -27,13 +36,18 @@ pub(crate) async fn get_json(endpoint: &str, query: &[(&str, String)]) -> Result
     response_to_json(url, response).await
 }
 
-pub(crate) async fn put_json(endpoint: &str, body: Value) -> Result<Value, String> {
+pub(crate) async fn put_json(
+    endpoint: &str,
+    body: Value,
+    session_credential: &str,
+) -> Result<Value, String> {
     let url = build_url(endpoint, &[])?;
-    let response = client()
+    let request = client()
         .put(url.clone())
         .header(ACCEPT, "application/json")
         .json(&body)
-        .timeout(BUILDERBOT_REQUEST_TIMEOUT)
+        .timeout(BUILDERBOT_REQUEST_TIMEOUT);
+    let response = add_session_credential(request, session_credential)?
         .send()
         .await
         .map_err(|error| {
@@ -67,6 +81,20 @@ fn build_url(endpoint: &str, query: &[(&str, String)]) -> Result<reqwest::Url, S
         }
     }
     Ok(url)
+}
+
+fn add_session_credential(
+    request: reqwest::RequestBuilder,
+    session_credential: &str,
+) -> Result<reqwest::RequestBuilder, String> {
+    let session_credential = session_credential.trim();
+    if session_credential.is_empty() {
+        return Err("Builderbot auth session credential is empty.".to_string());
+    }
+
+    let header_value = HeaderValue::from_str(session_credential)
+        .map_err(|error| format!("Invalid Builderbot auth session credential: {error}"))?;
+    Ok(request.header(SESSION_CREDENTIAL_HEADER, header_value))
 }
 
 async fn response_to_json(url: reqwest::Url, response: reqwest::Response) -> Result<Value, String> {
@@ -126,4 +154,38 @@ fn client() -> &'static reqwest::Client {
             .build()
             .expect("failed to build Builderbot HTTP client")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use builderbot_auth::auth::SESSION_CREDENTIAL_HEADER;
+
+    #[test]
+    fn add_session_credential_attaches_builderbot_auth_header() {
+        let url =
+            reqwest::Url::parse("https://builderbot.example.test/api/v1/tasks").expect("parse URL");
+        let request = add_session_credential(client().get(url), " shared-session ")
+            .expect("add session credential")
+            .build()
+            .expect("build request");
+
+        assert_eq!(
+            request
+                .headers()
+                .get(SESSION_CREDENTIAL_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("shared-session")
+        );
+    }
+
+    #[test]
+    fn add_session_credential_rejects_empty_values() {
+        let url =
+            reqwest::Url::parse("https://builderbot.example.test/api/v1/tasks").expect("parse URL");
+
+        let error = add_session_credential(client().get(url), " ").expect_err("empty credential");
+
+        assert_eq!(error, "Builderbot auth session credential is empty.");
+    }
 }

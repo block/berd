@@ -1,5 +1,14 @@
 {
   "navigationLabel": "Navegación de configuración",
+  "account": {
+    "loggingOut": "Cerrando sesión...",
+    "logout": "Cerrar sesión",
+    "logoutError": "No se pudo cerrar sesión. Inténtalo de nuevo.",
+    "logoutSuccess": "Sesión cerrada.",
+    "organization": "Organización",
+    "signedInAs": "Sesión iniciada como",
+    "title": "Cuenta"
+  },
   "about": {
     "buildModes": {
       "development": "Desarrollo",

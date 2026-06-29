@@ -3,6 +3,16 @@ mod deep_links;
 mod services;
 mod types;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, OnceLock};
+
+    pub(crate) fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+}
+
 #[cfg(target_os = "macos")]
 use objc2::AnyThread;
 #[cfg(target_os = "macos")]
@@ -307,6 +317,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::agents::read_import_persona_file,
             commands::agents::read_agent_source_file,
+            commands::auth::auth_status,
+            commands::auth::start_login,
+            commands::auth::login,
+            commands::auth::cancel_login,
+            commands::auth::logout,
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::get_cached_avatars_for_refs,

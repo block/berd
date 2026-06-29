@@ -5,6 +5,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use builderbot_auth::preferences::{
+    BuilderBotPreferences as SkillsPreferences, PREFERENCE_KEYS,
+};
+
 #[derive(Debug, Deserialize)]
 pub struct MeResponse {
     pub tenant_id: String,
@@ -210,96 +214,4 @@ pub struct InstalledSkillMetadata {
     pub targets: Vec<String>,
     pub local_source: bool,
     pub pinned: bool,
-}
-
-/// One `bb config` preference key. [`PREFERENCE_KEYS`] is the single source
-/// of truth for the key list: `bb config` builds its help text and
-/// unknown-key errors from it.
-pub struct PreferenceKeySpec {
-    pub key: &'static str,
-    pub help: &'static str,
-}
-
-/// Keep in sync with the fields of [`SkillsPreferences`] below (and the
-/// get/set match arms in `skills.rs`); adding a field without an entry here
-/// leaves it undocumented and unsettable.
-pub const PREFERENCE_KEYS: &[PreferenceKeySpec] = &[
-    PreferenceKeySpec {
-        key: "org",
-        help: "Org used for access",
-    },
-    PreferenceKeySpec {
-        key: "channel",
-        help: "release channel for installs/updates (default: stable)",
-    },
-    PreferenceKeySpec {
-        key: "targets",
-        help: "comma-separated default install targets (default: agents)",
-    },
-    PreferenceKeySpec {
-        key: "install_strategy",
-        help: "symlink | copy (default: symlink)",
-    },
-    PreferenceKeySpec {
-        key: "no_auto_updates",
-        help: "true | false (default: false)",
-    },
-];
-
-/// User preferences stored in `~/.bb/config.yaml`. Every field needs a
-/// matching [`PREFERENCE_KEYS`] entry.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SkillsPreferences {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub org: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub targets: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub install_strategy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub no_auto_updates: Option<bool>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Drift guard for PREFERENCE_KEYS: the exhaustive struct literal stops
-    /// compiling when a SkillsPreferences field is added, and the assertions
-    /// catch a missing or stale key entry.
-    #[test]
-    fn preference_keys_match_skills_preferences_fields() {
-        let populated = SkillsPreferences {
-            org: Some("test".to_string()),
-            channel: Some("stable".to_string()),
-            targets: vec!["agents".to_string()],
-            install_strategy: Some("symlink".to_string()),
-            no_auto_updates: Some(false),
-        };
-        let yaml = serde_yaml::to_value(&populated).expect("serialize preferences");
-        let fields = yaml
-            .as_mapping()
-            .expect("preferences serialize to a mapping")
-            .keys()
-            .map(|key| key.as_str().expect("string key").to_string())
-            .collect::<Vec<_>>();
-        let keys = PREFERENCE_KEYS
-            .iter()
-            .map(|spec| spec.key)
-            .collect::<Vec<_>>();
-        for field in &fields {
-            assert!(
-                keys.contains(&field.as_str()),
-                "SkillsPreferences field `{field}` is missing from PREFERENCE_KEYS"
-            );
-        }
-        for key in &keys {
-            assert!(
-                fields.iter().any(|field| field == key),
-                "PREFERENCE_KEYS entry `{key}` has no SkillsPreferences field"
-            );
-        }
-    }
 }

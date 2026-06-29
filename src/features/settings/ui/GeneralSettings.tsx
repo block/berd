@@ -1,4 +1,5 @@
 import { ColorPicker } from "@/shared/ui/color-picker";
+import { logout, type AuthStatus } from "@/features/auth/api/auth";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -121,7 +122,15 @@ function AboutInfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function GeneralSettings() {
+interface GeneralSettingsProps {
+  authStatus?: AuthStatus;
+  onLoggedOut?: (status: AuthStatus) => void;
+}
+
+export function GeneralSettings({
+  authStatus,
+  onLoggedOut,
+}: GeneralSettingsProps) {
   const { t } = useTranslation(["settings", "shortcuts"]);
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
@@ -130,6 +139,7 @@ export function GeneralSettings() {
   const [bbCliInstalling, setBbCliInstalling] = useState(false);
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sidebarFlatChatListExperiment = useExperiment(
     SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
@@ -249,6 +259,20 @@ export function GeneralSettings() {
     }
   }
 
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      const nextStatus = await logout();
+      toast.success(t("account.logoutSuccess"));
+      onLoggedOut?.(nextStatus);
+    } catch (error) {
+      console.warn("Failed to log out:", error);
+      toast.error(t("account.logoutError"));
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   function handleSidebarChatGroupingChange(enabled: boolean) {
     const didSave = setExperimentConfigValue(
       SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
@@ -345,8 +369,39 @@ export function GeneralSettings() {
       : t("general.bbCli.install");
   const bbCliBusy = bbCliLoading || bbCliInstalling;
 
+  const signedInAs =
+    authStatus?.email ?? authStatus?.name ?? authStatus?.user ?? aboutFallback;
+  const organization = authStatus?.org ?? aboutFallback;
+  const showAccountSection = authStatus?.loggedIn === true;
+
   return (
     <SettingsPage contentClassName="space-y-8">
+      {showAccountSection ? (
+        <SettingsSection title={t("account.title")}>
+          <SettingRow
+            label={t("account.signedInAs")}
+            description={signedInAs}
+            className="items-start"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              feedbackState={loggingOut ? "loading" : "idle"}
+              loadingLabel={t("account.loggingOut")}
+              disabled={loggingOut}
+              onClick={() => void handleLogout()}
+            >
+              {t("account.logout")}
+            </Button>
+          </SettingRow>
+          <AboutInfoRow
+            label={t("account.organization")}
+            value={organization}
+          />
+        </SettingsSection>
+      ) : null}
+
       <SettingsSection>
         <SettingRow
           label={t("general.language.label")}

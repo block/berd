@@ -10,6 +10,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+pub use builderbot_auth::config::{
+    default_bb_home, default_preferences_path, kgoose_service_url,
+    normalize_kgoose_base_url_with_service_path, normalize_kgoose_service_path, read_optional_env,
+    read_preferences_file, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_KGOOSE_SERVICE_PATH,
+    DEFAULT_PROFILE_NAME, KGOOSE_SERVICE_PATH_ENV_VAR,
+};
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 
@@ -20,20 +26,14 @@ use super::org_routing::resolve_org_kgoose_base_url;
 use super::skills_models::SkillsPreferences;
 
 pub const KGOOSE_BASE_URL_ENV_VAR: &str = "KGOOSE_BASE_URL";
-pub const KGOOSE_SERVICE_PATH_ENV_VAR: &str = "KGOOSE_SERVICE_PATH";
-pub const DEFAULT_KGOOSE_SERVICE_PATH: &str = "/cash-app/goose";
 pub const LOCAL_DEV_CONFIG_FILE_NAME: &str = "bb-local-dev-config.yaml";
-pub const BB_HOME_ENV_VAR: &str = "BB_HOME";
 pub const BB_SKILLS_HOME_ENV_VAR: &str = "BB_SKILLS_HOME";
 pub const BB_SKILLS_PACKAGES_DIR_ENV_VAR: &str = "BB_SKILLS_PACKAGES_DIR";
 pub const BB_SKILLS_CONFIG_ENV_VAR: &str = "BB_SKILLS_CONFIG";
-pub const BB_SKILLS_PROFILE_ENV_VAR: &str = "BB_SKILLS_PROFILE";
 pub const BB_KGOOSE_PLAYPEN_ENV_VAR: &str = "BB_KGOOSE_PLAYPEN";
 pub const KGOOSE_PLAYPEN_ENV_VAR: &str = "KGOOSE_PLAYPEN";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "skills.yaml";
-pub const DEFAULT_PROFILE_NAME: &str = "default";
 pub const META_FILE_NAME: &str = ".bb-skills-meta.json";
-pub const PREFERENCES_FILE_NAME: &str = "config.yaml";
 
 #[derive(Debug, Clone)]
 pub struct SkillsConfig {
@@ -209,25 +209,8 @@ impl SkillsConfig {
     }
 
     pub fn write_preferences(&self, preferences: &SkillsPreferences) -> Result<()> {
-        let path = self.preferences_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
-        let yaml = serde_yaml::to_string(preferences).context("serialize skills preferences")?;
-        fs::write(&path, yaml).with_context(|| format!("write {}", path.display()))
+        builderbot_auth::config::write_preferences_file(&self.preferences_path(), preferences)
     }
-}
-
-pub fn default_preferences_path(bb_home: &Path) -> PathBuf {
-    bb_home.join(PREFERENCES_FILE_NAME)
-}
-
-pub fn read_preferences_file(path: &Path) -> Result<SkillsPreferences> {
-    if !path.exists() {
-        return Ok(SkillsPreferences::default());
-    }
-    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    serde_yaml::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
 }
 
 fn discover_local_dev_config() -> Result<PathBuf> {
@@ -280,12 +263,6 @@ pub struct SkillsProfileConfig {
     pub packages_dir: Option<String>,
 }
 
-pub fn default_bb_home() -> PathBuf {
-    env::var("HOME")
-        .map(|home| PathBuf::from(home).join(".bb"))
-        .unwrap_or_else(|_| PathBuf::from(".bb"))
-}
-
 /// Shared agents skills directory: the canonical home for installed skill
 /// files. Other agents (`~/.claude/skills`, ...) link here instead of each
 /// holding their own copy.
@@ -293,37 +270,4 @@ pub fn default_agents_skills_dir() -> PathBuf {
     env::var("HOME")
         .map(|home| PathBuf::from(home).join(".agents").join("skills"))
         .unwrap_or_else(|_| PathBuf::from(".agents/skills"))
-}
-
-pub fn read_optional_env(name: &str) -> Result<Option<String>> {
-    match env::var(name) {
-        Ok(value) => Ok(Some(value)),
-        Err(env::VarError::NotPresent) => Ok(None),
-        Err(err) => anyhow::bail!("failed to read {name}: {err}"),
-    }
-}
-
-pub fn normalize_kgoose_service_path(value: &str) -> Result<String> {
-    let path = value.trim().trim_matches('/');
-    if path.is_empty() {
-        anyhow::bail!("{KGOOSE_SERVICE_PATH_ENV_VAR} must not be empty");
-    }
-    Ok(format!("/{path}"))
-}
-
-pub fn normalize_kgoose_base_url_with_service_path(value: &str, service_path: &str) -> String {
-    let trimmed = value.trim().trim_end_matches('/');
-    trimmed
-        .strip_suffix(service_path.trim_end_matches('/'))
-        .unwrap_or(trimmed)
-        .trim_end_matches('/')
-        .to_string()
-}
-
-pub fn kgoose_service_url(base_url: &str, service_path: &str) -> String {
-    format!(
-        "{}{}",
-        normalize_kgoose_base_url_with_service_path(base_url, service_path),
-        service_path.trim_end_matches('/')
-    )
 }

@@ -181,6 +181,7 @@ bundle:
     fi
 
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+      VITE_AUTH_GATE=0 \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       "${TAURI_BUILD_ARGS[@]}"
 
@@ -230,6 +231,7 @@ bundle-debug:
       src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+      VITE_AUTH_GATE=0 \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"
 

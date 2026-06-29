@@ -24,7 +24,7 @@ use runtime::{
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::bb::auth_storage::stored_session_credential_header_value;
+use crate::bb::auth_storage::stored_session_credential_header_value_for_kgoose_base_url;
 use crate::bb::org_routing::resolve_org_kgoose_base_url;
 use crate::bb::skills_config::{
     default_bb_home, default_preferences_path, normalize_kgoose_service_path, read_optional_env,
@@ -361,25 +361,12 @@ fn resolve_kgoose_session_credential(base_url: &str, service_path: &str) -> Resu
         .map(std::path::PathBuf::from)
         .unwrap_or_else(default_bb_home);
 
-    for server_url in kgoose_auth_storage_lookup_urls(base_url, service_path) {
-        if let Some(credential) =
-            stored_session_credential_header_value(&profile, &server_url, bb_home.clone())?
-        {
-            return Ok(Some(credential));
-        }
-    }
-
-    Ok(None)
-}
-
-fn kgoose_auth_storage_lookup_urls(base_url: &str, service_path: &str) -> Vec<String> {
-    let trimmed = base_url.trim_end_matches('/');
-    let mut urls = vec![trimmed.to_string()];
-    let service_path = service_path.trim_end_matches('/');
-    if !trimmed.ends_with(service_path) {
-        urls.push(format!("{trimmed}{service_path}"));
-    }
-    urls
+    stored_session_credential_header_value_for_kgoose_base_url(
+        &profile,
+        base_url,
+        service_path,
+        bb_home,
+    )
 }
 
 fn clap_matches(command: Command, argv: Vec<String>) -> Result<ArgMatches> {

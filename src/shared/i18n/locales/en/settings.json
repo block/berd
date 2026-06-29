@@ -1,5 +1,14 @@
 {
   "navigationLabel": "Settings navigation",
+  "account": {
+    "loggingOut": "Logging out...",
+    "logout": "Log out",
+    "logoutError": "Couldn't log out. Try again.",
+    "logoutSuccess": "Logged out.",
+    "organization": "Organization",
+    "signedInAs": "Signed in as",
+    "title": "Account"
+  },
   "about": {
     "buildModes": {
       "development": "Development",

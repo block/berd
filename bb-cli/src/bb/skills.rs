@@ -724,7 +724,7 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
 
 fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
     let storage = default_session_storage(config)?;
-    let storage_key = super::auth_storage::SessionStorageKey::from_config(config);
+    let storage_key = super::auth_storage::session_storage_key_from_config(config);
     let mut warnings = Vec::new();
     let server_revoked = match logout_stored_session(config, storage.as_ref()) {
         Ok(server_revoked) => server_revoked,

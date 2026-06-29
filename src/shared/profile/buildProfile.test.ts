@@ -14,6 +14,7 @@ const registry = [
 describe("buildProfile", () => {
   it("enables generic bundled app build features", () => {
     expect(getBuildFeatureState()).toEqual({
+      authGate: false,
       agentToolsTip: true,
       automations: true,
       builderbot: true,

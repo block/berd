@@ -1,1 +1,1 @@
-pub const SESSION_CREDENTIAL_HEADER: &str = "X-BB-Session-Credential";
+pub use builderbot_auth::auth::SESSION_CREDENTIAL_HEADER;

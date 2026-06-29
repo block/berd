@@ -11,6 +11,7 @@ import { ProjectsView } from "@/features/projects/ui/ProjectsView";
 import { SearchView } from "@/features/search/ui/SearchView";
 import { SessionHistoryView } from "@/features/sessions/ui/SessionHistoryView";
 import { SettingsView } from "@/features/settings/ui/SettingsView";
+import type { AuthStatus } from "@/features/auth/api/auth";
 import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
@@ -36,6 +37,8 @@ import { scheduleAfterNextPaint } from "../lib/scheduleAfterNextPaint";
 interface AppShellContentProps {
   targetLocation: AppNavigationLocation;
   renderedLocation: AppNavigationLocation;
+  authStatus?: AuthStatus;
+  onLoggedOut?: (status: AuthStatus) => void;
   isPreparingContent: boolean;
   activeConnectionsTab: ConnectionsTab;
   automationsEnabled: boolean;
@@ -114,6 +117,7 @@ interface AppShellContentProps {
 export function AppShellContent({
   targetLocation,
   renderedLocation,
+  authStatus,
   isPreparingContent,
   activeConnectionsTab,
   automationsEnabled,
@@ -162,6 +166,7 @@ export function AppShellContent({
   onTagHomeComposerProject,
   onTagHomeComposerSkill,
   onHydratePinnedChatSessions,
+  onLoggedOut,
   onStartProviderTroubleshootingChat,
   onReturnToAgentDraft,
 }: AppShellContentProps) {
@@ -205,6 +210,7 @@ export function AppShellContent({
 
   const routeContent = renderRouteContent({
     activeConnectionsTab,
+    authStatus,
     automationsEnabled,
     builderbotEnabled,
     chatComposerHandoffActive,
@@ -236,6 +242,7 @@ export function AppShellContent({
     onOpenAutomation,
     onOpenExtension,
     onOpenProjectSettings,
+    onLoggedOut,
     onOpenSkill,
     onRenameChat,
     onForkChat,
@@ -266,6 +273,7 @@ export function AppShellContent({
 
 interface RenderRouteContentOptions {
   activeConnectionsTab: ConnectionsTab;
+  authStatus?: AuthStatus;
   automationsEnabled: boolean;
   builderbotEnabled: boolean;
   chatComposerHandoffActive: boolean;
@@ -327,6 +335,7 @@ interface RenderRouteContentOptions {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
+  onLoggedOut?: (status: AuthStatus) => void;
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
@@ -341,6 +350,7 @@ function renderRouteContent({
   chatComposerHandoffActive,
   chatComposerHandoffInProgress,
   chatComposerHandoffRequest,
+  authStatus,
   chatComposerHandoffSessionId,
   chatViewportLeftOcclusionPx,
   homeContent,
@@ -367,6 +377,7 @@ function renderRouteContent({
   onOpenAutomation,
   onOpenExtension,
   onOpenProjectSettings,
+  onLoggedOut,
   onOpenSkill,
   onRenameChat,
   onForkChat,
@@ -390,7 +401,9 @@ function renderRouteContent({
         <SettingsView
           activeSection={location.settingsSection}
           activeConnectionsTab={activeConnectionsTab}
+          authStatus={authStatus}
           onConnectionsTabChange={onConnectionsTabChange}
+          onLoggedOut={onLoggedOut}
           onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
           onReturnToAgentDraft={onReturnToAgentDraft}
         />

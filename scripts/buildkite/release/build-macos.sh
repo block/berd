@@ -74,6 +74,7 @@ echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
 VITE_APP_VERSION="$RELEASE_VERSION" \
 VITE_ENVIRONMENT=production \
+VITE_AUTH_GATE=0 \
 VITE_UPDATER_ENABLED=true \
   pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features berdctl \
     --config src-tauri/tauri.release.conf.json
@@ -83,6 +84,10 @@ UNSIGNED_APP="src-tauri/target/${TARGET_TRIPLE}/release/bundle/macos/${APP_BUNDL
 
 echo "+++ :package: Staging unsigned .app for apple-codesign"
 mkdir -p release/macos
+echo "+++ :key: Rendering macOS entitlements"
+./scripts/render-macos-entitlements.sh \
+  src-tauri/entitlements.plist \
+  release/macos/entitlements.plist
 rm -rf "release/macos/${APP_BUNDLE_NAME}.app"
 # ditto preserves bundle metadata and extended attributes cp would drop.
 ditto "$UNSIGNED_APP" "release/macos/${APP_BUNDLE_NAME}.app"

@@ -12,6 +12,7 @@ import {
 } from "@/shared/runtime-config/schema";
 
 const enabledBuildFeatures: Record<BuildFeature, boolean> = {
+  authGate: false,
   agentToolsTip: true,
   automations: true,
   builderbot: true,

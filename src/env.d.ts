@@ -6,6 +6,7 @@ declare global {
   interface ImportMetaEnv {
     readonly VITE_APP_VERSION?: string;
     readonly VITE_ENVIRONMENT?: string;
+    readonly VITE_AUTH_GATE?: string;
     readonly VITE_TELEMETRY_DEBUG?: string;
     readonly VITE_DESIGN_SYSTEM_EXPLORER?: string;
     readonly VITE_BERD_G2_BASE_URL?: string;

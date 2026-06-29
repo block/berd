@@ -86,6 +86,7 @@ import { AgentBuilderLeaveDraftDialog } from "@/features/agents/ui/AgentBuilderL
 import { AutomationBuilderLeaveDialog } from "@/features/automations/ui/AutomationBuilderLeaveDialog";
 import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
 import { AppShellLayout } from "./ui/AppShellLayout";
+import type { AuthStatus } from "@/features/auth/api/auth";
 import { AppShellContent } from "./ui/AppShellContent";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
 import {
@@ -297,7 +298,15 @@ function getTopBarChromeInsets(
   return { leading: "compact" };
 }
 
-export function AppShell({ children }: { children?: React.ReactNode }) {
+export function AppShell({
+  authStatus,
+  children,
+  onLoggedOut,
+}: {
+  authStatus?: AuthStatus;
+  children?: React.ReactNode;
+  onLoggedOut?: (status: AuthStatus) => void;
+}) {
   const { t } = useTranslation(["chat", "common", "agents", "settings"]);
   const {
     expandSidebar,
@@ -3312,6 +3321,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             <AppShellContent
               targetLocation={targetLocation}
               renderedLocation={renderedLocation}
+              authStatus={authStatus}
               isPreparingContent={isPreparingContent}
               activeConnectionsTab={activeConnectionsTab}
               automationsEnabled={isAutomationsFeatureEnabled}
@@ -3366,6 +3376,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onTagHomeComposerProject={handleTagHomeComposerProject}
               onTagHomeComposerSkill={handleTagHomeComposerSkill}
               onHydratePinnedChatSessions={hydratePinnedChatSessions}
+              onLoggedOut={onLoggedOut}
               onStartProviderTroubleshootingChat={
                 handleStartProviderTroubleshootingChat
               }
