@@ -2,6 +2,10 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
+import {
+  clearBufferedStreamingUpdatesForSession,
+  enqueueStreamingTextUpdate,
+} from "../../acp/liveStreamingUpdates";
 import { clearReplayBuffer, ensureReplayBuffer } from "../replayBuffer";
 
 const mockAcpSendMessage = vi.fn();
@@ -46,6 +50,7 @@ describe("useChat compaction", () => {
   beforeEach(() => {
     mockAcpSendMessage.mockReset();
     mockAcpLoadSession.mockReset();
+    clearBufferedStreamingUpdatesForSession("session-1");
     clearReplayBuffer("session-1");
     useChatStore.setState({
       messagesBySession: {},
@@ -116,6 +121,55 @@ describe("useChat compaction", () => {
     expect(useChatStore.getState().loadingSessionIds.has("session-1")).toBe(
       false,
     );
+  });
+
+  it("drops buffered compact command output before replacing the transcript", async () => {
+    mockAcpSendMessage.mockImplementation(async () => {
+      useChatStore.getState().addMessage("session-1", {
+        id: "compact-live-response",
+        role: "assistant",
+        created: 1,
+        content: [],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          completionStatus: "inProgress",
+        },
+      });
+      enqueueStreamingTextUpdate(
+        "session-1",
+        "compact-live-response",
+        "Throwaway compact output",
+      );
+    });
+    mockAcpLoadSession.mockImplementation(async (sessionId: string) => {
+      const buffer = ensureReplayBuffer(sessionId);
+      buffer.push(createTextMessage("user-1", "user", "Before compact"));
+      buffer.push(
+        createTextMessage("assistant-1", "assistant", "After compact"),
+      );
+    });
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.compactConversation();
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "assistant-1",
+      expect.any(String),
+    ]);
+    expect(
+      messages.some((message) =>
+        message.content.some(
+          (block) =>
+            block.type === "text" && block.text === "Throwaway compact output",
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("prepares and compacts the override persona session", async () => {

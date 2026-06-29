@@ -1,6 +1,7 @@
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { flushBufferedStreamingUpdatesForSession } from "./liveStreamingUpdates";
 
 type SessionInfoUpdate = SessionUpdate & {
   sessionUpdate: "session_info_update";
@@ -30,6 +31,11 @@ export function handleSessionInfoUpdate(
     const activeRunId =
       typeof gooseMeta.activeRunId === "string" ? gooseMeta.activeRunId : null;
     const chatStore = useChatStore.getState();
+    if (activeRunId === null) {
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+      });
+    }
     chatStore.setActiveRunId(sessionId, activeRunId);
     if (activeRunId === null) {
       chatStore.setRunCancellationPending(sessionId, false);

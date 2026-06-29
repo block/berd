@@ -23,6 +23,10 @@ import { i18n } from "@/shared/i18n";
 import type { ChatSendOptions } from "../types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { steerPromptInSession } from "../lib/steerCore";
+import {
+  clearBufferedStreamingUpdatesForSession,
+  flushBufferedStreamingUpdatesForSession,
+} from "../acp/liveStreamingUpdates";
 
 // TODO: Remove this fallback once goose2 has first-class /-commands.
 const MANUAL_COMPACT_TRIGGER = "/compact";
@@ -245,6 +249,7 @@ export function useChat(
     };
 
     chatStore.setRunCancellationPending(sessionId, true);
+    flushBufferedStreamingUpdatesForSession(sessionId, { flushSubtitle: true });
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
@@ -284,6 +289,7 @@ export function useChat(
 
   const clearChat = useCallback(() => {
     abortRef.current?.abort();
+    clearBufferedStreamingUpdatesForSession(sessionId);
     clearMessages(sessionId);
     resetPersonaHandoff(sessionId);
     useChatStore.getState().setRunCancellationPending(sessionId, false);
@@ -325,6 +331,9 @@ export function useChat(
         overridePersona?.name,
       );
 
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+      });
       setActiveSession(sessionId);
       setChatState(sessionId, "compacting");
       setStreamingMessageId(sessionId, null);
@@ -358,6 +367,7 @@ export function useChat(
         // Command responses are streamed via prompt notifications, but the ACP
         // layer does not currently forward history replacement events. Drop those
         // transient chunks and refresh the session from replay instead.
+        clearBufferedStreamingUpdatesForSession(sessionId);
         clearReplayBuffer(sessionId);
         const workingDir = getWorkingDir();
         await acpLoadSession(sessionId, workingDir);
@@ -386,6 +396,7 @@ export function useChat(
         setError(sessionId, errorMessage);
         return "failed" as CompactConversationResult;
       } finally {
+        clearBufferedStreamingUpdatesForSession(sessionId);
         setChatState(sessionId, "idle");
         setStreamingMessageId(sessionId, null);
         setPendingAssistantProvider(sessionId, null);

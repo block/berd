@@ -5,7 +5,6 @@ import type {
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getBufferedMessage } from "@/features/chat/hooks/replayBuffer";
-import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
 import type {
   MessageContent,
   MessageMetadata,
@@ -14,7 +13,6 @@ import type {
   ToolRequestContent,
   ToolResponseContent,
 } from "@/shared/types/messages";
-import { isTextContent } from "@/shared/types/messages";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   clearActiveMessageId,
@@ -53,6 +51,11 @@ import {
 } from "@/shared/api/acpToolCallIdentity";
 import { applyChatSessionConfigOptionsSnapshot } from "./sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
+import {
+  enqueueStreamingTextUpdate,
+  enqueueStreamingThinkingUpdate,
+  flushBufferedStreamingUpdatesForSession,
+} from "./liveStreamingUpdates";
 
 // Per-session perf counters for replay streaming.
 interface ReplayPerf {
@@ -387,6 +390,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
       if (isRunInterventionBoundary(update)) {
+        flushBufferedStreamingUpdatesForSession(sessionId);
         store.startAssistantStreamAfterIntervention(sessionId);
         break;
       }
@@ -397,56 +401,15 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       );
 
       if (update.content.type === "text" && "text" in update.content) {
-        store.appendStreamingText(sessionId, messageId, update.content.text);
-
-        // Mirror the backend's last-message-snippet append: update the sidebar
-        // subtitle live from the assistant message's accumulated text so far.
-        // This runs in the global handler for every session regardless of
-        // visibility, so background turns update too. Re-read the store to get
-        // the text appended just now, and concatenate only text blocks (matching
-        // the backend's `Message::as_concat_text`).
-        //
-        // The snippet is fully determined by the first MESSAGE_SNIPPET_MAX_CHARS
-        // code points, and a streaming turn only ever appends at the end, so we
-        // build at most a SNIPPET_SCAN_LIMIT-unit leading prefix rather than
-        // materializing the whole reply each chunk. That keeps the per-chunk cost
-        // bounded (avoiding O(n²) over a long streamed message); messageSnippet
-        // bounds its own scan to the same limit, and patchSession compare-and-skips
-        // when the resulting subtitle is unchanged.
-        //
-        // The streaming assistant message stays the last entry for the turn
-        // (ensureLiveAssistantMessage appends at the tail; updateStreamingText and
-        // streamed tool calls edit/append within it), so findLast short-circuits
-        // on its first comparison instead of scanning every prior message each
-        // chunk — same idiom as findLiveMessageIdWithToolCall below. Ids are
-        // unique, so the result is identical to find regardless of position.
-        const streamingMessage = useChatStore
-          .getState()
-          .messagesBySession[sessionId]?.findLast(
-            (message) => message.id === messageId,
-          );
-        if (streamingMessage) {
-          let accumulatedText = "";
-          for (const block of streamingMessage.content) {
-            if (!isTextContent(block)) continue;
-            if (accumulatedText.length > 0) accumulatedText += "\n";
-            accumulatedText += block.text.slice(
-              0,
-              SNIPPET_SCAN_LIMIT - accumulatedText.length,
-            );
-            if (accumulatedText.length >= SNIPPET_SCAN_LIMIT) break;
-          }
-          useChatSessionStore
-            .getState()
-            .updateSessionSubtitleFromText(sessionId, accumulatedText);
-        }
+        enqueueStreamingTextUpdate(sessionId, messageId, update.content.text);
       } else if (update.content.type === "image") {
         // Live counterpart to the replay path (see the replay
         // agent_message_chunk handler above): append an image content block to
         // the streaming assistant message so agent-emitted images render inline
         // during the turn, not only after reload. Without this branch image
-        // chunks were silently dropped live. Ensure the streaming message id is
-        // set first so appendToStreamingMessage targets the right message.
+        // chunks were silently dropped live. Ensure buffered text lands before
+        // the image so content order stays identical to notification order.
+        flushBufferedStreamingUpdatesForSession(sessionId);
         store.setStreamingMessageId(sessionId, messageId);
         store.appendToStreamingMessage(sessionId, { ...update.content });
       }
@@ -459,20 +422,25 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
           sessionId,
           getChunkMessageId(update) ?? undefined,
         );
-        store.setStreamingMessageId(sessionId, messageId);
-        store.updateStreamingThinking(sessionId, update.content.text);
+        enqueueStreamingThinkingUpdate(
+          sessionId,
+          messageId,
+          update.content.text,
+        );
       }
       break;
     }
 
     case "user_message_chunk": {
       if (isRunInterventionBoundary(update)) {
+        flushBufferedStreamingUpdatesForSession(sessionId);
         store.startAssistantStreamAfterIntervention(sessionId);
       }
       break;
     }
 
     case "tool_call": {
+      flushBufferedStreamingUpdatesForSession(sessionId);
       const messageId = ensureLiveAssistantMessage(sessionId);
       const identity = getToolCallIdentity(update);
       const chainSummary = getToolChainSummary(update);
@@ -494,6 +462,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
     }
 
     case "tool_call_update": {
+      flushBufferedStreamingUpdatesForSession(sessionId);
       const identity = getToolCallIdentity(update);
       const chainSummary = getToolChainSummary(update);
       // Late-arriving updates (chain summaries, async titles) can target a
@@ -596,6 +565,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
     case "session_info_update":
     case "config_option_update":
     case "usage_update":
+      flushBufferedStreamingUpdatesForSession(sessionId);
       handleShared(sessionId, update);
       break;
 

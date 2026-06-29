@@ -3,6 +3,79 @@ import { useTranslation } from "react-i18next";
 
 import { getCurrentLocale } from "./locale";
 
+const FORMATTER_CACHE_LIMIT = 128;
+const numberFormatterCache = new Map<string, Intl.NumberFormat>();
+const dateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>();
+const relativeTimeFormatterCache = new Map<string, Intl.RelativeTimeFormat>();
+
+function stableOptionsKey(options: object | undefined): string {
+  if (!options) {
+    return "";
+  }
+
+  return JSON.stringify(
+    Object.entries(options).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+}
+
+function getCachedFormatter<T>(
+  cache: Map<string, T>,
+  key: string,
+  create: () => T,
+): T {
+  const cached = cache.get(key);
+  if (cached) {
+    cache.delete(key);
+    cache.set(key, cached);
+    return cached;
+  }
+
+  const formatter = create();
+  cache.set(key, formatter);
+  if (cache.size > FORMATTER_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) {
+      cache.delete(oldestKey);
+    }
+  }
+  return formatter;
+}
+
+function getNumberFormatter(
+  locale: string,
+  options?: Intl.NumberFormatOptions,
+): Intl.NumberFormat {
+  return getCachedFormatter(
+    numberFormatterCache,
+    `${locale}\u0000${stableOptionsKey(options)}`,
+    () => new Intl.NumberFormat(locale, options),
+  );
+}
+
+function getDateTimeFormatter(
+  locale: string,
+  options?: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  return getCachedFormatter(
+    dateTimeFormatterCache,
+    `${locale}\u0000${stableOptionsKey(options)}`,
+    () => new Intl.DateTimeFormat(locale, options),
+  );
+}
+
+function getRelativeTimeFormatter(
+  locale: string,
+  options?: Intl.RelativeTimeFormatOptions,
+): Intl.RelativeTimeFormat {
+  return getCachedFormatter(
+    relativeTimeFormatterCache,
+    `${locale}\u0000${stableOptionsKey(options)}`,
+    () => new Intl.RelativeTimeFormat(locale, options),
+  );
+}
+
 function toDate(value: Date | string | number): Date {
   return value instanceof Date ? value : new Date(value);
 }
@@ -12,7 +85,7 @@ export function formatNumber(
   options?: Intl.NumberFormatOptions,
   locale: string = getCurrentLocale(),
 ): string {
-  return new Intl.NumberFormat(locale, options).format(value);
+  return getNumberFormatter(locale, options).format(value);
 }
 
 export function formatDate(
@@ -20,7 +93,7 @@ export function formatDate(
   options?: Intl.DateTimeFormatOptions,
   locale: string = getCurrentLocale(),
 ): string {
-  return new Intl.DateTimeFormat(locale, options).format(toDate(value));
+  return getDateTimeFormatter(locale, options).format(toDate(value));
 }
 
 export function formatDateParts(
@@ -28,7 +101,7 @@ export function formatDateParts(
   options?: Intl.DateTimeFormatOptions,
   locale: string = getCurrentLocale(),
 ): Intl.DateTimeFormatPart[] {
-  return new Intl.DateTimeFormat(locale, options).formatToParts(toDate(value));
+  return getDateTimeFormatter(locale, options).formatToParts(toDate(value));
 }
 
 export function formatRelativeTime(
@@ -37,7 +110,7 @@ export function formatRelativeTime(
   options?: Intl.RelativeTimeFormatOptions,
   locale: string = getCurrentLocale(),
 ): string {
-  return new Intl.RelativeTimeFormat(locale, options).format(value, unit);
+  return getRelativeTimeFormatter(locale, options).format(value, unit);
 }
 
 export function formatRelativeTimeToNow(

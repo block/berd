@@ -19,6 +19,7 @@ import {
   clearMessageTracking,
   handleSessionNotification,
 } from "../acpNotificationHandler";
+import { flushBufferedStreamingUpdatesForSession } from "../liveStreamingUpdates";
 import { setActiveMessageId } from "@/shared/api/acpActiveMessageTracking";
 import { registerPreparedSession } from "@/shared/api/acpSessionRegistry";
 
@@ -182,6 +183,9 @@ describe("acpNotificationHandler", () => {
         true,
       );
     });
+    flushBufferedStreamingUpdatesForSession("acp-session", {
+      flushSubtitle: true,
+    });
 
     const [message] = useChatStore.getState().messagesBySession["acp-session"];
     expect(message.id).toBe("assistant-1");
@@ -308,8 +312,12 @@ describe("acpNotificationHandler", () => {
         } as never);
       }
 
+      flushBufferedStreamingUpdatesForSession("acp-session", {
+        flushSubtitle: true,
+      });
+
       // Step 2 lock-in: the handler never materializes more than a bounded
-      // leading prefix, so no per-chunk call exceeds SNIPPET_SCAN_LIMIT units.
+      // leading prefix, so no subtitle call exceeds SNIPPET_SCAN_LIMIT units.
       expect(subtitleSpy).toHaveBeenCalled();
       for (const [, text] of subtitleSpy.mock.calls) {
         expect((text as string).length).toBeLessThanOrEqual(SNIPPET_SCAN_LIMIT);
@@ -358,6 +366,10 @@ describe("acpNotificationHandler", () => {
       } as never);
     }
 
+    flushBufferedStreamingUpdatesForSession("acp-session", {
+      flushSubtitle: true,
+    });
+
     const fullText = chunks.join("");
     const subtitle = useChatSessionStore
       .getState()
@@ -386,6 +398,10 @@ describe("acpNotificationHandler", () => {
         },
       },
     } as never);
+
+    flushBufferedStreamingUpdatesForSession("acp-session", {
+      flushSubtitle: true,
+    });
 
     const [message] = useChatStore.getState().messagesBySession["acp-session"];
     expect(message).toMatchObject({
@@ -477,6 +493,10 @@ describe("acpNotificationHandler", () => {
         },
       },
     } as never);
+
+    flushBufferedStreamingUpdatesForSession("acp-session", {
+      flushSubtitle: true,
+    });
 
     const messages = useChatStore.getState().messagesBySession["acp-session"];
     expect(messages).toHaveLength(3);
@@ -1016,6 +1036,10 @@ describe("acpNotificationHandler", () => {
         },
       },
     } as never);
+
+    flushBufferedStreamingUpdatesForSession("acp-session", {
+      flushSubtitle: true,
+    });
 
     const messages = useChatStore.getState().messagesBySession["acp-session"];
     const ownerMessage = messages.find((m) => m.id === "assistant-1");

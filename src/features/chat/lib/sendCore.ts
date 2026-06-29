@@ -10,6 +10,10 @@ import {
 } from "@/features/chat/lib/sessionTitle";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  clearLiveSubtitleUpdate,
+  flushBufferedStreamingUpdatesForSession,
+} from "@/features/chat/acp/liveStreamingUpdates";
 import { acpSendMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -121,6 +125,7 @@ export async function dispatchPrompt(
   const pendingAssistantProvider = providerId ?? agent?.provider ?? "goose";
 
   setPendingAssistantProvider(sessionId, pendingAssistantProvider);
+  clearLiveSubtitleUpdate(sessionId);
 
   // Create and add user message.
   const userMessage = createUserMessage(
@@ -212,12 +217,19 @@ export async function dispatchPrompt(
       );
     }
 
+    flushBufferedStreamingUpdatesForSession(sessionId, { flushSubtitle: true });
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+      });
       setChatState(sessionId, "idle");
     } else {
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+      });
       const errorMessage = formatAcpErrorMessage(err);
       const liveStore = useChatStore.getState();
       const { streamingMessageId } = liveStore.getSessionRuntime(sessionId);

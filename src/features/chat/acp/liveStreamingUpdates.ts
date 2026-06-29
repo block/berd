@@ -1,0 +1,328 @@
+import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
+import { isTextContent } from "@/shared/types/messages";
+
+const LIVE_SUBTITLE_THROTTLE_MS = 1_000;
+const FRAME_FALLBACK_MS = 16;
+
+type TimerId = ReturnType<typeof setTimeout>;
+
+interface BufferedTextUpdate {
+  kind: "text";
+  sessionId: string;
+  messageId: string;
+  text: string;
+}
+
+interface BufferedThinkingUpdate {
+  kind: "thinking";
+  sessionId: string;
+  messageId: string;
+  chunks: string[];
+}
+
+type BufferedStreamingUpdate = BufferedTextUpdate | BufferedThinkingUpdate;
+
+interface PendingSubtitleUpdate {
+  text: string;
+  timerId: TimerId | null;
+  lastPublishedAt: number;
+}
+
+const bufferedStreamingUpdates: BufferedStreamingUpdate[] = [];
+const pendingSubtitleUpdates = new Map<string, PendingSubtitleUpdate>();
+let scheduledFrameId: number | null = null;
+let scheduledTimeoutId: TimerId | null = null;
+
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function requestFrame(callback: () => void): void {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.requestAnimationFrame === "function"
+  ) {
+    scheduledFrameId = window.requestAnimationFrame(() => {
+      scheduledFrameId = null;
+      callback();
+    });
+    return;
+  }
+
+  scheduledTimeoutId = setTimeout(() => {
+    scheduledTimeoutId = null;
+    callback();
+  }, FRAME_FALLBACK_MS);
+}
+
+function cancelScheduledFrame(): void {
+  if (
+    scheduledFrameId !== null &&
+    typeof window !== "undefined" &&
+    typeof window.cancelAnimationFrame === "function"
+  ) {
+    window.cancelAnimationFrame(scheduledFrameId);
+  }
+  scheduledFrameId = null;
+
+  if (scheduledTimeoutId !== null) {
+    clearTimeout(scheduledTimeoutId);
+  }
+  scheduledTimeoutId = null;
+}
+
+function scheduleBufferedFlush(): void {
+  if (scheduledFrameId !== null || scheduledTimeoutId !== null) {
+    return;
+  }
+
+  requestFrame(flushAllBufferedStreamingUpdates);
+}
+
+function getAccumulatedAssistantText(
+  sessionId: string,
+  messageId: string,
+): string | null {
+  const streamingMessage = useChatStore
+    .getState()
+    .messagesBySession[sessionId]?.findLast(
+      (message) => message.id === messageId,
+    );
+  if (!streamingMessage) {
+    return null;
+  }
+
+  let accumulatedText = "";
+  for (const block of streamingMessage.content) {
+    if (!isTextContent(block)) continue;
+    if (accumulatedText.length > 0) accumulatedText += "\n";
+    accumulatedText += block.text.slice(
+      0,
+      SNIPPET_SCAN_LIMIT - accumulatedText.length,
+    );
+    if (accumulatedText.length >= SNIPPET_SCAN_LIMIT) break;
+  }
+
+  return accumulatedText;
+}
+
+function updateLiveSubtitle(sessionId: string, text: string): void {
+  useChatSessionStore.getState().updateSessionSubtitleFromText(sessionId, text);
+}
+
+function publishLiveSubtitle(sessionId: string, text: string): void {
+  updateLiveSubtitle(sessionId, text);
+  const pending = pendingSubtitleUpdates.get(sessionId);
+  if (pending) {
+    pending.text = text;
+    pending.lastPublishedAt = nowMs();
+  } else {
+    pendingSubtitleUpdates.set(sessionId, {
+      text,
+      timerId: null,
+      lastPublishedAt: nowMs(),
+    });
+  }
+}
+
+export function scheduleLiveSubtitleUpdate(
+  sessionId: string,
+  text: string,
+): void {
+  const now = nowMs();
+  const pending = pendingSubtitleUpdates.get(sessionId);
+  if (!pending) {
+    pendingSubtitleUpdates.set(sessionId, {
+      text,
+      timerId: null,
+      lastPublishedAt: now,
+    });
+    updateLiveSubtitle(sessionId, text);
+    return;
+  }
+
+  pending.text = text;
+  const elapsedMs = now - pending.lastPublishedAt;
+  if (elapsedMs >= LIVE_SUBTITLE_THROTTLE_MS) {
+    if (pending.timerId !== null) {
+      clearTimeout(pending.timerId);
+      pending.timerId = null;
+    }
+    publishLiveSubtitle(sessionId, text);
+    return;
+  }
+
+  if (pending.timerId !== null) {
+    return;
+  }
+
+  pending.timerId = setTimeout(() => {
+    pending.timerId = null;
+    publishLiveSubtitle(sessionId, pending.text);
+  }, LIVE_SUBTITLE_THROTTLE_MS - elapsedMs);
+}
+
+export function flushLiveSubtitleUpdate(sessionId: string): void {
+  const pending = pendingSubtitleUpdates.get(sessionId);
+  if (!pending) {
+    return;
+  }
+
+  if (pending.timerId !== null) {
+    clearTimeout(pending.timerId);
+  }
+  pendingSubtitleUpdates.delete(sessionId);
+  updateLiveSubtitle(sessionId, pending.text);
+}
+
+export function clearLiveSubtitleUpdate(sessionId: string): void {
+  const pending = pendingSubtitleUpdates.get(sessionId);
+  if (pending?.timerId != null) {
+    clearTimeout(pending.timerId);
+  }
+  pendingSubtitleUpdates.delete(sessionId);
+}
+
+export function enqueueStreamingTextUpdate(
+  sessionId: string,
+  messageId: string,
+  text: string,
+): void {
+  if (!text) {
+    return;
+  }
+
+  const latest = bufferedStreamingUpdates.at(-1);
+  if (
+    latest?.kind === "text" &&
+    latest.sessionId === sessionId &&
+    latest.messageId === messageId
+  ) {
+    latest.text += text;
+  } else {
+    bufferedStreamingUpdates.push({
+      kind: "text",
+      sessionId,
+      messageId,
+      text,
+    });
+  }
+  scheduleBufferedFlush();
+}
+
+export function enqueueStreamingThinkingUpdate(
+  sessionId: string,
+  messageId: string,
+  text: string,
+): void {
+  if (!text) {
+    return;
+  }
+
+  const latest = bufferedStreamingUpdates.at(-1);
+  if (
+    latest?.kind === "thinking" &&
+    latest.sessionId === sessionId &&
+    latest.messageId === messageId
+  ) {
+    latest.chunks.push(text);
+  } else {
+    bufferedStreamingUpdates.push({
+      kind: "thinking",
+      sessionId,
+      messageId,
+      chunks: [text],
+    });
+  }
+  scheduleBufferedFlush();
+}
+
+function applyBufferedUpdate(update: BufferedStreamingUpdate): void {
+  const store = useChatStore.getState();
+  if (update.kind === "text") {
+    store.appendStreamingText(update.sessionId, update.messageId, update.text);
+    const accumulatedText = getAccumulatedAssistantText(
+      update.sessionId,
+      update.messageId,
+    );
+    if (accumulatedText !== null) {
+      scheduleLiveSubtitleUpdate(update.sessionId, accumulatedText);
+    }
+    return;
+  }
+
+  store.setStreamingMessageId(update.sessionId, update.messageId);
+  for (const chunk of update.chunks) {
+    store.updateStreamingThinking(update.sessionId, chunk);
+  }
+}
+
+export function flushAllBufferedStreamingUpdates(): void {
+  cancelScheduledFrame();
+
+  const updates = bufferedStreamingUpdates.splice(
+    0,
+    bufferedStreamingUpdates.length,
+  );
+
+  for (const update of updates) {
+    applyBufferedUpdate(update);
+  }
+}
+
+export function flushBufferedStreamingUpdatesForSession(
+  sessionId: string,
+  options: { flushSubtitle?: boolean } = {},
+): void {
+  const sessionUpdates = bufferedStreamingUpdates.filter(
+    (update) => update.sessionId === sessionId,
+  );
+  if (sessionUpdates.length === 0) {
+    if (options.flushSubtitle) {
+      flushLiveSubtitleUpdate(sessionId);
+    }
+    return;
+  }
+
+  for (
+    let index = bufferedStreamingUpdates.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    if (bufferedStreamingUpdates[index]?.sessionId === sessionId) {
+      bufferedStreamingUpdates.splice(index, 1);
+    }
+  }
+
+  if (bufferedStreamingUpdates.length === 0) {
+    cancelScheduledFrame();
+  }
+
+  for (const update of sessionUpdates) {
+    applyBufferedUpdate(update);
+  }
+
+  if (options.flushSubtitle) {
+    flushLiveSubtitleUpdate(sessionId);
+  }
+}
+
+export function clearBufferedStreamingUpdatesForSession(
+  sessionId: string,
+): void {
+  for (
+    let index = bufferedStreamingUpdates.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    if (bufferedStreamingUpdates[index]?.sessionId === sessionId) {
+      bufferedStreamingUpdates.splice(index, 1);
+    }
+  }
+  if (bufferedStreamingUpdates.length === 0) {
+    cancelScheduledFrame();
+  }
+  clearLiveSubtitleUpdate(sessionId);
+}
