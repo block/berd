@@ -925,6 +925,125 @@ describe("VirtualMessageTimeline", () => {
     expect(scroller.scrollTop).toBe(4700);
   });
 
+  it("updates live agent work text before the turn completes", () => {
+    const user = textMessage("user-1", "user", "Please inspect");
+    const assistant: Message = {
+      id: "assistant-work",
+      role: "assistant",
+      created: Date.UTC(2026, 5, 4, 12, 1, 0),
+      metadata: { userVisible: true },
+      content: [
+        { type: "thinking", text: "Planning" },
+        { type: "text", text: "Streaming answer part one" },
+      ],
+    };
+
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[user, assistant]}
+        streamingMessageId="assistant-work"
+      />,
+    );
+
+    expect(screen.getByText("Streaming answer part one")).toBeInTheDocument();
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          user,
+          {
+            ...assistant,
+            content: [
+              { type: "thinking", text: "Planning" },
+              {
+                type: "text",
+                text: "Streaming answer part one and now part two",
+              },
+            ],
+          },
+        ]}
+        streamingMessageId="assistant-work"
+      />,
+    );
+
+    expect(
+      screen.getByText("Streaming answer part one and now part two"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("message-assistant-work:answer")).toBeNull();
+  });
+
+  it("mounts a just-settled agent-work row open before collapsing", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const user = textMessage("user-1", "user", "Please inspect");
+    const streamingAssistant: Message = {
+      id: "assistant-work",
+      role: "assistant",
+      created: Date.UTC(2026, 5, 4, 12, 1, 0),
+      metadata: { userVisible: true },
+      content: [
+        { type: "thinking", text: "Planning" },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "scan",
+          arguments: {},
+          status: "in_progress",
+        },
+        { type: "text", text: "Streaming answer" },
+      ],
+    };
+    const settledAssistant: Message = {
+      ...streamingAssistant,
+      content: [
+        { type: "thinking", text: "Planning" },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "scan",
+          arguments: {},
+          status: "completed",
+        },
+        { type: "text", text: "Final answer" },
+      ],
+    };
+
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[user, streamingAssistant]}
+        streamingMessageId="assistant-work"
+      />,
+    );
+
+    expect(
+      screen.getByTestId("virtual-message-timeline-live-tail"),
+    ).toBeInTheDocument();
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[user, settledAssistant]}
+        streamingMessageId={null}
+      />,
+    );
+
+    const agentWorkRow = screen.getByTestId(
+      "virtual-transcript-row-message:assistant-work:agent-work",
+    );
+    expect(agentWorkRow).toHaveTextContent("Agent work");
+    const collapsibleContent = agentWorkRow.querySelector(
+      '[data-slot="collapsible-content"]',
+    );
+    expect(collapsibleContent).toHaveAttribute("data-state", "open");
+    expect(screen.getByText("Final answer")).toBeInTheDocument();
+
+    animationFrame.runAll(100);
+
+    expect(collapsibleContent).toHaveAttribute("data-state", "closed");
+  });
+
   it("handles scroll targets for agent-work-led assistant turns", async () => {
     mockTranscriptElementMeasurements();
     const onScrollTargetHandled = vi.fn();

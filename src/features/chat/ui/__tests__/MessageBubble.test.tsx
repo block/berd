@@ -297,6 +297,34 @@ describe("MessageBubble", () => {
     expect(screen.getByText("hello world")).toBeInTheDocument();
   });
 
+  it("replaces the Anthropic thinking-history 400 with a friendly notice", () => {
+    render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: 'Ran into this error: Request failed: Bad request (400): {"message":"messages.5.content.1: `thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified. These blocks must remain as they were in the original response."}.\n\nPlease retry if you think this is a transient or recoverable error.',
+          },
+        ])}
+      />,
+    );
+    expect(
+      screen.getByText(/its earlier reasoning history is no longer in a form/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/cannot be modified/i)).toBeNull();
+  });
+
+  it("leaves ordinary assistant text untouched", () => {
+    render(
+      <MessageBubble
+        message={assistantMessage([
+          { type: "text", text: "Here is the summary." },
+        ])}
+      />,
+    );
+    expect(screen.getByText("Here is the summary.")).toBeInTheDocument();
+  });
+
   it("labels steered user messages", () => {
     const message = userMessage("adjust course");
     message.metadata = {

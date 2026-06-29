@@ -1155,6 +1155,14 @@ function buildAgentWorkItems({
     return null;
   }
 
+  if (isStreaming) {
+    const workContent = compactWorkContent(visibleContent);
+    if (!workContent.some(isWorkContent)) {
+      return null;
+    }
+    return [buildAgentWorkItem({ message, content: workContent, isStreaming })];
+  }
+
   // The agent's final answer is the contiguous run of text blocks at the END of
   // the message, ignoring any trailing reasoning/thinking blocks the model emits
   // AFTER its answer (GPT 5.5 does this). Those trailing thoughts stay in the

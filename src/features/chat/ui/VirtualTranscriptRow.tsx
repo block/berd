@@ -55,6 +55,7 @@ interface VirtualTranscriptRowProps {
   offscreenMeasurementKind?: "real";
   measurementPlan?: TranscriptShellMeasurementPlan;
   isStreaming?: boolean;
+  settleAgentWorkOnMount?: boolean;
   actionsAlwaysVisible?: boolean;
   showJumpToResponseStartHint?: boolean;
   isPulsing?: boolean;
@@ -79,6 +80,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   offscreenMeasurementKind,
   measurementPlan,
   isStreaming,
+  settleAgentWorkOnMount,
   actionsAlwaysVisible,
   showJumpToResponseStartHint,
   isPulsing,
@@ -353,7 +355,10 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
         )}
       >
-        <AgentWorkPanel payload={row.agentWork} />
+        <AgentWorkPanel
+          payload={row.agentWork}
+          settleOnMount={settleAgentWorkOnMount}
+        />
       </div>
     );
   } else if (row.kind === "tool-chain" && row.toolChainSummary) {
@@ -481,6 +486,7 @@ function areVirtualTranscriptRowPropsEqual(
     previous.offscreenMeasurementKind === next.offscreenMeasurementKind &&
     previous.measurementPlan === next.measurementPlan &&
     previous.isStreaming === next.isStreaming &&
+    previous.settleAgentWorkOnMount === next.settleAgentWorkOnMount &&
     previous.actionsAlwaysVisible === next.actionsAlwaysVisible &&
     previous.showJumpToResponseStartHint === next.showJumpToResponseStartHint &&
     previous.isPulsing === next.isPulsing &&

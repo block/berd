@@ -264,6 +264,9 @@
     "mcpAppLoading": "Loading MCP App…",
     "mcpAppRenderError": "Unable to render MCP App inline.",
     "redactedThinking": "(thinking redacted)",
+    "providerError": {
+      "anthropicThinkingHistory": "This chat can't continue with a Claude model because its earlier reasoning history is no longer in a form Claude will accept. Start a new chat, or switch this chat to a non-Claude model to keep going."
+    },
     "berdctlCrossSessionLabel": "Sent by Berd from another session",
     "steerLabel": "Steered"
   },
@@ -398,6 +401,8 @@
     "label": "Agent work",
     "redactedThinking": "Thinking redacted",
     "summary": {
+      "previousSteps_one": "{{count}} previous step",
+      "previousSteps_other": "{{count}} previous steps",
       "steps_one": "{{count}} step",
       "steps_other": "{{count}} steps"
     }

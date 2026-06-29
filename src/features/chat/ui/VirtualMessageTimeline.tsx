@@ -1105,6 +1105,38 @@ export function VirtualMessageTimeline({
     ],
   );
   const stableRows = useStableTranscriptRows(snapshot.rows);
+  const [settlingAgentWorkMessageId, setSettlingAgentWorkMessageId] = useState<
+    string | null
+  >(null);
+  const settlingPreviousStreamingMessageIdRef = useRef<string | null>(
+    streamingMessageId ?? null,
+  );
+
+  useEffect(() => {
+    const previousStreamingMessageId =
+      settlingPreviousStreamingMessageIdRef.current;
+    const currentStreamingMessageId = streamingMessageId ?? null;
+
+    if (currentStreamingMessageId) {
+      settlingPreviousStreamingMessageIdRef.current = currentStreamingMessageId;
+      setSettlingAgentWorkMessageId(null);
+      return;
+    }
+
+    settlingPreviousStreamingMessageIdRef.current = null;
+    if (!previousStreamingMessageId) {
+      return;
+    }
+
+    setSettlingAgentWorkMessageId(previousStreamingMessageId);
+    const clearSettlingState = window.setTimeout(() => {
+      setSettlingAgentWorkMessageId((current) =>
+        current === previousStreamingMessageId ? null : current,
+      );
+    }, 800);
+
+    return () => window.clearTimeout(clearSettlingState);
+  }, [streamingMessageId]);
   const liveStreamingTailSplit = useMemo(
     () =>
       splitLiveStreamingTail({
@@ -3226,6 +3258,11 @@ export function VirtualMessageTimeline({
       isStreaming={
         streamingMessageId != null &&
         (row.responseStartMessageId ?? row.messageId) === streamingMessageId
+      }
+      settleAgentWorkOnMount={
+        row.kind === "agent-work" &&
+        row.messageId === settlingAgentWorkMessageId &&
+        row.agentWork?.isActiveWork === false
       }
       actionsAlwaysVisible={
         row.messageId === latestAssistantMessageId &&

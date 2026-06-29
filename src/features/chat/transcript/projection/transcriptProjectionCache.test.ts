@@ -821,6 +821,36 @@ describe("transcript projection cache", () => {
     }
   });
 
+  it("keeps active assistant text inside agent work until streaming completes", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-streaming-work",
+      "assistant",
+      [
+        { type: "thinking", text: "Planning" },
+        toolRequest("tool-1"),
+        { type: "text", text: "This may become the final answer." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant], "assistant-streaming-work");
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-streaming-work",
+      "message:assistant-streaming-work:agent-work",
+    ]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-streaming-work:agent-work",
+    );
+    expect(workRow.agentWork?.content.map((content) => content.type)).toEqual([
+      "thinking",
+      "toolRequest",
+      "text",
+    ]);
+  });
+
   it("keeps final text outside the agent work row", () => {
     const cache = createTranscriptProjectionCache();
     const assistant = messageWithContent(

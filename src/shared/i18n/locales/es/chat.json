@@ -263,6 +263,9 @@
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
     "redactedThinking": "(pensamiento redactado)",
+    "providerError": {
+      "anthropicThinkingHistory": "Este chat no puede continuar con un modelo Claude porque su historial de razonamiento previo ya no tiene una forma que Claude acepte. Inicia un chat nuevo o cambia este chat a un modelo que no sea Claude para continuar."
+    },
     "berdctlCrossSessionLabel": "Enviado por Berd desde otra sesión",
     "steerLabel": "Guiado"
   },
@@ -395,6 +398,8 @@
     "label": "Trabajo del agente",
     "redactedThinking": "Pensamiento redactado",
     "summary": {
+      "previousSteps_one": "{{count}} paso anterior",
+      "previousSteps_other": "{{count}} pasos anteriores",
       "steps_one": "{{count}} paso",
       "steps_other": "{{count}} pasos"
     }

@@ -349,7 +349,7 @@ describe("MessageTimeline", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps a hoisted final answer streaming while its original assistant turn streams", () => {
+  it("keeps active assistant text inside agent work while its turn streams", () => {
     const assistantMessage: Message = {
       id: "assistant-1",
       role: "assistant",
@@ -371,10 +371,172 @@ describe("MessageTimeline", () => {
       />,
     );
 
-    expect(screen.getByTestId("message-assistant-1:answer")).toHaveAttribute(
-      "data-streaming",
-      "true",
+    expect(
+      screen.getByTestId(
+        "virtual-transcript-row-message:assistant-1:agent-work",
+      ),
+    ).toHaveAttribute("data-virtual-row-anchor-priority", "streaming");
+    expect(screen.queryByTestId("message-assistant-1:answer")).toBeNull();
+    expect(screen.getByText("Streaming answer")).toBeInTheDocument();
+  });
+
+  it("updates live agent work text before the turn completes", () => {
+    const userMessage = message("user-1", "user", "Please inspect");
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning" },
+        { type: "text", text: "Streaming answer part one" },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    const { rerender } = renderWithProviders(
+      <MessageTimeline
+        messages={[userMessage, assistantMessage]}
+        streamingMessageId="assistant-1"
+      />,
     );
+
+    expect(screen.getByText("Streaming answer part one")).toBeInTheDocument();
+
+    rerender(
+      <MessageTimeline
+        messages={[
+          userMessage,
+          {
+            ...assistantMessage,
+            content: [
+              { type: "thinking", text: "Planning" },
+              {
+                type: "text",
+                text: "Streaming answer part one and now part two",
+              },
+            ],
+          },
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    expect(
+      screen.getByText("Streaming answer part one and now part two"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("message-assistant-1:answer")).toBeNull();
+  });
+
+  it("can show active agent work as a live work preview", () => {
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "checking git branch status",
+          arguments: {},
+          status: "completed",
+        },
+        {
+          type: "toolRequest",
+          id: "tool-2",
+          name: "reviewing transcript projection tests",
+          arguments: {},
+          status: "completed",
+        },
+        {
+          type: "toolRequest",
+          id: "tool-3",
+          name: "running targeted tests",
+          arguments: {},
+          status: "completed",
+        },
+        {
+          type: "toolRequest",
+          id: "tool-4",
+          name: "checking virtual timeline behavior",
+          arguments: {},
+          status: "completed",
+        },
+        {
+          type: "toolRequest",
+          id: "tool-5",
+          name: "writing review summary",
+          arguments: {},
+          status: "completed",
+        },
+        { type: "text", text: "Streaming answer" },
+        {
+          type: "toolRequest",
+          id: "tool-6",
+          name: "recording diagnostics",
+          arguments: {},
+          status: "in_progress",
+        },
+      ],
+      metadata: { userVisible: true },
+    };
+    const userMessage = message("user-1", "user", "Please inspect");
+
+    const { rerender } = renderWithProviders(
+      <MessageTimeline
+        messages={[userMessage, assistantMessage]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    const workRow = screen.getByTestId(
+      "virtual-transcript-row-message:assistant-1:agent-work",
+    );
+    expect(workRow).toHaveTextContent("3 previous steps");
+    expect(workRow).not.toHaveTextContent("Planning");
+    expect(workRow).not.toHaveTextContent("Checking git branch status");
+    expect(workRow).not.toHaveTextContent(
+      "Reviewing transcript projection tests",
+    );
+    expect(workRow).toHaveTextContent("Running targeted tests");
+    expect(workRow).toHaveTextContent("Writing review summary");
+    expect(workRow).toHaveTextContent("Recording diagnostics");
+    expect(workRow).toHaveTextContent("Streaming answer");
+    expect(workRow).not.toHaveTextContent("Agent work");
+    expect(
+      workRow.querySelector('[data-slot="collapsible-content"]'),
+    ).toHaveAttribute("data-state", "open");
+    expect(workRow.querySelector(".max-h-\\[18rem\\]")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "3 previous steps" }));
+    expect(workRow).toHaveTextContent("Planning");
+    expect(workRow).toHaveTextContent("Checking git branch status");
+
+    rerender(
+      <MessageTimeline
+        messages={[
+          userMessage,
+          {
+            ...assistantMessage,
+            content: [
+              { type: "thinking", text: "Planning\n\nI should inspect first." },
+              {
+                type: "toolRequest",
+                id: "tool-1",
+                name: "checking git branch status",
+                arguments: {},
+                status: "completed",
+              },
+              { type: "text", text: "Final answer" },
+            ],
+          },
+        ]}
+        streamingMessageId={null}
+      />,
+    );
+
+    expect(screen.getByText("Final answer")).toBeInTheDocument();
+    expect(screen.getByText("Agent work")).toBeInTheDocument();
   });
 
   it("jumps from the final answer back to the agent work response start", async () => {

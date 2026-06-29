@@ -38,6 +38,7 @@ import { MarkdownImage } from "./MarkdownImage";
 import { resolveImageContentSrc } from "./resolveImageContentSrc";
 import { McpAppView } from "./McpAppView";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
+import { detectProviderErrorNotice } from "@/features/chat/lib/providerErrorNotice";
 import type { CustomRenderer } from "streamdown";
 import { RUNNABLE_SHELL_LANGUAGES } from "@/shared/lib/runnableShellCommand";
 import type {
@@ -265,6 +266,7 @@ function renderContentBlock(
     changeFolderLabel?: string;
     stateKey?: string;
     renderReasoning?: boolean;
+    resolveProviderErrorNotice?: (text: string) => string | null;
   },
   isStreamingMsg?: boolean,
   isUserMessage?: boolean,
@@ -285,6 +287,9 @@ function renderContentBlock(
           </p>
         );
       }
+      const providerErrorNotice =
+        options.resolveProviderErrorNotice?.(tc.text) ?? null;
+      const displayText = providerErrorNotice ?? tc.text;
       return (
         <MessageResponse
           key={`text-${index}`}
@@ -295,7 +300,7 @@ function renderContentBlock(
           }
           imageRenderer={MarkdownImage}
         >
-          {tc.text}
+          {displayText}
         </MessageResponse>
       );
     }
@@ -468,6 +473,15 @@ export const MessageBubble = memo(function MessageBubble({
         : [],
     [onRunShellCommand],
   );
+  const resolveProviderErrorNotice = useMemo(() => {
+    if (role !== "assistant") {
+      return undefined;
+    }
+    return (text: string) => {
+      const kind = detectProviderErrorNotice(text);
+      return kind ? t(`message.providerError.${kind}`) : null;
+    };
+  }, [role, t]);
   const rowRootAttributes = useTranscriptRowRootAdapter();
   const { updateRowState } = useTranscriptRowStateAdapter();
   const hadPathNoticeRef = useRef(false);
@@ -760,6 +774,7 @@ export const MessageBubble = memo(function MessageBubble({
                     runItCodeRenderers,
                     stateKey: section.key,
                     renderReasoning: shouldRenderReasoning,
+                    resolveProviderErrorNotice,
                   },
                   isStreaming,
                   isUser,

@@ -44,6 +44,7 @@ interface ToolCallAdapterProps {
   titleClassName?: string;
   chevronClassName?: string;
   agentWorkLayout?: boolean;
+  agentWorkUsePrimaryText?: boolean;
 }
 
 function useElapsedTime(status: ToolCallStatus, startedAt?: number) {
@@ -272,19 +273,29 @@ function AgentWorkToolSection({
   label,
   value,
   destructive = false,
+  usePrimaryText = false,
 }: {
   label: string;
   value: string | null;
   destructive?: boolean;
+  usePrimaryText?: boolean;
 }) {
   if (!value || value.trim().length === 0) return null;
 
   return (
     <section className="space-y-1.5">
-      <div className="text-xs font-normal text-muted-foreground">{label}</div>
       <div
         className={cn(
-          "scrollbar-visible max-h-32 overflow-auto rounded-sm bg-muted/30 px-3 py-2 text-muted-foreground [scrollbar-gutter:stable]",
+          "text-xs font-normal",
+          usePrimaryText ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </div>
+      <div
+        className={cn(
+          "rounded-sm bg-muted/30 px-3 py-2",
+          usePrimaryText ? "text-foreground" : "text-muted-foreground",
           destructive && "text-destructive",
         )}
       >
@@ -335,6 +346,7 @@ export function ToolCallAdapter({
   titleClassName,
   chevronClassName,
   agentWorkLayout = false,
+  agentWorkUsePrimaryText = false,
 }: ToolCallAdapterProps) {
   const { t } = useTranslation("chat");
   const elapsed = useElapsedTime(status, startedAt);
@@ -474,19 +486,23 @@ export function ToolCallAdapter({
               <AgentWorkToolSection
                 label={t("tools.inputSummary.command")}
                 value={commandRow?.value ?? null}
+                usePrimaryText={agentWorkUsePrimaryText}
               />
               <AgentWorkToolSection
                 label={t("tools.input")}
                 value={inputDetails ?? rawInputDetails}
+                usePrimaryText={agentWorkUsePrimaryText}
               />
               <AgentWorkToolSection
                 label={isError ? t("tools.error") : t("tools.result")}
                 value={resultDetails}
                 destructive={isError}
+                usePrimaryText={agentWorkUsePrimaryText}
               />
               <AgentWorkToolSection
                 label={t("tools.structuredContent")}
                 value={structuredDetails}
+                usePrimaryText={agentWorkUsePrimaryText}
               />
             </div>
           ) : showCombinedSurface ? (
