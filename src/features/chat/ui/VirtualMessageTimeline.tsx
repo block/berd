@@ -933,6 +933,7 @@ export function VirtualMessageTimeline({
   searchBackendRef,
   onRetryMessage,
   onEditMessage,
+  onForkFromMessage,
   onSendMcpAppMessage,
   onRunShellCommand,
   onEditProject,
@@ -3178,6 +3179,7 @@ export function VirtualMessageTimeline({
     () => ({
       onRetryMessage,
       onEditMessage,
+      onForkFromMessage,
       onSendMcpAppMessage,
       onMcpAppAutoScroll: requestMcpAppAutoScroll,
       onRunShellCommand,
@@ -3190,6 +3192,7 @@ export function VirtualMessageTimeline({
     [
       onRetryMessage,
       onEditMessage,
+      onForkFromMessage,
       onSendMcpAppMessage,
       requestMcpAppAutoScroll,
       onRunShellCommand,

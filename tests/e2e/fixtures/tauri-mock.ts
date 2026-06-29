@@ -114,6 +114,7 @@ export function buildInitScript(options?: {
         title: session.title ?? "New Chat",
         updatedAt: session.updatedAt ?? new Date().toISOString(),
         messageCount: session.messageCount ?? 0,
+        conversationBefore: session.conversationBefore,
         providerId: session.providerId ?? "goose",
         modelId: session.modelId ?? null,
       }));
@@ -254,6 +255,7 @@ export function buildInitScript(options?: {
           title: "New Chat",
           updatedAt: nowIso(),
           messageCount: 0,
+          conversationBefore: undefined,
           providerId,
           modelId: null,
         };
@@ -333,6 +335,7 @@ export function buildInitScript(options?: {
               messageCount: source?.messageCount ?? 0,
               providerId: source?.providerId ?? "goose",
               modelId: source?.modelId ?? null,
+              conversationBefore: message.params?._meta?.conversationBefore,
             };
             ACP_SESSIONS.unshift(copy);
             return jsonRpcResult(message.id, {
@@ -675,6 +678,7 @@ export function buildInitScript(options?: {
                   title: session.title,
                   updatedAt: session.updatedAt,
                   messageCount: session.messageCount,
+                  conversationBefore: session.conversationBefore,
                 })),
               );
             case "create_session":

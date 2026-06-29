@@ -118,6 +118,7 @@ export function MessageTimeline({
   searchContentRef,
   onRetryMessage,
   onEditMessage,
+  onForkFromMessage,
   onSendMcpAppMessage,
   onRunShellCommand,
   onEditProject,
@@ -1250,6 +1251,7 @@ export function MessageTimeline({
     () => ({
       onRetryMessage,
       onEditMessage,
+      onForkFromMessage,
       onSendMcpAppMessage,
       onMcpAppAutoScroll: requestMcpAppAutoScroll,
       onRunShellCommand,
@@ -1262,6 +1264,7 @@ export function MessageTimeline({
     [
       onRetryMessage,
       onEditMessage,
+      onForkFromMessage,
       onSendMcpAppMessage,
       requestMcpAppAutoScroll,
       onRunShellCommand,

@@ -254,6 +254,7 @@
   "message": {
     "copied": "Copiado",
     "defaultImageAlt": "Adjunto",
+    "forkFromHere": "Bifurcar sesión desde aquí",
     "jumpToResponseStart": "Ir al inicio de la respuesta",
     "jumpToFloatingResponseStart": "Ir al inicio de la respuesta actual",
     "jumpToResponseStartHint": "En respuestas largas, esto te lleva de vuelta al inicio.",

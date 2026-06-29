@@ -497,8 +497,26 @@ describe("acpDuplicateSession", () => {
     await expect(
       acpDuplicateSession("session-1", "/tmp/project"),
     ).resolves.toEqual(forkedSession);
-    expect(mockForkSession).toHaveBeenCalledWith("session-1", "/tmp/project");
+    expect(mockForkSession).toHaveBeenCalledWith(
+      "session-1",
+      "/tmp/project",
+      undefined,
+    );
     expect(mockRenameSession).not.toHaveBeenCalled();
+  });
+
+  it("delegates fork options to direct ACP", async () => {
+    mockForkSession.mockResolvedValueOnce(forkedSession);
+
+    const { acpDuplicateSession } = await import("../acp");
+
+    await acpDuplicateSession("session-1", "/tmp/project", undefined, {
+      conversationBefore: 1_700_000_123,
+    });
+
+    expect(mockForkSession).toHaveBeenCalledWith("session-1", "/tmp/project", {
+      conversationBefore: 1_700_000_123,
+    });
   });
 
   it("renames duplicated sessions when a duplicate title is provided", async () => {
@@ -509,7 +527,11 @@ describe("acpDuplicateSession", () => {
     await expect(
       acpDuplicateSession("session-1", "/tmp/project", "Copy of Chat One"),
     ).resolves.toEqual({ ...forkedSession, title: "Copy of Chat One" });
-    expect(mockForkSession).toHaveBeenCalledWith("session-1", "/tmp/project");
+    expect(mockForkSession).toHaveBeenCalledWith(
+      "session-1",
+      "/tmp/project",
+      undefined,
+    );
     expect(mockRenameSession).toHaveBeenCalledWith(
       "session-2",
       "Copy of Chat One",

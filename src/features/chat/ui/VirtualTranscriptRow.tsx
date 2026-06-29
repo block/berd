@@ -190,6 +190,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     onRetryMessage,
     onEditMessage,
     onJumpToResponseStart,
+    onForkFromMessage,
     onJumpToResponseStartHintClose,
     onJumpToResponseStartHintDismiss,
     onSendMcpAppMessage,
@@ -323,6 +324,12 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
               ? handleJumpToResponseStartForRow
               : undefined
           }
+          onForkFromMessage={
+            (message.role === "user" || message.role === "assistant") &&
+            !isStreaming
+              ? onForkFromMessage
+              : undefined
+          }
           onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}
           onJumpToResponseStartHintDismiss={onJumpToResponseStartHintDismiss}
           onSendMcpAppMessage={onSendMcpAppMessage}
@@ -416,6 +423,12 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onJumpToResponseStart={
             message.role === "assistant" && !isStreaming
               ? handleJumpToResponseStartForRow
+              : undefined
+          }
+          onForkFromMessage={
+            (message.role === "user" || message.role === "assistant") &&
+            !isStreaming
+              ? onForkFromMessage
               : undefined
           }
           onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}

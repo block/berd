@@ -235,6 +235,10 @@
       "title": "Render local images in chat",
       "description": "Show Markdown image links that point at local files in the chat's working directory inline, instead of a broken image. Scoped to the working directory; remote http(s) images stay blocked."
     },
+    "sessionForkFromMessage": {
+      "title": "Fork chats from a message",
+      "description": "Show a Fork from here action on transcript messages that creates a new chat ending at that point."
+    },
     "title": "Experiments"
   },
   "general": {

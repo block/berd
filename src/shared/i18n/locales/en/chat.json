@@ -255,6 +255,7 @@
   "message": {
     "copied": "Copied",
     "defaultImageAlt": "Attached",
+    "forkFromHere": "Fork session from here",
     "jumpToResponseStart": "Jump to response start",
     "jumpToFloatingResponseStart": "Jump to current response start",
     "jumpToResponseStartHint": "For long replies, this takes you back to the top.",

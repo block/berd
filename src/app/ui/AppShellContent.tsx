@@ -21,6 +21,7 @@ import type { ExtensionEntry } from "@/features/extensions/types";
 import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettings";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
+import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import type {
   AppNavigationLocation,
   AppNavigationUpdateOptions,
@@ -84,6 +85,7 @@ interface AppShellContentProps {
   onOpenProjectSettings: (projectId: string) => void;
   onActivateHomeSession: (sessionId: string) => void;
   onRenameChat: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: ForkSessionHandler;
   onSelectSession: (sessionId: string) => void;
   onSelectSearchResult: (
     sessionId: string,
@@ -141,6 +143,7 @@ export function AppShellContent({
   onOpenProjectSettings,
   onActivateHomeSession,
   onRenameChat,
+  onForkChat,
   onSelectSession,
   onSelectSearchResult,
   onStartChatFromProjectId,
@@ -226,6 +229,7 @@ export function AppShellContent({
     onOpenProjectSettings,
     onOpenSkill,
     onRenameChat,
+    onForkChat,
     onReturnToAgentDraft,
     onSelectSearchResult,
     onSelectSession,
@@ -300,6 +304,7 @@ interface RenderRouteContentOptions {
   onOpenProjectSettings: (projectId: string) => void;
   onActivateHomeSession: (sessionId: string) => void;
   onRenameChat: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: ForkSessionHandler;
   onSelectSession: (sessionId: string) => void;
   onSelectSearchResult: (
     sessionId: string,
@@ -355,6 +360,7 @@ function renderRouteContent({
   onOpenProjectSettings,
   onOpenSkill,
   onRenameChat,
+  onForkChat,
   onReturnToAgentDraft,
   onSelectSearchResult,
   onSelectSession,
@@ -453,6 +459,7 @@ function renderRouteContent({
           onAgentBuilderClose={onAgentBuilderClose}
           onCreateProject={onCreateProject}
           onOpenProjectSettings={onOpenProjectSettings}
+          onForkChat={onForkChat}
           leftViewportOcclusionPx={chatViewportLeftOcclusionPx}
           composerHandoffRequest={chatComposerHandoffRequest}
           composerHandoffSessionId={chatComposerHandoffSessionId}

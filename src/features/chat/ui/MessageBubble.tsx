@@ -104,6 +104,7 @@ interface MessageBubbleProps {
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onJumpToResponseStart?: (messageId: string) => void;
+  onForkFromMessage?: (messageId: string) => void;
   showJumpToResponseStartHint?: boolean;
   onJumpToResponseStartHintClose?: (messageId: string) => void;
   onJumpToResponseStartHintDismiss?: (messageId: string) => void;
@@ -421,6 +422,7 @@ export const MessageBubble = memo(function MessageBubble({
   onRetryMessage,
   onEditMessage,
   onJumpToResponseStart,
+  onForkFromMessage,
   showJumpToResponseStartHint,
   onJumpToResponseStartHintClose,
   onJumpToResponseStartHintDismiss,
@@ -798,6 +800,7 @@ export const MessageBubble = memo(function MessageBubble({
               onJumpToResponseStart={
                 !isUser && !isStreaming ? onJumpToResponseStart : undefined
               }
+              onForkFromMessage={!isStreaming ? onForkFromMessage : undefined}
               showJumpToResponseStartHint={
                 !isUser && !isStreaming ? showJumpToResponseStartHint : false
               }

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Check, Copy, Pencil, RotateCcw, X } from "lucide-react";
+import { Check, Copy, Split, Pencil, RotateCcw, X } from "lucide-react";
 import { IconChevronsUp } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
@@ -17,6 +17,7 @@ interface MessageBubbleActionsProps {
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onJumpToResponseStart?: (messageId: string) => void;
+  onForkFromMessage?: (messageId: string) => void;
   showJumpToResponseStartHint?: boolean;
   onJumpToResponseStartHintClose?: (messageId: string) => void;
   onJumpToResponseStartHintDismiss?: (messageId: string) => void;
@@ -32,12 +33,14 @@ export function MessageBubbleActions({
   onRetryMessage,
   onEditMessage,
   onJumpToResponseStart,
+  onForkFromMessage,
   showJumpToResponseStartHint,
   onJumpToResponseStartHintClose,
   onJumpToResponseStartHintDismiss,
 }: MessageBubbleActionsProps) {
   const { t } = useTranslation(["chat", "common"]);
   const jumpToResponseStartLabel = t("message.jumpToResponseStart");
+  const forkFromHereLabel = t("message.forkFromHere");
   const copyLabel = copied ? t("message.copied") : t("common:actions.copy");
   const copyTooltip = showJumpToResponseStartHint ? undefined : copyLabel;
   const jumpToResponseStartAction = onJumpToResponseStart ? (
@@ -78,6 +81,18 @@ export function MessageBubbleActions({
           )}
         </MessageAction>
       )}
+      {onForkFromMessage ? (
+        <MessageAction
+          size="icon-xs"
+          variant="ghost-light"
+          className="text-muted-foreground/80"
+          label={forkFromHereLabel}
+          tooltip={forkFromHereLabel}
+          onClick={() => onForkFromMessage(messageId)}
+        >
+          <Split className="size-3.5" />
+        </MessageAction>
+      ) : null}
       {!isUser && jumpToResponseStartAction ? (
         showJumpToResponseStartHint ? (
           <Popover

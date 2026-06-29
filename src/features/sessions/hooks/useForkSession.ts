@@ -5,7 +5,10 @@ import { toast } from "sonner";
 import { acpSessionToChatSession } from "@/features/chat/lib/acpSessionMapping";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { acpDuplicateSession } from "@/shared/api/acp";
+import {
+  acpDuplicateSession,
+  type AcpDuplicateSessionOptions,
+} from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 
 function isSessionNotFoundError(error: unknown): boolean {
@@ -22,14 +25,20 @@ function isSessionNotFoundError(error: unknown): boolean {
  * entry points behave identically. `onForked` runs after a successful fork
  * (e.g. to open the new session).
  */
+export type ForkSessionOptions = AcpDuplicateSessionOptions;
+export type ForkSessionHandler = (
+  sessionId: string,
+  options?: ForkSessionOptions,
+) => void | Promise<void>;
+
 export function useForkSession(options?: {
   onForked?: (sessionId: string) => void;
-}): (sessionId: string) => Promise<void> {
+}): ForkSessionHandler {
   const { t } = useTranslation(["sessions", "common"]);
   const onForked = options?.onForked;
 
   return useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, forkOptions?: ForkSessionOptions) => {
       const session = useChatSessionStore.getState().getSession(sessionId);
       if (!session) return;
       const sourceName = getDisplaySessionTitle(
@@ -41,6 +50,7 @@ export function useForkSession(options?: {
           sessionId,
           session.workingDir ?? "~",
           t("history.copyTitle", { title: sourceName }),
+          forkOptions,
         );
         useChatSessionStore
           .getState()

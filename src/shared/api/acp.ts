@@ -1,6 +1,10 @@
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import * as directAcp from "./acpApi";
-import type { AcpSessionInfo, AcpSessionsPage } from "./acpApi";
+import type {
+  AcpForkSessionOptions,
+  AcpSessionInfo,
+  AcpSessionsPage,
+} from "./acpApi";
 import * as sessionRegistry from "./acpSessionRegistry";
 import {
   getCatalogEntry,
@@ -58,6 +62,8 @@ export interface AcpCreateSessionResult {
   sessionId: string;
   configOptionsSnapshot: AcpSessionConfigSnapshots;
 }
+
+export type AcpDuplicateSessionOptions = AcpForkSessionOptions;
 
 function mergeSessionConfigSnapshots(
   base: AcpSessionConfigSnapshots,
@@ -433,8 +439,9 @@ export async function acpDuplicateSession(
   sessionId: string,
   workingDir: string,
   duplicateTitle?: string,
+  options?: AcpDuplicateSessionOptions,
 ): Promise<AcpSessionInfo> {
-  const session = await directAcp.forkSession(sessionId, workingDir);
+  const session = await directAcp.forkSession(sessionId, workingDir, options);
   const normalizedTitle = duplicateTitle?.trim();
   if (!normalizedTitle) {
     return session;

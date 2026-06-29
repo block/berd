@@ -3291,6 +3291,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onOpenProjectSettings={handleEditProject}
               onActivateHomeSession={activateHomeSession}
               onRenameChat={handleRenameChat}
+              onForkChat={handleForkChat}
               onSelectSession={handleSelectSession}
               onSelectSearchResult={handleSelectSearchResult}
               onStartChatFromProjectId={handleStartProjectChat}

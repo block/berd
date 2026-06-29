@@ -428,6 +428,54 @@ describe("MessageBubble", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
+  it("renders and invokes fork-from-here for completed assistant messages", async () => {
+    const user = userEvent.setup();
+    const onForkFromMessage = vi.fn();
+    render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        onForkFromMessage={onForkFromMessage}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Fork session from here" }),
+    );
+
+    expect(onForkFromMessage).toHaveBeenCalledWith("a1");
+  });
+
+  it("renders and invokes fork-from-here for completed user messages", async () => {
+    const user = userEvent.setup();
+    const onForkFromMessage = vi.fn();
+    render(
+      <MessageBubble
+        message={userMessage("prompt")}
+        onForkFromMessage={onForkFromMessage}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Fork session from here" }),
+    );
+
+    expect(onForkFromMessage).toHaveBeenCalledWith("u1");
+  });
+
+  it("hides fork-from-here for streaming assistant messages", () => {
+    render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        isStreaming
+        onForkFromMessage={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Fork session from here" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders a response-start action for completed assistant messages", async () => {
     const user = userEvent.setup();
     const onJumpToResponseStart = vi.fn();

@@ -56,11 +56,15 @@ import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { getTextContent } from "@/shared/types/messages";
+import { getConversationBeforeForMessageFork } from "@/features/sessions/lib/sessionFork";
+import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscriptSearch";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
+import { SESSION_FORK_FROM_MESSAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
@@ -296,6 +300,7 @@ interface ChatViewProps {
     onCreated?: (projectId: string) => void;
   }) => void;
   onOpenProjectSettings?: (projectId: string) => void;
+  onForkChat?: ForkSessionHandler;
   leftViewportOcclusionPx?: number;
   composerHandoffRequest?: number;
   composerHandoffSessionId?: string | null;
@@ -313,6 +318,7 @@ export function ChatView({
   onAgentBuilderClose,
   onCreateProject,
   onOpenProjectSettings,
+  onForkChat,
   leftViewportOcclusionPx = 0,
   composerHandoffRequest = 0,
   composerHandoffSessionId = null,
@@ -321,6 +327,11 @@ export function ChatView({
   onComposerHandoffTarget,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
+  const sessionForkFromMessageExperiment = useExperiment(
+    SESSION_FORK_FROM_MESSAGE_EXPERIMENT_ID,
+  );
+  const enableSessionForkFromMessage =
+    sessionForkFromMessageExperiment?.enabled === true;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const composerShellRef = useRef<HTMLDivElement | null>(null);
@@ -857,6 +868,24 @@ export function ChatView({
     : controller.messages;
   const suppressEmptyConversationPlaceholder =
     composerHandoffInProgress || controller.queue.queuedMessage !== null;
+  const handleForkFromMessage = useCallback(
+    (messageId: string) => {
+      if (isReadOnly || !effectiveSession?.id || !onForkChat) {
+        return;
+      }
+
+      const conversationBefore = getConversationBeforeForMessageFork(
+        controller.messages,
+        messageId,
+      );
+      if (conversationBefore == null) {
+        return;
+      }
+
+      void onForkChat(effectiveSession.id, { conversationBefore });
+    },
+    [controller.messages, effectiveSession?.id, isReadOnly, onForkChat],
+  );
 
   // Only gate the first render for a session. Later live updates should stream
   // into the mounted timeline without showing the skeleton again.
@@ -1152,6 +1181,11 @@ export function ChatView({
         // The builder rail replaces the context panel for fully-targeted
         // agent-builder sessions, so opening it would silently no-op.
         isAgentBuilderSession ? undefined : handleOpenContextPanel
+      }
+      onForkFromMessage={
+        enableSessionForkFromMessage && !isReadOnly && onForkChat
+          ? handleForkFromMessage
+          : undefined
       }
       showPlaceholder={showTimelineLoading}
       placeholder={conversationPlaceholder}

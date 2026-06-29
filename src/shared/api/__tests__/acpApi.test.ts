@@ -363,7 +363,7 @@ describe("forkSession", () => {
     });
   });
 
-  it("passes the selected working dir and empty MCP server list", async () => {
+  it("passes the selected working dir and empty MCP server list without fork metadata", async () => {
     mocks.unstableForkSession.mockResolvedValueOnce({
       sessionId: "session-2",
       _meta: {
@@ -395,6 +395,53 @@ describe("forkSession", () => {
       personaId: null,
     });
     expect(mocks.unstableForkSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/tmp/project",
+      mcpServers: [],
+    });
+  });
+
+  it("includes conversationBefore metadata for truncated forks", async () => {
+    mocks.unstableForkSession.mockResolvedValueOnce({
+      sessionId: "session-2",
+      _meta: {},
+    });
+
+    const { forkSession } = await import("../acpApi");
+
+    await forkSession("session-1", "/tmp/project", {
+      conversationBefore: 1_700_000_123,
+    });
+
+    expect(mocks.unstableForkSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/tmp/project",
+      mcpServers: [],
+      _meta: { conversationBefore: 1_700_000_123 },
+    });
+  });
+
+  it("omits malformed conversationBefore metadata", async () => {
+    mocks.unstableForkSession.mockResolvedValue({
+      sessionId: "session-2",
+      _meta: {},
+    });
+
+    const { forkSession } = await import("../acpApi");
+
+    await forkSession("session-1", "/tmp/project", {
+      conversationBefore: Number.POSITIVE_INFINITY,
+    });
+    await forkSession("session-1", "/tmp/project", {
+      conversationBefore: 1_700_000_123.5,
+    });
+
+    expect(mocks.unstableForkSession).toHaveBeenNthCalledWith(1, {
+      sessionId: "session-1",
+      cwd: "/tmp/project",
+      mcpServers: [],
+    });
+    expect(mocks.unstableForkSession).toHaveBeenNthCalledWith(2, {
       sessionId: "session-1",
       cwd: "/tmp/project",
       mcpServers: [],

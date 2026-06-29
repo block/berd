@@ -1,5 +1,6 @@
 import type {
   ContentBlock,
+  ForkSessionRequest,
   NewSessionResponse,
   LoadSessionResponse,
   ListSessionsRequest,
@@ -151,16 +152,30 @@ export async function importSession(json: string): Promise<AcpSessionInfo> {
   return result as unknown as AcpSessionInfo;
 }
 
+export interface AcpForkSessionOptions {
+  conversationBefore?: number;
+}
+
+function isValidConversationBefore(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 export async function forkSession(
   sessionId: string,
   workingDir: string,
+  options: AcpForkSessionOptions = {},
 ): Promise<AcpSessionInfo> {
   const client = await getClient();
-  const response = await client.unstable_forkSession({
+  const params: ForkSessionRequest = {
     sessionId,
     cwd: workingDir,
     mcpServers: [],
-  });
+  };
+  if (isValidConversationBefore(options.conversationBefore)) {
+    params._meta = { conversationBefore: options.conversationBefore };
+  }
+
+  const response = await client.unstable_forkSession(params);
   return {
     sessionId: response.sessionId,
     title: null,

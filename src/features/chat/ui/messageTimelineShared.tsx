@@ -17,6 +17,7 @@ export interface MessageBubbleCallbacks {
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onJumpToResponseStart?: (messageId: string) => void;
+  onForkFromMessage?: (messageId: string) => void;
   onJumpToResponseStartHintClose?: (messageId: string) => void;
   onJumpToResponseStartHintDismiss?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;

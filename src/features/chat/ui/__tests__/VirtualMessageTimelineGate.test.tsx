@@ -147,6 +147,7 @@ describe("VirtualMessageTimelineGate", () => {
       onRetryMessage: vi.fn(),
       onEditMessage: vi.fn(),
       onSendMcpAppMessage: vi.fn(),
+      onForkFromMessage: vi.fn(),
       onRunShellCommand: vi.fn(),
       onEditProject: vi.fn(),
     } satisfies MessageTimelineBubbleCallbacks;

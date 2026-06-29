@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   >,
   afterNextPaintCallbacks: [] as Array<() => void>,
   autoFlushAfterNextPaint: true,
+  sessionForkFromMessageEnabled: true,
 }));
 
 vi.mock("motion/react", () => ({
@@ -91,6 +92,7 @@ vi.mock("../VirtualMessageTimelineGate", () => ({
     }>;
     searchContentRef?: Ref<HTMLDivElement>;
     footer?: ReactNode;
+    onForkFromMessage?: (messageId: string) => void;
     placeholder?: ReactNode;
     showPlaceholder?: boolean;
   }) => {
@@ -99,6 +101,12 @@ vi.mock("../VirtualMessageTimelineGate", () => ({
       props.showPlaceholder || props.messages.length === 0;
     return (
       <div data-testid="message-timeline">
+        <button
+          type="button"
+          onClick={() => props.onForkFromMessage?.("user-1")}
+        >
+          Fork probe
+        </button>
         <div ref={props.searchContentRef}>
           {props.messages.map((message) => (
             <p key={message.id}>
@@ -221,6 +229,10 @@ vi.mock("@/features/home/hooks/usePinToHomeWidget", () => ({
   usePinToHomeWidget: mocks.usePinToHomeWidget,
 }));
 
+vi.mock("@/features/experiments/experimentPreferences", () => ({
+  useExperiment: () => ({ enabled: mocks.sessionForkFromMessageEnabled }),
+}));
+
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
@@ -327,6 +339,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.activeWorkspaceBySession = {};
     mocks.afterNextPaintCallbacks = [];
     mocks.autoFlushAfterNextPaint = true;
+    mocks.sessionForkFromMessageEnabled = true;
     window.localStorage.clear();
     mockMatchMedia(false);
     mocks.usePinToHomeWidget.mockReturnValue({
@@ -386,6 +399,77 @@ describe("ChatView MCP app messaging", () => {
       sessionArtifactCwd: null,
       project: null,
     });
+  });
+
+  it("passes fork-from-message through to MessageTimeline with a timestamp cutoff", async () => {
+    const user = userEvent.setup();
+    const onForkChat = vi.fn();
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          created: 1_700_000_000_250,
+          content: [{ type: "text", text: "Hello" }],
+          metadata: { userVisible: true },
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          created: 1_700_000_003_100,
+          content: [{ type: "text", text: "Hi" }],
+          metadata: { userVisible: true },
+        },
+      ],
+    });
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        onForkChat={onForkChat}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Fork probe" }));
+
+    expect(onForkChat).toHaveBeenCalledWith("session-1", {
+      conversationBefore: 1_700_000_003,
+    });
+  });
+
+  it("does not pass fork-from-message in read-only mode", () => {
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        onForkChat={vi.fn()}
+        readOnlyStatus="Finishing current response..."
+      />,
+    );
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onForkFromMessage?: unknown;
+    };
+    expect(timelineProps.onForkFromMessage).toBeUndefined();
+  });
+
+  it("does not pass fork-from-message when the experiment is disabled", () => {
+    mocks.sessionForkFromMessageEnabled = false;
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        onForkChat={vi.fn()}
+      />,
+    );
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onForkFromMessage?: unknown;
+    };
+    expect(timelineProps.onForkFromMessage).toBeUndefined();
   });
 
   it("passes handleSend through to MessageTimeline for MCP app messages", () => {
