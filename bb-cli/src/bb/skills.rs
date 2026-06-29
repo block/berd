@@ -234,11 +234,11 @@ pub fn auth_command() -> Command {
         .disable_help_subcommand(true)
         .subcommand(
             Command::new("status")
-                .about("Print marketplace auth status")
+                .about("Print auth status")
                 .long_about(
-                    "Print marketplace auth status. With a stored CLI auth session \
-                     this calls the server's /me endpoint and prints the authenticated \
-                     tenant, subject, and scopes.",
+                    "Print auth status. With a stored CLI auth session, this verifies \
+                     the session with /auth/me and prints the authenticated subject \
+                     and profile details.",
                 ),
         )
         .subcommand(

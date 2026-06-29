@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::skills_api::MarketplaceClient;
 use super::skills_config::{kgoose_service_url, SkillsConfig, SkillsFileConfig};
 use super::skills_install::{find_orphaned_work_dirs, link_targets, read_installed};
-use super::skills_models::{CapabilitiesResponse, InstalledSkillMetadata, MeResponse};
+use super::skills_models::{CapabilitiesResponse, InstalledSkillMetadata};
 use super::skills_targets::{inspect_link, LinkState, Scope, TargetRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -143,17 +143,6 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
                         CheckStatus::Warn,
                         "skipped: server check failed",
                     );
-                }
-            }
-            // Authenticated identity, only meaningful when a session credential resolved.
-            if client.has_auth() {
-                match client.get_json::<MeResponse>("/v1/marketplace/me") {
-                    Ok(me) => report.add(
-                        "identity",
-                        CheckStatus::Pass,
-                        format!("{} @ {}", me.subject, me.tenant_id),
-                    ),
-                    Err(err) => report.add("identity", CheckStatus::Fail, format!("{err:#}")),
                 }
             }
         }

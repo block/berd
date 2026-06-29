@@ -9,12 +9,6 @@ pub use builderbot_auth::preferences::{
     BuilderBotPreferences as SkillsPreferences, PREFERENCE_KEYS,
 };
 
-#[derive(Debug, Deserialize)]
-pub struct MeResponse {
-    pub tenant_id: String,
-    pub subject: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SkillPage {
     pub items: Vec<SkillSummary>,
@@ -199,7 +193,6 @@ pub struct Warning {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledSkillMetadata {
     pub schema_version: String,
-    pub tenant_id: String,
     pub server_url: String,
     pub slug: String,
     pub version_id: String,

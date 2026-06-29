@@ -26,7 +26,7 @@ tip
 
 Like [oclif](https://oclif.io/) and [Cobra](https://github.com/spf13/cobra), `sq` is [a framework](https://github.com/square/exoskeleton#exoskeleton) that provides consistent menus, help pages, tab-completion, and suggestions. `sq` also installs and auto-updates commands on-demand and instruments their [reliability, performance, and usage](https://go/sq-dash). But `sq` differs from other CLI frameworks in that subcommands of `sq` aren't objects in TypeScript or Go but executables external to it in predictable locations.
 
-Each subcommand maps to a standable and separate executable, which allows the subcommand to be implemented in different languages and be released on different schedules.
+Each subcommand maps to a standalone and separate executable, which allows the subcommand to be implemented in different languages and be released on different schedules.
 
 `sq` provides a common entrypoint as a framework for commandline tools.
 

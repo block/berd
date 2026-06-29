@@ -215,7 +215,6 @@ fn write_installed_package(skills_home: &Path, slug: &str, content_sha: &str, ta
         package.join(".bb-skills-meta.json"),
         serde_json::to_vec_pretty(&json!({
             "schema_version": "bb-skills-install/v1",
-            "tenant_id": "tenant_test",
             "server_url": "http://marketplace.local",
             "slug": slug,
             "version_id": "ver_builtin_builderbot_tools_0_1_0",

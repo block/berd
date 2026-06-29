@@ -15,7 +15,7 @@ use super::skills_archive::{extract_zip_safely, sha256_hex, verify_artifact};
 use super::skills_config::{kgoose_service_url, SkillsConfig, META_FILE_NAME};
 use super::skills_models::{
     InstallOperation, InstallPlanResponse, InstalledSkillMetadata, InstalledSkillRequest,
-    MeResponse, SkillDetail, Warning,
+    SkillDetail, Warning,
 };
 use super::skills_targets::{
     copy_dir_recursive, link_into_target, LinkOutcome, ResolvedTarget, Scope,
@@ -301,19 +301,11 @@ pub fn execute_plan(
         warnings: plan.warnings,
         ..Default::default()
     };
-    let tenant_id = fetch_tenant_id(config, client);
-
     for operation in &plan.operations {
         match operation.action.as_str() {
             "noop" => execution.up_to_date.push(operation.skill.slug.clone()),
             "install" | "update" => {
-                let change = execute_install_operation(
-                    config,
-                    client,
-                    operation,
-                    options,
-                    tenant_id.as_deref(),
-                )?;
+                let change = execute_install_operation(config, client, operation, options)?;
                 execution.installed.push(change);
             }
             "remove" if options.allow_removals => {
@@ -343,27 +335,11 @@ pub fn execute_plan(
     Ok(execution)
 }
 
-fn fetch_tenant_id(config: &SkillsConfig, client: &MarketplaceClient) -> Option<String> {
-    if !client.has_auth() {
-        return None;
-    }
-    match client.get_json::<MeResponse>("/v1/marketplace/me") {
-        Ok(me) => Some(me.tenant_id),
-        Err(err) => {
-            config
-                .style
-                .verbose(&format!("could not resolve tenant from /me: {err:#}"));
-            None
-        }
-    }
-}
-
 fn execute_install_operation(
     config: &SkillsConfig,
     client: &MarketplaceClient,
     operation: &InstallOperation,
     options: &ExecuteOptions,
-    tenant_id: Option<&str>,
 ) -> Result<InstalledChange> {
     let slug = &operation.skill.slug;
     let artifact = operation
@@ -386,7 +362,6 @@ fn execute_install_operation(
 
     let metadata = InstalledSkillMetadata {
         schema_version: "bb-skills-install/v1".to_string(),
-        tenant_id: tenant_id.unwrap_or("unknown").to_string(),
         server_url: kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
         slug: slug.clone(),
         version_id: operation.skill.version_id.clone(),
@@ -622,7 +597,6 @@ pub fn install_local_path(
     let content_sha = hash_directory(&staging)?;
     let metadata = InstalledSkillMetadata {
         schema_version: "bb-skills-install/v1".to_string(),
-        tenant_id: "local".to_string(),
         server_url: kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path),
         slug: slug.clone(),
         version_id: format!("local-{}", &content_sha[..12]),
