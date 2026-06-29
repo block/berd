@@ -5,6 +5,8 @@ use crate::config::normalize_kgoose_base_url_with_service_path;
 #[cfg(test)]
 use crate::config::DEFAULT_KGOOSE_SERVICE_PATH;
 
+const ORG_ROUTED_DOMAIN_SUFFIXES: &[&str] = &[".build", ".xyz"];
+
 pub fn normalize_org(value: &str) -> Result<String> {
     let org = value.trim().to_ascii_lowercase();
     if org.is_empty() {
@@ -44,7 +46,7 @@ pub fn resolve_org_kgoose_base_url(
     };
     let mut url = Url::parse(&absolute).context("kGoose base URL must be absolute")?;
     match url.host() {
-        Some(Host::Domain(host)) if !is_loopback_domain(host) => {
+        Some(Host::Domain(host)) if should_route_org_host(host) => {
             let routed_host = if host.starts_with(&format!("{org}.")) {
                 host.to_string()
             } else {
@@ -61,6 +63,13 @@ pub fn resolve_org_kgoose_base_url(
 
 fn is_loopback_domain(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost")
+}
+
+fn should_route_org_host(host: &str) -> bool {
+    !is_loopback_domain(host)
+        && ORG_ROUTED_DOMAIN_SUFFIXES
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
 }
 
 #[cfg(test)]
@@ -117,6 +126,45 @@ mod tests {
         .expect("route URL");
 
         assert_eq!(routed, "http://127.0.0.1:5173");
+    }
+
+    #[test]
+    fn resolve_org_kgoose_base_url_keeps_direct_sqprod_hosts_unrouted() {
+        let routed = resolve_org_kgoose_base_url(
+            "https://kgoose.sqprod.co",
+            Some("test"),
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("resolve URL");
+
+        assert_eq!(routed, "https://kgoose.sqprod.co");
+    }
+
+    #[test]
+    fn resolve_org_kgoose_base_url_keeps_arbitrary_domains_unrouted() {
+        let routed = resolve_org_kgoose_base_url(
+            "https://runtime.example.test/base/",
+            Some("test"),
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("resolve URL");
+
+        assert_eq!(routed, "https://runtime.example.test/base");
+    }
+
+    #[test]
+    fn resolve_org_kgoose_base_url_routes_xyz_hosts() {
+        let routed = resolve_org_kgoose_base_url(
+            "https://kgoose.example.xyz/base/",
+            Some("test"),
+            false,
+            DEFAULT_KGOOSE_SERVICE_PATH,
+        )
+        .expect("resolve URL");
+
+        assert_eq!(routed, "https://test.kgoose.example.xyz/base");
     }
 
     #[test]

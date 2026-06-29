@@ -973,11 +973,10 @@ mod tests {
 
         let routed = route_kgoose_base_url_for_shared_org("https://kgoose.sqprod.co")
             .expect("route request base");
-        let session =
-            shared_session_credential_for_kgoose_base_url("https://test.kgoose.sqprod.co")
-                .expect("read shared session");
+        let session = shared_session_credential_for_kgoose_base_url("https://kgoose.sqprod.co")
+            .expect("read shared session");
 
-        assert_eq!(routed, "https://test.kgoose.sqprod.co");
+        assert_eq!(routed, "https://kgoose.sqprod.co");
         assert_eq!(session, None);
 
         clear_auth_env();
