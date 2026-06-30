@@ -32,6 +32,7 @@ interface TerminalSessionStopOptions {
 }
 
 type TerminalSessionListener = () => void;
+export type TerminalSessionRegistryListener = () => void;
 export type TerminalSessionStatusSource =
   | "backend-exit"
   | "client-stop"
@@ -60,6 +61,8 @@ const TERMINAL_PARKING_ROOT_ID = "goose-terminal-parking-root";
 const sessions = new Map<string, TerminalSession>();
 const queuedCommands = new Map<string, string[]>();
 const statusListeners = new Map<string, Set<TerminalSessionStatusListener>>();
+const registryListeners = new Set<TerminalSessionRegistryListener>();
+let terminalSessionIdsSnapshot = new Set<string>();
 let renderingSuspended = false;
 
 function createTerminalHostElement(): HTMLDivElement {
@@ -121,15 +124,57 @@ function formatCommandInput(command: string): string {
   return `${trimmedCommand}\r`;
 }
 
-function emitStatusChange(change: TerminalSessionStatusChange): void {
-  const listeners = statusListeners.get(change.key);
-  if (!listeners) {
+function readChatSessionIdsWithTerminals(): Set<string> {
+  const sessionIds = new Set<string>();
+  for (const [key, session] of sessions) {
+    if (session.status === "exited") {
+      continue;
+    }
+
+    const sessionId = chatSessionIdFromTerminalKey(key);
+    if (sessionId) {
+      sessionIds.add(sessionId);
+    }
+  }
+
+  return sessionIds;
+}
+
+function setsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) {
+    return false;
+  }
+
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function emitRegistryChange(): void {
+  const nextSnapshot = readChatSessionIdsWithTerminals();
+  if (setsEqual(terminalSessionIdsSnapshot, nextSnapshot)) {
     return;
   }
 
-  for (const listener of listeners) {
-    listener(change);
+  terminalSessionIdsSnapshot = nextSnapshot;
+  for (const listener of registryListeners) {
+    listener();
   }
+}
+
+function emitStatusChange(change: TerminalSessionStatusChange): void {
+  const listeners = statusListeners.get(change.key);
+  if (listeners) {
+    for (const listener of listeners) {
+      listener(change);
+    }
+  }
+
+  emitRegistryChange();
 }
 
 export class TerminalSession {
@@ -355,6 +400,7 @@ export class TerminalSession {
 
     this.disposed = true;
     sessions.delete(this.key);
+    emitRegistryChange();
     clearQueuedCommands(this.key);
     this.startupToken = null;
     this.hostElement?.remove();
@@ -775,5 +821,31 @@ export function getOrCreateTerminalSession(
   existing?.stop();
   const session = new TerminalSession(options);
   sessions.set(options.key, session);
+  emitRegistryChange();
   return session;
+}
+
+function chatSessionIdFromTerminalKey(key: string): string | null {
+  // Chat terminals are keyed as `{chatSessionId}:{terminalTabId}` by ChatView.
+  // The registry exposes the chat-session owner so draft-like terminal state can
+  // keep otherwise-empty chats reachable in the sidebar.
+  const separatorIndex = key.indexOf(":");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  return key.slice(0, separatorIndex);
+}
+
+export function getChatSessionIdsWithTerminals(): ReadonlySet<string> {
+  return terminalSessionIdsSnapshot;
+}
+
+export function subscribeTerminalSessionRegistry(
+  listener: TerminalSessionRegistryListener,
+): () => void {
+  registryListeners.add(listener);
+  return () => {
+    registryListeners.delete(listener);
+  };
 }

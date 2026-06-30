@@ -12,6 +12,7 @@ interface FindExistingDraftArgs {
   activeSessionId: string | null;
   draftsBySession: Record<string, string>;
   messagesBySession: Record<string, Message[]>;
+  sessionIdsWithTerminals?: ReadonlySet<string>;
   request: NewChatRequest;
 }
 
@@ -20,6 +21,19 @@ function isMatchingContext(
   request: Omit<NewChatRequest, "title">,
 ): boolean {
   return session.projectId === request.projectId;
+}
+
+function sessionHasTerminal(
+  session: ChatSession,
+  sessionIdsWithTerminals: ReadonlySet<string>,
+): boolean {
+  return (
+    sessionIdsWithTerminals.has(session.id) ||
+    Boolean(
+      session.clientSessionId &&
+        sessionIdsWithTerminals.has(session.clientSessionId),
+    )
+  );
 }
 
 function isReusableDraft(
@@ -38,6 +52,7 @@ export function findExistingDraft({
   activeSessionId,
   draftsBySession,
   messagesBySession,
+  sessionIdsWithTerminals = new Set(),
   request,
 }: FindExistingDraftArgs): ChatSession | undefined {
   if (!isDefaultChatTitle(request.title)) {
@@ -62,7 +77,9 @@ export function findExistingDraft({
   }
 
   const withContent = candidates.filter(
-    (session) => (draftsBySession[session.id] ?? "").length > 0,
+    (session) =>
+      (draftsBySession[session.id] ?? "").length > 0 ||
+      sessionHasTerminal(session, sessionIdsWithTerminals),
   );
   if (withContent.length > 0) {
     return (

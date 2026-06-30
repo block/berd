@@ -58,6 +58,49 @@ describe("findExistingDraft", () => {
     ).toBeUndefined();
   });
 
+  it("reuses a matching empty draft with a terminal", () => {
+    const draft = makeSession("alpha-draft", {
+      projectId: "alpha",
+      providerId: "goose",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: {},
+        messagesBySession: {},
+        sessionIdsWithTerminals: new Set(["alpha-draft"]),
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+        },
+      }),
+    ).toEqual(draft);
+  });
+
+  it("reuses a promoted empty draft with a terminal on its client id", () => {
+    const draft = makeSession("backend-session", {
+      clientSessionId: "client-session",
+      projectId: "alpha",
+      providerId: "goose",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: {},
+        messagesBySession: {},
+        sessionIdsWithTerminals: new Set(["client-session"]),
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+        },
+      }),
+    ).toEqual(draft);
+  });
+
   it("does not reuse an abandoned empty draft", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",

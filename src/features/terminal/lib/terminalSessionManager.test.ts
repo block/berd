@@ -155,12 +155,12 @@ describe("terminalSessionManager", () => {
     } = await import("./terminalSessionManager");
     mocks.startTerminal.mockResolvedValueOnce("terminal-1");
 
-    queueTerminalCommand("session:tab-1", "pnpm test");
+    queueTerminalCommand("chat-session-id:tab-1", "pnpm test");
 
-    expect(stopTerminalSession("session:tab-1")).toBe(false);
+    expect(stopTerminalSession("chat-session-id:tab-1")).toBe(false);
 
     getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -181,7 +181,7 @@ describe("terminalSessionManager", () => {
     mocks.startTerminal.mockResolvedValueOnce("terminal-1");
 
     getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -189,9 +189,9 @@ describe("terminalSessionManager", () => {
     });
     await Promise.resolve();
 
-    expect(stopTerminalSession("session:tab-1", { writeStopped: true })).toBe(
-      true,
-    );
+    expect(
+      stopTerminalSession("chat-session-id:tab-1", { writeStopped: true }),
+    ).toBe(true);
     expect(mocks.stopTerminal).toHaveBeenCalledWith("terminal-1");
   });
 
@@ -203,7 +203,7 @@ describe("terminalSessionManager", () => {
     mocks.startTerminal.mockResolvedValueOnce("terminal-2");
 
     getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -211,7 +211,7 @@ describe("terminalSessionManager", () => {
     });
     await Promise.resolve();
 
-    expect(restartTerminalSession("session:tab-1")).toBe(true);
+    expect(restartTerminalSession("chat-session-id:tab-1")).toBe(true);
 
     expect(mocks.stopTerminal).toHaveBeenCalledWith("terminal-1");
     expect(mocks.startTerminal).toHaveBeenCalledTimes(2);
@@ -227,11 +227,11 @@ describe("terminalSessionManager", () => {
       return Promise.resolve("terminal-1");
     });
 
-    subscribeTerminalSessionStatus("session:tab-1", (change) => {
+    subscribeTerminalSessionStatus("chat-session-id:tab-1", (change) => {
       changes.push(change);
     });
     getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -245,7 +245,7 @@ describe("terminalSessionManager", () => {
     });
 
     expect(changes).toContainEqual({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       status: "exited",
       previousStatus: "running",
       source: "backend-exit",
@@ -299,7 +299,7 @@ describe("terminalSessionManager", () => {
     mocks.startTerminal.mockResolvedValueOnce("terminal-1");
 
     getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -307,14 +307,14 @@ describe("terminalSessionManager", () => {
     });
     await Promise.resolve();
 
-    subscribeTerminalSessionStatus("session:tab-1", (change) => {
+    subscribeTerminalSessionStatus("chat-session-id:tab-1", (change) => {
       changes.push(change);
     });
 
-    stopTerminalSession("session:tab-1", { writeStopped: true });
+    stopTerminalSession("chat-session-id:tab-1", { writeStopped: true });
 
     expect(changes).toContainEqual({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       status: "exited",
       previousStatus: "running",
       source: "client-stop",
@@ -329,7 +329,7 @@ describe("terminalSessionManager", () => {
     const firstContainer = document.createElement("div");
     const secondContainer = document.createElement("div");
     const session = getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -361,7 +361,7 @@ describe("terminalSessionManager", () => {
     );
     mocks.startTerminal.mockResolvedValueOnce("terminal-1");
     const session = getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -378,21 +378,78 @@ describe("terminalSessionManager", () => {
       await import("./terminalSessionManager");
     mocks.startTerminal.mockResolvedValueOnce("terminal-1");
 
-    expect(getTerminalSessionStatus("session:tab-1")).toBeNull();
+    expect(getTerminalSessionStatus("chat-session-id:tab-1")).toBeNull();
 
     getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
       fontFamily: "monospace",
     });
 
-    expect(getTerminalSessionStatus("session:tab-1")).toBe("starting");
+    expect(getTerminalSessionStatus("chat-session-id:tab-1")).toBe("starting");
 
     await Promise.resolve();
 
-    expect(getTerminalSessionStatus("session:tab-1")).toBe("running");
+    expect(getTerminalSessionStatus("chat-session-id:tab-1")).toBe("running");
+  });
+
+  it("tracks chat sessions that have visible terminal state", async () => {
+    const {
+      getChatSessionIdsWithTerminals,
+      getOrCreateTerminalSession,
+      stopTerminalSession,
+      subscribeTerminalSessionRegistry,
+    } = await import("./terminalSessionManager");
+    const snapshots: string[][] = [];
+    mocks.startTerminal.mockResolvedValueOnce("terminal-1");
+
+    const unsubscribe = subscribeTerminalSessionRegistry(() => {
+      snapshots.push(Array.from(getChatSessionIdsWithTerminals()));
+    });
+
+    getOrCreateTerminalSession({
+      key: "chat-session-id:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+
+    expect(getChatSessionIdsWithTerminals()).toEqual(
+      new Set(["chat-session-id"]),
+    );
+    await Promise.resolve();
+    expect(getChatSessionIdsWithTerminals()).toEqual(
+      new Set(["chat-session-id"]),
+    );
+
+    stopTerminalSession("chat-session-id:tab-1");
+    expect(getChatSessionIdsWithTerminals()).toEqual(new Set());
+    expect(snapshots).toEqual([["chat-session-id"], []]);
+
+    unsubscribe();
+  });
+
+  it("keeps errored terminals in the chat-session terminal registry", async () => {
+    const { getChatSessionIdsWithTerminals, getOrCreateTerminalSession } =
+      await import("./terminalSessionManager");
+    mocks.startTerminal.mockRejectedValueOnce(new Error("no shell"));
+
+    getOrCreateTerminalSession({
+      key: "chat-session-id:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+
+    await Promise.resolve();
+
+    expect(getChatSessionIdsWithTerminals()).toEqual(
+      new Set(["chat-session-id"]),
+    );
   });
 
   it("drains terminal output on animation frames after xterm parses the previous chunk", async () => {
@@ -406,7 +463,7 @@ describe("terminalSessionManager", () => {
       return Promise.resolve("terminal-1");
     });
     const session = getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -465,7 +522,7 @@ describe("terminalSessionManager", () => {
       return Promise.resolve("terminal-1");
     });
     const session = getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},
@@ -502,7 +559,7 @@ describe("terminalSessionManager", () => {
       return Promise.resolve("terminal-1");
     });
     const session = getOrCreateTerminalSession({
-      key: "session:tab-1",
+      key: "chat-session-id:tab-1",
       cwd: "/repo",
       labels,
       theme: {},

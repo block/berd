@@ -109,7 +109,10 @@ import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
 import { cn } from "@/shared/lib/cn";
 import { isEditableTarget } from "@/shared/keyboard/isEditableTarget";
-import { setTerminalRenderingSuspended } from "@/features/terminal/lib/terminalSessionManager";
+import {
+  getChatSessionIdsWithTerminals,
+  setTerminalRenderingSuspended,
+} from "@/features/terminal/lib/terminalSessionManager";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
@@ -1407,6 +1410,7 @@ export function AppShell({
         activeSessionId: sessionState.activeSessionId,
         draftsBySession: chatState.draftsBySession,
         messagesBySession: chatState.messagesBySession,
+        sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
         request: {
           title,
           projectId: project?.id,
@@ -1589,6 +1593,7 @@ export function AppShell({
         activeSessionId: sessionState.activeSessionId,
         draftsBySession: chatState.draftsBySession,
         messagesBySession: chatState.messagesBySession,
+        sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
         request: {
           title,
           projectId: project.id,
@@ -1668,6 +1673,7 @@ export function AppShell({
         activeSessionId: sessionState.activeSessionId,
         draftsBySession: chatState.draftsBySession,
         messagesBySession: chatState.messagesBySession,
+        sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
         request: {
           title,
           projectId: project?.id,

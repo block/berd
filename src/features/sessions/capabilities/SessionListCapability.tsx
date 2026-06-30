@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
@@ -55,6 +56,10 @@ import {
 import type { SessionChatRuntime } from "@/shared/types/chat";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
+import {
+  getChatSessionIdsWithTerminals,
+  subscribeTerminalSessionRegistry,
+} from "@/features/terminal/lib/terminalSessionManager";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import type { SidebarSessionItem } from "@/features/sessions/ui/session-list/SidebarProjectSection";
 import type { SidebarProjectsSectionProps } from "@/features/sessions/ui/session-list/SidebarProjectsSection";
@@ -284,10 +289,24 @@ function compareSessionListItems(
     : compareSessionsByActivityDesc(a, b);
 }
 
+function sessionHasTerminal(
+  session: ChatSession,
+  sessionIdsWithTerminals: ReadonlySet<string>,
+): boolean {
+  return (
+    sessionIdsWithTerminals.has(session.id) ||
+    Boolean(
+      session.clientSessionId &&
+        sessionIdsWithTerminals.has(session.clientSessionId),
+    )
+  );
+}
+
 function includeSessionListPlaceholderSessions(
   visibleSessions: ChatSession[],
   sessions: ChatSession[],
   nonEmptyDraftSessionIds: ReadonlySet<string>,
+  sessionIdsWithTerminals: ReadonlySet<string>,
   activeSessionId?: string | null,
 ): {
   sessions: ChatSession[];
@@ -302,7 +321,9 @@ function includeSessionListPlaceholderSessions(
     }
 
     return (
-      session.id === activeSessionId || nonEmptyDraftSessionIds.has(session.id)
+      session.id === activeSessionId ||
+      nonEmptyDraftSessionIds.has(session.id) ||
+      sessionHasTerminal(session, sessionIdsWithTerminals)
     );
   });
   const placeholderSessionIds = new Set(
@@ -386,6 +407,11 @@ export function SessionListCapability({
     useShallow(selectLocalMessageCountsBySession),
   );
   const nonEmptyDraftSessionIds = useChatStore(selectNonEmptyDraftSessionIds);
+  const sessionIdsWithTerminals = useSyncExternalStore(
+    subscribeTerminalSessionRegistry,
+    getChatSessionIdsWithTerminals,
+    () => new Set<string>(),
+  );
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
   const activeWorkspaceBySession = useChatSessionStore(
@@ -426,12 +452,14 @@ export function SessionListCapability({
         getVisibleSessions(sessions, localMessageCountsBySession),
         sessions,
         nonEmptyDraftSessionIds,
+        sessionIdsWithTerminals,
         activeSessionId,
       ),
     [
       activeSessionId,
       localMessageCountsBySession,
       nonEmptyDraftSessionIds,
+      sessionIdsWithTerminals,
       sessions,
     ],
   );
