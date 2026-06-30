@@ -218,10 +218,8 @@ UNSIGNED_APP="src-tauri/target/${TARGET_TRIPLE}/release/bundle/macos/${APP_BUNDL
 
 echo "+++ :package: Staging unsigned .app for apple-codesign"
 mkdir -p release/macos
-echo "+++ :key: Rendering macOS entitlements"
-./scripts/render-macos-entitlements.sh \
-  src-tauri/entitlements.plist \
-  release/macos/entitlements.plist
+echo "+++ :key: Staging macOS entitlements"
+cp src-tauri/entitlements.plist release/macos/entitlements.plist
 rm -rf "release/macos/${APP_BUNDLE_NAME}.app"
 # ditto preserves bundle metadata and extended attributes cp would drop.
 ditto "$UNSIGNED_APP" "release/macos/${APP_BUNDLE_NAME}.app"

@@ -18,9 +18,5 @@
     <true/>
     <key>com.apple.security.files.downloads.read-write</key>
     <true/>
-    <key>keychain-access-groups</key>
-    <array>
-      <string>$(AppIdentifierPrefix)com.squareup.builderbot.shared-auth</string>
-    </array>
   </dict>
 </plist>

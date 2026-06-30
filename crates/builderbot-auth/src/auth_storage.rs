@@ -5,8 +5,6 @@ use std::fs;
 use std::path::PathBuf;
 #[cfg(any(debug_assertions, test))]
 use std::sync::Mutex;
-#[cfg(target_os = "macos")]
-use std::sync::OnceLock;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -306,15 +304,8 @@ impl SessionCredentialStorage for KeyringSessionCredentialStorage {
 fn keyring_get(key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>> {
     use crate::keychain;
 
-    let value = match keychain_scope()? {
-        KeychainScope::Shared(access_group) => {
-            keychain::get_generic_password(KEYRING_SERVICE, &key.account(), &access_group)
-        }
-        KeychainScope::UnscopedDev => {
-            keychain::get_generic_password_unscoped(KEYRING_SERVICE, &key.account())
-        }
-    }
-    .context("read BuilderBot auth session from keyring")?;
+    let value = keychain::get_generic_password_unscoped(KEYRING_SERVICE, &key.account())
+        .context("read BuilderBot auth session from keyring")?;
 
     match value {
         Some(value) => {
@@ -331,71 +322,16 @@ fn keyring_set(key: &SessionStorageKey, credential: &StoredSessionCredential) ->
     use crate::keychain;
 
     let value = serde_json::to_string(credential).context("serialize auth session")?;
-    match keychain_scope()? {
-        KeychainScope::Shared(access_group) => keychain::set_generic_password(
-            KEYRING_SERVICE,
-            &key.account(),
-            &access_group,
-            value.as_bytes(),
-        ),
-        KeychainScope::UnscopedDev => keychain::set_generic_password_unscoped(
-            KEYRING_SERVICE,
-            &key.account(),
-            value.as_bytes(),
-        ),
-    }
-    .context("write BuilderBot auth session to keyring")
+    keychain::set_generic_password_unscoped(KEYRING_SERVICE, &key.account(), value.as_bytes())
+        .context("write BuilderBot auth session to keyring")
 }
 
 #[cfg(target_os = "macos")]
 fn keyring_delete(key: &SessionStorageKey) -> Result<bool> {
     use crate::keychain;
 
-    match keychain_scope()? {
-        KeychainScope::Shared(access_group) => {
-            keychain::delete_generic_password(KEYRING_SERVICE, &key.account(), &access_group)
-        }
-        KeychainScope::UnscopedDev => {
-            keychain::delete_generic_password_unscoped(KEYRING_SERVICE, &key.account())
-        }
-    }
-    .context("delete BuilderBot auth session from keyring")
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Clone)]
-enum KeychainScope {
-    Shared(String),
-    UnscopedDev,
-}
-
-#[cfg(target_os = "macos")]
-enum KeychainScopeDecision {
-    Scope(KeychainScope),
-    Error(String),
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_scope() -> Result<KeychainScope> {
-    static SCOPE: OnceLock<KeychainScopeDecision> = OnceLock::new();
-    match SCOPE.get_or_init(resolve_keychain_scope) {
-        KeychainScopeDecision::Scope(scope) => Ok(scope.clone()),
-        KeychainScopeDecision::Error(error) => Err(anyhow!(error.clone())),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn resolve_keychain_scope() -> KeychainScopeDecision {
-    match crate::keychain::shared_auth_access_group() {
-        Ok(access_group) => KeychainScopeDecision::Scope(KeychainScope::Shared(access_group)),
-        Err(error) if cfg!(debug_assertions) => {
-            log::debug!(
-                "BuilderBot shared auth keychain access group is unavailable in a dev build; using unscoped macOS Keychain storage: {error:#}"
-            );
-            KeychainScopeDecision::Scope(KeychainScope::UnscopedDev)
-        }
-        Err(error) => KeychainScopeDecision::Error(format!("{error:#}")),
-    }
+    keychain::delete_generic_password_unscoped(KEYRING_SERVICE, &key.account())
+        .context("delete BuilderBot auth session from keyring")
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -543,6 +479,19 @@ mod tests {
                 "cash-app/goose"
             ),
             vec!["https://test.blockstaging.build/cash-app/goose".to_string()]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keyring_item_shape_uses_legacy_service_and_account() {
+        let key =
+            SessionStorageKey::new("default", "https://kgoose.stage.sqprod.co/cash-app/goose/");
+
+        assert_eq!(KEYRING_SERVICE, "com.squareup.builderbot.cli-auth");
+        assert_eq!(
+            key.account(),
+            "default@https://kgoose.stage.sqprod.co/cash-app/goose"
         );
     }
 }
