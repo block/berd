@@ -73,6 +73,9 @@ import {
   MessageTimelineJumpToLatestButton,
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
+  RESPONSE_START_HINT_HIDE_DELAY_MS,
+  isResponseStartHintInRelevanceBand,
+  useStickyFlag,
   type MessageBubbleCallbacks,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
@@ -1014,6 +1017,7 @@ export function VirtualMessageTimeline({
   const [responseStartHintMessageId, setResponseStartHintMessageId] = useState<
     string | null
   >(null);
+  const [responseStartHintInZone, setResponseStartHintInZone] = useState(false);
   const [footerHeightPx, setFooterHeightPx] = useState(0);
   const [liveTailScrollHeightFloorPx, setLiveTailScrollHeightFloorPx] =
     useState(0);
@@ -2448,6 +2452,83 @@ export function VirtualMessageTimeline({
     virtualTimelineSnapshot.range.virtualItems,
   ]);
 
+  // Live, scroll-driven relevance gate for the per-message jump-to-response-
+  // start hint. The hint popover anchors to the action chevron rendered on the
+  // message's final fragment row, so it should only be visible while that
+  // chevron sits inside the active reading band — below a generous top margin
+  // (so a chevron parked near/above the top no longer counts as "being read")
+  // and above the composer overlay. This single position check subsumes all
+  // the off-zone cases: scrolled above the top, parked near the top, and pushed
+  // below the composer all fail it. Mirrors gutterResponseStartMessageId by
+  // reading virtual snapshot offsets rather than DOM rects, so it stays correct
+  // even if a fragment row has unmounted. `wasActive` carries the previous gate
+  // state so the top boundary can apply hysteresis and avoid restarting the
+  // hint's fade on scroll jitter.
+  const computeResponseStartHintActive = useCallback(
+    (wasActive: boolean): boolean => {
+      if (!responseStartHintMessageId) {
+        return false;
+      }
+      const messageRows = getRowsForMessage(
+        stableRows,
+        responseStartHintMessageId,
+      );
+      const chevronRow = messageRows.at(-1);
+      if (!chevronRow) {
+        return false;
+      }
+      const chevronIndex = snapshot.rowIndexById.get(chevronRow.rowId);
+      if (chevronIndex == null) {
+        return false;
+      }
+      const chevronItem = virtualTimelineSnapshot.range.virtualItems.find(
+        (item) => item.index === chevronIndex,
+      );
+      if (!chevronItem) {
+        // The action row has scrolled out of the rendered window, so the reader
+        // is far from this message and the hint is no longer relevant.
+        return false;
+      }
+
+      const { scrollTop, viewportHeight } =
+        virtualTimelineSnapshot.controllerState;
+      const visibleBottom = Math.max(
+        0,
+        viewportHeight - messageListBottomPaddingPx,
+      );
+      // Viewport-relative coordinates: the viewport top is the origin (0) and the
+      // chevron renders at the bottom edge of the message's final row.
+      return isResponseStartHintInRelevanceBand({
+        chevronY: chevronItem.end - scrollTop,
+        containerTop: 0,
+        visibleBottom,
+        wasActive,
+      });
+    },
+    [
+      messageListBottomPaddingPx,
+      responseStartHintMessageId,
+      snapshot.rowIndexById,
+      stableRows,
+      virtualTimelineSnapshot.controllerState,
+      virtualTimelineSnapshot.range.virtualItems,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    setResponseStartHintInZone((wasInZone) =>
+      computeResponseStartHintActive(wasInZone),
+    );
+  }, [computeResponseStartHintActive]);
+
+  // Show the hint as soon as its chevron enters the band, but hold it briefly
+  // after the gate drops so a scroll that sweeps the chevron out (or jitters at
+  // an edge) doesn't tear the popover down mid-fade and restart it.
+  const responseStartHintIsActive = useStickyFlag(
+    responseStartHintInZone,
+    RESPONSE_START_HINT_HIDE_DELAY_MS,
+  );
+
   const isResponseStartHintEligible = useCallback(
     (messageId: string) => {
       const container = containerRef.current;
@@ -3268,7 +3349,10 @@ export function VirtualMessageTimeline({
         row.messageId === latestAssistantMessageId &&
         (row.responseStartMessageId ?? row.messageId) !== streamingMessageId
       }
-      showJumpToResponseStartHint={row.messageId === responseStartHintMessageId}
+      showJumpToResponseStartHint={
+        row.messageId === responseStartHintMessageId &&
+        responseStartHintIsActive
+      }
       isPulsing={row.messageId === pulsingMessageId}
       rowStateProvider={virtualTimeline.rowStateProvider}
       bubbleCallbacks={bubbleCallbacks}

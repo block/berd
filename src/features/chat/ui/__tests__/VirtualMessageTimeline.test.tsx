@@ -1183,6 +1183,28 @@ describe("VirtualMessageTimeline", () => {
           ),
       ).toBe(true),
     );
+
+    // Scroll back up toward the start of the response so its action chevron is
+    // pushed out of the active reading band; the hint must withdraw even though
+    // it has already been earned for this message.
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    setScrollMetrics(scroller, {
+      scrollTop: 0,
+      scrollHeight: 1400,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId("bubble-assistant-1")
+          .some(
+            (element) =>
+              element.getAttribute("data-response-start-hint") === "true",
+          ),
+      ).toBe(false),
+    );
   });
 
   it("resumes following a live flow tail when the user scrolls down to latest", async () => {

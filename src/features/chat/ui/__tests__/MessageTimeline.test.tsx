@@ -957,18 +957,79 @@ describe("MessageTimeline", () => {
       scrollHeight: 1400,
       clientHeight: 500,
     });
+    setElementRect(scroller, { top: 0, bottom: 500, height: 500 });
 
     rerender(<MessageTimeline messages={[userMessage, assistantMessage]} />);
 
     const messageFrame = screen.getByTestId("message-assistant-1")
       .parentElement as HTMLElement;
-    setElementRect(messageFrame, { top: 0, height: 700 });
+    // A 700px response whose start has scrolled above the top, with its action
+    // chevron (the message's bottom edge) resting in the active reading band.
+    setElementRect(messageFrame, { top: -200, bottom: 450, height: 700 });
 
     animationFrame.run(1000);
 
-    expect(screen.getByTestId("message-assistant-1")).toHaveAttribute(
-      "data-response-start-hint",
-      "true",
+    // The hint shows as soon as its chevron is in the band.
+    await waitFor(() =>
+      expect(screen.getByTestId("message-assistant-1")).toHaveAttribute(
+        "data-response-start-hint",
+        "true",
+      ),
+    );
+  });
+
+  it("hides the response-start hint once the message's chevron scrolls out of the active reading band", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const userMessage = message("user-1", "user", "Question");
+    const assistantMessage = message(
+      "assistant-1",
+      "assistant",
+      Array.from({ length: 40 }, (_, index) => `Answer ${index}`).join("\n"),
+    );
+
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={[userMessage]} />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 0,
+      scrollHeight: 1400,
+      clientHeight: 500,
+    });
+    setElementRect(scroller, { top: 0, bottom: 500, height: 500 });
+
+    rerender(<MessageTimeline messages={[userMessage, assistantMessage]} />);
+
+    const messageFrame = screen.getByTestId("message-assistant-1")
+      .parentElement as HTMLElement;
+    // Chevron resting in the active reading band → hint visible.
+    setElementRect(messageFrame, { top: -200, bottom: 450, height: 700 });
+    animationFrame.run(1000);
+
+    // The hint shows as soon as its chevron is in the band.
+    await waitFor(() =>
+      expect(screen.getByTestId("message-assistant-1")).toHaveAttribute(
+        "data-response-start-hint",
+        "true",
+      ),
+    );
+
+    // Scroll further down so the response — chevron included — is parked near
+    // the top, outside the active reading band. The hint withdraws after the
+    // brief hide delay (RESPONSE_START_HINT_HIDE_DELAY_MS).
+    setElementRect(messageFrame, { top: -650, bottom: 50, height: 700 });
+    setScrollMetrics(scroller, {
+      scrollTop: 650,
+      scrollHeight: 1400,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("message-assistant-1")).toHaveAttribute(
+        "data-response-start-hint",
+        "false",
+      ),
     );
   });
 

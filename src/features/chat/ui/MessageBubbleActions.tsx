@@ -49,9 +49,14 @@ export function MessageBubbleActions({
       variant="ghost-light"
       className="text-muted-foreground/80"
       label={jumpToResponseStartLabel}
-      tooltip={
-        showJumpToResponseStartHint ? undefined : jumpToResponseStartLabel
-      }
+      // Use a native title for the hover affordance instead of MessageAction's
+      // Radix tooltip. The shared tooltip opens with zero delay, so when the
+      // rich hint popover closes (the gate drops as the chevron scrolls off the
+      // bottom) Radix returns focus to this trigger and instantly flashes a
+      // label-only bubble — a smaller, subtitle-less "ghost" of the hint. A
+      // native title only shows on a deliberate rested hover and ignores focus,
+      // so it can't glitch during the hide. Suppressed while the hint shows.
+      title={showJumpToResponseStartHint ? undefined : jumpToResponseStartLabel}
       onClick={() => onJumpToResponseStart(messageId)}
     >
       <IconChevronsUp className="size-3.5" />
@@ -94,46 +99,47 @@ export function MessageBubbleActions({
         </MessageAction>
       ) : null}
       {!isUser && jumpToResponseStartAction ? (
-        showJumpToResponseStartHint ? (
-          <Popover
-            open
-            onOpenChange={(open) => {
-              if (!open) {
-                onJumpToResponseStartHintClose?.(messageId);
-              }
-            }}
+        <Popover
+          open={!!showJumpToResponseStartHint}
+          onOpenChange={(open) => {
+            if (!open) {
+              onJumpToResponseStartHintClose?.(messageId);
+            }
+          }}
+        >
+          <PopoverTrigger asChild>{jumpToResponseStartAction}</PopoverTrigger>
+          <PopoverContent
+            variant="tooltip"
+            align="center"
+            side="top"
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            // The hint closes on a scroll-driven gate flip, not a user action.
+            // Don't let Radix yank focus back to the chevron as it unmounts —
+            // that focus return is what re-opens the chevron's hover affordance
+            // mid-scroll and can scroll the (departing) chevron back into view.
+            onCloseAutoFocus={(event) => event.preventDefault()}
+            className="max-w-56 p-3"
           >
-            <PopoverTrigger asChild>{jumpToResponseStartAction}</PopoverTrigger>
-            <PopoverContent
-              variant="tooltip"
-              align="center"
-              side="top"
-              onOpenAutoFocus={(event) => event.preventDefault()}
-              className="max-w-56 p-3"
-            >
-              <div className="relative">
-                <p className="pr-7 text-xs font-medium leading-4">
-                  {jumpToResponseStartLabel}
-                </p>
-                <p className="mt-1 text-xs leading-4 text-popover-inverse-foreground/80">
-                  {t("message.jumpToResponseStartHint")}
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="absolute right-0 top-0 size-4 p-0 text-popover-inverse-foreground/75 hover:bg-transparent hover:text-popover-inverse-foreground"
-                  aria-label={t("message.jumpToResponseStartHintDismiss")}
-                  onClick={() => onJumpToResponseStartHintDismiss?.(messageId)}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-        ) : (
-          jumpToResponseStartAction
-        )
+            <div className="relative">
+              <p className="pr-7 text-xs font-medium leading-4">
+                {jumpToResponseStartLabel}
+              </p>
+              <p className="mt-1 text-xs leading-4 text-popover-inverse-foreground/80">
+                {t("message.jumpToResponseStartHint")}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-0 top-0 size-4 p-0 text-popover-inverse-foreground/75 hover:bg-transparent hover:text-popover-inverse-foreground"
+                aria-label={t("message.jumpToResponseStartHintDismiss")}
+                onClick={() => onJumpToResponseStartHintDismiss?.(messageId)}
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
       ) : null}
       {!isUser && onRetryMessage && (
         <MessageAction

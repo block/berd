@@ -40,6 +40,9 @@ import {
   MessageTimelineJumpToLatestButton,
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
+  RESPONSE_START_HINT_HIDE_DELAY_MS,
+  isResponseStartHintInRelevanceBand,
+  useStickyFlag,
   type MessageBubbleCallbacks,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
@@ -178,6 +181,7 @@ export function MessageTimeline({
   const [responseStartHintMessageId, setResponseStartHintMessageId] = useState<
     string | null
   >(null);
+  const [responseStartHintInZone, setResponseStartHintInZone] = useState(false);
   const [footerHeightPx, setFooterHeightPx] = useState(0);
   const hasFooter = footer != null;
   const messageListBottomPaddingPx = hasFooter
@@ -343,6 +347,68 @@ export function MessageTimeline({
   useLayoutEffect(() => {
     syncGutterResponseStartVisibility();
   }, [syncGutterResponseStartVisibility]);
+
+  // Live relevance gate for the per-message jump-to-response-start hint. The
+  // hint popover anchors to the action chevron at the bottom of the message's
+  // final row, so it should only be visible while that chevron sits inside the
+  // active reading band — below a generous top margin (so a chevron parked
+  // near/above the top no longer counts as "being read") and above the composer
+  // overlay. This single position check subsumes every off-zone case: scrolled
+  // above the top, parked near the top, and pushed below the composer all fail
+  // it. `wasActive` carries the previous gate state so the top boundary can
+  // apply hysteresis and avoid restarting the hint's fade on scroll jitter.
+  const computeResponseStartHintActive = useCallback(
+    (messageId: string | null, wasActive: boolean) => {
+      if (!messageId) {
+        return false;
+      }
+      const container = containerRef.current;
+      if (!container) {
+        return false;
+      }
+      let chevronRowElement: HTMLElement | null = null;
+      for (let index = snapshot.rows.length - 1; index >= 0; index -= 1) {
+        const row = snapshot.rows[index];
+        if (row?.messageId === messageId) {
+          chevronRowElement = rowRefs.current[row.rowId] ?? null;
+          break;
+        }
+      }
+      if (!chevronRowElement) {
+        return false;
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      const chevronRect = chevronRowElement.getBoundingClientRect();
+      const footerRect = footerRef.current?.getBoundingClientRect();
+      const visibleBottom = footerRect
+        ? Math.min(containerRect.bottom, footerRect.top)
+        : containerRect.bottom;
+      // Absolute viewport coordinates: the container's top edge is the origin
+      // and the chevron renders at the bottom of the message's final row.
+      return isResponseStartHintInRelevanceBand({
+        chevronY: chevronRect.bottom,
+        containerTop: containerRect.top,
+        visibleBottom,
+        wasActive,
+      });
+    },
+    [snapshot.rows],
+  );
+
+  useLayoutEffect(() => {
+    setResponseStartHintInZone((wasInZone) =>
+      computeResponseStartHintActive(responseStartHintMessageId, wasInZone),
+    );
+  }, [computeResponseStartHintActive, responseStartHintMessageId]);
+
+  // Show the hint as soon as its chevron enters the band, but hold it briefly
+  // after the gate drops so a scroll that sweeps the chevron out (or jitters at
+  // an edge) doesn't tear the popover down mid-fade and restart it.
+  const responseStartHintActive = useStickyFlag(
+    responseStartHintInZone,
+    RESPONSE_START_HINT_HIDE_DELAY_MS,
+  );
 
   const setTimelineScrollTop = useCallback(
     (container: HTMLDivElement, scrollTop: number) => {
@@ -1127,6 +1193,9 @@ export function MessageTimeline({
     lastScrollTopRef.current = scrollTop;
     userScrollIntentRef.current = false;
     syncGutterResponseStartVisibility();
+    setResponseStartHintInZone((wasInZone) =>
+      computeResponseStartHintActive(responseStartHintMessageId, wasInZone),
+    );
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
@@ -1325,7 +1394,8 @@ export function MessageTimeline({
             (row.responseStartMessageId ?? row.messageId) !== streamingMessageId
           }
           showJumpToResponseStartHint={
-            row.messageId === responseStartHintMessageId
+            row.messageId === responseStartHintMessageId &&
+            responseStartHintActive
           }
           isPulsing={row.messageId === pulsingMessageId}
           bubbleCallbacks={bubbleCallbacks}
