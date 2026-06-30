@@ -98,9 +98,11 @@ set_vite_env() {
     VITE_*)
       local next=()
       local pair
-      for pair in "${VITE_EXTRA_ENV[@]}"; do
-        [[ "$pair" == "$key="* ]] || next+=("$pair")
-      done
+      if [[ ${#VITE_EXTRA_ENV[@]} -gt 0 ]]; then
+        for pair in "${VITE_EXTRA_ENV[@]}"; do
+          [[ "$pair" == "$key="* ]] || next+=("$pair")
+        done
+      fi
       next+=("$key=$value")
       VITE_EXTRA_ENV=("${next[@]}")
       ;;
