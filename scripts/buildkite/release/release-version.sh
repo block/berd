@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Print the release version for the upload-mobile-release plugin to attach to
-# the go/mr artifact record. Forwards the `version` Buildkite meta-data value
-# (same one set by the pipeline's input step).
+# Print the resolved release version. For official builds this is the `version`
+# Buildkite meta-data value (same one set by the pipeline's input step); for
+# custom builds it carries the `-<custom_name>` suffix build-macos.sh stamps.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/buildkite/release/lib.sh
 source "$SCRIPT_DIR/lib.sh"
-meta version
+resolve_release_version

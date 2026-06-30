@@ -29,7 +29,12 @@ export const SETTINGS_SECTIONS = [
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
-  { id: "updates", labelKey: "nav.updates", icon: RefreshCw },
+  {
+    id: "updates",
+    labelKey: "nav.updates",
+    icon: RefreshCw,
+    capability: "updates",
+  },
   {
     id: "doctor",
     labelKey: "nav.doctor",

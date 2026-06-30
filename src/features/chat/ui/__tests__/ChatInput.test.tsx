@@ -599,8 +599,8 @@ describe("ChatInput", () => {
       screen.queryByRole("button", { name: /attach/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /voice dictation/i }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: /voice dictation/i }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("textbox")).not.toHaveFocus();
   });
 
@@ -2128,6 +2128,40 @@ describe("ChatInput", () => {
     );
 
     expect(screen.getByRole("button", { name: "Listening..." })).toBeEnabled();
+  });
+
+  it("hides the mic toggle when voice input is unavailable and idle", () => {
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [],
+        }}
+        projectPicker={{
+          selectedProjectId: null,
+          availableProjects: [],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          onSend: vi.fn(),
+          voiceEnabled: false,
+          voiceRecording: false,
+          onVoiceToggle: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Voice dictation" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows and updates reasoning effort from the model picker", async () => {

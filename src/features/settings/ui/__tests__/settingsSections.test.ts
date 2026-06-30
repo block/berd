@@ -16,6 +16,9 @@ const enabledCapabilities: ProfileCapabilityState = {
   doctor: true,
   feedback: true,
   telemetry: true,
+  voiceDictation: true,
+  kgooseConnections: true,
+  updates: true,
 };
 
 describe("settingsSections", () => {
@@ -65,5 +68,20 @@ describe("settingsSections", () => {
     expect(
       getVisibleSettingsSections(capabilities).map((section) => section.id),
     ).not.toContain("doctor");
+  });
+
+  it("filters updates when the updater build feature is disabled", () => {
+    const capabilities = {
+      ...enabledCapabilities,
+      updates: false,
+    };
+
+    expect(isSettingsSectionEnabled("updates", capabilities)).toBe(false);
+    expect(resolveEnabledSettingsSection("updates", capabilities)).toBe(
+      DEFAULT_SETTINGS_SECTION,
+    );
+    expect(
+      getVisibleSettingsSections(capabilities).map((section) => section.id),
+    ).not.toContain("updates");
   });
 });

@@ -42,6 +42,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const queryClient = useQueryClient();
   const doctorEnabled = useProfileCapability("doctor");
+  const updatesEnabled = useProfileCapability("updates");
 
   // Warm the shared doctor report once per Settings visit. SettingsView mounts
   // whenever Settings opens (every entry path: sidebar, restored URL, returning
@@ -82,7 +83,7 @@ export function SettingsView({
       {activeSection === "notifications" && <NotificationSettings />}
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}
-      {activeSection === "updates" && <UpdatesSettings />}
+      {activeSection === "updates" && updatesEnabled && <UpdatesSettings />}
     </PageShell>
   );
 }

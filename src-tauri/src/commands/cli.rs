@@ -1,14 +1,14 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "no-bb-cli-install")))]
 use std::time::Duration;
 use tauri::AppHandle;
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 
 const BB_LINK_PATH: &str = "/usr/local/bin/bb";
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "no-bb-cli-install")))]
 const AUTO_INSTALL_DELAY: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Serialize)]
@@ -17,6 +17,11 @@ pub struct BbCliStatus {
     installed: bool,
     needs_repair: bool,
     can_install: bool,
+    // True when this build was compiled with the `no-bb-cli-install` feature, so
+    // the PATH install is unavailable and the renderer should hide the section
+    // instead of showing a dead button. Mirrors the `UnsupportedBuild` signal
+    // the runtime-config release path uses for `set_fake_runtime_config`.
+    unsupported_in_build: bool,
     link_path: String,
     bundled_path: Option<String>,
     current_target: Option<String>,
@@ -31,6 +36,7 @@ pub fn get_bb_cli_status(app: AppHandle) -> BbCliStatus {
     bb_cli_status(&app)
 }
 
+#[cfg(not(feature = "no-bb-cli-install"))]
 #[tauri::command]
 pub fn install_bb_cli(app: AppHandle) -> Result<BbCliStatus, String> {
     let bundled = bundled_bb_path(&app).ok_or_else(|| {
@@ -48,7 +54,7 @@ pub fn install_bb_cli(app: AppHandle) -> Result<BbCliStatus, String> {
     Ok(bb_cli_status(&app))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "no-bb-cli-install")))]
 pub fn schedule_bb_cli_auto_install(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -89,7 +95,7 @@ pub fn schedule_bb_cli_auto_install(app: &AppHandle) {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(feature = "no-bb-cli-install")))]
 pub fn schedule_bb_cli_auto_install(_app: &AppHandle) {}
 
 fn bb_cli_status(app: &AppHandle) -> BbCliStatus {
@@ -113,9 +119,17 @@ fn bb_cli_status(app: &AppHandle) -> BbCliStatus {
         && resolved_current == resolved_bundled;
     let link_exists = Path::new(BB_LINK_PATH).exists() || current_target.is_some();
     let needs_repair = !installed && (link_exists || found_on_path.is_some());
-    let can_install = bundled_executable;
+    // A build compiled with `no-bb-cli-install` can never mutate the user's
+    // PATH, so it never offers to install and reports the gate to the renderer
+    // via `unsupported_in_build`.
+    let (can_install, unsupported_in_build) = resolve_install_gate(bundled_executable);
 
-    let (message, detail) = if installed {
+    let (message, detail) = if unsupported_in_build {
+        (
+            "CLI install unavailable".to_string(),
+            "Installing the bb command line tool is not available in this build.".to_string(),
+        )
+    } else if installed {
         (
             "CLI installed".to_string(),
             format!("{BB_LINK_PATH} points to the bundled bb command."),
@@ -161,6 +175,7 @@ fn bb_cli_status(app: &AppHandle) -> BbCliStatus {
         installed,
         needs_repair,
         can_install,
+        unsupported_in_build,
         link_path: BB_LINK_PATH.to_string(),
         bundled_path,
         current_target,
@@ -169,6 +184,15 @@ fn bb_cli_status(app: &AppHandle) -> BbCliStatus {
         message,
         detail,
     }
+}
+
+/// Resolves the install gate from build state and the `no-bb-cli-install`
+/// feature. Returns `(can_install, unsupported_in_build)`: a build compiled with
+/// the disable feature can never install into PATH, and even a supported build
+/// needs an executable bundled binary to symlink.
+fn resolve_install_gate(bundled_executable: bool) -> (bool, bool) {
+    let supported = cfg!(not(feature = "no-bb-cli-install"));
+    (bundled_executable && supported, !supported)
 }
 
 fn bundled_bb_path(app: &AppHandle) -> Option<PathBuf> {
@@ -204,7 +228,7 @@ fn resolve_path(path: &Path) -> String {
         .into_owned()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "no-bb-cli-install")))]
 fn is_stable_installed_app_resource(path: &Path) -> bool {
     let Some(resources_dir) = path.parent() else {
         return false;
@@ -239,6 +263,7 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
+#[cfg(not(feature = "no-bb-cli-install"))]
 fn install_bb_symlink(cli_path: &Path) -> Result<(), String> {
     if try_install_bb_symlink(cli_path).is_ok() {
         return Ok(());
@@ -254,6 +279,7 @@ fn install_bb_symlink(cli_path: &Path) -> Result<(), String> {
     }
 }
 
+#[cfg(not(feature = "no-bb-cli-install"))]
 fn try_install_bb_symlink(cli_path: &Path) -> std::io::Result<()> {
     let link = Path::new(BB_LINK_PATH);
     if let Some(parent) = link.parent() {
@@ -273,7 +299,7 @@ fn try_install_bb_symlink(cli_path: &Path) -> std::io::Result<()> {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "no-bb-cli-install")))]
 mod macos {
     use super::{Path, BB_LINK_PATH};
     use libc::{c_char, c_int, c_void, pid_t};
@@ -528,5 +554,30 @@ mod macos {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_install_gate;
+
+    #[test]
+    fn install_gate_tracks_feature() {
+        let (can_install, unsupported_in_build) = resolve_install_gate(true);
+        // The additive `no-bb-cli-install` disable feature flips the gate: when
+        // it is compiled in, PATH install is unsupported.
+        if cfg!(feature = "no-bb-cli-install") {
+            assert!(!can_install);
+            assert!(unsupported_in_build);
+        } else {
+            assert!(can_install);
+            assert!(!unsupported_in_build);
+        }
+    }
+
+    #[test]
+    fn missing_bundle_never_installs() {
+        let (can_install, _) = resolve_install_gate(false);
+        assert!(!can_install);
     }
 }

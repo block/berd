@@ -45,7 +45,7 @@ import {
   isProduction,
   isStaging,
 } from "@/shared/utils/environment";
-import { getBuildFeatureState } from "@/shared/profile/buildProfile";
+import { getProfileCapabilitySnapshot } from "@/shared/profile/capabilities";
 import { IdentityProvider, type ResolvedIdentity } from "./identity";
 import { installTelemetryTransportBridge } from "./transport";
 
@@ -70,9 +70,22 @@ const client = new CDP({
   environment: getEnvironment(),
 });
 
-/** Telemetry only emits when the build feature is enabled in production/staging. */
+/**
+ * Telemetry only emits when the `telemetry` capability is enabled in
+ * production/staging. The capability AND-gates the build feature (the immediate,
+ * no-flicker off switch) with `featureToggles.telemetry` (the future endpoint
+ * toggle), so a restricted build disables telemetry now via `VITE_TELEMETRY=0`
+ * and the bundled runtime config / endpoint can disable it later with no code
+ * change.
+ *
+ * Caveat: `initTelemetry()` + `trackAppLaunched()` fire at startup before
+ * runtime config loads, so a runtime/endpoint disable cannot suppress the launch
+ * event — only the build feature can.
+ */
 function telemetryEnabled(): boolean {
-  return getBuildFeatureState().telemetry && (isProduction() || isStaging());
+  return (
+    getProfileCapabilitySnapshot("telemetry") && (isProduction() || isStaging())
+  );
 }
 
 function telemetryDebugLoggingEnabled(): boolean {

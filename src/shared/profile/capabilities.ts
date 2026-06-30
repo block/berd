@@ -7,12 +7,16 @@ import {
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import { getBuildFeatureState, type BuildFeature } from "./buildProfile";
+import type { RuntimeFeatureToggleKey } from "./runtimeFeatureToggles";
 
 export type ProfileCapabilityId =
   | "automations"
   | "builderbot"
   | "agentToolsTip"
   | "telemetry"
+  | "voiceDictation"
+  | "kgooseConnections"
+  | "updates"
   | "feedback"
   | "doctor";
 
@@ -21,7 +25,7 @@ type CapabilitySource =
   | {
       kind: "runtimeFeature";
       feature: BuildFeature;
-      toggle: "automations" | "builderbot" | "agentToolsTip";
+      toggle: RuntimeFeatureToggleKey;
       experiment?: string;
     }
   | { kind: "runtimeConfigSection"; field: "feedback" | "doctor" };
@@ -48,7 +52,25 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     feature: "agentToolsTip",
     toggle: "agentToolsTip",
   },
-  telemetry: { kind: "buildFeature", feature: "telemetry" },
+  telemetry: {
+    kind: "runtimeFeature",
+    feature: "telemetry",
+    toggle: "telemetry",
+  },
+  voiceDictation: {
+    kind: "runtimeFeature",
+    feature: "voiceDictation",
+    toggle: "voiceDictation",
+  },
+  kgooseConnections: {
+    kind: "runtimeFeature",
+    feature: "kgooseConnections",
+    toggle: "kgooseConnections",
+  },
+  updates: {
+    kind: "buildFeature",
+    feature: "updater",
+  },
   feedback: { kind: "runtimeConfigSection", field: "feedback" },
   doctor: { kind: "runtimeConfigSection", field: "doctor" },
 };

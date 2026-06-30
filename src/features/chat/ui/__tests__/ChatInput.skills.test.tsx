@@ -575,6 +575,42 @@ describe("ChatInput skill mentions", () => {
     window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
   });
 
+  it("does not load Agent Tools connection status when kgoose connections are disabled", async () => {
+    const user = userEvent.setup();
+    const openSettingsListener = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+    setReadyRuntimeConfig({
+      ...DEFAULT_RUNTIME_CONFIG,
+      featureToggles: { kgooseConnections: false },
+    });
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to linear");
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockListConnections).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(openSettingsListener).not.toHaveBeenCalled();
+
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+  });
+
   it("does not show Agent Tools availability tips while connection status is loading", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([

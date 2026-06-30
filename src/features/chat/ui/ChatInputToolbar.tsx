@@ -401,40 +401,40 @@ export function ChatInputToolbar({
             </Popover>
           )}
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button
-                  type="button"
-                  variant="composer-action"
-                  size="icon-pill-sm"
-                  disabled={!voiceRecording && (!voiceEnabled || disabled)}
-                  onClick={onVoiceToggle}
-                  aria-label={
-                    voiceRecording
-                      ? t("toolbar.voiceInputRecording")
-                      : t("toolbar.voiceInput")
-                  }
-                  className={cn(
-                    voiceRecording &&
-                      "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
-                    voiceTranscribing && "animate-pulse",
-                  )}
-                >
-                  <Mic aria-hidden="true" />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {!voiceEnabled
-                ? t("toolbar.voiceInputDisabled")
-                : voiceRecording
+          {(voiceEnabled || voiceRecording) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    type="button"
+                    variant="composer-action"
+                    size="icon-pill-sm"
+                    disabled={!voiceRecording && (!voiceEnabled || disabled)}
+                    onClick={onVoiceToggle}
+                    aria-label={
+                      voiceRecording
+                        ? t("toolbar.voiceInputRecording")
+                        : t("toolbar.voiceInput")
+                    }
+                    className={cn(
+                      voiceRecording &&
+                        "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
+                      voiceTranscribing && "animate-pulse",
+                    )}
+                  >
+                    <Mic aria-hidden="true" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {voiceRecording
                   ? t("toolbar.voiceInputRecording")
                   : voiceTranscribing
                     ? t("toolbar.voiceInputTranscribing")
                     : t("toolbar.voiceInput")}
-            </TooltipContent>
-          </Tooltip>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <div>

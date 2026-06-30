@@ -18,7 +18,14 @@ const DEFAULT_MODEL_INVENTORY_MODE: RuntimeModelInventoryMode = "authoritative";
 export function defaultModelInventoryModeForLoadResult(
   result: RuntimeConfigLoadResult,
 ): RuntimeModelInventoryMode {
-  return result.status !== "ready" || result.source === "appDefault"
+  // `bundledFile` is treated like `appDefault`: the bundled runtime-config.json
+  // fully replaces the compiled-in default in no-endpoint builds and carries the
+  // same minimal seed provider, so its model inventory is a starting point to be
+  // refreshed from the backend — not an authoritative endpoint-supplied list.
+  // Only a live/cached admin endpoint response is authoritative.
+  return result.status !== "ready" ||
+    result.source === "appDefault" ||
+    result.source === "bundledFile"
     ? "refreshable"
     : "authoritative";
 }

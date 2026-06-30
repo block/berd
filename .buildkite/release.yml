@@ -7,11 +7,9 @@ env:
 
   MACOS_ENVIRONMENT_XCODE_VERSION: "26.3.0"
   MACOS_ENVIRONMENT_RUBY_VERSION: "3.3.9"
-# The macos-environment plugin activates Xcode and sets up RVM/bundler so the
-# upload-mobile-release plugin's pre-command can find `fastlane` if it ever
-# needs to. berd only builds macOS, but the plugin's signing/upload helpers
-# still rely on the environment it primes.
-common:
+
+# Official releases are intentionally static: they build/sign once, then publish
+# the updater feed and GitHub release from the signed artifacts.
 steps:
   - input: ":mac: Cut a Berd release"
     key: "release-input"
@@ -68,6 +66,7 @@ steps:
     depends_on:
       - "build-macos"
     command: ./scripts/buildkite/release/publish-updater.sh
+
   - label: ":github: Publish GitHub release"
     key: "publish"
     depends_on:

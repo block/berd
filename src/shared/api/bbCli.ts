@@ -4,6 +4,12 @@ export interface BbCliStatus {
   installed: boolean;
   needsRepair: boolean;
   canInstall: boolean;
+  /**
+   * True when this build was compiled with the `no-bb-cli-install` Cargo
+   * feature, so installing the bb CLI into PATH is unsupported. The renderer
+   * hides the install section entirely rather than showing a dead button.
+   */
+  unsupportedInBuild: boolean;
   linkPath: string;
   bundledPath?: string | null;
   currentTarget?: string | null;

@@ -154,7 +154,10 @@ import {
   resolveStackedNavigationPaneSizes,
 } from "./layout/panes/paneSizeRules";
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
-import { useProfileCapabilities } from "@/shared/profile/capabilities";
+import {
+  getProfileCapabilitySnapshot,
+  useProfileCapabilities,
+} from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -340,7 +343,13 @@ export function AppShell({
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
   );
   const [activeConnectionsTab, setActiveConnectionsTab] =
-    useState<ConnectionsTab>("companyManaged");
+    useState<ConnectionsTab>(() =>
+      // Build-time/runtime gate: a build without the kgoose "Company-managed"
+      // tab opens connections on "custom" instead.
+      getProfileCapabilitySnapshot("kgooseConnections")
+        ? "companyManaged"
+        : "custom",
+    );
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
@@ -2468,7 +2477,9 @@ export function AppShell({
   const handleOpenExtensionFromSearch = useCallback(
     (entry: ExtensionEntry) => {
       setActiveConnectionsTab(
-        isCompanyManagedExtension(entry)
+        // The "Company-managed" tab can be gated off at build/runtime; a
+        // company-managed extension then falls back to "custom".
+        isCompanyManagedExtension(entry) && capabilities.kgooseConnections
           ? "companyManaged"
           : classifyExtension(entry) === "gooseCapabilities"
             ? "gooseCapabilities"
@@ -2476,7 +2487,7 @@ export function AppShell({
       );
       openSettings("connections");
     },
-    [openSettings],
+    [openSettings, capabilities.kgooseConnections],
   );
 
   const handleOpenAutomationFromSearch = useCallback(

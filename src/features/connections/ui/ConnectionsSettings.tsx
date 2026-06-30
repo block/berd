@@ -20,6 +20,7 @@ import {
   resolveConnectionStatus,
 } from "@/features/connections/lib/connectionStatus";
 import { ExtensionsSettings } from "@/features/extensions/ui/ExtensionsSettings";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
@@ -139,10 +140,31 @@ export function ConnectionsSettings({
   const { t } = useTranslation("settings");
   const queryClient = useQueryClient();
 
+  // Gates the kgoose-backed "Company-managed" tab. The capability is named
+  // after the backing system (kgoose), not the "Company-managed" UI label — the
+  // mismatch is deliberate, don't "fix" it.
+  const showKgooseConnections = useProfileCapability("kgooseConnections");
+
+  // When the tab is gated off, never call the kgoose `list-oauth-extensions`
+  // endpoint, and coerce a stale `companyManaged` selection (e.g. from a
+  // persisted default or an external open-settings event) onto "custom" so the
+  // controlled Tabs `value` always points at a rendered tab.
+  const effectiveTab: ConnectionsTab =
+    !showKgooseConnections && activeTab === "companyManaged"
+      ? "custom"
+      : activeTab;
+
+  useEffect(() => {
+    if (effectiveTab !== activeTab) {
+      onActiveTabChange(effectiveTab);
+    }
+  }, [effectiveTab, activeTab, onActiveTabChange]);
+
   const { data: connectionsData } = useQuery({
     queryKey: CONNECTIONS_QUERY_KEY,
     queryFn: listConnections,
     refetchInterval: CONNECTIONS_REFETCH_INTERVAL_MS,
+    enabled: showKgooseConnections,
   });
 
   useEffect(() => {
@@ -192,7 +214,7 @@ export function ConnectionsSettings({
   return (
     <SettingsPage contentClassName="space-y-6">
       <Tabs
-        value={activeTab}
+        value={effectiveTab}
         onValueChange={(value) => onActiveTabChange(value as ConnectionsTab)}
         className="gap-5"
       >
@@ -204,9 +226,11 @@ export function ConnectionsSettings({
             {t("connections.description")}
           </p>
           <TabsList variant="weight" className="mt-4">
-            <TabsTrigger value="companyManaged" variant="weight">
-              {t("connections.tabs.companyManaged")}
-            </TabsTrigger>
+            {showKgooseConnections ? (
+              <TabsTrigger value="companyManaged" variant="weight">
+                {t("connections.tabs.companyManaged")}
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value="custom" variant="weight">
               {t("connections.tabs.custom")}
             </TabsTrigger>
@@ -216,20 +240,22 @@ export function ConnectionsSettings({
           </TabsList>
         </div>
 
-        <TabsContent value="companyManaged">
-          <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
-            {sortedRows.map(({ entry, status }) => (
-              <ConnectionRow
-                key={entry.provider}
-                entry={entry}
-                status={status}
-              />
-            ))}
-          </div>
-        </TabsContent>
+        {showKgooseConnections ? (
+          <TabsContent value="companyManaged">
+            <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
+              {sortedRows.map(({ entry, status }) => (
+                <ConnectionRow
+                  key={entry.provider}
+                  entry={entry}
+                  status={status}
+                />
+              ))}
+            </div>
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="custom">
-          {activeTab === "custom" ? (
+          {effectiveTab === "custom" ? (
             <ExtensionsSettings
               variant="custom"
               hideCompanyManagedExtensions
@@ -239,7 +265,7 @@ export function ConnectionsSettings({
         </TabsContent>
 
         <TabsContent value="gooseCapabilities">
-          {activeTab === "gooseCapabilities" ? (
+          {effectiveTab === "gooseCapabilities" ? (
             <ExtensionsSettings
               variant="gooseCapabilities"
               showAddAction={false}

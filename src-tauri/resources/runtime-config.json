@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "goose": {
+    "defaultModelProviderId": "databricks_v2",
+    "defaultModelId": "goose-gpt-5-5",
+    "modelProviders": [
+      {
+        "id": "databricks_v2",
+        "displayName": "Databricks AI Gateway",
+        "description": "Databricks AI Gateway models",
+        "setupMethod": "host_with_oauth_fallback",
+        "group": "default",
+        "aliases": ["databricks_v2", "databricks", "databricks-ai-gateway"],
+        "nativeConnectQuery": "databricks",
+        "endpointEnv": {
+          "DATABRICKS_HOST": "https://block-lakehouse-production.cloud.databricks.com"
+        },
+        "models": [
+          {
+            "id": "goose-gpt-5-5",
+            "name": "GPT-5.5",
+            "recommended": true
+          }
+        ]
+      }
+    ]
+  },
+  "featureToggles": {}
+}

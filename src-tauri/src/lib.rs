@@ -127,13 +127,67 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            // Before any heavier startup work, offer to move into
-            // /Applications when launched from installer media (DMG, a
-            // read-only/translocated location, or another non-installed
-            // download). Accepting relaunches the installed copy and exits.
-            #[cfg(target_os = "macos")]
-            services::installer_media::maybe_prompt_move_to_applications(app.handle());
+            // Register every command-backed state in the Tauri state map
+            // before any blocking, async, or filesystem work below. The main
+            // window is created hidden, but its webview still loads and races
+            // ahead on Tokio threads (e.g. `runChatRuntimeStartup` spawning
+            // goose serve and calling `refresh_runtime_config`). If a blocking
+            // step such as the move-to-/Applications prompt runs first, those
+            // handlers read the state map before `manage()` has run and fail
+            // with "state not managed". These `manage()` calls are cheap and
+            // side-effect-free, so running them first guarantees the state is
+            // present even while a later step blocks the setup thread.
+            let app_data_dir = app.path().app_data_dir()?;
 
+            let bundled_runtime_config_path = match app.path().resource_dir() {
+                Ok(resource_dir) => Some(
+                    resource_dir.join(commands::runtime_config::BUNDLED_RUNTIME_CONFIG_FILE_NAME),
+                ),
+                Err(error) => {
+                    log::warn!(
+                        "Failed to resolve resource dir for bundled runtime config: {error}"
+                    );
+                    None
+                }
+            };
+
+            app.manage(commands::runtime_config::RuntimeConfigState::new(
+                app_data_dir.clone(),
+                bundled_runtime_config_path,
+            ));
+            // Construct and register the distro bundle up front (goose serve and
+            // runtime-config readiness both depend on it). Seeding its bundled
+            // skills/agents is filesystem work and is deferred below.
+            app.manage(DistroBundleState::new(app.handle()));
+            app.manage(commands::automations::AutomationStreamState::default());
+            app.manage(commands::terminal::TerminalState::default());
+            app.manage(commands::window_session::WindowSessionRegistry::default());
+            app.manage(commands::agent_setup::AgentSetupRegistry::default());
+            app.manage(commands::model_setup::ModelSetupRegistry::default());
+
+            // `LayoutState::new` opens (and creates) the layout database, so the
+            // one-time legacy app-data migration must run first to copy any
+            // pre-rename database before a fresh, empty one is created here.
+            services::app_data_migration::migrate_legacy_app_data(app.handle());
+            let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
+                app_data_dir.clone(),
+            ))
+            .map_err(std::io::Error::other)?;
+            app.manage(layout_state);
+
+            // With all command state registered, it is now safe to run blocking,
+            // async, network, or filesystem work.
+            //
+            // The move-to-/Applications prompt is intentionally NOT run here.
+            // Its synchronous `NSAlert.runModal()` would block this setup
+            // closure on the main thread until the user dismisses it, stalling
+            // the menu, lifecycle, and updater wiring below and widening the
+            // window in which the racing webview observes a partially set-up
+            // app. It is deferred to `RunEvent::Ready` (see `run` below), which
+            // fires on the main thread once setup has returned and the event
+            // loop is running.
+
+            #[cfg(not(feature = "no-bb-cli-install"))]
             commands::cli::schedule_bb_cli_auto_install(app.handle());
 
             services::diagnostic_log::record_event(
@@ -172,70 +226,55 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
-            services::app_data_migration::migrate_legacy_app_data(app.handle());
-
-            let app_data_dir = app.path().app_data_dir()?;
             services::berdctl_discovery::sweep_stale_discovery_files(&app_data_dir);
 
-            app.manage(commands::runtime_config::RuntimeConfigState::new(
-                app_data_dir.clone(),
-            ));
+            // Seed the bundled skills/agents from the distro bundle registered
+            // above. This touches the filesystem, so it runs after the prompt.
+            {
+                let distro_state = app.state::<DistroBundleState>();
+                if let Some(bundle) = distro_state.bundle() {
+                    let skills_bundle = bundle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        match bundled_skills::seed_bundled_skills(&skills_bundle) {
+                            Ok(count) if count > 0 => {
+                                log::info!("Seeded {count} bundled skill(s)");
+                            }
+                            Ok(_) => {}
+                            Err(error) => log::warn!("Failed to seed bundled skills: {error}"),
+                        }
+                    });
 
-            let distro_state = DistroBundleState::new(app.handle());
-            if let Some(bundle) = distro_state.bundle() {
-                let skills_bundle = bundle.clone();
-                tauri::async_runtime::spawn(async move {
-                    match bundled_skills::seed_bundled_skills(&skills_bundle) {
-                        Ok(count) if count > 0 => {
-                            log::info!("Seeded {count} bundled skill(s)");
-                        }
-                        Ok(_) => {}
-                        Err(error) => log::warn!("Failed to seed bundled skills: {error}"),
-                    }
-                });
-
-                match bundled_agents::seed_bundled_agents(bundle) {
-                    Ok(result) => {
-                        if result.seeded_count > 0 {
-                            log::info!("Seeded {} bundled agent(s)", result.seeded_count);
-                        }
-                        if !result.avatar_refs_to_warm.is_empty() {
-                            let avatars_app = app.handle().clone();
-                            tauri::async_runtime::spawn(async move {
-                                match commands::avatars::warm_avatar_refs(
-                                    avatars_app,
-                                    result.avatar_refs_to_warm,
-                                )
-                                .await
-                                {
-                                    Ok(count) if count > 0 => {
-                                        log::info!("Warmed {count} bundled agent avatar(s)");
+                    match bundled_agents::seed_bundled_agents(bundle) {
+                        Ok(result) => {
+                            if result.seeded_count > 0 {
+                                log::info!("Seeded {} bundled agent(s)", result.seeded_count);
+                            }
+                            if !result.avatar_refs_to_warm.is_empty() {
+                                let avatars_app = app.handle().clone();
+                                tauri::async_runtime::spawn(async move {
+                                    match commands::avatars::warm_avatar_refs(
+                                        avatars_app,
+                                        result.avatar_refs_to_warm,
+                                    )
+                                    .await
+                                    {
+                                        Ok(count) if count > 0 => {
+                                            log::info!("Warmed {count} bundled agent avatar(s)");
+                                        }
+                                        Ok(_) => {}
+                                        Err(error) => {
+                                            log::warn!(
+                                                "Failed to warm bundled agent avatar cache: {error}"
+                                            );
+                                        }
                                     }
-                                    Ok(_) => {}
-                                    Err(error) => {
-                                        log::warn!(
-                                            "Failed to warm bundled agent avatar cache: {error}"
-                                        );
-                                    }
-                                }
-                            });
+                                });
+                            }
                         }
+                        Err(error) => log::warn!("Failed to seed bundled agents: {error}"),
                     }
-                    Err(error) => log::warn!("Failed to seed bundled agents: {error}"),
                 }
             }
-            app.manage(distro_state);
-            app.manage(commands::automations::AutomationStreamState::default());
-            app.manage(commands::terminal::TerminalState::default());
-            app.manage(commands::window_session::WindowSessionRegistry::default());
-            app.manage(commands::agent_setup::AgentSetupRegistry::default());
-            app.manage(commands::model_setup::ModelSetupRegistry::default());
-            let layout_app_data_dir = app_data_dir;
-            let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
-                layout_app_data_dir,
-            ))
-            .map_err(std::io::Error::other)?;
-            app.manage(layout_state);
 
             let artifacts_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -328,6 +367,7 @@ pub fn run() {
             commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
             commands::cli::get_bb_cli_status,
+            #[cfg(not(feature = "no-bb-cli-install"))]
             commands::cli::install_bb_cli,
             commands::connections::list_connections,
             commands::automations::get_automation_tiles,
@@ -438,6 +478,17 @@ pub fn run() {
                     let _ = main.show();
                     let _ = main.set_focus();
                 }
+            }
+            // Offer to move into /Applications when launched from installer
+            // media (DMG, a read-only/translocated location, or another
+            // non-installed download). Deferred out of `setup` to here so the
+            // synchronous `NSAlert.runModal()` runs on the main thread only
+            // once setup has returned and the event loop is running, keeping
+            // setup non-blocking. Fires once. Accepting copies the bundle,
+            // relaunches the installed copy, and exits this process.
+            #[cfg(target_os = "macos")]
+            RunEvent::Ready => {
+                services::installer_media::maybe_prompt_move_to_applications(app);
             }
             _ => {}
         });

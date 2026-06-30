@@ -1,7 +1,10 @@
+#[cfg(not(feature = "no-voice-dictation"))]
 use crate::services::kgoose;
 use serde::Serialize;
+#[cfg(not(feature = "no-voice-dictation"))]
 use serde_json::json;
 
+#[cfg(not(feature = "no-voice-dictation"))]
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
     "https://kgoose.sqprod.co/cash-app/goose/transcribe/v1/realtime-client-secret";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
@@ -34,30 +37,43 @@ fn transcription_model() -> String {
 
 #[tauri::command]
 pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String> {
+    // Defense in depth: a restricted build compiled with the
+    // `no-voice-dictation` feature reports "not configured" so the renderer
+    // never requests a realtime client secret. The frontend `voiceDictation`
+    // capability is the primary gate.
     Ok(OpenAiRealtimeStatus {
-        configured: true,
+        configured: cfg!(not(feature = "no-voice-dictation")),
         transcription_model: transcription_model(),
     })
 }
 
 #[tauri::command]
 pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
-    let transcription_model = transcription_model();
+    #[cfg(feature = "no-voice-dictation")]
+    {
+        Err("OpenAI realtime sessions are unsupported because voice dictation is disabled in this build.".to_string())
+    }
 
-    let value = kgoose::post_json_external_url(
-        OPENAI_REALTIME_CLIENT_SECRETS_URL,
-        json!({ "language": "en" }),
-    )
-    .await
-    .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
-    let client_secret = parse_client_secret(&value)?;
+    #[cfg(not(feature = "no-voice-dictation"))]
+    {
+        let transcription_model = transcription_model();
 
-    Ok(OpenAiRealtimeSession {
-        client_secret,
-        transcription_model,
-    })
+        let value = kgoose::post_json_external_url(
+            OPENAI_REALTIME_CLIENT_SECRETS_URL,
+            json!({ "language": "en" }),
+        )
+        .await
+        .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
+        let client_secret = parse_client_secret(&value)?;
+
+        Ok(OpenAiRealtimeSession {
+            client_secret,
+            transcription_model,
+        })
+    }
 }
 
+#[cfg(not(feature = "no-voice-dictation"))]
 fn parse_client_secret(value: &serde_json::Value) -> Result<String, String> {
     let client_secret = value.get("client_secret").and_then(client_secret_value);
     let top_level_value = value.get("value").and_then(|value| value.as_str());
@@ -74,6 +90,7 @@ fn parse_client_secret(value: &serde_json::Value) -> Result<String, String> {
         })
 }
 
+#[cfg(not(feature = "no-voice-dictation"))]
 fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
     value
         .get("value")
@@ -83,9 +100,31 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "no-voice-dictation")]
+    use super::create_openai_realtime_session;
+    use super::get_openai_realtime_status;
+    #[cfg(not(feature = "no-voice-dictation"))]
     use super::parse_client_secret;
+    #[cfg(not(feature = "no-voice-dictation"))]
     use serde_json::json;
 
+    #[tokio::test]
+    async fn status_configured_tracks_voice_dictation_feature() {
+        let status = get_openai_realtime_status().await.unwrap();
+        // Configured unless the additive `no-voice-dictation` disable feature is
+        // compiled in.
+        assert_eq!(status.configured, cfg!(not(feature = "no-voice-dictation")));
+    }
+
+    #[cfg(feature = "no-voice-dictation")]
+    #[tokio::test]
+    async fn create_session_is_unsupported_when_voice_dictation_is_disabled() {
+        let result = create_openai_realtime_session().await;
+
+        assert!(matches!(result, Err(error) if error.contains("unsupported")));
+    }
+
+    #[cfg(not(feature = "no-voice-dictation"))]
     #[test]
     fn parses_supported_client_secret_shapes() {
         assert_eq!(
@@ -106,6 +145,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "no-voice-dictation"))]
     #[test]
     fn rejects_missing_client_secret() {
         assert!(parse_client_secret(&json!({ "ok": true })).is_err());

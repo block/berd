@@ -2,10 +2,15 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockUseOpenAiRealtimeDictation = vi.fn();
+const mockUseProfileCapability = vi.fn();
 
 vi.mock("../useOpenAiRealtimeDictation", () => ({
   useOpenAiRealtimeDictation: (options: unknown) =>
     mockUseOpenAiRealtimeDictation(options),
+}));
+
+vi.mock("@/shared/profile/capabilities", () => ({
+  useProfileCapability: (id: string) => mockUseProfileCapability(id),
 }));
 
 import { useVoiceDictation } from "../useVoiceDictation";
@@ -22,6 +27,53 @@ describe("useVoiceDictation", () => {
       stopRecording: vi.fn(),
       toggleRecording: vi.fn(),
     });
+    mockUseProfileCapability.mockReset();
+    mockUseProfileCapability.mockReturnValue(true);
+  });
+
+  it("disables dictation when the voiceDictation capability is off", () => {
+    mockUseProfileCapability.mockReturnValue(false);
+
+    const { result } = renderHook(() =>
+      useVoiceDictation({
+        attachments: [],
+        clearAttachments: vi.fn(),
+        onSend: vi.fn(),
+        resetTextarea: vi.fn(),
+        selectedPersonaId: null,
+        setText: vi.fn(),
+        text: "",
+      }),
+    );
+
+    expect(mockUseProfileCapability).toHaveBeenCalledWith("voiceDictation");
+    // Forces the underlying dictation hook into its disabled state...
+    const options = mockUseOpenAiRealtimeDictation.mock.calls.at(-1)?.[0] as {
+      disabled: boolean;
+    };
+    expect(options.disabled).toBe(true);
+    // ...and propagates isEnabled=false even though the inner hook reports true.
+    expect(result.current.isEnabled).toBe(false);
+  });
+
+  it("keeps dictation enabled when the voiceDictation capability is on", () => {
+    const { result } = renderHook(() =>
+      useVoiceDictation({
+        attachments: [],
+        clearAttachments: vi.fn(),
+        onSend: vi.fn(),
+        resetTextarea: vi.fn(),
+        selectedPersonaId: null,
+        setText: vi.fn(),
+        text: "",
+      }),
+    );
+
+    const options = mockUseOpenAiRealtimeDictation.mock.calls.at(-1)?.[0] as {
+      disabled: boolean;
+    };
+    expect(options.disabled).toBe(false);
+    expect(result.current.isEnabled).toBe(true);
   });
 
   it("types realtime transcript snapshots into the composer", () => {

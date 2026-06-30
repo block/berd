@@ -73,6 +73,7 @@
     ],
     "resources": {
       "../distro": "distro",
+      "resources/runtime-config.json": "runtime-config.json",
       "../resources/berd-sounds-0.mp3": "berd-sounds-0.mp3",
       "../resources/berd-sounds-1.mp3": "berd-sounds-1.mp3",
       "../resources/berd-sounds-2.mp3": "berd-sounds-2.mp3",

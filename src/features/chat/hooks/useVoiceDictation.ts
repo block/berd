@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "react";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useOpenAiRealtimeDictation } from "./useOpenAiRealtimeDictation";
@@ -144,7 +145,17 @@ export function useVoiceDictation({
     [autoSubmitPhrases, finishAutoSubmit, setText],
   );
 
+  // Single shared chokepoint for both ChatInput and GlobalComposerPill: a
+  // disabled `voiceDictation` capability forces the dictation off (no mic
+  // permission/secret requests) and propagates `isEnabled=false`, so the
+  // toolbar hides the mic button on both surfaces. Read reactively so a
+  // runtime/endpoint `featureToggles.voiceDictation` flip re-renders and hides
+  // the mic button live, rather than leaving it stale until an unrelated
+  // re-render samples a fresh snapshot.
+  const voiceDictationEnabled = useProfileCapability("voiceDictation");
+
   const dictation = useOpenAiRealtimeDictation({
+    disabled: !voiceDictationEnabled,
     onRecordingStart: () => {
       lastRealtimeTranscriptRef.current = "";
     },
@@ -152,5 +163,8 @@ export function useVoiceDictation({
   });
   stopRecordingRef.current = dictation.stopRecording;
 
-  return dictation;
+  return {
+    ...dictation,
+    isEnabled: voiceDictationEnabled && dictation.isEnabled,
+  };
 }

@@ -113,6 +113,10 @@ impl<'a> KgooseContext<'a> {
     }
 }
 
+// Only the admin runtime-config endpoint fetch uses these unauthenticated
+// bootstrap helpers, so they are gated behind the same feature; a restricted
+// build never compiles the fetch path (see commands::runtime_config).
+#[cfg(feature = "admin-runtime-config")]
 pub(crate) fn build_bootstrap_url(
     endpoint: &str,
     distro_config: Option<&KgooseDistroConfig>,
@@ -120,6 +124,7 @@ pub(crate) fn build_bootstrap_url(
     build_url(endpoint, None, distro_config)
 }
 
+#[cfg(feature = "admin-runtime-config")]
 pub(crate) async fn get_json_url_with_timeout(
     url: reqwest::Url,
     request_timeout: Duration,
@@ -136,6 +141,7 @@ pub(crate) async fn get_json_url_with_timeout(
 }
 
 /// Posts JSON to a fully resolved external URL without distro routing or playpen baggage.
+#[cfg(not(feature = "no-voice-dictation"))]
 pub(crate) async fn post_json_external_url(url: &str, body: Value) -> Result<Value, String> {
     let url = reqwest::Url::parse(url)
         .map_err(|error| format!("Invalid kgoose request URL {url}: {error}"))?;
@@ -149,6 +155,7 @@ fn json_post_request(url: reqwest::Url) -> reqwest::RequestBuilder {
         .header(CONTENT_TYPE, "application/json")
 }
 
+#[cfg(not(feature = "no-voice-dictation"))]
 async fn send_json_request(
     request: reqwest::RequestBuilder,
     url: reqwest::Url,

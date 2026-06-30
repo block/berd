@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/buildkite/release/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-RELEASE_VERSION="$(meta version)"
+RELEASE_VERSION="$(release_input_version)"
 TAG="v${RELEASE_VERSION}"
 TITLE="Berd v${RELEASE_VERSION}"
 APP_COMMIT="${BUILDKITE_COMMIT:-$(git rev-parse HEAD)}"

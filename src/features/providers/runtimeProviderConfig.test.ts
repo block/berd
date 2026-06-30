@@ -5,7 +5,10 @@ import {
 } from "@/shared/runtime-config/schema";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { getModelCacheRefreshProviderIds } from "./modelCacheRefresh";
-import { runtimeModelInventory } from "./runtimeProviderConfig";
+import {
+  defaultModelInventoryModeForLoadResult,
+  runtimeModelInventory,
+} from "./runtimeProviderConfig";
 import { useProviderCatalogStore } from "./stores/providerCatalogStore";
 
 function catalogEntry(
@@ -80,6 +83,59 @@ describe("runtimeModelInventory", () => {
         sortOrder: 1,
       },
     ]);
+  });
+});
+
+describe("defaultModelInventoryModeForLoadResult", () => {
+  it("treats the bundled file like the app default (refreshable)", () => {
+    // Official no-endpoint builds load runtime config from the bundled file;
+    // they must keep refreshing the model list from the backend, exactly as the
+    // pre-bundle appDefault path did.
+    expect(
+      defaultModelInventoryModeForLoadResult({
+        status: "ready",
+        source: "bundledFile",
+        config: DEFAULT_RUNTIME_CONFIG,
+      }),
+    ).toBe("refreshable");
+  });
+
+  it("keeps the app default refreshable", () => {
+    expect(
+      defaultModelInventoryModeForLoadResult({
+        status: "ready",
+        source: "appDefault",
+        config: DEFAULT_RUNTIME_CONFIG,
+      }),
+    ).toBe("refreshable");
+  });
+
+  it("treats a live/cached endpoint response as authoritative", () => {
+    expect(
+      defaultModelInventoryModeForLoadResult({
+        status: "ready",
+        source: "endpoint",
+        config: DEFAULT_RUNTIME_CONFIG,
+      }),
+    ).toBe("authoritative");
+    expect(
+      defaultModelInventoryModeForLoadResult({
+        status: "ready",
+        source: "cachedEndpoint",
+        config: DEFAULT_RUNTIME_CONFIG,
+      }),
+    ).toBe("authoritative");
+  });
+
+  it("falls back to refreshable when the config is unavailable", () => {
+    expect(
+      defaultModelInventoryModeForLoadResult({
+        status: "unavailable",
+        source: "bundledFile",
+        reason: "missing",
+        message: "no bundled config",
+      }),
+    ).toBe("refreshable");
   });
 });
 

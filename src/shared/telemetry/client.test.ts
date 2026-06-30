@@ -3,13 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mock CDP. Identity is stamped per-event via the envelope `overrides`, so the
 // client only needs `trackWithSchema`; there is no `user`/`_identify` to model.
 const trackWithSchema = vi.fn();
-const buildFeatures = vi.hoisted(() => ({
-  authGate: false,
-  agentToolsTip: true,
-  automations: true,
-  builderbot: true,
-  telemetry: true,
-}));
+// The telemetry gate now reads the resolved `telemetry` capability (build
+// feature AND `featureToggles.telemetry`), so the test drives that snapshot
+// directly rather than the raw build-feature state.
+const telemetryCapability = vi.hoisted(() => ({ enabled: true }));
 const desktopPageContext = {
   path: "",
   referrer: "",
@@ -35,8 +32,9 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
-vi.mock("@/shared/profile/buildProfile", () => ({
-  getBuildFeatureState: () => buildFeatures,
+vi.mock("@/shared/profile/capabilities", () => ({
+  getProfileCapabilitySnapshot: (id: string) =>
+    id === "telemetry" ? telemetryCapability.enabled : true,
 }));
 
 // The schema factories just echo their params so we can assert what was passed.
@@ -95,11 +93,7 @@ function setEnv(env: "production" | "staging" | "development") {
 }
 
 beforeEach(() => {
-  buildFeatures.authGate = false;
-  buildFeatures.agentToolsTip = true;
-  buildFeatures.automations = true;
-  buildFeatures.builderbot = true;
-  buildFeatures.telemetry = true;
+  telemetryCapability.enabled = true;
   trackWithSchema.mockClear();
   invoke.mockReset();
 });
@@ -302,9 +296,12 @@ describe("telemetry", () => {
     expect(consoleInfo).not.toHaveBeenCalled();
   });
 
-  it("is a no-op in production when the telemetry build feature is disabled", async () => {
+  it("is a no-op in production when the telemetry capability is disabled", async () => {
     setEnv("production");
-    buildFeatures.telemetry = false;
+    // A disabled capability covers both the build-feature off switch and a
+    // future `featureToggles.telemetry: false`; the client only sees the
+    // resolved snapshot.
+    telemetryCapability.enabled = false;
 
     const t = await loadTelemetry();
     t.initTelemetry();

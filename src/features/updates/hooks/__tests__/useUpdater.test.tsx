@@ -80,6 +80,10 @@ describe("UpdaterProvider", () => {
 
     await Promise.resolve();
 
+    // A custom build bakes in VITE_UPDATER_ENABLED=false, so the updater is
+    // inert: enabled is false, status stays "unavailable", and no startup /
+    // interval check is scheduled.
+    expect(result.current.enabled).toBe(false);
     expect(result.current.status).toBe("unavailable");
     expect(check).not.toHaveBeenCalled();
   });

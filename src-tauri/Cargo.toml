@@ -73,9 +73,34 @@ objc2-user-notifications = "0.3.2"
 
 
 [features]
+default = []
 berdctl = ["tauri-plugin-berdctl/server"]
 app-test-driver = []
 devtools = ["tauri/devtools"]
+# Additive "disable" features. Cargo features are purely additive, so a
+# restricted build is expressed by ADDING these (never with
+# --no-default-features + re-listing everything you want to keep):
+#
+#   cargo … --features no-voice-dictation,no-bb-cli-install
+#
+# A plain build (defaults) leaves voice dictation and the bb CLI PATH install
+# ENABLED; the features below opt out of each.
+#
+# no-voice-dictation: the realtime client secret is never requested
+# (`get_openai_realtime_status` reports `configured: false`).
+no-voice-dictation = []
+# no-bb-cli-install: the app never auto-installs or offers to symlink the
+# bundled berdctl into /usr/local/bin/bb. The bundled binary still ships for
+# direct `berdctl` use (gated separately by the `berdctl` protocol-server
+# feature); only the PATH install is suppressed.
+no-bb-cli-install = []
+# Admin runtime-config endpoint fetch. Default-OFF: a normal build never
+# compiles the kgoose-backed fetch/cache path and instead loads the bundled
+# src-tauri/resources/runtime-config.json as the source of truth (falling back
+# to the compiled-in default_runtime_config() only when that file is missing or
+# invalid). Enable it (e.g. --features admin-runtime-config) once the endpoint
+# ships to fetch config live with no schema change.
+admin-runtime-config = []
 
 [dev-dependencies]
 tempfile = "3"

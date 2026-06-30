@@ -1197,38 +1197,35 @@ export function GlobalComposerPill({
         </div>
 
         <div className="pointer-events-auto absolute inset-y-0 right-0 z-10 flex items-center gap-2">
-          <Button
-            type="button"
-            disabled={!dictation.isRecording && !dictation.isEnabled}
-            onClick={dictation.toggleRecording}
-            variant="composer-action"
-            size="icon-pill-sm"
-            className={cn(
-              dictation.isRecording &&
-                "bg-destructive/12 text-destructive hover:bg-destructive/16 hover:text-destructive active:bg-destructive/16 active:text-destructive",
-              dictation.isTranscribing && "animate-pulse",
-              !dictation.isRecording &&
-                !dictation.isEnabled &&
-                "opacity-50 hover:bg-accent",
-            )}
-            aria-label={
-              dictation.isRecording
-                ? t("toolbar.voiceInputRecording")
-                : t("toolbar.voiceInput")
-            }
-            aria-pressed={dictation.isRecording}
-            title={
-              !dictation.isEnabled
-                ? t("toolbar.voiceInputDisabled")
-                : dictation.isRecording
+          {(dictation.isEnabled || dictation.isRecording) && (
+            <Button
+              type="button"
+              disabled={!dictation.isRecording && !dictation.isEnabled}
+              onClick={dictation.toggleRecording}
+              variant="composer-action"
+              size="icon-pill-sm"
+              className={cn(
+                dictation.isRecording &&
+                  "bg-destructive/12 text-destructive hover:bg-destructive/16 hover:text-destructive active:bg-destructive/16 active:text-destructive",
+                dictation.isTranscribing && "animate-pulse",
+              )}
+              aria-label={
+                dictation.isRecording
+                  ? t("toolbar.voiceInputRecording")
+                  : t("toolbar.voiceInput")
+              }
+              aria-pressed={dictation.isRecording}
+              title={
+                dictation.isRecording
                   ? t("toolbar.voiceInputRecording")
                   : dictation.isTranscribing
                     ? t("toolbar.voiceInputTranscribing")
                     : t("toolbar.voiceInput")
-            }
-          >
-            <IconMicrophone aria-hidden="true" />
-          </Button>
+              }
+            >
+              <IconMicrophone aria-hidden="true" />
+            </Button>
+          )}
           <Button
             type="button"
             onClick={handleSend}

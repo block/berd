@@ -631,51 +631,56 @@ export function GeneralSettings({
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title={t("general.bbCli.title")}>
-        <SettingRow
-          label={t("general.bbCli.label")}
-          description={
-            bbCliStatus
-              ? `${bbCliStatus.message}. ${bbCliStatus.detail}`
-              : t("general.bbCli.description")
-          }
-          className="items-start"
-        >
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => void refreshBbCliStatus()}
-                disabled={bbCliBusy}
-              >
-                <RotateCcw className="size-3.5" />
-                {t("general.bbCli.refresh")}
-              </Button>
-              <Button
-                type="button"
-                variant={bbCliStatus?.installed ? "outline" : "default"}
-                size="xs"
-                onClick={() => void handleInstallBbCli()}
-                disabled={bbCliBusy || bbCliStatus?.canInstall === false}
-              >
-                <Terminal className="size-3.5" />
-                {bbCliInstalling
-                  ? t("general.bbCli.installing")
-                  : bbCliActionLabel}
-              </Button>
+      {/* A restricted build compiled with the `no-bb-cli-install` Cargo feature
+          reports `unsupportedInBuild`; hide the install section entirely rather
+          than showing a button that can never install. */}
+      {!bbCliStatus?.unsupportedInBuild && (
+        <SettingsSection title={t("general.bbCli.title")}>
+          <SettingRow
+            label={t("general.bbCli.label")}
+            description={
+              bbCliStatus
+                ? `${bbCliStatus.message}. ${bbCliStatus.detail}`
+                : t("general.bbCli.description")
+            }
+            className="items-start"
+          >
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => void refreshBbCliStatus()}
+                  disabled={bbCliBusy}
+                >
+                  <RotateCcw className="size-3.5" />
+                  {t("general.bbCli.refresh")}
+                </Button>
+                <Button
+                  type="button"
+                  variant={bbCliStatus?.installed ? "outline" : "default"}
+                  size="xs"
+                  onClick={() => void handleInstallBbCli()}
+                  disabled={bbCliBusy || bbCliStatus?.canInstall === false}
+                >
+                  <Terminal className="size-3.5" />
+                  {bbCliInstalling
+                    ? t("general.bbCli.installing")
+                    : bbCliActionLabel}
+                </Button>
+              </div>
+              <p className="max-w-80 truncate text-right text-xs text-muted-foreground">
+                {bbCliStatus?.bundledVersion
+                  ? t("general.bbCli.version", {
+                      version: bbCliStatus.bundledVersion,
+                    })
+                  : t("general.bbCli.versionUnknown")}
+              </p>
             </div>
-            <p className="max-w-80 truncate text-right text-xs text-muted-foreground">
-              {bbCliStatus?.bundledVersion
-                ? t("general.bbCli.version", {
-                    version: bbCliStatus.bundledVersion,
-                  })
-                : t("general.bbCli.versionUnknown")}
-            </p>
-          </div>
-        </SettingRow>
-      </SettingsSection>
+          </SettingRow>
+        </SettingsSection>
+      )}
 
       <SettingsSection title={t("appearance.title")}>
         <div className="space-y-3 px-4 py-4">

@@ -28,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/buildkite/release/lib.sh"
 
-RELEASE_VERSION="$(meta version)"
+RELEASE_VERSION="$(release_input_version)"
 : "${MOBUILD_ARTIFACTORY_UPLOAD_TOKEN:?MOBUILD_ARTIFACTORY_UPLOAD_TOKEN is required}"
 
 # Reads on mdx/ are unauthenticated, so a running Berd install can poll the

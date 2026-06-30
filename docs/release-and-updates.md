@@ -2,13 +2,15 @@
 
 ## Overview
 
-Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/) to deliver in-app updates. The flow:
+Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/) to deliver in-app updates. The official release flow:
 
 1. The Buildkite release pipeline builds a signed `.app` and the `squareup/apple-codesign` plugin signs, notarizes, and staples it.
 2. A separate pipeline step downloads the Apple-codesigned `.app.zip`, re-archives it as `.app.tar.gz`, signs it with an Ed25519 key, and publishes the updater feed (`latest.json` + versioned archive) to Artifactory.
 3. Signed release builds check `latest.json` on startup and every 6 hours. When a newer version is found, Berd downloads and installs it in the background, then shows “restart to apply”. Restart stays user-controlled.
 
 The updater feed is hosted on Artifactory rather than GitHub Releases because Artifactory supports unauthenticated reads — critical for a private repo where GitHub Releases URLs return 404 for unauthenticated clients. Artifactory also provides versioned archive history and a `publish_latest` gate for safe rollout (test builds can upload versioned archives without overwriting `latest.json`).
+
+Custom releases use a separate Buildkite pipeline. They build, sign, notarize, staple, and upload the macOS `.app.zip` and `.dmg` artifacts to a named Artifactory path, but they never publish updater artifacts, never update `latest.json`, never create go/mr records, and never create GitHub releases or tags.
 
 ## URLs
 
@@ -18,6 +20,7 @@ The updater feed is hosted on Artifactory rather than GitHub Releases because Ar
 | Updater endpoint | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json` |
 | Versioned archive | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/v<VERSION>/Berd.app.tar.gz` |
 | DMG / zip downloads | Available on versioned (`v<X.Y.Z>`) GitHub releases |
+| Custom DMG / zip downloads | `https://global.block-artifacts.com/artifactory/mdx/berd-custom/<custom_name>/v<VERSION>/` |
 
 ## One-time Setup
 
@@ -39,9 +42,9 @@ This creates `~/.tauri/berd-release.key` (private) and `~/.tauri/berd-release.ke
 | `MOBUILD_ARTIFACTORY_UPLOAD_TOKEN` | Write access to `mdx/` on Artifactory via the `mobuild` service account |
 | `ARTIFACTORY_USER` | Optional Artifactory user override; defaults to `mobuild` |
 
-## Release Flow
+## Official Release Flow
 
-1. **Trigger** — Open the Buildkite release pipeline and enter a semver version (e.g. `0.2.0`). Optionally set `publish_latest` to control whether the updater feed is updated.
+1. **Trigger** — Open the official Buildkite release pipeline (`.buildkite/release.yml`) and enter a semver version (e.g. `0.2.0`). Optionally set `publish_latest` to control whether the updater feed is updated.
 2. **Build & sign macOS** (`build-macos.sh`):
    - Stamps the version into `package.json`, `tauri.conf.json`, and `Cargo.toml`.
    - Generates `tauri.release.conf.json` with the Artifactory updater endpoint and public key (no `createUpdaterArtifacts` — updater artifacts are created in the publish step instead).
@@ -58,6 +61,27 @@ This creates `~/.tauri/berd-release.key` (private) and `~/.tauri/berd-release.ke
 Steps 3 and 4 run in parallel after the build step completes.
 
 The `publish_latest` gate allows test builds to upload versioned archives to Artifactory without overwriting `latest.json`, so existing users don't get prompted to update until the release is validated.
+
+## Custom Release Flow
+
+1. **Trigger** — Open the custom Buildkite release pipeline (`.buildkite/custom-release.yml`) at the target commit and enter:
+   - `version`: semver base version (e.g. `0.2.0`)
+   - `custom_name`: lowercase slug (e.g. `acme-demo`)
+   - `custom_config`: optional JSON overrides for `featureToggles`, `doctor`, and `feedback`
+   - `disable_bb_cli`: optional toggle to omit the bb CLI PATH install
+2. **Build & sign macOS** (`build-macos.sh`):
+   - Stamps the app as `<version>-<custom_name>`.
+   - Disables the updater in the renderer and Tauri config.
+   - Deep-merges the optional `custom_config` onto `src-tauri/resources/runtime-config.json`, validates it, and derives build-time feature gates.
+   - Builds the unsigned `.app`; the `squareup/apple-codesign` plugin signs, notarizes, staples, packages, and uploads `.app.zip` / `.dmg` artifacts.
+3. **Upload custom artifacts** (`publish-custom-artifacts.sh`):
+   - Downloads the signed `.app.zip` and `.dmg` artifacts from the build step.
+   - Renames them with the custom app version, e.g. `Berd_0.2.0-acme-demo.app.zip` and `Berd_0.2.0-acme-demo_aarch64.dmg`.
+   - Uploads them to `mdx/berd-custom/<custom_name>/v<version>/`.
+
+Custom pipelines intentionally stop there. They do not upload updater archives, do not update `latest.json`, do not create go/mr records, and do not create GitHub releases or tags.
+
+When both official and custom builds are needed for the same code, run both Buildkite pipelines at the same commit. The official pipeline owns the update channel and GitHub release; the custom pipeline owns only its named Artifactory artifact path.
 
 ## How the Updater Works
 
@@ -117,6 +141,8 @@ The build will produce the `.app` bundle in `src-tauri/target/aarch64-apple-darw
 | `scripts/build-tauri-release-config.mjs` | Generates `tauri.release.conf.json` from env vars |
 | `scripts/publish-updater-to-artifactory.sh` | Uploads updater archive, signature, and `latest.json` to Artifactory |
 | `scripts/buildkite/release/build-macos.sh` | Release build: stamps version, generates release config, builds app |
+| `scripts/buildkite/release/publish-custom-artifacts.sh` | Uploads custom signed `.app.zip` and `.dmg` artifacts to Artifactory |
 | `scripts/buildkite/release/publish-updater.sh` | Post-codesign: re-archives `.app`, signs with Ed25519, delegates to Artifactory publish script |
-| `.buildkite/release.yml` | Pipeline definition with build, publish-updater, and publish steps |
+| `.buildkite/release.yml` | Official pipeline with static build, publish-updater, and publish steps |
+| `.buildkite/custom-release.yml` | Custom pipeline with build/sign and custom Artifactory upload steps |
 | `.gitignore` | Excludes generated `src-tauri/tauri.release.conf.json` |

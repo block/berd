@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RUNTIME_CONFIG, runtimeConfigSchema } from "./schema";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  runtimeConfigSchema,
+  runtimeConfigSourceSchema,
+} from "./schema";
 
 const defaultProvider = DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0];
 
@@ -71,6 +75,14 @@ describe("runtimeConfigSchema", () => {
     expect(runtimeConfigSchema.parse(DEFAULT_RUNTIME_CONFIG)).toEqual(
       DEFAULT_RUNTIME_CONFIG,
     );
+  });
+
+  it("accepts the bundledFile source variant", () => {
+    // Parity with RuntimeConfigSource::BundledFile in
+    // src-tauri/src/commands/runtime_config.rs: a restricted build loads the
+    // bundled runtime-config.json and reports this source, so the renderer must
+    // parse it.
+    expect(runtimeConfigSourceSchema.parse("bundledFile")).toBe("bundledFile");
   });
 
   it.each([

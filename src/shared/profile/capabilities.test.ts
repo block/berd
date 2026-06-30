@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
+  PROFILE_CAPABILITY_REGISTRY,
   resolveProfileCapabilities,
   type ProfileCapabilityState,
 } from "./capabilities";
 import type { BuildFeature } from "./buildProfile";
+import {
+  PROFILE_RUNTIME_FEATURE_TOGGLE_KEYS,
+  RUNTIME_FEATURE_TOGGLE_KEYS,
+} from "./runtimeFeatureToggles";
 import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
@@ -17,6 +22,9 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   automations: true,
   builderbot: true,
   telemetry: true,
+  voiceDictation: true,
+  kgooseConnections: true,
+  updater: true,
 };
 
 const readyRuntimeConfig = DEFAULT_RUNTIME_CONFIG satisfies RuntimeConfig;
@@ -41,12 +49,14 @@ describe("profile capabilities", () => {
           automations: false,
           agentToolsTip: false,
           telemetry: false,
+          updater: false,
         },
       }),
     ).toMatchObject({
       automations: false,
       agentToolsTip: false,
       telemetry: false,
+      updates: false,
     });
   });
 
@@ -72,6 +82,109 @@ describe("profile capabilities", () => {
         experiments: [{ id: BUILDERBOT_SURFACE_EXPERIMENT_ID, enabled: false }],
       }).builderbot,
     ).toBe(false);
+  });
+
+  it("AND-gates voice dictation across its build feature and runtime toggle", () => {
+    // Both build feature and runtime toggle allow it -> enabled.
+    expect(resolve().voiceDictation).toBe(true);
+
+    // Build feature off -> disabled regardless of runtime config.
+    expect(
+      resolve({
+        buildFeatures: {
+          ...enabledBuildFeatures,
+          voiceDictation: false,
+        },
+      }).voiceDictation,
+    ).toBe(false);
+
+    // Runtime toggle off -> disabled even with the build feature on.
+    expect(
+      resolve({
+        runtimeConfig: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          featureToggles: { voiceDictation: false },
+        },
+      }).voiceDictation,
+    ).toBe(false);
+
+    // Runtime config not yet loaded -> safe default of enabled (build feature
+    // is the no-flicker gate; runtime toggle is for the future endpoint).
+    expect(
+      resolve({
+        runtimeConfigLoaded: true,
+        runtimeConfig: null,
+      }).voiceDictation,
+    ).toBe(true);
+  });
+
+  it("AND-gates telemetry across its build feature and runtime toggle", () => {
+    // Both build feature and runtime toggle allow it -> enabled.
+    expect(resolve().telemetry).toBe(true);
+
+    // Build feature off -> disabled regardless of runtime config.
+    expect(
+      resolve({
+        buildFeatures: {
+          ...enabledBuildFeatures,
+          telemetry: false,
+        },
+      }).telemetry,
+    ).toBe(false);
+
+    // Runtime toggle off -> disabled even with the build feature on.
+    expect(
+      resolve({
+        runtimeConfig: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          featureToggles: { telemetry: false },
+        },
+      }).telemetry,
+    ).toBe(false);
+
+    // Runtime config not yet loaded -> safe default of enabled (build feature
+    // is the no-flicker gate; runtime toggle is for the future endpoint).
+    expect(
+      resolve({
+        runtimeConfigLoaded: true,
+        runtimeConfig: null,
+      }).telemetry,
+    ).toBe(true);
+  });
+
+  it("AND-gates kgooseConnections across its build feature and runtime toggle", () => {
+    // Both build feature and runtime toggle allow it -> enabled.
+    expect(resolve().kgooseConnections).toBe(true);
+
+    // Build feature off -> disabled regardless of runtime config (build-time is
+    // the hard floor: a gated build can never be turned back on by config).
+    expect(
+      resolve({
+        buildFeatures: {
+          ...enabledBuildFeatures,
+          kgooseConnections: false,
+        },
+      }).kgooseConnections,
+    ).toBe(false);
+
+    // Runtime toggle off -> disabled even with the build feature on.
+    expect(
+      resolve({
+        runtimeConfig: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          featureToggles: { kgooseConnections: false },
+        },
+      }).kgooseConnections,
+    ).toBe(false);
+
+    // Runtime config not yet loaded -> safe default of enabled (build feature
+    // is the no-flicker gate; runtime toggle is for the future endpoint).
+    expect(
+      resolve({
+        runtimeConfigLoaded: true,
+        runtimeConfig: null,
+      }).kgooseConnections,
+    ).toBe(true);
   });
 
   it("defaults runtime config capabilities to enabled when fields are absent", () => {
@@ -118,6 +231,30 @@ describe("profile capabilities", () => {
       builderbot: false,
       telemetry: true,
     });
+  });
+
+  it("keeps profile runtime toggle keys in sync with the registry's runtime toggles", () => {
+    // The build-time runtime-config validator rejects custom-build
+    // featureToggles keys outside RUNTIME_FEATURE_TOGGLE_KEYS, so the profile
+    // toggle subset must stay exactly the toggles the registry actually
+    // consults — otherwise a newly added runtime toggle would be wrongly
+    // rejected, or a removed one wrongly accepted.
+    const registryToggles = Object.values(PROFILE_CAPABILITY_REGISTRY)
+      .filter((source) => source.kind === "runtimeFeature")
+      .map((source) => source.toggle);
+
+    expect([...PROFILE_RUNTIME_FEATURE_TOGGLE_KEYS].sort()).toEqual(
+      [...new Set(registryToggles)].sort(),
+    );
+  });
+
+  it("keeps non-profile runtime toggle keys explicit for strict validation", () => {
+    const profileToggles = new Set<string>(PROFILE_RUNTIME_FEATURE_TOGGLE_KEYS);
+    const nonProfileToggles = RUNTIME_FEATURE_TOGGLE_KEYS.filter(
+      (key) => !profileToggles.has(key),
+    );
+
+    expect(nonProfileToggles).toEqual(["costTracking"]);
   });
 
   it("disables feedback and doctor when runtime config disables them", () => {

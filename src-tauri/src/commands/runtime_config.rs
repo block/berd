@@ -1,21 +1,30 @@
 use crate::services::distro_bundle::DistroBundleState;
+#[cfg(feature = "admin-runtime-config")]
 use crate::services::kgoose;
+#[cfg(any(feature = "admin-runtime-config", test))]
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+#[cfg(feature = "admin-runtime-config")]
 use std::time::Duration;
 use tauri::State;
 
 const RUNTIME_CONFIG_DIR_NAME: &str = "runtime-config";
 const FAKE_RUNTIME_CONFIG_FILE_NAME: &str = "fake-endpoint.json";
 const ADMIN_RUNTIME_CONFIG_CACHE_FILE_NAME: &str = "admin-cache.json";
+// Bundled runtime config staged into the Tauri resource dir (see the `resources`
+// map in `tauri.conf.json`). When the `admin-runtime-config` feature is disabled
+// (the default) this file is the runtime config source of truth, replacing the
+// compiled-in `default_runtime_config()`.
+pub(crate) const BUNDLED_RUNTIME_CONFIG_FILE_NAME: &str = "runtime-config.json";
+#[cfg(feature = "admin-runtime-config")]
 pub(crate) const RUNTIME_CONFIG_ENDPOINT: &str = "desktop/v1/runtime-config";
-// TODO(runtime-admin-config): remove this flag to enable the kgoose-backed runtime config feature when the endpoint is ready.
-const ENABLE_ADMIN_RUNTIME_CONFIG: bool = false;
 const RUNTIME_CONFIG_SCHEMA_VERSION: u16 = 1;
+#[cfg(any(feature = "admin-runtime-config", test))]
 const ADMIN_CACHE_SCHEMA_VERSION: u16 = 1;
+#[cfg(feature = "admin-runtime-config")]
 const ADMIN_RUNTIME_CONFIG_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const ADMIN_OWNED_CUSTOM_PROVIDER_ID: &str = "block_openai_compatible";
 const DEFAULT_RUNTIME_PROVIDER_ID: &str = "databricks_v2";
@@ -143,6 +152,7 @@ pub struct RuntimeKgooseConfig {
     pub path: Option<String>,
 }
 
+#[cfg(any(feature = "admin-runtime-config", test))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RuntimeConfigAdminCache {
@@ -156,6 +166,7 @@ struct RuntimeConfigAdminCache {
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeConfigSource {
     AppDefault,
+    BundledFile,
     CachedEndpoint,
     Endpoint,
     FakeEndpoint,
@@ -188,14 +199,16 @@ pub enum RuntimeConfigLoadResult {
 pub struct RuntimeConfigState {
     fake_config_path: PathBuf,
     admin_cache_path: PathBuf,
+    bundled_config_path: Option<PathBuf>,
     cached: Mutex<Option<RuntimeConfigLoadResult>>,
 }
 
 impl RuntimeConfigState {
-    pub fn new(app_data_dir: PathBuf) -> Self {
+    pub fn new(app_data_dir: PathBuf, bundled_config_path: Option<PathBuf>) -> Self {
         Self {
             fake_config_path: fake_runtime_config_path(&app_data_dir),
             admin_cache_path: admin_cache_path(&app_data_dir),
+            bundled_config_path,
             cached: Mutex::new(None),
         }
     }
@@ -215,6 +228,7 @@ impl RuntimeConfigState {
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
+            self.bundled_config_path.as_deref(),
             distro_state,
         )
         .await;
@@ -242,6 +256,7 @@ impl RuntimeConfigState {
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
+            self.bundled_config_path.as_deref(),
             distro_state,
         )
         .await;
@@ -287,6 +302,7 @@ impl RuntimeConfigState {
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
+            self.bundled_config_path.as_deref(),
             distro_state,
         )
         .await;
@@ -328,14 +344,19 @@ fn admin_cache_path(app_data_dir: &Path) -> PathBuf {
 async fn load_runtime_config_from_source(
     fake_config_path: &Path,
     cache_path: &Path,
+    bundled_config_path: Option<&Path>,
     distro_state: &DistroBundleState,
 ) -> RuntimeConfigLoadResult {
     #[cfg(debug_assertions)]
     if fake_config_path.exists() {
         return read_fake_runtime_config_from_path(fake_config_path);
     }
+    #[cfg(not(debug_assertions))]
+    let _ = fake_config_path;
 
-    if ENABLE_ADMIN_RUNTIME_CONFIG {
+    #[cfg(feature = "admin-runtime-config")]
+    {
+        let _ = bundled_config_path;
         match fetch_admin_runtime_config(distro_state).await {
             Ok((config, source_url)) => {
                 if let Err(error) = write_admin_cache_to_path(cache_path, &config, &source_url) {
@@ -348,29 +369,35 @@ async fn load_runtime_config_from_source(
             }
             Err(error) => log::warn!("failed to fetch admin runtime config: {error}"),
         }
-    } else {
-        log::info!("admin runtime config disabled; using bundled default runtime config");
-        return default_runtime_config_result(RuntimeConfigSource::AppDefault);
-    }
 
-    match read_admin_cache_from_path(cache_path) {
-        Ok(cache) => {
-            log::info!(
-                "using cached admin runtime config fetchedAt={} sourceUrl={}",
-                cache.fetched_at,
-                cache.source_url
-            );
-            return RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::CachedEndpoint,
-                config: Box::new(cache.config),
-            };
+        match read_admin_cache_from_path(cache_path) {
+            Ok(cache) => {
+                log::info!("using cached admin runtime config");
+                return RuntimeConfigLoadResult::Ready {
+                    source: RuntimeConfigSource::CachedEndpoint,
+                    config: Box::new(cache.config),
+                };
+            }
+            Err(error) => log::warn!("failed to read cached admin runtime config: {error}"),
         }
-        Err(error) => log::warn!("failed to read cached admin runtime config: {error}"),
+
+        default_runtime_config_result(RuntimeConfigSource::AppDefault)
     }
 
-    default_runtime_config_result(RuntimeConfigSource::AppDefault)
+    #[cfg(not(feature = "admin-runtime-config"))]
+    {
+        // The admin runtime config endpoint is compiled out, so the bundled
+        // runtime-config.json is the source of truth. A stale admin cache must
+        // not shadow it, so the cache is intentionally ignored in this mode.
+        let _ = (cache_path, distro_state);
+        load_bundled_runtime_config_from_source(
+            bundled_config_path,
+            allow_bundled_runtime_config_default_fallback(),
+        )
+    }
 }
 
+#[cfg(feature = "admin-runtime-config")]
 async fn fetch_admin_runtime_config(
     distro_state: &DistroBundleState,
 ) -> Result<(RuntimeConfig, String), String> {
@@ -382,6 +409,100 @@ async fn fetch_admin_runtime_config(
         .map_err(|error| format!("failed to parse admin runtime config: {error}"))?;
     validate_runtime_config(&config)?;
     Ok((config, source_url))
+}
+
+/// Read the bundled `runtime-config.json` staged into the Tauri resource dir.
+/// Used as the runtime config source of truth when the `admin-runtime-config`
+/// feature is disabled.
+#[cfg(not(feature = "admin-runtime-config"))]
+fn load_bundled_runtime_config_from_source(
+    bundled_config_path: Option<&Path>,
+    allow_default_fallback: bool,
+) -> RuntimeConfigLoadResult {
+    match bundled_config_path {
+        Some(path) if path.exists() => match read_bundled_runtime_config_from_path(path) {
+            Ok(config) => {
+                log::info!("using bundled runtime config '{}'", path.display());
+                RuntimeConfigLoadResult::Ready {
+                    source: RuntimeConfigSource::BundledFile,
+                    config: Box::new(config),
+                }
+            }
+            Err((reason, message)) => bundled_runtime_config_unavailable_or_default(
+                reason,
+                message,
+                allow_default_fallback,
+            ),
+        },
+        Some(path) => bundled_runtime_config_unavailable_or_default(
+            RuntimeConfigUnavailableReason::Missing,
+            format!("Bundled runtime config '{}' not found", path.display()),
+            allow_default_fallback,
+        ),
+        None => bundled_runtime_config_unavailable_or_default(
+            RuntimeConfigUnavailableReason::Missing,
+            "Bundled runtime config path unavailable".to_string(),
+            allow_default_fallback,
+        ),
+    }
+}
+
+#[cfg(not(feature = "admin-runtime-config"))]
+fn allow_bundled_runtime_config_default_fallback() -> bool {
+    cfg!(any(debug_assertions, test))
+}
+
+#[cfg(not(feature = "admin-runtime-config"))]
+fn bundled_runtime_config_unavailable_or_default(
+    reason: RuntimeConfigUnavailableReason,
+    message: String,
+    allow_default_fallback: bool,
+) -> RuntimeConfigLoadResult {
+    if allow_default_fallback {
+        log::warn!("{message}; using compiled-in default runtime config");
+        return default_runtime_config_result(RuntimeConfigSource::AppDefault);
+    }
+
+    log::error!("{message}");
+    RuntimeConfigLoadResult::Unavailable {
+        source: RuntimeConfigSource::BundledFile,
+        reason,
+        message,
+    }
+}
+
+#[cfg(not(feature = "admin-runtime-config"))]
+fn read_bundled_runtime_config_from_path(
+    path: &Path,
+) -> Result<RuntimeConfig, (RuntimeConfigUnavailableReason, String)> {
+    let contents = std::fs::read_to_string(path).map_err(|error| {
+        (
+            RuntimeConfigUnavailableReason::ReadFailed,
+            format!(
+                "Failed to read bundled runtime config '{}': {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let config = serde_json::from_str::<RuntimeConfig>(&contents).map_err(|error| {
+        (
+            RuntimeConfigUnavailableReason::Invalid,
+            format!(
+                "Failed to parse bundled runtime config '{}': {error}",
+                path.display()
+            ),
+        )
+    })?;
+    validate_runtime_config(&config).map_err(|error| {
+        (
+            RuntimeConfigUnavailableReason::Invalid,
+            format!(
+                "Bundled runtime config '{}' failed validation: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    Ok(config)
 }
 
 #[cfg(debug_assertions)]
@@ -424,6 +545,7 @@ fn read_fake_runtime_config_from_path(path: &Path) -> RuntimeConfigLoadResult {
     }
 }
 
+#[cfg(any(feature = "admin-runtime-config", test))]
 fn read_admin_cache_from_path(path: &Path) -> Result<RuntimeConfigAdminCache, String> {
     let contents = std::fs::read_to_string(path).map_err(|error| {
         format!(
@@ -446,6 +568,7 @@ fn read_admin_cache_from_path(path: &Path) -> Result<RuntimeConfigAdminCache, St
     Ok(cache)
 }
 
+#[cfg(any(feature = "admin-runtime-config", test))]
 fn write_admin_cache_to_path(
     path: &Path,
     config: &RuntimeConfig,
@@ -981,7 +1104,48 @@ mod tests {
 
     fn temp_state() -> (tempfile::TempDir, RuntimeConfigState) {
         let dir = tempdir().expect("temp dir");
-        let state = RuntimeConfigState::new(dir.path().to_path_buf());
+        let state = RuntimeConfigState::new(dir.path().to_path_buf(), None);
+        (dir, state)
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    fn restricted_bundled_config() -> RuntimeConfig {
+        let mut config = default_runtime_config();
+        config.feature_toggles = Some(HashMap::from([
+            ("voiceDictation".to_string(), false),
+            ("telemetry".to_string(), false),
+        ]));
+        config
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    fn write_bundled_config(path: &Path, config: &RuntimeConfig) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create bundled config dir");
+        }
+        std::fs::write(
+            path,
+            serde_json::to_vec_pretty(config).expect("serialize bundled config"),
+        )
+        .expect("write bundled config");
+    }
+
+    // Build a state whose bundled config path lives under the temp dir. When
+    // `bundled` is provided, the file is written; otherwise the path is supplied
+    // but the file is absent (exercising the missing-file fallback).
+    #[cfg(not(feature = "admin-runtime-config"))]
+    fn temp_state_with_bundled(
+        bundled: Option<&RuntimeConfig>,
+    ) -> (tempfile::TempDir, RuntimeConfigState) {
+        let dir = tempdir().expect("temp dir");
+        let bundled_path = dir
+            .path()
+            .join("resources")
+            .join(BUNDLED_RUNTIME_CONFIG_FILE_NAME);
+        if let Some(config) = bundled {
+            write_bundled_config(&bundled_path, config);
+        }
+        let state = RuntimeConfigState::new(dir.path().to_path_buf(), Some(bundled_path));
         (dir, state)
     }
 
@@ -1042,6 +1206,36 @@ mod tests {
     #[test]
     fn default_runtime_config_is_valid() {
         validate_runtime_config(&default_runtime_config()).expect("default config");
+    }
+
+    #[test]
+    fn bundled_runtime_config_resource_is_valid_and_carries_no_restrictive_toggles() {
+        // Pins the checked-in resource that ships as the official default source
+        // of truth (bundled via tauri.conf.json `resources`). It must parse
+        // against the real `deny_unknown_fields` struct and validate.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(BUNDLED_RUNTIME_CONFIG_FILE_NAME);
+        let contents = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("read bundled runtime config '{}': {error}", path.display())
+        });
+        let config = serde_json::from_str::<RuntimeConfig>(&contents)
+            .unwrap_or_else(|error| panic!("parse bundled runtime config: {error}"));
+        validate_runtime_config(&config).expect("bundled runtime config must validate");
+
+        // The official default disables nothing: all features ship ON. Feature
+        // disabling (e.g. voice dictation / telemetry, which commits b8a95e90 /
+        // 71d19399 made runtimeFeature capabilities) is supplied only at
+        // custom-build time and is not committed here.
+        let toggles = config.feature_toggles.clone().unwrap_or_default();
+        assert!(
+            toggles.is_empty(),
+            "official default must not carry feature toggles, got {toggles:?}"
+        );
+
+        // Single source of truth: the goose block mirrors the compiled-in
+        // default.
+        assert_eq!(config.goose, default_runtime_config().goose);
     }
 
     #[test]
@@ -1142,6 +1336,159 @@ mod tests {
             .expect_err("invalid fake config should fail ready_config");
         assert!(error.contains("Runtime config unavailable"));
         assert!(error.contains("Invalid"));
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn load_uses_bundled_runtime_config_when_present() {
+        let bundled = restricted_bundled_config();
+        let (_dir, state) = temp_state_with_bundled(Some(&bundled));
+        let distro_state = empty_distro_state();
+
+        let (source, config) =
+            expect_ready(state.get(&distro_state).await.expect("get bundled config"));
+        assert_eq!(source, RuntimeConfigSource::BundledFile);
+        assert_eq!(config, bundled);
+        assert_eq!(
+            config.feature_toggles,
+            Some(HashMap::from([
+                ("voiceDictation".to_string(), false),
+                ("telemetry".to_string(), false),
+            ]))
+        );
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn load_uses_dev_default_fallback_when_bundled_runtime_config_missing() {
+        let (_dir, state) = temp_state_with_bundled(None);
+        let distro_state = empty_distro_state();
+
+        let (source, config) =
+            expect_ready(state.get(&distro_state).await.expect("get default config"));
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn load_uses_dev_default_fallback_when_bundled_runtime_config_invalid() {
+        let dir = tempdir().expect("temp dir");
+        let bundled_path = dir
+            .path()
+            .join("resources")
+            .join(BUNDLED_RUNTIME_CONFIG_FILE_NAME);
+        std::fs::create_dir_all(bundled_path.parent().expect("parent")).expect("create dir");
+        std::fs::write(&bundled_path, r#"{"schemaVersion":1}"#)
+            .expect("write invalid bundled config");
+        let state = RuntimeConfigState::new(dir.path().to_path_buf(), Some(bundled_path));
+        let distro_state = empty_distro_state();
+
+        let (source, config) = expect_ready(
+            state
+                .get(&distro_state)
+                .await
+                .expect("get fallback default config"),
+        );
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[test]
+    fn bundled_runtime_config_fails_closed_when_missing_and_fallback_disabled() {
+        let dir = tempdir().expect("temp dir");
+        let bundled_path = dir
+            .path()
+            .join("resources")
+            .join(BUNDLED_RUNTIME_CONFIG_FILE_NAME);
+
+        let (source, reason, message) = expect_unavailable(
+            load_bundled_runtime_config_from_source(Some(&bundled_path), false),
+        );
+
+        assert_eq!(source, RuntimeConfigSource::BundledFile);
+        assert_eq!(reason, RuntimeConfigUnavailableReason::Missing);
+        assert!(message.contains("not found"));
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[test]
+    fn bundled_runtime_config_fails_closed_when_path_unavailable_and_fallback_disabled() {
+        let (source, reason, message) =
+            expect_unavailable(load_bundled_runtime_config_from_source(None, false));
+
+        assert_eq!(source, RuntimeConfigSource::BundledFile);
+        assert_eq!(reason, RuntimeConfigUnavailableReason::Missing);
+        assert!(message.contains("path unavailable"));
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[test]
+    fn bundled_runtime_config_fails_closed_when_invalid_and_fallback_disabled() {
+        let dir = tempdir().expect("temp dir");
+        let bundled_path = dir
+            .path()
+            .join("resources")
+            .join(BUNDLED_RUNTIME_CONFIG_FILE_NAME);
+        std::fs::create_dir_all(bundled_path.parent().expect("parent")).expect("create dir");
+        std::fs::write(&bundled_path, r#"{"schemaVersion":1}"#)
+            .expect("write invalid bundled config");
+
+        let (source, reason, message) = expect_unavailable(
+            load_bundled_runtime_config_from_source(Some(&bundled_path), false),
+        );
+
+        assert_eq!(source, RuntimeConfigSource::BundledFile);
+        assert_eq!(reason, RuntimeConfigUnavailableReason::Invalid);
+        assert!(message.contains("failed validation") || message.contains("Failed to parse"));
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn load_ignores_admin_cache_when_bundled_runtime_config_present() {
+        // A stale admin cache must not shadow the bundled-file source of truth.
+        let bundled = restricted_bundled_config();
+        let (_dir, state) = temp_state_with_bundled(Some(&bundled));
+        let distro_state = empty_distro_state();
+
+        let mut cached = valid_config();
+        cached.feature_toggles = Some(HashMap::from([("fromCache".to_string(), true)]));
+        write_admin_cache_to_path(
+            &state.admin_cache_path,
+            &cached,
+            "https://kgoose.example.test/runtime",
+        )
+        .expect("write admin cache");
+
+        let (source, config) =
+            expect_ready(state.get(&distro_state).await.expect("get bundled config"));
+        assert_eq!(source, RuntimeConfigSource::BundledFile);
+        assert_eq!(config, bundled);
+        assert_ne!(config.feature_toggles, cached.feature_toggles);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn load_ignores_admin_cache_without_bundled_runtime_config() {
+        // With no bundled file, the admin cache is still ignored: the loader
+        // falls through to the compiled-in default rather than the stale cache.
+        let (_dir, state) = temp_state_with_bundled(None);
+        let distro_state = empty_distro_state();
+
+        let mut cached = valid_config();
+        cached.feature_toggles = Some(HashMap::from([("fromCache".to_string(), true)]));
+        write_admin_cache_to_path(
+            &state.admin_cache_path,
+            &cached,
+            "https://kgoose.example.test/runtime",
+        )
+        .expect("write admin cache");
+
+        let (source, config) =
+            expect_ready(state.get(&distro_state).await.expect("get default config"));
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
     }
 
     #[test]

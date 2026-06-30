@@ -271,6 +271,7 @@ export const runtimeConfigSchema = z
 
 export const runtimeConfigSourceSchema = z.enum([
   "appDefault",
+  "bundledFile",
   "cachedEndpoint",
   "endpoint",
   "fakeEndpoint",

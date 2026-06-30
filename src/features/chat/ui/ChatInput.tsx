@@ -29,6 +29,7 @@ import {
   resolveConnectionStatus,
 } from "@/features/connections/lib/connectionStatus";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
   recordAssistiveMomentDismissed,
@@ -225,6 +226,7 @@ export function ChatInput({
     enabled: agentToolsTipsEnabled,
     setEnabled: setAgentToolsTipsEnabled,
   } = useAgentToolsTipsPreference();
+  const kgooseConnectionsEnabled = useProfileCapability("kgooseConnections");
   const [internalSelectedSkills, setInternalSelectedSkills] = useState<
     ChatSkillDraft[]
   >([]);
@@ -899,9 +901,14 @@ export function ChatInput({
   );
   const latestAgentToolsTip = agentToolsTips.at(-1) ?? null;
   const shouldLoadAgentToolsConnectionStatus =
-    agentToolsTipsEnabled && agentToolsTips.length > 0;
+    agentToolsTipsEnabled &&
+    kgooseConnectionsEnabled &&
+    agentToolsTips.length > 0;
   const [agentToolsConnectionsData, setAgentToolsConnectionsData] =
     useState<ListConnectionsResponse | null>(null);
+  const availableAgentToolsConnectionsData = kgooseConnectionsEnabled
+    ? agentToolsConnectionsData
+    : null;
 
   useEffect(() => {
     if (!shouldLoadAgentToolsConnectionStatus) {
@@ -936,13 +943,16 @@ export function ChatInput({
 
   const agentToolsConnectionsByName = useMemo(() => {
     const map = new Map<string, Connection>();
-    for (const connection of agentToolsConnectionsData?.connections ?? []) {
+    const connections = availableAgentToolsConnectionsData?.connections ?? [];
+    for (const connection of connections) {
       map.set(connection.name, connection);
     }
     return map;
-  }, [agentToolsConnectionsData?.connections]);
+  }, [availableAgentToolsConnectionsData?.connections]);
   const agentToolsStatuses = useMemo(() => {
-    if (!agentToolsConnectionsData) return new Map<string, ConnectionStatus>();
+    if (!availableAgentToolsConnectionsData) {
+      return new Map<string, ConnectionStatus>();
+    }
 
     const map = new Map<string, ConnectionStatus>();
     for (const tip of agentToolsTips) {
@@ -952,8 +962,12 @@ export function ChatInput({
       );
     }
     return map;
-  }, [agentToolsConnectionsByName, agentToolsConnectionsData, agentToolsTips]);
-  const disconnectedAgentToolsTips = agentToolsConnectionsData
+  }, [
+    agentToolsConnectionsByName,
+    availableAgentToolsConnectionsData,
+    agentToolsTips,
+  ]);
+  const disconnectedAgentToolsTips = availableAgentToolsConnectionsData
     ? agentToolsTips.filter((tip) => {
         const status = agentToolsStatuses.get(tip.id);
         return status?.kind === "disconnected" || status?.kind === "expired";
@@ -974,7 +988,7 @@ export function ChatInput({
       : latestDisconnectedAgentToolsTips;
   const presentedDisconnectedAgentToolsLabels =
     presentedDisconnectedAgentToolsTips.map((tip) => tip.label);
-  const agentToolsTipDismissId = agentToolsConnectionsData
+  const agentToolsTipDismissId = availableAgentToolsConnectionsData
     ? presentedDisconnectedAgentToolsTips.length > 0
       ? `disconnected:${presentedDisconnectedAgentToolsTips
           .map((tip) => tip.id)
