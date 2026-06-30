@@ -60,7 +60,10 @@
     "stopped": "Terminal stopped",
     "tabs": "Terminal tabs",
     "toggle": "Toggle terminal",
-    "title": "Terminal"
+    "title": "Terminal",
+    "dockToBottom": "Dock terminal to bottom",
+    "popOut": "Pop out terminal",
+    "resize": "Resize terminal"
   },
   "errors": {
     "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
@@ -427,5 +430,8 @@
       "labeled": "{{label}} ({{count}} step)",
       "labeled_other": "{{label}} ({{count}} steps)"
     }
+  },
+  "rightRail": {
+    "resize": "Resize right rail"
   }
 }

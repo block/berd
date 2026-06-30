@@ -86,6 +86,7 @@ vi.mock("../../hooks/useGitStateAutoRefresh", () => ({
 vi.mock("../ChatContextPanel", () => ({
   CP_TOTAL_W: 339,
   ChatContextPanel: () => <div data-testid="chat-context-panel" />,
+  useChatContextPanelCompactViewport: () => false,
 }));
 
 vi.mock("../../stores/chatSessionStore", () => ({

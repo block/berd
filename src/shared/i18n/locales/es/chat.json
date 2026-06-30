@@ -59,7 +59,10 @@
     "stopped": "Terminal detenido",
     "tabs": "Pestañas de terminal",
     "toggle": "Alternar terminal",
-    "title": "Terminal"
+    "title": "Terminal",
+    "dockToBottom": "Acoplar terminal abajo",
+    "popOut": "Separar terminal",
+    "resize": "Redimensionar terminal"
   },
   "errors": {
     "sessionPreparationSuperseded": "La configuración de la sesión cambió durante la preparación. Intenta enviar de nuevo.",
@@ -424,5 +427,8 @@
       "labeled": "{{label}} ({{count}} paso)",
       "labeled_other": "{{label}} ({{count}} pasos)"
     }
+  },
+  "rightRail": {
+    "resize": "Redimensionar panel derecho"
   }
 }

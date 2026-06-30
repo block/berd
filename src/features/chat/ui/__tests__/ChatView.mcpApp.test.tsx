@@ -52,17 +52,39 @@ const mocks = vi.hoisted(() => ({
   sessionForkFromMessageEnabled: true,
 }));
 
-vi.mock("motion/react", () => ({
-  AnimatePresence: ({ children }: { children: ReactNode }) => children,
-  motion: new Proxy(
-    {},
-    {
-      get: () => (props: { children?: ReactNode }) => (
-        <div>{props.children}</div>
-      ),
-    },
-  ),
-}));
+vi.mock("motion/react", () => {
+  const componentCache = new Map<
+    string | symbol,
+    (props: Record<string, unknown>) => ReactNode
+  >();
+
+  return {
+    AnimatePresence: ({ children }: { children: ReactNode }) => children,
+    motion: new Proxy(
+      {},
+      {
+        get: (_target, element) => {
+          const cached = componentCache.get(element);
+          if (cached) return cached;
+
+          const MotionMock = ({
+            children,
+            layout: _layout,
+            transition: _transition,
+            initial: _initial,
+            animate: _animate,
+            exit: _exit,
+            ...props
+          }: Record<string, unknown>) => (
+            <div {...props}>{children as ReactNode}</div>
+          );
+          componentCache.set(element, MotionMock);
+          return MotionMock;
+        },
+      },
+    ),
+  };
+});
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.t }),
@@ -274,16 +296,24 @@ interface PersistedTerminalTab {
   cwd: string;
 }
 
-function readPersistedTerminalTabs(): PersistedTerminalTab[] {
+function readPersistedTerminalState(): {
+  tabs?: PersistedTerminalTab[];
+  placement?: {
+    kind?: string;
+    rect?: { x: number; y: number; width: number; height: number };
+    size?: { height?: number };
+  };
+} {
   const rawState = window.localStorage.getItem(terminalStorageKey);
   if (!rawState) {
-    return [];
+    return {};
   }
 
-  const parsedState = JSON.parse(rawState) as {
-    tabs?: PersistedTerminalTab[];
-  };
-  return parsedState.tabs ?? [];
+  return JSON.parse(rawState);
+}
+
+function readPersistedTerminalTabs(): PersistedTerminalTab[] {
+  return readPersistedTerminalState().tabs ?? [];
 }
 
 function emitTerminalStatus(
@@ -306,6 +336,24 @@ function flushAfterNextPaintCallbacks() {
   for (const callback of callbacks) {
     callback();
   }
+}
+
+function createDomRect(rect: Partial<DOMRect>): DOMRect {
+  const left = rect.left ?? rect.x ?? 0;
+  const top = rect.top ?? rect.y ?? 0;
+  const width = rect.width ?? 0;
+  const height = rect.height ?? 0;
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: rect.right ?? left + width,
+    bottom: rect.bottom ?? top + height,
+    x: rect.x ?? left,
+    y: rect.y ?? top,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
 
 function chatSessionWithWorkingDir(workingDir: string): ChatSession {
@@ -1717,6 +1765,260 @@ describe("ChatView MCP app messaging", () => {
       "/Users/test/repo-a",
     );
     expect(mocks.stopTerminalSession).toHaveBeenCalledWith(exitedSessionKey);
+  });
+
+  it("pops the terminal out and docks it back without changing the running tab", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    const sessionKey = screen
+      .getByTestId("terminal-panel")
+      .getAttribute("data-session-key");
+
+    await user.click(screen.getByRole("button", { name: "terminal.popOut" }));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-session-key",
+      sessionKey,
+    );
+    expect(
+      screen.getByRole("button", { name: "terminal.dockToBottom" }),
+    ).toBeInTheDocument();
+    expect(readPersistedTerminalState()).toMatchObject({
+      placement: { kind: "floating" },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "terminal.dockToBottom" }),
+    );
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-session-key",
+      sessionKey,
+    );
+    expect(
+      screen.getByRole("button", { name: "terminal.popOut" }),
+    ).toBeInTheDocument();
+    expect(readPersistedTerminalState()).toMatchObject({
+      placement: { kind: "docked" },
+    });
+  });
+
+  it("pops the docked terminal out when dragging the header upward", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    const sessionKey = screen
+      .getByTestId("terminal-panel")
+      .getAttribute("data-session-key");
+    const header = screen.getByRole("toolbar", { name: "terminal.title" });
+
+    fireEvent(
+      header,
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 500,
+      }),
+    );
+    fireEvent(
+      window,
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 120,
+        clientY: 450,
+      }),
+    );
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }));
+
+    await waitFor(() =>
+      expect(readPersistedTerminalState()).toMatchObject({
+        placement: { kind: "floating" },
+      }),
+    );
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-session-key",
+      sessionKey,
+    );
+  });
+
+  it("docks the floating terminal when dragging the header to the dock zone", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+    const getBoundingClientRectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute("data-chat-column")) {
+          return createDomRect({ left: 0, top: 0, width: 640, height: 800 });
+        }
+        return createDomRect({ left: 0, top: 0, width: 300, height: 300 });
+      });
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.popOut" }));
+    expect(readPersistedTerminalState()).toMatchObject({
+      placement: { kind: "floating" },
+    });
+
+    const header = screen.getByRole("toolbar", { name: "terminal.title" });
+    const dockY = window.innerHeight - 8;
+    fireEvent(
+      header,
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 100,
+      }),
+    );
+    fireEvent(
+      window,
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 100,
+        clientY: dockY,
+      }),
+    );
+    expect(document.querySelector("[data-terminal-dock-preview]")).toBeTruthy();
+    fireEvent(
+      window,
+      new MouseEvent("pointerup", { bubbles: true, clientY: dockY }),
+    );
+
+    await waitFor(() =>
+      expect(readPersistedTerminalState()).toMatchObject({
+        placement: { kind: "docked" },
+      }),
+    );
+    expect(
+      document.querySelector("[data-terminal-dock-preview]"),
+    ).not.toBeInTheDocument();
+    getBoundingClientRectSpy.mockRestore();
+  });
+
+  it("does not preview the bottom dock when dragging outside the chat column", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+    const getBoundingClientRectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute("data-chat-column")) {
+          return createDomRect({ left: 0, top: 0, width: 640, height: 800 });
+        }
+        return createDomRect({ left: 0, top: 0, width: 300, height: 300 });
+      });
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.popOut" }));
+
+    const header = screen.getByRole("toolbar", { name: "terminal.title" });
+    const dockY = window.innerHeight - 8;
+    fireEvent(
+      header,
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 100,
+      }),
+    );
+    fireEvent(
+      window,
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientX: 700,
+        clientY: dockY,
+      }),
+    );
+
+    expect(
+      document.querySelector("[data-terminal-dock-preview]"),
+    ).not.toBeInTheDocument();
+    fireEvent(
+      window,
+      new MouseEvent("pointerup", {
+        bubbles: true,
+        clientX: 700,
+        clientY: dockY,
+      }),
+    );
+    expect(readPersistedTerminalState()).toMatchObject({
+      placement: { kind: "floating" },
+    });
+    getBoundingClientRectSpy.mockRestore();
+  });
+
+  it("resizes the docked terminal height from the top edge", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    const resizeHandle = document.querySelector<HTMLElement>(
+      '[data-terminal-resize-edge="top"]',
+    );
+    if (!resizeHandle) {
+      throw new Error("expected docked terminal resize handle");
+    }
+
+    const initialHeight = readPersistedTerminalState().placement?.size?.height;
+    fireEvent(
+      resizeHandle,
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientY: 300,
+      }),
+    );
+    fireEvent(
+      window,
+      new MouseEvent("pointermove", {
+        bubbles: true,
+        clientY: 260,
+      }),
+    );
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true }));
+
+    await waitFor(() =>
+      expect(readPersistedTerminalState().placement?.size?.height).toBe(
+        (initialHeight ?? 300) + 40,
+      ),
+    );
+  });
+
+  it("renders resize handles when the terminal is floating", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.popOut" }));
+
+    expect(readPersistedTerminalState().placement?.rect).toMatchObject({
+      height: expect.any(Number),
+      width: expect.any(Number),
+      x: expect.any(Number),
+      y: expect.any(Number),
+    });
+    expect(
+      screen.getAllByRole("button", { name: "terminal.resize" }),
+    ).toHaveLength(8);
+    expect(
+      document.querySelector('[data-terminal-resize-edge="bottom-right"]'),
+    ).toBeTruthy();
   });
 
   it("routes chat commands to the default tab for the cwd", async () => {

@@ -71,6 +71,9 @@ interface ChatContextPanelProps {
   } | null;
   sessionWorkingDir?: string | null;
   terminalOpen?: boolean;
+  panelWidth?: number;
+  allowVerticalShrink?: boolean;
+  widthTransitionEnabled?: boolean;
   leftViewportOcclusionPx?: number;
   onRequestClose?: () => void;
   onToggleTerminal?: () => void;
@@ -82,6 +85,9 @@ export function ChatContextPanel({
   project,
   sessionWorkingDir,
   terminalOpen = false,
+  panelWidth = CP_TOTAL_W,
+  allowVerticalShrink = false,
+  widthTransitionEnabled = true,
   leftViewportOcclusionPx = 0,
   onRequestClose,
   onToggleTerminal,
@@ -194,15 +200,17 @@ export function ChatContextPanel({
   return (
     <div
       className={cn(
-        "shrink-0",
+        allowVerticalShrink ? "min-h-0 shrink overflow-hidden" : "shrink-0",
         frameMode === "docking" && "relative",
         frameMode === "docked" ? "overflow-hidden" : "overflow-visible",
       )}
       style={
         {
-          width: isOpen && !isCompactViewport ? CP_TOTAL_W : 0,
-          transition: `width ${reflowDuration}ms ease`,
-          "--context-panel-width": `${CP_PANEL_W}px`,
+          width: isOpen && !isCompactViewport ? panelWidth : 0,
+          transition: widthTransitionEnabled
+            ? `width ${reflowDuration}ms ease`
+            : "none",
+          "--context-panel-width": `${panelWidth}px`,
         } as CSSProperties
       }
     >
@@ -212,7 +220,9 @@ export function ChatContextPanel({
             ref={handlePanelRef}
             key="context-panel"
             className={cn(
-              "flex self-start",
+              allowVerticalShrink
+                ? "flex min-h-0 max-h-full self-start overflow-hidden"
+                : "flex self-start",
               frameMode === "compact" &&
                 "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]",
               frameMode === "docking" && "absolute right-0 top-0 max-h-full",
@@ -221,9 +231,9 @@ export function ChatContextPanel({
             style={
               frameMode === "compact"
                 ? ({
-                    "--context-panel-width": `${CP_PANEL_W}px`,
+                    "--context-panel-width": `${panelWidth}px`,
                   } as CSSProperties)
-                : { width: CP_TOTAL_W }
+                : { width: panelWidth }
             }
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -232,7 +242,7 @@ export function ChatContextPanel({
           >
             <aside
               className={cn(
-                "chat-context-panel-surface flex min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground",
+                "chat-context-panel-surface flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground",
                 "[backdrop-filter:var(--backdrop-chat-context-panel)] [-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
                 "h-auto max-h-full overflow-y-auto",
                 isCompactViewport && "shadow-popover",

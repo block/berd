@@ -1,22 +1,24 @@
 # Composable Capabilities
 
-Date: 2026-06-05
+Date: 2026-06-05  
+Updated: 2026-06-27
 
 ## Summary
 
 Berd should support both beginners and pro engineers without forcing every
 workflow into a separate hard-coded screen. The codebase should make product
-surfaces composable: a team-authored view can combine reusable feature pieces
-today, and a future user-authored view builder can reuse the same pieces later.
+surfaces composable: a team-authored view can combine reusable product
+capabilities today, and a future user-authored view builder can reuse the same
+contracts later if that product direction proves useful.
 
 The architecture goal is:
 
 ```text
 design-system primitives
-down to
-feature capabilities
-down to
-composed product views
+  down to
+feature-owned capabilities
+  down to
+composed product views and surfaces
 ```
 
 The core rule:
@@ -26,53 +28,227 @@ Views compose capabilities.
 Capabilities own product behavior.
 Shared UI owns visual primitives.
 APIs own side effects.
+The registry describes what exists; it does not own runtime state.
 ```
 
-This is not a rewrite plan. It is a convention for new feature work and a guide
-for gradually untangling existing screens when we touch them.
+This is not a rewrite plan. It is a migration direction for new feature work and
+a guide for gradually untangling existing screens when we touch them.
+
+## Mental Model
+
+The folder names can be confusing because `feature` and `capability` answer
+different questions.
+
+```text
+Feature = who owns the code.
+Capability = what reusable product behavior that code offers.
+Surface/View = where that behavior appears.
+```
+
+A product area can be both a feature and a capability in normal conversation. For
+example, "the terminal" is a product capability, but its code can still live in
+`src/features/terminal/` because the terminal feature owns the terminal behavior.
+
+Example:
+
+```text
+src/features/terminal/
+  api/              Tauri/backend terminal side effects
+  lib/              terminal lifecycle and state helpers
+  ui/               terminal visual pieces
+  capabilities/     reusable terminal capability entry points
+```
+
+Read that as:
+
+```text
+The terminal-owned feature folder exposes one or more reusable terminal
+capabilities.
+```
+
+Not:
+
+```text
+Terminal is only a feature and therefore cannot be a capability.
+```
 
 ## Vocabulary
 
 | Term | Meaning | Example |
 | --- | --- | --- |
 | Component | Mostly visual UI. It should not own product workflow logic. | Button, dialog, tabs, empty state, status chip |
-| Capability | A reusable product unit that bundles data needs, actions, states, and render modes. | Pull request summary, pull request diff, conversation composer |
-| View | A composed screen, panel, or workflow surface made from capabilities. | PR inbox, project chat, first PR created moment |
-| Surface | A place where a capability can appear with a specific density and layout. | Inline chat, right rail, full page, compact row |
-| API | The boundary that talks to Tauri, ACP, GitHub, local storage, or external services. | Fetch PRs, start a session, submit a review |
-| Model | Product rules and state definitions that are not tied to a visual layout. | PR status rules, filters, loading/error states |
+| Capability | A reusable product unit that bundles data needs, actions, states, and render modes. | Terminal, conversation composer, pull request summary |
+| Capability registry | A thin app-level catalog of capability contracts and entry points. It is not a global state store. | `terminal` descriptor |
+| View | A composed screen, panel, or workflow surface made from capabilities. | Chat view, home, PR inbox, project workspace |
+| Surface | A place or density where a capability can appear. | Bottom dock, right rail, floating panel, home pill, chat footer |
+| Render mode | A capability-owned way to render for a surface or density. | `bottomDock`, `floating`, `rightRail`, `home`, `chatFooter` |
+| Control policy | Explicit availability for optional actions or controls in a render mode. | Model picker visible/hidden, attachments enabled/disabled |
+| API | The boundary that talks to Tauri, ACP, GitHub, local storage, or external services. | Start a terminal, submit a message, fetch PRs |
+| Model | Product rules and state definitions that are not tied to a visual layout. | Terminal tab rules, composer disabled states, PR status rules |
 
 The important distinction: a capability is not just a bigger component. It owns
 enough behavior to work correctly wherever it is rendered.
 
-## Why This Matters
+## Naming Guidance
 
-Berd's product vision is progressive disclosure. A beginner may only need to
-see that their first pull request was created, plus a short summary and a clear
-next action. A pro engineer may need a review queue, status, diff, comments,
-actions, filters, and agent help in one dense workspace.
+Capability names should use the simplest durable product noun. Prefer the name a
+designer or user would naturally say over an implementation-shaped name.
 
-Those should not become two unrelated implementations.
-
-Instead, the same pull request capabilities should support both experiences:
+Good capability names:
 
 ```text
-Beginner view:
-  PullRequestSummary, compact
-  OpenPullRequestAction
-  Diff hidden unless requested
-
-Pro view:
-  PullRequestQueue
-  PullRequestSummary
-  PullRequestDiff
-  PullRequestActions
-  SavedFilters
+Terminal
+Conversation Composer
+Session List
+Context Rail
+Pull Request Summary
 ```
 
-The product team can compose the first set of views. Later, users can compose
-their own views from the same capability contracts if that product direction
-proves useful.
+Avoid adding scope words just to explain the implementation:
+
+```text
+Terminal Workspace
+Chat Footer Composer Module
+Right Rail Terminal Tool
+```
+
+Use more specific names underneath the capability when they clarify internal
+parts or render modes:
+
+```text
+Capability: Terminal
+  TerminalSession      one backend shell process
+  TerminalTab          one tab inside the terminal
+  TerminalPanel        the raw xterm renderer
+  TerminalBottomDock   bottom-dock render mode
+  TerminalFloatingPanel floating render mode
+  TerminalRightRailTile right-rail render mode
+```
+
+Registry ids should follow the same principle. Use the short product noun when
+there is one obvious capability:
+
+```text
+terminal
+conversationComposer
+sessionList
+```
+
+Use dotted ids only when a feature exposes multiple distinct capabilities:
+
+```text
+terminal.runningIndicator
+terminal.commandLauncher
+```
+
+A capability name should not depend on its current screen location. If the name
+only makes sense because the thing lives in the bottom dock, right rail, home, or
+chat footer, it is probably a render mode or surface name rather than the
+capability name.
+
+## Why This Matters
+
+Berd's product vision is progressive disclosure. A beginner may need a simple
+surface with one clear action. A pro engineer may need a dense workspace with
+multiple tools, status, context, and agent help visible at once.
+
+Those should not become unrelated implementations.
+
+For example, the conversation composer currently appears in multiple places:
+
+```text
+Home composer
+Main chat composer
+Agent builder composer
+```
+
+Those surfaces can look different, like design-system variants, but they should
+not each reimplement the product rules for drafting, sending, stopping,
+attachments, skills, model selection, queued messages, or disabled states.
+
+The target direction is:
+
+```text
+ConversationComposerCapability
+  render mode: home
+  render mode: chatFooter
+  render mode: agentBuilder
+
+Each render mode can have different chrome, density, and control availability.
+The capability still owns the shared product behavior.
+```
+
+## Global Registry Direction
+
+Berd should start moving toward a global capability registry, but the registry
+should be intentionally thin.
+
+The registry is a catalog:
+
+```text
+What capabilities exist?
+Who owns them?
+What context do they need?
+What render modes do they support?
+What product states and actions do they expose?
+```
+
+The registry is not a capability store:
+
+```text
+It should not own open terminal tabs.
+It should not own composer drafts.
+It should not own current session runtime.
+It should not become a second app state system.
+It should not become a plugin framework before the product needs one.
+```
+
+A useful first shape is static TypeScript metadata:
+
+```text
+src/app/capabilities/
+  types.ts
+  registry.ts
+
+src/features/terminal/capabilities/
+  TerminalCapability.tsx
+  terminalCapabilityDescriptor.ts
+```
+
+Feature folders own capability implementations. The app-level registry imports
+small public descriptors from those feature folders.
+
+Example registry entry:
+
+```text
+id: terminal
+name: Terminal
+owning feature: terminal
+required context: session id, working directory
+render modes: bottomDock, floating, rightRail
+states: unavailable, starting, running, exited, error
+primary actions: open, collapse, expand, add tab, select tab, restart, stop
+```
+
+## One-By-One Refactor Strategy
+
+Do not pause feature work to migrate the whole app into capabilities. Instead,
+when a feature request touches a product area, ask whether that product area
+should be shaped as a composable capability as part of the work.
+
+Recommended sequence:
+
+1. Name the durable product concept.
+2. Identify which code owns the behavior today.
+3. Separate reusable product behavior from the current screen layout.
+4. Create a capability entry point inside the owning feature folder.
+5. Keep the current surface working first.
+6. Register the capability descriptor if the contract is clear enough.
+7. Add new surfaces or render modes on top of the same capability.
+
+This keeps the migration reversible. If a capability contract is wrong, we adjust
+one small boundary. If the registry gets too much responsibility too early, the
+whole app pays for the wrong abstraction.
 
 ## Ownership Boundaries
 
@@ -83,7 +259,7 @@ blocks. These should use the design system tokens and existing component
 patterns.
 
 Shared UI should not know about product domains like pull requests, sessions,
-providers, agents, or projects.
+providers, agents, terminals, or projects.
 
 Good shared UI:
 
@@ -101,7 +277,7 @@ Not shared UI:
 ```text
 PullRequestReviewButton
 AgentModelPicker
-SessionTerminalTabs
+TerminalTabs
 GitHubConnectionCard
 ```
 
@@ -111,7 +287,7 @@ Feature folders own product behavior for a domain. A feature can expose
 capabilities and reusable UI to other features, but the source of truth stays
 inside the feature.
 
-For new feature areas, use this shape:
+For new or actively touched feature areas, prefer this shape:
 
 ```text
 src/features/<feature-name>/
@@ -123,10 +299,163 @@ src/features/<feature-name>/
   views/            team-authored composed screens and panels
 ```
 
-This structure is a convention, not a requirement to move every existing feature
-immediately.
+This structure is a convention, not a reason to move every existing file
+immediately. Add it when it helps the work in front of you.
 
-### Cross-Feature Composition
+### Capabilities
+
+A capability should have a visible contract. It should make the reusable product
+behavior easier to understand, not harder.
+
+A capability owns:
+
+```text
+data needs
+product states
+actions and side effects
+validation and disabled states
+render modes
+control availability defaults
+```
+
+A capability should not own:
+
+```text
+the entire app layout
+a view's unrelated neighboring panels
+global app state unrelated to the capability
+visual primitives that belong in shared UI
+```
+
+### Views And Surfaces
+
+Views are allowed to be opinionated. They define the arrangement and decide which
+capabilities appear together.
+
+Views should not duplicate capability behavior. If two views need the same
+product action or state handling, that logic belongs in the feature capability,
+model, hook, or API layer.
+
+The ownership rule:
+
+```text
+Source feature owns the capability.
+Composed view owns the arrangement.
+Consuming feature owns its own domain context.
+```
+
+## Capability Contract
+
+Before a capability is reused across surfaces or registered globally, answer
+these questions:
+
+| Question | Why it matters |
+| --- | --- |
+| What product concept does it model? | Keeps us from extracting a random chunk of UI. |
+| What data/context does it need? | Lets views know what they must provide. |
+| What actions can it perform? | Keeps behavior reusable instead of page-specific. |
+| What states does it handle? | Prevents every surface from reinventing loading, empty, error, disabled, and permission states. |
+| What render modes does it support? | Supports progressive disclosure and density changes. |
+| Which controls are optional? | Allows surfaces to hide or disable controls without forking behavior. |
+| What owns side effects? | Keeps APIs and mutations out of purely visual components. |
+| What should remain view-specific? | Prevents capabilities from absorbing entire screens. |
+
+Example:
+
+```text
+Capability: Terminal
+
+Needs:
+  session id
+  working directory or working directory candidates
+  focus return target, if the host surface needs one
+
+States:
+  unavailable: no working directory
+  starting
+  running
+  exited
+  error
+  collapsed
+  expanded
+
+Actions:
+  open terminal
+  collapse / expand
+  add tab
+  select tab
+  restart active tab
+  stop and close tab
+  run command in existing or new tab
+
+Render modes:
+  bottom dock
+  floating panel
+  right rail tile
+
+Host-owned concerns:
+  where the terminal is placed
+  how much surrounding layout space it receives
+  whether it appears beside chat, under a rail, or over content
+```
+
+## Render Modes, Variants, And Control Policies
+
+A capability can share data and actions while rendering differently in each
+surface. Use render modes or surface adapters for layout and density:
+
+```text
+TerminalBottomDock
+TerminalFloatingPanel
+TerminalRightRailTile
+```
+
+Each adapter should use the same capability contract. The adapter decides visual
+density and chrome; it should not invent a separate workflow.
+
+This is similar to design-system variants, but with product behavior included:
+
+```text
+Design-system component:
+  same visual primitive, different variants
+
+Composable capability:
+  same product behavior, different render modes and available controls
+```
+
+For optional controls, prefer named render modes plus an explicit control policy
+over a long list of unstructured booleans.
+
+Good:
+
+```text
+ConversationComposerCapability
+  surface: home
+  controls:
+    modelPicker: visible
+    projectPicker: visible
+    attachments: enabled
+```
+
+Avoid:
+
+```text
+showModelPicker
+showProjectPicker
+showVoice
+showSkills
+showAttachments
+showReasoning
+showContext
+showQueue
+showStop
+...
+```
+
+The goal is not to forbid configuration. The goal is to keep product differences
+intentional and readable.
+
+## Cross-Feature Composition
 
 A feature can be a puzzle piece inside another feature's view. For example, a
 pull request review workspace may combine pull request capabilities with a chat
@@ -151,174 +480,87 @@ pull-requests copies chat session logic
 pull-requests mutates chat state through undocumented helpers
 ```
 
-The ownership rule:
+If a capability is meant to cross feature boundaries, expose it through a small
+public entry point rather than importing random internal files.
+
+## Current Pilot: Terminal
+
+The terminal is a good first capability to move toward the registry because the
+feature request itself is about flexible placement.
+
+Today the terminal already has terminal-owned API and lifecycle code, but the
+chat view still owns too much terminal product behavior: tabs, active tab,
+expanded/collapsed state, tab chrome, bottom-dock layout, shortcuts, and command
+routing.
+
+Target direction:
 
 ```text
-Source feature owns the capability.
-Composed view owns the arrangement.
-Consuming feature owns its own domain context.
-```
-
-This means a feature can be reused inside another feature without being absorbed
-by it. If a capability is meant to cross feature boundaries, expose it through a
-small public entry point rather than importing random internal files.
-
-Example shape:
-
-```text
-src/features/chat/
-  capabilities/
+src/features/terminal/
+  api/
+    terminal.ts
+  lib/
+    terminalSessionManager.ts
+    terminalState.ts
   ui/
-  model/
-  index.ts          public exports for other features
+    TerminalPanel.tsx
+    TerminalTabsHeader.tsx
+  capabilities/
+    TerminalCapability.tsx
+    terminalCapabilityDescriptor.ts
 
-src/features/pull-requests/views/
-  PullRequestReviewWorkspace
-    uses PullRequestDiff from pull-requests
-    uses PullRequestActions from pull-requests
-    uses ChatSurface from chat
+src/app/capabilities/
+  registry.ts
+  types.ts
 ```
 
-### Views
-
-Views are allowed to be opinionated. They define the layout and decide which
-capabilities appear together.
-
-Views should not duplicate capability behavior. If two views need the same
-product action or state handling, that logic belongs in the feature capability
-or model layer.
-
-## Capability Contract
-
-A capability should make its contract visible. Before it is reused across
-surfaces, it should answer these questions:
-
-| Question | Why it matters |
-| --- | --- |
-| What data does it need? | Lets views know what context they must provide. |
-| What actions can it perform? | Keeps behavior reusable instead of page-specific. |
-| What states does it handle? | Prevents every surface from reinventing loading, empty, error, and permission states. |
-| What surfaces can it render into? | Supports progressive disclosure and density changes. |
-| What permissions or connections does it require? | Makes blocked states explicit. |
-| What owns side effects? | Keeps APIs and mutations out of purely visual components. |
-
-Example:
+The first terminal refactor should preserve the existing bottom dock, then make
+new placements possible through the same capability contract:
 
 ```text
-Capability: Pull Request Summary
-
-Needs:
-  repository
-  pull request id or pull request object
-  GitHub connection state
-
-States:
-  loading
-  ready
-  not connected
-  missing permission
-  not found
-  error
-
-Actions:
-  open pull request
-  copy link
-  ask agent to summarize
-
-Render modes:
-  inline in chat
-  compact row in inbox
-  card in context panel
-  header in detail view
+bottom dock first
+floating panel next
+right rail / bento placement after the behavior boundary is stable
 ```
 
-## Render Modes And Surface Adapters
+This avoids making "floating terminal" a one-off overlay bolted onto `ChatView`.
+The product primitive becomes "Terminal," and placement becomes a host
+concern.
 
-A capability can share data and actions while rendering differently in each
-surface. Use small surface adapters for layout and density:
+## Future Example: Conversation Composer
+
+The conversation composer is another strong future capability candidate because
+it appears in multiple surfaces with overlapping behavior:
 
 ```text
-PullRequestSummaryInline
-PullRequestSummaryRow
-PullRequestSummaryCard
-PullRequestSummaryPanel
+Home composer
+Main chat composer
+Agent builder composer
 ```
 
-Each adapter should use the same capability contract. The adapter decides visual
-density; it should not invent a separate workflow.
-
-This keeps a future user-composed view from needing to know implementation
-details. It only needs to know that "Pull Request Summary" can render in a row,
-card, inline, or panel form.
-
-## Do Not Add A Global Registry Yet
-
-A global capability registry may eventually be useful for user-authored views,
-but it is too early to make it the foundation. Start with static composition:
+Those can be one capability with multiple render modes:
 
 ```text
-PullRequestInboxView imports the PR capabilities it needs.
-Chat can import the PR summary inline renderer when a PR is attached.
-Home can import a compact PR status card if that becomes useful.
+ConversationComposerCapability
+  render mode: home
+  render mode: chatFooter
+  render mode: agentBuilder
 ```
 
-After several capabilities exist and the repeated contract is proven, a registry
-can emerge from real usage rather than guesses.
+Some controls may be present in one render mode and absent in another. That is
+allowed when it is represented as an intentional control policy rather than a
+forked implementation.
 
-## Pilot: Pull Request Workflows
-
-Pull request work is a strong pilot because it naturally spans beginner and pro
-needs.
-
-Beginner moments:
+For example, if a future Home composer removed model selection, it should still
+use the same composer capability:
 
 ```text
-User creates their first PR.
-Berd shows a readable summary.
-Berd gives a simple open/share action.
-Diff and review tools stay available but not prominent.
+surface: home
+controls:
+  modelPicker: hidden
 ```
 
-Pro workflow:
-
-```text
-User opens a PR inbox.
-Berd shows review queue, status, diffs, comments, actions, and filters.
-Chat can sit beside the PR context and help with review or summary.
-```
-
-Recommended first implementation sequence:
-
-1. Add the pull-request feature folder when PR work begins.
-2. Build the domain API and model first: list, detail, diff, review actions,
-   connection state, loading, empty, error, permission states.
-3. Build small render modes: status, list row, summary, diff panel, action bar.
-4. Compose an internal `PullRequestInboxView`.
-5. Reuse the same summary and diff capability inside chat when the user asks for
-   PR context.
-6. Only later consider user-authored view composition.
-
-## Chat As A Capability Family
-
-Chat is currently one of the places where composition pressure is visible. A
-full chat view needs conversation, composer, session control, context panels,
-terminal behavior, and sometimes agent-builder behavior.
-
-Do not move a giant `ChatView` into shared UI. Instead, gradually separate chat
-into capability-sized pieces when related work touches it:
-
-```text
-ConversationTimeline
-Composer
-SessionController
-ContextRail
-TerminalSurface
-ChatSurface
-```
-
-That lets Berd reuse chat in a full screen, beside a PR, inside a project, or
-inside a focused workflow without dragging every full-screen concern into each
-surface.
+The visual surface changes. The underlying composer rules do not fork.
 
 ## Design System Rules
 
@@ -333,25 +575,42 @@ Rules:
    inside a feature.
 4. If a capability needs a new reusable visual treatment, propose it as a design
    system primitive or token.
-5. Keep density choices surface-specific. A pro inbox can be denser than a
+5. Keep density choices surface-specific. A pro workspace can be denser than a
    beginner card, but both should still feel like Berd.
 
-## When To Extract A Capability
+## How To Decide If Something Should Become A Capability
 
-Do extract a capability when:
+When a future feature request arrives, use this decision test before coding.
 
-1. The same product behavior is needed in more than one view.
+Strong candidate for a capability:
+
+1. The same product behavior is needed in more than one view or likely surface.
 2. A screen is becoming a bundle of unrelated responsibilities.
-3. A feature needs multiple render densities for beginner and pro experiences.
-4. Logic is being copied between pages, panels, and chat.
-5. A future user-composed view would reasonably want this product unit.
+3. The feature needs multiple render densities or placements.
+4. Logic is being copied between pages, panels, chat, home, or agent-builder.
+5. The behavior has meaningful product states beyond simple visual display.
+6. A future user-composed workspace would reasonably want this product unit.
+7. The feature request is about moving, docking, reusing, or reconfiguring a tool.
+8. The product concept can be named clearly without referencing its current
+   screen location.
 
-Do not extract a capability when:
+Probably not a capability yet:
 
-1. The behavior is only used once and still changing quickly.
-2. The only reuse is visual styling; that probably belongs in shared UI.
-3. The abstraction would hide important product states.
-4. The contract is speculative and not yet proven by real views.
+1. The behavior is only used once and is still changing quickly.
+2. The only reuse is visual styling; that belongs in shared UI.
+3. The proposed abstraction would hide important product states.
+4. The contract is speculative and not grounded in a real surface need.
+5. The extracted unit cannot be named as a durable product concept.
+6. The work would require a broad rewrite unrelated to the feature request.
+
+Useful question:
+
+```text
+If this surface moved tomorrow, what behavior should move with it?
+```
+
+That movable behavior is probably the capability. The layout around it is
+probably the view or host surface.
 
 ## Migration Guidance
 
@@ -359,46 +618,64 @@ Use this pattern for new work first. Existing screens should move incrementally:
 
 1. When touching a screen, name which parts are view composition and which parts
    are reusable capabilities.
-2. Move duplicated product logic into the feature model, hooks, or capability
-   layer.
+2. Move duplicated product logic into the feature model, hooks, API, or
+   capability layer.
 3. Keep visual primitives in shared UI.
-4. Avoid large rewrites whose only goal is matching this folder shape.
-5. Let proven reuse drive extraction.
+4. Preserve the existing surface before adding new render modes.
+5. Register the capability when its contract is clear enough to describe.
+6. Avoid large rewrites whose only goal is matching this folder shape.
+7. Let real feature pressure drive extraction.
 
-This keeps the architecture reversible. If a capability is wrong, we can adjust a
-small contract. If a global registry is added too soon, the whole app has to pay
-for the wrong abstraction.
+This keeps the architecture practical. We do not need every feature to become a
+capability immediately, and we do not need the registry to become a global
+capability store.
 
-## Checklist For New Feature Work
+## Checklist For Capability-Oriented Feature Work
 
-Before building a new composed workflow, answer:
+Before building or refactoring a composed workflow, answer:
 
-1. What capabilities does this view need?
-2. Which capability owns each data fetch or mutation?
-3. What render modes are needed now?
-4. Which render modes are likely soon, but should not be built yet?
-5. What loading, empty, error, permission, offline, and slow states exist?
-6. What design-system primitives or tokens are needed?
-7. What should stay view-specific?
-8. What should be easy to reuse from chat, home, projects, or another future
-   surface?
+1. What durable product concept are we modeling?
+2. Is this a feature-owned capability, a shared UI primitive, or just a view
+   detail?
+3. Which feature folder owns the source of truth?
+4. What context does the capability need from its host view?
+5. Which actions and side effects does the capability own?
+6. What states must be explicit: loading, empty, error, disabled, permission,
+   offline, slow, stale, optimistic, or retry?
+7. What render mode is needed now?
+8. Which render modes are likely soon, but should not be built yet?
+9. Which controls are optional by surface?
+10. What should stay view-specific?
+11. Does this need a registry descriptor now, or can it remain a local capability
+    until the contract is clearer?
 
 ## Future Direction
 
-If team-authored composed views prove useful, Berd can later add a lightweight
-capability registry for user-authored views. At that point, each registered
-capability would need stable metadata:
+The near-term goal is team-authored composition: make Berd easier for the team
+to build flexible surfaces without duplicating behavior.
+
+The medium-term goal is a stable global capability registry that can power
+internal layout systems, bento surfaces, and reusable workspace composition.
+
+A future user-authored view builder may use the same registry, but the registry
+should emerge from real capabilities and real product surfaces rather than from a
+speculative plugin architecture.
+
+Each registered capability should eventually have stable metadata:
 
 ```text
+id
 name
 description
+owning feature
 required context
 available render modes
-connection requirements
+optional controls
 actions
 state contract
+connection or permission requirements
 ```
 
-That should come after several real capabilities exist. The near-term goal is to
-make Berd easier for the team to compose without overbuilding the future view
-builder.
+Keep the registry boring until the product needs more. The important work is the
+one-by-one refactor: turn product behavior into clear, reusable capabilities as
+we touch the features that need to become flexible.
