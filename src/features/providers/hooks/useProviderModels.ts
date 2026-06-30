@@ -2,10 +2,11 @@ import { useCallback, useMemo } from "react";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { ModelOption } from "@/features/chat/types";
 import { filterModelProvidersForRuntimeConfig } from "../runtimeProviderConstraints";
-import { getModelProviders } from "../providerCatalog";
+import { getModelProvidersFromEntries } from "../providerCatalog";
 import { getModelCacheRefreshProviderIds } from "../modelCacheRefresh";
 import { getProviderModelSelectionHint } from "../modelSelectionHints";
 import { defaultModelInventoryModeForLoadResult } from "../runtimeProviderConfig";
+import { useProviderCatalogStore } from "../stores/providerCatalogStore";
 import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
 
 const EMPTY_MODELS: ModelOption[] = [];
@@ -23,22 +24,24 @@ export function useProviderModels() {
   );
   const runtimeConfig = useRuntimeConfigStore((state) => state.config);
   const runtimeConfigResult = useRuntimeConfigStore((state) => state.result);
+  const catalogEntries = useProviderCatalogStore((state) => state.entries);
 
   const configuredModelProviderIds = useMemo(
     () =>
       filterModelProvidersForRuntimeConfig(
-        getModelProviders(),
+        getModelProvidersFromEntries(catalogEntries),
         runtimeConfig,
       ).map((p) => p.id),
-    [runtimeConfig],
+    [catalogEntries, runtimeConfig],
   );
   const modelCacheRefreshProviderIds = useMemo(
     () =>
       getModelCacheRefreshProviderIds(runtimeConfig, {
         defaultModelInventoryMode:
           defaultModelInventoryModeForLoadResult(runtimeConfigResult),
+        catalogEntries,
       }),
-    [runtimeConfig, runtimeConfigResult],
+    [catalogEntries, runtimeConfig, runtimeConfigResult],
   );
 
   const getModelsForProvider = useCallback(

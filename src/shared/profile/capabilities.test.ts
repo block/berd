@@ -21,6 +21,7 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   agentToolsTip: true,
   automations: true,
   builderbot: true,
+  byoKeyProviders: false,
   telemetry: true,
   voiceDictation: true,
   kgooseConnections: true,

@@ -7,6 +7,7 @@ declare global {
     readonly VITE_APP_VERSION?: string;
     readonly VITE_ENVIRONMENT?: string;
     readonly VITE_AUTH_GATE?: string;
+    readonly VITE_BYO_KEY_PROVIDERS?: string;
     readonly VITE_TELEMETRY?: string;
     readonly VITE_VOICE_DICTATION?: string;
     readonly VITE_KGOOSE_CONNECTIONS?: string;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { filterModelProvidersForRuntimeConfig } from "./runtimeProviderConstraints";
 
 describe("filterModelProvidersForRuntimeConfig", () => {
@@ -62,5 +63,80 @@ describe("filterModelProvidersForRuntimeConfig", () => {
         },
       }),
     ).toEqual([providers[1]]);
+  });
+
+  const fieldsProviders: ProviderCatalogEntry[] = [
+    ...providers,
+    {
+      id: "anthropic",
+      displayName: "Anthropic",
+      category: "model",
+      description: "Claude models",
+      setupMethod: "single_api_key",
+      group: "default",
+      fields: [
+        {
+          key: "ANTHROPIC_API_KEY",
+          label: "API Key",
+          secret: true,
+          required: true,
+        },
+      ],
+    },
+    {
+      id: "ollama",
+      displayName: "Ollama",
+      category: "model",
+      description: "Local models",
+      setupMethod: "config_fields",
+      group: "default",
+      fields: [
+        {
+          key: "OLLAMA_HOST",
+          label: "Host",
+          secret: false,
+          required: true,
+        },
+      ],
+    },
+  ];
+
+  it("keeps only explicit goose-setup-catalog BYO providers when bring-your-own-key is on", () => {
+    // openai/anthropic come from goose's setup catalog with their own secret
+    // API-key fields; with the bring-your-own-key feature on they bypass the
+    // runtime allowlist (which defaults to just databricks_v2). Other fields-
+    // bearing providers remain governed by the allowlist.
+    expect(
+      filterModelProvidersForRuntimeConfig(
+        fieldsProviders,
+        DEFAULT_RUNTIME_CONFIG,
+        { byoKeyProvidersEnabled: true },
+      ),
+    ).toEqual([providers[0], fieldsProviders[3]]);
+  });
+
+  it("does not let fields-bearing providers bypass the allowlist when bring-your-own-key is off", () => {
+    // Flag off is the pre-feature behavior: the allowlist alone decides, so a
+    // fields-bearing anthropic entry is filtered out and only databricks_v2
+    // (the default allowlist) survives.
+    expect(
+      filterModelProvidersForRuntimeConfig(
+        fieldsProviders,
+        DEFAULT_RUNTIME_CONFIG,
+        { byoKeyProvidersEnabled: false },
+      ),
+    ).toEqual([providers[0]]);
+  });
+
+  it("defaults to the build feature (off in tests), keeping fields-bearing providers out", () => {
+    // Without an explicit option the function reads getBuildFeatureState(),
+    // which is off by default — so a normal build behaves as it did before the
+    // bring-your-own-key feature.
+    expect(
+      filterModelProvidersForRuntimeConfig(
+        fieldsProviders,
+        DEFAULT_RUNTIME_CONFIG,
+      ),
+    ).toEqual([providers[0]]);
   });
 });

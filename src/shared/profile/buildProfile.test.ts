@@ -23,11 +23,34 @@ describe("buildProfile", () => {
       agentToolsTip: true,
       automations: true,
       builderbot: true,
+      byoKeyProviders: false,
       telemetry: true,
       voiceDictation: true,
       kgooseConnections: true,
       updater: true,
     });
+  });
+
+  it("enables bring-your-own-key providers only when VITE_BYO_KEY_PROVIDERS is 1 (default off)", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_BYO_KEY_PROVIDERS", "1");
+
+    const { getBuildFeatureState: getFreshBuildFeatureState } = await import(
+      "./buildProfile"
+    );
+
+    expect(getFreshBuildFeatureState().byoKeyProviders).toBe(true);
+  });
+
+  it("keeps bring-your-own-key providers off for any VITE_BYO_KEY_PROVIDERS value other than 1", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_BYO_KEY_PROVIDERS", "true");
+
+    const { getBuildFeatureState: getFreshBuildFeatureState } = await import(
+      "./buildProfile"
+    );
+
+    expect(getFreshBuildFeatureState().byoKeyProviders).toBe(false);
   });
 
   it("disables telemetry when VITE_TELEMETRY is set to 0 (inverse-positive default-on)", async () => {

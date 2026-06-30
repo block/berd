@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import {
   listProviderSetupCatalog,
   mapProviderSetupCatalogEntryDto,
+  selectByoKeyProviders,
 } from "./catalog";
 
 const mocks = vi.hoisted(() => ({
@@ -106,5 +108,43 @@ describe("provider setup catalog API", () => {
       },
     ]);
     expect(mocks.catalogList).toHaveBeenCalledWith({});
+  });
+});
+
+describe("selectByoKeyProviders", () => {
+  function entry(id: string, withFields = true): ProviderCatalogEntry {
+    return {
+      id,
+      displayName: id,
+      category: "model",
+      description: id,
+      setupMethod: "single_api_key",
+      group: "default",
+      ...(withFields
+        ? {
+            fields: [
+              {
+                key: `${id.toUpperCase()}_API_KEY`,
+                label: "API Key",
+                secret: true,
+                required: true,
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  it("keeps only the bring-your-own-key model providers", () => {
+    expect(
+      selectByoKeyProviders([
+        entry("openai"),
+        entry("databricks"),
+        entry("anthropic"),
+        entry("google"),
+        entry("ollama"),
+        entry("openai", false),
+      ]).map((provider) => provider.id),
+    ).toEqual(["openai", "anthropic"]);
   });
 });

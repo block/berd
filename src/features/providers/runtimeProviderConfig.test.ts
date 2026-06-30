@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
@@ -6,10 +6,18 @@ import {
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { getModelCacheRefreshProviderIds } from "./modelCacheRefresh";
 import {
+  applyRuntimeProviderConfig,
   defaultModelInventoryModeForLoadResult,
+  mergeRuntimeProviderCatalog,
   runtimeModelInventory,
 } from "./runtimeProviderConfig";
 import { useProviderCatalogStore } from "./stores/providerCatalogStore";
+
+// applyRuntimeProviderConfig also syncs custom providers over ACP; stub it so
+// the catalog-merge gating can be tested without a live client.
+vi.mock("@/features/providers/api/customProviders", () => ({
+  syncRuntimeCustomProviders: vi.fn().mockResolvedValue(undefined),
+}));
 
 function catalogEntry(
   id: string,
@@ -83,6 +91,146 @@ describe("runtimeModelInventory", () => {
         sortOrder: 1,
       },
     ]);
+  });
+});
+
+describe("mergeRuntimeProviderCatalog", () => {
+  it("preserves explicit BYO setup entries and drops stale non-BYO entries", () => {
+    const existing: ProviderCatalogEntry[] = [
+      {
+        id: "openai",
+        displayName: "OpenAI",
+        category: "model",
+        description: "GPT models",
+        setupMethod: "config_fields",
+        group: "default",
+        fields: [
+          {
+            key: "OPENAI_API_KEY",
+            label: "API Key",
+            secret: true,
+            required: false,
+          },
+        ],
+      },
+      {
+        id: "ollama",
+        displayName: "Ollama",
+        category: "model",
+        description: "Local models",
+        setupMethod: "config_fields",
+        group: "default",
+        fields: [
+          {
+            key: "OLLAMA_HOST",
+            label: "Host",
+            secret: false,
+            required: true,
+          },
+        ],
+      },
+      // Absent from the runtime config and not an explicit BYO provider: stale
+      // entries that the authoritative runtime config should drop.
+      catalogEntry("stale_provider", "model"),
+    ];
+
+    const merged = mergeRuntimeProviderCatalog(
+      existing,
+      DEFAULT_RUNTIME_CONFIG,
+    );
+    const ids = merged.map((entry) => entry.id);
+
+    expect(ids).toContain("openai");
+    expect(ids).toContain("databricks_v2");
+    expect(ids).not.toContain("ollama");
+    expect(ids).not.toContain("stale_provider");
+    expect(merged.find((entry) => entry.id === "openai")?.fields).toHaveLength(
+      1,
+    );
+  });
+
+  it("lets the runtime config win for ids it also defines", () => {
+    const existing: ProviderCatalogEntry[] = [
+      {
+        ...catalogEntry("databricks_v2", "model"),
+        displayName: "Stale Databricks",
+        fields: [{ key: "X", label: "X", secret: false, required: false }],
+      },
+    ];
+
+    const databricks = mergeRuntimeProviderCatalog(
+      existing,
+      DEFAULT_RUNTIME_CONFIG,
+    ).filter((entry) => entry.id === "databricks_v2");
+
+    expect(databricks).toHaveLength(1);
+    expect(databricks[0].fields).toBeUndefined();
+    expect(databricks[0].displayName).toBe("Databricks AI Gateway");
+  });
+});
+
+describe("applyRuntimeProviderConfig catalog gating", () => {
+  function seedFieldsBearingEntry() {
+    useProviderCatalogStore.getState().setEntries([
+      {
+        id: "openai",
+        displayName: "OpenAI",
+        category: "model",
+        description: "GPT models",
+        setupMethod: "config_fields",
+        group: "default",
+        fields: [
+          {
+            key: "OPENAI_API_KEY",
+            label: "API Key",
+            secret: true,
+            required: false,
+          },
+        ],
+      },
+    ]);
+  }
+
+  it("merges and preserves fields-bearing entries when bring-your-own-key is on", async () => {
+    seedFieldsBearingEntry();
+
+    await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG, {
+      byoKeyProvidersEnabled: true,
+    });
+
+    const ids = useProviderCatalogStore
+      .getState()
+      .entries.map((entry) => entry.id);
+    expect(ids).toContain("openai");
+    expect(ids).toContain("databricks_v2");
+  });
+
+  it("wholesale-replaces the catalog (pre-feature behavior) when bring-your-own-key is off", async () => {
+    seedFieldsBearingEntry();
+
+    await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG, {
+      byoKeyProvidersEnabled: false,
+    });
+
+    const ids = useProviderCatalogStore
+      .getState()
+      .entries.map((entry) => entry.id);
+    // The seeded fields-bearing openai entry is dropped — the runtime config is
+    // the sole catalog source, exactly as before the feature existed.
+    expect(ids).not.toContain("openai");
+    expect(ids).toContain("databricks_v2");
+  });
+
+  it("defaults to the build feature (off in tests), wholesale-replacing the catalog", async () => {
+    seedFieldsBearingEntry();
+
+    await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG);
+
+    const ids = useProviderCatalogStore
+      .getState()
+      .entries.map((entry) => entry.id);
+    expect(ids).not.toContain("openai");
+    expect(ids).toContain("databricks_v2");
   });
 });
 
@@ -163,6 +311,50 @@ describe("getModelCacheRefreshProviderIds", () => {
         defaultModelInventoryMode: "refreshable",
       }),
     ).toEqual(["databricks_v2", "codex-acp"]);
+  });
+
+  it("includes explicit BYO setup providers when bring-your-own-key is on", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        ...catalogEntry("anthropic", "model"),
+        fields: [
+          {
+            key: "ANTHROPIC_API_KEY",
+            label: "API Key",
+            secret: true,
+            required: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(
+      getModelCacheRefreshProviderIds(DEFAULT_RUNTIME_CONFIG, {
+        byoKeyProvidersEnabled: true,
+      }),
+    ).toEqual(["anthropic", "codex-acp"]);
+  });
+
+  it("does not include fields-bearing non-BYO providers when bring-your-own-key is on", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        ...catalogEntry("ollama", "model"),
+        fields: [
+          {
+            key: "OLLAMA_HOST",
+            label: "Host",
+            secret: false,
+            required: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(
+      getModelCacheRefreshProviderIds(DEFAULT_RUNTIME_CONFIG, {
+        byoKeyProvidersEnabled: true,
+      }),
+    ).toEqual(["codex-acp"]);
   });
 
   it("includes explicitly refreshable runtime model providers", () => {

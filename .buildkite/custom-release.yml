@@ -27,6 +27,11 @@ steps:
         hint: 'JSON override for feature-level runtime sections only (featureToggles, doctor, feedback), e.g. {"featureToggles":{"voiceDictation":false,"telemetry":false}}.'
         default: "{}"
         required: false
+      - text: "Custom Vite env overrides"
+        key: "custom_vite_env"
+        hint: 'JSON object of VITE_* build env overrides, e.g. {"VITE_BYO_KEY_PROVIDERS":"1"}. VITE_APP_VERSION and VITE_ENVIRONMENT are not allowed.'
+        default: "{}"
+        required: false
       - select: "Disable bb CLI PATH install?"
         key: "disable_bb_cli"
         hint: "Yes omits the bb CLI PATH-install from this custom build (Cargo no-bb-cli-install)."

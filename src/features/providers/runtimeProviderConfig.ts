@@ -1,8 +1,10 @@
+import { isByoKeyProvider } from "@/features/providers/api/catalog";
 import { syncRuntimeCustomProviders } from "@/features/providers/api/customProviders";
 import type { ModelOption } from "@/features/chat/types";
 import { CURATED_PROVIDER_CATALOG } from "@/features/providers/curatedProviders";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import type {
   RuntimeConfig,
   RuntimeConfigLoadResult,
@@ -60,6 +62,25 @@ export function providerCatalogFromRuntimeConfig(
   );
 
   return [...nonGooseModelProviders, ...runtimeModelProviders];
+}
+
+export function mergeRuntimeProviderCatalog(
+  existingEntries: ProviderCatalogEntry[],
+  runtimeConfig: RuntimeConfig,
+): ProviderCatalogEntry[] {
+  const runtimeCatalog = providerCatalogFromRuntimeConfig(runtimeConfig);
+  const runtimeIds = new Set(runtimeCatalog.map((entry) => entry.id));
+
+  // The runtime config is authoritative for everything it defines, so a model
+  // provider removed from the config still disappears. We only preserve the
+  // explicit goose-setup-catalog BYO entries (openai/anthropic), which the
+  // runtime config never describes — without this they'd be wiped every time the
+  // config is applied.
+  const preserved = existingEntries.filter(
+    (entry) => isByoKeyProvider(entry) && !runtimeIds.has(entry.id),
+  );
+
+  return [...runtimeCatalog, ...preserved];
 }
 
 function runtimeModelToOption(
@@ -154,11 +175,21 @@ export async function applyRuntimeProviderConfig(
   options: {
     seedModelsFresh?: boolean;
     defaultModelInventoryMode?: RuntimeModelInventoryMode;
+    byoKeyProvidersEnabled?: boolean;
   } = {},
 ): Promise<void> {
-  useProviderCatalogStore
-    .getState()
-    .setEntries(providerCatalogFromRuntimeConfig(runtimeConfig));
+  const byoKeyProvidersEnabled =
+    options.byoKeyProvidersEnabled ?? getBuildFeatureState().byoKeyProviders;
+  const catalogStore = useProviderCatalogStore.getState();
+  // With bring-your-own-key off, the runtime config is the sole catalog source
+  // and wholesale-replaces the store (the pre-feature behavior). With it on,
+  // merge so the fields-bearing openai/anthropic setup-catalog entries survive
+  // every (re-)apply; the runtime config still wins for everything it defines.
+  catalogStore.setEntries(
+    byoKeyProvidersEnabled
+      ? mergeRuntimeProviderCatalog(catalogStore.entries, runtimeConfig)
+      : providerCatalogFromRuntimeConfig(runtimeConfig),
+  );
   useProviderModelCacheStore
     .getState()
     .seedRuntimeModels(runtimeModelInventory(runtimeConfig), {

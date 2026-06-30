@@ -12,6 +12,9 @@
 #   - custom_config:  JSON overrides blob deep-merged onto the committed
 #                     src-tauri/resources/runtime-config.json for custom builds
 #                     (default "{}"); validated before building
+#   - custom_vite_env: JSON object of VITE_* build env overrides for custom
+#                     builds (default "{}"); VITE_APP_VERSION and
+#                     VITE_ENVIRONMENT are owned by the release script
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
 #
@@ -39,6 +42,8 @@ RELEASE_VERSION="$(resolve_release_version)"
 BUILD_KIND="$(release_build_kind)"
 CUSTOM_CONFIG="$(meta custom_config 2>/dev/null || true)"
 [[ -n "$CUSTOM_CONFIG" ]] || CUSTOM_CONFIG="{}"
+CUSTOM_VITE_ENV="$(meta custom_vite_env 2>/dev/null || true)"
+[[ -n "$CUSTOM_VITE_ENV" ]] || CUSTOM_VITE_ENV="{}"
 DISABLE_BB_CLI="$(meta disable_bb_cli 2>/dev/null || echo false)"
 
 # In-app updates are an official-build-only feature. A custom build that embeds
@@ -59,14 +64,52 @@ else
   UPDATER_ENABLED=true
 fi
 
-# Cargo feature list + extra VITE_* env overrides applied to the build below.
-# Official keeps exactly today's invocation (features = berdctl, no extra
-# VITE_*); custom appends disable-features and VITE_* derived from the merged
-# config in the build-kind block after `just setup`.
+# Cargo feature list + VITE_* env applied to the build below. Keep official
+# build defaults encoded here; custom_vite_env may override only non-release-
+# owned keys via set_vite_env, without emitting duplicate env assignments.
 CARGO_FEATURES="berdctl"
-VITE_OVERRIDES=()
+VITE_APP_VERSION_VALUE="$RELEASE_VERSION"
+VITE_ENVIRONMENT_VALUE="production"
+VITE_AUTH_GATE_VALUE=0
+VITE_BYO_KEY_PROVIDERS_VALUE=0
+VITE_UPDATER_ENABLED_VALUE="$UPDATER_ENABLED"
+VITE_EXTRA_ENV=()
 
 RUNTIME_CONFIG="src-tauri/resources/runtime-config.json"
+
+set_vite_env() {
+  local key="$1"
+  local value="$2"
+
+  case "$key" in
+    VITE_APP_VERSION|VITE_ENVIRONMENT)
+      echo "custom_vite_env cannot override release-owned key: $key" >&2
+      return 1
+      ;;
+    VITE_AUTH_GATE)
+      VITE_AUTH_GATE_VALUE="$value"
+      ;;
+    VITE_BYO_KEY_PROVIDERS)
+      VITE_BYO_KEY_PROVIDERS_VALUE="$value"
+      ;;
+    VITE_UPDATER_ENABLED)
+      VITE_UPDATER_ENABLED_VALUE="$value"
+      ;;
+    VITE_*)
+      local next=()
+      local pair
+      for pair in "${VITE_EXTRA_ENV[@]}"; do
+        [[ "$pair" == "$key="* ]] || next+=("$pair")
+      done
+      next+=("$key=$value")
+      VITE_EXTRA_ENV=("${next[@]}")
+      ;;
+    *)
+      echo "custom_vite_env key must start with VITE_: $key" >&2
+      return 1
+      ;;
+  esac
+}
 
 echo "+++ :package: Stamping version -> $RELEASE_VERSION"
 tmp="$(mktemp)"
@@ -136,18 +179,30 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
   # operator treats an explicit `false` as absent and would mask the disable.)
   if [[ "$(jq -r '.featureToggles.voiceDictation == false' "$RUNTIME_CONFIG")" == "true" ]]; then
     CARGO_FEATURES="$CARGO_FEATURES,no-voice-dictation"
-    VITE_OVERRIDES+=("VITE_VOICE_DICTATION=0")
+    set_vite_env VITE_VOICE_DICTATION 0
   fi
   if [[ "$(jq -r '.featureToggles.telemetry == false' "$RUNTIME_CONFIG")" == "true" ]]; then
-    VITE_OVERRIDES+=("VITE_TELEMETRY=0")
+    set_vite_env VITE_TELEMETRY 0
   fi
   # kgoose-backed "Company-managed" connections tab. Purely a renderer gate:
   # flipping the VITE_* build feature hides the tab and skips the kgoose query.
   # The Rust `list_connections` command stays registered (no backend feature) —
   # a gated renderer just never calls it.
   if [[ "$(jq -r '.featureToggles.kgooseConnections == false' "$RUNTIME_CONFIG")" == "true" ]]; then
-    VITE_OVERRIDES+=("VITE_KGOOSE_CONNECTIONS=0")
+    set_vite_env VITE_KGOOSE_CONNECTIONS 0
   fi
+
+  printf '%s' "$CUSTOM_VITE_ENV" | jq -e '
+    type == "object" and
+    all(keys[]; test("^VITE_[A-Z0-9_]+$")) and
+    all(.[]; type == "string")
+  ' >/dev/null || {
+    echo "custom_vite_env must be a JSON object with string VITE_* keys/values: $CUSTOM_VITE_ENV" >&2; exit 1;
+  }
+
+  while IFS=$'\t' read -r key value; do
+    set_vite_env "$key" "$value"
+  done < <(printf '%s' "$CUSTOM_VITE_ENV" | jq -r 'to_entries[] | [.key, .value] | @tsv')
 fi
 
 # bb CLI PATH install has no runtime-config representation; the custom pipeline
@@ -195,21 +250,20 @@ echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
 # Pass the build-time env via `env`, not as shell assignment-prefix words.
-# VITE_OVERRIDES (custom only) is expanded from an array, and bash classifies
-# `VITE_*=…` assignment prefixes at parse time — it never re-classifies words
-# produced by a later expansion, so the array's first element would be taken as
-# the command name and fail (`VITE_VOICE_DICTATION=0: command not found`),
-# before `pnpm tauri build` ever runs. `env` applies every name=value argument
-# at runtime, so both the literal and expanded assignments take effect. The
-# guarded expansion contributes nothing for official builds (empty array under
-# `set -u`), so the official invocation stays exactly features=berdctl with no
-# extra VITE_* vars.
+# Custom-only extra VITE_* values are expanded from an array, and bash
+# classifies `VITE_*=…` assignment prefixes at parse time — it never
+# re-classifies words produced by a later expansion, so an array element would
+# be taken as the command name and fail (`VITE_VOICE_DICTATION=0: command not
+# found`) before `pnpm tauri build` ever runs. `env` applies every name=value
+# argument at runtime. The guarded expansion contributes nothing for official
+# builds (empty array under `set -u`).
 env \
-  VITE_APP_VERSION="$RELEASE_VERSION" \
-  VITE_ENVIRONMENT=production \
-  VITE_AUTH_GATE=0 \
-  VITE_UPDATER_ENABLED="$UPDATER_ENABLED" \
-  ${VITE_OVERRIDES[@]+"${VITE_OVERRIDES[@]}"} \
+  VITE_APP_VERSION="$VITE_APP_VERSION_VALUE" \
+  VITE_ENVIRONMENT="$VITE_ENVIRONMENT_VALUE" \
+  VITE_AUTH_GATE="$VITE_AUTH_GATE_VALUE" \
+  VITE_BYO_KEY_PROVIDERS="$VITE_BYO_KEY_PROVIDERS_VALUE" \
+  VITE_UPDATER_ENABLED="$VITE_UPDATER_ENABLED_VALUE" \
+  ${VITE_EXTRA_ENV[@]+"${VITE_EXTRA_ENV[@]}"} \
   pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features "$CARGO_FEATURES" \
     --config src-tauri/tauri.release.conf.json
 

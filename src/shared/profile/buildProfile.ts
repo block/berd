@@ -3,6 +3,7 @@ export type BuildFeature =
   | "agentToolsTip"
   | "automations"
   | "builderbot"
+  | "byoKeyProviders"
   | "telemetry"
   | "voiceDictation"
   | "kgooseConnections"
@@ -13,6 +14,13 @@ const BUILD_FEATURES: Record<BuildFeature, boolean> = {
   agentToolsTip: true,
   automations: true,
   builderbot: true,
+  // Bring-your-own-key model providers (openai/anthropic surfaced from goose's
+  // setup catalog so a user can enter their own API key). Defaults OFF; a build
+  // opts in with VITE_BYO_KEY_PROVIDERS=1 (e.g. `VITE_BYO_KEY_PROVIDERS=1 just
+  // dev`). With it off, databricks_v2 is the only goose model provider and no
+  // provider-setup/key-entry UI is exposed anywhere (settings, chat model
+  // picker, berdctl).
+  byoKeyProviders: import.meta.env.VITE_BYO_KEY_PROVIDERS === "1",
   // Defaults on; a restricted build opts out with VITE_TELEMETRY=0.
   telemetry: import.meta.env.VITE_TELEMETRY !== "0",
   // Defaults on; a restricted build opts out with VITE_VOICE_DICTATION=0.

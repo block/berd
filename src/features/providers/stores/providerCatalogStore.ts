@@ -14,6 +14,7 @@ export interface ProviderCatalogState {
 interface ProviderCatalogActions {
   load: () => Promise<ProviderCatalogEntry[]>;
   setEntries: (entries: ProviderCatalogEntry[]) => void;
+  mergeEntries: (entries: ProviderCatalogEntry[]) => void;
   reset: () => void;
 }
 
@@ -40,6 +41,23 @@ export const useProviderCatalogStore = create<ProviderCatalogStore>((set) => ({
       loading: false,
       loaded: true,
       error: null,
+    });
+  },
+
+  // Overlay `entries` onto the current catalog, replacing any existing entry
+  // with the same id and keeping the rest. Used to merge goose-setup-catalog
+  // providers (openai/anthropic) into the runtime-config-derived catalog
+  // without clobbering it.
+  mergeEntries: (entries) => {
+    set((state) => {
+      const incomingIds = new Set(entries.map((entry) => entry.id));
+      const kept = state.entries.filter((entry) => !incomingIds.has(entry.id));
+      return {
+        entries: [...kept, ...entries],
+        loading: false,
+        loaded: true,
+        error: null,
+      };
     });
   },
 

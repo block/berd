@@ -11,8 +11,13 @@ import {
   applyRuntimeProviderConfig,
   defaultModelInventoryModeForLoadResult,
 } from "@/features/providers/runtimeProviderConfig";
+import {
+  listProviderSetupCatalog,
+  selectByoKeyProviders,
+} from "@/features/providers/api/catalog";
 import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AcpProvider } from "@/shared/api/acp";
@@ -20,6 +25,7 @@ import { getClient, setNotificationHandler } from "@/shared/api/acpConnection";
 import notificationHandler from "@/features/chat/acp/acpNotificationHandler";
 import { registerChatSessionConfigSnapshotHandlers } from "@/features/chat/acp/sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 
@@ -115,6 +121,38 @@ export async function runChatRuntimeStartup(): Promise<void> {
     });
   };
 
+  // Merge goose's bring-your-own-key model providers (openai/anthropic) into the
+  // catalog. goose's setup catalog serves them with their own secret API-key
+  // `fields`, which the runtime-config catalog never carries — so they're the
+  // only path to rendering the key-entry form. `applyRuntimeProviderConfig`
+  // preserves these fields-bearing entries on every (re-)apply, so this can run
+  // either side of `loadRuntimeConfig`. Non-fatal: if goose doesn't serve them,
+  // the app still works with the runtime-config providers. Gated behind the
+  // bring-your-own-key build feature (VITE_BYO_KEY_PROVIDERS=1); off by default,
+  // so a normal build never surfaces openai/anthropic.
+  const loadSetupCatalog = async () => {
+    if (!getBuildFeatureState().byoKeyProviders) {
+      return;
+    }
+    const t0 = performance.now();
+    try {
+      const byoKeyProviders = selectByoKeyProviders(
+        await listProviderSetupCatalog(),
+      );
+      if (byoKeyProviders.length > 0) {
+        useProviderCatalogStore.getState().mergeEntries(byoKeyProviders);
+      }
+      perfLog(
+        `[perf:startup] loadSetupCatalog done in ${(performance.now() - t0).toFixed(1)}ms (n=${byoKeyProviders.length})`,
+      );
+    } catch (err) {
+      console.warn(
+        "Failed to load goose provider setup catalog on startup:",
+        err,
+      );
+    }
+  };
+
   const loadPersonas = async () => {
     const t0 = performance.now();
     store.setPersonasLoading(true);
@@ -155,6 +193,7 @@ export async function runChatRuntimeStartup(): Promise<void> {
   applyCuratedProviders(false);
 
   await loadRuntimeConfig();
+  await loadSetupCatalog();
   await loadDistroBundle();
   applyCuratedProviders(true);
 
