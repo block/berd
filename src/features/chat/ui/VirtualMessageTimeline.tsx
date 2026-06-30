@@ -1000,6 +1000,7 @@ export function VirtualMessageTimeline({
   const responseStartHintCandidateMessageIdRef = useRef<string | null>(null);
   const responseStartHintAnimationFrameRef = useRef<number | null>(null);
   const responseStartHintSeenMessageIdsRef = useRef(new Set<string>());
+  const responseStartHintRecordedMessageIdRef = useRef<string | null>(null);
   const detachedScrollTopRef = useRef<number | null>(null);
   const liveTailHandoffRef = useRef<{
     distanceFromBottom: number;
@@ -2529,6 +2530,23 @@ export function VirtualMessageTimeline({
     RESPONSE_START_HINT_HIDE_DELAY_MS,
   );
 
+  // Record the "shown" count the first time the hint is actually visible for a
+  // message, not when it was merely scheduled. With maxShows = 1, recording at
+  // schedule time could retire the moment as expired for a hint the user never
+  // saw (e.g. the visibility band never opened before they switched sessions).
+  useEffect(() => {
+    if (
+      responseStartHintMessageId &&
+      responseStartHintIsActive &&
+      responseStartHintRecordedMessageIdRef.current !==
+        responseStartHintMessageId
+    ) {
+      responseStartHintRecordedMessageIdRef.current =
+        responseStartHintMessageId;
+      recordAssistiveMomentShown(ASSISTIVE_UX_RULES.chatJumpToResponseStart.id);
+    }
+  }, [responseStartHintMessageId, responseStartHintIsActive]);
+
   const isResponseStartHintEligible = useCallback(
     (messageId: string) => {
       const container = containerRef.current;
@@ -2610,9 +2628,11 @@ export function VirtualMessageTimeline({
 
         responseStartHintSeenMessageIdsRef.current.add(completedMessage.id);
         responseStartHintCandidateMessageIdRef.current = null;
-        recordAssistiveMomentShown(
-          ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
-        );
+        // Select the candidate here, but defer recording the "shown" count
+        // until the hint actually becomes visible (see the effect that watches
+        // responseStartHintIsActive). Counting at schedule time could spend the
+        // single allowed show on a hint the user never saw if the visibility
+        // band never opens before they move on.
         setResponseStartHintMessageId(completedMessage.id);
       });
     },

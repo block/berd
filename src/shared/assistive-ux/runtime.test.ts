@@ -44,10 +44,7 @@ describe("Assistive UX runtime", () => {
     ).toBe("expired");
   });
 
-  it("allows the response-start discover moment to show four times", () => {
-    recordAssistiveMomentShown(responseStartId);
-    recordAssistiveMomentShown(responseStartId);
-    recordAssistiveMomentShown(responseStartId);
+  it("retires the response-start discover moment after a single show", () => {
     expect(shouldShowAssistiveMoment(responseStartId)).toBe(true);
 
     recordAssistiveMomentShown(responseStartId);

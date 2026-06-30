@@ -31,7 +31,7 @@ export const ASSISTIVE_UX_RULES = {
   chatJumpToResponseStart: {
     id: "chat.jumpToResponseStart",
     type: "discover",
-    maxShows: 4,
+    maxShows: 1,
   },
   chatAgentToolsConnectionTips: {
     id: "chat.agentToolsConnectionTips",

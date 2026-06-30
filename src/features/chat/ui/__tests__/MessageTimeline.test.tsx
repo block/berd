@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
 import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   setExperimentEnabled,
@@ -33,6 +34,7 @@ function triggerResizeObservers() {
 
 beforeEach(() => {
   localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+  localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
   expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
     true,
   );
