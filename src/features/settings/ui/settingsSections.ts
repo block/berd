@@ -7,6 +7,7 @@ import {
   Link2,
   RefreshCw,
   Settings2,
+  Shield,
   Stethoscope,
 } from "lucide-react";
 import { IconPlug } from "@tabler/icons-react";
@@ -29,6 +30,7 @@ export const SETTINGS_SECTIONS = [
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
+  { id: "security", labelKey: "nav.security", icon: Shield },
   {
     id: "updates",
     labelKey: "nav.updates",

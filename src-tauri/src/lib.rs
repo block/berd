@@ -437,6 +437,8 @@ pub fn run() {
             commands::runtime_config::set_fake_runtime_config,
             commands::runtime_config::clear_fake_runtime_config,
             commands::runtime_config::refresh_runtime_config,
+            commands::security_threshold::get_security_threshold,
+            commands::security_threshold::set_security_threshold,
             commands::system::get_home_dir,
             commands::system::open_in_chrome,
             commands::system::save_exported_agent_file,

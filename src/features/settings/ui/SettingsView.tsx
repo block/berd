@@ -5,6 +5,7 @@ import { DoctorSettings } from "./DoctorSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { NotificationSettings } from "./NotificationSettings";
+import { SecuritySettings } from "./SecuritySettings";
 import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
@@ -80,6 +81,7 @@ export function SettingsView({
       {activeSection === "general" && (
         <GeneralSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
       )}
+      {activeSection === "security" && <SecuritySettings />}
       {activeSection === "notifications" && <NotificationSettings />}
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}

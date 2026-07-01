@@ -8,6 +8,7 @@ import { useAuthGate } from "@/features/auth/hooks/useAuthGate";
 import { LoginView } from "@/features/auth/ui/LoginView";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useZoom } from "@/shared/hooks/useZoom";
+import { SecurityConfirmationModal } from "@/features/security/ui/SecurityConfirmationModal";
 import { Toaster } from "@/shared/ui/sonner";
 
 export function App() {
@@ -65,6 +66,7 @@ export function App() {
     <>
       {content}
       {authGate.status === "loggedIn" ? <SelectedTextContextMenu /> : null}
+      <SecurityConfirmationModal />
       <Toaster />
     </>
   );

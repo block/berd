@@ -25,6 +25,21 @@ export function setNotificationHandler(handler: AcpNotificationHandler): void {
   notificationHandler = handler;
 }
 
+/**
+ * Handles ACP permission requests. When set, `requestPermission` delegates to
+ * it; otherwise the connection falls back to auto-approving (preserving the
+ * default behavior for environments where no handler is registered).
+ */
+export type PermissionRequestHandler = (
+  request: RequestPermissionRequest,
+) => Promise<RequestPermissionResponse>;
+
+let permissionHandler: PermissionRequestHandler | null = null;
+
+export function setPermissionHandler(handler: PermissionRequestHandler): void {
+  permissionHandler = handler;
+}
+
 let clientPromise: Promise<GooseClient> | null = null;
 let resolvedClient: GooseClient | null = null;
 
@@ -33,6 +48,9 @@ function createClientCallbacks(): () => Client {
     requestPermission: async (
       args: RequestPermissionRequest,
     ): Promise<RequestPermissionResponse> => {
+      if (permissionHandler) {
+        return permissionHandler(args);
+      }
       const optionId = args.options?.[0]?.optionId ?? "approve";
       return {
         outcome: {

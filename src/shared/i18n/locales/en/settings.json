@@ -390,7 +390,8 @@
     "providers": "AI providers",
     "providersUpdateAvailable": "Update available",
     "shortcuts": "Keyboard shortcuts",
-    "updates": "Updates"
+    "updates": "Updates",
+    "security": "Security"
   },
   "notifications": {
     "title": "Notifications",
@@ -662,5 +663,39 @@
     "title": "Providers",
     "waitingForSignIn": "Waiting for sign-in..."
   },
-  "title": "Settings"
+  "title": "Settings",
+  "security": {
+    "title": "Security",
+    "description": "Protect against prompt injection and command injection attacks.",
+    "promptInjection": {
+      "label": "Prompt injection detection",
+      "description": "Scans conversation context for prompt injection attacks. Uses ML-based classification."
+    },
+    "commandClassifier": {
+      "label": "Command injection detection",
+      "description": "Scans tool calls for malicious content using an ML classifier, with fallback to pattern-based detection."
+    },
+    "status": {
+      "active": "Active"
+    },
+    "managedByOrg": "These protections are managed by your organization and cannot be disabled.",
+    "warpNotice": "ML classification requires a connection to WARP to reach the classification service.",
+    "threshold": {
+      "label": "Detection sensitivity",
+      "description": "The confidence level at which a flagged action prompts you to allow or block it. Lower values are more sensitive (more prompts); higher values are less sensitive. Range 0.0–1.0.",
+      "save": "Save",
+      "saved": "Detection sensitivity updated.",
+      "saveError": "Failed to update detection sensitivity.",
+      "rangeError": "Enter a value between 0.0 and 1.0.",
+      "restartHint": "Changes take effect after restarting Berd."
+    }
+  },
+  "securityConfirmation": {
+    "title": "Security alert",
+    "description": "This action was flagged as a potential security risk. Review it before allowing it to run.",
+    "commandLabel": "Flagged command",
+    "findingId": "Finding ID: {{id}}",
+    "allow": "Allow",
+    "block": "Block"
+  }
 }

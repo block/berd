@@ -22,7 +22,12 @@ import { useProviderCatalogStore } from "@/features/providers/stores/providerCat
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AcpProvider } from "@/shared/api/acp";
-import { getClient, setNotificationHandler } from "@/shared/api/acpConnection";
+import {
+  getClient,
+  setNotificationHandler,
+  setPermissionHandler,
+} from "@/shared/api/acpConnection";
+import { handleSecurityPermissionRequest } from "@/features/security/acp/securityPermissionHandler";
 import notificationHandler from "@/features/chat/acp/acpNotificationHandler";
 import { registerChatSessionConfigSnapshotHandlers } from "@/features/chat/acp/sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -53,6 +58,7 @@ export async function runChatRuntimeStartup(): Promise<void> {
   const tConn = performance.now();
   registerChatSessionConfigSnapshotHandlers();
   setNotificationHandler(notificationHandler);
+  setPermissionHandler(handleSecurityPermissionRequest);
   await getClient();
   perfLog(
     `[perf:startup] ACP getClient ready in ${(performance.now() - tConn).toFixed(1)}ms`,
