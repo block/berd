@@ -581,12 +581,6 @@ const typographyTokens = [
   "--app-top-bar-control-fg",
   "--app-top-bar-control-fg-disabled",
   "--app-top-bar-control-hover-opacity",
-  "--heading-card-font-size",
-  "--heading-card-line-height",
-  "--body-reading-size",
-  "--body-reading-line-height",
-  "--label-font-size",
-  "--label-letter-spacing",
 ];
 
 function getManifestItem(name: string) {
