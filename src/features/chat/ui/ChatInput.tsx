@@ -740,6 +740,12 @@ export function ChatInput({
     if (isComposing) {
       return;
     }
+    if (event.key === "Escape" && isStreaming && onStop) {
+      event.preventDefault();
+      event.stopPropagation();
+      onStop();
+      return;
+    }
     if (eventMatchesShortcutCommand(event.nativeEvent, "chat.sendNow")) {
       event.preventDefault();
       if (isStreaming) {

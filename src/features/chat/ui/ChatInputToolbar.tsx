@@ -438,7 +438,7 @@ export function ChatInputToolbar({
         </div>
 
         <div>
-          {isStreaming && !canSend ? (
+          {isStreaming && onStop ? (
             <Button
               type="button"
               onClick={onStop}

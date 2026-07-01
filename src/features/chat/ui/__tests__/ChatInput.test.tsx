@@ -1751,18 +1751,58 @@ describe("ChatInput", () => {
     await waitFor(() => expect(input.style.height).toBe("144px"));
   });
 
-  it("shows send button instead of stop when streaming with text entered", async () => {
+  it("keeps stop button available when streaming with text entered", async () => {
+    const onStop = vi.fn();
     const user = userEvent.setup();
-    render(<ChatInput onSend={vi.fn()} onStop={vi.fn()} isStreaming />);
+    render(<ChatInput onSend={vi.fn()} onStop={onStop} isStreaming />);
 
-    await user.type(screen.getByRole("textbox"), "follow up");
+    const input = screen.getByRole("textbox");
+    await user.type(input, "follow up");
 
     expect(
-      screen.getByRole("button", { name: /send message/i }),
+      screen.getByRole("button", { name: /stop generation/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /stop generation/i }),
+      screen.queryByRole("button", { name: /send message/i }),
     ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /stop generation/i }));
+
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(input).toHaveValue("follow up");
+  });
+
+  it("keeps stop button available when streaming with draft context selected", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        isStreaming
+        selectedSkills={[{ id: "code-review", name: "code-review" }]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /stop generation/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /send message/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("stops streaming with Escape without sending or clearing a draft", async () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatInput onSend={onSend} onStop={onStop} isStreaming />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "follow up");
+    await user.keyboard("{Escape}");
+
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("follow up");
   });
 
   it("calls onSend during streaming when text is entered", async () => {
