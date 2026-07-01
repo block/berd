@@ -39,6 +39,8 @@ export const SETUP_CATALOG_BYO_KEY_PROVIDER_IDS = [
 const SETUP_CATALOG_BYO_KEY_PROVIDER_ID_SET = new Set<string>(
   SETUP_CATALOG_BYO_KEY_PROVIDER_IDS,
 );
+const SETUP_CATALOG_DATABRICKS_PROVIDER_ID = "databricks_v2";
+const SETUP_CATALOG_DATABRICKS_HOST_FIELD_KEY = "DATABRICKS_HOST";
 
 export function isByoKeyProvider(
   entry: Pick<ProviderCatalogEntry, "id" | "fields">,
@@ -53,6 +55,18 @@ export function selectByoKeyProviders(
   entries: ProviderCatalogEntry[],
 ): ProviderCatalogEntry[] {
   return entries.filter(isByoKeyProvider);
+}
+
+export function selectDatabricksHostConfigProvider(
+  entries: ProviderCatalogEntry[],
+): ProviderCatalogEntry | null {
+  const entry = entries.find(
+    (candidate) => candidate.id === SETUP_CATALOG_DATABRICKS_PROVIDER_ID,
+  );
+  const fields = entry?.fields?.filter(
+    (field) => field.key === SETUP_CATALOG_DATABRICKS_HOST_FIELD_KEY,
+  );
+  return entry && fields?.length ? { ...entry, fields } : null;
 }
 
 export async function listProviderSetupCatalog(): Promise<

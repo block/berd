@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { Button } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Spinner } from "@/shared/ui/spinner";
@@ -137,7 +138,9 @@ export function ModelProviderRow({
   const fields = provider.fields ?? [];
   const hasFields = fields.length > 0;
   const supportsNativeConnect = !!provider.nativeConnectQuery;
-  const isInternalDatabricks = provider.id === INTERNAL_DATABRICKS_PROVIDER_ID;
+  const showInternalDatabricksDetails =
+    provider.id === INTERNAL_DATABRICKS_PROVIDER_ID &&
+    !getBuildFeatureState().byoKeyProviders;
   const isConnected =
     provider.status === "connected" || provider.status === "built_in";
   const fieldValueMap = useMemo(
@@ -447,7 +450,7 @@ export function ModelProviderRow({
             </div>
           ) : (
             <>
-              {isInternalDatabricks ? (
+              {showInternalDatabricksDetails ? (
                 <InternalDatabricksDetails
                   label={t("providers.models.details.configuredUrl")}
                 />

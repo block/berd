@@ -30,6 +30,8 @@ const ADMIN_OWNED_CUSTOM_PROVIDER_ID: &str = "block_openai_compatible";
 const DEFAULT_RUNTIME_PROVIDER_ID: &str = "databricks_v2";
 const DEFAULT_RUNTIME_MODEL_ID: &str = "goose-gpt-5-5";
 const DEFAULT_DATABRICKS_HOST: &str = "https://block-lakehouse-production.cloud.databricks.com";
+#[cfg(debug_assertions)]
+const BYO_KEY_PROVIDERS_ENV: &str = "VITE_BYO_KEY_PROVIDERS";
 const ALLOWED_ENDPOINT_ENV_KEYS: &[&str] = &["DATABRICKS_HOST"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -321,6 +323,7 @@ impl RuntimeConfigState {
         &self,
         result: RuntimeConfigLoadResult,
     ) -> Result<RuntimeConfigLoadResult, String> {
+        let result = runtime_config_load_result_for_local_byo_dev(result);
         let mut cached = self
             .cached
             .lock()
@@ -597,6 +600,54 @@ fn write_admin_cache_to_path(
             path.display()
         )
     })
+}
+
+fn runtime_config_load_result_for_local_byo_dev(
+    result: RuntimeConfigLoadResult,
+) -> RuntimeConfigLoadResult {
+    #[cfg(debug_assertions)]
+    if std::env::var(BYO_KEY_PROVIDERS_ENV).as_deref() == Ok("1") {
+        return match result {
+            RuntimeConfigLoadResult::Ready { source, config }
+                if matches!(
+                    source,
+                    RuntimeConfigSource::AppDefault | RuntimeConfigSource::BundledFile
+                ) =>
+            {
+                let mut config = *config;
+                clear_default_databricks_endpoint_env(&mut config);
+                RuntimeConfigLoadResult::Ready {
+                    source,
+                    config: Box::new(config),
+                }
+            }
+            other => other,
+        };
+    }
+
+    result
+}
+
+#[cfg(debug_assertions)]
+fn clear_default_databricks_endpoint_env(config: &mut RuntimeConfig) {
+    let Some(provider) = config
+        .goose
+        .model_providers
+        .iter_mut()
+        .find(|provider| provider.id == DEFAULT_RUNTIME_PROVIDER_ID)
+    else {
+        return;
+    };
+    let Some(endpoint_env) = provider.endpoint_env.as_mut() else {
+        return;
+    };
+
+    if endpoint_env.get("DATABRICKS_HOST").map(String::as_str) == Some(DEFAULT_DATABRICKS_HOST) {
+        endpoint_env.remove("DATABRICKS_HOST");
+    }
+    if endpoint_env.is_empty() {
+        provider.endpoint_env = None;
+    }
 }
 
 fn default_runtime_config_result(source: RuntimeConfigSource) -> RuntimeConfigLoadResult {

@@ -167,6 +167,49 @@ describe("mergeRuntimeProviderCatalog", () => {
     expect(databricks[0].fields).toBeUndefined();
     expect(databricks[0].displayName).toBe("Databricks AI Gateway");
   });
+
+  it("keeps only the Databricks host field when runtime config has no endpoint env", () => {
+    const configWithoutEndpointEnv: RuntimeConfig = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        modelProviders: [
+          {
+            ...DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0],
+            endpointEnv: undefined,
+          },
+        ],
+      },
+    };
+    const existing: ProviderCatalogEntry[] = [
+      {
+        ...catalogEntry("databricks_v2", "model"),
+        fields: [
+          {
+            key: "DATABRICKS_HOST",
+            label: "Host",
+            secret: false,
+            required: true,
+          },
+          {
+            key: "DATABRICKS_TOKEN",
+            label: "Token",
+            secret: true,
+            required: false,
+          },
+        ],
+      },
+    ];
+
+    const databricks = mergeRuntimeProviderCatalog(
+      existing,
+      configWithoutEndpointEnv,
+    ).find((entry) => entry.id === "databricks_v2");
+
+    expect(databricks?.fields?.map((field) => field.key)).toEqual([
+      "DATABRICKS_HOST",
+    ]);
+  });
 });
 
 describe("applyRuntimeProviderConfig catalog gating", () => {

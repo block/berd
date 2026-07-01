@@ -205,6 +205,24 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
   while IFS=$'\t' read -r key value; do
     set_vite_env "$key" "$value"
   done < <(printf '%s' "$CUSTOM_VITE_ENV" | jq -r 'to_entries[] | [.key, .value] | @tsv')
+
+  if [[ "$VITE_BYO_KEY_PROVIDERS_VALUE" == "1" ]]; then
+    echo "+++ :wrench: Removing bundled Databricks host for BYO key providers"
+    tmp="$(mktemp)"
+    jq '
+      .goose.modelProviders |= map(
+        if .id == "databricks_v2" and .endpointEnv.DATABRICKS_HOST == "https://block-lakehouse-production.cloud.databricks.com" then
+          .endpointEnv |= del(.DATABRICKS_HOST)
+          | if (.endpointEnv | length) == 0 then del(.endpointEnv) else . end
+        else
+          .
+        end
+      )
+    ' "$RUNTIME_CONFIG" > "$tmp" && mv "$tmp" "$RUNTIME_CONFIG"
+    pnpm exec tsx scripts/validate-runtime-config.ts --strict-toggles "$RUNTIME_CONFIG" || {
+      echo "BYO runtime-config failed validation" >&2; exit 1;
+    }
+  fi
 fi
 
 # bb CLI PATH install has no runtime-config representation; the custom pipeline

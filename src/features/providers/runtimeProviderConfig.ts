@@ -15,6 +15,8 @@ import type {
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 
 const GOOSE_AGENT_PROVIDER_ID = "goose";
+const DATABRICKS_PROVIDER_ID = "databricks_v2";
+const DATABRICKS_HOST_FIELD_KEY = "DATABRICKS_HOST";
 const DEFAULT_MODEL_INVENTORY_MODE: RuntimeModelInventoryMode = "authoritative";
 
 export function defaultModelInventoryModeForLoadResult(
@@ -71,14 +73,25 @@ export function mergeRuntimeProviderCatalog(
   const runtimeCatalog = providerCatalogFromRuntimeConfig(runtimeConfig);
   const runtimeIds = new Set(runtimeCatalog.map((entry) => entry.id));
 
-  // The runtime config is authoritative for everything it defines, so a model
-  // provider removed from the config still disappears. We only preserve the
-  // explicit goose-setup-catalog BYO entries (openai/anthropic), which the
-  // runtime config never describes — without this they'd be wiped every time the
-  // config is applied.
   const preserved = existingEntries.filter(
     (entry) => isByoKeyProvider(entry) && !runtimeIds.has(entry.id),
   );
+  const databricks = runtimeConfig.goose.modelProviders.find(
+    (provider) => provider.id === DATABRICKS_PROVIDER_ID,
+  );
+  const databricksSetupEntry = existingEntries.find(
+    (entry) => entry.id === DATABRICKS_PROVIDER_ID,
+  );
+  if (databricks && !databricks.endpointEnv && databricksSetupEntry?.fields) {
+    const databricksCatalogEntry = runtimeCatalog.find(
+      (entry) => entry.id === DATABRICKS_PROVIDER_ID,
+    );
+    if (databricksCatalogEntry) {
+      databricksCatalogEntry.fields = databricksSetupEntry.fields.filter(
+        (field) => field.key === DATABRICKS_HOST_FIELD_KEY,
+      );
+    }
+  }
 
   return [...runtimeCatalog, ...preserved];
 }

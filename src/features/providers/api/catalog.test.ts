@@ -4,6 +4,7 @@ import {
   listProviderSetupCatalog,
   mapProviderSetupCatalogEntryDto,
   selectByoKeyProviders,
+  selectDatabricksHostConfigProvider,
 } from "./catalog";
 
 const mocks = vi.hoisted(() => ({
@@ -146,5 +147,29 @@ describe("selectByoKeyProviders", () => {
         entry("openai", false),
       ]).map((provider) => provider.id),
     ).toEqual(["openai", "anthropic"]);
+  });
+
+  it("selects only the editable Databricks host field", () => {
+    expect(
+      selectDatabricksHostConfigProvider([
+        {
+          ...entry("databricks_v2"),
+          fields: [
+            {
+              key: "DATABRICKS_HOST",
+              label: "Host URL",
+              secret: false,
+              required: true,
+            },
+            {
+              key: "DATABRICKS_TOKEN",
+              label: "Access Token",
+              secret: true,
+              required: false,
+            },
+          ],
+        },
+      ])?.fields?.map((field) => field.key),
+    ).toEqual(["DATABRICKS_HOST"]);
   });
 });

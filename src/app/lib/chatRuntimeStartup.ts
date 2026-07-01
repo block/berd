@@ -14,6 +14,7 @@ import {
 import {
   listProviderSetupCatalog,
   selectByoKeyProviders,
+  selectDatabricksHostConfigProvider,
 } from "@/features/providers/api/catalog";
 import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
@@ -121,29 +122,35 @@ export async function runChatRuntimeStartup(): Promise<void> {
     });
   };
 
-  // Merge goose's bring-your-own-key model providers (openai/anthropic) into the
-  // catalog. goose's setup catalog serves them with their own secret API-key
-  // `fields`, which the runtime-config catalog never carries — so they're the
-  // only path to rendering the key-entry form. `applyRuntimeProviderConfig`
-  // preserves these fields-bearing entries on every (re-)apply, so this can run
-  // either side of `loadRuntimeConfig`. Non-fatal: if goose doesn't serve them,
-  // the app still works with the runtime-config providers. Gated behind the
-  // bring-your-own-key build feature (VITE_BYO_KEY_PROVIDERS=1); off by default,
-  // so a normal build never surfaces openai/anthropic.
+  // Merge goose's BYO setup catalog entries into the catalog. For openai and
+  // anthropic this provides API-key fields; for BYO Databricks builds this
+  // provides the editable DATABRICKS_HOST field after the runtime default URL is
+  // removed. Gated behind VITE_BYO_KEY_PROVIDERS=1.
   const loadSetupCatalog = async () => {
     if (!getBuildFeatureState().byoKeyProviders) {
       return;
     }
     const t0 = performance.now();
     try {
-      const byoKeyProviders = selectByoKeyProviders(
-        await listProviderSetupCatalog(),
-      );
-      if (byoKeyProviders.length > 0) {
-        useProviderCatalogStore.getState().mergeEntries(byoKeyProviders);
+      const setupCatalog = await listProviderSetupCatalog();
+      const databricks = selectDatabricksHostConfigProvider(setupCatalog);
+      const providers = [
+        ...selectByoKeyProviders(setupCatalog),
+        ...(databricks ? [databricks] : []),
+      ];
+      if (providers.length > 0) {
+        const runtimeConfigResult = useRuntimeConfigStore.getState().result;
+        useProviderCatalogStore.getState().mergeEntries(providers);
+        await applyRuntimeProviderConfig(
+          useRuntimeConfigStore.getState().config,
+          {
+            defaultModelInventoryMode:
+              defaultModelInventoryModeForLoadResult(runtimeConfigResult),
+          },
+        );
       }
       perfLog(
-        `[perf:startup] loadSetupCatalog done in ${(performance.now() - t0).toFixed(1)}ms (n=${byoKeyProviders.length})`,
+        `[perf:startup] loadSetupCatalog done in ${(performance.now() - t0).toFixed(1)}ms (n=${providers.length})`,
       );
     } catch (err) {
       console.warn(
