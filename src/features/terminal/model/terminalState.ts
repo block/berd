@@ -70,7 +70,7 @@ export const TERMINAL_STORAGE_KEY_PREFIX = "goose:chat-terminal-workspaces";
 export const TERMINAL_FLOATING_MARGIN_PX = 16;
 export const TERMINAL_FLOATING_DEFAULT_WIDTH_PX = 720;
 export const TERMINAL_FLOATING_DEFAULT_HEIGHT_PX = 360;
-export const TERMINAL_FLOATING_MIN_WIDTH_PX = 360;
+export const TERMINAL_FLOATING_MIN_WIDTH_PX = 280;
 export const TERMINAL_FLOATING_MIN_HEIGHT_PX = 220;
 export const TERMINAL_FLOATING_COLLAPSED_HEIGHT_PX = 44;
 export const TERMINAL_DOCK_DROP_ZONE_HEIGHT_PX = 140;
@@ -327,8 +327,25 @@ export function resolveTerminalDockedPlacement(
   };
 }
 
+/**
+ * Bounds mode for a floating terminal rect.
+ *
+ * - `"settle"` keeps the panel fully inside the viewport margin box. Used for
+ *   the resting position (initial pop-out, drop, persistence, resize).
+ * - `"drag"` lets the panel follow the cursor freely while a drag is in
+ *   flight, enforcing only that a grabbable strip of the header stays
+ *   on-screen so the panel can never be lost off the edge.
+ */
+export type TerminalFloatingBoundsMode = "settle" | "drag";
+
+// While dragging, keep at least this much of the panel reachable on each axis
+// so the header can always be grabbed again. Reuses existing layout constants
+// rather than introducing new magic numbers.
+const TERMINAL_FLOATING_DRAG_GRABBABLE_PX = TERMINAL_FLOATING_MARGIN_PX * 4;
+
 export function resolveFloatingTerminalRect(
   rect: TerminalFloatingRect | null,
+  mode: TerminalFloatingBoundsMode = "settle",
 ): TerminalFloatingRect {
   const { minX, minY, maxRight, maxBottom, maxWidth, maxHeight } =
     getFloatingTerminalLimits();
@@ -344,12 +361,30 @@ export function resolveFloatingTerminalRect(
   );
   const defaultX = maxRight - width;
   const defaultY = maxBottom - height - TERMINAL_FLOATING_MARGIN_PX * 2;
-  const maxX = maxRight - width;
-  const maxY = maxBottom - height;
+
+  // "settle" pins the panel fully inside the margin box. "drag" only requires
+  // that a grabbable strip stays on-screen, so the panel stays glued to the
+  // cursor and can overhang the edges mid-drag.
+  let minXBound: number;
+  let maxXBound: number;
+  let minYBound: number;
+  let maxYBound: number;
+  if (mode === "drag") {
+    const grab = TERMINAL_FLOATING_DRAG_GRABBABLE_PX;
+    minXBound = TERMINAL_FLOATING_MARGIN_PX + grab - width;
+    maxXBound = maxRight - grab;
+    minYBound = minY;
+    maxYBound = maxBottom - grab;
+  } else {
+    minXBound = minX;
+    maxXBound = maxRight - width;
+    minYBound = minY;
+    maxYBound = maxBottom - height;
+  }
 
   return {
-    x: clampValue(rect?.x ?? defaultX, minX, maxX),
-    y: clampValue(rect?.y ?? defaultY, minY, maxY),
+    x: clampValue(rect?.x ?? defaultX, minXBound, maxXBound),
+    y: clampValue(rect?.y ?? defaultY, minYBound, maxYBound),
     width,
     height,
   };
@@ -406,17 +441,6 @@ export function resolveFloatingTerminalResizeRect(
 
 export function getDefaultFloatingTerminalRect(): TerminalFloatingRect {
   return resolveFloatingTerminalRect(null);
-}
-
-export function getFloatingTerminalRectFromSource(
-  sourceRect: Pick<DOMRect, "left" | "top" | "width" | "height">,
-): TerminalFloatingRect {
-  return resolveFloatingTerminalRect({
-    x: sourceRect.left,
-    y: sourceRect.top,
-    width: Math.max(sourceRect.width, TERMINAL_FLOATING_MIN_WIDTH_PX),
-    height: Math.max(sourceRect.height, TERMINAL_FLOATING_MIN_HEIGHT_PX),
-  });
 }
 
 export function isTerminalDockDropZone(clientY: number): boolean {

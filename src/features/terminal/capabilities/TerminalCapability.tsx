@@ -6,7 +6,9 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   IconChevronDown,
@@ -27,8 +29,10 @@ import {
   terminalTabButtonId,
   terminalTabPanelId,
   resolveFloatingTerminalResizeRect,
+  resolveTerminalDockHeight,
   TERMINAL_DOCK_MIN_HEIGHT_PX,
   TERMINAL_FLOATING_COLLAPSED_HEIGHT_PX,
+  TERMINAL_FLOATING_MIN_WIDTH_PX,
   type TerminalDockedPlacement,
   type TerminalFloatingRect,
   type TerminalResizeEdge,
@@ -77,6 +81,15 @@ export function TerminalCapability({
 }: TerminalCapabilityProps) {
   const { t } = useTranslation("chat");
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
+  // Live overrides applied while a resize drag is in flight. Rendering reads
+  // these instead of the persisted controller state so each pointer frame only
+  // updates local component state — no per-frame localStorage write or
+  // ChatView re-render. The final value is committed to the controller on
+  // pointer release, after which the override is cleared.
+  const [liveFloatingRect, setLiveFloatingRect] =
+    useState<TerminalFloatingRect | null>(null);
+  const [liveDockHeight, setLiveDockHeight] = useState<number | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -87,7 +100,9 @@ export function TerminalCapability({
       if (eventMatchesShortcutCommand(event, "terminal.newTab")) {
         const target = event.target;
         const terminalHasFocus =
-          target instanceof Node && Boolean(rootRef?.current?.contains(target));
+          target instanceof Node &&
+          (Boolean(rootRef?.current?.contains(target)) ||
+            Boolean(floatingPanelRef.current?.contains(target)));
         if (!terminalHasFocus) {
           return;
         }
@@ -163,13 +178,52 @@ export function TerminalCapability({
       event.preventDefault();
       const startX = Number.isFinite(event.clientX) ? event.clientX : 0;
       const startY = Number.isFinite(event.clientY) ? event.clientY : 0;
+      const terminalShell = event.currentTarget.closest(
+        "[data-terminal-shell]",
+      );
       const sourceRect =
-        rootRef?.current?.getBoundingClientRect() ??
+        (terminalShell instanceof HTMLElement
+          ? terminalShell.getBoundingClientRect()
+          : null) ??
         floatingPanelRef.current?.getBoundingClientRect() ??
+        rootRef?.current?.getBoundingClientRect() ??
         event.currentTarget.getBoundingClientRect();
       const startPlacement = controller.placement;
+      // Offset of the grab point inside the panel, so the panel stays rigidly
+      // glued to the cursor at the exact spot it was picked up.
+      const grabOffsetX = startX - sourceRect.left;
+      const grabOffsetY = startY - sourceRect.top;
+      // For an already-floating terminal, drive the drag rect from the stored
+      // floating size, not the measured shell. A collapsed floating terminal
+      // renders at the 44px collapsed height, so measuring it would write that
+      // height back and clamp away the user's saved expanded height on the next
+      // updateFloatingRect. Docked pop-out still uses the measured shell size.
+      const panelWidth =
+        startPlacement.kind === "floating"
+          ? startPlacement.rect.width
+          : sourceRect.width;
+      const panelHeight =
+        startPlacement.kind === "floating"
+          ? startPlacement.rect.height
+          : sourceRect.height;
       let hasSeparated = false;
+      let hasLeftSourceDockRegion = startPlacement.kind !== "docked";
       let currentDockTarget: TerminalDockedPlacement | null = null;
+
+      const resolveIntentionalDockTarget = (
+        dockTarget: TerminalDockedPlacement | null,
+      ): TerminalDockedPlacement | null => {
+        if (startPlacement.kind !== "docked" || hasLeftSourceDockRegion) {
+          return dockTarget;
+        }
+
+        if (dockTarget?.region === startPlacement.region) {
+          return null;
+        }
+
+        hasLeftSourceDockRegion = true;
+        return dockTarget;
+      };
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
         const clientX = Number.isFinite(moveEvent.clientX)
@@ -180,44 +234,36 @@ export function TerminalCapability({
           : startY;
         const deltaX = clientX - startX;
         const deltaY = clientY - startY;
-        const separated =
-          Math.abs(deltaX) > TERMINAL_HEADER_DRAG_THRESHOLD_PX ||
-          Math.abs(deltaY) > TERMINAL_HEADER_DRAG_THRESHOLD_PX;
 
-        if (!hasSeparated && !separated) {
-          return;
-        }
-
+        // A small omnidirectional threshold separates an intentional drag from
+        // a click. Any direction past the threshold pops the terminal out.
         if (
-          startPlacement.kind === "docked" &&
-          deltaY >= -TERMINAL_HEADER_DRAG_THRESHOLD_PX
+          !hasSeparated &&
+          Math.abs(deltaX) <= TERMINAL_HEADER_DRAG_THRESHOLD_PX &&
+          Math.abs(deltaY) <= TERMINAL_HEADER_DRAG_THRESHOLD_PX
         ) {
           return;
         }
 
-        hasSeparated = true;
-        if (startPlacement.kind === "docked") {
-          controller.popOutFromRect(sourceRect);
-        }
+        const nextDragRect = {
+          x: clientX - grabOffsetX,
+          y: clientY - grabOffsetY,
+          width: panelWidth,
+          height: panelHeight,
+        };
 
-        const dockTarget = getDockTargetForPointer?.(clientX, clientY) ?? null;
+        if (!hasSeparated && startPlacement.kind === "docked") {
+          controller.popOutToRect(nextDragRect, "drag");
+        } else {
+          controller.updateFloatingRect(nextDragRect, "drag");
+        }
+        hasSeparated = true;
+
+        const dockTarget = resolveIntentionalDockTarget(
+          getDockTargetForPointer?.(clientX, clientY) ?? null,
+        );
         currentDockTarget = dockTarget;
         onDockPreviewChange?.(dockTarget);
-
-        const startRect =
-          startPlacement.kind === "floating"
-            ? startPlacement.rect
-            : {
-                x: sourceRect.left,
-                y: sourceRect.top,
-                width: sourceRect.width,
-                height: sourceRect.height,
-              };
-        controller.updateFloatingRect({
-          ...startRect,
-          x: startRect.x + deltaX,
-          y: startRect.y + deltaY,
-        });
       };
 
       const cleanup = (upEvent?: PointerEvent) => {
@@ -238,12 +284,25 @@ export function TerminalCapability({
             : startY;
         const dropTarget =
           hasSeparated && upEvent
-            ? (getDockTargetForPointer?.(upClientX, upClientY) ??
-              currentDockTarget)
+            ? (resolveIntentionalDockTarget(
+                getDockTargetForPointer?.(upClientX, upClientY) ?? null,
+              ) ?? currentDockTarget)
             : null;
 
         if (dropTarget) {
           controller.dockToRegion(dropTarget.region);
+        } else if (hasSeparated) {
+          // Settle the floating panel fully back inside the viewport margin
+          // box now that the drag is over.
+          controller.updateFloatingRect(
+            {
+              x: upClientX - grabOffsetX,
+              y: upClientY - grabOffsetY,
+              width: panelWidth,
+              height: panelHeight,
+            },
+            "settle",
+          );
         }
       };
 
@@ -270,9 +329,11 @@ export function TerminalCapability({
 
       event.preventDefault();
       event.stopPropagation();
+      setIsResizing(true);
       const startX = Number.isFinite(event.clientX) ? event.clientX : 0;
       const startY = Number.isFinite(event.clientY) ? event.clientY : 0;
       const startRect = controller.placement.rect;
+      let latestRect = startRect;
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
         const clientX = Number.isFinite(moveEvent.clientX)
@@ -281,29 +342,39 @@ export function TerminalCapability({
         const clientY = Number.isFinite(moveEvent.clientY)
           ? moveEvent.clientY
           : startY;
-        controller.updateFloatingRect(
-          resolveFloatingTerminalResizeRect(
-            startRect,
-            edge,
-            clientX - startX,
-            clientY - startY,
-          ),
+        latestRect = resolveFloatingTerminalResizeRect(
+          startRect,
+          edge,
+          clientX - startX,
+          clientY - startY,
         );
+        // Drive the drag from local state only; persist on release.
+        setLiveFloatingRect(latestRect);
       };
 
-      const cleanup = () => {
+      // `commit` persists the dragged size on a deliberate pointer release.
+      // `discard` drops the live override without persisting so an interrupted
+      // drag (e.g. window blur) snaps back to the pre-drag size.
+      const teardown = () => {
         window.removeEventListener("pointermove", handlePointerMove);
-        window.removeEventListener("pointerup", cleanup);
-        window.removeEventListener("blur", cleanup);
+        window.removeEventListener("pointerup", commit);
+        window.removeEventListener("blur", discard);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        setLiveFloatingRect(null);
+        setIsResizing(false);
       };
+      const commit = () => {
+        controller.updateFloatingRect(latestRect);
+        teardown();
+      };
+      const discard = () => teardown();
 
       document.body.style.cursor = getResizeCursor(edge);
       document.body.style.userSelect = "none";
       window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", cleanup, { once: true });
-      window.addEventListener("blur", cleanup);
+      window.addEventListener("pointerup", commit, { once: true });
+      window.addEventListener("blur", discard);
     },
     [controller],
   );
@@ -316,32 +387,46 @@ export function TerminalCapability({
 
       event.preventDefault();
       event.stopPropagation();
+      setIsResizing(true);
       const startY = Number.isFinite(event.clientY) ? event.clientY : 0;
       const startHeight = controller.dockHeight;
+      let latestHeight = startHeight;
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
         const clientY = Number.isFinite(moveEvent.clientY)
           ? moveEvent.clientY
           : startY;
         const deltaY = clientY - startY;
-        controller.updateDockHeight(
+        latestHeight = resolveTerminalDockHeight(
           edge === "bottom" ? startHeight + deltaY : startHeight - deltaY,
         );
+        // Drive the drag from local state only; persist on release.
+        setLiveDockHeight(latestHeight);
       };
 
-      const cleanup = () => {
+      // `commit` persists the dragged height on a deliberate pointer release.
+      // `discard` drops the live override without persisting so an interrupted
+      // drag (e.g. window blur) snaps back to the pre-drag height.
+      const teardown = () => {
         window.removeEventListener("pointermove", handlePointerMove);
-        window.removeEventListener("pointerup", cleanup);
-        window.removeEventListener("blur", cleanup);
+        window.removeEventListener("pointerup", commit);
+        window.removeEventListener("blur", discard);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        setLiveDockHeight(null);
+        setIsResizing(false);
       };
+      const commit = () => {
+        controller.updateDockHeight(latestHeight);
+        teardown();
+      };
+      const discard = () => teardown();
 
       document.body.style.cursor = "row-resize";
       document.body.style.userSelect = "none";
       window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", cleanup, { once: true });
-      window.addEventListener("blur", cleanup);
+      window.addEventListener("pointerup", commit, { once: true });
+      window.addEventListener("blur", discard);
     },
     [controller],
   );
@@ -349,8 +434,9 @@ export function TerminalCapability({
   const panel = (
     <TerminalPanelShell
       controller={controller}
-      dockHeight={controller.dockHeight}
+      dockHeight={liveDockHeight ?? controller.dockHeight}
       floating={controller.placement.kind === "floating"}
+      resizing={isResizing}
       onDockResizeStart={startDockedResize}
       onHeaderPointerDown={startHeaderDrag}
       onTabKeyDown={handleTerminalTabKeyDown}
@@ -360,12 +446,12 @@ export function TerminalCapability({
   );
 
   if (controller.placement.kind === "floating") {
-    return (
+    const floatingPanel = (
       <div
         ref={floatingPanelRef}
-        className="fixed z-50 min-h-11 min-w-[320px] overflow-hidden rounded-md bg-card shadow-[var(--shadow-modal)] ring-1 ring-border/80"
+        className="terminal-floating-shadow fixed z-50 min-h-11 overflow-hidden rounded-md border border-border/80 bg-card"
         style={floatingRectStyle(
-          controller.placement.rect,
+          liveFloatingRect ?? controller.placement.rect,
           controller.expanded,
         )}
       >
@@ -375,6 +461,10 @@ export function TerminalCapability({
         ) : null}
       </div>
     );
+
+    return typeof document === "undefined"
+      ? floatingPanel
+      : createPortal(floatingPanel, document.body);
   }
 
   return panel;
@@ -388,6 +478,7 @@ function floatingRectStyle(
     left: rect.x,
     top: rect.y,
     width: rect.width,
+    minWidth: TERMINAL_FLOATING_MIN_WIDTH_PX,
     height: expanded ? rect.height : TERMINAL_FLOATING_COLLAPSED_HEIGHT_PX,
   };
 }
@@ -461,6 +552,7 @@ function TerminalPanelShell({
   controller,
   dockHeight,
   floating,
+  resizing,
   onDockResizeStart,
   onHeaderPointerDown,
   onTabKeyDown,
@@ -470,6 +562,7 @@ function TerminalPanelShell({
   controller: TerminalController;
   dockHeight: number;
   floating: boolean;
+  resizing: boolean;
   onDockResizeStart: (
     edge: "top" | "bottom",
     event: ReactPointerEvent<HTMLElement>,
@@ -482,11 +575,14 @@ function TerminalPanelShell({
   sessionId: string;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
-  const dockResizeEdge =
-    controller.dockedPlacement.region === "rightRail" ? "bottom" : "top";
+  const dockResizeEdges: Array<"top" | "bottom"> =
+    controller.dockedPlacement.region === "rightRail"
+      ? ["top", "bottom"]
+      : ["top"];
 
   return (
     <div
+      data-terminal-shell
       ref={
         controller.expanded ? controller.setTerminalRegionElement : undefined
       }
@@ -508,7 +604,10 @@ function TerminalPanelShell({
         );
       }}
       className={cn(
-        "relative flex flex-col overflow-hidden rounded-md bg-card text-foreground transition-[height] duration-200 ease-out will-change-[height] motion-reduce:transition-none",
+        "relative flex flex-col overflow-hidden rounded-md bg-card text-foreground will-change-[height]",
+        resizing
+          ? "transition-none"
+          : "transition-[height] duration-200 ease-out motion-reduce:transition-none",
         floating ? "h-full shrink-0" : "min-h-11 shrink",
         !floating && !controller.expanded && "h-11",
       )}
@@ -518,22 +617,25 @@ function TerminalPanelShell({
           : undefined
       }
     >
-      {!floating && controller.expanded ? (
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={t("terminal.resize")}
-          data-terminal-resize-edge={dockResizeEdge}
-          title={t("terminal.resize")}
-          onPointerDown={(event) => onDockResizeStart(dockResizeEdge, event)}
-          className={cn(
-            "absolute right-3 left-3 z-30 h-3 cursor-ns-resize bg-transparent outline-none",
-            dockResizeEdge === "bottom"
-              ? "bottom-0 translate-y-1/2"
-              : "top-0 -translate-y-1/2",
-          )}
-        />
-      ) : null}
+      {!floating && controller.expanded
+        ? dockResizeEdges.map((edge) => (
+            <button
+              key={edge}
+              type="button"
+              tabIndex={-1}
+              aria-label={t("terminal.resize")}
+              data-terminal-resize-edge={edge}
+              title={t("terminal.resize")}
+              onPointerDown={(event) => onDockResizeStart(edge, event)}
+              className={cn(
+                "absolute right-3 left-3 z-30 h-3 cursor-ns-resize bg-transparent outline-none",
+                edge === "bottom"
+                  ? "bottom-0 translate-y-1/2"
+                  : "top-0 -translate-y-1/2",
+              )}
+            />
+          ))
+        : null}
       <div
         role="toolbar"
         aria-label={t("terminal.title")}

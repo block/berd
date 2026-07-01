@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -278,43 +279,32 @@ export function TerminalPanel({
     collapsedRef.current = collapsed;
   }, [collapsed]);
 
-  useEffect(() => {
-    let nextSession: TerminalSession | null = null;
-    let detach: (() => void) | undefined;
-    let didCancel = false;
-    const shortKey = shortTerminalSessionKey(sessionKey);
-    const cancelAttach = scheduleAfterNextPaint(() => {
-      if (didCancel) {
-        return;
-      }
-
-      nextSession = getOrCreateTerminalSession({
-        key: sessionKey,
-        cwd,
-        labels,
-        theme: resolveTerminalTheme(resolvedTheme),
-        fontFamily: terminalFontFamily(),
-      });
-      nextSession.updateLabels(labels);
-      sessionRef.current = nextSession;
-      if (collapsedRef.current) {
-        nextSession.deferResize();
-      }
-
-      const container = containerRef.current;
-      const start = performance.now();
-      perfLog(`[perf:terminal] ${shortKey} attach deferred`);
-      detach = container ? nextSession.attach(container) : undefined;
-      perfLog(
-        `[perf:terminal] ${shortKey} attach complete ${(performance.now() - start).toFixed(1)}ms status=${nextSession.status} hasContainer=${Boolean(container)}`,
-      );
+  useLayoutEffect(() => {
+    const nextSession = getOrCreateTerminalSession({
+      key: sessionKey,
+      cwd,
+      labels,
+      theme: resolveTerminalTheme(resolvedTheme),
+      fontFamily: terminalFontFamily(),
     });
+    nextSession.updateLabels(labels);
+    sessionRef.current = nextSession;
+    if (collapsedRef.current) {
+      nextSession.deferResize();
+    }
+
+    const container = containerRef.current;
+    const shortKey = shortTerminalSessionKey(sessionKey);
+    const start = performance.now();
+    perfLog(`[perf:terminal] ${shortKey} attach immediate`);
+    const detach = container ? nextSession.attach(container) : undefined;
+    perfLog(
+      `[perf:terminal] ${shortKey} attach complete ${(performance.now() - start).toFixed(1)}ms status=${nextSession.status} hasContainer=${Boolean(container)}`,
+    );
 
     return () => {
-      didCancel = true;
-      cancelAttach();
       detach?.();
-      if (nextSession && sessionRef.current === nextSession) {
+      if (sessionRef.current === nextSession) {
         sessionRef.current = null;
       }
     };
@@ -352,7 +342,9 @@ export function TerminalPanel({
     previousCollapsedRef.current = collapsed;
 
     if (collapsed) {
-      nextSession.deferResize();
+      if (!wasCollapsed) {
+        nextSession.deferResize();
+      }
       return;
     }
 

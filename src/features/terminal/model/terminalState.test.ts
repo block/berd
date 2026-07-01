@@ -18,10 +18,31 @@ describe("terminal state", () => {
 
     expect(rect.x).toBeGreaterThanOrEqual(16);
     expect(rect.y).toBeGreaterThanOrEqual(16);
-    expect(rect.width).toBeGreaterThanOrEqual(360);
+    expect(rect.width).toBeGreaterThanOrEqual(280);
     expect(rect.height).toBeGreaterThanOrEqual(220);
     expect(rect.x + rect.width).toBeLessThanOrEqual(window.innerWidth - 16);
     expect(rect.y + rect.height).toBeLessThanOrEqual(window.innerHeight - 16);
+  });
+
+  it("lets a dragging rect overhang the viewport while keeping a grabbable strip", () => {
+    const dragged = resolveFloatingTerminalRect(
+      { x: -200, y: 50, width: 500, height: 300 },
+      "drag",
+    );
+
+    // It may overhang the left edge (its left can be negative)...
+    expect(dragged.x).toBeLessThan(16);
+    // ...but a grabbable strip must remain reachable on the right side.
+    expect(dragged.x + dragged.width).toBeGreaterThan(16);
+
+    // Settle mode (the default) pins the same rect fully inside the margin box.
+    const settled = resolveFloatingTerminalRect({
+      x: -200,
+      y: 50,
+      width: 500,
+      height: 300,
+    });
+    expect(settled.x).toBeGreaterThanOrEqual(16);
   });
 
   it("resizes floating rects from an edge while preserving min size", () => {
@@ -41,7 +62,7 @@ describe("terminal state", () => {
       1_000,
     );
 
-    expect(clamped.width).toBe(360);
+    expect(clamped.width).toBe(280);
     expect(clamped.height).toBe(220);
   });
 
@@ -84,7 +105,7 @@ describe("terminal state", () => {
       placement: {
         kind: "floating",
         rect: {
-          width: 360,
+          width: 280,
           height: 220,
         },
       },

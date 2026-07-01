@@ -406,7 +406,7 @@ describe("TerminalPanel", () => {
         />,
       );
 
-      expect(mocks.deferResize).not.toHaveBeenCalled();
+      expect(mocks.deferResize).toHaveBeenCalledTimes(1);
       expect(mocks.resumeResize).not.toHaveBeenCalled();
 
       act(() => {
@@ -456,8 +456,8 @@ describe("TerminalPanel", () => {
     expect(
       screen.queryByRole("button", { name: "terminal.collapse" }),
     ).toBeNull();
-    expect(getOrCreateTerminalSessionMock).not.toHaveBeenCalled();
-    expect(mocks.attach).not.toHaveBeenCalled();
+    expect(getOrCreateTerminalSessionMock).toHaveBeenCalledTimes(1);
+    expect(mocks.attach).toHaveBeenCalledTimes(1);
 
     act(() => {
       frames.runAll();

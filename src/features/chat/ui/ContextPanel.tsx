@@ -327,7 +327,7 @@ export function ContextPanel({
 
       <TabsContent
         value="details"
-        className="w-full min-h-0 flex-1 overflow-y-auto"
+        className="scrollbar-none w-full min-h-0 flex-1 overflow-y-auto"
       >
         <div className="w-full pb-4">
           <WorkspaceWidget
@@ -381,7 +381,10 @@ export function ContextPanel({
         </div>
       </TabsContent>
 
-      <TabsContent value="files" className="w-full overflow-y-auto">
+      <TabsContent
+        value="files"
+        className="scrollbar-none w-full overflow-y-auto"
+      >
         <FilesList projectWorkingDirs={fileBrowserRoots} />
       </TabsContent>
     </Tabs>

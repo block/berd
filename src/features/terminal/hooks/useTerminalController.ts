@@ -16,7 +16,6 @@ import {
   findDefaultTerminalTab,
   getDefaultFloatingTerminalRect,
   getDefaultTerminalDockedPlacement,
-  getFloatingTerminalRectFromSource,
   removeTerminalTab,
   resolveFloatingTerminalRect,
   resolveTerminalDockedPlacement,
@@ -25,6 +24,8 @@ import {
   terminalTabLabel,
   validateTerminalState,
   type TerminalDockRegion,
+  type TerminalFloatingBoundsMode,
+  type TerminalFloatingRect,
   type TerminalPlacement,
   type TerminalState,
   type TerminalTab,
@@ -265,8 +266,11 @@ export function useTerminalController({
     requestFocus();
   }, [commitState, requestFocus]);
 
-  const popOutFromRect = useCallback(
-    (sourceRect: Pick<DOMRect, "left" | "top" | "width" | "height">) => {
+  const popOutToRect = useCallback(
+    (
+      rect: TerminalFloatingRect,
+      mode: TerminalFloatingBoundsMode = "settle",
+    ) => {
       commitState((current) => {
         const lastDockedPlacement =
           current.placement.kind === "docked"
@@ -277,7 +281,7 @@ export function useTerminalController({
           expanded: current.tabs.length > 0 ? true : current.expanded,
           placement: {
             kind: "floating",
-            rect: getFloatingTerminalRectFromSource(sourceRect),
+            rect: resolveFloatingTerminalRect(rect, mode),
             lastDockedPlacement,
           },
         };
@@ -314,7 +318,10 @@ export function useTerminalController({
   }, [dockToRegion]);
 
   const updateFloatingRect = useCallback(
-    (rect: { x: number; y: number; width: number; height: number }) => {
+    (
+      rect: { x: number; y: number; width: number; height: number },
+      mode: TerminalFloatingBoundsMode = "settle",
+    ) => {
       commitState((current) =>
         current.placement.kind === "floating"
           ? {
@@ -322,7 +329,7 @@ export function useTerminalController({
               placement: {
                 ...current.placement,
                 kind: "floating",
-                rect: resolveFloatingTerminalRect(rect),
+                rect: resolveFloatingTerminalRect(rect, mode),
               },
             }
           : current,
@@ -425,7 +432,7 @@ export function useTerminalController({
     isFloating,
     placement,
     popOut,
-    popOutFromRect,
+    popOutToRect,
     removeTab,
     restart,
     runCommand,

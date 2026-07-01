@@ -1989,6 +1989,20 @@ code[data-streamdown="inline-code"],
   vertical-align: baseline;
 }
 
+@keyframes terminal-floating-shadow-in {
+  from {
+    box-shadow: var(--shadow-mini);
+  }
+  to {
+    box-shadow: var(--shadow-modal);
+  }
+}
+
+.terminal-floating-shadow {
+  animation: terminal-floating-shadow-in 0.14s ease-out both;
+  box-shadow: var(--shadow-modal);
+}
+
 /* Page transition */
 @keyframes page-enter {
   from {
