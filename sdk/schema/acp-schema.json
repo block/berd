@@ -77,6 +77,75 @@
       },
       "type": "object"
     },
+    "AppsExportRequest_unstable": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name"],
+      "type": "object",
+      "x-method": "_goose/unstable/apps/export",
+      "x-side": "agent"
+    },
+    "AppsExportResponse_unstable": {
+      "properties": {
+        "html": {
+          "type": "string"
+        }
+      },
+      "required": ["html"],
+      "type": "object",
+      "x-method": "_goose/unstable/apps/export",
+      "x-side": "agent"
+    },
+    "AppsImportRequest_unstable": {
+      "properties": {
+        "html": {
+          "type": "string"
+        }
+      },
+      "required": ["html"],
+      "type": "object",
+      "x-method": "_goose/unstable/apps/import",
+      "x-side": "agent"
+    },
+    "AppsImportResponse_unstable": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "message"],
+      "type": "object",
+      "x-method": "_goose/unstable/apps/import",
+      "x-side": "agent"
+    },
+    "AppsListRequest_unstable": {
+      "properties": {
+        "sessionId": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object",
+      "x-method": "_goose/unstable/apps/list",
+      "x-side": "agent"
+    },
+    "AppsListResponse_unstable": {
+      "properties": {
+        "apps": {
+          "default": [],
+          "items": {},
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-method": "_goose/unstable/apps/list",
+      "x-side": "agent"
+    },
     "ArchiveSessionRequest_unstable": {
       "description": "Archive a session (soft delete).",
       "properties": {
@@ -245,6 +314,34 @@
           "type": "object"
         }
       ]
+    },
+    "CreateScheduleRequest_unstable": {
+      "properties": {
+        "cron": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["id", "recipe", "cron"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/create",
+      "x-side": "agent"
+    },
+    "CreateScheduleResponse_unstable": {
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/ScheduledJobDto"
+        }
+      },
+      "required": ["job"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/create",
+      "x-side": "agent"
     },
     "CreateSourceRequest_unstable": {
       "description": "Create a new source in an explicit target scope (global or project-scoped).",
@@ -609,6 +706,17 @@
       "required": ["id"],
       "type": "object",
       "x-method": "_goose/unstable/recipes/delete",
+      "x-side": "agent"
+    },
+    "DeleteScheduleRequest_unstable": {
+      "properties": {
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": ["scheduleId"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/delete",
       "x-side": "agent"
     },
     "DeleteSessionRequest": {
@@ -1266,6 +1374,15 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/SetToolPermissionsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/tools/permissions/set",
+                  "title": "SetToolPermissionsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/GooseToolCallRequest_unstable"
                     }
                   ],
@@ -1280,6 +1397,33 @@
                   ],
                   "description": "Params for _goose/unstable/resources/read",
                   "title": "ReadResourceRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/AppsListRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/apps/list",
+                  "title": "AppsListRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/AppsExportRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/apps/export",
+                  "title": "AppsExportRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/AppsImportRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/apps/import",
+                  "title": "AppsImportRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1316,6 +1460,42 @@
                   ],
                   "description": "Params for _goose/unstable/diagnostics/get",
                   "title": "DiagnosticsGetRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListPromptsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/config/prompts/list",
+                  "title": "ListPromptsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/GetPromptRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/config/prompts/get",
+                  "title": "GetPromptRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/SavePromptRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/config/prompts/save",
+                  "title": "SavePromptRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ResetPromptRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/config/prompts/reset",
+                  "title": "ResetPromptRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1599,6 +1779,15 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/ShareSessionNostrRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/session/share/nostr",
+                  "title": "ShareSessionNostrRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/EncodeRecipeRequest_unstable"
                     }
                   ],
@@ -1685,6 +1874,96 @@
                   ],
                   "description": "Params for _goose/unstable/recipes/to-yaml",
                   "title": "RecipeToYamlRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListSchedulesRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/list",
+                  "title": "ListSchedulesRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListScheduleSessionsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/sessions/list",
+                  "title": "ListScheduleSessionsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/CreateScheduleRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/create",
+                  "title": "CreateScheduleRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/DeleteScheduleRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/delete",
+                  "title": "DeleteScheduleRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/PauseScheduleRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/pause",
+                  "title": "PauseScheduleRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/UnpauseScheduleRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/unpause",
+                  "title": "UnpauseScheduleRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/UpdateScheduleRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/update",
+                  "title": "UpdateScheduleRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/RunScheduleNowRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/run-now",
+                  "title": "RunScheduleNowRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/KillRunningJobRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/running-job/kill",
+                  "title": "KillRunningJobRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/InspectRunningJobRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/schedules/running-job/inspect",
+                  "title": "InspectRunningJobRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1945,6 +2224,14 @@
                     {
                       "allOf": [
                         {
+                          "$ref": "#/$defs/SetToolPermissionsResponse_unstable"
+                        }
+                      ],
+                      "title": "SetToolPermissionsResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
                           "$ref": "#/$defs/GooseToolCallResponse_unstable"
                         }
                       ],
@@ -1961,6 +2248,30 @@
                     {
                       "allOf": [
                         {
+                          "$ref": "#/$defs/AppsListResponse_unstable"
+                        }
+                      ],
+                      "title": "AppsListResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/AppsExportResponse_unstable"
+                        }
+                      ],
+                      "title": "AppsExportResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/AppsImportResponse_unstable"
+                        }
+                      ],
+                      "title": "AppsImportResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
                           "$ref": "#/$defs/SteerSessionResponse_unstable"
                         }
                       ],
@@ -1973,6 +2284,30 @@
                         }
                       ],
                       "title": "DiagnosticsGetResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListPromptsResponse_unstable"
+                        }
+                      ],
+                      "title": "ListPromptsResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/GetPromptResponse_unstable"
+                        }
+                      ],
+                      "title": "GetPromptResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/PromptOperationResponse_unstable"
+                        }
+                      ],
+                      "title": "PromptOperationResponse_unstable"
                     },
                     {
                       "allOf": [
@@ -2153,6 +2488,14 @@
                     {
                       "allOf": [
                         {
+                          "$ref": "#/$defs/ShareSessionNostrResponse_unstable"
+                        }
+                      ],
+                      "title": "ShareSessionNostrResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
                           "$ref": "#/$defs/EncodeRecipeResponse_unstable"
                         }
                       ],
@@ -2205,6 +2548,62 @@
                         }
                       ],
                       "title": "RecipeToYamlResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListSchedulesResponse_unstable"
+                        }
+                      ],
+                      "title": "ListSchedulesResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListScheduleSessionsResponse_unstable"
+                        }
+                      ],
+                      "title": "ListScheduleSessionsResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/CreateScheduleResponse_unstable"
+                        }
+                      ],
+                      "title": "CreateScheduleResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/UpdateScheduleResponse_unstable"
+                        }
+                      ],
+                      "title": "UpdateScheduleResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/RunScheduleNowResponse_unstable"
+                        }
+                      ],
+                      "title": "RunScheduleNowResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/KillRunningJobResponse_unstable"
+                        }
+                      ],
+                      "title": "KillRunningJobResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/InspectRunningJobResponse_unstable"
+                        }
+                      ],
+                      "title": "InspectRunningJobResponse_unstable"
                     },
                     {
                       "allOf": [
@@ -2388,6 +2787,38 @@
       "x-method": "_goose/unstable/config/extensions/list",
       "x-side": "agent"
     },
+    "GetPromptRequest_unstable": {
+      "description": "Read a Goose prompt template.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name"],
+      "type": "object",
+      "x-method": "_goose/unstable/config/prompts/get",
+      "x-side": "agent"
+    },
+    "GetPromptResponse_unstable": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "defaultContent": {
+          "type": "string"
+        },
+        "isCustomized": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "content", "defaultContent", "isCustomized"],
+      "type": "object",
+      "x-method": "_goose/unstable/config/prompts/get",
+      "x-side": "agent"
+    },
     "GetSessionExtensionsRequest_unstable": {
       "properties": {
         "sessionId": {
@@ -2439,6 +2870,10 @@
     "GetToolsRequest_unstable": {
       "description": "List all tools available in a session.",
       "properties": {
+        "extensionName": {
+          "description": "Filter tools to those belonging to this extension.",
+          "type": ["string", "null"]
+        },
         "sessionId": {
           "type": "string"
         }
@@ -2452,8 +2887,9 @@
       "description": "Tools response.",
       "properties": {
         "tools": {
-          "description": "Array of tool info objects with `name`, `description`, `parameters`, and optional `permission`.",
-          "items": {},
+          "items": {
+            "$ref": "#/$defs/ToolListItem"
+          },
           "type": "array"
         }
       },
@@ -2699,13 +3135,16 @@
       "type": "object"
     },
     "ImportSessionRequest_unstable": {
-      "description": "Import a session from a JSON string.",
+      "description": "Import a session from a JSON string or share link.",
       "properties": {
-        "data": {
+        "input": {
           "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SessionImportSource"
         }
       },
-      "required": ["data"],
+      "required": ["input", "source"],
       "type": "object",
       "x-method": "_goose/unstable/session/import",
       "x-side": "agent"
@@ -2761,6 +3200,59 @@
       "x-method": "_goose/unstable/sources/import",
       "x-side": "agent"
     },
+    "InspectRunningJobRequest_unstable": {
+      "properties": {
+        "jobId": {
+          "type": "string"
+        }
+      },
+      "required": ["jobId"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/running-job/inspect",
+      "x-side": "agent"
+    },
+    "InspectRunningJobResponse_unstable": {
+      "properties": {
+        "jobStartTime": {
+          "type": ["string", "null"]
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "runningDurationSeconds": {
+          "type": ["integer", "null"]
+        },
+        "sessionId": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["running"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/running-job/inspect",
+      "x-side": "agent"
+    },
+    "KillRunningJobRequest_unstable": {
+      "properties": {
+        "jobId": {
+          "type": "string"
+        }
+      },
+      "required": ["jobId"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/running-job/kill",
+      "x-side": "agent"
+    },
+    "KillRunningJobResponse_unstable": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["message"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/running-job/kill",
+      "x-side": "agent"
+    },
     "ListAgentMentionsRequest_unstable": {
       "description": "List user-facing agent mention targets for `@` autocomplete.",
       "properties": {
@@ -2787,6 +3279,26 @@
       "required": ["agents"],
       "type": "object",
       "x-method": "_goose/unstable/agent-mentions/list",
+      "x-side": "agent"
+    },
+    "ListPromptsRequest_unstable": {
+      "description": "List all available Goose prompt templates.",
+      "type": "object",
+      "x-method": "_goose/unstable/config/prompts/list",
+      "x-side": "agent"
+    },
+    "ListPromptsResponse_unstable": {
+      "properties": {
+        "prompts": {
+          "items": {
+            "$ref": "#/$defs/PromptTemplateEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["prompts"],
+      "type": "object",
+      "x-method": "_goose/unstable/config/prompts/list",
       "x-side": "agent"
     },
     "ListProvidersRequest_unstable": {
@@ -2837,6 +3349,54 @@
       "required": ["recipes"],
       "type": "object",
       "x-method": "_goose/unstable/recipes/list",
+      "x-side": "agent"
+    },
+    "ListScheduleSessionsRequest_unstable": {
+      "properties": {
+        "limit": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": ["scheduleId", "limit"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/sessions/list",
+      "x-side": "agent"
+    },
+    "ListScheduleSessionsResponse_unstable": {
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["sessions"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/sessions/list",
+      "x-side": "agent"
+    },
+    "ListSchedulesRequest_unstable": {
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/list",
+      "x-side": "agent"
+    },
+    "ListSchedulesResponse_unstable": {
+      "properties": {
+        "jobs": {
+          "items": {
+            "$ref": "#/$defs/ScheduledJobDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["jobs"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/list",
       "x-side": "agent"
     },
     "ListSlashCommandsRequest_unstable": {
@@ -3208,6 +3768,17 @@
       "x-method": "_goose/unstable/recipes/parse",
       "x-side": "agent"
     },
+    "PauseScheduleRequest_unstable": {
+      "properties": {
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": ["scheduleId"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/pause",
+      "x-side": "agent"
+    },
     "PreferenceKey": {
       "enum": [
         "autoCompactThreshold",
@@ -3288,6 +3859,38 @@
       "type": "object",
       "x-method": "_goose/unstable/preferences/save",
       "x-side": "agent"
+    },
+    "PromptOperationResponse_unstable": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["message"],
+      "type": "object",
+      "x-side": "agent"
+    },
+    "PromptTemplateEntry": {
+      "description": "Information about a prompt template, including its default content and customization status.",
+      "properties": {
+        "defaultContent": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "isCustomized": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "userContent": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["name", "description", "defaultContent", "isCustomized"],
+      "type": "object"
     },
     "ProviderCatalogListRequest_unstable": {
       "description": "List custom-provider catalog entries. Omit `format` to list all formats.",
@@ -4504,6 +5107,18 @@
       "x-method": "_goose/unstable/session/recipe/request-params",
       "x-side": "client"
     },
+    "ResetPromptRequest_unstable": {
+      "description": "Reset a Goose prompt template to its default content.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name"],
+      "type": "object",
+      "x-method": "_goose/unstable/config/prompts/reset",
+      "x-side": "agent"
+    },
     "ResourceLink": {
       "description": "A resource that the server is capable of reading, included in a prompt or tool call result.",
       "properties": {
@@ -4548,6 +5163,50 @@
       "description": "The sender or recipient of messages and data in a conversation.",
       "enum": ["assistant", "user"],
       "type": "string"
+    },
+    "RunScheduleNowRequest_unstable": {
+      "properties": {
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": ["scheduleId"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/run-now",
+      "x-side": "agent"
+    },
+    "RunScheduleNowResponse_unstable": {
+      "properties": {
+        "sessionId": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "$ref": "#/$defs/RunScheduleNowStatus"
+        }
+      },
+      "required": ["status"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/run-now",
+      "x-side": "agent"
+    },
+    "RunScheduleNowStatus": {
+      "enum": ["completed", "cancelled"],
+      "type": "string"
+    },
+    "SavePromptRequest_unstable": {
+      "description": "Save a custom Goose prompt template.",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "content"],
+      "type": "object",
+      "x-method": "_goose/unstable/config/prompts/save",
+      "x-side": "agent"
     },
     "SaveRecipeRequest_unstable": {
       "properties": {
@@ -4616,8 +5275,42 @@
       "x-method": "_goose/unstable/recipes/schedule",
       "x-side": "agent"
     },
+    "ScheduledJobDto": {
+      "properties": {
+        "cron": {
+          "type": "string"
+        },
+        "currentSessionId": {
+          "type": ["string", "null"]
+        },
+        "currentlyRunning": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "jobStartTime": {
+          "type": ["string", "null"]
+        },
+        "lastRun": {
+          "type": ["string", "null"]
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "source", "cron", "currentlyRunning", "paused"],
+      "type": "object"
+    },
     "SessionId": {
       "description": "A unique identifier for a conversation session between a client and agent.\n\nSessions maintain their own context, conversation history, and state,\nallowing multiple independent interactions with the same agent.\n\nSee protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)",
+      "type": "string"
+    },
+    "SessionImportSource": {
+      "enum": ["auto", "json", "nostr"],
       "type": "string"
     },
     "SessionInfo": {
@@ -4751,6 +5444,66 @@
       "required": ["sessionId", "text"],
       "type": "object",
       "x-method": "_goose/unstable/session/system-prompt/set",
+      "x-side": "agent"
+    },
+    "SetToolPermissionsRequest_unstable": {
+      "description": "Set permission levels for one or more tools.",
+      "properties": {
+        "toolPermissions": {
+          "items": {
+            "$ref": "#/$defs/ToolPermissionEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["toolPermissions"],
+      "type": "object",
+      "x-method": "_goose/unstable/tools/permissions/set",
+      "x-side": "agent"
+    },
+    "SetToolPermissionsResponse_unstable": {
+      "type": "object",
+      "x-method": "_goose/unstable/tools/permissions/set",
+      "x-side": "agent"
+    },
+    "ShareSessionNostrRequest_unstable": {
+      "properties": {
+        "relays": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": ["sessionId", "relays"],
+      "type": "object",
+      "x-method": "_goose/unstable/session/share/nostr",
+      "x-side": "agent"
+    },
+    "ShareSessionNostrResponse_unstable": {
+      "properties": {
+        "deeplink": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "nevent": {
+          "type": "string"
+        },
+        "relays": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["deeplink", "nevent", "eventId", "relays"],
+      "type": "object",
+      "x-method": "_goose/unstable/session/share/nostr",
       "x-side": "agent"
     },
     "SourceEntry": {
@@ -4998,6 +5751,55 @@
       "required": ["text", "uri"],
       "type": "object"
     },
+    "ToolListItem": {
+      "description": "A single tool item returned by the tools list endpoint.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "inputSchema": {},
+        "name": {
+          "type": "string"
+        },
+        "outputSchema": {},
+        "parameters": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permission": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolPermissionLevel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["name", "description", "parameters", "inputSchema"],
+      "type": "object"
+    },
+    "ToolPermissionEntry": {
+      "description": "A single tool permission entry.",
+      "properties": {
+        "permission": {
+          "$ref": "#/$defs/ToolPermissionLevel"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": ["toolName", "permission"],
+      "type": "object"
+    },
+    "ToolPermissionLevel": {
+      "description": "Permission level for a tool.",
+      "enum": ["always_allow", "ask_before", "never_allow"],
+      "type": "string"
+    },
     "TruncateSessionConversationRequest_unstable": {
       "description": "Truncate a session conversation from the given message timestamp onward.",
       "properties": {
@@ -5025,6 +5827,17 @@
       "x-method": "_goose/unstable/session/unarchive",
       "x-side": "agent"
     },
+    "UnpauseScheduleRequest_unstable": {
+      "properties": {
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": ["scheduleId"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/unpause",
+      "x-side": "agent"
+    },
     "UnstructuredCommandInput": {
       "description": "All text that was typed after the command name is provided as input.",
       "properties": {
@@ -5040,6 +5853,31 @@
       },
       "required": ["hint"],
       "type": "object"
+    },
+    "UpdateScheduleRequest_unstable": {
+      "properties": {
+        "cron": {
+          "type": "string"
+        },
+        "scheduleId": {
+          "type": "string"
+        }
+      },
+      "required": ["scheduleId", "cron"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/update",
+      "x-side": "agent"
+    },
+    "UpdateScheduleResponse_unstable": {
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/ScheduledJobDto"
+        }
+      },
+      "required": ["job"],
+      "type": "object",
+      "x-method": "_goose/unstable/schedules/update",
+      "x-side": "agent"
     },
     "UpdateSessionProjectRequest_unstable": {
       "description": "Update the project association for a session.",

@@ -2,6 +2,34 @@
 
 import { z } from 'zod';
 
+export const zAppsExportRequestUnstable = z.object({
+    name: z.string()
+});
+
+export const zAppsExportResponseUnstable = z.object({
+    html: z.string()
+});
+
+export const zAppsImportRequestUnstable = z.object({
+    html: z.string()
+});
+
+export const zAppsImportResponseUnstable = z.object({
+    message: z.string(),
+    name: z.string()
+});
+
+export const zAppsListRequestUnstable = z.object({
+    sessionId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zAppsListResponseUnstable = z.object({
+    apps: z.array(z.unknown()).optional().default([])
+});
+
 /**
  * Archive a session (soft delete).
  */
@@ -165,6 +193,10 @@ export const zDefaultsSaveRequestUnstable = z.object({
 
 export const zDeleteRecipeRequestUnstable = z.object({
     id: z.string()
+});
+
+export const zDeleteScheduleRequestUnstable = z.object({
+    scheduleId: z.string()
 });
 
 /**
@@ -390,6 +422,20 @@ export const zGetAvailableExtensionsRequestUnstable = z.record(z.unknown());
  */
 export const zGetConfigExtensionsRequestUnstable = z.record(z.unknown());
 
+/**
+ * Read a Goose prompt template.
+ */
+export const zGetPromptRequestUnstable = z.object({
+    name: z.string()
+});
+
+export const zGetPromptResponseUnstable = z.object({
+    content: z.string(),
+    defaultContent: z.string(),
+    isCustomized: z.boolean(),
+    name: z.string()
+});
+
 export const zGetSessionExtensionsRequestUnstable = z.object({
     sessionId: z.string()
 });
@@ -405,14 +451,11 @@ export const zGetSessionInfoRequestUnstable = z.object({
  * List all tools available in a session.
  */
 export const zGetToolsRequestUnstable = z.object({
+    extensionName: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
     sessionId: z.string()
-});
-
-/**
- * Tools response.
- */
-export const zGetToolsResponseUnstable = z.object({
-    tools: z.array(z.unknown())
 });
 
 /**
@@ -447,13 +490,6 @@ export const zHttpHeader = z.object({
 });
 
 /**
- * Import a session from a JSON string.
- */
-export const zImportSessionRequestUnstable = z.object({
-    data: z.string()
-});
-
-/**
  * Import session response — metadata about the newly created session.
  */
 export const zImportSessionResponseUnstable = z.object({
@@ -467,6 +503,34 @@ export const zImportSessionResponseUnstable = z.object({
         z.string(),
         z.null()
     ]).optional()
+});
+
+export const zInspectRunningJobRequestUnstable = z.object({
+    jobId: z.string()
+});
+
+export const zInspectRunningJobResponseUnstable = z.object({
+    jobStartTime: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    running: z.boolean(),
+    runningDurationSeconds: z.union([
+        z.number().int(),
+        z.null()
+    ]).optional(),
+    sessionId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zKillRunningJobRequestUnstable = z.object({
+    jobId: z.string()
+});
+
+export const zKillRunningJobResponseUnstable = z.object({
+    message: z.string()
 });
 
 /**
@@ -484,6 +548,11 @@ export const zListAgentMentionsRequestUnstable = z.object({
 });
 
 /**
+ * List all available Goose prompt templates.
+ */
+export const zListPromptsRequestUnstable = z.record(z.unknown());
+
+/**
  * List providers with setup metadata and the current model inventory snapshot.
  */
 export const zListProvidersRequestUnstable = z.object({
@@ -491,6 +560,13 @@ export const zListProvidersRequestUnstable = z.object({
 });
 
 export const zListRecipesRequestUnstable = z.record(z.unknown());
+
+export const zListScheduleSessionsRequestUnstable = z.object({
+    limit: z.number().int().gte(0),
+    scheduleId: z.string()
+});
+
+export const zListSchedulesRequestUnstable = z.record(z.unknown());
 
 /**
  * List slash commands available for `/` autocomplete.
@@ -719,6 +795,10 @@ export const zParseRecipeRequestUnstable = z.object({
     content: z.string()
 });
 
+export const zPauseScheduleRequestUnstable = z.object({
+    scheduleId: z.string()
+});
+
 export const zPreferenceKey = z.enum([
     'autoCompactThreshold',
     'gooseThinkingEffort',
@@ -755,6 +835,28 @@ export const zPreferencesRemoveRequestUnstable = z.object({
  */
 export const zPreferencesSaveRequestUnstable = z.object({
     values: z.array(zPreferenceValue).optional().default([])
+});
+
+export const zPromptOperationResponseUnstable = z.object({
+    message: z.string()
+});
+
+/**
+ * Information about a prompt template, including its default content and customization status.
+ */
+export const zPromptTemplateEntry = z.object({
+    defaultContent: z.string(),
+    description: z.string(),
+    isCustomized: z.boolean(),
+    name: z.string(),
+    userContent: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zListPromptsResponseUnstable = z.object({
+    prompts: z.array(zPromptTemplateEntry)
 });
 
 /**
@@ -1352,6 +1454,13 @@ export const zExtAgentRequest = z.object({
 });
 
 /**
+ * Reset a Goose prompt template to its default content.
+ */
+export const zResetPromptRequestUnstable = z.object({
+    name: z.string()
+});
+
+/**
  * The sender or recipient of messages and data in a conversation.
  */
 export const zRole = z.enum(['assistant', 'user']);
@@ -1446,6 +1555,28 @@ export const zResourceLink = z.object({
     uri: z.string()
 });
 
+export const zRunScheduleNowRequestUnstable = z.object({
+    scheduleId: z.string()
+});
+
+export const zRunScheduleNowStatus = z.enum(['completed', 'cancelled']);
+
+export const zRunScheduleNowResponseUnstable = z.object({
+    sessionId: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    status: zRunScheduleNowStatus
+});
+
+/**
+ * Save a custom Goose prompt template.
+ */
+export const zSavePromptRequestUnstable = z.object({
+    content: z.string(),
+    name: z.string()
+});
+
 export const zSaveRecipeResponseUnstable = z.object({
     file_name: z.string(),
     file_path: z.string(),
@@ -1464,6 +1595,34 @@ export const zScheduleRecipeRequestUnstable = z.object({
     id: z.string()
 });
 
+export const zScheduledJobDto = z.object({
+    cron: z.string(),
+    currentSessionId: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    currentlyRunning: z.boolean(),
+    id: z.string(),
+    jobStartTime: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    lastRun: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    paused: z.boolean(),
+    source: z.string()
+});
+
+export const zCreateScheduleResponseUnstable = z.object({
+    job: zScheduledJobDto
+});
+
+export const zListSchedulesResponseUnstable = z.object({
+    jobs: z.array(zScheduledJobDto)
+});
+
 /**
  * A unique identifier for a conversation session between a client and agent.
  *
@@ -1473,6 +1632,20 @@ export const zScheduleRecipeRequestUnstable = z.object({
  * See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)
  */
 export const zSessionId = z.string();
+
+export const zSessionImportSource = z.enum([
+    'auto',
+    'json',
+    'nostr'
+]);
+
+/**
+ * Import a session from a JSON string or share link.
+ */
+export const zImportSessionRequestUnstable = z.object({
+    input: z.string(),
+    source: zSessionImportSource
+});
 
 /**
  * Information about a session returned by session/list
@@ -1497,6 +1670,10 @@ export const zSessionInfo = z.object({
 
 export const zGetSessionInfoResponseUnstable = z.object({
     session: zSessionInfo
+});
+
+export const zListScheduleSessionsResponseUnstable = z.object({
+    sessions: z.array(zSessionInfo)
 });
 
 /**
@@ -1552,6 +1729,20 @@ export const zSetSessionSystemPromptRequestUnstable = z.object({
     mode: zSessionSystemPromptMode.optional().default('append'),
     sessionId: z.string(),
     text: z.string()
+});
+
+export const zSetToolPermissionsResponseUnstable = z.record(z.unknown());
+
+export const zShareSessionNostrRequestUnstable = z.object({
+    relays: z.array(z.string()),
+    sessionId: z.string()
+});
+
+export const zShareSessionNostrResponseUnstable = z.object({
+    deeplink: z.string(),
+    eventId: z.string(),
+    nevent: z.string(),
+    relays: z.array(z.string())
 });
 
 /**
@@ -1809,6 +2000,12 @@ export const zRecipeDto = z.object({
     version: z.string().optional().default('1.0.0')
 });
 
+export const zCreateScheduleRequestUnstable = z.object({
+    cron: z.string(),
+    id: z.string(),
+    recipe: zRecipeDto
+});
+
 export const zDecodeRecipeResponseUnstable = z.object({
     recipe: zRecipeDto
 });
@@ -1954,6 +2151,52 @@ export const zSteerSessionRequestUnstable = z.object({
 });
 
 /**
+ * Permission level for a tool.
+ */
+export const zToolPermissionLevel = z.enum([
+    'always_allow',
+    'ask_before',
+    'never_allow'
+]);
+
+/**
+ * A single tool item returned by the tools list endpoint.
+ */
+export const zToolListItem = z.object({
+    description: z.string(),
+    inputSchema: z.unknown(),
+    name: z.string(),
+    outputSchema: z.unknown().optional(),
+    parameters: z.array(z.string()),
+    permission: z.union([
+        zToolPermissionLevel,
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Tools response.
+ */
+export const zGetToolsResponseUnstable = z.object({
+    tools: z.array(zToolListItem)
+});
+
+/**
+ * A single tool permission entry.
+ */
+export const zToolPermissionEntry = z.object({
+    permission: zToolPermissionLevel,
+    toolName: z.string()
+});
+
+/**
+ * Set permission levels for one or more tools.
+ */
+export const zSetToolPermissionsRequestUnstable = z.object({
+    toolPermissions: z.array(zToolPermissionEntry)
+});
+
+/**
  * Truncate a session conversation from the given message timestamp onward.
  */
 export const zTruncateSessionConversationRequestUnstable = z.object({
@@ -1966,6 +2209,10 @@ export const zTruncateSessionConversationRequestUnstable = z.object({
  */
 export const zUnarchiveSessionRequestUnstable = z.object({
     sessionId: z.string()
+});
+
+export const zUnpauseScheduleRequestUnstable = z.object({
+    scheduleId: z.string()
 });
 
 /**
@@ -2002,6 +2249,15 @@ export const zAvailableCommand = z.object({
 
 export const zListSlashCommandsResponseUnstable = z.object({
     availableCommands: z.array(zAvailableCommand)
+});
+
+export const zUpdateScheduleRequestUnstable = z.object({
+    cron: z.string(),
+    scheduleId: z.string()
+});
+
+export const zUpdateScheduleResponseUnstable = z.object({
+    job: zScheduledJobDto
 });
 
 /**
@@ -2041,10 +2297,17 @@ export const zExtResponse = z.union([
             z.union([
                 zEmptyResponse,
                 zGetToolsResponseUnstable,
+                zSetToolPermissionsResponseUnstable,
                 zGooseToolCallResponseUnstable,
                 zReadResourceResponseUnstable,
+                zAppsListResponseUnstable,
+                zAppsExportResponseUnstable,
+                zAppsImportResponseUnstable,
                 zSteerSessionResponseUnstable,
                 zDiagnosticsGetResponseUnstable,
+                zListPromptsResponseUnstable,
+                zGetPromptResponseUnstable,
+                zPromptOperationResponseUnstable,
                 zGetConfigExtensionsResponseUnstable,
                 zGetAvailableExtensionsResponseUnstable,
                 zGetSessionExtensionsResponseUnstable,
@@ -2067,6 +2330,7 @@ export const zExtResponse = z.union([
                 zOnboardingImportApplyResponseUnstable,
                 zExportSessionResponseUnstable,
                 zImportSessionResponseUnstable,
+                zShareSessionNostrResponseUnstable,
                 zEncodeRecipeResponseUnstable,
                 zDecodeRecipeResponseUnstable,
                 zScanRecipeResponseUnstable,
@@ -2074,6 +2338,13 @@ export const zExtResponse = z.union([
                 zSaveRecipeResponseUnstable,
                 zParseRecipeResponseUnstable,
                 zRecipeToYamlResponseUnstable,
+                zListSchedulesResponseUnstable,
+                zListScheduleSessionsResponseUnstable,
+                zCreateScheduleResponseUnstable,
+                zUpdateScheduleResponseUnstable,
+                zRunScheduleNowResponseUnstable,
+                zKillRunningJobResponseUnstable,
+                zInspectRunningJobResponseUnstable,
                 zGetSessionInfoResponseUnstable,
                 zCreateSourceResponseUnstable,
                 zListSourcesResponseUnstable,
@@ -2116,12 +2387,20 @@ export const zExtRequest = z.object({
             zAddSessionExtensionRequestUnstable,
             zRemoveSessionExtensionRequestUnstable,
             zGetToolsRequestUnstable,
+            zSetToolPermissionsRequestUnstable,
             zGooseToolCallRequestUnstable,
             zReadResourceRequestUnstable,
+            zAppsListRequestUnstable,
+            zAppsExportRequestUnstable,
+            zAppsImportRequestUnstable,
             zUpdateWorkingDirRequestUnstable,
             zSetSessionSystemPromptRequestUnstable,
             zSteerSessionRequestUnstable,
             zDiagnosticsGetRequestUnstable,
+            zListPromptsRequestUnstable,
+            zGetPromptRequestUnstable,
+            zSavePromptRequestUnstable,
+            zResetPromptRequestUnstable,
             zDeleteSessionRequest,
             zGetConfigExtensionsRequestUnstable,
             zGetAvailableExtensionsRequestUnstable,
@@ -2153,6 +2432,7 @@ export const zExtRequest = z.object({
             zOnboardingImportApplyRequestUnstable,
             zExportSessionRequestUnstable,
             zImportSessionRequestUnstable,
+            zShareSessionNostrRequestUnstable,
             zEncodeRecipeRequestUnstable,
             zDecodeRecipeRequestUnstable,
             zScanRecipeRequestUnstable,
@@ -2163,6 +2443,16 @@ export const zExtRequest = z.object({
             zSaveRecipeRequestUnstable,
             zParseRecipeRequestUnstable,
             zRecipeToYamlRequestUnstable,
+            zListSchedulesRequestUnstable,
+            zListScheduleSessionsRequestUnstable,
+            zCreateScheduleRequestUnstable,
+            zDeleteScheduleRequestUnstable,
+            zPauseScheduleRequestUnstable,
+            zUnpauseScheduleRequestUnstable,
+            zUpdateScheduleRequestUnstable,
+            zRunScheduleNowRequestUnstable,
+            zKillRunningJobRequestUnstable,
+            zInspectRunningJobRequestUnstable,
             zGetSessionInfoRequestUnstable,
             zTruncateSessionConversationRequestUnstable,
             zUpdateSessionProjectRequestUnstable,

@@ -148,7 +148,10 @@ export async function exportSession(sessionId: string): Promise<string> {
 
 export async function importSession(json: string): Promise<AcpSessionInfo> {
   const client = await getClient();
-  const result = await client.goose.GooseUnstableSessionImport({ data: json });
+  const result = await client.goose.GooseUnstableSessionImport({
+    input: json,
+    source: "json",
+  });
   return result as unknown as AcpSessionInfo;
 }
 
