@@ -2,13 +2,14 @@
 name: create-pr
 description: >-
   Create a GitHub PR from the current branch: handle uncommitted changes, generate
-  a summary, and submit via gh CLI. Use when the user says "create PR", "open PR",
+  a summary, submit via gh CLI, then watch the PR to a ready state — fixing failing
+  checks and addressing review comments. Use when the user says "create PR", "open PR",
   "submit PR", "push PR", or wants to create a pull request.
 ---
 
 # Create PR
 
-Create a GitHub PR from the current branch: handle uncommitted changes, generate a summary, and submit.
+Create a GitHub PR from the current branch: handle uncommitted changes, generate a summary, submit, then watch the PR until it is in a ready state.
 
 ## Step 1: Resolve Base Branch
 
@@ -92,6 +93,76 @@ After the GitHub PR exists:
 1. Push the branch to remote if it hasn't been pushed yet: `git push -u origin HEAD`
 2. Create the PR using `gh pr create` with the generated title and body. Use a HEREDOC for the body to preserve formatting.
 3. Output the PR URL as a clickable hyperlink so the user can open it directly.
+
+## Step 7: Watch the PR to a Ready State
+
+Once the PR is created, do not stop. Own the loop from "PR is open" to "PR is in a ready state": watch GitHub, fix failing checks, and address review comments until checks pass and no actionable feedback remains. This step ends at a ready state — it does not merge the PR.
+
+Keep track of the latest head SHA. Any new push changes the CI/review baseline and restarts this loop.
+
+### Watch CI and review feedback together
+
+Poll GitHub until both CI and review state have settled. Use whatever is available, such as:
+
+- `gh pr view` for PR state, reviews, comments, and mergeability.
+- `gh pr checks --watch` or repeated `gh pr checks` for check status.
+- `gh run list`, `gh run view`, and `gh run rerun` for workflow failures and reruns.
+- GitHub API/GraphQL when needed to inspect review threads and unresolved conversations.
+
+Do not only watch checks. Review comments can arrive while CI is running, so keep sweeping for new comments and reviews as checks run.
+
+### Handle failing or stuck checks
+
+When a check fails or gets stuck, decide whether it looks flaky/infrastructure-related or caused by the PR.
+
+**If it looks flaky or infrastructure-related:**
+
+1. Try to rerun the failed job/check first.
+2. If rerun is not available because of permissions or tooling limits, push an empty commit as a last-resort CI kick: confirm the working tree has no unrelated changes, then `git commit --allow-empty -m "chore: rerun CI"` and push.
+3. After any rerun or empty commit, restart the loop from the latest head SHA.
+
+**If it looks like a real failure:**
+
+1. Read the failing logs enough to understand the cause.
+2. Reproduce locally when practical.
+3. Fix the root cause, not just the symptom.
+4. Run the relevant local tests, linters, type checks, or targeted commands.
+5. Commit only the intended changes and push, then restart the loop from the new head SHA.
+
+Prefer rerunning before pushing an empty commit. Prefer fixing code before repeatedly rerunning a failure that has evidence of being real.
+
+### Handle GitHub comments
+
+Read all PR comments, review summaries, inline review comments, and unresolved review threads from both people and bots.
+
+Evaluate every comment from two perspectives:
+
+- Senior software engineer: correctness, maintainability, test coverage, reliability, security, architecture, readability, and long-term cost.
+- Product designer: user behavior, UX clarity, accessibility, visual/system consistency, edge cases, and whether the implementation matches product intent.
+
+For each comment, choose the path that best matches the intent of the PR:
+
+1. **Apply the recommended fix** — the suggestion is right for the PR, so make it as described.
+2. **Apply a better or different fix** — the comment points at a real issue, but a larger, more holistic, or a simpler fix more closely matches the PR's intent. Prefer the systemic fix over a band-aid, and use the design system and its tokens for UI work.
+3. **Decline the fix** — the suggestion is not valid for the intention of the PR (incorrect, harmful, out of scope, or would work against the PR's goal).
+
+After deciding:
+
+- If you take path 1 or 2: make the code changes, commit, and push. Then **always comment back** explaining what changed, and **resolve the thread** when the comment is a resolvable review thread.
+- If you take path 3: **always comment back** with a concise, respectful rationale for why you did not make the change, but **do not resolve** the thread — leave it open so the user can see that something was not resolved and decide for themselves.
+
+Only review threads can be resolved. Top-level PR comments and review summaries are not resolvable threads, so reply to them when they call for it but do not try to resolve them.
+
+After any code change, comment reply, or thread resolution, check whether new feedback arrived and restart this loop if needed.
+
+### Done
+
+The workflow is complete when all of the following are true on the latest head commit:
+
+- Checks are passing.
+- No actionable feedback remains. Every comment has either been addressed (fixed, committed, replied to, and its review thread resolved) or intentionally declined (replied to with a rationale and left open on purpose). Declined-but-open threads and non-resolvable top-level comments do not block the ready state — do not keep polling for them or try to resolve them.
+
+When that state is reached, tell the user the PR is in a ready state, and include the PR URL, what CI/review issues you handled, and any commits you pushed. Stop watching unless the user asks you to keep going.
 
 ## Tone
 
