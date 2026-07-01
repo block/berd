@@ -7,6 +7,7 @@ import {
   TooltipTrigger,
 } from "@/shared/ui/tooltip";
 import { isExternalHref } from "@/shared/lib/isExternalHref";
+import { isUrlTrusted } from "@/shared/lib/trustedDomains";
 import { LinkSafetyModal } from "@/shared/ui/ai-elements/link-safety-modal";
 import { cn } from "@/shared/lib/cn";
 import { useVirtualLayoutPendingForStreamdown } from "@/features/chat/transcript/measurement";
@@ -415,7 +416,15 @@ const MarkdownLink = memo(
           rel="noreferrer"
           onClick={(e) => {
             e.preventDefault();
-            openModal?.(href ?? "");
+            if (isUrlTrusted(href ?? "")) {
+              void import("@tauri-apps/plugin-opener")
+                .then(({ openUrl }) => openUrl(href ?? ""))
+                .catch((error: unknown) => {
+                  console.error("[linkSafety] openUrl failed:", error);
+                });
+            } else {
+              openModal?.(href ?? "");
+            }
           }}
           {...rest}
         >

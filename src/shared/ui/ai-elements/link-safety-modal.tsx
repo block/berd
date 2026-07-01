@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/shared/ui/button";
+import { Checkbox } from "@/shared/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/dialog";
+import { Label } from "@/shared/ui/label";
+import { extractDomain, trustDomain } from "@/shared/lib/trustedDomains";
 
 interface LinkSafetyModalProps {
   isOpen: boolean;
@@ -26,7 +29,10 @@ export function LinkSafetyModal({
 }: LinkSafetyModalProps) {
   const { t } = useTranslation("common");
   const [isCopied, setIsCopied] = useState(false);
+  const [trustChecked, setTrustChecked] = useState(false);
   const timeoutRef = useRef<number>(0);
+
+  const domain = useMemo(() => extractDomain(url), [url]);
 
   if (isOpen && isCopied) {
     setIsCopied(false);
@@ -39,14 +45,24 @@ export function LinkSafetyModal({
     [],
   );
 
+  // Reset the checkbox when the modal opens with a new URL
+  useEffect(() => {
+    if (isOpen) {
+      setTrustChecked(false);
+    }
+  }, [isOpen, url]);
+
   const handleOpen = useCallback(async () => {
     try {
       await (onOpenLink ?? openUrl)(url);
+      if (trustChecked && domain) {
+        trustDomain(domain);
+      }
     } catch (e: unknown) {
       console.error("[linkSafety] openUrl failed:", e);
     }
     onClose();
-  }, [url, onClose, onOpenLink]);
+  }, [url, onClose, onOpenLink, trustChecked, domain]);
 
   const handleCopy = useCallback(() => {
     if (isCopied) return;
@@ -80,6 +96,15 @@ export function LinkSafetyModal({
         <div className="break-all rounded-md bg-muted p-3 font-mono text-sm">
           {url}
         </div>
+        {domain && (
+          <Label className="cursor-pointer items-center text-muted-foreground">
+            <Checkbox
+              checked={trustChecked}
+              onCheckedChange={(checked) => setTrustChecked(checked === true)}
+            />
+            {t("components.linkSafety.dontAskAgain", { domain })}
+          </Label>
+        )}
         <DialogFooter className="flex-row">
           <Button
             className="flex-1"

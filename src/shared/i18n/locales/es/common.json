@@ -63,7 +63,8 @@
       "copyLink": "Copiar enlace",
       "description": "Estás a punto de visitar un sitio web externo.",
       "openLink": "Abrir enlace",
-      "title": "¿Abrir enlace externo?"
+      "title": "¿Abrir enlace externo?",
+      "dontAskAgain": "No volver a preguntar para {{domain}}"
     },
     "mermaid": {
       "downloadStarted": "Descarga iniciada: {{filename}}",

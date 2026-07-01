@@ -1,6 +1,7 @@
 import type { AppRendererProps } from "@mcp-ui/client";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isUrlTrusted } from "@/shared/lib/trustedDomains";
 
 type OpenLinkParams = Parameters<
   NonNullable<AppRendererProps["onOpenLink"]>
@@ -55,6 +56,18 @@ export function useMcpAppOpenLink() {
       isError: true,
       message: "Another open-link request replaced this request.",
     });
+    pendingOpenLinkResolverRef.current = null;
+    setPendingOpenLinkUrl(null);
+
+    // Bypass the confirmation modal for trusted domains
+    if (isUrlTrusted(safeUrl)) {
+      try {
+        await openUrl(safeUrl);
+        return {};
+      } catch {
+        return { isError: true };
+      }
+    }
 
     return new Promise<OpenLinkResult>((resolve) => {
       pendingOpenLinkResolverRef.current = resolve;
