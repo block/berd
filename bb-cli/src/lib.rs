@@ -28,9 +28,8 @@ use crate::bb::auth_storage::stored_session_credential_header_value_for_kgoose_b
 use crate::bb::org_routing::resolve_org_kgoose_base_url;
 use crate::bb::skills_config::{
     default_bb_home, default_preferences_path, normalize_kgoose_service_path, read_optional_env,
-    read_preferences_file, SkillsFileConfig, BB_HOME_ENV_VAR, BB_SKILLS_CONFIG_ENV_VAR,
-    BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_CONFIG_FILE_NAME, DEFAULT_KGOOSE_SERVICE_PATH,
-    DEFAULT_PROFILE_NAME,
+    read_preferences_file, resolve_skills_profile_context, SkillsProfileResolveOptions,
+    BB_HOME_ENV_VAR, DEFAULT_KGOOSE_SERVICE_PATH,
 };
 use crate::catalog::{load_extensions_catalog, write_extensions_catalog};
 use crate::kgoose::{CallToolResponse, HttpKgooseClient, KgooseClient, KgooseConfig};
@@ -356,31 +355,14 @@ fn bb_org_required_error() -> anyhow::Error {
 }
 
 fn resolve_kgoose_session_credential(base_url: &str, service_path: &str) -> Result<Option<String>> {
-    let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(default_bb_home);
-    let profile = resolve_bb_tools_profile(&bb_home)?;
+    let profile_context = resolve_skills_profile_context(SkillsProfileResolveOptions::default())?;
 
     stored_session_credential_header_value_for_kgoose_base_url(
-        &profile,
+        &profile_context.profile,
         base_url,
         service_path,
-        bb_home,
+        profile_context.bb_home,
     )
-}
-
-fn resolve_bb_tools_profile(bb_home: &std::path::Path) -> Result<String> {
-    if let Some(profile) = read_optional_env(BB_SKILLS_PROFILE_ENV_VAR)? {
-        return Ok(profile);
-    }
-
-    let config_path = read_optional_env(BB_SKILLS_CONFIG_ENV_VAR)?
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| bb_home.join(DEFAULT_CONFIG_FILE_NAME));
-    let file_config = SkillsFileConfig::read(&config_path)?;
-    Ok(file_config
-        .current_profile
-        .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string()))
 }
 
 fn clap_matches(command: Command, argv: Vec<String>) -> Result<ArgMatches> {

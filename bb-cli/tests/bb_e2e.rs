@@ -2016,6 +2016,20 @@ fn bb_tools_help_surfaces_schema_derived_flags() {
 
 #[test]
 fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
+    assert_bb_tools_session_credential(
+        "bb-tools-session",
+        "default",
+        "stored-bb-tools-session",
+        |_temp, _command| {},
+    );
+}
+
+fn assert_bb_tools_session_credential(
+    temp_name: &str,
+    storage_profile: &str,
+    storage_credential: &str,
+    configure_command: impl FnOnce(&Path, &mut std::process::Command),
+) {
     let server = MockServer::start(vec![
         list_tools_response("utils", calculate_tool_schema(false)),
         MockResponse::json(json!({
@@ -2023,15 +2037,17 @@ fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
             "is_error": false
         })),
     ]);
-    let temp = temp_test_dir("bb-tools-session");
+    let temp = temp_test_dir(temp_name);
     let storage_path = temp.join("auth-sessions.json");
-    let storage_key =
-        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+    let storage_key = browser_auth_storage_key(
+        storage_profile,
+        &format!("{}/cash-app/goose", server.base_url),
+    );
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
             storage_key: {
-                "sessionCredential": "stored-bb-tools-session",
+                "sessionCredential": storage_credential,
                 "expiresAt": "2026-06-15T00:00:00Z"
             }
         }))
@@ -2039,8 +2055,9 @@ fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
     )
     .expect("write auth storage");
 
-    let output = server
-        .bb_tools_command()
+    let mut command = server.bb_tools_command();
+    configure_command(&temp, &mut command);
+    let output = command
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .args([
@@ -2064,14 +2081,14 @@ fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
             .headers
             .get("x-bb-session-credential")
             .map(String::as_str),
-        Some("stored-bb-tools-session")
+        Some(storage_credential)
     );
     assert_eq!(
         requests[1]
             .headers
             .get("x-bb-session-credential")
             .map(String::as_str),
-        Some("stored-bb-tools-session")
+        Some(storage_credential)
     );
     assert_eq!(requests[0].path, BB_TOOLS_LIST_TOOLS_PATH);
     assert_eq!(requests[1].path, BB_TOOLS_CALL_TOOL_PATH);
@@ -2080,74 +2097,51 @@ fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
 
 #[test]
 fn bb_tools_resolves_session_credential_from_current_profile() {
-    let server = MockServer::start(vec![
-        list_tools_response("utils", calculate_tool_schema(false)),
-        MockResponse::json(json!({
-            "content": [{"text": {"text": "{\"sum\":5}"}}],
-            "is_error": false
-        })),
-    ]);
-    let temp = temp_test_dir("bb-tools-current-profile-session");
-    let bb_home = temp.join("bb-home");
-    write_bb_org_config(&bb_home, "test");
-    fs::write(
-        bb_home.join("skills.yaml"),
-        "current_profile: local\nprofiles:\n  local: {}\n",
-    )
-    .expect("write skills config");
-    let storage_path = temp.join("auth-sessions.json");
-    let storage_key =
-        browser_auth_storage_key("local", &format!("{}/cash-app/goose", server.base_url));
-    fs::write(
-        &storage_path,
-        serde_json::to_string_pretty(&json!({
-            storage_key: {
-                "sessionCredential": "stored-current-profile-session",
-                "expiresAt": "2026-06-15T00:00:00Z"
-            }
-        }))
-        .expect("serialize storage"),
-    )
-    .expect("write auth storage");
-
-    let output = server
-        .bb_tools_command()
-        .env("BB_HOME", &bb_home)
-        .env("BB_AUTH_STORAGE", "file")
-        .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args([
-            "utils",
-            "calculate",
-            "--numbers",
-            "2",
-            "3",
-            "--operation",
-            "add",
-        ])
-        .output()
-        .expect("run bb tools tool");
-    let requests = server.finish();
-    let (_stdout, stderr) = output_text(&output);
-
-    assert!(output.status.success(), "stderr was: {stderr}");
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[0]
-            .headers
-            .get("x-bb-session-credential")
-            .map(String::as_str),
-        Some("stored-current-profile-session")
+    assert_bb_tools_session_credential(
+        "bb-tools-current-profile-session",
+        "local",
+        "stored-current-profile-session",
+        |temp, command| {
+            let bb_home = temp.join("bb-home");
+            write_bb_org_config(&bb_home, "test");
+            fs::write(
+                bb_home.join("skills.yaml"),
+                "current_profile: local\nprofiles:\n  local: {}\n",
+            )
+            .expect("write skills config");
+            command.env("BB_HOME", &bb_home);
+        },
     );
-    assert_eq!(
-        requests[1]
-            .headers
-            .get("x-bb-session-credential")
-            .map(String::as_str),
-        Some("stored-current-profile-session")
+}
+
+#[test]
+fn bb_tools_env_profile_does_not_require_readable_skills_config() {
+    assert_bb_tools_session_credential(
+        "bb-tools-env-profile-session",
+        "env-profile",
+        "stored-env-profile-session",
+        |temp, command| {
+            let malformed_config = temp.join("malformed-skills.yaml");
+            fs::write(&malformed_config, "current_profile: [").expect("write malformed config");
+            command
+                .env("BB_SKILLS_CONFIG", &malformed_config)
+                .env("BB_SKILLS_PROFILE", "env-profile");
+        },
     );
-    assert_eq!(requests[0].path, BB_TOOLS_LIST_TOOLS_PATH);
-    assert_eq!(requests[1].path, BB_TOOLS_CALL_TOOL_PATH);
-    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_tools_malformed_skills_config_falls_back_to_default_profile() {
+    assert_bb_tools_session_credential(
+        "bb-tools-default-profile-session",
+        "default",
+        "stored-default-profile-session",
+        |temp, command| {
+            let malformed_config = temp.join("malformed-skills.yaml");
+            fs::write(&malformed_config, "current_profile: [").expect("write malformed config");
+            command.env("BB_SKILLS_CONFIG", &malformed_config);
+        },
+    );
 }
 
 #[cfg(unix)]

@@ -35,6 +35,22 @@ pub const KGOOSE_PLAYPEN_ENV_VAR: &str = "KGOOSE_PLAYPEN";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "skills.yaml";
 pub const META_FILE_NAME: &str = ".bb-skills-meta.json";
 
+#[derive(Debug, Clone, Default)]
+pub struct SkillsProfileResolveOptions {
+    pub local_dev: bool,
+    pub explicit_config_path: Option<PathBuf>,
+    pub explicit_profile: Option<String>,
+    pub require_file_config: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillsProfileContext {
+    pub bb_home: PathBuf,
+    pub config_path: PathBuf,
+    pub profile: String,
+    pub file_config: SkillsFileConfig,
+}
+
 #[derive(Debug, Clone)]
 pub struct SkillsConfig {
     pub kgoose_base_url: String,
@@ -62,33 +78,18 @@ impl SkillsConfig {
 
     fn resolve_with_org_routing(matches: &ArgMatches, org_routing: bool) -> Result<Self> {
         let local_dev = matches.get_flag("local-dev");
-        let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
-            .map(PathBuf::from)
-            .unwrap_or_else(default_bb_home);
-        let explicit_config_path = matches
-            .get_one::<String>("skills-config")
-            .map(PathBuf::from);
-        let config_path = if let Some(path) = explicit_config_path {
-            path
-        } else if local_dev {
-            discover_local_dev_config()?
-        } else if let Some(path) = read_optional_env(BB_SKILLS_CONFIG_ENV_VAR)?.map(PathBuf::from) {
-            path
-        } else {
-            bb_home.join(DEFAULT_CONFIG_FILE_NAME)
-        };
-        let file_config = SkillsFileConfig::read(&config_path)?;
-        let explicit_profile = matches.get_one::<String>("skills-profile").cloned();
-        let env_profile = read_optional_env(BB_SKILLS_PROFILE_ENV_VAR)?;
-        let profile = explicit_profile
-            .or_else(|| {
-                local_dev
-                    .then(|| file_config.current_profile.clone())
-                    .flatten()
-            })
-            .or(env_profile)
-            .or_else(|| file_config.current_profile.clone())
-            .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
+        let profile_context = resolve_skills_profile_context(SkillsProfileResolveOptions {
+            local_dev,
+            explicit_config_path: matches
+                .get_one::<String>("skills-config")
+                .map(PathBuf::from),
+            explicit_profile: matches.get_one::<String>("skills-profile").cloned(),
+            require_file_config: true,
+        })?;
+        let bb_home = profile_context.bb_home;
+        let config_path = profile_context.config_path;
+        let file_config = profile_context.file_config;
+        let profile = profile_context.profile;
         let profile_config = file_config.profiles.get(&profile);
 
         let kgoose_service_path = matches
@@ -211,6 +212,61 @@ impl SkillsConfig {
     pub fn write_preferences(&self, preferences: &SkillsPreferences) -> Result<()> {
         builderbot_auth::config::write_preferences_file(&self.preferences_path(), preferences)
     }
+}
+
+pub fn resolve_skills_profile_context(
+    options: SkillsProfileResolveOptions,
+) -> Result<SkillsProfileContext> {
+    let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
+        .map(PathBuf::from)
+        .unwrap_or_else(default_bb_home);
+    let config_path = if let Some(path) = options.explicit_config_path {
+        path
+    } else if options.local_dev {
+        discover_local_dev_config()?
+    } else if let Some(path) = read_optional_env(BB_SKILLS_CONFIG_ENV_VAR)?.map(PathBuf::from) {
+        path
+    } else {
+        bb_home.join(DEFAULT_CONFIG_FILE_NAME)
+    };
+    let env_profile = read_optional_env(BB_SKILLS_PROFILE_ENV_VAR)?;
+    let profile_before_config = options
+        .explicit_profile
+        .clone()
+        .or_else(|| (!options.local_dev).then(|| env_profile.clone()).flatten());
+    if !options.require_file_config {
+        if let Some(profile) = profile_before_config.clone() {
+            return Ok(SkillsProfileContext {
+                bb_home,
+                config_path,
+                profile,
+                file_config: SkillsFileConfig::default(),
+            });
+        }
+    }
+
+    let file_config = match SkillsFileConfig::read(&config_path) {
+        Ok(file_config) => file_config,
+        Err(_) if !options.require_file_config => SkillsFileConfig::default(),
+        Err(error) => return Err(error),
+    };
+    let profile = profile_before_config
+        .or_else(|| {
+            options
+                .local_dev
+                .then(|| file_config.current_profile.clone())
+                .flatten()
+        })
+        .or(env_profile)
+        .or_else(|| file_config.current_profile.clone())
+        .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
+
+    Ok(SkillsProfileContext {
+        bb_home,
+        config_path,
+        profile,
+        file_config,
+    })
 }
 
 fn discover_local_dev_config() -> Result<PathBuf> {
