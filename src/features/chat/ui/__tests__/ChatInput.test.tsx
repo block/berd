@@ -12,6 +12,7 @@ import { ChatInput } from "./chatInputTestUtils";
 import { ChatInputToolbar } from "../ChatInputToolbar";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { Persona } from "@/shared/types/agents";
+import type { ChatInputComposerActions } from "../../types";
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "../../lib/streamingShortcutPreference";
 
 const mockVoiceDictation = {
@@ -1882,6 +1883,212 @@ describe("ChatInput", () => {
     expect(
       screen.getByRole("button", { name: /stop generation/i }),
     ).toBeInTheDocument();
+  });
+
+  it("edits a queued message from the queue bar", async () => {
+    const onDismissQueue = vi.fn();
+    const onPersonaChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onDismissQueue={onDismissQueue}
+        onPersonaChange={onPersonaChange}
+        queuedMessage={{
+          text: "queued msg",
+          personaId: "reviewer",
+          attachments: [
+            {
+              id: "file-1",
+              kind: "file" as const,
+              name: "notes.txt",
+              path: "/tmp/notes.txt",
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+
+    expect(onDismissQueue).toHaveBeenCalledOnce();
+    expect(onPersonaChange).toHaveBeenCalledWith("reviewer");
+    expect(screen.getByRole("textbox")).toHaveValue("queued msg");
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it("preserves queued send options when resending an edited message", async () => {
+    const onSend = vi.fn(() => true);
+    const onDismissQueue = vi.fn();
+    const user = userEvent.setup();
+
+    function EditableQueuedMessageInput() {
+      const [queuedMessage, setQueuedMessage] = useState<
+        ChatInputComposerActions["queuedMessage"]
+      >({
+        text: "check this diff",
+        sendOptions: {
+          assistantPrompt: "Use these skills for this request: code-review.",
+          chips: [{ label: "code-review", type: "skill" as const }],
+          displayText: "check this diff",
+        },
+      });
+
+      return (
+        <ChatInput
+          onSend={onSend}
+          onDismissQueue={() => {
+            onDismissQueue();
+            setQueuedMessage(null);
+          }}
+          queuedMessage={queuedMessage}
+        />
+      );
+    }
+
+    render(<EditableQueuedMessageInput />);
+
+    const input = screen.getByRole("textbox");
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(input);
+    await user.type(input, "check this diff carefully");
+    await user.keyboard("{Enter}");
+
+    expect(onDismissQueue).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith(
+      "check this diff carefully",
+      undefined,
+      undefined,
+      {
+        assistantPrompt: "Use these skills for this request: code-review.",
+        chips: [{ label: "code-review", type: "skill" }],
+        displayText: "check this diff carefully",
+      },
+    );
+  });
+
+  it("refreshes persona chips when resending an edited queued message", async () => {
+    const onSend = vi.fn(() => true);
+    const user = userEvent.setup();
+
+    function EditableQueuedMessageWithPersona() {
+      const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(
+        "builtin-solo",
+      );
+      const [queuedMessage, setQueuedMessage] = useState<
+        ChatInputComposerActions["queuedMessage"]
+      >({
+        text: "queued msg",
+        personaId: "builtin-solo",
+        sendOptions: {
+          assistantPrompt: "Use these skills for this request: code-review.",
+          chips: [
+            {
+              id: "builtin-solo",
+              label: "Solo",
+              agentRole: "active" as const,
+              type: "agent" as const,
+            },
+            { label: "code-review", type: "skill" as const },
+          ],
+          displayText: "queued msg",
+        },
+      });
+
+      return (
+        <ChatInput
+          onSend={onSend}
+          personas={TEST_PERSONAS}
+          selectedPersonaId={selectedPersonaId}
+          onPersonaChange={setSelectedPersonaId}
+          onDismissQueue={() => setQueuedMessage(null)}
+          queuedMessage={queuedMessage}
+        />
+      );
+    }
+
+    render(<EditableQueuedMessageWithPersona />);
+
+    const input = screen.getByRole("textbox");
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Remove Solo agent" }));
+    await user.clear(input);
+    await user.type(input, "@Rev");
+    await user.click(screen.getByRole("option", { name: /reviewer/i }));
+    await user.type(input, "now with reviewer");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith(
+      "now with reviewer",
+      "reviewer",
+      undefined,
+      {
+        assistantPrompt: "Use these skills for this request: code-review.",
+        chips: [
+          {
+            id: "reviewer",
+            label: "Reviewer",
+            agentRole: "active",
+            type: "agent",
+          },
+          { label: "code-review", type: "skill" },
+        ],
+        displayText: "now with reviewer",
+      },
+    );
+  });
+
+  it("strips cross-session origin metadata when resending an edited queued message", async () => {
+    const onSend = vi.fn(() => true);
+    const user = userEvent.setup();
+
+    function EditableCrossSessionQueuedMessageInput() {
+      const [queuedMessage, setQueuedMessage] = useState<
+        ChatInputComposerActions["queuedMessage"]
+      >({
+        text: "queued from another session",
+        sendOptions: {
+          acpGooseMetadata: {
+            origin: "berdctl_cross_session",
+            threadId: "thread-1",
+          },
+          userMessageMetadata: {
+            origin: "berdctl_cross_session",
+          },
+        },
+      });
+
+      return (
+        <ChatInput
+          onSend={onSend}
+          onDismissQueue={() => setQueuedMessage(null)}
+          queuedMessage={queuedMessage}
+        />
+      );
+    }
+
+    render(<EditableCrossSessionQueuedMessageInput />);
+
+    const input = screen.getByRole("textbox");
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(input);
+    await user.type(input, "now from me");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("now from me", undefined, undefined, {
+      acpGooseMetadata: {
+        threadId: "thread-1",
+      },
+    });
   });
 
   it("does not steer a queued message from an empty composer on enter", async () => {

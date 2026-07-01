@@ -284,6 +284,7 @@
   },
   "queue": {
     "dismiss": "Descartar mensaje en cola",
+    "edit": "Editar mensaje en cola",
     "label": "En cola: {{text}}"
   },
   "globalPill": {

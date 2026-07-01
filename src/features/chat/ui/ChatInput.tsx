@@ -8,7 +8,7 @@ import {
   useId,
   type ReactNode,
 } from "react";
-import { X } from "lucide-react";
+import { Pencil, X } from "lucide-react";
 import { IconCheck, IconCornerDownLeft } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -55,7 +55,7 @@ import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
 import { resolveAgentToolsCapabilityTips } from "../lib/agentToolsCapabilities";
 import { useAgentToolsTipsPreference } from "../lib/agentToolsTipPreferences";
 import { getImageFilesFromClipboardItems } from "../lib/clipboardAttachments";
-import type { ChatInputProps, ChatSkillDraft } from "../types";
+import type { ChatInputProps, ChatSendOptions, ChatSkillDraft } from "../types";
 import { ContextualTip } from "@/shared/ui/contextual-tip";
 import {
   getStreamingShortcutAction,
@@ -73,6 +73,7 @@ const AGENT_TOOLS_TIP_AUTO_DISMISS_MS = 4_500;
 const AGENT_TOOLS_TIP_EXIT_ANIMATION_MS = 200;
 const AGENT_TOOLS_CONNECTION_TIPS_MOMENT_ID =
   ASSISTIVE_UX_RULES.chatAgentToolsConnectionTips.id;
+const BERDCTL_CROSS_SESSION_ORIGIN = "berdctl_cross_session";
 
 type AgentToolsTipResolutionMode = "latest" | "aggregate";
 
@@ -82,6 +83,49 @@ interface AgentToolsTipPresentation {
   icon?: ReactNode;
   iconClassName?: string;
   onAction?: () => void;
+}
+
+function stripCrossSessionOrigin<T extends Record<string, unknown>>(
+  metadata: T | undefined,
+): T | undefined {
+  if (metadata?.origin !== BERDCTL_CROSS_SESSION_ORIGIN) {
+    return metadata;
+  }
+
+  const { origin: _origin, ...rest } = metadata;
+  return Object.keys(rest).length > 0 ? (rest as T) : undefined;
+}
+
+function getManualEditQueuedSendOptions(
+  sendOptions: ChatSendOptions | undefined,
+): ChatSendOptions | null {
+  if (!sendOptions) {
+    return null;
+  }
+
+  const { userMessageMetadata, acpGooseMetadata, ...rest } = sendOptions;
+  const nextUserMessageMetadata = stripCrossSessionOrigin(userMessageMetadata);
+  const nextAcpGooseMetadata = stripCrossSessionOrigin(acpGooseMetadata);
+
+  return {
+    ...rest,
+    ...(nextUserMessageMetadata
+      ? { userMessageMetadata: nextUserMessageMetadata }
+      : {}),
+    ...(nextAcpGooseMetadata ? { acpGooseMetadata: nextAcpGooseMetadata } : {}),
+  };
+}
+
+function refreshRestoredQueuedChips(
+  sendOptions: ChatSendOptions,
+  currentChips: MessageChip[],
+): ChatSendOptions {
+  const restoredNonAgentChips =
+    sendOptions.chips?.filter((chip) => chip.type !== "agent") ?? [];
+  const chips = [...currentChips, ...restoredNonAgentChips];
+  const { chips: _chips, ...rest } = sendOptions;
+
+  return chips.length > 0 ? { ...rest, chips } : rest;
 }
 
 function formatAgentToolsList(
@@ -534,6 +578,8 @@ export function ChatInput({
     setSelectedSkills,
     resolveSkillSlashCommand,
   });
+  const [restoredQueuedSendOptions, setRestoredQueuedSendOptions] =
+    useState<ChatSendOptions | null>(null);
 
   const setTextFromDictation = useCallback(
     (value: string) => setText(value, "aggregate"),
@@ -552,6 +598,36 @@ export function ChatInput({
     isSendLocked:
       hasQueuedMessage || disabled || sendDisabled || attachmentWorkPending,
   });
+
+  const submitRestoredQueuedMessage = useCallback(
+    async (
+      submittedText: string,
+      submittedAttachments: typeof attachments,
+      sendOptions: ChatSendOptions,
+      submitHandler: typeof onSend,
+    ) => {
+      const displayText = submittedText.trim();
+      const restoredSendOptions =
+        sendOptions.displayText === undefined
+          ? refreshRestoredQueuedChips(
+              sendOptions,
+              selectedMessageChipsRef.current,
+            )
+          : refreshRestoredQueuedChips(
+              { ...sendOptions, displayText },
+              selectedMessageChipsRef.current,
+            );
+      const sendResult = submitHandler(
+        displayText || " ",
+        selectedPersonaId ?? undefined,
+        submittedAttachments.length > 0 ? submittedAttachments : undefined,
+        restoredSendOptions,
+      );
+      const accepted = await Promise.resolve(sendResult);
+      return accepted !== false;
+    },
+    [selectedPersonaId],
+  );
 
   const submitCurrentMessage = useCallback(
     async (submitHandler: typeof onSend, canSubmitCurrentMessage: boolean) => {
@@ -575,15 +651,27 @@ export function ChatInput({
       const submittedAttachments = scopedControls.attachments
         ? attachments
         : [];
-      const accepted = await submitChatInputMessage(
-        submittedText,
-        submittedAttachments,
-        submittedSkills,
-        submitHandler,
-      );
+      const restoredSendOptions =
+        restoredQueuedSendOptions && submittedSkills.length === 0
+          ? restoredQueuedSendOptions
+          : null;
+      const accepted = restoredSendOptions
+        ? await submitRestoredQueuedMessage(
+            submittedText,
+            submittedAttachments,
+            restoredSendOptions,
+            submitHandler,
+          )
+        : await submitChatInputMessage(
+            submittedText,
+            submittedAttachments,
+            submittedSkills,
+            submitHandler,
+          );
       if (!accepted) {
         return;
       }
+      setRestoredQueuedSendOptions(null);
       const textStillMatchesSubmission = textRef.current === submittedText;
       const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
         selectedSkillsRef.current,
@@ -614,6 +702,8 @@ export function ChatInput({
       scopedControls.voice,
       setSelectedSkills,
       setText,
+      restoredQueuedSendOptions,
+      submitRestoredQueuedMessage,
       submitChatInputMessage,
       text,
       visibleSelectedSkills,
@@ -639,12 +729,15 @@ export function ChatInput({
     void onSteerQueuedMessage();
   }, [canSteerQueuedMessage, onSteerQueuedMessage]);
 
-  const setTextWithCursorAtEnd = (value: string) => {
-    setText(value);
-    pendingCursorOffsetRef.current = value.length;
-  };
+  const setTextWithCursorAtEnd = useCallback(
+    (value: string) => {
+      setText(value);
+      pendingCursorOffsetRef.current = value.length;
+    },
+    [setText],
+  );
 
-  const restoreQueuedMessage = () => {
+  const restoreQueuedMessage = useCallback(() => {
     if (!queuedMessage || !onDismissQueue) {
       return false;
     }
@@ -652,6 +745,9 @@ export function ChatInput({
     const nextText =
       queuedMessage.sendOptions?.displayText ?? queuedMessage.text;
     setTextWithCursorAtEnd(nextText);
+    setRestoredQueuedSendOptions(
+      getManualEditQueuedSendOptions(queuedMessage.sendOptions),
+    );
     onPersonaChange?.(queuedMessage.personaId ?? null);
     replaceAttachments(
       scopedControls.attachments ? (queuedMessage.attachments ?? []) : [],
@@ -659,7 +755,21 @@ export function ChatInput({
     setSelectedSkills([]);
     onDismissQueue();
     return true;
-  };
+  }, [
+    onDismissQueue,
+    onPersonaChange,
+    queuedMessage,
+    replaceAttachments,
+    scopedControls.attachments,
+    setSelectedSkills,
+    setTextWithCursorAtEnd,
+  ]);
+
+  const handleEditQueuedMessage = useCallback(() => {
+    if (restoreQueuedMessage()) {
+      textareaRef.current?.focus();
+    }
+  }, [restoreQueuedMessage]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing =
@@ -1262,6 +1372,17 @@ export function ChatInput({
                         aria-hidden="true"
                       />
                       {t("toolbar.steer")}
+                    </button>
+                  ) : null}
+                  {onDismissQueue ? (
+                    <button
+                      type="button"
+                      onClick={handleEditQueuedMessage}
+                      className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                      aria-label={t("queue.edit")}
+                      title={t("queue.edit")}
+                    >
+                      <Pencil className="size-3.5" aria-hidden="true" />
                     </button>
                   ) : null}
                   <button
