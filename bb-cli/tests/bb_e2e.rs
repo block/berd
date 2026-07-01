@@ -2078,6 +2078,78 @@ fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
+#[test]
+fn bb_tools_resolves_session_credential_from_current_profile() {
+    let server = MockServer::start(vec![
+        list_tools_response("utils", calculate_tool_schema(false)),
+        MockResponse::json(json!({
+            "content": [{"text": {"text": "{\"sum\":5}"}}],
+            "is_error": false
+        })),
+    ]);
+    let temp = temp_test_dir("bb-tools-current-profile-session");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
+    fs::write(
+        bb_home.join("skills.yaml"),
+        "current_profile: local\nprofiles:\n  local: {}\n",
+    )
+    .expect("write skills config");
+    let storage_path = temp.join("auth-sessions.json");
+    let storage_key =
+        browser_auth_storage_key("local", &format!("{}/cash-app/goose", server.base_url));
+    fs::write(
+        &storage_path,
+        serde_json::to_string_pretty(&json!({
+            storage_key: {
+                "sessionCredential": "stored-current-profile-session",
+                "expiresAt": "2026-06-15T00:00:00Z"
+            }
+        }))
+        .expect("serialize storage"),
+    )
+    .expect("write auth storage");
+
+    let output = server
+        .bb_tools_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .args([
+            "utils",
+            "calculate",
+            "--numbers",
+            "2",
+            "3",
+            "--operation",
+            "add",
+        ])
+        .output()
+        .expect("run bb tools tool");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-current-profile-session")
+    );
+    assert_eq!(
+        requests[1]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-current-profile-session")
+    );
+    assert_eq!(requests[0].path, BB_TOOLS_LIST_TOOLS_PATH);
+    assert_eq!(requests[1].path, BB_TOOLS_CALL_TOOL_PATH);
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
 #[cfg(unix)]
 #[test]
 fn bb_tools_root_metadata_commands_do_not_read_auth_storage() {

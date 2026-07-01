@@ -160,6 +160,7 @@ impl MockServer {
             .env_remove("KGOOSE_TIMEOUT")
             .env_remove("STS_ACCESS_TOKEN")
             .env("BB_HOME", bb_home)
+            .env_remove("BB_SKILLS_CONFIG")
             .env_remove("BB_SKILLS_PROFILE")
             .env_remove("BB_AUTH_STORAGE")
             .env_remove("BB_AUTH_STORAGE_FILE")
