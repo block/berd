@@ -20,6 +20,17 @@ export interface ProjectInfo {
   order: number;
   archivedAt: string | null;
   artifact?: ProjectArtifactMetadata | null;
+  chatGroups?: ProjectChatGroupsMetadata | null;
+}
+
+export interface ProjectChatGroupMetadata {
+  id: string;
+  name: string;
+  chatIds: string[];
+}
+
+export interface ProjectChatGroupsMetadata {
+  groups: ProjectChatGroupMetadata[];
 }
 
 function createArtifactMetadata(
@@ -61,6 +72,7 @@ function toProjectInfo(source: SourceEntry): ProjectInfo {
     order: (p.order as number) ?? 0,
     archivedAt: (p.archivedAt as string) ?? null,
     artifact: parseProjectArtifactMetadata(p.artifact),
+    chatGroups: parseProjectChatGroupsMetadata(p.chatGroups),
   };
 }
 
@@ -73,6 +85,7 @@ interface ProjectMetadataFields {
   order: number;
   archivedAt: string | null;
   artifact?: ProjectArtifactMetadata | null;
+  chatGroups?: ProjectChatGroupsMetadata | null;
 }
 
 function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
@@ -85,7 +98,42 @@ function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
   if (typeof info.order === "number") props.order = info.order;
   if (info.archivedAt) props.archivedAt = info.archivedAt;
   if (info.artifact) props.artifact = info.artifact;
+  if (info.chatGroups?.groups.length) props.chatGroups = info.chatGroups;
   return props;
+}
+
+function parseProjectChatGroupsMetadata(
+  value: unknown,
+): ProjectChatGroupsMetadata | null {
+  if (!value || typeof value !== "object") return null;
+
+  const rawGroups = (value as { groups?: unknown }).groups;
+  if (!Array.isArray(rawGroups)) return null;
+
+  const groups: ProjectChatGroupMetadata[] = [];
+  for (const rawGroup of rawGroups) {
+    if (!rawGroup || typeof rawGroup !== "object") continue;
+    const group = rawGroup as {
+      id?: unknown;
+      name?: unknown;
+      chatIds?: unknown;
+    };
+    if (typeof group.id !== "string" || typeof group.name !== "string") {
+      continue;
+    }
+
+    groups.push({
+      id: group.id,
+      name: group.name,
+      chatIds: Array.isArray(group.chatIds)
+        ? group.chatIds.filter(
+            (chatId): chatId is string => typeof chatId === "string",
+          )
+        : [],
+    });
+  }
+
+  return groups.length > 0 ? { groups } : null;
 }
 
 function slugify(name: string): string {
@@ -178,6 +226,7 @@ export async function createProject(
       order: 0,
       archivedAt: null,
       artifact,
+      chatGroups: null,
     }),
   });
   return toProjectInfo(raw.source as SourceEntry);
@@ -241,6 +290,7 @@ export async function updateProject(
       order: merged.order,
       archivedAt: merged.archivedAt,
       artifact,
+      chatGroups: merged.chatGroups,
     }),
   });
   return toProjectInfo(raw.source as SourceEntry);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type FormEvent } from "react";
+import { useState, useEffect, useMemo, useRef, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle, IconFolderPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
@@ -60,6 +60,7 @@ export function CreateProjectDialog({
 }: CreateProjectDialogProps) {
   const { t } = useTranslation(["projects", "common"]);
   const [name, setName] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [prompt, setPrompt] = useState("");
   const [workingDirs, setWorkingDirs] = useState<string[]>([]);
   const [color, setColor] = useState<string>(DEFAULT_PROJECT_COLOR);
@@ -172,6 +173,13 @@ export function CreateProjectDialog({
     setPreviousOpen(isOpen);
     setPreviousEditingId(editingProject?.id);
   }
+
+  useEffect(() => {
+    if (!isOpen || isEditing) return;
+
+    nameInputRef.current?.focus();
+    nameInputRef.current?.select();
+  }, [isEditing, isOpen]);
 
   if (justOpened || projectIdChanged) {
     if (editingProject) {
@@ -345,6 +353,7 @@ export function CreateProjectDialog({
                 <span className="text-destructive">*</span>
               </Label>
               <Input
+                inputRef={nameInputRef}
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);

@@ -23,6 +23,7 @@ import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettin
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
+import type { CommandOutcome } from "@/features/berdctl/navigation";
 import type {
   AppNavigationLocation,
   AppNavigationUpdateOptions,
@@ -80,7 +81,7 @@ interface AppShellContentProps {
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onAgentBuilderClose?: () => void;
   onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
-  onArchiveChat: (sessionId: string) => Promise<void>;
+  onArchiveChat: (sessionId: string) => Promise<CommandOutcome>;
   onCreateProject: (options?: {
     initialWorkingDir?: string | null;
     onCreated?: (projectId: string) => void;
@@ -313,7 +314,7 @@ interface RenderRouteContentOptions {
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onAgentBuilderClose?: () => void;
   onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
-  onArchiveChat: (sessionId: string) => Promise<void>;
+  onArchiveChat: (sessionId: string) => Promise<CommandOutcome>;
   onCreateProject: (options?: {
     initialWorkingDir?: string | null;
     onCreated?: (projectId: string) => void;
@@ -467,7 +468,9 @@ function renderRouteContent({
           onSelectSession={onSelectSession}
           onSelectSearchResult={onSelectSearchResult}
           onRenameChat={onRenameChat}
-          onArchiveChat={onArchiveChat}
+          onArchiveChat={(sessionId) =>
+            onArchiveChat(sessionId).then(() => undefined)
+          }
         />
       );
     case "chat":

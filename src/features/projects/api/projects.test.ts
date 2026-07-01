@@ -177,4 +177,27 @@ describe("projects API artifact metadata", () => {
     const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
     expect(updateRequest.properties.artifact).toEqual(existingArtifact);
   });
+
+  it("stores project chat group metadata when updating a project", async () => {
+    mocks.sourcesUpdate.mockImplementation(async (request) => ({
+      source: source(request.properties),
+    }));
+
+    const { updateProject } = await import("./projects");
+
+    const chatGroups = {
+      groups: [
+        {
+          id: "launch:chat-group:readiness",
+          name: "Readiness",
+          chatIds: ["session-1", "session-2"],
+        },
+      ],
+    };
+    const project = await updateProject(projectInfo(), { chatGroups });
+
+    const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
+    expect(updateRequest.properties.chatGroups).toEqual(chatGroups);
+    expect(project.chatGroups).toEqual(chatGroups);
+  });
 });

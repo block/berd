@@ -61,6 +61,18 @@ function createDomDropEvent(file: File) {
   } as unknown as React.DragEvent<HTMLDivElement>;
 }
 
+function createInternalDragEvent() {
+  return {
+    preventDefault: vi.fn(),
+    dataTransfer: {
+      files: [],
+      items: [],
+      types: ["application/x-goose-internal-drag"],
+      dropEffect: "none",
+    },
+  } as unknown as React.DragEvent<HTMLDivElement>;
+}
+
 describe("useAttachmentDropTarget", () => {
   beforeEach(() => {
     dragDropListener = null;
@@ -70,6 +82,7 @@ describe("useAttachmentDropTarget", () => {
 
   afterEach(() => {
     delete window.__TAURI_INTERNALS__;
+    delete document.documentElement.dataset.gooseInternalDrag;
     vi.restoreAllMocks();
   });
 
@@ -205,6 +218,89 @@ describe("useAttachmentDropTarget", () => {
 
     expect(domDrop.preventDefault).toHaveBeenCalled();
     expect(onDropFiles).toHaveBeenCalledWith([file]);
+    expect(onDropPaths).not.toHaveBeenCalled();
+
+    unmount();
+    cleanup();
+  });
+
+  it("ignores internal app drags even if they pass over the attachment target", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    const dragEnterEvent = createInternalDragEvent();
+    act(() => {
+      result.current.handleDragEnter(dragEnterEvent);
+    });
+
+    expect(dragEnterEvent.preventDefault).toHaveBeenCalled();
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    const dropEvent = createInternalDragEvent();
+    act(() => {
+      result.current.handleDrop(dropEvent);
+    });
+
+    expect(dropEvent.preventDefault).toHaveBeenCalled();
+    expect(onDropFiles).not.toHaveBeenCalled();
+    expect(onDropPaths).not.toHaveBeenCalled();
+
+    unmount();
+    cleanup();
+  });
+
+  it("ignores native Tauri drag events while an internal app drag is active", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    document.documentElement.dataset.gooseInternalDrag = "project-chat";
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(onDropFiles).not.toHaveBeenCalled();
     expect(onDropPaths).not.toHaveBeenCalled();
 
     unmount();

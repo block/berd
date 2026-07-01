@@ -33,12 +33,18 @@ function layoutProps({
   isResizing = false,
   sidebarCollapsed = false,
   sidebarDisableWidthTransition = false,
+  sidebarHeightResizeDisabled = false,
   sidebarResizeDisabled = false,
+  sidebarWidthResizeDisabled = false,
+  sidebarContentAnchor = "right",
 }: {
   isResizing?: boolean;
   sidebarCollapsed?: boolean;
   sidebarDisableWidthTransition?: boolean;
+  sidebarHeightResizeDisabled?: boolean;
   sidebarResizeDisabled?: boolean;
+  sidebarWidthResizeDisabled?: boolean;
+  sidebarContentAnchor?: "left" | "right";
 } = {}) {
   const sidebarPanelOuterWidth = 212;
   const sidebarOuterWidth = sidebarCollapsed ? 0 : sidebarPanelOuterWidth;
@@ -54,8 +60,11 @@ function layoutProps({
       projects: [],
     },
     sidebarCollapsed,
+    sidebarContentAnchor,
     sidebarDisableWidthTransition,
+    sidebarHeightResizeDisabled,
     sidebarResizeDisabled,
+    sidebarWidthResizeDisabled,
     sidebarOuterWidth,
     sidebarPanelOuterWidth,
     isResizing,
@@ -105,8 +114,10 @@ describe("AppShellLayout", () => {
     const { rerender, props, sidebarPanel, sidebarSlot } = renderLayout();
 
     expect(sidebarSlot.style.width).toBe(`${props.sidebarPanelOuterWidth}px`);
+    expect(sidebarSlot.style.height).toBe("480px");
     expect(sidebarSlot.style.transition).toContain("width 320ms");
     expect(sidebarPanel.style.width).toBe(`${props.sidebarPanelOuterWidth}px`);
+    expect(sidebarPanel.style.opacity).toBe("");
     expect(sidebarPanel).toHaveClass("right-0");
     expect(sidebarPanel.style.transform).toBe("");
 
@@ -117,9 +128,37 @@ describe("AppShellLayout", () => {
     );
 
     expect(sidebarSlot.style.width).toBe("0px");
+    expect(sidebarSlot.style.height).toBe("480px");
+    expect(sidebarSlot.style.clipPath).toBe("inset(-100vh 0 -100vh 0)");
     expect(sidebarSlot.style.transition).toContain("width 320ms");
+    expect(sidebarPanel.style.opacity).toBe("");
+    expect(sidebarPanel.style.pointerEvents).toBe("none");
     expect(sidebarPanel).toHaveClass("right-0");
     expect(sidebarPanel.style.transform).toBe("");
+  });
+
+  it("keeps a left-anchored sidebar right-aligned while animating back in", () => {
+    const { rerender, sidebarPanel } = renderLayout({
+      sidebarCollapsed: true,
+      sidebarContentAnchor: "left",
+    });
+
+    expect(sidebarPanel).toHaveClass("right-0");
+    expect(sidebarPanel).not.toHaveClass("left-0");
+
+    rerender(
+      <AppShellLayout
+        {...layoutProps({
+          sidebarCollapsed: false,
+          sidebarContentAnchor: "left",
+        })}
+      >
+        <main>Content</main>
+      </AppShellLayout>,
+    );
+
+    expect(sidebarPanel).toHaveClass("right-0");
+    expect(sidebarPanel).not.toHaveClass("left-0");
   });
 
   it("does not animate the reserved sidebar width while resizing", () => {
@@ -146,5 +185,16 @@ describe("AppShellLayout", () => {
     });
 
     expect(container.querySelector(".sidebar-resize-rail")).toBeNull();
+    expect(container.querySelector(".cursor-row-resize")).toBeNull();
+  });
+
+  it("can disable sidebar width resize while keeping height resize available", () => {
+    const { container } = renderLayout({
+      sidebarWidthResizeDisabled: true,
+    });
+
+    expect(container.querySelector(".sidebar-resize-rail")).toBeNull();
+    expect(container.querySelector(".cursor-row-resize")).toBeInTheDocument();
+    expect(container.querySelector(".cursor-nwse-resize")).toBeNull();
   });
 });

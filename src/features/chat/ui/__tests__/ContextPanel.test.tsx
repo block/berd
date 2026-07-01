@@ -106,7 +106,7 @@ describe("ContextPanel", () => {
     return button;
   };
   const getWorkspaceActionsButton = () =>
-    screen.getByRole("button", { name: /open workspace actions/i });
+    screen.getByRole("button", { name: /open project folder actions/i });
   const openWorkspaceActions = async (
     user: ReturnType<typeof userEvent.setup>,
   ) => {
@@ -180,7 +180,7 @@ describe("ContextPanel", () => {
     expect(screen.getByRole("tab", { name: /context/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /files/i })).toBeInTheDocument();
     expect(screen.getByText("Project")).toBeInTheDocument();
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Active worktree")).toBeInTheDocument();
     expect(screen.getByText("Desktop UX")).toBeInTheDocument();
     expect(screen.getAllByText("main").length).toBeGreaterThan(0);
     const changesSummary = screen.getAllByText((_, element) =>
@@ -232,7 +232,9 @@ describe("ContextPanel", () => {
     const contextTab = screen.getByRole("tab", { name: /context/i });
     const filesTab = screen.getByRole("tab", { name: /files/i });
     const divider = tabListFrame?.nextElementSibling;
-    const workspaceSection = screen.getByText("Workspace").closest("section");
+    const workspaceSection = screen
+      .getByText("Active worktree")
+      .closest("section");
     const projectName = screen.getByText("Desktop UX");
     const workspaceSelector = screen.getByRole("button", {
       name: /select worktree/i,
@@ -816,7 +818,7 @@ describe("ContextPanel", () => {
     await openWorkspaceActions(user);
 
     expect(screen.queryByText("Local")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Workspace")).toHaveLength(2);
+    expect(screen.getAllByText("Project folders").length).toBeGreaterThan(0);
     expect(screen.getByText("Remote")).toBeInTheDocument();
     expect(screen.queryByText("Git")).not.toBeInTheDocument();
     expect(

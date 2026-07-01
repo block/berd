@@ -281,6 +281,7 @@
 
   /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
   --sidebar: rgba(255, 255, 255, 0.8);
+  --backdrop-sidebar-panel: blur(18px) saturate(180%) brightness(1.02);
   --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -289,6 +290,29 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+  --sidebar-row-hover: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 3%,
+    transparent
+  );
+  --sidebar-row-active: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 4%,
+    transparent
+  );
+  --sidebar-prototype-nav-muted-fg: var(--color-gray-500);
+  --sidebar-prototype-nav-default-fg: var(--color-gray-700);
+  --sidebar-prototype-nav-active-fg: var(--color-gray-900);
+  --sidebar-prototype-nav-row-hover: color-mix(
+    in srgb,
+    var(--color-gray-900) 3%,
+    var(--color-white)
+  );
+  --sidebar-prototype-nav-row-active: color-mix(
+    in srgb,
+    var(--color-gray-900) 4%,
+    var(--color-white)
+  );
   --sidebar-section-action-bg: var(--muted);
   --sidebar-section-action-fg: var(--foreground);
   --sidebar-section-action-bg-hover: var(--foreground);
@@ -687,7 +711,8 @@
     transparent
   );
 
-  --sidebar: rgba(0, 0, 0, 0.8);
+  --sidebar: rgba(0, 0, 0, 0.62);
+  --backdrop-sidebar-panel: blur(18px) saturate(160%) brightness(1.08);
   --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -696,6 +721,21 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+  --sidebar-row-hover: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 5%,
+    transparent
+  );
+  --sidebar-row-active: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 7%,
+    transparent
+  );
+  --sidebar-prototype-nav-muted-fg: var(--color-gray-500);
+  --sidebar-prototype-nav-default-fg: var(--color-gray-200);
+  --sidebar-prototype-nav-active-fg: var(--color-white);
+  --sidebar-prototype-nav-row-hover: var(--color-gray-800);
+  --sidebar-prototype-nav-row-active: var(--color-gray-800);
   --sidebar-section-action-bg: var(--muted);
   --sidebar-section-action-fg: var(--foreground);
   --sidebar-section-action-bg-hover: var(--foreground);
@@ -709,7 +749,7 @@
   );
 
   /* Goose canvas + composer extensions — inverted. */
-  --canvas-base: #1a1a1a;
+  --canvas-base: #1f1f1f;
   --canvas-project-tint: #1a1d22;
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-composer-hover: rgba(255, 255, 255, 0.14);

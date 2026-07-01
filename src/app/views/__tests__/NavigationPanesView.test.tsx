@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -67,6 +68,7 @@ let mockActiveWorkspaceBySession: Record<
   string,
   { path: string; branch: string | null }
 > = {};
+let mockSessionStateById: Record<string, { hasUnread?: boolean }> = {};
 const mockLoadMoreSessions = vi.fn();
 const mockAcpSearchSessions = vi.fn();
 const mockGetGitState = vi.fn();
@@ -194,6 +196,33 @@ function NavigationPanesSelectionHarness({
   );
 }
 
+function PrototypeNavigationHarness({
+  onPrototypeSecondaryTargetChange,
+}: {
+  onPrototypeSecondaryTargetChange?: (
+    target: NavigationPanesViewProps["prototypeSecondaryTarget"],
+  ) => void;
+}) {
+  const [prototypeSecondaryTarget, setPrototypeSecondaryTarget] =
+    useState<NavigationPanesViewProps["prototypeSecondaryTarget"]>(null);
+
+  return (
+    <NavigationPanesView
+      {...sidebarProps({
+        activeView: "home",
+        projects: [mockProject({ name: "Project One" })],
+        prototypeMode: "hybrid-push-overlay",
+        prototypeSecondaryPush: true,
+        prototypeSecondaryTarget,
+        onPrototypeSecondaryTargetChange: (target) => {
+          setPrototypeSecondaryTarget(target);
+          onPrototypeSecondaryTargetChange?.(target);
+        },
+      })}
+    />
+  );
+}
+
 function mockElementRect(element: Element, top: number, bottom: number) {
   return mockRect(element, { top, bottom });
 }
@@ -270,14 +299,14 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
         messagesBySession: {},
         draftsBySession: mockDraftsBySession,
         nonEmptyDraftSessionIds: nonEmptyDraftSessionIds(),
-        sessionStateById: {},
+        sessionStateById: mockSessionStateById,
       }),
     {
       getState: () => ({
         messagesBySession: {},
         draftsBySession: mockDraftsBySession,
         nonEmptyDraftSessionIds: nonEmptyDraftSessionIds(),
-        sessionStateById: {},
+        sessionStateById: mockSessionStateById,
       }),
     },
   ),
@@ -343,6 +372,7 @@ describe("NavigationPanesView", () => {
     mockIsLoadingMoreSessions = false;
     mockSessionPageCursor = null;
     mockActiveWorkspaceBySession = {};
+    mockSessionStateById = {};
     mockLoadMoreSessions.mockReset();
     mockAcpSearchSessions.mockReset();
     mockAcpSearchSessions.mockResolvedValue([]);
@@ -1465,6 +1495,225 @@ describe("NavigationPanesView", () => {
     expect(settingsIndex).toBe(sessionHistoryIndex + 1);
   });
 
+  it("does not change prototype secondary navigation on top-level hover", () => {
+    const onPrototypeSecondaryTargetChange = vi.fn();
+    const { container } = renderSidebar({
+      projects: [mockProject({ color: "sage" })],
+      prototypeMode: "hybrid-push-overlay",
+      onPrototypeSecondaryTargetChange,
+    });
+
+    const projectIcon = container.querySelector(
+      '[data-project-color-swatch="project-1"]',
+    );
+    expect(projectIcon).toHaveAttribute("style", "color: currentcolor;");
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Project One" }));
+
+    expect(onPrototypeSecondaryTargetChange).not.toHaveBeenCalled();
+  });
+
+  it("previews prototype project secondary navigation on click without changing the active primary item", async () => {
+    const user = userEvent.setup();
+    const onPrototypeSecondaryTargetChange = vi.fn();
+    const onPrototypeSecondaryPreviewChange = vi.fn();
+    const onPrototypeSecondarySelect = vi.fn();
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject()],
+      prototypeMode: "hybrid-push-overlay",
+      onPrototypeSecondaryPreviewChange,
+      onPrototypeSecondaryTargetChange,
+      onPrototypeSecondarySelect,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(onPrototypeSecondaryTargetChange).toHaveBeenCalledWith({
+      kind: "project",
+      projectId: "project-1",
+    });
+    expect(onPrototypeSecondaryPreviewChange).toHaveBeenCalledWith(true);
+    expect(onPrototypeSecondarySelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      screen.getByRole("button", { name: "Project One" }),
+    ).not.toHaveAttribute("aria-current");
+  });
+
+  it("starts a project chat from the prototype project row action", async () => {
+    const user = userEvent.setup();
+    const onNewChatInProject = vi.fn();
+    const onPrototypeSecondaryTargetChange = vi.fn();
+
+    renderSidebar({
+      onNewChatInProject,
+      onPrototypeSecondaryTargetChange,
+      projects: [mockProject()],
+      prototypeMode: "hybrid-push-overlay",
+    });
+
+    await user.hover(screen.getByRole("button", { name: "Project One" }));
+    await user.click(
+      screen.getByRole("button", { name: "New chat in Project One" }),
+    );
+
+    expect(onPrototypeSecondaryTargetChange).toHaveBeenCalledWith({
+      kind: "project",
+      projectId: "project-1",
+    });
+    expect(onNewChatInProject).toHaveBeenCalledWith("project-1", {
+      reuseExistingDraft: true,
+    });
+  });
+
+  it("navigates prototype top-level items on click, not hover", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+
+    renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+      onNavigate,
+    });
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Agents" }));
+    expect(onNavigate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Agents" }));
+
+    expect(onNavigate).toHaveBeenCalledWith("agents");
+  });
+
+  it("shows and persists dismissal for the prototype navigation announcement", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+    });
+
+    expect(screen.getByText("Try the updated navigation")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Dismiss updated navigation announcement",
+      }),
+    );
+
+    expect(
+      screen.queryByText("Try the updated navigation"),
+    ).not.toBeInTheDocument();
+
+    unmount();
+    renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+    });
+
+    expect(
+      screen.queryByText("Try the updated navigation"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("removes the prototype nav underlay shadow when primary nav is collapsed", () => {
+    const { rerender } = renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+      prototypePrimaryCollapsed: true,
+      prototypeSecondaryTarget: { kind: "chats" },
+    });
+
+    expect(
+      screen.getByTestId("sidebar-prototype-glass-underlay"),
+    ).not.toHaveClass("shadow-sidebar-panel-elevated");
+
+    rerender(
+      <NavigationPanesView
+        {...sidebarProps({
+          prototypeMode: "hybrid-push-overlay",
+          prototypePrimaryCollapsed: false,
+          prototypeSecondaryTarget: { kind: "chats" },
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("sidebar-prototype-glass-underlay")).toHaveClass(
+      "shadow-sidebar-panel-elevated",
+    );
+  });
+
+  it("collapses the prototype primary nav when clicking outside navigation", () => {
+    const onPrototypePrimaryHoverChange = vi.fn();
+
+    renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+      onPrototypePrimaryHoverChange,
+    });
+
+    fireEvent.pointerEnter(screen.getByTestId("sidebar-primary-nav-panel"));
+    expect(onPrototypePrimaryHoverChange).toHaveBeenCalledWith(true);
+
+    fireEvent.pointerDown(document.body);
+
+    expect(onPrototypePrimaryHoverChange).toHaveBeenCalledWith(false);
+  });
+
+  it("collapses the prototype primary nav when clicking in secondary navigation", async () => {
+    const user = userEvent.setup();
+    const onPrototypePrimaryHoverChange = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryTarget: { kind: "chats" },
+      onPrototypePrimaryHoverChange,
+    });
+
+    fireEvent.pointerEnter(screen.getByTestId("sidebar-primary-nav-panel"));
+    expect(onPrototypePrimaryHoverChange).toHaveBeenCalledWith(true);
+
+    await user.click(screen.getByRole("button", { name: "Recovered Session" }));
+
+    expect(onPrototypePrimaryHoverChange).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps primary nav state unchanged when entering secondary and collapses when leaving all nav", () => {
+    const onPrototypePrimaryHoverChange = vi.fn();
+
+    renderSidebar({
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryTarget: { kind: "chats" },
+      onPrototypePrimaryHoverChange,
+    });
+
+    const primaryPanel = screen.getByTestId("sidebar-primary-nav-panel");
+    const secondaryPanel = screen.getByTestId(
+      "sidebar-prototype-secondary-panel",
+    ).parentElement?.parentElement;
+
+    if (!secondaryPanel) {
+      throw new Error("Prototype secondary nav wrapper was not rendered");
+    }
+
+    fireEvent.pointerEnter(secondaryPanel);
+    expect(onPrototypePrimaryHoverChange).not.toHaveBeenCalledWith(true);
+
+    fireEvent.pointerEnter(primaryPanel);
+    expect(onPrototypePrimaryHoverChange).toHaveBeenCalledWith(true);
+    onPrototypePrimaryHoverChange.mockClear();
+
+    fireEvent.pointerLeave(primaryPanel, { relatedTarget: secondaryPanel });
+    onPrototypePrimaryHoverChange.mockClear();
+
+    fireEvent.pointerLeave(secondaryPanel, { relatedTarget: document.body });
+    expect(onPrototypePrimaryHoverChange).toHaveBeenCalledWith(false);
+  });
+
   it("hides Doctor settings navigation when runtime config disables it", () => {
     setReadyRuntimeConfig({
       ...DEFAULT_RUNTIME_CONFIG,
@@ -2259,6 +2508,724 @@ describe("NavigationPanesView", () => {
     ).toHaveClass("overflow-y-auto");
   });
 
+  it("creates a prototype project chat group from the chat row actions menu", async () => {
+    const user = userEvent.setup();
+    seedSessions({
+      id: "project-seed-chat",
+      title: "Project seed chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "Project seed chat",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open actions for Project seed chat",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Create group" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Set group name" });
+    await user.type(within(dialog).getByLabelText("Group name"), "new group");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(
+      within(projectNavigation).getByRole("button", { name: "new group" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.queryByRole("dialog", { name: "Set group name" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("persists project chat groups through project metadata", async () => {
+    const user = userEvent.setup();
+    const onUpdateProjectChatGroups = vi.fn();
+    seedSessions({
+      id: "project-seed-chat",
+      title: "Project seed chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      onUpdateProjectChatGroups,
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "Project seed chat",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open actions for Project seed chat",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Create group" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Set group name" });
+    await user.type(within(dialog).getByLabelText("Group name"), "new group");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(onUpdateProjectChatGroups).toHaveBeenCalledWith("project-1", {
+      groups: [
+        expect.objectContaining({
+          name: "new group",
+          chatIds: ["project-seed-chat"],
+        }),
+      ],
+    });
+  });
+
+  it("renders persisted project chat groups from project metadata", () => {
+    seedSessions({
+      id: "project-seed-chat",
+      title: "Project seed chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      projects: [
+        mockProject({
+          name: "Project One",
+          chatGroups: {
+            groups: [
+              {
+                id: "project-1:chat-group:launch",
+                name: "launch",
+                chatIds: ["project-seed-chat"],
+              },
+            ],
+          },
+        }),
+      ],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+
+    expect(
+      within(projectNavigation).getByRole("button", { name: "launch" }),
+    ).toBeInTheDocument();
+    expect(
+      within(projectNavigation).getAllByRole("button", {
+        name: "Project seed chat",
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("starts a real project chat when clicking the empty project placeholder", async () => {
+    const user = userEvent.setup();
+    const onNewChatInProject = vi.fn();
+    const onSelectSession = vi.fn();
+
+    renderSidebar({
+      activeView: "home",
+      onNewChatInProject,
+      onSelectSession,
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    expect(
+      within(projectNavigation).getByTestId("prototype-project-new-chat-icon"),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(projectNavigation).getByRole("button", { name: "New chat" }),
+    );
+
+    expect(onNewChatInProject).toHaveBeenCalledWith("project-1", {
+      reuseExistingDraft: true,
+    });
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("does not show row actions on the empty project new chat placeholder", async () => {
+    const user = userEvent.setup();
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    await user.hover(
+      within(projectNavigation).getByRole("button", { name: "New chat" }),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Open actions for New chat" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the real project draft visible instead of adding fake placeholder chats", async () => {
+    const user = userEvent.setup();
+    const onNewChatInProject = vi.fn();
+    const onSelectSession = vi.fn();
+
+    seedSessions({
+      id: "project-draft",
+      title: "New chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 0,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "chat",
+      onNewChatInProject,
+      onSelectSession,
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    expect(
+      within(projectNavigation).getByTestId("prototype-project-new-chat-icon"),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(projectNavigation).getByRole("button", { name: "New chat" }),
+    );
+
+    expect(onSelectSession).toHaveBeenCalledWith("project-draft");
+    expect(onNewChatInProject).not.toHaveBeenCalled();
+  });
+
+  it("does not add a top-level placeholder when adding a group-level draft chat", async () => {
+    const user = userEvent.setup();
+    const createdSession: MockSession = {
+      id: "group-draft",
+      title: "New chat",
+      updatedAt: "2026-04-09T12:01:00.000Z",
+      messageCount: 0,
+      projectId: "project-1",
+    };
+    const onNewChatInProject = vi.fn(async () => {
+      seedSessions(...mockSessions, createdSession);
+      return createdSession as unknown as ChatSession;
+    });
+
+    seedSessions({
+      id: "project-seed-chat",
+      title: "Project seed chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "chat",
+      onNewChatInProject,
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "Project seed chat",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open actions for Project seed chat",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Create group" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Set group name" });
+    await user.type(within(dialog).getByLabelText("Group name"), "launch");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    const groupRow = within(projectNavigation).getByRole("button", {
+      name: "launch",
+    });
+    await user.hover(groupRow);
+    await user.click(screen.getByRole("button", { name: "New chat in group" }));
+
+    expect(onNewChatInProject).toHaveBeenCalledWith("project-1", {
+      reuseExistingDraft: false,
+    });
+    expect(
+      await within(projectNavigation).findAllByRole("button", {
+        name: "New chat",
+      }),
+    ).toHaveLength(1);
+    expect(
+      within(projectNavigation).queryByTestId(
+        "prototype-project-new-chat-icon",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show the top-level new chat placeholder when a project already has chats", () => {
+    const onNewChatInProject = vi.fn();
+
+    seedSessions({
+      id: "project-titled-chat",
+      title: "Draft launch plan",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 2,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "chat",
+      onNewChatInProject,
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+
+    expect(
+      within(projectNavigation).getByRole("button", {
+        name: "Draft launch plan",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(projectNavigation).queryByRole("button", { name: "New chat" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(projectNavigation).queryByTestId(
+        "prototype-project-new-chat-icon",
+      ),
+    ).not.toBeInTheDocument();
+    expect(onNewChatInProject).not.toHaveBeenCalled();
+  });
+
+  it("hides an inactive project draft when the project already has saved chats", () => {
+    seedSessions(
+      {
+        id: "project-draft",
+        title: "New chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 0,
+        projectId: "project-1",
+      },
+      {
+        id: "project-titled-chat",
+        title: "Draft launch plan",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 2,
+        projectId: "project-1",
+      },
+    );
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+
+    expect(
+      within(projectNavigation).queryByRole("button", { name: "New chat" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("deduplicates multiple unsent project draft rows", () => {
+    seedSessions(
+      {
+        id: "project-draft-1",
+        title: "New chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 0,
+        projectId: "project-1",
+      },
+      {
+        id: "project-draft-2",
+        title: "New chat",
+        updatedAt: "2026-04-09T12:02:00.000Z",
+        messageCount: 0,
+        projectId: "project-1",
+      },
+    );
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+
+    expect(
+      within(projectNavigation).getAllByRole("button", { name: "New chat" }),
+    ).toHaveLength(1);
+    expect(
+      within(projectNavigation).getByTestId("prototype-project-new-chat-icon"),
+    ).toBeInTheDocument();
+  });
+
+  it("replaces the project placeholder row with a real draft when composing from a project row", async () => {
+    const user = userEvent.setup();
+    const createdSession: MockSession = {
+      id: "project-draft",
+      title: "New chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 0,
+      projectId: "project-1",
+    };
+    const onNewChatInProject = vi.fn(async () => {
+      seedSessions(...mockSessions, createdSession);
+      return createdSession as unknown as ChatSession;
+    });
+
+    const renderProps = {
+      activeView: "chat",
+      onNewChatInProject,
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    } satisfies Partial<NavigationPanesViewProps>;
+    const { rerender } = renderSidebar(renderProps);
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+
+    expect(
+      within(projectNavigation).getByTestId("prototype-project-new-chat-icon"),
+    ).toBeInTheDocument();
+
+    await user.hover(screen.getByRole("button", { name: "Project One" }));
+    await user.click(
+      screen.getByRole("button", { name: "New chat in Project One" }),
+    );
+
+    await waitFor(() => {
+      expect(onNewChatInProject).toHaveBeenCalledWith("project-1", {
+        reuseExistingDraft: true,
+      });
+    });
+    rerender(<NavigationPanesView {...sidebarProps(renderProps)} />);
+
+    expect(
+      await within(projectNavigation).findAllByRole("button", {
+        name: "New chat",
+      }),
+    ).toHaveLength(1);
+    expect(
+      within(projectNavigation).getByTestId("prototype-project-new-chat-icon"),
+    ).toBeInTheDocument();
+  });
+
+  it("switches the prototype chats secondary panel between latest, week, unread, and archived", async () => {
+    const user = userEvent.setup();
+    const now = new Date();
+    const currentWeekStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const day = currentWeekStart.getDay();
+    currentWeekStart.setDate(
+      currentWeekStart.getDate() + (day === 0 ? -6 : 1 - day),
+    );
+    const currentWeekLabel = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+    }).format(currentWeekStart);
+
+    mockSessionStateById = {
+      "unread-chat": { hasUnread: true },
+    };
+    seedSessions(
+      {
+        id: "latest-chat",
+        title: "Latest Chat",
+        updatedAt: now.toISOString(),
+        messageCount: 3,
+      },
+      {
+        id: "unread-chat",
+        title: "Unread Chat",
+        updatedAt: now.toISOString(),
+        messageCount: 3,
+      },
+      {
+        id: "older-chat",
+        title: "Older Chat",
+        updatedAt: "2026-01-08T12:00:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "archived-chat",
+        title: "Archived Chat",
+        updatedAt: now.toISOString(),
+        archivedAt: now.toISOString(),
+        messageCount: 3,
+      },
+    );
+
+    renderSidebar({
+      activeView: "home",
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "chats" },
+    });
+
+    const chatsNavigation = screen.getByRole("navigation", { name: "Chats" });
+    expect(
+      within(chatsNavigation).getByRole("button", { name: "Latest Chat" }),
+    ).toBeInTheDocument();
+    expect(
+      within(chatsNavigation).queryByRole("button", { name: "Archived Chat" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(chatsNavigation).getByRole("button", {
+        name: "Filter chats: Latest",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Week" }));
+
+    expect(
+      within(chatsNavigation).getByText(currentWeekLabel),
+    ).toBeInTheDocument();
+    expect(
+      within(chatsNavigation).getByRole("button", { name: "Latest Chat" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(chatsNavigation).getByRole("button", {
+        name: "Filter chats: Week",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Unread" }));
+
+    expect(
+      within(chatsNavigation).getByRole("button", { name: "Unread Chat" }),
+    ).toBeInTheDocument();
+    expect(
+      within(chatsNavigation).queryByRole("button", { name: "Latest Chat" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(chatsNavigation).getByRole("button", {
+        name: "Filter chats: Unread",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Archived" }));
+
+    expect(
+      within(chatsNavigation).getByRole("button", { name: "Archived Chat" }),
+    ).toBeInTheDocument();
+    expect(
+      within(chatsNavigation).queryByRole("button", { name: "Unread Chat" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("archives real prototype project chats from the chat row delete action", async () => {
+    const user = userEvent.setup();
+    const onArchiveChat = vi.fn().mockResolvedValue(undefined);
+
+    seedSessions({
+      id: "project-seed-chat",
+      title: "audit type scale",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+      onArchiveChat,
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "audit type scale",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open actions for audit type scale",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    expect(onArchiveChat).toHaveBeenCalledWith("project-seed-chat");
+    await waitFor(() => {
+      expect(
+        within(projectNavigation).queryByRole("button", {
+          name: "audit type scale",
+        }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps real prototype project chats visible when delete archive fails", async () => {
+    const user = userEvent.setup();
+    const onArchiveChat = vi
+      .fn()
+      .mockResolvedValue({ ok: false, reason: "backend_archive_failed" });
+
+    seedSessions({
+      id: "project-seed-chat",
+      title: "audit type scale",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+      onArchiveChat,
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "audit type scale",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open actions for audit type scale",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(onArchiveChat).toHaveBeenCalledWith("project-seed-chat");
+    });
+    expect(
+      within(projectNavigation).getByRole("button", {
+        name: "audit type scale",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a previewed prototype secondary panel open when the chat row menu opens", async () => {
+    const user = userEvent.setup();
+    const onPrototypeSecondaryTargetChange = vi.fn();
+    seedSessions({
+      id: "project-seed-chat",
+      title: "Project seed chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderWithQueryClient(
+      <PrototypeNavigationHarness
+        onPrototypeSecondaryTargetChange={onPrototypeSecondaryTargetChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    const projectNavigation = await screen.findByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "Project seed chat",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open actions for Project seed chat",
+      }),
+    );
+    await screen.findByRole("menuitem", { name: "Create group" });
+
+    const secondaryWrapper = screen.getByTestId(
+      "sidebar-prototype-secondary-panel",
+    ).parentElement?.parentElement;
+    if (!(secondaryWrapper instanceof HTMLElement)) {
+      throw new Error("Prototype secondary panel wrapper was not rendered");
+    }
+
+    fireEvent.pointerLeave(secondaryWrapper, { relatedTarget: document.body });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    });
+
+    expect(onPrototypeSecondaryTargetChange).not.toHaveBeenCalledWith(null);
+  });
+
   it("scrolls externally activated chats into view", async () => {
     const requestAnimationFrameSpy = vi
       .spyOn(window, "requestAnimationFrame")
@@ -2459,7 +3426,7 @@ describe("NavigationPanesView", () => {
 
   it("keeps bulk archive actions disabled until archive callbacks settle", async () => {
     const user = userEvent.setup();
-    const archive = createDeferredPromise<void>();
+    const archive = createDeferredPromise<undefined>();
     const onArchiveChat = vi.fn(() => archive.promise);
     seedSessions(
       {

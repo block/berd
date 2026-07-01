@@ -76,6 +76,7 @@ export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
   "sidebar-detachable-chats";
 
 export const SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID = "sidebar-flat-chat-list";
+export const NAVIGATION_REFRESH_EXPERIMENT_ID = "navigation-refresh";
 export const SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY =
   "groupChatsByProject";
 export const DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT = true;
@@ -168,6 +169,11 @@ export const EXPERIMENT_DEFINITIONS = [
     id: SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
     titleKey: "experiments.sidebarDetachableChats.title",
     descriptionKey: "experiments.sidebarDetachableChats.description",
+  },
+  {
+    id: NAVIGATION_REFRESH_EXPERIMENT_ID,
+    titleKey: "experiments.navigationRefresh.title",
+    descriptionKey: "experiments.navigationRefresh.description",
   },
   {
     id: SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,

@@ -12,7 +12,7 @@ import { cn } from "@/shared/lib/cn";
 import { ContextPanel } from "./ContextPanel";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 
-const CP_PANEL_W = 315;
+const CP_PANEL_W = 250;
 export const CP_TOTAL_W = CP_PANEL_W;
 const CP_FADE_S = 0.15;
 const CP_REFLOW_MS = 200;

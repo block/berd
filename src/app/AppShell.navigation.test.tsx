@@ -169,6 +169,11 @@ vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
 }));
 
 vi.mock("@/app/views/NavigationPanesView", () => ({
+  NAV_PROTOTYPE_PANEL_GAP_PX: 0,
+  NAV_PROTOTYPE_PANEL_OVERLAP_PX: 1,
+  NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX: 48,
+  NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX: 230,
+  NAV_PROTOTYPE_SECONDARY_WIDTH_PX: 230,
   NavigationPanesView: ({
     onNavigate,
     onNewChat,

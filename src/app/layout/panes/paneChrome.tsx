@@ -3,6 +3,7 @@ import {
   forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useState,
@@ -199,11 +200,20 @@ export const PaneSurface = forwardRef<
     className?: string;
     dataAttributes?: Record<string, boolean | string | undefined>;
     fullHeight?: boolean;
+    glass?: boolean;
     testId: string;
     width?: number;
   }
 >(function PaneSurface(
-  { children, className, dataAttributes, fullHeight = false, testId, width },
+  {
+    children,
+    className,
+    dataAttributes,
+    fullHeight = false,
+    glass = true,
+    testId,
+    width,
+  },
   ref,
 ) {
   return (
@@ -211,11 +221,18 @@ export const PaneSurface = forwardRef<
       ref={ref}
       data-testid={testId}
       className={cn(
-        "relative flex flex-shrink-0 flex-col overflow-hidden rounded-md bg-sidebar backdrop-blur-md",
+        "relative flex flex-shrink-0 flex-col overflow-hidden rounded-md",
+        glass ? "bg-sidebar backdrop-blur-md" : "bg-transparent",
         fullHeight && "h-full",
         className,
       )}
       style={{
+        ...(glass
+          ? {
+              backdropFilter: "var(--backdrop-sidebar-panel)",
+              WebkitBackdropFilter: "var(--backdrop-sidebar-panel)",
+            }
+          : null),
         width,
       }}
       {...dataAttributes}
@@ -273,18 +290,24 @@ export function PaneLayoutFrame({
   className,
   gapPx,
   height,
+  onPointerEnter,
+  onPointerLeave,
   orientation,
   overlays,
   testId,
+  underlays,
   width,
 }: {
   children: ReactNode;
   className?: string;
   gapPx: number;
   height?: string;
+  onPointerEnter?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerLeave?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   orientation: "horizontal" | "vertical";
   overlays?: ReactNode;
   testId: string;
+  underlays?: ReactNode;
   width: number;
 }) {
   return (
@@ -292,10 +315,13 @@ export function PaneLayoutFrame({
       className={cn("relative h-full", className)}
       style={{ width, height }}
       data-testid={testId}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
     >
+      {underlays}
       <div
         className={cn(
-          "flex h-full gap-[var(--pane-layout-gap)]",
+          "relative z-10 flex h-full gap-[var(--pane-layout-gap)]",
           orientation === "horizontal" ? "flex-row" : "flex-col",
         )}
         style={

@@ -14,8 +14,14 @@ import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRe
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
-import { archiveProject } from "@/features/projects/api/projects";
-import type { ProjectInfo } from "@/features/projects/api/projects";
+import {
+  archiveProject,
+  updateProject,
+} from "@/features/projects/api/projects";
+import type {
+  ProjectChatGroupsMetadata,
+  ProjectInfo,
+} from "@/features/projects/api/projects";
 import {
   DEFAULT_SETTINGS_SECTION,
   resolveEnabledSettingsSection,
@@ -143,6 +149,7 @@ import {
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
+  NAVIGATION_REFRESH_EXPERIMENT_ID,
   PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
   SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
@@ -153,11 +160,21 @@ import {
   resolveSideBySideNavigationPaneSizesForAvailableWidth,
   resolveStackedNavigationPaneSizes,
 } from "./layout/panes/paneSizeRules";
+import {
+  NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX,
+  NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX,
+  NAV_PROTOTYPE_PANEL_GAP_PX,
+  NAV_PROTOTYPE_PANEL_OVERLAP_PX,
+  NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
+  type NavigationPrototypeMode,
+  type NavigationSecondaryTarget,
+} from "./views/NavigationPanesView";
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
 import {
   getProfileCapabilitySnapshot,
   useProfileCapabilities,
 } from "@/shared/profile/capabilities";
+import { resolveNavigationPrototypePrimaryCollapsed } from "./navigationPrototypeState";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -209,6 +226,16 @@ const parent = (
 
 function validateBooleanPreference(value: unknown, defaults: boolean) {
   return typeof value === "boolean" ? value : defaults;
+}
+
+function getNavigationSecondaryTargetKey(target: NavigationSecondaryTarget) {
+  if (!target) return "none";
+  if (target.kind === "settings") return "settings";
+  return target.kind === "project" ? `project:${target.projectId}` : "chats";
+}
+
+function getNavigationPrototypeMode(): NavigationPrototypeMode {
+  return "hybrid-push-overlay";
 }
 
 function isArchiveShortcutBlockedTarget(target: EventTarget | null) {
@@ -383,27 +410,161 @@ export function AppShell({
   const isDetachableSidebarChatsEnabled = Boolean(
     detachableSidebarChatsExperiment?.enabled,
   );
+  const navigationRefreshExperiment = useExperiment(
+    NAVIGATION_REFRESH_EXPERIMENT_ID,
+  );
+  const isNavigationPrototypeEnabled =
+    Boolean(navigationRefreshExperiment?.enabled) && !import.meta.env.VITEST;
+  const navigationPrototypeMode = getNavigationPrototypeMode();
+  const sessions = useChatSessionStore(selectSessions);
+  const activeSessionId = useChatSessionStore(selectActiveSessionId);
+  const [navigationSecondaryTarget, setNavigationSecondaryTarget] =
+    useState<NavigationSecondaryTarget>(null);
+  const [navigationSecondaryPreview, setNavigationSecondaryPreview] =
+    useState(false);
+  const [
+    navigationSecondarySelectionCommitted,
+    setNavigationSecondarySelectionCommitted,
+  ] = useState(false);
+  const [navigationPrimaryManualCollapsed] = usePersistedState(
+    "goose:navigation-prototype-primary-collapsed",
+    false,
+    validateBooleanPreference,
+  );
+  const [navigationPrimaryHovered, setNavigationPrimaryHovered] =
+    useState(false);
+  const handleNavigationSecondaryTargetChange = useCallback(
+    (target: NavigationSecondaryTarget) => {
+      if (
+        getNavigationSecondaryTargetKey(target) !==
+          getNavigationSecondaryTargetKey(navigationSecondaryTarget) ||
+        target === null
+      ) {
+        setNavigationSecondarySelectionCommitted(false);
+      }
+
+      setNavigationSecondaryTarget(target);
+    },
+    [navigationSecondaryTarget],
+  );
+  const handleNavigationSecondarySelect = useCallback(() => {
+    setNavigationSecondarySelectionCommitted(true);
+  }, []);
+  const resetNavigationSecondary = useCallback(() => {
+    setNavigationSecondaryTarget(null);
+    setNavigationSecondaryPreview(false);
+    setNavigationSecondarySelectionCommitted(false);
+  }, []);
+  const isEffectiveDetachableSidebarChatsEnabled =
+    isDetachableSidebarChatsEnabled && !isNavigationPrototypeEnabled;
   const paneDockingLayout = usePaneDockingLayout({
     baseNavigationWidth: sidebarWidth,
-    enabled: isDetachableSidebarChatsEnabled,
+    enabled: isEffectiveDetachableSidebarChatsEnabled,
   });
   const sidebarOuterGutterWidth = Math.max(
     0,
     sidebarPanelOuterWidth - sidebarWidth,
   );
-  const preferredSidebarDockedWidth =
-    isDetachableSidebarChatsEnabled && paneDockingLayout.chatListDock === "side"
+  const activeNavigationSession = activeSessionId
+    ? (sessions.find((session) => session.id === activeSessionId) ?? null)
+    : null;
+  const activeChatNavigationSecondaryTarget =
+    useMemo<NavigationSecondaryTarget>(() => {
+      if (activeView === "settings") return { kind: "settings" };
+      if (activeView !== "chat") return null;
+      if (activeNavigationSession?.projectId) {
+        return {
+          kind: "project",
+          projectId: activeNavigationSession.projectId,
+        };
+      }
+      return { kind: "chats" };
+    }, [activeNavigationSession?.projectId, activeView]);
+  const effectiveNavigationSecondaryTarget =
+    navigationSecondaryTarget ?? activeChatNavigationSecondaryTarget;
+  const effectiveNavigationSecondaryMatchesActiveChat =
+    getNavigationSecondaryTargetKey(effectiveNavigationSecondaryTarget) ===
+    getNavigationSecondaryTargetKey(activeChatNavigationSecondaryTarget);
+  const effectiveNavigationSecondaryPreview =
+    navigationSecondaryPreview &&
+    !effectiveNavigationSecondaryMatchesActiveChat;
+  const effectiveNavigationSecondaryCommitted =
+    navigationSecondarySelectionCommitted ||
+    effectiveNavigationSecondaryMatchesActiveChat;
+  const prototypeSecondaryOpen =
+    isNavigationPrototypeEnabled && effectiveNavigationSecondaryTarget !== null;
+  const prototypeChatSecondaryShouldStayDocked =
+    isNavigationPrototypeEnabled &&
+    activeView === "chat" &&
+    activeChatNavigationSecondaryTarget !== null;
+  const prototypeSecondaryFloating = navigationPrototypeMode === "manual-float";
+  const prototypeSecondaryPush =
+    prototypeSecondaryOpen &&
+    !prototypeSecondaryFloating &&
+    (!effectiveNavigationSecondaryPreview ||
+      prototypeChatSecondaryShouldStayDocked);
+  const prototypeSecondaryVisual =
+    prototypeSecondaryOpen && !prototypeSecondaryFloating;
+  const prototypePrimaryRestCollapsed =
+    isNavigationPrototypeEnabled &&
+    activeView === "chat" &&
+    !prototypeSecondaryOpen;
+  const prototypePrimaryDefaultExpanded =
+    isNavigationPrototypeEnabled &&
+    activeView === "home" &&
+    (!prototypeSecondaryOpen || effectiveNavigationSecondaryPreview);
+  const prototypePrimaryCollapsed =
+    navigationPrototypeMode === "manual-push"
+      ? navigationPrimaryManualCollapsed
+      : resolveNavigationPrototypePrimaryCollapsed({
+          mode: navigationPrototypeMode,
+          navigationPrimaryHovered,
+          prototypePrimaryDefaultExpanded,
+          prototypePrimaryRestCollapsed,
+          prototypeSecondaryOpen,
+        });
+  const prototypePrimaryWidth = prototypePrimaryCollapsed
+    ? NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX
+    : NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX;
+  const prototypePrimaryOverlaysContent =
+    navigationPrototypeMode === "manual-float" ||
+    prototypePrimaryRestCollapsed ||
+    (navigationPrototypeMode === "hybrid-push-overlay" &&
+      prototypeSecondaryOpen &&
+      (effectiveNavigationSecondaryCommitted ||
+        prototypeChatSecondaryShouldStayDocked));
+  const prototypeDockedPrimaryWidth = prototypePrimaryOverlaysContent
+    ? NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX
+    : prototypePrimaryWidth;
+  const prototypeSidebarDockedWidth =
+    prototypeDockedPrimaryWidth +
+    (prototypeSecondaryPush
+      ? NAV_PROTOTYPE_PANEL_GAP_PX +
+        NAV_PROTOTYPE_SECONDARY_WIDTH_PX -
+        NAV_PROTOTYPE_PANEL_OVERLAP_PX
+      : 0);
+  const prototypeSidebarVisualWidth =
+    prototypePrimaryWidth +
+    (prototypeSecondaryVisual
+      ? NAV_PROTOTYPE_PANEL_GAP_PX +
+        NAV_PROTOTYPE_SECONDARY_WIDTH_PX -
+        NAV_PROTOTYPE_PANEL_OVERLAP_PX
+      : 0);
+  const preferredSidebarDockedWidth = isNavigationPrototypeEnabled
+    ? prototypeSidebarDockedWidth
+    : isEffectiveDetachableSidebarChatsEnabled &&
+        paneDockingLayout.chatListDock === "side"
       ? paneDockingLayout.navigationPaneSizes.primaryNav +
         SIDEBAR_DETACHED_PANEL_GAP_PX +
         paneDockingLayout.navigationPaneSizes.chatList
-      : isDetachableSidebarChatsEnabled
+      : isEffectiveDetachableSidebarChatsEnabled
         ? getStackedNavigationPaneWidth(paneDockingLayout.navigationPaneSizes)
         : sidebarWidth;
   const responsiveSidebarDockedWidth = getResponsiveSidebarWidth(
     preferredSidebarDockedWidth,
     viewportWidth,
   );
-  const visibleNavigationPaneSizes = isDetachableSidebarChatsEnabled
+  const visibleNavigationPaneSizes = isEffectiveDetachableSidebarChatsEnabled
     ? paneDockingLayout.chatListDock === "side"
       ? resolveSideBySideNavigationPaneSizesForAvailableWidth(
           paneDockingLayout.navigationPaneSizes,
@@ -412,19 +573,23 @@ export function AppShell({
         )
       : resolveStackedNavigationPaneSizes(responsiveSidebarDockedWidth)
     : paneDockingLayout.navigationPaneSizes;
-  const sidebarDockedWidth =
-    isDetachableSidebarChatsEnabled && paneDockingLayout.chatListDock === "side"
+  const sidebarDockedWidth = isNavigationPrototypeEnabled
+    ? prototypeSidebarDockedWidth
+    : isEffectiveDetachableSidebarChatsEnabled &&
+        paneDockingLayout.chatListDock === "side"
       ? visibleNavigationPaneSizes.primaryNav +
         SIDEBAR_DETACHED_PANEL_GAP_PX +
         visibleNavigationPaneSizes.chatList
-      : isDetachableSidebarChatsEnabled
+      : isEffectiveDetachableSidebarChatsEnabled
         ? getStackedNavigationPaneWidth(visibleNavigationPaneSizes)
         : sidebarWidth;
   const sidebarDockedPanelOuterWidth =
-    sidebarDockedWidth + sidebarOuterGutterWidth;
+    (isNavigationPrototypeEnabled
+      ? prototypeSidebarVisualWidth
+      : sidebarDockedWidth) + sidebarOuterGutterWidth;
   const sidebarDockedOuterWidth = sidebarCollapsed
     ? 0
-    : sidebarDockedPanelOuterWidth;
+    : sidebarDockedWidth + sidebarOuterGutterWidth;
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
@@ -524,8 +689,6 @@ export function AppShell({
   const promoteChatSessionId = useChatStore((s) => s.promoteSessionId);
   const cleanupChatSession = useChatStore((s) => s.cleanupSession);
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
-  const sessions = useChatSessionStore(selectSessions);
-  const activeSessionId = useChatSessionStore(selectActiveSessionId);
   const activeProjectTint = useActiveProjectTint();
   const hasHydratedSessions = useChatSessionStore(selectHasHydratedSessions);
   const sessionsLoading = useChatSessionStore(selectSessionsLoading);
@@ -552,12 +715,13 @@ export function AppShell({
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
   const handleNavigateToSession = useCallback(
     (sessionId: string) => {
+      resetNavigationSecondary();
       setActiveSession(sessionId);
       setChatActiveSession(sessionId);
       setActiveView("chat");
       useChatStore.getState().markSessionRead(sessionId);
     },
-    [setActiveSession, setChatActiveSession],
+    [resetNavigationSecondary, setActiveSession, setChatActiveSession],
   );
 
   useCompletionNotifications(handleNavigateToSession);
@@ -594,11 +758,42 @@ export function AppShell({
   const retryFailedSessionsForProjectRef = useRef<
     (project: ProjectInfo) => void
   >(() => {});
+  const startEmptyChatForSelectedProjectRef = useRef<
+    (project: ProjectInfo) => void
+  >(() => {});
+  const projectChatGroupMutationVersionRef = useRef<Record<string, number>>({});
   const refreshProjectsAfterDialogSave = useCallback(
     (savedProject: ProjectInfo) => {
+      useProjectStore
+        .getState()
+        .replaceProjectsFromBackend(
+          useProjectStore
+            .getState()
+            .projects.some((project) => project.id === savedProject.id)
+            ? useProjectStore
+                .getState()
+                .projects.map((project) =>
+                  project.id === savedProject.id ? savedProject : project,
+                )
+            : [...useProjectStore.getState().projects, savedProject],
+        );
       retryFailedSessionsForProjectRef.current(savedProject);
     },
     [],
+  );
+
+  const handleProjectCreatedAfterDialogSave = useCallback(
+    (savedProject: ProjectInfo) => {
+      if (isNavigationPrototypeEnabled) {
+        setNavigationSecondaryTarget({
+          kind: "project",
+          projectId: savedProject.id,
+        });
+        setNavigationSecondarySelectionCommitted(true);
+        startEmptyChatForSelectedProjectRef.current(savedProject);
+      }
+    },
+    [isNavigationPrototypeEnabled],
   );
   const {
     closeCreateProjectDialog,
@@ -608,7 +803,10 @@ export function AppShell({
     handleProjectCreated,
     openCreateProjectDialog,
     openEditProjectDialog,
-  } = useProjectDialog({ onProjectCreated: refreshProjectsAfterDialogSave });
+  } = useProjectDialog({
+    onProjectCreated: handleProjectCreatedAfterDialogSave,
+    onProjectSaved: refreshProjectsAfterDialogSave,
+  });
   const startup = useAppStartup();
   const [startupLoadingMinElapsed, setStartupLoadingMinElapsed] = useState(
     () => startup.ready,
@@ -1588,6 +1786,7 @@ export function AppShell({
         providerId?: string;
         modelId?: string;
         modelName?: string;
+        reuseExistingDraft?: boolean;
       } = {},
     ) => {
       const tStart = performance.now();
@@ -1599,17 +1798,20 @@ export function AppShell({
       const chatState = useChatStore.getState();
       // New chats always start at the project default folder; worktree
       // selections in other chats are per-chat state and do not carry over.
-      const existingDraft = findExistingDraft({
-        sessions: sessionState.sessions,
-        activeSessionId: sessionState.activeSessionId,
-        draftsBySession: chatState.draftsBySession,
-        messagesBySession: chatState.messagesBySession,
-        sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
-        request: {
-          title,
-          projectId: project.id,
-        },
-      });
+      const existingDraft =
+        options.reuseExistingDraft === false
+          ? undefined
+          : findExistingDraft({
+              sessions: sessionState.sessions,
+              activeSessionId: sessionState.activeSessionId,
+              draftsBySession: chatState.draftsBySession,
+              messagesBySession: chatState.messagesBySession,
+              sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
+              request: {
+                title,
+                projectId: project.id,
+              },
+            });
 
       if (existingDraft) {
         clearSettingsSectionUrl();
@@ -2142,16 +2344,46 @@ export function AppShell({
   );
 
   const handleNewChatInProject = useCallback(
-    (projectId: string) => {
+    (
+      projectId: string,
+      options: {
+        reuseExistingDraft?: boolean;
+      } = {},
+    ) => {
       const project = projects.find((p) => p.id === projectId);
-      if (project) {
-        guardAppNavigation(() => {
-          void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
-        });
+      if (!project) {
+        return Promise.resolve(undefined);
       }
+
+      return new Promise<ChatSession | undefined>((resolve) => {
+        guardAppNavigation(
+          () => {
+            const draftOptions =
+              options.reuseExistingDraft === undefined
+                ? {}
+                : { reuseExistingDraft: options.reuseExistingDraft };
+            void createNewProjectDraft(
+              DEFAULT_CHAT_TITLE,
+              project,
+              draftOptions,
+            )
+              .then(resolve)
+              .catch((error) => {
+                console.error("Failed to start project chat:", error);
+                resolve(undefined);
+              });
+          },
+          () => {
+            resolve(undefined);
+          },
+        );
+      });
     },
     [createNewProjectDraft, projects, guardAppNavigation],
   );
+  startEmptyChatForSelectedProjectRef.current = (project: ProjectInfo) => {
+    void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+  };
 
   const handleArchiveProject = useCallback(
     async (projectId: string) => {
@@ -2160,6 +2392,58 @@ export function AppShell({
         fetchProjects();
       } catch {
         // best-effort
+      }
+    },
+    [fetchProjects],
+  );
+
+  const handleUpdateProjectChatGroups = useCallback(
+    async (projectId: string, chatGroups: ProjectChatGroupsMetadata | null) => {
+      const mutationVersion =
+        (projectChatGroupMutationVersionRef.current[projectId] ?? 0) + 1;
+      projectChatGroupMutationVersionRef.current[projectId] = mutationVersion;
+      const project = useProjectStore
+        .getState()
+        .projects.find((candidate) => candidate.id === projectId);
+      if (!project) return;
+
+      const optimisticProject = { ...project, chatGroups };
+      useProjectStore
+        .getState()
+        .replaceProjectsFromBackend(
+          useProjectStore
+            .getState()
+            .projects.map((candidate) =>
+              candidate.id === projectId ? optimisticProject : candidate,
+            ),
+        );
+
+      try {
+        const savedProject = await updateProject(project, { chatGroups });
+        if (
+          projectChatGroupMutationVersionRef.current[projectId] !==
+          mutationVersion
+        ) {
+          return;
+        }
+
+        useProjectStore
+          .getState()
+          .replaceProjectsFromBackend(
+            useProjectStore
+              .getState()
+              .projects.map((candidate) =>
+                candidate.id === projectId ? savedProject : candidate,
+              ),
+          );
+      } catch (error) {
+        console.error("Failed to update project chat groups:", error);
+        if (
+          projectChatGroupMutationVersionRef.current[projectId] ===
+          mutationVersion
+        ) {
+          void fetchProjects();
+        }
       }
     },
     [fetchProjects],
@@ -2208,6 +2492,7 @@ export function AppShell({
         section,
         capabilities,
       );
+      resetNavigationSecondary();
       if (activeView !== "settings" && activeView !== "design-system") {
         lastNonSecondaryViewRef.current = activeView;
       }
@@ -2218,16 +2503,23 @@ export function AppShell({
         void expandSidebar();
       }
     },
-    [activeView, capabilities, expandSidebar, sidebarCollapsed],
+    [
+      activeView,
+      capabilities,
+      expandSidebar,
+      resetNavigationSecondary,
+      sidebarCollapsed,
+    ],
   );
 
   const leaveSecondarySurface = useCallback(() => {
     if (returnToAgentBuilderSettingsTarget()) {
       return;
     }
+    resetNavigationSecondary();
     clearSettingsSectionUrl();
     setActiveView(lastNonSecondaryViewRef.current);
-  }, [returnToAgentBuilderSettingsTarget]);
+  }, [resetNavigationSecondary, returnToAgentBuilderSettingsTarget]);
 
   const selectSettingsSection = useCallback(
     (section: SectionId) => {
@@ -2243,6 +2535,7 @@ export function AppShell({
 
   const openDesignSystem = useCallback(() => {
     if (!isDesignSystemExplorerEnabled()) return;
+    resetNavigationSecondary();
     if (activeView !== "settings" && activeView !== "design-system") {
       lastNonSecondaryViewRef.current = activeView;
     }
@@ -2251,7 +2544,7 @@ export function AppShell({
     if (sidebarCollapsed) {
       void expandSidebar();
     }
-  }, [activeView, expandSidebar, sidebarCollapsed]);
+  }, [activeView, expandSidebar, resetNavigationSecondary, sidebarCollapsed]);
 
   const returnToSettingsFromDesignSystem = useCallback(() => {
     openSettings(activeSettingsSection);
@@ -2353,14 +2646,16 @@ export function AppShell({
 
   const handleArchiveChat = useCallback(
     async (sessionId: string) => {
-      await archiveChatWithCleanup(sessionId, {
+      return archiveChatWithCleanup(sessionId, {
         mode: "optimistic",
         reportErrors: true,
       });
     },
     [archiveChatWithCleanup],
   );
-  closeAgentBuilderSessionRef.current = handleArchiveChat;
+  closeAgentBuilderSessionRef.current = async (sessionId) => {
+    await handleArchiveChat(sessionId);
+  };
 
   const handleEditProject = useCallback(
     (projectId: string) => {
@@ -2422,6 +2717,7 @@ export function AppShell({
   const activateHomeSession = useCallback(
     (sessionId: string) => {
       guardAppNavigation(() => {
+        resetNavigationSecondary();
         if (homeSessionId === sessionId) {
           setHomeSessionId(null);
         }
@@ -2432,15 +2728,27 @@ export function AppShell({
         useChatStore.getState().markSessionRead(sessionId);
       });
     },
-    [homeSessionId, guardAppNavigation, setActiveSession, setChatActiveSession],
+    [
+      homeSessionId,
+      guardAppNavigation,
+      resetNavigationSecondary,
+      setActiveSession,
+      setChatActiveSession,
+    ],
   );
 
-  const selectSessionDirect = useCallback((id: string) => {
-    activateChatSession(id);
-    clearSettingsSectionUrl();
-    setActiveView("chat");
-    void loadSessionMessages(id);
-  }, []);
+  const selectSessionDirect = useCallback(
+    (id: string, options: { preserveNavigationSecondary?: boolean } = {}) => {
+      if (!options.preserveNavigationSecondary) {
+        resetNavigationSecondary();
+      }
+      activateChatSession(id);
+      clearSettingsSectionUrl();
+      setActiveView("chat");
+      void loadSessionMessages(id);
+    },
+    [resetNavigationSecondary],
+  );
   navigateAgentBuilderChatRef.current = selectSessionDirect;
 
   const handleSelectSession = useCallback(
@@ -2456,10 +2764,20 @@ export function AppShell({
         return;
       }
       guardAppNavigation(() => {
-        selectSessionDirect(id);
+        selectSessionDirect(id, {
+          preserveNavigationSecondary:
+            isNavigationPrototypeEnabled &&
+            effectiveNavigationSecondaryTarget?.kind === "chats",
+        });
       });
     },
-    [guardAppNavigation, isMultiWindowEnabled, selectSessionDirect],
+    [
+      effectiveNavigationSecondaryTarget,
+      guardAppNavigation,
+      isMultiWindowEnabled,
+      isNavigationPrototypeEnabled,
+      selectSessionDirect,
+    ],
   );
 
   const handleSelectSearchResult = useCallback(
@@ -2498,6 +2816,7 @@ export function AppShell({
         return;
       }
       guardAppNavigation(() => {
+        resetNavigationSecondary();
         replaceNextNavigationEntryRef.current = false;
         setAutomationsRoute({
           surface: "detail",
@@ -2510,13 +2829,19 @@ export function AppShell({
         setActiveView("automations");
       });
     },
-    [guardAppNavigation, isAutomationsFeatureEnabled, setActiveSession],
+    [
+      guardAppNavigation,
+      isAutomationsFeatureEnabled,
+      resetNavigationSecondary,
+      setActiveSession,
+    ],
   );
 
   const handleNavigate = useCallback(
     (view: AppView) => {
       guardAppNavigation(() => {
         resetGlobalComposerTransition();
+        resetNavigationSecondary();
         if (view === "automations" && !isAutomationsFeatureEnabled) {
           setActiveView("home");
           return;
@@ -2556,6 +2881,7 @@ export function AppShell({
       openDesignSystem,
       openSettings,
       guardAppNavigation,
+      resetNavigationSecondary,
       resetGlobalComposerTransition,
       setActiveSession,
       isAutomationsFeatureEnabled,
@@ -2667,6 +2993,7 @@ export function AppShell({
   const applyNavigationLocation = useCallback(
     (location: AppNavigationLocation) => {
       navigationHistoryRef.current.isApplying = true;
+      resetNavigationSecondary();
 
       if (location.view === "settings") {
         setActiveSettingsSection(location.settingsSection);
@@ -2758,6 +3085,7 @@ export function AppShell({
       expandSidebar,
       isAutomationsFeatureEnabled,
       isBuilderbotSurfaceEnabled,
+      resetNavigationSecondary,
       setActiveSession,
       setChatActiveSession,
       sidebarCollapsed,
@@ -3261,6 +3589,7 @@ export function AppShell({
           width: sidebarWidth,
           isResizing,
           onSettingsClick: () => handleNavigate("settings"),
+          onOpenSettingsSection: openSettings,
           onSettingsBack: leaveSecondarySurface,
           onSettingsSectionChange: selectSettingsSection,
           onDesignSystemBack: returnToSettingsFromDesignSystem,
@@ -3279,6 +3608,7 @@ export function AppShell({
           onCreateProject: () => openCreateProjectDialog(),
           onEditProject: handleEditProject,
           onArchiveProject: handleArchiveProject,
+          onUpdateProjectChatGroups: handleUpdateProjectChatGroups,
           onArchiveChat: handleArchiveChat,
           onRenameChat: handleRenameChat,
           onForkChat: handleForkChat,
@@ -3291,7 +3621,8 @@ export function AppShell({
           activeSettingsSection,
           activeDesignSystemSection,
           activeSessionId,
-          detachableSessionListEnabled: isDetachableSidebarChatsEnabled,
+          detachableSessionListEnabled:
+            isEffectiveDetachableSidebarChatsEnabled,
           onPaneResizeBegin: paneDockingLayout.beginNavigationPaneResize,
           onPaneResizeEnd: paneDockingLayout.endNavigationPaneResize,
           onPaneResize: paneDockingLayout.resizeNavigationPane,
@@ -3300,14 +3631,32 @@ export function AppShell({
           onSessionListDragRelease: paneDockingLayout.commitPaneDragRelease,
           getSessionListDragPreviewDock:
             paneDockingLayout.getPaneDragPreviewDock,
+          prototypeMode: isNavigationPrototypeEnabled
+            ? navigationPrototypeMode
+            : null,
+          prototypePrimaryCollapsed,
+          onPrototypePrimaryHoverChange: setNavigationPrimaryHovered,
+          prototypeSecondaryTarget: effectiveNavigationSecondaryTarget,
+          onPrototypeSecondaryTargetChange:
+            handleNavigationSecondaryTargetChange,
+          onPrototypeSecondarySelect: handleNavigationSecondarySelect,
+          prototypeSecondaryPreview: effectiveNavigationSecondaryPreview,
+          onPrototypeSecondaryPreviewChange: setNavigationSecondaryPreview,
+          prototypePrimaryWidth,
+          prototypeSecondaryWidth: NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
+          prototypeSecondaryFloating,
+          prototypePrimaryOverlaysContent,
+          prototypeSecondaryPush,
           projects,
           className: "h-full rounded-md",
         }}
         sidebarCollapsed={sidebarCollapsed}
+        sidebarContentAnchor={isNavigationPrototypeEnabled ? "left" : "right"}
         sidebarDisableWidthTransition={
           paneDockingLayout.suppressNavigationWidthTransition
         }
-        sidebarResizeDisabled={isDetachableSidebarChatsEnabled}
+        sidebarResizeDisabled={isEffectiveDetachableSidebarChatsEnabled}
+        sidebarWidthResizeDisabled={isNavigationPrototypeEnabled}
         sidebarOuterWidth={sidebarDockedOuterWidth}
         sidebarPanelOuterWidth={sidebarDockedPanelOuterWidth}
         isResizing={isResizing}

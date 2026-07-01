@@ -205,6 +205,10 @@
       "description": "Muestra el ajuste Agrupar chats por proyecto y permite una lista plana de chats en la barra lateral ordenada por actividad reciente.",
       "title": "Lista plana de chats en barra lateral"
     },
+    "navigationRefresh": {
+      "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
+      "title": "Navegación renovada"
+    },
     "paneJumpNavigation": {
       "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
       "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",

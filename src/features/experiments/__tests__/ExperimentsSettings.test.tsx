@@ -129,6 +129,20 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("switch", {
+        name: i18n.t("experiments.navigationRefresh.title", {
+          ns: "settings",
+        }),
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        i18n.t("experiments.navigationRefresh.description", {
+          ns: "settings",
+        }),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
         name: i18n.t("experiments.sidebarFlatChatList.title", {
           ns: "settings",
         }),

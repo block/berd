@@ -8,10 +8,12 @@ interface OpenProjectDialogOptions {
 
 interface UseProjectDialogOptions {
   onProjectCreated?: (project: ProjectInfo) => void;
+  onProjectSaved?: (project: ProjectInfo) => void;
 }
 
 export function useProjectDialog({
   onProjectCreated,
+  onProjectSaved,
 }: UseProjectDialogOptions = {}) {
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectInitialWorkingDir, setCreateProjectInitialWorkingDir] =
@@ -49,12 +51,17 @@ export function useProjectDialog({
 
   const handleProjectCreated = useCallback(
     (project: ProjectInfo) => {
-      onProjectCreated?.(project);
-      pendingProjectCreatedRef.current?.(project.id);
+      const isNewProject = editingProject === null;
+
+      onProjectSaved?.(project);
+      if (isNewProject) {
+        onProjectCreated?.(project);
+        pendingProjectCreatedRef.current?.(project.id);
+      }
       pendingProjectCreatedRef.current = null;
       setCreateProjectInitialWorkingDir(null);
     },
-    [onProjectCreated],
+    [editingProject, onProjectCreated, onProjectSaved],
   );
 
   return {

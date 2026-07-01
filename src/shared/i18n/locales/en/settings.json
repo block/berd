@@ -205,6 +205,10 @@
       "description": "Shows the Group Chats by Project setting and allows a flat recency-sorted sidebar chat list.",
       "title": "Flat sidebar chat list"
     },
+    "navigationRefresh": {
+      "description": "Try the refreshed primary and secondary navigation for projects, chats, and settings.",
+      "title": "Refreshed navigation"
+    },
     "paneJumpNavigation": {
       "description": "Use Ctrl+; to jump between visible app panes with badge letters or h/j/k/l.",
       "shortcutDescription": "Choose the prefix that opens pane jump mode.",
@@ -309,7 +313,7 @@
     "terminalFallback": {
       "change": "Change",
       "chooseDialogTitle": "Choose terminal fallback folder",
-      "description": "Default terminal location when there is no selected workspace folder.",
+      "description": "Default terminal location when there is no selected project folder.",
       "label": "Terminal folder",
       "loading": "Loading...",
       "reset": "Reset",
@@ -495,7 +499,7 @@
   "providers": {
     "agents": {
       "applyUpdates": "Update",
-      "description": "Goose is built into your workspace. Install others to add new agents.",
+      "description": "Goose is built into Block. Install others to add new agents.",
       "errors": {
         "genericSetupFailure": "Setup hit a snag.",
         "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal.",

@@ -80,13 +80,13 @@
     "actions": {
       "chooseCreateAction": "Choose create action",
       "fetchRemoteStatus": "Fetch remote status",
-      "openWorkspaceMenu": "Open workspace actions",
+      "openWorkspaceMenu": "Open project folder actions",
       "refreshLocalStatus": "Refresh local status",
       "refreshGitStatus": "Refresh git status"
     },
     "createDialog": {
       "baseBranch": "Base branch",
-      "branchDescription": "Create a new branch and switch this workspace to it.",
+      "branchDescription": "Create a new branch and switch the active worktree to it.",
       "branchError": "Failed to create branch {{branch}}.",
       "branchName": "Branch name",
       "branchNamePlaceholder": "feature/my-branch",
@@ -173,7 +173,7 @@
       "local": "Local",
       "project": "Project",
       "remote": "Remote",
-      "workspace": "Workspace"
+      "workspace": "Project folders"
     },
     "states": {
       "detached": "detached",
@@ -194,7 +194,7 @@
       "artifacts": "Artifacts",
       "changes": "Changes",
       "changesOnBranch": "on",
-      "workspace": "Workspace"
+      "workspace": "Active worktree"
     }
   },
   "files": {

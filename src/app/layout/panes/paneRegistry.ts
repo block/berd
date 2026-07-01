@@ -53,9 +53,9 @@ export const APP_SHELL_PANE_REGISTRY = {
     defaultAnchor: { kind: "window", edge: "right" },
     width: {
       kind: "range",
-      minPx: 280,
+      minPx: 250,
       maxPx: 1024,
-      defaultPx: 280,
+      defaultPx: 250,
     },
     height: { kind: "fill" },
   },

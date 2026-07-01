@@ -21,6 +21,18 @@ interface UseAttachmentDropTargetOptions {
 
 const NATIVE_DROP_EXPECTED_MS = 1000;
 const NATIVE_DROP_HANDLED_SUPPRESSION_MS = 500;
+const INTERNAL_APP_DRAG_DATA_TYPE = "application/x-goose-internal-drag";
+
+function isInternalAppDrag(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types).includes(INTERNAL_APP_DRAG_DATA_TYPE);
+}
+
+function isInternalAppDragActive() {
+  return (
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.gooseInternalDrag != null
+  );
+}
 
 function hasDraggedFiles(dataTransfer: DataTransfer) {
   return (
@@ -185,6 +197,12 @@ export function useAttachmentDropTarget({
 
       const dataTransfer = event.dataTransfer;
       if (!dataTransfer) return;
+      if (isInternalAppDrag(dataTransfer) || isInternalAppDragActive()) {
+        event.preventDefault();
+        dragDepthRef.current = 0;
+        setIsAttachmentDragOver(false);
+        return;
+      }
       const draggedFiles = hasDraggedFiles(dataTransfer);
       if (disabled || !draggedFiles) {
         return;
@@ -201,6 +219,12 @@ export function useAttachmentDropTarget({
     (event: AttachmentDragEvent) => {
       const dataTransfer = event.dataTransfer;
       if (!dataTransfer) return;
+      if (isInternalAppDrag(dataTransfer) || isInternalAppDragActive()) {
+        event.preventDefault();
+        dragDepthRef.current = 0;
+        setIsAttachmentDragOver(false);
+        return;
+      }
       const draggedFiles = hasDraggedFiles(dataTransfer);
       if (disabled || !draggedFiles) {
         return;
@@ -235,6 +259,12 @@ export function useAttachmentDropTarget({
     (event: AttachmentDragEvent) => {
       const dataTransfer = event.dataTransfer;
       if (!dataTransfer) return;
+      if (isInternalAppDrag(dataTransfer) || isInternalAppDragActive()) {
+        event.preventDefault();
+        dragDepthRef.current = 0;
+        setIsAttachmentDragOver(false);
+        return;
+      }
       const draggedFiles = hasDraggedFiles(dataTransfer);
       if (disabled || !draggedFiles) {
         return;
@@ -340,6 +370,14 @@ export function useAttachmentDropTarget({
             dragDepthRef.current = 0;
             setIsAttachmentDragOver(false);
             nativeDropExpectedUntilRef.current = 0;
+            return;
+          }
+
+          if (isInternalAppDragActive()) {
+            clearNativeDragWatchdog();
+            dragDepthRef.current = 0;
+            nativeDropExpectedUntilRef.current = 0;
+            setIsAttachmentDragOver(false);
             return;
           }
 
