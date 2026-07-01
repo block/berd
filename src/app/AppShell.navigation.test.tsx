@@ -579,6 +579,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "~/goose artifacts",
       {
+        deferProviderSetup: true,
         modelId: undefined,
         projectId: undefined,
       },
@@ -610,6 +611,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "~/goose artifacts",
       {
+        deferProviderSetup: true,
         modelId: undefined,
         projectId: undefined,
       },
@@ -633,6 +635,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "~/goose artifacts",
       {
+        deferProviderSetup: true,
         modelId: undefined,
         projectId: undefined,
       },
@@ -733,6 +736,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "/Users/test/goose artifacts test",
       {
+        deferProviderSetup: true,
         modelId: undefined,
         projectId: undefined,
       },
@@ -2321,6 +2325,7 @@ describe("AppShell global navigation", () => {
         "goose",
         "~/goose artifacts",
         {
+          deferProviderSetup: false,
           modelId: "goose-model",
           projectId: undefined,
         },
@@ -2356,6 +2361,7 @@ describe("AppShell global navigation", () => {
         "goose",
         "~/goose artifacts",
         {
+          deferProviderSetup: true,
           modelId: undefined,
           projectId: undefined,
         },

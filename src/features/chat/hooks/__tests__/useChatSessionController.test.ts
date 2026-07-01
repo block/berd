@@ -1711,6 +1711,36 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("uses the selected provider and model during send-time preparation", async () => {
+    useChatSessionStore.getState().patchSession("session-1", {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+    mockAcpPrepareSession.mockReset();
+    mockAcpSetModel.mockReset();
+    mockAcpPrepareSession.mockResolvedValue(undefined);
+    mockAcpSetModel.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    await act(async () => {
+      await result.current.handleSend("use the selected model");
+    });
+
+    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "anthropic",
+      "/tmp/project",
+    );
+    expect(mockAcpSetModel).toHaveBeenCalledWith(
+      "session-1",
+      "claude-sonnet-4",
+    );
+  });
+
   it("does not let send-time preparation restore a stale model after a newer selection", async () => {
     const firstCwd = deferred<string>();
     mockResolveSessionCwd.mockReset();

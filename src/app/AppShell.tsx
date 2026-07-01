@@ -1180,6 +1180,8 @@ export function AppShell({
             {
               projectId,
               modelId: resolvedSessionModelPreference.modelId,
+              deferProviderSetup:
+                resolvedSessionModelPreference.modelId == null,
             },
           ).then(({ sessionId, configOptionsSnapshot }) => ({
             sessionId,

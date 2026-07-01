@@ -407,6 +407,93 @@ describe("acpCreateSession", () => {
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
 
+  it("can defer provider setup until a model is selected", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(
+      acpCreateSession("anthropic", "/tmp/project", {
+        deferProviderSetup: true,
+      }),
+    ).resolves.toEqual({
+      sessionId: "acp-session-1",
+      configOptionsSnapshot: {
+        model: null,
+        reasoningEffort: null,
+      },
+    });
+
+    expect(mockNewSession).toHaveBeenCalledWith(
+      "/tmp/project",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+    expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(false);
+  });
+
+  it("does not defer provider setup when a model is provided", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("anthropic", "/tmp/project", {
+      modelId: "claude-sonnet-4",
+      deferProviderSetup: true,
+    });
+
+    expect(mockNewSession).toHaveBeenCalledWith(
+      "/tmp/project",
+      "anthropic",
+      undefined,
+      undefined,
+    );
+    expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "anthropic");
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "acp-session-1",
+      "claude-sonnet-4",
+    );
+    expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
+  it("activates a deferred session through load, provider setup, and model setup", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession, acpPrepareSession, acpSetModel } = await import(
+      "../acp"
+    );
+
+    const { sessionId } = await acpCreateSession("anthropic", "/tmp/project", {
+      deferProviderSetup: true,
+    });
+
+    await acpPrepareSession(sessionId, "anthropic", "/tmp/project");
+    await acpSetModel(sessionId, "claude-sonnet-4");
+
+    expect(mockLoadSession).toHaveBeenCalledWith(
+      "acp-session-1",
+      "/tmp/project",
+    );
+    expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "anthropic");
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "acp-session-1",
+      "claude-sonnet-4",
+    );
+    expect(mockLoadSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetProvider.mock.invocationCallOrder[0],
+    );
+    expect(mockSetProvider.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetModel.mock.invocationCallOrder[0],
+    );
+    expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
   it("returns the latest config snapshot from session creation setup", async () => {
     mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
     mockSetProvider.mockResolvedValueOnce({

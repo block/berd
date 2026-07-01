@@ -545,7 +545,12 @@ describe("sessions.create", () => {
     expect(mocks.acpCreateSession).toHaveBeenCalledWith(
       "goose",
       "/resolved/cwd",
-      { personaId: "agent-7", modelId: "model-9", projectId: undefined },
+      {
+        personaId: "agent-7",
+        modelId: "model-9",
+        projectId: undefined,
+        deferProviderSetup: false,
+      },
     );
     expect(result).toEqual({
       session_id: "session-new",
@@ -608,7 +613,12 @@ describe("sessions.create", () => {
     expect(mocks.acpCreateSession).toHaveBeenCalledWith(
       "codex-acp",
       "/resolved/cwd",
-      expect.anything(),
+      {
+        personaId: undefined,
+        modelId: undefined,
+        projectId: undefined,
+        deferProviderSetup: false,
+      },
     );
   });
 

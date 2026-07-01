@@ -133,6 +133,7 @@ Result:
       providerId,
       personaId: persona?.id,
       modelId: args.model_id,
+      deferProviderSetup: false,
     });
     sendPromptInBackground(
       session.id,

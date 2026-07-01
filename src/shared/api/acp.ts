@@ -52,6 +52,7 @@ export interface AcpCreateSessionOptions {
   personaId?: string;
   projectId?: string;
   modelId?: string | null;
+  deferProviderSetup?: boolean;
 }
 
 export interface AcpSessionConfigApplyOptions {
@@ -302,9 +303,11 @@ export async function acpCreateSession(
   workingDir: string,
   options: AcpCreateSessionOptions = {},
 ): Promise<AcpCreateSessionResult> {
+  const deferProviderSetup =
+    options.deferProviderSetup === true && !options.modelId;
   const response = await directAcp.newSession(
     workingDir,
-    providerId,
+    deferProviderSetup ? undefined : providerId,
     options.projectId,
     options.personaId,
   );
@@ -314,27 +317,32 @@ export async function acpCreateSession(
     sessionId: shortLogId(sessionId),
     providerId,
     requestedModelId: options.modelId ?? null,
+    providerSetupDeferred: deferProviderSetup,
     hasReasoningEffortSnapshot: Boolean(configOptionsSnapshot.reasoningEffort),
     ...reasoningEffortConfigLogFields(
       "reasoningEffort",
       configOptionsSnapshot.reasoningEffort,
     ),
   });
-  configOptionsSnapshot = mergeSessionConfigSnapshots(
-    configOptionsSnapshot,
-    await directAcp.setProvider(sessionId, providerId),
-  );
-  logReasoningEffortInfo("acpCreateSession setProvider complete", {
-    sessionId: shortLogId(sessionId),
-    providerId,
-    requestedModelId: options.modelId ?? null,
-    hasReasoningEffortSnapshot: Boolean(configOptionsSnapshot.reasoningEffort),
-    ...reasoningEffortConfigLogFields(
-      "reasoningEffort",
-      configOptionsSnapshot.reasoningEffort,
-    ),
-  });
-  sessionRegistry.registerPreparedSession(sessionId, providerId, workingDir);
+  if (!deferProviderSetup) {
+    configOptionsSnapshot = mergeSessionConfigSnapshots(
+      configOptionsSnapshot,
+      await directAcp.setProvider(sessionId, providerId),
+    );
+    logReasoningEffortInfo("acpCreateSession setProvider complete", {
+      sessionId: shortLogId(sessionId),
+      providerId,
+      requestedModelId: options.modelId ?? null,
+      hasReasoningEffortSnapshot: Boolean(
+        configOptionsSnapshot.reasoningEffort,
+      ),
+      ...reasoningEffortConfigLogFields(
+        "reasoningEffort",
+        configOptionsSnapshot.reasoningEffort,
+      ),
+    });
+    sessionRegistry.registerPreparedSession(sessionId, providerId, workingDir);
+  }
   if (options.modelId) {
     configOptionsSnapshot = mergeSessionConfigSnapshots(
       configOptionsSnapshot,

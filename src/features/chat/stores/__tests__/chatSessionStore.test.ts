@@ -448,6 +448,7 @@ describe("chatSessionStore", () => {
           projectId: "project-1",
           personaId: "persona-1",
           modelId: "gpt-4.1",
+          deferProviderSetup: false,
         },
       );
       expect(session).toMatchObject({
@@ -485,6 +486,16 @@ describe("chatSessionStore", () => {
         workingDir: "/tmp/project",
       });
 
+      expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+        "openai",
+        "/tmp/project",
+        {
+          projectId: undefined,
+          personaId: undefined,
+          modelId: undefined,
+          deferProviderSetup: true,
+        },
+      );
       expect(session.reasoningEffort).toEqual({
         configId: "thinking_effort",
         currentValue: "medium",

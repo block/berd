@@ -147,6 +147,7 @@ interface CreateSessionOpts {
   workingDir?: string;
   modelId?: string;
   modelName?: string;
+  deferProviderSetup?: boolean;
 }
 
 interface ChatSessionStoreActions {
@@ -378,6 +379,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         personaId: opts.personaId,
         modelId: opts.modelId,
         projectId: opts.projectId,
+        deferProviderSetup: opts.deferProviderSetup ?? opts.modelId == null,
       },
     );
     logReasoningEffortInfo("createSession acp resolved", {
