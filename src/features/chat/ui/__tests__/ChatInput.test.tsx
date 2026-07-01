@@ -778,7 +778,7 @@ describe("ChatInput", () => {
     expect(input).toHaveValue("");
   });
 
-  it("selecting a persona @mention creates a sticky assistant chip and removes the mention text", async () => {
+  it("selecting a persona @mention creates a sticky assistant chip and completes the mention text", async () => {
     const user = userEvent.setup();
     render(<StatefulChatInput />);
 
@@ -786,7 +786,7 @@ describe("ChatInput", () => {
     await user.type(input, "@Rev");
     await user.click(screen.getByRole("option", { name: /reviewer/i }));
 
-    expect(input).toHaveValue("");
+    expect(input).toHaveValue("@Reviewer ");
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
@@ -827,16 +827,21 @@ describe("ChatInput", () => {
     await user.type(input, "check this");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("check this", "reviewer", undefined, {
-      chips: [
-        {
-          id: "reviewer",
-          label: "Reviewer",
-          agentRole: "active",
-          type: "agent",
-        },
-      ],
-    });
+    expect(onSend).toHaveBeenCalledWith(
+      "@Reviewer check this",
+      "reviewer",
+      undefined,
+      {
+        chips: [
+          {
+            id: "reviewer",
+            label: "Reviewer",
+            agentRole: "active",
+            type: "agent",
+          },
+        ],
+      },
+    );
   });
 
   it("keeps multiple persona @mentions as visible agent chips", async () => {
@@ -862,7 +867,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSend).toHaveBeenCalledWith(
-      "compare these approaches",
+      "@Reviewer @Solo compare these approaches",
       "builtin-solo",
       undefined,
       {
@@ -2026,7 +2031,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSend).toHaveBeenCalledWith(
-      "now with reviewer",
+      "@Reviewer now with reviewer",
       "reviewer",
       undefined,
       {
@@ -2040,7 +2045,7 @@ describe("ChatInput", () => {
           },
           { label: "code-review", type: "skill" },
         ],
-        displayText: "now with reviewer",
+        displayText: "@Reviewer now with reviewer",
       },
     );
   });
@@ -2515,16 +2520,21 @@ describe("ChatInput", () => {
     await user.type(input, "hello");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined, {
-      chips: [
-        {
-          id: "reviewer",
-          label: "Reviewer",
-          agentRole: "active",
-          type: "agent",
-        },
-      ],
-    });
+    expect(onSend).toHaveBeenCalledWith(
+      "@Reviewer hello",
+      "reviewer",
+      undefined,
+      {
+        chips: [
+          {
+            id: "reviewer",
+            label: "Reviewer",
+            agentRole: "active",
+            type: "agent",
+          },
+        ],
+      },
+    );
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 

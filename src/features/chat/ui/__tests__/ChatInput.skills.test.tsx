@@ -146,7 +146,7 @@ describe("ChatInput skill mentions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows skills in slash results, removes the command text, and creates a skill chip", async () => {
+  it("shows skills in slash results, preserves the command text, and creates a skill chip", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
 
@@ -165,7 +165,28 @@ describe("ChatInput skill mentions", () => {
       await screen.findByRole("option", { name: /code-review/i }),
     );
 
-    expect(input).toHaveValue("");
+    expect(input).toHaveValue("/code-review ");
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+  });
+
+  it("preserves slash command text when selecting a skill later in the prompt", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "do a /code");
+
+    await user.click(
+      await screen.findByRole("option", { name: /code-review/i }),
+    );
+
+    expect(input).toHaveValue("do a /code-review ");
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
@@ -200,7 +221,7 @@ describe("ChatInput skill mentions", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(input).toHaveValue("");
+    expect(input).toHaveValue("/code-review ");
     expect(screen.getByText("code-review")).toBeInTheDocument();
     expect(screen.queryByText("release-notes")).not.toBeInTheDocument();
   });
@@ -262,7 +283,7 @@ describe("ChatInput skill mentions", () => {
 
     await user.type(input, "https://example.com/path");
 
-    expect(input).toHaveValue("https://example.com/path");
+    expect(input).toHaveValue("/code-review https://example.com/path");
     expect(screen.getByText("code-review")).toBeInTheDocument();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });

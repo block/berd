@@ -309,6 +309,26 @@ function removeMentionQuery(
   };
 }
 
+function replaceMentionQuery(
+  text: string,
+  mentionStartIndex: number,
+  mentionQuery: string,
+  replacement: string,
+) {
+  const before = text.slice(0, mentionStartIndex);
+  const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
+  const separator =
+    after.length === 0 || (!/^\s/.test(after) && !/^[.,!?;:)]/.test(after))
+      ? " "
+      : "";
+  const newText = `${before}${replacement}${separator}${after}`;
+
+  return {
+    newText,
+    cursorPosition: before.length + replacement.length + separator.length,
+  };
+}
+
 function isCompletablePathMention(file: FileMentionItem): boolean {
   return file.kind !== "file";
 }
@@ -625,12 +645,14 @@ export function useMentionHandlers({
 
   const handlePersonaMentionSelect = useCallback(
     (persona: Persona) => {
-      const { newText, cursorPosition } = removeMentionQuery(
+      const { newText, cursorPosition } = replaceMentionQuery(
         text,
         mentionStartIndex,
         mentionQuery,
+        `@${persona.displayName}`,
       );
       pendingCursorRef.current = cursorPosition;
+      registerCompletedMention(persona.displayName);
       setText(newText);
       closeMention();
       onPersonaMentionSelect?.(persona);
@@ -643,6 +665,7 @@ export function useMentionHandlers({
       closeMention,
       onPersonaMentionSelect,
       onPersonaChange,
+      registerCompletedMention,
       setText,
     ],
   );
@@ -698,10 +721,11 @@ export function useMentionHandlers({
 
   const handleSkillMentionSelect = useCallback(
     (skill: SkillMentionItem) => {
-      const { newText, cursorPosition } = removeMentionQuery(
+      const { newText, cursorPosition } = replaceMentionQuery(
         text,
         mentionStartIndex,
         mentionQuery,
+        `/${skill.name}`,
       );
       pendingCursorRef.current = cursorPosition;
       setText(newText);
