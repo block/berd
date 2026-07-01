@@ -839,7 +839,6 @@ export function ChatInput({
     handleDrop,
   } = useAttachmentDropTarget({
     disabled: disabled || !scopedControls.attachments,
-    isStreaming,
     targetRef: effectiveAttachmentDropTargetRef,
     bindTargetEvents: usesExternalAttachmentDropTarget,
     onDropFiles: (files) => {

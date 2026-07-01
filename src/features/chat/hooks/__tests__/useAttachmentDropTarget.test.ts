@@ -81,7 +81,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,
@@ -135,7 +134,6 @@ describe("useAttachmentDropTarget", () => {
     const { unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,
@@ -189,7 +187,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,
@@ -222,7 +219,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         bindTargetEvents: true,
         onDropFiles,
@@ -284,7 +280,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,
@@ -327,7 +322,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,
@@ -368,7 +362,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,
@@ -413,7 +406,6 @@ describe("useAttachmentDropTarget", () => {
     const { result, unmount } = renderHook(() =>
       useAttachmentDropTarget({
         disabled: false,
-        isStreaming: false,
         targetRef,
         onDropFiles,
         onDropPaths,

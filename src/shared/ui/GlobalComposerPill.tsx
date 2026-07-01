@@ -900,7 +900,6 @@ export function GlobalComposerPill({
     handleDrop,
   } = useAttachmentDropTarget({
     disabled: false,
-    isStreaming: false,
     targetRef: containerRef,
     onDropFiles: (files) => {
       runAttachmentWork(() => addBrowserFiles(files));

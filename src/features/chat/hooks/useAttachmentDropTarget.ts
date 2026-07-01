@@ -13,7 +13,6 @@ type AttachmentDragEvent =
 
 interface UseAttachmentDropTargetOptions {
   disabled: boolean;
-  isStreaming: boolean;
   targetRef: RefObject<HTMLDivElement | null>;
   bindTargetEvents?: boolean;
   onDropFiles: (files: File[]) => void;
@@ -103,7 +102,6 @@ function getTargetHitTest(
 
 export function useAttachmentDropTarget({
   disabled,
-  isStreaming,
   targetRef,
   bindTargetEvents = false,
   onDropFiles,
@@ -125,12 +123,12 @@ export function useAttachmentDropTarget({
   }, []);
 
   useEffect(() => {
-    if (!disabled && !isStreaming) return;
+    if (!disabled) return;
     clearNativeDragWatchdog();
     dragDepthRef.current = 0;
     nativeDropExpectedUntilRef.current = 0;
     setIsAttachmentDragOver(false);
-  }, [clearNativeDragWatchdog, disabled, isStreaming]);
+  }, [clearNativeDragWatchdog, disabled]);
 
   // Safety-net: force-reset the overlay when the drag operation ends without a
   // proper drop/leave cycle. This covers OS-level drag cancellation (Escape in
@@ -188,7 +186,7 @@ export function useAttachmentDropTarget({
       const dataTransfer = event.dataTransfer;
       if (!dataTransfer) return;
       const draggedFiles = hasDraggedFiles(dataTransfer);
-      if (disabled || isStreaming || !draggedFiles) {
+      if (disabled || !draggedFiles) {
         return;
       }
 
@@ -196,7 +194,7 @@ export function useAttachmentDropTarget({
       dragDepthRef.current += 1;
       setIsAttachmentDragOver(true);
     },
-    [disabled, isStreaming],
+    [disabled],
   );
 
   const handleDragOver = useCallback(
@@ -204,7 +202,7 @@ export function useAttachmentDropTarget({
       const dataTransfer = event.dataTransfer;
       if (!dataTransfer) return;
       const draggedFiles = hasDraggedFiles(dataTransfer);
-      if (disabled || isStreaming || !draggedFiles) {
+      if (disabled || !draggedFiles) {
         return;
       }
 
@@ -212,7 +210,7 @@ export function useAttachmentDropTarget({
       dataTransfer.dropEffect = "copy";
       setIsAttachmentDragOver(true);
     },
-    [disabled, isStreaming],
+    [disabled],
   );
 
   const handleDragLeave = useCallback((event: AttachmentDragEvent) => {
@@ -238,7 +236,7 @@ export function useAttachmentDropTarget({
       const dataTransfer = event.dataTransfer;
       if (!dataTransfer) return;
       const draggedFiles = hasDraggedFiles(dataTransfer);
-      if (disabled || isStreaming || !draggedFiles) {
+      if (disabled || !draggedFiles) {
         return;
       }
 
@@ -274,7 +272,7 @@ export function useAttachmentDropTarget({
 
       onDropFiles(files);
     },
-    [disabled, isStreaming, onDropFiles],
+    [disabled, onDropFiles],
   );
 
   useEffect(() => {
@@ -355,7 +353,6 @@ export function useAttachmentDropTarget({
             if (
               (!hitTest.inside && !nativeDropWasExpected) ||
               disabled ||
-              isStreaming ||
               payload.paths.length === 0
             ) {
               return;
@@ -370,8 +367,7 @@ export function useAttachmentDropTarget({
           // user is still actively dragging.
           resetWatchdog();
 
-          const nativeDropIsOverTarget =
-            hitTest.inside && !disabled && !isStreaming;
+          const nativeDropIsOverTarget = hitTest.inside && !disabled;
           if (nativeDropIsOverTarget) {
             nativeDropExpectedUntilRef.current =
               Date.now() + NATIVE_DROP_EXPECTED_MS;
@@ -393,7 +389,7 @@ export function useAttachmentDropTarget({
       clearNativeDragWatchdog();
       unlisten?.();
     };
-  }, [clearNativeDragWatchdog, disabled, isStreaming, onDropPaths, targetRef]);
+  }, [clearNativeDragWatchdog, disabled, onDropPaths, targetRef]);
 
   return {
     isAttachmentDragOver,

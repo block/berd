@@ -171,6 +171,36 @@ describe("ChatInput attachments", () => {
     expect(screen.getByText("Drop files or folders")).toBeInTheDocument();
   });
 
+  it("accepts dropped attachments while streaming", async () => {
+    render(<ChatInput onSend={vi.fn()} isStreaming />);
+
+    const textbox = screen.getByRole("textbox");
+    const composer = textbox.closest("div.rounded-composer");
+    if (!composer) {
+      throw new Error("Expected composer container");
+    }
+    const file = new File(["hello"], "report.txt", { type: "text/plain" });
+    const dataTransfer = {
+      files: [file],
+      items: [{ kind: "file" }],
+      types: ["Files"],
+    } as unknown as DataTransfer;
+
+    fireEvent.dragEnter(composer, { dataTransfer });
+    fireEvent.dragOver(composer, { dataTransfer });
+
+    expect(screen.getByText("Drop files or folders")).toBeInTheDocument();
+
+    fireEvent.drop(composer, { dataTransfer });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("Drop files or folders"),
+      ).not.toBeInTheDocument();
+    });
+    expect(await screen.findByText("report.txt")).toBeInTheDocument();
+  });
+
   it("does not cancel non-file drops into the composer", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
