@@ -1,12 +1,22 @@
+#[cfg(not(feature = "no-security-ml"))]
 use std::fs;
 
+#[cfg(not(feature = "no-security-ml"))]
 use crate::services::goose_config;
 
+#[cfg(not(feature = "no-security-ml"))]
 const THRESHOLD_KEY: &str = "SECURITY_PROMPT_THRESHOLD";
+#[cfg(not(feature = "no-security-ml"))]
 const DEFAULT_THRESHOLD: f64 = 0.8;
+#[cfg(not(feature = "no-security-ml"))]
 const MIN_THRESHOLD: f64 = 0.0;
+#[cfg(not(feature = "no-security-ml"))]
 const MAX_THRESHOLD: f64 = 1.0;
 
+#[cfg(feature = "no-security-ml")]
+const SECURITY_ML_DISABLED_ERROR: &str = "security ML is disabled for this build";
+
+#[cfg(not(feature = "no-security-ml"))]
 #[tauri::command]
 pub fn get_security_threshold() -> Result<f64, String> {
     let path = goose_config::config_path()?;
@@ -30,6 +40,7 @@ pub fn get_security_threshold() -> Result<f64, String> {
     Ok(threshold)
 }
 
+#[cfg(not(feature = "no-security-ml"))]
 #[tauri::command]
 pub fn set_security_threshold(threshold: f64) -> Result<(), String> {
     if !threshold.is_finite() || !(MIN_THRESHOLD..=MAX_THRESHOLD).contains(&threshold) {
@@ -71,4 +82,16 @@ pub fn set_security_threshold(threshold: f64) -> Result<(), String> {
         .map_err(|error| format!("failed to write goose config: {error}"))?;
 
     Ok(())
+}
+
+#[cfg(feature = "no-security-ml")]
+#[tauri::command]
+pub fn get_security_threshold() -> Result<f64, String> {
+    Err(SECURITY_ML_DISABLED_ERROR.to_string())
+}
+
+#[cfg(feature = "no-security-ml")]
+#[tauri::command]
+pub fn set_security_threshold(_threshold: f64) -> Result<(), String> {
+    Err(SECURITY_ML_DISABLED_ERROR.to_string())
 }

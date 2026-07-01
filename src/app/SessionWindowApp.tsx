@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { runChatRuntimeStartup } from "@/app/lib/chatRuntimeStartup";
 import { SessionWindowTopBar } from "@/app/ui/SessionWindowTopBar";
+import { SecurityConfirmationModal } from "@/features/security/ui/SecurityConfirmationModal";
 import {
   listenSessionHandoffSnapshotAvailable,
   type SessionHandoffSnapshotAvailable,
@@ -30,6 +31,7 @@ import {
   type SessionWindowHandoff,
 } from "@/features/chat/stores/sessionWindowStore";
 import { ChatView } from "@/features/chat/ui/ChatView";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { Button } from "@/shared/ui/button";
 
 type Phase = "loading" | "mirror" | "recoverable" | "ready" | "missing";
@@ -138,6 +140,7 @@ export function SessionWindowApp({
     },
     [sessionId],
   );
+  const securityMlEnabled = getBuildFeatureState().securityMl;
   const contextPanelLabel = isContextPanelOpen
     ? t("context.closePanel")
     : t("context.openPanel");
@@ -306,8 +309,9 @@ export function SessionWindowApp({
       });
   }, [loadOwnedSession, sessionId]);
 
+  let content: ReactNode;
   if (phase === "missing") {
-    return (
+    content = (
       <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
         <SessionWindowTopBar title={t("sessionWindow.missingTitle")} />
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
@@ -315,10 +319,8 @@ export function SessionWindowApp({
         </div>
       </div>
     );
-  }
-
-  if (phase === "recoverable" && session) {
-    return (
+  } else if (phase === "recoverable" && session) {
+    content = (
       <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
         <SessionWindowTopBar title={session.title} />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
@@ -336,28 +338,37 @@ export function SessionWindowApp({
         </div>
       </div>
     );
+  } else {
+    content = (
+      <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
+        <SessionWindowTopBar
+          title={session?.title ?? "Berd"}
+          contextPanelLabel={contextPanelLabel}
+          contextPanelOpen={isContextPanelOpen}
+          showContextPanelToggle={Boolean(session)}
+          onToggleContextPanel={handleToggleContextPanel}
+        />
+        {(phase === "ready" || phase === "mirror") && session ? (
+          <div className="min-h-0 flex-1">
+            <ChatView
+              sessionId={sessionId}
+              activeSession={session}
+              readOnlyStatus={
+                phase === "mirror"
+                  ? t("sessionWindow.readOnlyStatus")
+                  : undefined
+              }
+            />
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   return (
-    <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
-      <SessionWindowTopBar
-        title={session?.title ?? "Berd"}
-        contextPanelLabel={contextPanelLabel}
-        contextPanelOpen={isContextPanelOpen}
-        showContextPanelToggle={Boolean(session)}
-        onToggleContextPanel={handleToggleContextPanel}
-      />
-      {(phase === "ready" || phase === "mirror") && session ? (
-        <div className="min-h-0 flex-1">
-          <ChatView
-            sessionId={sessionId}
-            activeSession={session}
-            readOnlyStatus={
-              phase === "mirror" ? t("sessionWindow.readOnlyStatus") : undefined
-            }
-          />
-        </div>
-      ) : null}
-    </div>
+    <>
+      {content}
+      {securityMlEnabled ? <SecurityConfirmationModal /> : null}
+    </>
   );
 }

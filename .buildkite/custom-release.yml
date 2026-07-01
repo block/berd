@@ -24,7 +24,7 @@ steps:
         required: true
       - text: "Custom config overrides"
         key: "custom_config"
-        hint: 'JSON override for feature-level runtime sections only (featureToggles, doctor, feedback), e.g. {"featureToggles":{"voiceDictation":false,"telemetry":false}}.'
+        hint: 'JSON override for feature-level runtime sections only (featureToggles, doctor, feedback), e.g. {"featureToggles":{"voiceDictation":false,"telemetry":false}}. Use custom_vite_env for build-time gates like VITE_SECURITY_ML.'
         default: "{}"
         required: false
       - text: "Custom Vite env overrides"

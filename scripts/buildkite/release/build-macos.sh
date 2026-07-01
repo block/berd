@@ -72,6 +72,7 @@ VITE_APP_VERSION_VALUE="$RELEASE_VERSION"
 VITE_ENVIRONMENT_VALUE="production"
 VITE_AUTH_GATE_VALUE=0
 VITE_BYO_KEY_PROVIDERS_VALUE=0
+VITE_SECURITY_ML_VALUE=1
 VITE_UPDATER_ENABLED_VALUE="$UPDATER_ENABLED"
 VITE_EXTRA_ENV=()
 
@@ -94,6 +95,9 @@ set_vite_env() {
       ;;
     VITE_UPDATER_ENABLED)
       VITE_UPDATER_ENABLED_VALUE="$value"
+      ;;
+    VITE_SECURITY_ML)
+      VITE_SECURITY_ML_VALUE="$value"
       ;;
     VITE_*)
       local next=()
@@ -231,6 +235,10 @@ if [[ "$BUILD_KIND" == "custom" && "$DISABLE_BB_CLI" == "true" ]]; then
   CARGO_FEATURES="$CARGO_FEATURES,no-bb-cli-install"
 fi
 
+if [[ "$BUILD_KIND" == "custom" && "$VITE_SECURITY_ML_VALUE" == "0" ]]; then
+  CARGO_FEATURES="$CARGO_FEATURES,no-security-ml"
+fi
+
 # Generate release config. For official builds this bakes the updater endpoint
 # and public key into the binary; the apple-codesign plugin handles signing, and
 # publish-updater.sh creates updater artifacts after notarization. Custom builds
@@ -282,6 +290,7 @@ env \
   VITE_ENVIRONMENT="$VITE_ENVIRONMENT_VALUE" \
   VITE_AUTH_GATE="$VITE_AUTH_GATE_VALUE" \
   VITE_BYO_KEY_PROVIDERS="$VITE_BYO_KEY_PROVIDERS_VALUE" \
+  VITE_SECURITY_ML="$VITE_SECURITY_ML_VALUE" \
   VITE_UPDATER_ENABLED="$VITE_UPDATER_ENABLED_VALUE" \
   ${VITE_EXTRA_ENV[@]+"${VITE_EXTRA_ENV[@]}"} \
   pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features "$CARGO_FEATURES" \

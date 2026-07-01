@@ -19,6 +19,7 @@ import { PageShell } from "@/shared/ui/page-shell";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
 import { useProfileCapability } from "@/shared/profile/capabilities";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 
 interface SettingsViewProps {
   activeSection: SectionId;
@@ -44,6 +45,7 @@ export function SettingsView({
   const queryClient = useQueryClient();
   const doctorEnabled = useProfileCapability("doctor");
   const updatesEnabled = useProfileCapability("updates");
+  const securityMlEnabled = getBuildFeatureState().securityMl;
 
   // Warm the shared doctor report once per Settings visit. SettingsView mounts
   // whenever Settings opens (every entry path: sidebar, restored URL, returning
@@ -81,7 +83,9 @@ export function SettingsView({
       {activeSection === "general" && (
         <GeneralSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
       )}
-      {activeSection === "security" && <SecuritySettings />}
+      {activeSection === "security" && securityMlEnabled && (
+        <SecuritySettings />
+      )}
       {activeSection === "notifications" && <NotificationSettings />}
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}

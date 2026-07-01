@@ -27,6 +27,7 @@ describe("buildProfile", () => {
       telemetry: true,
       voiceDictation: true,
       kgooseConnections: true,
+      securityMl: true,
       updater: true,
     });
   });
@@ -84,6 +85,17 @@ describe("buildProfile", () => {
     );
 
     expect(getFreshBuildFeatureState().kgooseConnections).toBe(false);
+  });
+
+  it("disables security ML when VITE_SECURITY_ML is set to 0 (inverse-positive default-on)", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_SECURITY_ML", "0");
+
+    const { getBuildFeatureState: getFreshBuildFeatureState } = await import(
+      "./buildProfile"
+    );
+
+    expect(getFreshBuildFeatureState().securityMl).toBe(false);
   });
 
   it("disables updater when VITE_UPDATER_ENABLED is false", async () => {

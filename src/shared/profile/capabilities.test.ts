@@ -25,6 +25,7 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   telemetry: true,
   voiceDictation: true,
   kgooseConnections: true,
+  securityMl: true,
   updater: true,
 };
 

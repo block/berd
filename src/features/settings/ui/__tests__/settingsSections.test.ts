@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProfileCapabilityState } from "@/shared/profile/capabilities";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -22,6 +22,10 @@ const enabledCapabilities: ProfileCapabilityState = {
 };
 
 describe("settingsSections", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
   it("includes experiments in settings navigation after doctor", () => {
     const sectionIds = SETTINGS_SECTIONS.map((section) => section.id);
 
@@ -40,6 +44,28 @@ describe("settingsSections", () => {
       sectionIds.indexOf("notifications") + 1,
     );
     expect(resolveSettingsSection("shortcuts")).toBe("shortcuts");
+  });
+
+  it("includes security in settings navigation by default", () => {
+    expect(SETTINGS_SECTIONS.map((section) => section.id)).toContain(
+      "security",
+    );
+    expect(resolveSettingsSection("security")).toBe("security");
+  });
+
+  it("omits security when security ML is disabled", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_SECURITY_ML", "0");
+
+    const {
+      SETTINGS_SECTIONS: disabledSections,
+      resolveSettingsSection: resolveDisabledSettingsSection,
+    } = await import("../settingsSections");
+
+    expect(disabledSections.map((section) => section.id)).not.toContain(
+      "security",
+    );
+    expect(resolveDisabledSettingsSection("security")).toBe("general");
   });
 
   it("includes updates in settings navigation", () => {

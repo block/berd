@@ -162,8 +162,11 @@ impl GooseServeProcess {
         if let Some(config_path) = distro_config_path.as_deref() {
             apply_additional_config_files_env(&mut command, &shell_env, config_path);
         }
-        set_security_env(&mut command);
-        set_otel_env(&mut command);
+        #[cfg(not(feature = "no-security-ml"))]
+        {
+            set_security_env(&mut command);
+            set_otel_env(&mut command);
+        }
         match runtime_config_for_spawn(&app_handle).await {
             Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
             Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
@@ -826,6 +829,7 @@ fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &Runt
     }
 }
 
+#[cfg(not(feature = "no-security-ml"))]
 fn set_security_env(command: &mut Command) {
     command.env("SECURITY_PROMPT_ENABLED_OVERRIDE", "true");
     command.env("SECURITY_PROMPT_CLASSIFIER_ENABLED", "true");
@@ -839,6 +843,7 @@ fn set_security_env(command: &mut Command) {
     );
 }
 
+#[cfg(not(feature = "no-security-ml"))]
 fn set_otel_env(command: &mut Command) {
     command.env(
         "OTEL_EXPORTER_OTLP_ENDPOINT",

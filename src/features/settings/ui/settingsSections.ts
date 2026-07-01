@@ -15,6 +15,7 @@ import type {
   ProfileCapabilityId,
   ProfileCapabilityState,
 } from "@/shared/profile/capabilities";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 
 type SettingsSectionDefinition = {
   id: string;
@@ -30,7 +31,9 @@ export const SETTINGS_SECTIONS = [
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
-  { id: "security", labelKey: "nav.security", icon: Shield },
+  ...(getBuildFeatureState().securityMl
+    ? ([{ id: "security", labelKey: "nav.security", icon: Shield }] as const)
+    : []),
   {
     id: "updates",
     labelKey: "nav.updates",

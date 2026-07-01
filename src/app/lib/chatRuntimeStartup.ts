@@ -58,7 +58,9 @@ export async function runChatRuntimeStartup(): Promise<void> {
   const tConn = performance.now();
   registerChatSessionConfigSnapshotHandlers();
   setNotificationHandler(notificationHandler);
-  setPermissionHandler(handleSecurityPermissionRequest);
+  if (getBuildFeatureState().securityMl) {
+    setPermissionHandler(handleSecurityPermissionRequest);
+  }
   await getClient();
   perfLog(
     `[perf:startup] ACP getClient ready in ${(performance.now() - tConn).toFixed(1)}ms`,

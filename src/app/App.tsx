@@ -13,7 +13,9 @@ import { Toaster } from "@/shared/ui/sonner";
 
 export function App() {
   useZoom();
-  const authGateEnabled = getBuildFeatureState().authGate;
+  const buildFeatures = getBuildFeatureState();
+  const authGateEnabled = buildFeatures.authGate;
+  const securityMlEnabled = buildFeatures.securityMl;
   const authGate = useAuthGate(authGateEnabled);
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export function App() {
     <>
       {content}
       {authGate.status === "loggedIn" ? <SelectedTextContextMenu /> : null}
-      <SecurityConfirmationModal />
+      {securityMlEnabled ? <SecurityConfirmationModal /> : null}
       <Toaster />
     </>
   );
