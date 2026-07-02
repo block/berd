@@ -441,11 +441,21 @@ describe("NavigationPanesView", () => {
     expect(mockGetGitState).toHaveBeenCalledWith("/repo");
   });
 
-  it("uses the selected workspace branch before reading Git state", () => {
+  it("refreshes a selected workspace branch subtitle from Git state", async () => {
     localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
     mockActiveWorkspaceBySession = {
-      "session-1": { path: "/repo", branch: "selected-workspace-branch" },
+      "session-1": { path: "/repo", branch: "stale-workspace-branch" },
     };
+    mockGetGitState.mockResolvedValueOnce({
+      isGitRepo: true,
+      currentBranch: "actual-git-branch",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: [],
+    });
     seedSessions({
       id: "session-1",
       title: "Workspace chat",
@@ -457,8 +467,12 @@ describe("NavigationPanesView", () => {
 
     renderSidebar();
 
-    expect(screen.getByText("selected-workspace-branch")).toBeInTheDocument();
-    expect(mockGetGitState).not.toHaveBeenCalled();
+    expect(screen.getByText("stale-workspace-branch")).toBeInTheDocument();
+    expect(mockGetGitState).toHaveBeenCalledWith("/repo");
+    expect(await screen.findByText("actual-git-branch")).toBeInTheDocument();
+    expect(
+      screen.queryByText("stale-workspace-branch"),
+    ).not.toBeInTheDocument();
   });
 
   afterEach(() => {

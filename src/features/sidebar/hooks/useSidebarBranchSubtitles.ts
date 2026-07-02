@@ -29,10 +29,11 @@ function getSessionBranchSubtitle(
   branchNameByPath: ReadonlyMap<string, string | null>,
 ): string | null {
   const path = getSessionBranchSubtitlePath(session, activeWorkspace);
-  return (
-    nonEmptyTrimmed(activeWorkspace?.branch) ??
-    (path ? nonEmptyTrimmed(branchNameByPath.get(path)) : null)
-  );
+  if (path && branchNameByPath.has(path)) {
+    return nonEmptyTrimmed(branchNameByPath.get(path));
+  }
+
+  return nonEmptyTrimmed(activeWorkspace?.branch);
 }
 
 function getBranchSubtitlePaths(
@@ -46,7 +47,6 @@ function getBranchSubtitlePaths(
   for (const session of sessions) {
     if (session.archivedAt) continue;
     const activeWorkspace = activeWorkspaceBySession[session.id];
-    if (nonEmptyTrimmed(activeWorkspace?.branch)) continue;
     const path = getSessionBranchSubtitlePath(session, activeWorkspace);
     if (path) {
       paths.add(path);
@@ -84,9 +84,10 @@ export function useSidebarBranchSubtitles({
     const next = new Map<string, string | null>();
     paths.forEach((path, index) => {
       const gitState = branchQueries[index]?.data;
+      if (!gitState) return;
       next.set(
         path,
-        gitState?.isGitRepo ? nonEmptyTrimmed(gitState.currentBranch) : null,
+        gitState.isGitRepo ? nonEmptyTrimmed(gitState.currentBranch) : null,
       );
     });
     return next;
