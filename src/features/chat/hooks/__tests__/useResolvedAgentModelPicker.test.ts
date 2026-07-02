@@ -1205,16 +1205,18 @@ describe("useResolvedAgentModelPicker", () => {
     expect(recreateSessionForProvider).not.toHaveBeenCalled();
   });
 
-  it("does not recreate a session whose only history is local messages", async () => {
-    const recreateSessionForProvider = vi.fn().mockResolvedValue(undefined);
+  it("recreates a session whose only local history is a failed user prompt", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(true);
     const prepareSelectedProvider = vi
       .fn()
       .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
 
-    // The backend never committed a turn (messageCount stays 0), but the
-    // user's optimistically-added prompt and the send-failure bubble live in
-    // the local message store. That is a conversation with history — recovery
-    // must surface the failure normally rather than discard the session.
+    // The backend never committed a turn (messageCount stays 0); the user's
+    // optimistically-added prompt and the send-failure bubble live only in
+    // the local message store. This is the exact state the stranded-provider
+    // trap produces — chat-first on the dead default provider — so recovery
+    // must still recreate (the typed text is carried into the new composer)
+    // rather than permanently stranding the session.
     useChatStore.setState({
       messagesBySession: {
         "session-1": [
@@ -1223,6 +1225,18 @@ describe("useResolvedAgentModelPicker", () => {
             role: "user",
             created: 0,
             content: [{ type: "text", text: "hello" }],
+          },
+          {
+            id: "system-1",
+            role: "system",
+            created: 1,
+            content: [
+              {
+                type: "systemNotification",
+                notificationType: "error",
+                text: "Failed to get provider: Provider not set",
+              },
+            ],
           },
         ],
       },
@@ -1243,6 +1257,130 @@ describe("useResolvedAgentModelPicker", () => {
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
           messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleProviderChange("claude-acp");
+    });
+
+    await waitFor(() => {
+      expect(recreateSessionForProvider).toHaveBeenCalledWith(
+        "claude-acp",
+        null,
+        expect.any(Function),
+      );
+    });
+  });
+
+  it("does not recreate a session that has assistant history", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(undefined);
+    const prepareSelectedProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    // An assistant message means a provider was alive at some point and real
+    // conversation happened. Never discard that — surface the switch failure
+    // normally instead of recreating.
+    useChatStore.setState({
+      messagesBySession: {
+        "session-1": [
+          {
+            id: "user-1",
+            role: "user",
+            created: 0,
+            content: [{ type: "text", text: "hello" }],
+          },
+          {
+            id: "assistant-1",
+            role: "assistant",
+            created: 1,
+            content: [{ type: "text", text: "hi there" }],
+          },
+        ],
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "claude-acp", label: "Claude Code" },
+        ],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleProviderChange("claude-acp");
+    });
+
+    await waitFor(() => {
+      expect(prepareSelectedProvider).toHaveBeenCalled();
+    });
+    expect(recreateSessionForProvider).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate a session with committed backend turns", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(undefined);
+    const prepareSelectedProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    // The recoverability guard reads the session store, not the hook prop.
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 4,
+        },
+      ],
+      activeSessionId: "session-1",
+    });
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "claude-acp", label: "Claude Code" },
+        ],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 4,
         },
         pendingModelSelection: undefined,
         setPendingProviderId: vi.fn(),

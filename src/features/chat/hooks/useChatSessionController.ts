@@ -56,6 +56,11 @@ import {
   type PreferredModelSelection,
   type PreviousModelSelection,
 } from "../model-selection/modelSelectionIntent";
+import {
+  collectStrandedComposerText,
+  recoverStrandedProviderSession,
+  type RecreateSessionForProvider,
+} from "../model-selection/strandedProviderRecovery";
 
 interface UseChatSessionControllerOptions {
   sessionId: string | null;
@@ -115,6 +120,7 @@ interface PendingHomeModelSyncArgs {
   ) => Promise<boolean>;
   applySessionModelSelection: ApplySessionModelSelection;
   setGlobalSelectedProvider: (providerId: string) => void;
+  recreateSessionForProvider?: RecreateSessionForProvider;
 }
 
 async function syncPendingHomeModelSelection({
@@ -130,6 +136,7 @@ async function syncPendingHomeModelSelection({
   prepareCurrentSession,
   applySessionModelSelection,
   setGlobalSelectedProvider,
+  recreateSessionForProvider,
 }: PendingHomeModelSyncArgs): Promise<void> {
   try {
     if (!homePendingModel?.id || !modelIntentRequestId) {
@@ -171,6 +178,19 @@ async function syncPendingHomeModelSelection({
     }
   } catch (error) {
     if (!homePendingModel?.id || !modelIntentRequestId) {
+      // Even a plain prepare (no explicit model) hits the read-current gate on
+      // a dead provider; recreate onto the target rather than restoring the
+      // corpse's identity onto the session.
+      if (
+        await recoverStrandedProviderSession({
+          error,
+          sessionId,
+          providerId: nextProviderId,
+          recreateSessionForProvider,
+        })
+      ) {
+        return;
+      }
       console.error("Failed to sync pending Home state:", error);
       useChatSessionStore.getState().patchSession(sessionId, {
         providerId: previous.providerId,
@@ -191,6 +211,36 @@ async function syncPendingHomeModelSelection({
       return;
     }
     liveStore.clearModelSelectionIntent(sessionId, modelIntentRequestId);
+    // The Home composer's pending model lands here after the real session is
+    // born — the exact first-chat path on a machine where the default
+    // provider cannot construct. Recreate onto the pending choice instead of
+    // rolling back onto the dead provider.
+    if (
+      await recoverStrandedProviderSession({
+        error,
+        sessionId,
+        providerId: homePendingProviderId,
+        modelSelection: homePendingModel,
+        recreateSessionForProvider,
+        onRecovered: () => {
+          if (homePendingModel.source !== "explicit") {
+            return;
+          }
+          const agentId =
+            resolveAgentProviderCatalogIdStrictFromEntries(
+              catalogEntries,
+              homePendingProviderId,
+            ) ?? "goose";
+          setStoredModelPreference(agentId, {
+            modelId: homePendingModel.id,
+            modelName: homePendingModel.name,
+            providerId: homePendingProviderId,
+          });
+        },
+      })
+    ) {
+      return;
+    }
     console.error("Failed to sync pending Home state:", error);
     rollbackToPreviousModel({
       sessionId,
@@ -636,6 +686,13 @@ export function useChatSessionController({
         modelSelection.id !== "default"
           ? modelSelection.id
           : undefined;
+      // Capture the user's typed-but-unsent text (failed prompts + composer
+      // draft) before creating the fresh session: recovery now also covers
+      // sessions where a prompt failed to send on the dead provider, and that
+      // text must survive the hop rather than be archived with the corpse.
+      const strandedComposerText = sessionId
+        ? collectStrandedComposerText(sessionId)
+        : "";
       const created = await store.createSession({
         title: current?.title,
         projectId: current?.projectId ?? undefined,
@@ -669,10 +726,19 @@ export function useChatSessionController({
         return false;
       }
 
+      // Seed the recovered text into the fresh session's composer before
+      // navigating so the user lands with their prompt ready to resend on the
+      // healthy provider.
+      if (strandedComposerText) {
+        useChatStore.getState().setDraft(created.id, strandedComposerText);
+      }
+
       activateSession(created.id);
 
-      // Retire the stranded corpse now that we've migrated off it. The picker
-      // only routes empty sessions here, so nothing is lost — but left in place
+      // Retire the stranded corpse now that we've migrated off it. Recovery
+      // only routes sessions with no committed backend turns and no assistant
+      // content here, and any typed-but-failed prompt text was just carried
+      // into the new composer, so nothing is lost — but left in place
       // the dead session lingers in the list, re-triggers the same trap when
       // re-entered, and accumulates a new empty each time the user retries.
       // Archive rather than drop locally: the session exists on the backend, so
@@ -1096,7 +1162,7 @@ export function useChatSessionController({
                   .getState()
                   .clearModelSelectionIntent(sessionId, requestId);
               })
-              .catch((error) => {
+              .catch(async (error) => {
                 const liveStore = useChatSessionStore.getState();
                 const intentStillMatches =
                   liveStore.getModelSelectionIntent(sessionId)?.requestId ===
@@ -1105,6 +1171,22 @@ export function useChatSessionController({
                   return;
                 }
                 liveStore.clearModelSelectionIntent(sessionId, requestId);
+                // The agent editor and persona switches route here — when the
+                // session's live provider is unset (dead default on a machine
+                // without its credentials), the in-place apply can never
+                // succeed, so recreate onto the persona's provider instead of
+                // rolling back onto the corpse.
+                if (
+                  await recoverStrandedProviderSession({
+                    error,
+                    sessionId,
+                    providerId: matchingProvider.id,
+                    modelSelection: personaModelSelection,
+                    recreateSessionForProvider,
+                  })
+                ) {
+                  return;
+                }
                 console.error("Failed to apply persona model:", error);
                 rollbackToPreviousModel({
                   sessionId,
@@ -1147,6 +1229,7 @@ export function useChatSessionController({
       personas,
       prepareSelectedProvider,
       providers,
+      recreateSessionForProvider,
       resolvePersonaModelSelection,
       session?.modelId,
       session?.modelName,
@@ -2119,6 +2202,7 @@ export function useChatSessionController({
         prepareCurrentSession,
         applySessionModelSelection,
         setGlobalSelectedProvider,
+        recreateSessionForProvider,
       });
     }
 
@@ -2140,6 +2224,7 @@ export function useChatSessionController({
     pendingProviderId,
     pendingQueuedMessage,
     prepareCurrentSession,
+    recreateSessionForProvider,
     selectedProvider,
     setGlobalSelectedProvider,
     flushPendingDraftStoreWrite,

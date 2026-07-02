@@ -1676,6 +1676,169 @@ describe("useChatSessionController", () => {
     ).toBeNull();
   });
 
+  it("recovers a session with a failed prompt and carries the text into the new composer", async () => {
+    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+
+    // Chat-first on a dead provider: the optimistic user message and the
+    // error bubble live only in the local store; the backend committed
+    // nothing. There is also a half-typed draft in the composer.
+    useChatStore.setState({
+      messagesBySession: {
+        "session-1": [
+          {
+            id: "user-1",
+            role: "user",
+            created: 0,
+            content: [{ type: "text", text: "help me fix this bug" }],
+          },
+          {
+            id: "system-1",
+            role: "system",
+            created: 1,
+            content: [
+              {
+                type: "systemNotification",
+                notificationType: "error",
+                text: "Failed to get provider: Provider not set",
+              },
+            ],
+          },
+        ],
+      },
+      draftsBySession: { "session-1": "second attempt" },
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    // Recovery recreates on the target provider despite the local history…
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "anthropic",
+        "/tmp/project",
+        expect.objectContaining({
+          modelId: "claude-sonnet-4",
+          deferProviderSetup: false,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "session-recovered",
+      );
+    });
+
+    // …and the typed-but-unsent text survives the hop into the new composer.
+    expect(useChatStore.getState().draftsBySession["session-recovered"]).toBe(
+      "help me fix this bug\n\nsecond attempt",
+    );
+
+    await waitFor(() => {
+      expect(mockAcpSessionArchive).toHaveBeenCalledWith({
+        sessionId: "session-1",
+      });
+    });
+  });
+
+  it("does not recover a session that has assistant history", async () => {
+    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+
+    useChatStore.setState({
+      messagesBySession: {
+        "session-1": [
+          {
+            id: "user-1",
+            role: "user",
+            created: 0,
+            content: [{ type: "text", text: "hello" }],
+          },
+          {
+            id: "assistant-1",
+            role: "assistant",
+            created: 1,
+            content: [{ type: "text", text: "hi there" }],
+          },
+        ],
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    // The switch failure surfaces through the normal rollback path instead.
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledTimes(1);
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("recovers onto the persona's provider when a persona switch strands on a dead provider", async () => {
+    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "anthropic",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.availableModels = [
+      {
+        id: "claude-sonnet-4",
+        name: "claude-sonnet-4",
+        displayName: "Claude Sonnet 4",
+        providerId: "anthropic",
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+
+    // The in-place persona model apply fails on the dead provider; recovery
+    // recreates directly on the persona's provider instead of rolling back.
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "anthropic",
+        "/tmp/project",
+        expect.objectContaining({
+          modelId: "claude-sonnet-4",
+          deferProviderSetup: false,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "session-recovered",
+      );
+    });
+    await waitFor(() => {
+      expect(mockAcpSessionArchive).toHaveBeenCalledWith({
+        sessionId: "session-1",
+      });
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+  });
+
   it("preserves reasoning effort rehydrated during a model switch", async () => {
     patchReasoningEffort("session-1", "low");
     mockAcpSetModel.mockImplementationOnce(async () => {

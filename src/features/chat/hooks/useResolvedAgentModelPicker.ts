@@ -6,13 +6,11 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { getClient } from "@/shared/api/acpConnection";
-import { isProviderNotSetError } from "@/shared/api/acpErrors";
 import {
-  hasSessionStarted,
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
-import { useChatStore } from "../stores/chatStore";
+import { recoverStrandedProviderSession } from "../model-selection/strandedProviderRecovery";
 import { useAgentModelPickerState } from "./useAgentModelPickerState";
 import {
   clearStoredModelPreference,
@@ -196,9 +194,9 @@ export function useResolvedAgentModelPicker({
   // ("Provider not set"), the in-place switch can never succeed — the backend
   // reads the dead provider before applying the change. Claim the failure and
   // recreate the session on the target provider instead of rolling back onto
-  // the corpse. Returns true when it took over handling the error by resolving
-  // a recreate (including a superseded recreate); returns false when the caller
-  // should continue through its normal failure and rollback path.
+  // the corpse (shared logic in strandedProviderRecovery). Returns true when
+  // it took over handling the error; false routes the caller through its
+  // normal failure and rollback path.
   const recoverFromStrandedProvider = (
     error: unknown,
     providerId: string,
@@ -210,55 +208,22 @@ export function useResolvedAgentModelPicker({
     // skipped by the recovery early-return, so the next new session for this
     // agent falls back to the old (likely dead) preference and re-enters the trap.
     onRecovered?: () => void,
-  ): Promise<boolean> => {
-    if (!recreateSessionForProvider || !isProviderNotSetError(error)) {
-      return Promise.resolve(false);
-    }
-    // Only auto-recover empty sessions; never discard a conversation with
-    // history — surface those failures normally instead. Emptiness must match
-    // hasSessionStarted (used everywhere else to decide this): the backend
-    // messageCount only tracks committed turns, so a prompt that failed to
-    // send — the exact case that strands the provider — leaves messageCount 0
-    // while the optimistic user message and error bubble live only in the
-    // local message store. OR both in so a typed-but-failed prompt is not
-    // silently discarded.
-    const current = sessionId
-      ? useChatSessionStore.getState().getSession(sessionId)
-      : undefined;
-    const localMessages = sessionId
-      ? useChatStore.getState().messagesBySession[sessionId]
-      : undefined;
-    if (hasSessionStarted(current ?? { messageCount: 0 }, localMessages)) {
-      return Promise.resolve(false);
-    }
-    // Re-check the version inside the recreate (right before it navigates)
-    // rather than only here: the recreate awaits createSession, and a second
-    // provider/model pick during that window bumps the counter. Without the
-    // live check, two recreates would race to navigate and could strand the
-    // user on the superseded provider while orphaning an extra empty session.
-    return recreateSessionForProvider(
+  ): Promise<boolean> =>
+    recoverStrandedProviderSession({
+      error,
+      sessionId,
       providerId,
-      modelSelection ?? null,
-      () => selectionVersionRef.current === versionAtSelection,
-    )
-      .then((recovered) => {
-        // Persist only when this selection's recreate is the one that
-        // navigated. A superseded recreate resolves false, so the newer pick
-        // owns both navigation and its own preference — persisting here would
-        // clobber it with the stale choice.
-        if (recovered) {
-          onRecovered?.();
-        }
-        return true;
-      })
-      .catch((recreateError) => {
-        console.error(
-          "Failed to recreate session after provider-not-set error:",
-          recreateError,
-        );
-        return false;
-      });
-  };
+      modelSelection,
+      recreateSessionForProvider,
+      // Re-check the version inside the recreate (right before it navigates)
+      // rather than only here: the recreate awaits createSession, and a second
+      // provider/model pick during that window bumps the counter. Without the
+      // live check, two recreates would race to navigate and could strand the
+      // user on the superseded provider while orphaning an extra empty session.
+      isSelectionCurrent: () =>
+        selectionVersionRef.current === versionAtSelection,
+      onRecovered,
+    });
 
   const {
     pickerAgents,
