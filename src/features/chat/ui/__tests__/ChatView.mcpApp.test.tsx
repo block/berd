@@ -37,11 +37,8 @@ const mocks = vi.hoisted(() => ({
       }) => void
     >
   >(),
-  pinToHome: vi.fn(),
-  unpinFromHome: vi.fn(),
   t: vi.fn((key: string, _options?: Record<string, unknown>) => key),
   useChatSessionController: vi.fn(),
-  usePinToHomeWidget: vi.fn(),
   isContextPanelOpen: false,
   activeWorkspaceBySession: {} as Record<
     string,
@@ -247,10 +244,6 @@ vi.mock("../../hooks/useChatSessionController", () => ({
   useChatSessionController: mocks.useChatSessionController,
 }));
 
-vi.mock("@/features/home/hooks/usePinToHomeWidget", () => ({
-  usePinToHomeWidget: mocks.usePinToHomeWidget,
-}));
-
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: mocks.sessionForkFromMessageEnabled }),
 }));
@@ -381,8 +374,6 @@ describe("ChatView MCP app messaging", () => {
     mocks.runCommandInTerminalSession.mockReturnValue(false);
     mocks.stopTerminalSession.mockClear();
     mocks.terminalStatusListeners.clear();
-    mocks.pinToHome.mockClear();
-    mocks.unpinFromHome.mockClear();
     mocks.isContextPanelOpen = false;
     mocks.activeWorkspaceBySession = {};
     mocks.afterNextPaintCallbacks = [];
@@ -390,12 +381,6 @@ describe("ChatView MCP app messaging", () => {
     mocks.sessionForkFromMessageEnabled = true;
     window.localStorage.clear();
     mockMatchMedia(false);
-    mocks.usePinToHomeWidget.mockReturnValue({
-      isPinned: false,
-      isPinning: false,
-      pinToHome: mocks.pinToHome,
-      unpinFromHome: mocks.unpinFromHome,
-    });
     mocks.useChatSessionController.mockReturnValue({
       messages: [
         {
@@ -809,9 +794,7 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.showPlaceholder).toBe(false);
   });
 
-  it("surfaces pin chat as a chat top-bar action", async () => {
-    const user = userEvent.setup();
-
+  it("does not surface pin chat as a chat top-bar action", () => {
     render(
       <TopBarActionsProvider>
         <ChatView sessionId="session-1" />
@@ -819,9 +802,12 @@ describe("ChatView MCP app messaging", () => {
       </TopBarActionsProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "pinToHome.action" }));
-
-    expect(mocks.pinToHome).toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "pinToHome.action" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "pinToHome.unpin" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens and focuses chat search from the top-bar action", async () => {
@@ -1006,28 +992,6 @@ describe("ChatView MCP app messaging", () => {
       (mocks.chatInputSpy.mock.calls.at(-1)?.[0] as { initialValue?: string })
         .initialValue,
     ).toBe("draft stays put");
-  });
-
-  it("surfaces unpin chat as a chat top-bar action", async () => {
-    const user = userEvent.setup();
-    mocks.usePinToHomeWidget.mockReturnValue({
-      isPinned: true,
-      isPinning: false,
-      pinToHome: mocks.pinToHome,
-      unpinFromHome: mocks.unpinFromHome,
-    });
-
-    render(
-      <TopBarActionsProvider>
-        <ChatView sessionId="session-1" />
-        <TopBarActionsHost />
-      </TopBarActionsProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "pinToHome.unpin" }));
-
-    expect(mocks.unpinFromHome).toHaveBeenCalled();
-    expect(mocks.pinToHome).not.toHaveBeenCalled();
   });
 
   it("reserves the builder rail from the active session before controller hydration", () => {

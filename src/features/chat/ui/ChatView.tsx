@@ -9,7 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import { PinIcon, SearchIcon } from "lucide-react";
+import { SearchIcon } from "lucide-react";
 import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatInput } from "./ChatInput";
@@ -21,7 +21,6 @@ import { ChatRightRail } from "./ChatRightRail";
 import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
-import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -126,12 +125,6 @@ export function ChatView({
   });
   const { open: openSearch, close: closeSearch } = search;
   const setTopBarActions = useSetTopBarActions();
-  const {
-    isPinned: isPinnedToHome,
-    isPinning: isPinningToHome,
-    pinToHome,
-    unpinFromHome,
-  } = usePinToHomeWidget({ kind: "chat", id: sessionId });
   const controller = useChatSessionController({
     sessionId,
     readOnly: Boolean(readOnlyStatus),
@@ -481,55 +474,22 @@ export function ChatView({
   }
 
   useEffect(() => {
-    const label = isPinnedToHome
-      ? t("pinToHome.unpin")
-      : isPinningToHome
-        ? t("pinToHome.pinning")
-        : t("pinToHome.action");
-
     setTopBarActions(
-      <>
-        <Button
-          type="button"
-          variant="page-header"
-          size="xs"
-          onClick={openSearch}
-          aria-label={t("search.action")}
-          title={t("search.action")}
-          leftIcon={<SearchIcon aria-hidden="true" />}
-        >
-          {t("search.action")}
-        </Button>
-        <Button
-          type="button"
-          variant="page-header"
-          size="xs"
-          onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
-          disabled={isPinningToHome}
-          aria-label={label}
-          title={label}
-          leftIcon={
-            <PinIcon
-              aria-hidden="true"
-              fill={isPinnedToHome ? "currentColor" : "none"}
-            />
-          }
-        >
-          {label}
-        </Button>
-      </>,
+      <Button
+        type="button"
+        variant="page-header"
+        size="xs"
+        onClick={openSearch}
+        aria-label={t("search.action")}
+        title={t("search.action")}
+        leftIcon={<SearchIcon aria-hidden="true" />}
+      >
+        {t("search.action")}
+      </Button>,
     );
 
     return () => setTopBarActions(null);
-  }, [
-    isPinnedToHome,
-    isPinningToHome,
-    openSearch,
-    pinToHome,
-    setTopBarActions,
-    t,
-    unpinFromHome,
-  ]);
+  }, [openSearch, setTopBarActions, t]);
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
