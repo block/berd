@@ -29,6 +29,14 @@ use tauri::{AppHandle, Emitter, State};
 pub(crate) const BLOCK_NPM_REGISTRY_URL: &str =
     "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";
 
+pub(crate) fn npm_registry() -> Option<&'static str> {
+    if cfg!(feature = "no-block-npm-registry") {
+        None
+    } else {
+        Some(BLOCK_NPM_REGISTRY_URL)
+    }
+}
+
 /// Cap the buffered output so emitting the full snapshot on every streamed line
 /// stays cheap and the event payload stays bounded. Lifted from the frontend
 /// card (which used the same 50-line window) into the backend now that the
@@ -521,7 +529,7 @@ async fn run_fix(
         check_id,
         fix_type,
         command_override,
-        Some(BLOCK_NPM_REGISTRY_URL),
+        npm_registry(),
         move |line| {
             log::info!("{log_tag_for_lines} {line}");
             append_output(

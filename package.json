@@ -41,7 +41,8 @@
     "test:app-e2e": "vitest run --config vitest.app-e2e.config.ts",
     "test-driver": "tsx tests/app-e2e/lib/test-driver-cli.ts",
     "tauri:release:config": "node scripts/build-tauri-release-config.mjs",
-    "validate:runtime-config": "tsx scripts/validate-runtime-config.ts"
+    "validate:runtime-config": "tsx scripts/validate-runtime-config.ts",
+    "validate:bundled-agents": "tsx scripts/validate-bundled-agents.ts"
   },
   "dependencies": {
     "@aaif/goose-sdk": "workspace:*",

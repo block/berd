@@ -1034,7 +1034,7 @@ async fn run_doctor_impl(
     }
 
     let upstream = doctor::run_checks_with_options(doctor::RunChecksOptions {
-        npm_registry: Some(crate::commands::agent_setup::BLOCK_NPM_REGISTRY_URL.to_string()),
+        npm_registry: crate::commands::agent_setup::npm_registry().map(str::to_string),
         check_freshness,
         // Freshness, when enabled, runs against the network (and the crate's
         // 1-hour disk cache); `offline` would suppress the registry lookups we
@@ -1210,7 +1210,7 @@ pub async fn run_doctor_fix(
         check_id,
         fix_type,
         command_override,
-        Some(crate::commands::agent_setup::BLOCK_NPM_REGISTRY_URL),
+        crate::commands::agent_setup::npm_registry(),
     )
     .await
 }

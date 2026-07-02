@@ -98,6 +98,9 @@ no-bb-cli-install = []
 # ai-security OTLP logging env, and exposes disabled security settings commands.
 # Custom builds only; official builds must leave this off.
 no-security-ml = []
+# no-block-npm-registry: lets npm-backed doctor installs use the upstream npm
+# registry instead of Block's internal Artifactory proxy.
+no-block-npm-registry = []
 # Admin runtime-config endpoint fetch. Default-OFF: a normal build never
 # compiles the kgoose-backed fetch/cache path and instead loads the bundled
 # src-tauri/resources/runtime-config.json as the source of truth (falling back

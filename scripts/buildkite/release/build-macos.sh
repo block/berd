@@ -12,8 +12,9 @@
 #   - custom_config:  JSON overrides blob deep-merged onto the committed
 #                     src-tauri/resources/runtime-config.json for custom builds
 #                     (default "{}"); validated before building
-#   - custom_vite_env: JSON object of VITE_* build env overrides for custom
-#                     builds (default "{}"); VITE_APP_VERSION and
+#   - custom_vite_env: JSON object of VITE_* build env overrides plus
+#                     CUSTOM_BUNDLED_AGENTS and DISABLE_BLOCK_NPM_REGISTRY for
+#                     custom builds (default "{}"); VITE_APP_VERSION and
 #                     VITE_ENVIRONMENT are owned by the release script
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
@@ -42,8 +43,9 @@ RELEASE_VERSION="$(resolve_release_version)"
 BUILD_KIND="$(release_build_kind)"
 CUSTOM_CONFIG="$(meta custom_config 2>/dev/null || true)"
 [[ -n "$CUSTOM_CONFIG" ]] || CUSTOM_CONFIG="{}"
-CUSTOM_VITE_ENV="$(meta custom_vite_env 2>/dev/null || true)"
-[[ -n "$CUSTOM_VITE_ENV" ]] || CUSTOM_VITE_ENV="{}"
+CUSTOM_BUILD_ENV="$(meta custom_vite_env 2>/dev/null || true)"
+[[ -n "$CUSTOM_BUILD_ENV" ]] || CUSTOM_BUILD_ENV="{}"
+CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-block,builderbot}"
 DISABLE_BB_CLI="$(meta disable_bb_cli 2>/dev/null || echo false)"
 
 # In-app updates are an official-build-only feature. A custom build that embeds
@@ -116,6 +118,85 @@ set_vite_env() {
       ;;
   esac
 }
+
+# Copy selected agents from release-agents/ into distro/agents/ so Tauri bundles
+# them. The list is a comma-separated set of basenames without the .md
+# extension. Each file is validated before being copied.
+stage_custom_bundled_agents() {
+  local raw
+  raw="$(trim_whitespace "$CUSTOM_BUNDLED_AGENTS_VALUE")"
+
+  if [[ -z "$raw" ]]; then
+    return 0
+  fi
+
+  local src_dir="$REPO_ROOT/release-agents"
+  local dest_dir="$REPO_ROOT/distro/agents"
+
+  if [[ ! -d "$src_dir" ]]; then
+    echo "custom agents source directory missing: $src_dir" >&2
+    return 1
+  fi
+
+  mkdir -p "$dest_dir"
+
+  local name
+  local -a files=()
+  while IFS= read -r name; do
+    name="$(trim_whitespace "$name")"
+    [[ -n "$name" ]] || continue
+
+    if [[ "$name" == *"/"* ]]; then
+      echo "custom_bundled_agents entries must be basenames, not paths: $name" >&2
+      return 1
+    fi
+
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+      echo "custom_bundled_agents entries must be lowercase slugs ([a-z0-9][a-z0-9-]*): $name" >&2
+      return 1
+    fi
+
+    local source_file="$src_dir/${name}.md"
+    if [[ ! -f "$source_file" ]]; then
+      echo "custom bundled agent not found: $source_file" >&2
+      return 1
+    fi
+
+    if [[ -f "$dest_dir/${name}.md" ]]; then
+      echo "custom bundled agent name collides with an existing agent: ${name}.md" >&2
+      return 1
+    fi
+
+    files+=("$source_file")
+  done < <(tr ',' '\n' <<<"$raw")
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "+++ :robot: Staging custom bundled agents: $raw"
+  pnpm exec tsx scripts/validate-bundled-agents.ts "${files[@]}"
+
+  local file
+  for file in "${files[@]}"; do
+    cp "$file" "$dest_dir/"
+    STAGED_CUSTOM_AGENTS+=("$dest_dir/$(basename "$file")")
+  done
+}
+
+# Remove any agent files we staged in distro/agents/ so a later local run
+# against the same working tree doesn't accidentally include them.
+cleanup_custom_bundled_agents() {
+  local file
+  for file in "${STAGED_CUSTOM_AGENTS[@]}"; do
+    if [[ -f "$file" ]]; then
+      rm -f "$file"
+    fi
+  done
+}
+
+typeset -a STAGED_CUSTOM_AGENTS=()
+trap cleanup_custom_bundled_agents EXIT INT TERM
 
 echo "+++ :package: Stamping version -> $RELEASE_VERSION"
 tmp="$(mktemp)"
@@ -198,17 +279,36 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
     set_vite_env VITE_KGOOSE_CONNECTIONS 0
   fi
 
-  printf '%s' "$CUSTOM_VITE_ENV" | jq -e '
+  printf '%s' "$CUSTOM_BUILD_ENV" | jq -e '
     type == "object" and
-    all(keys[]; test("^VITE_[A-Z0-9_]+$")) and
+    all(keys[];
+      . == "CUSTOM_BUNDLED_AGENTS" or
+      . == "DISABLE_BLOCK_NPM_REGISTRY" or
+      test("^VITE_[A-Z0-9_]+$")
+    ) and
     all(.[]; type == "string")
   ' >/dev/null || {
-    echo "custom_vite_env must be a JSON object with string VITE_* keys/values: $CUSTOM_VITE_ENV" >&2; exit 1;
+    echo "custom_vite_env must be a JSON object with string VITE_* keys/values, CUSTOM_BUNDLED_AGENTS, or DISABLE_BLOCK_NPM_REGISTRY: $CUSTOM_BUILD_ENV" >&2; exit 1;
   }
 
   while IFS=$'\t' read -r key value; do
-    set_vite_env "$key" "$value"
-  done < <(printf '%s' "$CUSTOM_VITE_ENV" | jq -r 'to_entries[] | [.key, .value] | @tsv')
+    case "$key" in
+      CUSTOM_BUNDLED_AGENTS)
+        CUSTOM_BUNDLED_AGENTS_VALUE="$value"
+        ;;
+      DISABLE_BLOCK_NPM_REGISTRY)
+        if [[ "$value" == "1" ]]; then
+          CARGO_FEATURES="$CARGO_FEATURES,no-block-npm-registry"
+        elif [[ "$value" != "0" ]]; then
+          echo "DISABLE_BLOCK_NPM_REGISTRY must be \"0\" or \"1\"" >&2
+          exit 1
+        fi
+        ;;
+      *)
+        set_vite_env "$key" "$value"
+        ;;
+    esac
+  done < <(printf '%s' "$CUSTOM_BUILD_ENV" | jq -r 'to_entries[] | [.key, .value] | @tsv')
 
   if [[ "$VITE_BYO_KEY_PROVIDERS_VALUE" == "1" ]]; then
     echo "+++ :wrench: Removing bundled Databricks host for BYO key providers"
@@ -238,6 +338,10 @@ fi
 if [[ "$BUILD_KIND" == "custom" && "$VITE_SECURITY_ML_VALUE" == "0" ]]; then
   CARGO_FEATURES="$CARGO_FEATURES,no-security-ml"
 fi
+
+# Stage the selected bundled agents into distro/agents/ for the Tauri resource
+# bundle. Official builds use the default block,builderbot selection.
+stage_custom_bundled_agents
 
 # Generate release config. For official builds this bakes the updater endpoint
 # and public key into the binary; the apple-codesign plugin handles signing, and

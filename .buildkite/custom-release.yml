@@ -27,9 +27,9 @@ steps:
         hint: 'JSON override for feature-level runtime sections only (featureToggles, doctor, feedback), e.g. {"featureToggles":{"voiceDictation":false,"telemetry":false}}. Use custom_vite_env for build-time gates like VITE_SECURITY_ML.'
         default: "{}"
         required: false
-      - text: "Custom Vite env overrides"
+      - text: "Custom build env overrides"
         key: "custom_vite_env"
-        hint: 'JSON object of VITE_* build env overrides, e.g. {"VITE_BYO_KEY_PROVIDERS":"1"}. VITE_APP_VERSION and VITE_ENVIRONMENT are not allowed.'
+        hint: 'JSON object of VITE_* build env overrides plus CUSTOM_BUNDLED_AGENTS and DISABLE_BLOCK_NPM_REGISTRY, e.g. {"VITE_BYO_KEY_PROVIDERS":"1","DISABLE_BLOCK_NPM_REGISTRY":"1"}. Bundled agents default to "block,builderbot". VITE_APP_VERSION and VITE_ENVIRONMENT are not allowed.'
         default: "{}"
         required: false
       - select: "Disable bb CLI PATH install?"
@@ -42,7 +42,6 @@ steps:
             value: "false"
           - label: "Yes"
             value: "true"
-
   - label: ":mac: Build & sign custom macOS"
     key: "build-macos"
     depends_on: "release-input"
