@@ -897,6 +897,7 @@ export function AppShell({
   useSessionWindowTracking({ enabled: isMultiWindowEnabled });
   useSessionHandoffSource({ enabled: isMultiWindowEnabled });
   const lastNonSecondaryViewRef = useRef<AppView>("home");
+  const designSystemReturnViewRef = useRef<AppView>("home");
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
   );
@@ -2536,19 +2537,22 @@ export function AppShell({
   const openDesignSystem = useCallback(() => {
     if (!isDesignSystemExplorerEnabled()) return;
     resetNavigationSecondary();
-    if (activeView !== "settings" && activeView !== "design-system") {
-      lastNonSecondaryViewRef.current = activeView;
+    if (activeView !== "design-system") {
+      designSystemReturnViewRef.current = activeView;
     }
     setDesignSystemUrl();
     setActiveView("design-system");
-    if (sidebarCollapsed) {
-      void expandSidebar();
-    }
-  }, [activeView, expandSidebar, resetNavigationSecondary, sidebarCollapsed]);
+  }, [activeView, resetNavigationSecondary]);
 
-  const returnToSettingsFromDesignSystem = useCallback(() => {
-    openSettings(activeSettingsSection);
-  }, [activeSettingsSection, openSettings]);
+  const closeDesignSystem = useCallback(() => {
+    const returnView = designSystemReturnViewRef.current;
+    if (returnView === "settings") {
+      setSettingsSectionUrl(activeSettingsSection);
+    } else {
+      clearSettingsSectionUrl();
+    }
+    setActiveView(returnView);
+  }, [activeSettingsSection]);
 
   const selectDesignSystemSection = useCallback(
     (section: DesignSystemSection) => {
@@ -3331,17 +3335,13 @@ export function AppShell({
 
         return showDesignSystemSection && designSystemSectionLabel
           ? [
-              parent("settings", "Settings", returnToSettingsFromDesignSystem),
               parent("design-system", "Design System", () => {
                 setActiveDesignSystemSection(DEFAULT_DESIGN_SYSTEM_SECTION);
                 openDesignSystem();
               }),
               current("design-system-section", designSystemSectionLabel),
             ]
-          : [
-              parent("settings", "Settings", returnToSettingsFromDesignSystem),
-              current("design-system", "Design System"),
-            ];
+          : [current("design-system", "Design System")];
       }
       case "settings": {
         const settingsSection = SETTINGS_SECTIONS.find(
@@ -3388,7 +3388,6 @@ export function AppShell({
     openDesignSystem,
     openSettings,
     projects,
-    returnToSettingsFromDesignSystem,
     skillsBreadcrumbLabel,
     skillsSkillId,
     t,
@@ -3487,10 +3486,9 @@ export function AppShell({
         const { activeSessionId } = useChatSessionStore.getState();
         if (activeSessionId) {
           clearActiveSession(activeSessionId);
-        } else if (
-          activeView === "settings" ||
-          activeView === "design-system"
-        ) {
+        } else if (activeView === "design-system") {
+          closeDesignSystem();
+        } else if (activeView === "settings") {
           clearSettingsSectionUrl();
           setActiveView("home");
         }
@@ -3525,6 +3523,7 @@ export function AppShell({
     canUseGlobalComposerShortcut,
     clearActiveSession,
     clearGlobalComposerHandoffTimer,
+    closeDesignSystem,
     globalComposerPlacement,
     guardAppNavigation,
     handleArchiveChat,
@@ -3592,10 +3591,6 @@ export function AppShell({
           onOpenSettingsSection: openSettings,
           onSettingsBack: leaveSecondarySurface,
           onSettingsSectionChange: selectSettingsSection,
-          onDesignSystemBack: returnToSettingsFromDesignSystem,
-          onDesignSystemSectionChange: selectDesignSystemSection,
-          designSystemInspectorVisible,
-          onDesignSystemInspectorVisibleChange: setDesignSystemInspectorVisible,
           onNavigate: handleNavigate,
           onNewChatInProject: handleNewChatInProject,
           onNewChat: () => {
@@ -3619,7 +3614,6 @@ export function AppShell({
           onSelectSession: handleSelectSession,
           activeView,
           activeSettingsSection,
-          activeDesignSystemSection,
           activeSessionId,
           detachableSessionListEnabled:
             isEffectiveDetachableSidebarChatsEnabled,
@@ -3675,7 +3669,9 @@ export function AppShell({
         designSystemInspectorModeToggleRequest={
           designSystemInspectorModeToggleRequest
         }
+        onOpenDesignSystemExplorer={() => handleNavigate("design-system")}
         showDesignSystemInspector={designSystemInspectorVisible}
+        contentTakeover={activeView === "design-system"}
         createProjectDialog={{
           isOpen: createProjectOpen,
           onClose: closeCreateProjectDialog,
@@ -3689,6 +3685,12 @@ export function AppShell({
             <AppShellContent
               targetLocation={targetLocation}
               renderedLocation={renderedLocation}
+              designSystemInspectorVisible={designSystemInspectorVisible}
+              onCloseDesignSystem={closeDesignSystem}
+              onDesignSystemInspectorVisibleChange={
+                setDesignSystemInspectorVisible
+              }
+              onDesignSystemSectionChange={selectDesignSystemSection}
               authStatus={authStatus}
               isPreparingContent={isPreparingContent}
               activeConnectionsTab={activeConnectionsTab}

@@ -54,7 +54,14 @@ interface AppShellLayoutProps {
   /** Full slide panel width (content + gutter); stays constant while collapsing. */
   sidebarPanelOuterWidth: number;
   designSystemInspectorModeToggleRequest: number;
+  onOpenDesignSystemExplorer?: () => void;
   showDesignSystemInspector: boolean;
+  /**
+   * Full content takeover: hides the sidebar slot entirely and lets the main
+   * content span the whole width below the top bar (used by the design system
+   * explorer).
+   */
+  contentTakeover?: boolean;
   topBar: ComponentProps<typeof TopBar>;
 }
 
@@ -97,7 +104,9 @@ export function AppShellLayout({
   sidebarOuterWidth,
   sidebarPanelOuterWidth,
   designSystemInspectorModeToggleRequest,
+  onOpenDesignSystemExplorer,
   showDesignSystemInspector,
+  contentTakeover = false,
   topBar,
 }: AppShellLayoutProps) {
   // Externally-spawned ACP sessions (e.g. automation calling `session/new`
@@ -153,14 +162,14 @@ export function AppShellLayout({
         id: "sidebar",
         label: "sidebar",
         key: "s",
-        enabled: !sidebarCollapsed,
+        enabled: !sidebarCollapsed && !contentTakeover,
         element: sidebarElement,
         getInitialFocus: () =>
           sidebarElement?.querySelector<HTMLElement>(
             "[aria-current='page'], button:not(:disabled), a[href]",
           ) ?? null,
       }),
-      [sidebarCollapsed, sidebarElement],
+      [contentTakeover, sidebarCollapsed, sidebarElement],
     ),
   );
   useFocusRegion(
@@ -209,6 +218,7 @@ export function AppShellLayout({
           className={cn(
             "relative flex-shrink-0 overflow-visible",
             contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
+            contentTakeover && "hidden",
           )}
           style={{
             clipPath: sidebarClipOverflow
@@ -219,7 +229,8 @@ export function AppShellLayout({
             width: sidebarOuterWidth,
             transition: sidebarSpacerTransition,
           }}
-          aria-hidden={sidebarCollapsed || undefined}
+          aria-hidden={contentTakeover || sidebarCollapsed || undefined}
+          inert={contentTakeover ? true : undefined}
         >
           <div
             ref={setSidebarElement}
@@ -308,7 +319,7 @@ export function AppShellLayout({
           </div>
         </div>
 
-        {sidebarWidthResizeEnabled && (
+        {sidebarWidthResizeEnabled && !contentTakeover && (
           <div
             onMouseDown={onResizeStart}
             onDoubleClick={onResizeDoubleClick}
@@ -347,6 +358,7 @@ export function AppShellLayout({
       {isDesignSystemExplorerEnabled() && showDesignSystemInspector ? (
         <DesignSystemInspector
           inspectModeToggleRequest={designSystemInspectorModeToggleRequest}
+          onOpenExplorer={onOpenDesignSystemExplorer}
         />
       ) : null}
     </div>

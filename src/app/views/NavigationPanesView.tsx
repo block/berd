@@ -41,6 +41,10 @@ import type {
 } from "@/features/projects/api/projects";
 import { PrimaryNavigationSurface } from "@/features/navigation/ui/PrimaryNavigationSurface";
 import { DefaultProjectGlyphIcon } from "@/features/projects/ui/DefaultProjectGlyphIcon";
+import {
+  isImageProjectIcon,
+  normalizeProjectIcon,
+} from "@/features/projects/lib/projectIcons";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
@@ -71,11 +75,6 @@ import {
   getVisibleSettingsSections,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
-import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
-import {
-  DEFAULT_DESIGN_SYSTEM_SECTION,
-  type DesignSystemSection,
-} from "@/features/design-system/ui/designSystemSections";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { usePaneScrollIntoView } from "./usePaneScrollIntoView";
 import {
@@ -218,10 +217,6 @@ export interface NavigationPanesViewProps {
   onOpenSettingsSection?: (section: SectionId) => void;
   onSettingsBack?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
-  onDesignSystemBack?: () => void;
-  onDesignSystemSectionChange?: (section: DesignSystemSection) => void;
-  designSystemInspectorVisible?: boolean;
-  onDesignSystemInspectorVisibleChange?: (visible: boolean) => void;
   onNewChatInProject?: (
     projectId: string,
     options?: PrototypeProjectNewChatOptions,
@@ -247,7 +242,6 @@ export interface NavigationPanesViewProps {
   onSelectSession?: (sessionId: string) => void;
   activeView?: AppView;
   activeSettingsSection?: SectionId;
-  activeDesignSystemSection?: DesignSystemSection;
   activeSessionId?: string | null;
   detachableSessionListEnabled?: boolean;
   paneSizes?: NavigationPaneSizes;
@@ -731,11 +725,21 @@ function PrototypeProjectNavRow({
       active={active}
       collapsed={collapsed}
       icon={
-        <DefaultProjectGlyphIcon
-          projectId={project.id}
-          className={cn("size-4", NAV_PROTOTYPE_ICON_CLASS)}
-          style={{ color: "currentColor" }}
-        />
+        isImageProjectIcon(normalizeProjectIcon(project.icon)) ? (
+          <ProjectIcon
+            icon={project.icon}
+            color={project.color}
+            projectId={project.id}
+            className="size-4 shrink-0"
+            imageClassName="size-4 shrink-0 rounded-[3px]"
+          />
+        ) : (
+          <DefaultProjectGlyphIcon
+            projectId={project.id}
+            className={cn("size-4", NAV_PROTOTYPE_ICON_CLASS)}
+            style={{ color: "currentColor" }}
+          />
+        )
       }
       label={project.name}
       onClick={onClick}
@@ -2287,10 +2291,6 @@ export function NavigationPanesView({
   onOpenSettingsSection,
   onSettingsBack,
   onSettingsSectionChange,
-  onDesignSystemBack,
-  onDesignSystemSectionChange,
-  designSystemInspectorVisible = false,
-  onDesignSystemInspectorVisibleChange,
   onNewChatInProject,
   onNewChat,
   onCreateProject,
@@ -2308,7 +2308,6 @@ export function NavigationPanesView({
   onSelectSession,
   activeView,
   activeSettingsSection = DEFAULT_SETTINGS_SECTION,
-  activeDesignSystemSection = DEFAULT_DESIGN_SYSTEM_SECTION,
   activeSessionId,
   detachableSessionListEnabled = false,
   paneSizes,
@@ -2497,10 +2496,7 @@ export function NavigationPanesView({
   const showAutomationsSurface = capabilities.automations;
   const showBuilderbotSurface = capabilities.builderbot;
   const visibleSettingsSections = getVisibleSettingsSections(capabilities);
-  const isSettingsSurface = activeView === "settings";
-  const isDesignSystemSurface = activeView === "design-system";
-  const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
-  const showDesignSystemSettingsItem = isDesignSystemExplorerEnabled();
+  const isSecondarySurface = activeView === "settings";
   const shouldSkipActiveSessionScroll =
     activeSessionId !== null &&
     skipActiveSessionScrollRef.current === activeSessionId;
@@ -3347,27 +3343,19 @@ export function NavigationPanesView({
     >
       <PrimaryNavigationSurface
         ref={primaryNavPanelRef}
-        activeDesignSystemSection={activeDesignSystemSection}
         activeSettingsSection={activeSettingsSection}
         activeView={activeView}
         agentUpdatesAvailable={agentUpdatesAvailable}
         bottomMaskStyle={BOTTOM_MASK_STYLE}
         detachable={canDetachSessionList}
-        designSystemInspectorVisible={designSystemInspectorVisible}
         elevatedShadow={elevatedShadow}
         fullHeight={!canDetachSessionList || visualSessionListSideDocked}
         isSecondarySurface={isSecondarySurface}
-        isSettingsSurface={isSettingsSurface}
         labelTransition={labelTransition}
         mainNavRef={navRef}
         navCollapsed={navCollapsed}
         navLabelVisible={navLabelVisible}
         navPanelCompact={navPanelCompact}
-        onDesignSystemBack={onDesignSystemBack}
-        onDesignSystemInspectorVisibleChange={
-          onDesignSystemInspectorVisibleChange
-        }
-        onDesignSystemSectionChange={onDesignSystemSectionChange}
         onKeyDown={handleSidebarNavKeyDown}
         onNavigate={onNavigate}
         onPrimaryNavWidthToggle={handlePrimaryNavWidthToggle}
@@ -3425,7 +3413,6 @@ export function NavigationPanesView({
         showBottomMask={showBottomMask}
         showAutomationsSurface={showAutomationsSurface}
         showBuilderbotSurface={showBuilderbotSurface}
-        showDesignSystemSettingsItem={showDesignSystemSettingsItem}
         showPrimaryNavWidthToggle={
           canDetachSessionList && visualSessionListSideDocked
         }

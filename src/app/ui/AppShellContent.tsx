@@ -14,6 +14,7 @@ import { SettingsView } from "@/features/settings/ui/SettingsView";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import type { DesignSystemSection } from "@/features/design-system/ui/designSystemSections";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import type { SkillInfo } from "@/features/skills/api/skills";
@@ -38,6 +39,10 @@ import { scheduleAfterNextPaint } from "../lib/scheduleAfterNextPaint";
 interface AppShellContentProps {
   targetLocation: AppNavigationLocation;
   renderedLocation: AppNavigationLocation;
+  designSystemInspectorVisible?: boolean;
+  onCloseDesignSystem?: () => void;
+  onDesignSystemInspectorVisibleChange?: (visible: boolean) => void;
+  onDesignSystemSectionChange?: (section: DesignSystemSection) => void;
   authStatus?: AuthStatus;
   onLoggedOut?: (status: AuthStatus) => void;
   isPreparingContent: boolean;
@@ -123,6 +128,10 @@ export function AppShellContent({
   activeConnectionsTab,
   automationsEnabled,
   builderbotEnabled,
+  designSystemInspectorVisible,
+  onCloseDesignSystem,
+  onDesignSystemInspectorVisibleChange,
+  onDesignSystemSectionChange,
   renderedSession,
   homeSessionId,
   chatComposerHandoffRequest = 0,
@@ -219,9 +228,13 @@ export function AppShellContent({
     chatComposerHandoffRequest,
     chatComposerHandoffSessionId,
     chatViewportLeftOcclusionPx,
+    designSystemInspectorVisible,
     homeContent,
     homeSessionId,
     location: renderedLocation,
+    onCloseDesignSystem,
+    onDesignSystemInspectorVisibleChange,
+    onDesignSystemSectionChange,
     onActivateHomeSession,
     onAgentBuilderClose,
     onAgentBuilderSaved,
@@ -282,9 +295,13 @@ interface RenderRouteContentOptions {
   chatComposerHandoffRequest: number;
   chatComposerHandoffSessionId: string | null;
   chatViewportLeftOcclusionPx: number;
+  designSystemInspectorVisible?: boolean;
   homeContent: ReactNode;
   homeSessionId: string | null;
   location: AppNavigationLocation;
+  onCloseDesignSystem?: () => void;
+  onDesignSystemInspectorVisibleChange?: (visible: boolean) => void;
+  onDesignSystemSectionChange?: (section: DesignSystemSection) => void;
   onNavigateSkills: (
     skillId: string | null,
     options?: AppNavigationUpdateOptions,
@@ -354,6 +371,7 @@ function renderRouteContent({
   authStatus,
   chatComposerHandoffSessionId,
   chatViewportLeftOcclusionPx,
+  designSystemInspectorVisible,
   homeContent,
   homeSessionId,
   location,
@@ -366,9 +384,12 @@ function renderRouteContent({
   onAutomationsBreadcrumbLabelChange,
   onBuilderbotBreadcrumbLabelChange,
   onChatComposerHandoffTarget,
+  onCloseDesignSystem,
   onConnectionsTabChange,
   onCreatePersona,
   onCreateProject,
+  onDesignSystemInspectorVisibleChange,
+  onDesignSystemSectionChange,
   onExitSearch,
   onNavigateAgents,
   onNavigateAutomations,
@@ -395,7 +416,13 @@ function renderRouteContent({
   switch (location.view) {
     case "design-system":
       return isDesignSystemExplorerEnabled() ? (
-        <DesignSystemView activeSection={location.designSystemSection} />
+        <DesignSystemView
+          activeSection={location.designSystemSection}
+          inspectorVisible={designSystemInspectorVisible}
+          onClose={onCloseDesignSystem}
+          onInspectorVisibleChange={onDesignSystemInspectorVisibleChange}
+          onSectionChange={onDesignSystemSectionChange}
+        />
       ) : null;
     case "settings":
       return (

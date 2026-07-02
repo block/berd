@@ -71,6 +71,7 @@ type PanelResizeState = DragState & {
 
 type DesignSystemInspectorProps = {
   inspectModeToggleRequest?: number;
+  onOpenExplorer?: () => void;
 };
 
 type InspectModeState = {
@@ -114,6 +115,7 @@ function clampInspectorHeight(height: number, top: number) {
 
 export function DesignSystemInspector({
   inspectModeToggleRequest = 0,
+  onOpenExplorer,
 }: DesignSystemInspectorProps) {
   const { themeMode, setThemeMode } = useTheme();
   const inspectModeBindings = useShortcutBindings(
@@ -351,7 +353,9 @@ export function DesignSystemInspector({
     document.addEventListener("pointerout", handlePointerOut, true);
     document.addEventListener("click", handleClick, true);
     window.addEventListener("blur", clearHoverIfUnlocked);
-    window.addEventListener("keydown", handleKeyDown);
+    // Capture phase so inspect-mode Escape wins over bubble-phase listeners
+    // (e.g. the design system view's close-on-Escape) via defaultPrevented.
+    window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("scroll", refreshRects, true);
     window.addEventListener("resize", refreshRects);
 
@@ -361,7 +365,7 @@ export function DesignSystemInspector({
       document.removeEventListener("pointerout", handlePointerOut, true);
       document.removeEventListener("click", handleClick, true);
       window.removeEventListener("blur", clearHoverIfUnlocked);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("scroll", refreshRects, true);
       window.removeEventListener("resize", refreshRects);
     };
@@ -764,6 +768,18 @@ export function DesignSystemInspector({
         >
           <ThemeModeIcon aria-hidden="true" />
         </Button>
+        {onOpenExplorer ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            aria-label="Open design system explorer"
+            title="Open design system explorer"
+            onClick={onOpenExplorer}
+          >
+            <Palette aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
 
       {active && visibleInspection ? (

@@ -204,6 +204,9 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
       <button type="button" onClick={onSettingsClick}>
         Sidebar settings
       </button>
+      <button type="button" onClick={() => onNavigate?.("design-system")}>
+        Sidebar design system
+      </button>
       <button
         type="button"
         onClick={() => onSettingsSectionChange?.("providers")}
@@ -286,6 +289,7 @@ vi.mock("./ui/AppShellContent", () => ({
     renderedLocation,
     isPreparingContent,
     renderedSession,
+    onCloseDesignSystem,
     onNavigateSkills,
     onNavigateAgents,
     onNavigateAutomations,
@@ -466,6 +470,9 @@ vi.mock("./ui/AppShellContent", () => ({
         </button>
         <button type="button" onClick={() => onSelectSession?.("session-1")}>
           Open session 1
+        </button>
+        <button type="button" onClick={() => onCloseDesignSystem?.()}>
+          Close design system
         </button>
         <button type="button" onClick={() => onSelectSession?.("session-2")}>
           Open session 2
@@ -2106,6 +2113,62 @@ describe("AppShell global navigation", () => {
     expect(window.location.pathname).toBe("/settings");
     expect(new URLSearchParams(window.location.search).get("section")).toBe(
       "general",
+    );
+  });
+
+  it("closes the design system takeover back to the previous view", async () => {
+    const user = userEvent.setup();
+    mockDesignSystemExplorerEnabled.mockReturnValue(true);
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar design system" }),
+    );
+    expect(screen.getByTestId("active-view")).toHaveTextContent(
+      "design-system",
+    );
+    expect(window.location.pathname).toBe("/design-system");
+
+    await user.click(
+      screen.getByRole("button", { name: "Close design system" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+    });
+    expect(window.location.pathname).not.toBe("/design-system");
+  });
+
+  it("closes the design system takeover back to settings with its section URL", async () => {
+    const user = userEvent.setup();
+    mockDesignSystemExplorerEnabled.mockReturnValue(true);
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar settings" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    await user.click(screen.getByRole("button", { name: "Sidebar providers" }));
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "providers",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar design system" }),
+    );
+    expect(screen.getByTestId("active-view")).toHaveTextContent(
+      "design-system",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Close design system" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(window.location.pathname).toBe("/settings");
+    expect(new URLSearchParams(window.location.search).get("section")).toBe(
+      "providers",
     );
   });
 

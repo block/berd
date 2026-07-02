@@ -43,10 +43,6 @@
   "flat": {
     "noProject": "Sin proyecto"
   },
-  "designSystem": {
-    "inspector": "Inspector",
-    "showInspector": "Mostrar inspector"
-  },
   "navigation": {
     "agents": "Agentes",
     "automations": "Automatizaciones",
@@ -66,8 +62,6 @@
     "searching": "Buscando chats..."
   },
   "sections": {
-    "components": "Componentes",
-    "notUsed": "Sin uso",
     "projects": "Proyectos",
     "recents": "Chats"
   },

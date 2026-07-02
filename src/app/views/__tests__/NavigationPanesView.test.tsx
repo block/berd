@@ -1495,6 +1495,40 @@ describe("NavigationPanesView", () => {
     expect(settingsIndex).toBe(sessionHistoryIndex + 1);
   });
 
+  it("renders custom project image icons in the prototype project rows", () => {
+    const customIcon = "data:image/png;base64,abc123";
+    renderSidebar({
+      projects: [mockProject({ icon: customIcon })],
+      prototypeMode: "hybrid-push-overlay",
+    });
+
+    const projectRow = screen.getByRole("button", { name: "Project One" });
+    const iconImage = projectRow.querySelector("img");
+    if (!iconImage) {
+      throw new Error(
+        "Custom project icon image was not rendered in the prototype nav row",
+      );
+    }
+    expect(iconImage).toHaveAttribute("src", customIcon);
+    // The default cube glyph should not render when a custom icon is set.
+    expect(
+      projectRow.querySelector('[data-project-color-swatch="project-1"]'),
+    ).toBeNull();
+  });
+
+  it("falls back to the default project glyph when no custom icon is set", () => {
+    renderSidebar({
+      projects: [mockProject({ icon: "" })],
+      prototypeMode: "hybrid-push-overlay",
+    });
+
+    const projectRow = screen.getByRole("button", { name: "Project One" });
+    expect(
+      projectRow.querySelector('[data-project-color-swatch="project-1"]'),
+    ).not.toBeNull();
+    expect(projectRow.querySelector("img")).toBeNull();
+  });
+
   it("does not change prototype secondary navigation on top-level hover", () => {
     const onPrototypeSecondaryTargetChange = vi.fn();
     const { container } = renderSidebar({
@@ -1725,9 +1759,7 @@ describe("NavigationPanesView", () => {
     expect(screen.queryByRole("button", { name: /doctor/i })).toBeNull();
   });
 
-  it("moves the dev-only design system entry into settings navigation", async () => {
-    const user = userEvent.setup();
-    const onNavigate = vi.fn();
+  it("keeps the dev-only design system entry out of the navigation", () => {
     designSystemExplorer.isEnabled.mockReturnValue(true);
 
     const { unmount } = renderSidebar();
@@ -1755,20 +1787,16 @@ describe("NavigationPanesView", () => {
 
     unmount();
 
-    renderSidebar({
-      activeView: "settings",
-      onNavigate,
-    });
+    renderSidebar({ activeView: "settings" });
 
     const settingsNavigation = screen.getByRole("navigation", {
       name: /settings navigation/i,
     });
-    const designSystemButton = within(settingsNavigation).getByRole("button", {
-      name: "Design system (dev only)",
-    });
-
-    await user.click(designSystemButton);
-    expect(onNavigate).toHaveBeenCalledWith("design-system");
+    expect(
+      within(settingsNavigation).queryByRole("button", {
+        name: /design system/i,
+      }),
+    ).toBeNull();
   });
 
   it("still renders the nav when collapsed so the AppShell can animate it out", () => {
@@ -3516,11 +3544,18 @@ describe("NavigationPanesView", () => {
     expect(onSettingsSectionChange).toHaveBeenCalledWith("general");
   });
 
-  it("defaults the design system inspector toggle off", () => {
+  it("keeps the main navigation surface active on the design system view", () => {
     renderSidebar({ activeView: "design-system" });
 
+    // The design system explorer is a full content takeover with its own
+    // internal rail; the sidebar must not switch to a secondary surface.
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    expect(mainNavigation).toBeInTheDocument();
+    expect(mainNavigation.closest("[inert]")).toBeNull();
     expect(
-      screen.getByRole("switch", { name: "Show inspector" }),
-    ).toHaveAttribute("aria-checked", "false");
+      screen.queryByRole("switch", { name: "Show inspector" }),
+    ).not.toBeInTheDocument();
   });
 });

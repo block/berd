@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   IconAlertTriangle,
   IconChevronDown,
   IconSparkles,
 } from "@tabler/icons-react";
-import { Plus, RefreshCw, Search } from "lucide-react";
+import { Plus, RefreshCw, Search, X } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
@@ -176,6 +176,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   DESIGN_SYSTEM_ALL_COMPONENT_SECTIONS,
   DESIGN_SYSTEM_COMPONENT_SECTIONS,
+  DESIGN_SYSTEM_CORE_SECTIONS,
   DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS,
   type DesignSystemSection,
 } from "./designSystemSections";
@@ -5348,14 +5349,131 @@ function renderSection(section: DesignSystemSection) {
   }
 }
 
+function DesignSystemRailItem({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex h-7 w-full items-center rounded-sm px-3 text-left text-sm transition-colors duration-150",
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+      )}
+    >
+      <span className="min-w-0 truncate">{label}</span>
+    </button>
+  );
+}
+
+function DesignSystemRailHeading({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-3 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
+      {children}
+    </div>
+  );
+}
+
 export function DesignSystemView({
   activeSection,
+  inspectorVisible = false,
+  onClose,
+  onInspectorVisibleChange,
+  onSectionChange,
 }: {
   activeSection: DesignSystemSection;
+  inspectorVisible?: boolean;
+  onClose?: () => void;
+  onInspectorVisibleChange?: (visible: boolean) => void;
+  onSectionChange?: (section: DesignSystemSection) => void;
 }) {
+  useEffect(() => {
+    if (!onClose) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      // Let open dialogs/popovers consume Escape first.
+      if (target?.closest("[role='dialog'], [data-state='open']")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <MainPanelLayout backgroundColor="bg-background">
       <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
+        <aside className="flex w-56 flex-shrink-0 flex-col border-r border-border">
+          <div className="flex items-center gap-2 px-3 pb-2 pt-4">
+            {onClose ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Close design system"
+                title="Close design system"
+                onClick={onClose}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            ) : null}
+            <span className="text-sm font-medium text-foreground">
+              Design system
+            </span>
+          </div>
+          <nav
+            aria-label="Design system navigation"
+            className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 scrollbar-none"
+          >
+            <div className="space-y-0.5">
+              {onInspectorVisibleChange ? (
+                <div className="flex h-7 w-full items-center justify-between rounded-sm px-3 text-sm text-muted-foreground">
+                  <span>Inspector</span>
+                  <Switch
+                    checked={inspectorVisible}
+                    onCheckedChange={onInspectorVisibleChange}
+                    aria-label="Show inspector"
+                  />
+                </div>
+              ) : null}
+              {DESIGN_SYSTEM_CORE_SECTIONS.map((item) => (
+                <DesignSystemRailItem
+                  key={item.id}
+                  label={item.label}
+                  active={activeSection === item.id}
+                  onClick={() => onSectionChange?.(item.id)}
+                />
+              ))}
+              <DesignSystemRailHeading>Components</DesignSystemRailHeading>
+              {DESIGN_SYSTEM_COMPONENT_SECTIONS.map((item) => (
+                <DesignSystemRailItem
+                  key={item.id}
+                  label={item.label}
+                  active={activeSection === item.id}
+                  onClick={() => onSectionChange?.(item.id)}
+                />
+              ))}
+              <DesignSystemRailHeading>Not used</DesignSystemRailHeading>
+              {DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS.map((item) => (
+                <DesignSystemRailItem
+                  key={item.id}
+                  label={item.label}
+                  active={activeSection === item.id}
+                  onClick={() => onSectionChange?.(item.id)}
+                />
+              ))}
+            </div>
+          </nav>
+        </aside>
         <div className="min-w-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6 page-transition">
             <ThemeControls />
