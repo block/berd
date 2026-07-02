@@ -48,6 +48,18 @@ pub struct VolumeInfo {
     pub is_root: bool,
 }
 
+const CANONICAL_APP_NAME: &str = "Berd.app";
+const LEGACY_APP_NAMES: [&str; 1] = ["Goose.app"];
+const LEGACY_BUNDLE_IDENTIFIER: &str = "com.squareup.goose-internal";
+const BERD_BUNDLE_IDENTIFIER: &str = "xyz.block.berd";
+
+fn is_legacy_migration_source_identifier(identifier: &str) -> bool {
+    matches!(
+        identifier,
+        LEGACY_BUNDLE_IDENTIFIER | BERD_BUNDLE_IDENTIFIER
+    )
+}
+
 /// Classify a bundle path + its volume into a [`RunLocation`].
 ///
 /// Conservative by design: a bundle inside any Applications directory is
@@ -104,6 +116,18 @@ fn bundle_path_from_executable(executable: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+fn canonical_app_path() -> PathBuf {
+    Path::new("/Applications").join(CANONICAL_APP_NAME)
+}
+
+fn is_legacy_installed_app_path(bundle_path: &Path) -> bool {
+    bundle_path.parent() == Some(Path::new("/Applications"))
+        && bundle_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| LEGACY_APP_NAMES.contains(&name))
+}
+
 /// Version identity read from a bundle's `Contents/Info.plist`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BundleVersion {
@@ -139,10 +163,83 @@ fn compare_versions(running: &BundleVersion, installed: &BundleVersion) -> Versi
         return VersionRelation::Unknown;
     };
 
-    match running.cmp(&installed) {
+    relation_from_ordering(running.cmp(&installed))
+}
+
+/// Strict ordering for an automatic migration. When the user-visible versions
+/// match, compare numeric, dot-separated build identifiers so an older build
+/// cannot silently replace a newer one.
+fn compare_migration_versions(
+    legacy: &BundleVersion,
+    canonical: &BundleVersion,
+) -> VersionRelation {
+    let short_relation = compare_versions(legacy, canonical);
+    if short_relation != VersionRelation::Same {
+        return short_relation;
+    }
+    if legacy.build == canonical.build {
+        return VersionRelation::Same;
+    }
+
+    let (Some(legacy_build), Some(canonical_build)) = (
+        parse_numeric_build(&legacy.build),
+        parse_numeric_build(&canonical.build),
+    ) else {
+        return VersionRelation::Unknown;
+    };
+    relation_from_ordering(legacy_build.cmp(&canonical_build))
+}
+
+fn parse_numeric_build(build: &str) -> Option<Vec<u64>> {
+    let mut components = build
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    while components.last() == Some(&0) {
+        components.pop();
+    }
+    Some(components)
+}
+
+fn relation_from_ordering(ordering: std::cmp::Ordering) -> VersionRelation {
+    match ordering {
         std::cmp::Ordering::Greater => VersionRelation::RunningNewer,
         std::cmp::Ordering::Less => VersionRelation::RunningOlder,
         std::cmp::Ordering::Equal => VersionRelation::Same,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LegacyMigrationAction {
+    RenameLegacy,
+    ReplaceCanonical,
+    RelaunchCanonical,
+    LeaveUnchanged,
+}
+
+fn legacy_migration_action(
+    canonical_exists: bool,
+    canonical_identifier_matches: bool,
+    legacy: Option<&BundleVersion>,
+    canonical: Option<&BundleVersion>,
+) -> LegacyMigrationAction {
+    if !canonical_exists {
+        return LegacyMigrationAction::RenameLegacy;
+    }
+    if !canonical_identifier_matches {
+        return LegacyMigrationAction::LeaveUnchanged;
+    }
+
+    match (legacy, canonical) {
+        (Some(legacy), Some(canonical)) => match compare_migration_versions(legacy, canonical) {
+            VersionRelation::RunningNewer => LegacyMigrationAction::ReplaceCanonical,
+            VersionRelation::RunningOlder | VersionRelation::Same => {
+                LegacyMigrationAction::RelaunchCanonical
+            }
+            VersionRelation::Unknown => LegacyMigrationAction::LeaveUnchanged,
+        },
+        _ => LegacyMigrationAction::LeaveUnchanged,
     }
 }
 
@@ -324,6 +421,9 @@ mod macos {
         let home = dirs::home_dir();
         let location = classify(&bundle_path, home.as_deref(), &volume);
         if !location.should_prompt_move() {
+            if let Err(error) = maybe_migrate_legacy_installed_bundle(&bundle_path) {
+                log::warn!("Failed to migrate legacy Berd app bundle: {error}");
+            }
             return;
         }
 
@@ -410,6 +510,108 @@ mod macos {
             short: short.to_string(),
             build: build.to_string(),
         })
+    }
+
+    fn read_bundle_identifier(bundle_path: &Path) -> Option<String> {
+        let info_plist = bundle_path.join("Contents/Info.plist");
+        let value = plist::Value::from_file(&info_plist).ok()?;
+        let dict = value.as_dictionary()?;
+        dict.get("CFBundleIdentifier")?
+            .as_string()
+            .map(ToString::to_string)
+    }
+
+    fn maybe_migrate_legacy_installed_bundle(bundle_path: &Path) -> std::io::Result<()> {
+        if !is_legacy_installed_app_path(bundle_path)
+            || !read_bundle_identifier(bundle_path)
+                .as_deref()
+                .is_some_and(is_legacy_migration_source_identifier)
+        {
+            return Ok(());
+        }
+
+        let target = canonical_app_path();
+        let canonical_exists = target.exists();
+        let canonical_identifier_matches = canonical_exists
+            && read_bundle_identifier(&target).as_deref() == Some(BERD_BUNDLE_IDENTIFIER);
+        let action = legacy_migration_action(
+            canonical_exists,
+            canonical_identifier_matches,
+            read_bundle_version(bundle_path).as_ref(),
+            read_bundle_version(&target).as_ref(),
+        );
+
+        match action {
+            LegacyMigrationAction::RenameLegacy => {
+                rename_exclusive(bundle_path, &target)?;
+            }
+            LegacyMigrationAction::ReplaceCanonical => {
+                swap_paths(bundle_path, &target)?;
+                if let Err(error) = move_to_trash(bundle_path) {
+                    if let Err(rollback_error) = swap_paths(bundle_path, &target) {
+                        return Err(std::io::Error::other(format!(
+                            "failed to trash replaced app: {error}; rollback also failed: \
+                             {rollback_error}"
+                        )));
+                    }
+                    return Err(error);
+                }
+            }
+            LegacyMigrationAction::RelaunchCanonical => {
+                relaunch_after_exit(&target, None)?;
+                log::info!(
+                    "Relaunching canonical Berd app at {} instead of legacy bundle {}",
+                    target.display(),
+                    bundle_path.display()
+                );
+                std::process::exit(0);
+            }
+            LegacyMigrationAction::LeaveUnchanged => {
+                log::warn!(
+                    "Leaving legacy Berd app at {} because canonical app {} could not be safely \
+                     replaced or launched",
+                    bundle_path.display(),
+                    target.display()
+                );
+                return Ok(());
+            }
+        }
+
+        relaunch_after_exit(&target, None)?;
+        log::info!(
+            "Migrated legacy Berd app bundle from {} to {}; relaunching",
+            bundle_path.display(),
+            target.display()
+        );
+        std::process::exit(0);
+    }
+
+    pub(super) fn rename_exclusive(source: &Path, target: &Path) -> std::io::Result<()> {
+        rename_with_flags(source, target, libc::RENAME_EXCL)
+    }
+
+    pub(super) fn swap_paths(first: &Path, second: &Path) -> std::io::Result<()> {
+        rename_with_flags(first, second, libc::RENAME_SWAP)
+    }
+
+    fn rename_with_flags(source: &Path, target: &Path, flags: libc::c_uint) -> std::io::Result<()> {
+        let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+        let target = std::ffi::CString::new(target.as_os_str().as_bytes())?;
+        // SAFETY: both C strings remain alive for the call and are NUL-terminated.
+        let result = unsafe {
+            libc::renameatx_np(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                target.as_ptr(),
+                flags,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
     }
 
     /// Gather volume facts for `path` via `statfs`.
@@ -558,8 +760,7 @@ mod macos {
 
         let detach_mount =
             matches!(location, RunLocation::DiskImage).then(|| volume.mount_point.clone());
-        relaunch_after_exit(&target, detach_mount);
-        Ok(())
+        relaunch_after_exit(&target, detach_mount)
     }
 
     /// Move `path` to the user's Trash via `NSFileManager`. Preferred over
@@ -581,7 +782,7 @@ mod macos {
 
     /// Spawn a detached shell that waits for this process to exit, launches the
     /// installed copy, and (optionally) detaches the disk image we ran from.
-    fn relaunch_after_exit(target: &Path, detach_mount: Option<PathBuf>) {
+    fn relaunch_after_exit(target: &Path, detach_mount: Option<PathBuf>) -> std::io::Result<()> {
         let pid = std::process::id();
         // The paths are single-quote escaped before interpolation: the only
         // reason a shell is involved at all is the wait-for-pid loop, and a
@@ -590,7 +791,7 @@ mod macos {
         let target = shell_single_quote(&target.to_string_lossy());
         let mut script = format!(
             "while /bin/kill -0 {pid} >/dev/null 2>&1; do /bin/sleep 0.2; done; \
-             /usr/bin/open -n {target}"
+             /usr/bin/open {target}"
         );
         if let Some(mount) = detach_mount {
             let mount = shell_single_quote(&mount.to_string_lossy());
@@ -598,7 +799,8 @@ mod macos {
                 "; /bin/sleep 1; /usr/bin/hdiutil detach {mount} >/dev/null 2>&1"
             ));
         }
-        let _ = Command::new("/bin/sh").arg("-c").arg(script).spawn();
+        Command::new("/bin/sh").arg("-c").arg(script).spawn()?;
+        Ok(())
     }
 }
 
@@ -630,6 +832,78 @@ mod tests {
     fn bundle_path_is_none_without_dot_app() {
         let exe = Path::new("/Users/someone/code/berd/target/release/Berd");
         assert_eq!(bundle_path_from_executable(exe), None);
+    }
+
+    #[test]
+    fn canonical_app_path_targets_berd_in_system_applications() {
+        assert_eq!(
+            canonical_app_path(),
+            PathBuf::from("/Applications/Berd.app")
+        );
+    }
+
+    #[test]
+    fn legacy_migration_accepts_old_and_current_source_identifiers() {
+        assert!(is_legacy_migration_source_identifier(
+            "com.squareup.goose-internal"
+        ));
+        assert!(is_legacy_migration_source_identifier("xyz.block.berd"));
+        assert!(!is_legacy_migration_source_identifier(
+            "com.example.unrelated"
+        ));
+    }
+
+    #[test]
+    fn legacy_installed_app_path_only_matches_known_system_legacy_names() {
+        assert!(is_legacy_installed_app_path(Path::new(
+            "/Applications/Goose.app"
+        )));
+        assert!(!is_legacy_installed_app_path(Path::new(
+            "/Applications/Berd.app"
+        )));
+        assert!(!is_legacy_installed_app_path(Path::new(
+            "/Users/someone/Applications/Goose.app"
+        )));
+        assert!(!is_legacy_installed_app_path(Path::new(
+            "/ApplicationsOther/Goose.app"
+        )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn rename_exclusive_does_not_replace_an_existing_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        std::fs::write(&source, "source").unwrap();
+        std::fs::write(&target, "target").unwrap();
+
+        assert!(super::macos::rename_exclusive(&source, &target).is_err());
+        assert_eq!(std::fs::read_to_string(source).unwrap(), "source");
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "target");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn swap_paths_atomically_exchanges_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        std::fs::write(first.join("marker"), "first").unwrap();
+        std::fs::write(second.join("marker"), "second").unwrap();
+
+        super::macos::swap_paths(&first, &second).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(first.join("marker")).unwrap(),
+            "second"
+        );
+        assert_eq!(
+            std::fs::read_to_string(second.join("marker")).unwrap(),
+            "first"
+        );
     }
 
     #[test]
@@ -739,6 +1013,22 @@ mod tests {
     }
 
     #[test]
+    fn compare_migration_versions_orders_equal_short_versions_by_build() {
+        assert_eq!(
+            compare_migration_versions(&version("1.2.3", "20"), &version("1.2.3", "10")),
+            VersionRelation::RunningNewer
+        );
+        assert_eq!(
+            compare_migration_versions(&version("1.2.3", "10.0"), &version("1.2.3", "10")),
+            VersionRelation::Same
+        );
+        assert_eq!(
+            compare_migration_versions(&version("1.2.3", "nightly"), &version("1.2.3", "10")),
+            VersionRelation::Unknown
+        );
+    }
+
+    #[test]
     fn compare_versions_unparseable_is_unknown() {
         assert_eq!(
             compare_versions(&version("not-a-version", "1"), &version("0.4.12", "412")),
@@ -809,6 +1099,71 @@ mod tests {
                 Some(&version("0.4.12", "412"))
             ),
             MoveScenario::ExistingUnknown
+        );
+    }
+
+    #[test]
+    fn legacy_migration_renames_when_canonical_is_missing() {
+        assert_eq!(
+            legacy_migration_action(false, false, Some(&version("0.5.0", "5")), None),
+            LegacyMigrationAction::RenameLegacy
+        );
+    }
+
+    #[test]
+    fn legacy_migration_only_replaces_an_older_valid_berd_app() {
+        assert_eq!(
+            legacy_migration_action(
+                true,
+                true,
+                Some(&version("0.5.0", "5")),
+                Some(&version("0.4.12", "412"))
+            ),
+            LegacyMigrationAction::ReplaceCanonical
+        );
+        assert_eq!(
+            legacy_migration_action(
+                true,
+                false,
+                Some(&version("0.5.0", "5")),
+                Some(&version("0.4.12", "412"))
+            ),
+            LegacyMigrationAction::LeaveUnchanged
+        );
+        assert_eq!(
+            legacy_migration_action(true, true, Some(&version("0.5.0", "5")), None),
+            LegacyMigrationAction::LeaveUnchanged
+        );
+        assert_eq!(
+            legacy_migration_action(
+                true,
+                true,
+                Some(&version("nightly", "5")),
+                Some(&version("0.4.12", "412"))
+            ),
+            LegacyMigrationAction::LeaveUnchanged
+        );
+    }
+
+    #[test]
+    fn legacy_migration_relaunches_equal_or_newer_canonical_app() {
+        assert_eq!(
+            legacy_migration_action(
+                true,
+                true,
+                Some(&version("0.4.12", "412")),
+                Some(&version("0.5.0", "5"))
+            ),
+            LegacyMigrationAction::RelaunchCanonical
+        );
+        assert_eq!(
+            legacy_migration_action(
+                true,
+                true,
+                Some(&version("0.5.0", "5")),
+                Some(&version("0.5.0", "5"))
+            ),
+            LegacyMigrationAction::RelaunchCanonical
         );
     }
 
