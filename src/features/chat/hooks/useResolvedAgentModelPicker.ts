@@ -6,10 +6,13 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { getClient } from "@/shared/api/acpConnection";
+import { isProviderNotSetError } from "@/shared/api/acpErrors";
 import {
+  hasSessionStarted,
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
+import { useChatStore } from "../stores/chatStore";
 import { useAgentModelPickerState } from "./useAgentModelPickerState";
 import {
   clearStoredModelPreference,
@@ -44,6 +47,16 @@ interface UseResolvedAgentModelPickerOptions {
     options?: ModelSelectionApplyOptions,
   ) => Promise<boolean>;
   applySessionModelSelection: ApplySessionModelSelection;
+  // Recreate the current (empty) session on a fresh provider when an in-place
+  // switch is impossible because the live provider is unset. Optional so
+  // non-session callers and tests can omit it. isSelectionCurrent is re-checked
+  // inside the recreate right before it navigates, so a switch superseded while
+  // createSession was in flight does not steal navigation from the newer pick.
+  recreateSessionForProvider?: (
+    providerId: string,
+    modelSelection?: PreferredModelSelection | null,
+    isSelectionCurrent?: () => boolean,
+  ) => Promise<boolean>;
 }
 
 function isModelAlias(modelId?: string | null): boolean {
@@ -61,6 +74,7 @@ export function useResolvedAgentModelPicker({
   setGlobalSelectedProvider,
   prepareSelectedProvider,
   applySessionModelSelection,
+  recreateSessionForProvider,
 }: UseResolvedAgentModelPickerOptions) {
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const catalogLoaded = useProviderCatalogStore((state) => state.loaded);
@@ -178,6 +192,74 @@ export function useResolvedAgentModelPicker({
     };
   }, [selectedAgentId]);
 
+  // When a switch fails because the current session's provider is unset
+  // ("Provider not set"), the in-place switch can never succeed — the backend
+  // reads the dead provider before applying the change. Claim the failure and
+  // recreate the session on the target provider instead of rolling back onto
+  // the corpse. Returns true when it took over handling the error by resolving
+  // a recreate (including a superseded recreate); returns false when the caller
+  // should continue through its normal failure and rollback path.
+  const recoverFromStrandedProvider = (
+    error: unknown,
+    providerId: string,
+    modelSelection: PreferredModelSelection | null | undefined,
+    versionAtSelection: number,
+    // Runs only if the recreate actually navigated onto the fresh session (not
+    // superseded, not failed). The explicit-model path uses it to persist the
+    // recovered choice; without it the success-path setStoredModelPreference is
+    // skipped by the recovery early-return, so the next new session for this
+    // agent falls back to the old (likely dead) preference and re-enters the trap.
+    onRecovered?: () => void,
+  ): Promise<boolean> => {
+    if (!recreateSessionForProvider || !isProviderNotSetError(error)) {
+      return Promise.resolve(false);
+    }
+    // Only auto-recover empty sessions; never discard a conversation with
+    // history — surface those failures normally instead. Emptiness must match
+    // hasSessionStarted (used everywhere else to decide this): the backend
+    // messageCount only tracks committed turns, so a prompt that failed to
+    // send — the exact case that strands the provider — leaves messageCount 0
+    // while the optimistic user message and error bubble live only in the
+    // local message store. OR both in so a typed-but-failed prompt is not
+    // silently discarded.
+    const current = sessionId
+      ? useChatSessionStore.getState().getSession(sessionId)
+      : undefined;
+    const localMessages = sessionId
+      ? useChatStore.getState().messagesBySession[sessionId]
+      : undefined;
+    if (hasSessionStarted(current ?? { messageCount: 0 }, localMessages)) {
+      return Promise.resolve(false);
+    }
+    // Re-check the version inside the recreate (right before it navigates)
+    // rather than only here: the recreate awaits createSession, and a second
+    // provider/model pick during that window bumps the counter. Without the
+    // live check, two recreates would race to navigate and could strand the
+    // user on the superseded provider while orphaning an extra empty session.
+    return recreateSessionForProvider(
+      providerId,
+      modelSelection ?? null,
+      () => selectionVersionRef.current === versionAtSelection,
+    )
+      .then((recovered) => {
+        // Persist only when this selection's recreate is the one that
+        // navigated. A superseded recreate resolves false, so the newer pick
+        // owns both navigation and its own preference — persisting here would
+        // clobber it with the stale choice.
+        if (recovered) {
+          onRecovered?.();
+        }
+        return true;
+      })
+      .catch((recreateError) => {
+        console.error(
+          "Failed to recreate session after provider-not-set error:",
+          recreateError,
+        );
+        return false;
+      });
+  };
+
   const {
     pickerAgents,
     availableModels,
@@ -260,7 +342,7 @@ export function useResolvedAgentModelPicker({
           .then(() => {
             clearCurrentModelSelectionIntent(sessionId, requestId);
           })
-          .catch((error) => {
+          .catch(async (error) => {
             const intentStillMatches = clearCurrentModelSelectionIntent(
               sessionId,
               requestId,
@@ -269,6 +351,19 @@ export function useResolvedAgentModelPicker({
               return;
             }
             if (!intentStillMatches) {
+              return;
+            }
+            if (
+              await recoverFromStrandedProvider(
+                error,
+                nextProviderId,
+                nextModelSelection,
+                versionAtSelection,
+              )
+            ) {
+              return;
+            }
+            if (selectionVersionRef.current !== versionAtSelection) {
               return;
             }
             console.error("Failed to update ACP session provider:", error);
@@ -303,7 +398,7 @@ export function useResolvedAgentModelPicker({
         .then(() => {
           clearCurrentModelSelectionIntent(sessionId, requestId);
         })
-        .catch((error) => {
+        .catch(async (error) => {
           const intentStillMatches = clearCurrentModelSelectionIntent(
             sessionId,
             requestId,
@@ -312,6 +407,19 @@ export function useResolvedAgentModelPicker({
             !intentStillMatches ||
             selectionVersionRef.current !== versionAtSelection
           ) {
+            return;
+          }
+          if (
+            await recoverFromStrandedProvider(
+              error,
+              nextProviderId,
+              undefined,
+              versionAtSelection,
+            )
+          ) {
+            return;
+          }
+          if (selectionVersionRef.current !== versionAtSelection) {
             return;
           }
           console.error("Failed to update ACP session provider:", error);
@@ -416,6 +524,24 @@ export function useResolvedAgentModelPicker({
             !intentStillMatches ||
             selectionVersionRef.current !== versionAtSelection
           ) {
+            return;
+          }
+          if (
+            await recoverFromStrandedProvider(
+              error,
+              nextProviderId,
+              nextModelSelection,
+              versionAtSelection,
+              () =>
+                setStoredModelPreference(
+                  selectedAgentId,
+                  nextStoredModelPreference,
+                ),
+            )
+          ) {
+            return;
+          }
+          if (selectionVersionRef.current !== versionAtSelection) {
             return;
           }
           console.error("Failed to set model:", error);

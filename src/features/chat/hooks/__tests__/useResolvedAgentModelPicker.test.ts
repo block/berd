@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useResolvedAgentModelPicker } from "../useResolvedAgentModelPicker";
 
 const mockUseAgentModelPickerState = vi.fn();
@@ -40,6 +41,7 @@ describe("useResolvedAgentModelPicker", () => {
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });
+    useChatStore.setState({ messagesBySession: {} });
     useProviderCatalogStore.getState().setEntries([
       {
         id: "codex-acp",
@@ -727,5 +729,538 @@ describe("useResolvedAgentModelPicker", () => {
       providerId: "claude-acp",
       source: "explicit",
     });
+  });
+
+  it("recreates the session on the target provider when the current provider is unset", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(undefined);
+    const prepareSelectedProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "claude-acp", label: "Claude Code" },
+        ],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleProviderChange("claude-acp");
+    });
+
+    await waitFor(() => {
+      expect(recreateSessionForProvider).toHaveBeenCalledWith(
+        "claude-acp",
+        null,
+        expect.any(Function),
+      );
+    });
+  });
+
+  it("persists the explicit model choice after recovering from a stranded provider", async () => {
+    // The in-place switch fails with "Provider not set" and the recovery
+    // recreate wins (resolves true), so the recovered choice must stick — the
+    // normal success-path setStoredModelPreference is skipped by the recovery
+    // early-return, and without persisting here the next new session would fall
+    // back to the old (dead) preference and re-enter the trap.
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(true);
+    const applySessionModelSelection = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    mockUseAgentModelPickerState.mockImplementation(
+      ({
+        onModelSelected,
+      }: {
+        onModelSelected?: (model: {
+          id: string;
+          name: string;
+          displayName?: string;
+          providerId?: string;
+        }) => void;
+      }) => ({
+        pickerAgents: [{ id: "goose", label: "Goose" }],
+        availableModels: [
+          {
+            id: "gpt-5.4",
+            name: "GPT-5.4",
+            displayName: "GPT-5.4",
+            providerId: "openai",
+          },
+        ],
+        modelsLoading: false,
+        modelStatusMessage: null,
+        handleProviderChange: vi.fn(),
+        handleModelChange: (modelId: string) =>
+          onModelSelected?.({
+            id: modelId,
+            name: "GPT-5.4",
+            displayName: "GPT-5.4",
+            providerId: "openai",
+          }),
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "openai", label: "OpenAI" },
+        ],
+        selectedProvider: "openai",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+        applySessionModelSelection,
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("gpt-5.4");
+    });
+
+    await waitFor(() => {
+      expect(recreateSessionForProvider).toHaveBeenCalledWith(
+        "openai",
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          providerId: "openai",
+          source: "explicit",
+        },
+        expect.any(Function),
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          localStorage.getItem("goose:preferredModelsByAgent") ?? "{}",
+        ),
+      ).toEqual({
+        goose: {
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+          providerId: "openai",
+        },
+      });
+    });
+  });
+
+  it("rolls back the optimistic model patch when stranded-provider recovery fails", async () => {
+    const recreateSessionForProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("create failed"));
+    const applySessionModelSelection = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error("Failed to get provider: Provider not set"),
+      )
+      .mockResolvedValueOnce(true);
+    const previousPreference = {
+      modelId: "current",
+      modelName: "current",
+      providerId: "openai",
+    };
+
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({ goose: previousPreference }),
+    );
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+      activeSessionId: "session-1",
+    });
+
+    mockUseAgentModelPickerState.mockImplementation(
+      ({
+        onModelSelected,
+      }: {
+        onModelSelected?: (model: {
+          id: string;
+          name: string;
+          displayName?: string;
+          providerId?: string;
+        }) => void;
+      }) => ({
+        pickerAgents: [{ id: "goose", label: "Goose" }],
+        availableModels: [
+          {
+            id: "gpt-5.4",
+            name: "GPT-5.4",
+            displayName: "GPT-5.4",
+            providerId: "openai",
+          },
+        ],
+        modelsLoading: false,
+        modelStatusMessage: null,
+        handleProviderChange: vi.fn(),
+        handleModelChange: (modelId: string) =>
+          onModelSelected?.({
+            id: modelId,
+            name: "GPT-5.4",
+            displayName: "GPT-5.4",
+            providerId: "openai",
+          }),
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "openai", label: "OpenAI" },
+        ],
+        selectedProvider: "openai",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+        applySessionModelSelection,
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("gpt-5.4");
+    });
+
+    await waitFor(() => {
+      expect(recreateSessionForProvider).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(applySessionModelSelection).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "openai",
+      modelId: "current",
+      modelName: "current",
+    });
+    expect(
+      JSON.parse(localStorage.getItem("goose:preferredModelsByAgent") ?? "{}"),
+    ).toEqual({ goose: previousPreference });
+    expect(mockToastError).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not persist the recovered model choice when the recreate is superseded", async () => {
+    // A superseded recreate resolves false: a newer pick owns navigation and
+    // its own preference, so persisting the stale choice here would clobber it.
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(false);
+    const applySessionModelSelection = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    mockUseAgentModelPickerState.mockImplementation(
+      ({
+        onModelSelected,
+      }: {
+        onModelSelected?: (model: {
+          id: string;
+          name: string;
+          displayName?: string;
+          providerId?: string;
+        }) => void;
+      }) => ({
+        pickerAgents: [{ id: "goose", label: "Goose" }],
+        availableModels: [
+          {
+            id: "gpt-5.4",
+            name: "GPT-5.4",
+            displayName: "GPT-5.4",
+            providerId: "openai",
+          },
+        ],
+        modelsLoading: false,
+        modelStatusMessage: null,
+        handleProviderChange: vi.fn(),
+        handleModelChange: (modelId: string) =>
+          onModelSelected?.({
+            id: modelId,
+            name: "GPT-5.4",
+            displayName: "GPT-5.4",
+            providerId: "openai",
+          }),
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "openai", label: "OpenAI" },
+        ],
+        selectedProvider: "openai",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+        applySessionModelSelection,
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("gpt-5.4");
+    });
+
+    await waitFor(() => {
+      expect(recreateSessionForProvider).toHaveBeenCalledTimes(1);
+    });
+    // Let the recreate's false resolution settle before asserting nothing stuck.
+    await Promise.resolve();
+    expect(localStorage.getItem("goose:preferredModelsByAgent")).toBeNull();
+  });
+
+  it("passes a supersession predicate that goes stale when a newer provider is picked mid-recreate", async () => {
+    // Hold the recreate open so a second provider pick can land while the
+    // first recovery's createSession is still in flight.
+    let releaseRecreate: () => void = () => {};
+    const recreatePending = new Promise<void>((resolve) => {
+      releaseRecreate = resolve;
+    });
+    const capturedPredicates: Array<() => boolean> = [];
+    const recreateSessionForProvider = vi
+      .fn()
+      .mockImplementation(
+        async (
+          _providerId: string,
+          _modelSelection: unknown,
+          isSelectionCurrent?: () => boolean,
+        ) => {
+          if (isSelectionCurrent) {
+            capturedPredicates.push(isSelectionCurrent);
+          }
+          await recreatePending;
+        },
+      );
+    const prepareSelectedProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "claude-acp", label: "Claude Code" },
+          { id: "codex-acp", label: "Codex" },
+        ],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+        recreateSessionForProvider,
+      }),
+    );
+
+    // First pick strands, kicking off a recreate that stays pending.
+    act(() => {
+      result.current.handleProviderChange("claude-acp");
+    });
+
+    await waitFor(() => {
+      expect(capturedPredicates).toHaveLength(1);
+    });
+    // While that recreate is in flight the predicate still reports current.
+    expect(capturedPredicates[0]()).toBe(true);
+
+    // A second pick bumps the shared version counter, superseding the first.
+    act(() => {
+      result.current.handleProviderChange("codex-acp");
+    });
+
+    await waitFor(() => {
+      expect(prepareSelectedProvider).toHaveBeenCalledTimes(2);
+    });
+
+    // The first recreate's predicate now reports stale, so the controller will
+    // skip its activateSession; only the newer pick's recreate navigates.
+    await waitFor(() => {
+      expect(capturedPredicates[0]()).toBe(false);
+    });
+
+    releaseRecreate();
+  });
+
+  it("does not recreate the session for unrelated switch failures", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(undefined);
+    const prepareSelectedProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("network down"));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "claude-acp", label: "Claude Code" },
+        ],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleProviderChange("claude-acp");
+    });
+
+    await waitFor(() => {
+      expect(prepareSelectedProvider).toHaveBeenCalled();
+    });
+    expect(recreateSessionForProvider).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate a session whose only history is local messages", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(undefined);
+    const prepareSelectedProvider = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+
+    // The backend never committed a turn (messageCount stays 0), but the
+    // user's optimistically-added prompt and the send-failure bubble live in
+    // the local message store. That is a conversation with history — recovery
+    // must surface the failure normally rather than discard the session.
+    useChatStore.setState({
+      messagesBySession: {
+        "session-1": [
+          {
+            id: "user-1",
+            role: "user",
+            created: 0,
+            content: [{ type: "text", text: "hello" }],
+          },
+        ],
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "claude-acp", label: "Claude Code" },
+        ],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => {
+      result.current.handleProviderChange("claude-acp");
+    });
+
+    await waitFor(() => {
+      expect(prepareSelectedProvider).toHaveBeenCalled();
+    });
+    expect(recreateSessionForProvider).not.toHaveBeenCalled();
   });
 });

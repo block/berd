@@ -32,6 +32,7 @@ import {
   supportsContextCompactionControls,
 } from "../lib/autoCompact";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
+import { activateSession } from "../lib/sessionActivation";
 import { useResolvedAgentModelPicker } from "./useResolvedAgentModelPicker";
 import { composeBuilderSendOptions } from "./useBuilderSendInterceptor";
 import { moveSessionToProject } from "../stores/chatSessionOperations";
@@ -606,6 +607,95 @@ export function useChatSessionController({
     ],
   );
 
+  // Escape hatch for the "Provider not set" trap. When an in-place provider or
+  // model switch fails because the session's live provider never constructed,
+  // the backend's switch handlers reject before they can install the target
+  // provider — they read the current (dead) provider first. Rather than roll
+  // back onto the corpse, recreate an empty session directly on the target
+  // provider: newSession installs the provider at birth, bypassing the
+  // read-current gate, so the fresh session is born healthy. Navigation follows
+  // the store's active session automatically. Resolves true when it navigated
+  // onto the fresh session, false when a newer pick superseded it mid-flight —
+  // the caller uses this to persist the recovered model preference only for the
+  // selection that actually won.
+  const recreateSessionForProvider = useCallback(
+    async (
+      providerId: string,
+      modelSelection?: PreferredModelSelection | null,
+      isSelectionCurrent?: () => boolean,
+    ): Promise<boolean> => {
+      const store = useChatSessionStore.getState();
+      const current = sessionId ? store.getSession(sessionId) : undefined;
+      const workingDir = await resolveSessionCwd(
+        project,
+        activeWorkspace?.path ?? current?.workingDir ?? session?.workingDir,
+      );
+      const modelId =
+        modelSelection?.id &&
+        modelSelection.id !== "current" &&
+        modelSelection.id !== "default"
+          ? modelSelection.id
+          : undefined;
+      const created = await store.createSession({
+        title: current?.title,
+        projectId: current?.projectId ?? undefined,
+        personaId: current?.personaId,
+        providerId,
+        workingDir,
+        modelId,
+        modelName: modelId ? (modelSelection?.name ?? undefined) : undefined,
+        // Force provider construction at session birth so the fresh session
+        // cannot re-enter the deferred/broken-provider bootstrap that stranded
+        // the old one.
+        deferProviderSetup: false,
+      });
+
+      // The caller's version guard ran before this detached recreate began, but
+      // createSession just awaited. If a newer provider/model pick superseded
+      // this selection during that window, do not navigate onto a stale target
+      // — the newer pick owns activation. Archive the empty session we just
+      // created so it does not orphan (best-effort), then bail before touching
+      // the active session or the stranded corpse (the newer recreate retires
+      // that one).
+      if (isSelectionCurrent && !isSelectionCurrent()) {
+        try {
+          await store.archiveSession(created.id);
+        } catch (error) {
+          console.error(
+            "Failed to archive superseded recreated session:",
+            error,
+          );
+        }
+        return false;
+      }
+
+      activateSession(created.id);
+
+      // Retire the stranded corpse now that we've migrated off it. The picker
+      // only routes empty sessions here, so nothing is lost — but left in place
+      // the dead session lingers in the list, re-triggers the same trap when
+      // re-entered, and accumulates a new empty each time the user retries.
+      // Archive rather than drop locally: the session exists on the backend, so
+      // a local removal would reappear on the next loadSessions(). Best-effort —
+      // recovery already succeeded, so a failed cleanup must not surface as a
+      // recovery failure.
+      const strandedSessionId = current?.id ?? sessionId;
+      if (strandedSessionId && strandedSessionId !== created.id) {
+        try {
+          await store.archiveSession(strandedSessionId);
+        } catch (error) {
+          console.error(
+            "Failed to archive stranded session after provider recovery:",
+            error,
+          );
+        }
+      }
+
+      return true;
+    },
+    [activeWorkspace?.path, project, session?.workingDir, sessionId],
+  );
+
   const prevProjectIdRef = useRef(session?.projectId);
   useEffect(() => {
     if (!sessionId) {
@@ -642,6 +732,7 @@ export function useChatSessionController({
     setGlobalSelectedProvider,
     prepareSelectedProvider,
     applySessionModelSelection,
+    recreateSessionForProvider,
   });
 
   const refreshMissingReasoningEffort = useCallback(async () => {

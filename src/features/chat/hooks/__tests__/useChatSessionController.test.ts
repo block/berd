@@ -24,6 +24,8 @@ const mockUseMessageQueue = vi.fn();
 const mockPickerOpen = vi.fn();
 const mockPreSeedDraftAgent = vi.fn();
 const mockDeletePersonaSource = vi.fn();
+const mockAcpCreateSession = vi.fn();
+const mockAcpSessionArchive = vi.fn();
 const mockUseChatRuntime = {
   chatState: "idle",
   activeRunId: null as string | null,
@@ -73,6 +75,7 @@ vi.mock("@/shared/api/acp", () => ({
   acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
   acpSetSessionConfigOption: (...args: unknown[]) =>
     mockAcpSetSessionConfigOption(...args),
+  acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -88,6 +91,8 @@ vi.mock("@/shared/api/acpConnection", () => ({
         mockGoosePreferencesRead(...args),
       GooseUnstablePreferencesSave: (...args: unknown[]) =>
         mockGoosePreferencesSave(...args),
+      GooseUnstableSessionArchive: (...args: unknown[]) =>
+        mockAcpSessionArchive(...args),
     },
   }),
 }));
@@ -279,6 +284,11 @@ describe("useChatSessionController", () => {
     mockAcpPrepareSession.mockResolvedValue(undefined);
     mockAcpSetModel.mockResolvedValue(undefined);
     mockAcpSetSessionConfigOption.mockResolvedValue(undefined);
+    mockAcpCreateSession.mockResolvedValue({
+      sessionId: "session-recovered",
+      configOptionsSnapshot: undefined,
+    });
+    mockAcpSessionArchive.mockResolvedValue(undefined);
     mockResolveSessionCwd.mockResolvedValue("/tmp/project");
     mockGooseDefaultsRead.mockResolvedValue({
       providerId: null,
@@ -1516,6 +1526,154 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getModelSelectionIntent("session-1"),
     ).toBeUndefined();
+  });
+
+  it("archives the stranded empty session after recovering from a 'Provider not set' switch", async () => {
+    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    // The dead in-place switch is abandoned; a fresh session is born directly on
+    // the target provider with the provider forced at birth.
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "anthropic",
+        "/tmp/project",
+        expect.objectContaining({
+          modelId: "claude-sonnet-4",
+          deferProviderSetup: false,
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "session-recovered",
+      );
+    });
+    expect(useChatStore.getState().activeSessionId).toBe("session-recovered");
+
+    // The stranded empty corpse is archived on the backend rather than left in
+    // the list to re-trigger the trap or accumulate empties.
+    await waitFor(() => {
+      expect(mockAcpSessionArchive).toHaveBeenCalledWith({
+        sessionId: "session-1",
+      });
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBeDefined();
+
+    // The recovered choice sticks: the success-path persist is skipped by the
+    // recovery early-return, so recovery persists it explicitly. Without this
+    // the next new session for this agent would fall back to the old (dead)
+    // preference and re-enter the trap.
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          window.localStorage.getItem("goose:preferredModelsByAgent") ?? "{}",
+        ),
+      ).toEqual({
+        goose: {
+          modelId: "claude-sonnet-4",
+          modelName: "Claude Sonnet 4",
+          providerId: "anthropic",
+        },
+      });
+    });
+  });
+
+  it("keeps the recovery navigation when archiving the stranded session fails", async () => {
+    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpSessionArchive.mockRejectedValueOnce(new Error("archive failed"));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    // Recovery still lands on the fresh session even though the best-effort
+    // cleanup of the old one throws.
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "session-recovered",
+      );
+    });
+    await waitFor(() => {
+      expect(mockAcpSessionArchive).toHaveBeenCalledWith({
+        sessionId: "session-1",
+      });
+    });
+  });
+
+  it("skips navigation and archives the fresh session when a newer pick supersedes the recreate mid-flight", async () => {
+    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+
+    // Suspend the recovery's createSession so a second pick can land while the
+    // fresh session is still being born.
+    const create = deferred<{
+      sessionId: string;
+      configOptionsSnapshot: undefined;
+    }>();
+    mockAcpCreateSession.mockReturnValueOnce(create.promise);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    // First switch strands the provider and kicks off a recreate that suspends
+    // inside createSession.
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+
+    // A second pick lands mid-recreate, bumping the picker's shared version
+    // counter so the in-flight recreate is now superseded.
+    act(() => {
+      result.current.handleProviderChange("codex-acp");
+    });
+
+    // Let the suspended recreate finish creating its (now stale) session.
+    create.resolve({
+      sessionId: "session-recovered",
+      configOptionsSnapshot: undefined,
+    });
+
+    // The superseded recreate archives the empty session it just created rather
+    // than orphaning it, closing the empty-accumulation gap under a rapid
+    // double-switch.
+    await waitFor(() => {
+      expect(mockAcpSessionArchive).toHaveBeenCalledWith({
+        sessionId: "session-recovered",
+      });
+    });
+    // ...and never navigates onto the stale target — the newer pick owns
+    // activation, so the user is not left on the superseded provider.
+    expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+      "session-recovered",
+    );
+    expect(useChatStore.getState().activeSessionId).not.toBe(
+      "session-recovered",
+    );
+    // The superseded recreate must not persist its stale model choice either —
+    // the newer pick owns the preference, so the discarded selection leaves no
+    // residue in goose:preferredModelsByAgent.
+    expect(
+      window.localStorage.getItem("goose:preferredModelsByAgent"),
+    ).toBeNull();
   });
 
   it("preserves reasoning effort rehydrated during a model switch", async () => {
