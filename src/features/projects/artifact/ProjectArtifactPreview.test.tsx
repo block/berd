@@ -79,7 +79,7 @@ describe("ProjectArtifactPreview", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not use backdrop blur in the tile fallback", () => {
+  it("shows a project glyph placeholder in the tile fallback", () => {
     mockedGetArtifacts.mockReturnValue(new Promise(() => {}));
 
     const { container } = renderWithQueryClient(
@@ -89,6 +89,9 @@ describe("ProjectArtifactPreview", () => {
     expect(
       container.querySelector(".backdrop-blur-xl"),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("project-artifact-placeholder-glyph"),
+    ).toBeInTheDocument();
   });
 
   it("passes cached image and environment URLs to the renderer", async () => {

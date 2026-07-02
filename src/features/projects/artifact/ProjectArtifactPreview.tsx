@@ -10,6 +10,7 @@ import {
 import { selectProjectPreviewArtifacts } from "@/shared/api/artifacts";
 import { useArtifacts } from "@/shared/hooks/useArtifacts";
 import { cn } from "@/shared/lib/cn";
+import { DefaultProjectGlyphIcon } from "../ui/DefaultProjectGlyphIcon";
 import { deriveProjectArtifactState } from "./deriveProjectArtifactState";
 import { prefetchProjectArtifactRenderer } from "./prefetchProjectArtifactRenderer";
 import type {
@@ -78,13 +79,19 @@ function ProjectArtifactFallback({
       )}
       <div
         className={cn(
-          "relative aspect-square w-[44%] rounded-[22%]",
+          "relative flex aspect-square items-center justify-center rounded-[22%] border border-border/35 text-foreground/80",
           isTile
-            ? "bg-surface-glass-strong/75 shadow-[var(--shadow-chat)]"
-            : "bg-surface-glass-strong/40 shadow-[var(--shadow-chat)] backdrop-blur-xl",
+            ? "w-[44%] bg-card/90 shadow-sm"
+            : "w-[44%] bg-surface-glass-strong/40 shadow-[var(--shadow-chat)] backdrop-blur-xl",
         )}
         aria-hidden="true"
-      />
+      >
+        <DefaultProjectGlyphIcon
+          color={state.accentColor}
+          className={isTile ? "size-[80%]" : "size-[38%]"}
+          data-testid="project-artifact-placeholder-glyph"
+        />
+      </div>
     </div>
   );
 }
