@@ -13,8 +13,9 @@
 #                     src-tauri/resources/runtime-config.json for custom builds
 #                     (default "{}"); validated before building
 #   - custom_vite_env: JSON object of VITE_* build env overrides plus
-#                     CUSTOM_BUNDLED_AGENTS and DISABLE_BLOCK_NPM_REGISTRY for
-#                     custom builds (default "{}"); VITE_APP_VERSION and
+#                     CUSTOM_BUNDLED_AGENTS, DISABLE_BLOCK_NPM_REGISTRY, and
+#                     DISABLE_BLOCK_DOCTOR_CHECKS for custom builds (default
+#                     "{}"); VITE_APP_VERSION and
 #                     VITE_ENVIRONMENT are owned by the release script
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
@@ -284,11 +285,12 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
     all(keys[];
       . == "CUSTOM_BUNDLED_AGENTS" or
       . == "DISABLE_BLOCK_NPM_REGISTRY" or
+      . == "DISABLE_BLOCK_DOCTOR_CHECKS" or
       test("^VITE_[A-Z0-9_]+$")
     ) and
     all(.[]; type == "string")
   ' >/dev/null || {
-    echo "custom_vite_env must be a JSON object with string VITE_* keys/values, CUSTOM_BUNDLED_AGENTS, or DISABLE_BLOCK_NPM_REGISTRY: $CUSTOM_BUILD_ENV" >&2; exit 1;
+    echo "custom_vite_env must be a JSON object with string VITE_* keys/values, CUSTOM_BUNDLED_AGENTS, DISABLE_BLOCK_NPM_REGISTRY, or DISABLE_BLOCK_DOCTOR_CHECKS: $CUSTOM_BUILD_ENV" >&2; exit 1;
   }
 
   while IFS=$'\t' read -r key value; do
@@ -301,6 +303,14 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
           CARGO_FEATURES="$CARGO_FEATURES,no-block-npm-registry"
         elif [[ "$value" != "0" ]]; then
           echo "DISABLE_BLOCK_NPM_REGISTRY must be \"0\" or \"1\"" >&2
+          exit 1
+        fi
+        ;;
+      DISABLE_BLOCK_DOCTOR_CHECKS)
+        if [[ "$value" == "1" ]]; then
+          CARGO_FEATURES="$CARGO_FEATURES,no-block-doctor-checks"
+        elif [[ "$value" != "0" ]]; then
+          echo "DISABLE_BLOCK_DOCTOR_CHECKS must be \"0\" or \"1\"" >&2
           exit 1
         fi
         ;;

@@ -1047,9 +1047,13 @@ async fn run_doctor_impl(
         .bundle()
         .and_then(|bundle| bundle.config_path.as_deref());
     if doctor_internal_tooling_checks_enabled(runtime_config) {
-        checks.extend(run_local_checks(registry, distro_config_path).await);
+        let mut local_checks = run_local_checks(registry, distro_config_path).await;
+        if !doctor_block_checks_enabled() {
+            local_checks.retain(|check| check.id != "sq-agent-tools");
+        }
+        checks.extend(local_checks);
     }
-    if doctor_kgoose_connectivity_enabled(runtime_config) {
+    if doctor_block_checks_enabled() && doctor_kgoose_connectivity_enabled(runtime_config) {
         checks.push(run_kgoose_connectivity_check(distro_state, runtime_config).await);
     }
     DoctorReport { checks }
@@ -1075,6 +1079,10 @@ fn doctor_kgoose_connectivity_enabled(runtime_config: &RuntimeConfig) -> bool {
     doctor_config(runtime_config)
         .and_then(|doctor| doctor.kgoose_connectivity)
         .unwrap_or(true)
+}
+
+fn doctor_block_checks_enabled() -> bool {
+    !cfg!(feature = "no-block-doctor-checks")
 }
 
 async fn run_doctor_or_timeout<F>(future: F, timeout_duration: Duration) -> DoctorReport
