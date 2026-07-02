@@ -57,7 +57,7 @@ export function ExperimentConfigControls({
   }
 
   return (
-    <div className="divide-y divide-border border-t bg-muted/20">
+    <div className="bg-muted/20">
       {controls.map(([key, control]) => {
         const controlId = `experiment-${definition.id}-${key}`;
         const description = control.descriptionKey
@@ -67,14 +67,19 @@ export function ExperimentConfigControls({
           control.type === "text" && control.multiline !== false;
         const isStackedControl =
           isMultilineTextControl || control.type === "shortcut";
+        const controlContainerClassName = isStackedControl
+          ? "w-full"
+          : control.type === "boolean"
+            ? "flex shrink-0 justify-end"
+            : "w-40 flex-shrink-0";
 
         return (
           <div
             key={key}
             className={
               isStackedControl
-                ? "flex flex-col gap-2 py-3 pl-8 pr-4"
-                : "flex items-center justify-between gap-6 py-3 pl-8 pr-4"
+                ? "relative flex flex-col gap-2 py-3 pl-8 pr-4 before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']"
+                : "relative flex items-center justify-between gap-6 py-3 pl-8 pr-4 before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']"
             }
           >
             <div className="min-w-0 flex-1">
@@ -91,7 +96,7 @@ export function ExperimentConfigControls({
                 </p>
               ) : null}
             </div>
-            <div className={isStackedControl ? "w-full" : "w-40 flex-shrink-0"}>
+            <div className={controlContainerClassName}>
               {control.type === "boolean" ? (
                 <Switch
                   id={controlId}

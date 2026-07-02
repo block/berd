@@ -209,6 +209,9 @@
       "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
       "title": "Navegación renovada"
     },
+    "navigationExperiments": {
+      "title": "Experimentos de navegación"
+    },
     "paneJumpNavigation": {
       "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
       "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",
@@ -218,6 +221,7 @@
       "title": "Navegación de paneles"
     },
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
+    "defaultLabel": "predeterminado",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
     "gooseStyleGuidelines": {
       "description": "Agrega un prompt del sistema adicional con guía de estilo a proveedores administrados por Goose antes de cada mensaje del usuario.",

@@ -1,8 +1,13 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExperimentDefinition } from "../experimentDefinitions";
+import {
+  NAVIGATION_REFRESH_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+  type ExperimentDefinition,
+} from "../experimentDefinitions";
 import { ExperimentsSettings } from "../ExperimentsSettings";
 import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "../experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
@@ -127,8 +132,14 @@ describe("ExperimentsSettings", () => {
         }),
       ),
     ).toBeInTheDocument();
+    const navigationExperimentsCard = screen.getByRole("region", {
+      name: i18n.t("experiments.navigationExperiments.title", {
+        ns: "settings",
+      }),
+    });
+    expect(navigationExperimentsCard).toBeInTheDocument();
     expect(
-      screen.getByRole("switch", {
+      within(navigationExperimentsCard).getByRole("switch", {
         name: i18n.t("experiments.navigationRefresh.title", {
           ns: "settings",
         }),
@@ -142,12 +153,17 @@ describe("ExperimentsSettings", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("switch", {
+      within(navigationExperimentsCard).getByRole("switch", {
         name: i18n.t("experiments.sidebarFlatChatList.title", {
           ns: "settings",
         }),
       }),
-    ).not.toBeChecked();
+    ).toBeChecked();
+    expect(
+      within(navigationExperimentsCard).getByText(
+        i18n.t("experiments.defaultLabel", { ns: "settings" }),
+      ),
+    ).toHaveAttribute("data-slot", "badge");
     expect(
       screen.getByText(
         i18n.t("experiments.sidebarFlatChatList.description", {
@@ -155,6 +171,133 @@ describe("ExperimentsSettings", () => {
         }),
       ),
     ).toBeInTheDocument();
+    expect(
+      within(navigationExperimentsCard).getByRole("switch", {
+        name: i18n.t("general.groupChatsByProject.label", {
+          ns: "settings",
+        }),
+      }),
+    ).toBeChecked();
+  });
+
+  it("keeps flat chat list as the default while project grouping remains configurable", async () => {
+    vi.stubEnv("DEV", false);
+    const user = userEvent.setup();
+
+    renderWithProviders(<ExperimentsSettings />);
+
+    const navigationExperimentsCard = screen.getByRole("region", {
+      name: i18n.t("experiments.navigationExperiments.title", {
+        ns: "settings",
+      }),
+    });
+    const navigationRefreshSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.navigationRefresh.title", {
+        ns: "settings",
+      }),
+    });
+    const flatChatListSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.sidebarFlatChatList.title", {
+        ns: "settings",
+      }),
+    });
+    const groupChatsByProjectSwitch = screen.getByRole("switch", {
+      name: i18n.t("general.groupChatsByProject.label", {
+        ns: "settings",
+      }),
+    });
+
+    expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(flatChatListSwitch).toBeChecked();
+    expect(groupChatsByProjectSwitch).toBeChecked();
+
+    await user.click(flatChatListSwitch);
+
+    await waitFor(() => {
+      expect(navigationRefreshSwitch).toBeChecked();
+      expect(flatChatListSwitch).not.toBeChecked();
+      expect(groupChatsByProjectSwitch).not.toBeChecked();
+      expect(groupChatsByProjectSwitch).toBeDisabled();
+    });
+    expect(
+      within(navigationExperimentsCard).queryByRole("button", {
+        name: i18n.t("experiments.resetToAuto", { ns: "settings" }),
+      }),
+    ).not.toBeInTheDocument();
+
+    await user.click(navigationRefreshSwitch);
+
+    expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(flatChatListSwitch).toBeChecked();
+    expect(groupChatsByProjectSwitch).not.toBeChecked();
+    expect(groupChatsByProjectSwitch).not.toBeDisabled();
+
+    await user.click(groupChatsByProjectSwitch);
+
+    expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(flatChatListSwitch).toBeChecked();
+    expect(groupChatsByProjectSwitch).toBeChecked();
+
+    await user.click(navigationRefreshSwitch);
+
+    expect(navigationRefreshSwitch).toBeChecked();
+    await waitFor(() => {
+      expect(flatChatListSwitch).not.toBeChecked();
+      expect(groupChatsByProjectSwitch).not.toBeChecked();
+      expect(groupChatsByProjectSwitch).toBeDisabled();
+    });
+    expect(
+      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
+        .experiments[NAVIGATION_REFRESH_EXPERIMENT_ID].enabled,
+    ).toBe(true);
+    expect(
+      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
+        .experiments[SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID].enabled,
+    ).toBe(false);
+    expect(
+      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
+        .experiments[SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID].config[
+        SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY
+      ],
+    ).toBe(false);
+  });
+
+  it("turns refreshed navigation off when flat chat list is toggled on", async () => {
+    vi.stubEnv("DEV", false);
+    const user = userEvent.setup();
+
+    renderWithProviders(<ExperimentsSettings />);
+
+    const navigationRefreshSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.navigationRefresh.title", {
+        ns: "settings",
+      }),
+    });
+    const flatChatListSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.sidebarFlatChatList.title", {
+        ns: "settings",
+      }),
+    });
+    const groupChatsByProjectSwitch = screen.getByRole("switch", {
+      name: i18n.t("general.groupChatsByProject.label", {
+        ns: "settings",
+      }),
+    });
+
+    await user.click(navigationRefreshSwitch);
+
+    await waitFor(() => {
+      expect(navigationRefreshSwitch).toBeChecked();
+      expect(flatChatListSwitch).not.toBeChecked();
+      expect(groupChatsByProjectSwitch).toBeDisabled();
+    });
+
+    await user.click(flatChatListSwitch);
+
+    expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(flatChatListSwitch).toBeChecked();
+    expect(groupChatsByProjectSwitch).not.toBeChecked();
+    expect(groupChatsByProjectSwitch).not.toBeDisabled();
   });
 
   it("points the pane jump shortcut control at keyboard shortcut settings", async () => {

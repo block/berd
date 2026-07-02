@@ -179,6 +179,7 @@ export const EXPERIMENT_DEFINITIONS = [
     id: SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
     titleKey: "experiments.sidebarFlatChatList.title",
     descriptionKey: "experiments.sidebarFlatChatList.description",
+    defaultEnabled: true,
     config: {
       [SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY]: {
         type: "boolean",
