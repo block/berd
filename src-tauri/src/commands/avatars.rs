@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::broadcast;
 
 const ARTIFACTORY_BASE: &str =
     "https://global.block-artifacts.com/artifactory/goose-internal/avatars/";
@@ -23,6 +24,12 @@ const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const ASSET_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const ASSET_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
+// A `.part` file older than this is treated as an orphan left behind by a
+// crashed process and is safe to delete. It must comfortably exceed the longest
+// a live download can run (connect + download timeout) so cleanup never removes
+// a part file that an in-flight download — which no longer holds any lock — is
+// still actively writing.
+const PART_FILE_STALE_AGE: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,7 +167,7 @@ impl std::fmt::Display for AvatarCommandError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AvatarAssetError {
     code: AvatarErrorCode,
     detail: String,
@@ -224,31 +231,36 @@ fn platform_avatar_format() -> &'static str {
 pub async fn get_avatar_library_snapshot(
     app: AppHandle,
 ) -> AvatarCommandResult<AvatarLibrarySnapshot> {
-    let _cache_guard = avatar_cache_lock().lock().await;
     let paths = avatar_cache_paths(&app)?;
-    clean_part_files(&paths)?;
 
-    let catalog = match read_cached_catalog(&paths)? {
-        Some(catalog) => {
-            prune_obsolete_versions(&paths, &catalog.catalog_version)?;
-            if is_catalog_cache_stale(&paths) {
-                let refresh_paths = paths.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _cache_guard = avatar_cache_lock().lock().await;
-                    if let Err(error) = refresh_cached_catalog(&refresh_paths).await {
-                        log::warn!("Failed to refresh avatar catalog cache: {error}");
-                    }
-                });
+    let catalog = {
+        let _catalog_guard = catalog_lock().lock().await;
+        clean_part_files(&paths)?;
+
+        match read_cached_catalog(&paths)? {
+            Some(catalog) => {
+                prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+                if is_catalog_cache_stale(&paths) {
+                    let refresh_paths = paths.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _catalog_guard = catalog_lock().lock().await;
+                        if let Err(error) = refresh_cached_catalog(&refresh_paths).await {
+                            log::warn!("Failed to refresh avatar catalog cache: {error}");
+                        }
+                    });
+                }
+                catalog
             }
-            catalog
-        }
-        None => {
-            let catalog = refresh_cached_catalog(&paths).await?;
-            prune_obsolete_versions(&paths, &catalog.catalog_version)?;
-            catalog
+            None => {
+                let catalog = refresh_cached_catalog(&paths).await?;
+                prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+                catalog
+            }
         }
     };
 
+    // Reading cached collections only inspects atomically-placed files, so it
+    // does not need the catalog lock.
     let cached_collections = cached_collections_for_catalog(&paths, &catalog)?;
     Ok(AvatarLibrarySnapshot {
         catalog,
@@ -261,7 +273,7 @@ pub async fn get_cached_avatar_for_ref(
     app: AppHandle,
     avatar_ref: String,
 ) -> Result<Option<CachedAvatar>, String> {
-    let _cache_guard = avatar_cache_lock().lock().await;
+    // No lock needed: reads atomically-placed media files and checksum markers.
     let avatar_id = parse_avatar_ref(&avatar_ref)?;
     let paths = avatar_cache_paths(&app)?;
     let Some(catalog) = read_cached_catalog(&paths)? else {
@@ -285,7 +297,7 @@ pub async fn get_cached_avatars_for_refs(
         parsed_refs.push((avatar_ref, avatar_id));
     }
 
-    let _cache_guard = avatar_cache_lock().lock().await;
+    // No lock needed: reads atomically-placed media files and checksum markers.
     let paths = avatar_cache_paths(&app)?;
     let Some(catalog) = read_cached_catalog(&paths)? else {
         return Ok(parsed_refs
@@ -373,25 +385,39 @@ pub async fn ensure_avatar_collection(
     catalog_version: String,
     collection_id: String,
 ) -> AvatarCommandResult<CachedAvatarCollection> {
-    let _cache_guard = avatar_cache_lock().lock().await;
     validate_safe_segment(&catalog_version)?;
     let paths = avatar_cache_paths(&app)?;
-    clean_part_files(&paths)?;
 
-    let catalog = catalog_for_requested_version(&paths, &catalog_version).await?;
-    if catalog.catalog_version != catalog_version {
-        return Err(format!(
-            "Avatar catalog version conflict: requested {}, current {}",
-            catalog_version, catalog.catalog_version
-        )
-        .into());
-    }
+    // Hold catalog lock only for metadata operations.
+    let catalog = {
+        let _catalog_guard = catalog_lock().lock().await;
+        clean_part_files(&paths)?;
 
+        let catalog = catalog_for_requested_version(&paths, &catalog_version).await?;
+        if catalog.catalog_version != catalog_version {
+            return Err(format!(
+                "Avatar catalog version conflict: requested {}, current {}",
+                catalog_version, catalog.catalog_version
+            )
+            .into());
+        }
+
+        // Validate collection exists while we have the catalog.
+        find_collection(&catalog, &collection_id)?;
+        catalog
+    };
+
+    // Downloads happen outside the catalog lock, using per-asset dedup.
     let collection = find_collection(&catalog, &collection_id)?;
     let (assets, failed_asset_ids, error_code) =
         ensure_collection_assets(&paths, &catalog, collection, platform_avatar_format()).await?;
 
-    prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+    // Brief lock for pruning.
+    {
+        let _catalog_guard = catalog_lock().lock().await;
+        prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+    }
+
     Ok(CachedAvatarCollection {
         catalog_version: catalog.catalog_version,
         collection_id,
@@ -402,7 +428,14 @@ pub async fn ensure_avatar_collection(
 }
 
 pub async fn clear_avatar_cache(app: AppHandle) -> Result<(), String> {
-    let _cache_guard = avatar_cache_lock().lock().await;
+    // The catalog lock serializes against metadata writes and pruning. The
+    // exclusive download guard is what makes the clear wait for in-flight
+    // downloads to finish — and blocks new ones from starting — since downloads
+    // no longer hold the catalog lock. Without it, a download could place its
+    // media file and checksum marker right after we wiped the cache dirs,
+    // leaving orphaned files behind while the clear reported success.
+    let _catalog_guard = catalog_lock().lock().await;
+    let _download_guard = download_guard().write().await;
     let paths = avatar_cache_paths(&app)?;
     clear_avatar_cache_paths(&paths).await
 }
@@ -416,20 +449,29 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
         return Ok(0);
     }
 
-    let _cache_guard = avatar_cache_lock().lock().await;
     let paths = avatar_cache_paths(&app)?;
-    clean_part_files(&paths)?;
-    let mut catalog = current_catalog(&paths)
-        .await
-        .map_err(|error| error.to_string())?;
-    if catalog_is_missing_avatar_ids(&catalog, &avatar_ids) {
-        match refresh_cached_catalog(&paths).await {
-            Ok(refreshed) => catalog = refreshed,
-            Err(error) => {
-                log::warn!("Failed to refresh avatar catalog for bundled agent warm-up: {error}");
+
+    // Hold catalog lock only for metadata resolution.
+    let catalog = {
+        let _catalog_guard = catalog_lock().lock().await;
+        clean_part_files(&paths)?;
+        let mut catalog = current_catalog(&paths)
+            .await
+            .map_err(|error| error.to_string())?;
+        if catalog_is_missing_avatar_ids(&catalog, &avatar_ids) {
+            match refresh_cached_catalog(&paths).await {
+                Ok(refreshed) => catalog = refreshed,
+                Err(error) => {
+                    log::warn!(
+                        "Failed to refresh avatar catalog for bundled agent warm-up: {error}"
+                    );
+                }
             }
         }
-    }
+        catalog
+    };
+
+    // Downloads happen outside the catalog lock, using per-asset dedup.
     let client = asset_http_client()?;
     let format = platform_avatar_format();
     let mut warmed = 0usize;
@@ -440,7 +482,7 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
             log::warn!("Bundled agent avatar '{avatar_id}' was not found in the avatar catalog");
             continue;
         };
-        match ensure_entry(&client, &paths, &catalog, entry, format).await {
+        match ensure_entry_deduped(&client, &paths, &catalog, entry, format).await {
             Ok(_) => {
                 warmed += 1;
                 warmed_avatar_refs.push(format!("app-avatar:{avatar_id}"));
@@ -457,7 +499,13 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
             log::warn!("Failed to emit avatar cache warm event: {error}");
         }
     }
-    prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+
+    // Brief lock for pruning.
+    {
+        let _catalog_guard = catalog_lock().lock().await;
+        prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+    }
+
     Ok(warmed)
 }
 
@@ -614,9 +662,184 @@ fn metadata_status_error(label: &str, status: StatusCode) -> AvatarCommandError 
     }
 }
 
-fn avatar_cache_lock() -> &'static tokio::sync::Mutex<()> {
+/// Lock that protects catalog metadata reads/writes, pruning, and part-file
+/// cleanup. This is NOT held during asset downloads — downloads use per-asset
+/// deduplication instead.
+fn catalog_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Shared/exclusive guard that serializes cache clears against in-flight
+/// downloads. A downloader holds the *read* guard for the duration of its
+/// download and placement, so many downloads still run concurrently;
+/// [`clear_avatar_cache`] holds the *write* guard, which waits for in-flight
+/// downloads to finish and blocks new ones from starting.
+///
+/// Downloads no longer hold [`catalog_lock`], so without this guard an in-flight
+/// download could place its media file and checksum marker right after a clear
+/// wiped the cache directories, leaving orphaned files behind while the clear
+/// reported success. Read-only avatar resolution does not take this guard, so
+/// the UI never blocks on it.
+fn download_guard() -> &'static tokio::sync::RwLock<()> {
+    static GUARD: OnceLock<tokio::sync::RwLock<()>> = OnceLock::new();
+    GUARD.get_or_init(|| tokio::sync::RwLock::new(()))
+}
+
+// Carries the full `AvatarAssetError` (code + detail), not just the detail
+// string, so a follower reconstructs the leader's exact error code. Flattening
+// to a string would force every follower to `Unavailable` and drop a leader's
+// `NetworkAccess` (WARP) code, surfacing the generic recovery message instead.
+type InflightResult = Result<CachedAvatarAsset, AvatarAssetError>;
+type InflightMap = HashMap<String, broadcast::Sender<InflightResult>>;
+
+/// Per-asset download deduplication. When a download is in flight for a given
+/// cache key (catalog_version + variant path), subsequent requests subscribe
+/// to the same broadcast channel instead of starting a duplicate download.
+///
+/// This is a synchronous mutex: it is only ever held for brief map lookups and
+/// a cache re-check, never across an `.await`. Keeping it synchronous lets
+/// [`InflightGuard`] remove a registration from a `Drop` impl, which is what
+/// makes a canceled download clean up after itself.
+fn inflight_downloads() -> &'static std::sync::Mutex<InflightMap> {
+    static MAP: OnceLock<std::sync::Mutex<InflightMap>> = OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn lock_inflight_downloads() -> std::sync::MutexGuard<'static, InflightMap> {
+    // The map is a plain cache; a poisoned lock only means a previous holder
+    // panicked, so recover the guard rather than propagate the panic.
+    inflight_downloads()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn inflight_key(catalog_version: &str, variant_path: &str) -> String {
+    format!("{catalog_version}/{variant_path}")
+}
+
+/// Either we became the downloader for an asset (`Leader`, holding the sender
+/// other tasks subscribe to) or another task already owns the download
+/// (`Follower`, holding a receiver for its result).
+enum InflightRole {
+    Leader(broadcast::Sender<InflightResult>),
+    Follower(broadcast::Receiver<InflightResult>),
+}
+
+/// Removes an in-flight download registration when dropped. The leader is the
+/// only task that can remove its own key, so dropping this guard — on normal
+/// completion or on cancellation (future dropped mid-download) — guarantees the
+/// key never lingers. Without it, a canceled leader would leave a sender in the
+/// map that never sends, wedging every later subscriber forever.
+struct InflightGuard<'a> {
+    key: &'a str,
+}
+
+impl<'a> InflightGuard<'a> {
+    fn new(key: &'a str) -> Self {
+        Self { key }
+    }
+}
+
+impl Drop for InflightGuard<'_> {
+    fn drop(&mut self) {
+        lock_inflight_downloads().remove(self.key);
+    }
+}
+
+/// Download a single asset with deduplication. If another task is already
+/// downloading the same asset, this waits for that result instead of starting
+/// a second download.
+async fn ensure_entry_deduped(
+    client: &reqwest::Client,
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    entry: &AvatarCatalogEntry,
+    format: &str,
+) -> Result<CachedAvatarAsset, AvatarAssetError> {
+    let variant = variant_for_format(entry, format)?;
+    validate_variant_path(variant, format, &entry.collection_id)?;
+    let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
+
+    // Fast path: already cached on disk.
+    if let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? {
+        return Ok(asset);
+    }
+
+    let key = inflight_key(&catalog.catalog_version, &variant.path);
+
+    loop {
+        // Atomically become the downloader or subscribe to an in-flight one.
+        // Holding the map lock across the cache re-check and the insert closes
+        // the check-then-act window where two tasks could both register.
+        let role = {
+            let mut inflight = lock_inflight_downloads();
+            // Another task may have finished between the fast path and here.
+            if let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? {
+                return Ok(asset);
+            }
+            match inflight.get(&key) {
+                Some(sender) => InflightRole::Follower(sender.subscribe()),
+                None => {
+                    let (tx, _) = broadcast::channel::<InflightResult>(1);
+                    inflight.insert(key.clone(), tx.clone());
+                    InflightRole::Leader(tx)
+                }
+            }
+        };
+
+        match role {
+            InflightRole::Follower(mut receiver) => match receiver.recv().await {
+                Ok(Ok(asset)) => return Ok(asset),
+                Ok(Err(error)) => return Err(error),
+                // The leader dropped its sender without a result (it was
+                // canceled). Its guard has removed the key, so retry: we may
+                // become the leader ourselves this time.
+                Err(_) => continue,
+            },
+            InflightRole::Leader(tx) => {
+                // The guard removes our registration on every exit path,
+                // including cancellation, so subscribers never wait on a
+                // channel that will never receive.
+                let _guard = InflightGuard::new(&key);
+                // Hold the shared download guard across the download and
+                // placement so a concurrent clear_avatar_cache waits for us to
+                // finish (and we wait for it) instead of wiping the cache dirs
+                // while we are still writing the media file and checksum marker.
+                let _download_guard = download_guard().read().await;
+                let result =
+                    ensure_entry_download(client, paths, catalog, entry, variant, &target).await;
+                // Broadcast the full result (code + detail) so followers
+                // reconstruct the leader's exact error code, not just Unavailable.
+                let _ = tx.send(result.clone());
+                return result;
+            }
+        }
+    }
+}
+
+/// The actual download + verify + place logic, extracted from the old
+/// `ensure_entry` so it can be called within the dedup wrapper.
+async fn ensure_entry_download(
+    client: &reqwest::Client,
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    entry: &AvatarCatalogEntry,
+    variant: &AvatarVariant,
+    target: &Path,
+) -> Result<CachedAvatarAsset, AvatarAssetError> {
+    delete_file_if_exists(target)?;
+    delete_file_if_exists(&checksum_marker_path(
+        paths,
+        &catalog.catalog_version,
+        &variant.path,
+    )?)?;
+
+    let url = allowed_artifactory_url(&format!("{}/{}", catalog.catalog_version, variant.path))?;
+    download_asset(client, url, target, variant).await?;
+    write_checksum_marker(paths, &catalog.catalog_version, variant)?;
+
+    Ok(cached_asset(entry, variant, target.to_path_buf()))
 }
 
 fn read_cached_catalog(paths: &AvatarCachePaths) -> Result<Option<AvatarCatalog>, String> {
@@ -747,34 +970,6 @@ fn is_catalog_cache_stale(paths: &AvatarCachePaths) -> bool {
     SystemTime::now()
         .duration_since(modified_at)
         .map_or(true, |age| age >= CATALOG_TTL)
-}
-
-async fn ensure_entry(
-    client: &reqwest::Client,
-    paths: &AvatarCachePaths,
-    catalog: &AvatarCatalog,
-    entry: &AvatarCatalogEntry,
-    format: &str,
-) -> Result<CachedAvatarAsset, AvatarAssetError> {
-    let variant = variant_for_format(entry, format)?;
-    validate_variant_path(variant, format, &entry.collection_id)?;
-    let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
-
-    if let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? {
-        return Ok(asset);
-    }
-    delete_file_if_exists(&target)?;
-    delete_file_if_exists(&checksum_marker_path(
-        paths,
-        &catalog.catalog_version,
-        &variant.path,
-    )?)?;
-
-    let url = allowed_artifactory_url(&format!("{}/{}", catalog.catalog_version, variant.path))?;
-    download_asset(client, url, &target, variant).await?;
-    write_checksum_marker(paths, &catalog.catalog_version, variant)?;
-
-    Ok(cached_asset(entry, variant, target))
 }
 
 async fn download_asset(
@@ -967,7 +1162,7 @@ async fn ensure_collection_assets(
             let catalog = Arc::clone(&catalog);
             async move {
                 let id = entry.id.clone();
-                match ensure_entry(&client, &paths, &catalog, &entry, format).await {
+                match ensure_entry_deduped(&client, &paths, &catalog, &entry, format).await {
                     Ok(asset) => Ok(asset),
                     Err(error) => {
                         log::warn!("Failed to ensure avatar asset '{id}': {error}");
@@ -1060,13 +1255,13 @@ fn cached_collection_assets(
         };
         validate_variant_path(variant, format, &entry.collection_id)?;
         let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
+        // This runs on the lock-free snapshot read path, concurrently with
+        // downloads that hold no catalog lock. Only report whether the asset is
+        // cached; do not delete incomplete files, or we could race a download
+        // that just placed the media (before writing its checksum marker) and
+        // force a needless re-download. Re-downloads clean up stale files up
+        // front, and pruning reclaims obsolete versions.
         let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? else {
-            delete_file_if_exists(&target)?;
-            delete_file_if_exists(&checksum_marker_path(
-                paths,
-                &catalog.catalog_version,
-                &variant.path,
-            )?)?;
             return Ok(None);
         };
         assets.push(asset);
@@ -1371,13 +1566,14 @@ fn previous_version_to_keep(
 }
 
 fn clean_part_files(paths: &AvatarCachePaths) -> Result<(), String> {
+    let now = SystemTime::now();
     for base in [&paths.meta, &paths.media] {
-        clean_part_files_under(base)?;
+        clean_part_files_under(base, now)?;
     }
     Ok(())
 }
 
-fn clean_part_files_under(path: &Path) -> Result<(), String> {
+fn clean_part_files_under(path: &Path, now: SystemTime) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
@@ -1391,12 +1587,33 @@ fn clean_part_files_under(path: &Path) -> Result<(), String> {
             .file_type()
             .map_err(|error| format!("Failed to inspect avatar cache file type: {error}"))?;
         if file_type.is_dir() {
-            clean_part_files_under(&path)?;
-        } else if entry.file_name().to_string_lossy().ends_with(".part") {
+            clean_part_files_under(&path, now)?;
+        } else if entry.file_name().to_string_lossy().ends_with(".part")
+            && part_file_is_stale(&entry, now)?
+        {
             delete_file_if_exists(&path)?;
         }
     }
     Ok(())
+}
+
+/// Whether a `.part` file is old enough that no live download could still be
+/// writing it. Downloads now run without holding any lock, so blanket-deleting
+/// part files would race an active download and make its final rename fail;
+/// only orphans left behind by a crashed process (which will be older than
+/// [`PART_FILE_STALE_AGE`]) are safe to remove.
+fn part_file_is_stale(entry: &fs::DirEntry, now: SystemTime) -> Result<bool, String> {
+    let metadata = entry
+        .metadata()
+        .map_err(|error| format!("Failed to inspect avatar cache part file: {error}"))?;
+    let Ok(modified_at) = metadata.modified() else {
+        // Without a modification time we cannot tell an orphan from a live
+        // download, so err on the side of keeping it.
+        return Ok(false);
+    };
+    Ok(now
+        .duration_since(modified_at)
+        .is_ok_and(|age| age >= PART_FILE_STALE_AGE))
 }
 
 fn delete_file_if_exists(path: &Path) -> Result<(), String> {
@@ -1636,13 +1853,16 @@ mod tests {
         let (_dir, paths) = temp_paths();
         let target = write_cached_webm(&paths, &catalog, bytes);
 
+        // Missing checksum marker: reported as not cached, but the read path
+        // must leave the file in place so it never races a concurrent download.
         assert!(
             cached_collection_assets(&paths, &catalog, collection, "webm")
                 .unwrap()
                 .is_none()
         );
-        assert!(!target.exists());
+        assert!(target.exists());
 
+        // Wrong bytes with a marker: still not cached, still left untouched.
         let target = write_cached_webm(&paths, &catalog, b"avatar-bytes-plus");
         write_webm_checksum_marker(&paths, &catalog);
         assert!(
@@ -1650,7 +1870,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(!target.exists());
+        assert!(target.exists());
 
         let target = write_cached_webm(&paths, &catalog, bytes);
         write_webm_checksum_marker(&paths, &catalog);
@@ -1659,6 +1879,26 @@ mod tests {
             .unwrap();
         assert_eq!(assets[0].path, target.to_string_lossy());
         assert!(Path::new(&assets[0].path).starts_with(&paths.media));
+    }
+
+    #[test]
+    fn clean_part_files_removes_only_stale_orphans() {
+        let (_dir, paths) = temp_paths();
+        let media_dir = paths.media.join("v1/webm/gloopies");
+        fs::create_dir_all(&media_dir).unwrap();
+        let part = media_dir.join("gloopy-1.webm.123.456.part");
+        fs::write(&part, b"partial").unwrap();
+
+        // A freshly written part file may belong to an in-flight download (which
+        // now holds no lock), so cleanup must leave it alone.
+        clean_part_files(&paths).unwrap();
+        assert!(part.exists());
+
+        // Once it is older than the stale threshold it is an orphan from a
+        // crashed process and is safe to remove.
+        let future = SystemTime::now() + PART_FILE_STALE_AGE + Duration::from_secs(1);
+        clean_part_files_under(&paths.media, future).unwrap();
+        assert!(!part.exists());
     }
 
     #[test]
@@ -1962,5 +2202,50 @@ mod tests {
 
         assert!(!paths.meta.exists());
         assert!(!paths.media.exists());
+    }
+
+    #[tokio::test]
+    async fn clear_waits_for_in_flight_downloads() {
+        // A held read guard models an in-flight download; the exclusive write
+        // guard that clear_avatar_cache takes must not be grantable until the
+        // download releases it, so a clear cannot wipe the cache dirs while a
+        // download is still placing files.
+        let download = download_guard().read().await;
+        assert!(
+            download_guard().try_write().is_err(),
+            "clear must not proceed while a download holds the guard"
+        );
+
+        drop(download);
+        assert!(
+            download_guard().try_write().is_ok(),
+            "clear may proceed once in-flight downloads release the guard"
+        );
+    }
+
+    #[tokio::test]
+    async fn deduped_follower_preserves_leader_error_code() {
+        // A follower subscribes to the leader's broadcast channel and must
+        // reconstruct the leader's exact error code. Carrying only the detail
+        // string used to force every follower to Unavailable, dropping a
+        // leader's NetworkAccess (WARP) code and its "connect to WARP"
+        // recovery message on concurrent requests for the same failing asset.
+        let (tx, _) = broadcast::channel::<InflightResult>(1);
+        let mut follower = tx.subscribe();
+
+        tx.send(Err(AvatarAssetError {
+            code: AvatarErrorCode::NetworkAccess,
+            detail: "connect to WARP".to_string(),
+        }))
+        .unwrap();
+
+        // Mirrors the follower arm in ensure_entry_deduped.
+        let error = match follower.recv().await {
+            Ok(Ok(_)) => panic!("expected the leader's error, not an asset"),
+            Ok(Err(error)) => error,
+            Err(error) => panic!("unexpected channel error: {error}"),
+        };
+        assert_eq!(error.code, AvatarErrorCode::NetworkAccess);
+        assert_eq!(error.detail, "connect to WARP");
     }
 }
