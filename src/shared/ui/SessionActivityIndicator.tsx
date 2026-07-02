@@ -1,8 +1,7 @@
 import { useReducedMotion } from "motion/react";
 
-import startupLoadingChatGif from "@/app/assets/startup-loading-chat.gif";
-import startupLoadingPoster from "@/app/assets/startup-loading-poster.png";
 import { cn } from "@/shared/lib/cn";
+import { BerdLoader } from "@/shared/ui/berd-loader";
 
 const ACTIVE_CHAT_BERD_SIZE_PX = 14;
 
@@ -23,16 +22,11 @@ export function ActiveChatBerdIndicator({
   const shouldReduceMotion = useReducedMotion();
 
   return (
-    <img
-      src={shouldReduceMotion ? startupLoadingPoster : startupLoadingChatGif}
-      alt=""
-      aria-hidden
-      className={cn(
-        "pointer-events-none object-contain dark:invert",
-        className,
-      )}
-      style={{ width: size, height: size }}
-      decoding="async"
+    <BerdLoader
+      animated={!shouldReduceMotion}
+      className={className}
+      decorative
+      size={size}
     />
   );
 }

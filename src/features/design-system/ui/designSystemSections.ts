@@ -13,6 +13,7 @@ export type DesignSystemSection =
   | "component-aspect-ratio"
   | "component-avatar"
   | "component-badge"
+  | "component-berd-loader"
   | "component-breadcrumb"
   | "component-alert"
   | "component-calendar"
@@ -93,6 +94,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-alert-dialog", label: "Alert Dialog" },
   { id: "component-button", label: "Button" },
   { id: "component-badge", label: "Badge" },
+  { id: "component-berd-loader", label: "Berd Loader" },
   { id: "component-breadcrumb", label: "Breadcrumb" },
   { id: "component-checkbox", label: "Checkbox" },
   { id: "component-collapsible", label: "Collapsible" },

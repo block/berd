@@ -113,7 +113,7 @@ describe("SidebarChatRow", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
-  it("shows the goose loader when the chat is active", () => {
+  it("shows the Berd loader when the chat is active", () => {
     const { container } = render(
       <SidebarChatRow
         id="session-1"
@@ -125,7 +125,7 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('img[src*="startup-loading"]'),
+      container.querySelector('[data-slot="berd-loader"]'),
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("sidebar-chat-menu-icon"),
@@ -152,7 +152,7 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByTestId("sidebar-chat-menu-icon")).toBeInTheDocument();
     expect(
-      container.querySelector('img[src*="startup-loading"]'),
+      container.querySelector('[data-slot="berd-loader"]'),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/chat active/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();

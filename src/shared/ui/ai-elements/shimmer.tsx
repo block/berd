@@ -28,7 +28,7 @@ export interface TextShimmerProps {
   duration?: number;
   spread?: number;
   delay?: number;
-  tone?: "default" | "soft" | "strong";
+  tone?: "default" | "soft" | "strong" | "current";
 }
 
 const ShimmerComponent = ({
@@ -50,21 +50,32 @@ const ShimmerComponent = ({
   );
   const shimmerColors = useMemo(
     () =>
-      tone === "strong"
+      tone === "current"
         ? {
-            base: "var(--color-muted-foreground)",
-            highlight: "var(--color-foreground)",
+            // Derive from an inheritable ink variable so the shimmer stays
+            // legible on surfaces whose foreground is fixed across themes (e.g.
+            // the always-dark responding pill). We can't use `currentColor`
+            // here because bg-clip-text sets this element's color to
+            // transparent. Surfaces set `--shimmer-ink` to their text token;
+            // otherwise it falls back to the normal foreground.
+            base: "color-mix(in srgb, var(--shimmer-ink, var(--color-foreground)) 55%, transparent)",
+            highlight: "var(--shimmer-ink, var(--color-foreground))",
           }
-        : tone === "soft"
+        : tone === "strong"
           ? {
               base: "var(--color-muted-foreground)",
-              highlight:
-                "color-mix(in srgb, var(--color-foreground) 72%, var(--color-muted-foreground) 28%)",
+              highlight: "var(--color-foreground)",
             }
-          : {
-              base: "var(--color-muted-foreground)",
-              highlight: "var(--color-background)",
-            },
+          : tone === "soft"
+            ? {
+                base: "var(--color-muted-foreground)",
+                highlight:
+                  "color-mix(in srgb, var(--color-foreground) 72%, var(--color-muted-foreground) 28%)",
+              }
+            : {
+                base: "var(--color-muted-foreground)",
+                highlight: "var(--color-background)",
+              },
     [tone],
   );
 

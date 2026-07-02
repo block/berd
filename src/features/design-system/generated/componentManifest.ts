@@ -310,6 +310,16 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Berd Loader",
+    source: "src/shared/ui/berd-loader.tsx",
+    exports: ["BerdLoader", "BerdLoaderProps"],
+    slots: ["berd-loader"],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: ["aria-hidden", 'aria-hidden="true"', "aria-label"],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Berd Logo",
     source: "src/shared/ui/BerdLogo.tsx",
     exports: ["BerdLogo"],

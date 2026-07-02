@@ -56,9 +56,7 @@ import { useExperiment } from "@/features/experiments/experimentPreferences";
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
 const CHAT_RESPONDING_PILL_CLASS =
-  "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]";
-const CHAT_RESPONDING_GOOSE_CLASS =
-  "[filter:var(--filter-chat-responding-goose)]";
+  "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] [--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]";
 function shouldStageInitialTranscript(
   messages: readonly unknown[],
   isLoadingHistory: boolean,
@@ -500,10 +498,7 @@ export function ChatView({
         CHAT_RESPONDING_PILL_CLASS,
       )}
     >
-      <ActiveChatBerdIndicator
-        size={14}
-        className={CHAT_RESPONDING_GOOSE_CLASS}
-      />
+      <ActiveChatBerdIndicator size={14} />
       <span>{readOnlyStatus}</span>
     </div>
   ) : shouldShowLoadingIndicator ? (
@@ -514,10 +509,7 @@ export function ChatView({
           CHAT_RESPONDING_PILL_CLASS,
         )}
       >
-        <ActiveChatBerdIndicator
-          size={14}
-          className={CHAT_RESPONDING_GOOSE_CLASS}
-        />
+        <ActiveChatBerdIndicator size={14} />
         <LoadingBerd
           key="loading-indicator"
           chatState={loadingChatState}

@@ -61,7 +61,7 @@ export function LoadingBerd({
         <Shimmer
           as="span"
           className="text-xs"
-          tone="strong"
+          tone="current"
           delay={LOADING_SHIMMER_DELAY_S}
           duration={LOADING_SHIMMER_S}
           spread={LOADING_SHIMMER_SPREAD}

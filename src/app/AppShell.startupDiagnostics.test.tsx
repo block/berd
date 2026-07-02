@@ -150,7 +150,7 @@ describe("AppShell startup diagnostics", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the bundled goose animation while app startup is loading", () => {
+  it("shows the Berd loader while app startup is loading", () => {
     mocks.startupState.ready = false;
 
     const { container } = renderAppShell();
@@ -159,8 +159,9 @@ describe("AppShell startup diagnostics", () => {
       screen.getByRole("status", { name: "Starting Berd" }),
     ).toBeInTheDocument();
     expect(
-      container.querySelector('img[src*="startup-loading"]'),
+      container.querySelector('[data-slot="berd-loader"]'),
     ).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
     expect(container.querySelector("video")).toBeNull();
     expect(screen.queryByTestId("app-shell-content")).not.toBeInTheDocument();
   });

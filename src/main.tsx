@@ -6,7 +6,6 @@ import {
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-import { preloadStartupLoadingMedia } from "@/app/lib/preloadStartupLoadingMedia";
 import {
   installRendererDiagnostics,
   reportRendererError,
@@ -29,8 +28,6 @@ try {
 } catch {
   // localStorage may be unavailable in some environments; ignore.
 }
-
-preloadStartupLoadingMedia();
 
 // React Query's default focus detection relies on `visibilitychange`, which
 // the Tauri webview does not fire when the app window merely loses or regains

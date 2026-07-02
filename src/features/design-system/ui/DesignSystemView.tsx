@@ -30,6 +30,8 @@ import {
 import { AspectRatio } from "@/shared/ui/aspect-ratio";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { Badge } from "@/shared/ui/badge";
+import { BerdLoader } from "@/shared/ui/berd-loader";
+import { BERD_LOADER_LOOP_MS } from "@/shared/ui/berd-loader-timing";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -232,6 +234,8 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
     "A layout primitive for fixed-ratio media and previews that should resize predictably across containers.",
   Avatar:
     "Compact identity marks for people, agents, and entities, including fallback behavior.",
+  "Berd Loader":
+    "Branded Berd activity mark for startup, active sessions, and agent work states.",
   Breadcrumb:
     "Hierarchy trails for wayfinding through nested pages and object detail surfaces.",
   Calendar:
@@ -2474,6 +2478,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
       <AvatarFallback>MG</AvatarFallback>
     </Avatar>
   ),
+  "Berd Loader": () => <BerdLoader size={70} />,
   Breadcrumb: () => (
     <Breadcrumb>
       <BreadcrumbList>
@@ -3494,6 +3499,124 @@ function ButtonGroupPage() {
           <ComponentTokenDetails
             colorRows={playgroundTokenDetails.colorRows}
             textRows={playgroundTokenDetails.textRows}
+          />
+        }
+      />
+    </>
+  );
+}
+
+function BerdLoaderPage() {
+  const [playgroundAnimated, setPlaygroundAnimated] = useState(true);
+  const [playgroundDecorative, setPlaygroundDecorative] = useState(true);
+  const [playgroundSize, setPlaygroundSize] = useState("70");
+  const [playgroundTone, setPlaygroundTone] = useState("foreground");
+  const loaderSize = Number(playgroundSize);
+  const tokenDetails = {
+    colorRows: [
+      {
+        anatomy: "SVG mark",
+        state: playgroundAnimated ? "Animated" : "Static",
+        background: "none",
+        textIcon: "currentColor",
+        border: "none",
+      },
+      {
+        anatomy: "Mask cutouts",
+        state: playgroundAnimated ? "Looping" : "Settled",
+        background: "none",
+        textIcon: "transparent cut from currentColor",
+        border: "none",
+      },
+      {
+        anatomy: "Accessible wrapper",
+        state: playgroundDecorative ? "Decorative" : "Labeled",
+        background: "none",
+        textIcon: playgroundDecorative ? "aria-hidden" : "aria-label: Loading",
+        border: "none",
+      },
+    ],
+    textRows: [
+      {
+        anatomy: "Loader",
+        size: `${loaderSize}px`,
+        weight: `loop ${BERD_LOADER_LOOP_MS}ms`,
+      },
+    ],
+  };
+
+  return (
+    <>
+      <PageIntro
+        title="Berd Loader"
+        description="Branded Berd activity mark for startup, active sessions, and agent work states."
+      />
+      <ComponentSpec name="Berd Loader" />
+
+      <ComponentPlayground
+        description="Inspect the inline SVG loader in its animated, reduced-motion, decorative, and labeled states. The mark inherits currentColor from its surrounding context."
+        preview={
+          <div
+            className={cn(
+              "flex min-h-32 w-full max-w-sm items-center justify-center rounded-md border border-border bg-card p-6",
+              playgroundTone === "muted" && "text-muted-foreground",
+              playgroundTone === "primary" && "text-primary",
+              playgroundTone === "responding" &&
+                "bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg",
+            )}
+          >
+            <BerdLoader
+              animated={playgroundAnimated}
+              decorative={playgroundDecorative}
+              size={loaderSize}
+            />
+          </div>
+        }
+        controls={[
+          {
+            id: "berd-loader-animated",
+            label: "Animated",
+            type: "switch",
+            checked: playgroundAnimated,
+            onChange: setPlaygroundAnimated,
+          },
+          {
+            id: "berd-loader-decorative",
+            label: "Decorative",
+            type: "switch",
+            checked: playgroundDecorative,
+            onChange: setPlaygroundDecorative,
+          },
+          {
+            id: "berd-loader-size",
+            label: "Size",
+            type: "select",
+            value: playgroundSize,
+            options: [
+              { label: "14px · session row", value: "14" },
+              { label: "70px · default", value: "70" },
+              { label: "83px · startup", value: "83" },
+            ],
+            onChange: setPlaygroundSize,
+          },
+          {
+            id: "berd-loader-tone",
+            label: "Color context",
+            type: "select",
+            value: playgroundTone,
+            options: [
+              { label: "Foreground", value: "foreground" },
+              { label: "Muted", value: "muted" },
+              { label: "Primary", value: "primary" },
+              { label: "Responding pill", value: "responding" },
+            ],
+            onChange: setPlaygroundTone,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={tokenDetails.colorRows}
+            textRows={tokenDetails.textRows}
           />
         }
       />
@@ -5224,6 +5347,8 @@ function renderSection(section: DesignSystemSection) {
       return <ButtonGroupPage />;
     case "component-badge":
       return <BadgePage />;
+    case "component-berd-loader":
+      return <BerdLoaderPage />;
     case "component-breadcrumb":
       return <BreadcrumbPage />;
     case "component-alert":

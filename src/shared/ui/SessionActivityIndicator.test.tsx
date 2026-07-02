@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 
 describe("SessionActivityIndicator", () => {
-  it("renders the goose loader for running sessions", () => {
+  it("renders the Berd loader for running sessions", () => {
     const { container } = render(<SessionActivityIndicator isRunning />);
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('img[src*="startup-loading"]'),
+      container.querySelector('[data-slot="berd-loader"]'),
     ).toBeInTheDocument();
   });
 
@@ -18,14 +18,14 @@ describe("SessionActivityIndicator", () => {
     expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
   });
 
-  it("renders an overlay goose loader variant for running sessions", () => {
+  it("renders an overlay Berd loader variant for running sessions", () => {
     const { container } = render(
       <SessionActivityIndicator isRunning variant="overlay" />,
     );
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('img[src*="startup-loading"]'),
+      container.querySelector('[data-slot="berd-loader"]'),
     ).toBeInTheDocument();
   });
 

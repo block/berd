@@ -34,10 +34,6 @@ vi.mock("@/app/SessionWindowRuntime", () => ({
   ),
 }));
 
-vi.mock("@/app/lib/preloadStartupLoadingMedia", () => ({
-  preloadStartupLoadingMedia: vi.fn(),
-}));
-
 vi.mock("@/app/lib/rendererDiagnostics", () => ({
   installRendererDiagnostics: mockInstallRendererDiagnostics,
   reportRendererError: mockReportRendererError,

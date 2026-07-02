@@ -343,7 +343,6 @@
   --surface-composer-action-active: var(--color-gray-400);
   --surface-chat-responding-pill-bg: var(--foreground);
   --surface-chat-responding-pill-fg: var(--background);
-  --filter-chat-responding-goose: invert(1);
   --chat-context-panel-bg: color-mix(
     in srgb,
     var(--color-gray-900) 66%,
@@ -768,7 +767,6 @@
   --surface-composer-action-active: var(--color-gray-500);
   --surface-chat-responding-pill-bg: var(--background);
   --surface-chat-responding-pill-fg: var(--foreground);
-  --filter-chat-responding-goose: none;
   --chat-context-panel-bg: color-mix(
     in srgb,
     var(--color-gray-900) 72%,
