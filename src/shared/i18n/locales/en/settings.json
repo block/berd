@@ -353,7 +353,21 @@
       "label": "Cached media",
       "success": "Cached media cleared."
     },
-    "title": "Storage"
+    "title": "Storage",
+    "trustedDomains": {
+      "clear": "Clear all",
+      "clearSuccess": "Trusted link domains cleared.",
+      "description": "Domains you trusted from link safety prompts. Links to these domains open without asking.",
+      "empty": "No trusted link domains yet.",
+      "label": "Trusted link domains",
+      "listLabel": "Trusted link domains",
+      "remove": "Remove",
+      "removeAria": "Remove {{domain}} from trusted link domains",
+      "removeSuccess": "{{domain}} removed from trusted link domains.",
+      "count_one": "{{count}} domain",
+      "count_other": "{{count}} domains",
+      "manage": "Manage"
+    }
   },
   "archive": {
     "title": "Archive"

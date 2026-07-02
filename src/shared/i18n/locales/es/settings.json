@@ -353,7 +353,21 @@
       "label": "Medios en caché",
       "success": "Contenido en caché limpiado."
     },
-    "title": "Almacenamiento"
+    "title": "Almacenamiento",
+    "trustedDomains": {
+      "clear": "Limpiar todo",
+      "clearSuccess": "Dominios de enlaces confiables limpiados.",
+      "description": "Dominios que marcaste como confiables desde avisos de seguridad de enlaces. Los enlaces a estos dominios se abren sin preguntar.",
+      "empty": "Aún no hay dominios de enlaces confiables.",
+      "label": "Dominios de enlaces confiables",
+      "listLabel": "Dominios de enlaces confiables",
+      "remove": "Quitar",
+      "removeAria": "Quitar {{domain}} de los dominios de enlaces confiables",
+      "removeSuccess": "{{domain}} se quitó de los dominios de enlaces confiables.",
+      "count_one": "{{count}} dominio",
+      "count_other": "{{count}} dominios",
+      "manage": "Administrar"
+    }
   },
   "archive": {
     "title": "Archivo"

@@ -32,6 +32,7 @@ import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   setExperimentEnabled,
 } from "@/features/experiments/experimentPreferences";
+import { trustDomain } from "@/shared/lib/trustedDomains";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
@@ -498,6 +499,72 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
+  });
+
+  it("opens trusted link domains in a dialog and removes domains", async () => {
+    const user = userEvent.setup();
+    trustDomain("github.com");
+    trustDomain("example.com");
+
+    renderGeneralSettings();
+
+    expect(screen.getByText("2 domains")).toBeInTheDocument();
+    expect(screen.queryByText("example.com")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Trusted link domains" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("list", { name: "Trusted link domains" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("example.com")).toBeInTheDocument();
+    expect(screen.getByText("github.com")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Remove example.com from trusted link domains",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("example.com")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("github.com")).toBeInTheDocument();
+    expect(screen.getByText("1 domain")).toBeInTheDocument();
+    expect(localStorage.getItem("goose_trusted_domains")).toBe(
+      JSON.stringify(["github.com"]),
+    );
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "example.com removed from trusted link domains.",
+    );
+  });
+
+  it("clears all trusted link domains from the dialog", async () => {
+    const user = userEvent.setup();
+    trustDomain("github.com");
+    trustDomain("example.com");
+
+    renderGeneralSettings();
+
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+    const clearAllButton = screen.getByRole("button", { name: "Clear all" });
+    expect(clearAllButton).toBeEnabled();
+
+    await user.click(clearAllButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("No trusted link domains yet."),
+      ).toBeInTheDocument();
+    });
+    expect(localStorage.getItem("goose_trusted_domains")).toBeNull();
+    expect(clearAllButton).toBeDisabled();
+    expect(screen.getByText("0 domains")).toBeInTheDocument();
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "Trusted link domains cleared.",
+    );
   });
 
   it("opens cached media confirmation and confirms cache clearing", async () => {

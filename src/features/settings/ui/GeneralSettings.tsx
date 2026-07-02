@@ -34,7 +34,20 @@ import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPr
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
+import {
+  clearUserTrustedDomains,
+  getUserTrustedDomains,
+  untrustDomain,
+} from "@/shared/lib/trustedDomains";
 import { useArtifactRootPreference } from "@/shared/artifacts/useArtifactRootPreference";
 import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
 import {
@@ -140,6 +153,11 @@ export function GeneralSettings({
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [trustedDomainsDialogOpen, setTrustedDomainsDialogOpen] =
+    useState(false);
+  const [trustedDomains, setTrustedDomains] = useState<string[]>(() =>
+    getUserTrustedDomains(),
+  );
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sidebarFlatChatListExperiment = useExperiment(
     SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
@@ -244,6 +262,26 @@ export function GeneralSettings({
   useEffect(() => {
     void refreshBbCliStatus();
   }, [refreshBbCliStatus]);
+
+  const refreshTrustedDomains = useCallback(() => {
+    setTrustedDomains(getUserTrustedDomains());
+  }, []);
+
+  function handleRemoveTrustedDomain(domain: string) {
+    untrustDomain(domain);
+    refreshTrustedDomains();
+    toast.success(t("storage.trustedDomains.removeSuccess", { domain }));
+  }
+
+  function handleClearTrustedDomains() {
+    clearUserTrustedDomains();
+    refreshTrustedDomains();
+    toast.success(t("storage.trustedDomains.clearSuccess"));
+  }
+
+  const trustedDomainsCount = t("storage.trustedDomains.count", {
+    count: trustedDomains.length,
+  });
 
   async function handleClearMediaCache() {
     setClearingCache(true);
@@ -811,6 +849,25 @@ export function GeneralSettings({
             {t("storage.cachedMedia.clear")}
           </Button>
         </SettingRow>
+
+        <SettingRow
+          label={t("storage.trustedDomains.label")}
+          description={t("storage.trustedDomains.description")}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">
+              {trustedDomainsCount}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => setTrustedDomainsDialogOpen(true)}
+            >
+              {t("storage.trustedDomains.manage")}
+            </Button>
+          </div>
+        </SettingRow>
       </SettingsSection>
 
       <SettingsSection title={t("compaction.title")}>
@@ -871,6 +928,66 @@ export function GeneralSettings({
         />
         <AboutInfoRow label={t("about.fields.license")} value="Apache-2.0" />
       </SettingsSection>
+
+      <Dialog
+        open={trustedDomainsDialogOpen}
+        onOpenChange={setTrustedDomainsDialogOpen}
+      >
+        <DialogContent className="max-w-md gap-5">
+          <DialogHeader>
+            <DialogTitle>{t("storage.trustedDomains.label")}</DialogTitle>
+            <DialogDescription>
+              {t("storage.trustedDomains.description")}
+            </DialogDescription>
+          </DialogHeader>
+
+          {trustedDomains.length > 0 ? (
+            <ul
+              className="max-h-80 space-y-2 overflow-y-auto pr-1"
+              aria-label={t("storage.trustedDomains.listLabel")}
+            >
+              {trustedDomains.map((domain) => (
+                <li
+                  key={domain}
+                  className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2"
+                >
+                  <span className="min-w-0 truncate text-sm" title={domain}>
+                    {domain}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => handleRemoveTrustedDomain(domain)}
+                    aria-label={t("storage.trustedDomains.removeAria", {
+                      domain,
+                    })}
+                  >
+                    <Trash2 className="size-3.5" />
+                    {t("storage.trustedDomains.remove")}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-md bg-background px-3 py-3 text-sm text-muted-foreground">
+              {t("storage.trustedDomains.empty")}
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearTrustedDomains}
+              disabled={trustedDomains.length === 0}
+            >
+              <Trash2 className="size-3.5" />
+              {t("storage.trustedDomains.clear")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={clearCacheDialogOpen}
