@@ -794,7 +794,7 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.showPlaceholder).toBe(false);
   });
 
-  it("does not surface pin chat as a chat top-bar action", () => {
+  it("does not surface chat-scoped top-bar actions", () => {
     render(
       <TopBarActionsProvider>
         <ChatView sessionId="session-1" />
@@ -808,24 +808,9 @@ describe("ChatView MCP app messaging", () => {
     expect(
       screen.queryByRole("button", { name: "pinToHome.unpin" }),
     ).not.toBeInTheDocument();
-  });
-
-  it("opens and focuses chat search from the top-bar action", async () => {
-    const user = userEvent.setup();
-
-    render(
-      <TopBarActionsProvider>
-        <ChatView sessionId="session-1" />
-        <TopBarActionsHost />
-      </TopBarActionsProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "search.action" }));
-
-    const input = screen.getByRole("searchbox", {
-      name: "search.inputLabel",
-    });
-    await waitFor(() => expect(input).toHaveFocus());
+    expect(
+      screen.queryByRole("button", { name: "search.action" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens chat search with the platform find shortcut", async () => {
@@ -942,13 +927,15 @@ describe("ChatView MCP app messaging", () => {
     const user = userEvent.setup();
     render(
       <TopBarActionsProvider>
+        <button type="button">Focus anchor</button>
         <ChatView sessionId="session-1" />
         <TopBarActionsHost />
       </TopBarActionsProvider>,
     );
 
-    const openButton = screen.getByRole("button", { name: "search.action" });
-    await user.click(openButton);
+    const focusTarget = screen.getByRole("button", { name: "Focus anchor" });
+    focusTarget.focus();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = screen.getByRole("searchbox", {
       name: "search.inputLabel",
     });
@@ -956,7 +943,7 @@ describe("ChatView MCP app messaging", () => {
     await user.keyboard("{Escape}");
 
     expect(input).not.toBeInTheDocument();
-    expect(openButton).toHaveFocus();
+    expect(focusTarget).toHaveFocus();
   });
 
   it("closes chat search when the session id changes in place", async () => {

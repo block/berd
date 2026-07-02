@@ -9,7 +9,6 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import { SearchIcon } from "lucide-react";
 import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatInput } from "./ChatInput";
@@ -19,11 +18,9 @@ import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
 import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
-import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
 import {
@@ -121,8 +118,7 @@ export function ChatView({
   const search = useChatTranscriptSearch(transcriptSearchRootRef, {
     backendRef: transcriptSearchBackendRef,
   });
-  const { open: openSearch, close: closeSearch } = search;
-  const setTopBarActions = useSetTopBarActions();
+  const { close: closeSearch } = search;
   const controller = useChatSessionController({
     sessionId,
     readOnly: Boolean(readOnlyStatus),
@@ -470,24 +466,6 @@ export function ChatView({
   } else if (isAgentBuilderTargetPending) {
     sendDisabledReason = t("toolbar.agentBuilderPreparing");
   }
-
-  useEffect(() => {
-    setTopBarActions(
-      <Button
-        type="button"
-        variant="page-header"
-        size="xs"
-        onClick={openSearch}
-        aria-label={t("search.action")}
-        title={t("search.action")}
-        leftIcon={<SearchIcon aria-hidden="true" />}
-      >
-        {t("search.action")}
-      </Button>,
-    );
-
-    return () => setTopBarActions(null);
-  }, [openSearch, setTopBarActions, t]);
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
