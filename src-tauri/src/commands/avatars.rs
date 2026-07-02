@@ -463,7 +463,7 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
                 Ok(refreshed) => catalog = refreshed,
                 Err(error) => {
                     log::warn!(
-                        "Failed to refresh avatar catalog for bundled agent warm-up: {error}"
+                        "Failed to refresh avatar catalog for agent avatar warm-up: {error}"
                     );
                 }
             }
@@ -479,7 +479,7 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
 
     for avatar_id in avatar_ids {
         let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
-            log::warn!("Bundled agent avatar '{avatar_id}' was not found in the avatar catalog");
+            log::warn!("Agent avatar '{avatar_id}' was not found in the avatar catalog");
             continue;
         };
         match ensure_entry_deduped(&client, &paths, &catalog, entry, format).await {
@@ -487,7 +487,7 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
                 warmed += 1;
                 warmed_avatar_refs.push(format!("app-avatar:{avatar_id}"));
             }
-            Err(error) => log::warn!("Failed to warm bundled agent avatar '{avatar_id}': {error}"),
+            Err(error) => log::warn!("Failed to warm agent avatar '{avatar_id}': {error}"),
         }
     }
 

@@ -230,6 +230,12 @@ pub fn run() {
 
             // Seed the bundled skills/agents from the distro bundle registered
             // above. This touches the filesystem, so it runs after the prompt.
+            //
+            // The avatar refs the seed reports come from the bundle's source
+            // files, which can differ from the installed copies when a user has
+            // edited a bundled agent's avatar; warming them keeps the bundled
+            // avatar available regardless.
+            let mut bundled_avatar_refs: Vec<String> = Vec::new();
             {
                 let distro_state = app.state::<DistroBundleState>();
                 if let Some(bundle) = distro_state.bundle() {
@@ -249,30 +255,41 @@ pub fn run() {
                             if result.seeded_count > 0 {
                                 log::info!("Seeded {} bundled agent(s)", result.seeded_count);
                             }
-                            if !result.avatar_refs_to_warm.is_empty() {
-                                let avatars_app = app.handle().clone();
-                                tauri::async_runtime::spawn(async move {
-                                    match commands::avatars::warm_avatar_refs(
-                                        avatars_app,
-                                        result.avatar_refs_to_warm,
-                                    )
-                                    .await
-                                    {
-                                        Ok(count) if count > 0 => {
-                                            log::info!("Warmed {count} bundled agent avatar(s)");
-                                        }
-                                        Ok(_) => {}
-                                        Err(error) => {
-                                            log::warn!(
-                                                "Failed to warm bundled agent avatar cache: {error}"
-                                            );
-                                        }
-                                    }
-                                });
-                            }
+                            bundled_avatar_refs = result.avatar_refs_to_warm;
                         }
                         Err(error) => log::warn!("Failed to seed bundled agents: {error}"),
                     }
+                }
+            }
+
+            // Collect avatar refs from ALL agents (bundled + user-created) so
+            // that startup warming recovers any missing avatar media, e.g. after
+            // a data migration or cache clear. This runs independently of the
+            // bundled-seed outcome above so that user-created agents' avatars are
+            // still recovered when no distro bundle is present or seeding failed.
+            {
+                let mut all_avatar_refs = bundled_avatar_refs;
+                for user_ref in bundled_agents::collect_all_agent_avatar_refs() {
+                    if !all_avatar_refs.contains(&user_ref) {
+                        all_avatar_refs.push(user_ref);
+                    }
+                }
+
+                if !all_avatar_refs.is_empty() {
+                    let avatars_app = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        match commands::avatars::warm_avatar_refs(avatars_app, all_avatar_refs)
+                            .await
+                        {
+                            Ok(count) if count > 0 => {
+                                log::info!("Warmed {count} agent avatar(s)");
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                log::warn!("Failed to warm agent avatar cache: {error}");
+                            }
+                        }
+                    });
                 }
             }
 
