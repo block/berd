@@ -44,6 +44,24 @@ type PathSearchCacheEntry = {
   cachedAt: number;
 };
 
+function dedupeSkillMentionItems(
+  skills: SkillMentionItem[],
+): SkillMentionItem[] {
+  const seenNames = new Set<string>();
+  const deduped: SkillMentionItem[] = [];
+
+  for (const skill of skills) {
+    const normalizedName = skill.name.trim().toLowerCase();
+    if (!normalizedName || seenNames.has(normalizedName)) {
+      continue;
+    }
+    seenNames.add(normalizedName);
+    deduped.push(skill);
+  }
+
+  return deduped;
+}
+
 function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -428,12 +446,14 @@ export function useMentionHandlers({
         .then((skills) => {
           if (cancelled || currentRequestId !== requestId) return;
           setSkillMentionItems(
-            skills.map((skill) => ({
-              id: skill.id,
-              name: skill.name,
-              description: skill.description,
-              sourceLabel: skill.sourceLabel,
-            })),
+            dedupeSkillMentionItems(
+              skills.map((skill) => ({
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+                sourceLabel: skill.sourceLabel,
+              })),
+            ),
           );
         })
         .catch((error) => {

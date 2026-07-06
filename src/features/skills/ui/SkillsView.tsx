@@ -90,6 +90,65 @@ function skillMatchesScope(skill: SkillInfo, scope: SkillScope): boolean {
   return skill.projectLinks.some((project) => project.id === projectId);
 }
 
+function getPrimaryProjectLink(skill: SkillInfo) {
+  return skill.projectLinks[0] ?? null;
+}
+
+function getProjectLinkForScope(
+  skill: SkillInfo,
+  selectedProjectId: string | null,
+) {
+  if (!selectedProjectId) {
+    return getPrimaryProjectLink(skill);
+  }
+
+  return (
+    skill.projectLinks.find((project) => project.id === selectedProjectId) ??
+    getPrimaryProjectLink(skill)
+  );
+}
+
+function resolveSkillForProjectScope(
+  skill: SkillInfo,
+  selectedProjectId: string | null,
+): SkillInfo {
+  if (skill.sourceKind !== "project") {
+    return skill;
+  }
+
+  const projectLink = getProjectLinkForScope(skill, selectedProjectId);
+  if (!projectLink) {
+    return skill;
+  }
+
+  return {
+    ...skill,
+    path: projectLink.path,
+    fileLocation: projectLink.fileLocation,
+    sourceLabel: projectLink.name,
+  };
+}
+
+function resolveSkillForPath(skill: SkillInfo, path: string): SkillInfo {
+  if (skill.sourceKind !== "project") {
+    return skill;
+  }
+
+  const projectLink = skill.projectLinks.find(
+    (project) => project.path === path,
+  );
+  if (!projectLink) {
+    return skill;
+  }
+
+  return {
+    ...skill,
+    path: projectLink.path,
+    fileLocation: projectLink.fileLocation,
+    sourceLabel: projectLink.name,
+  };
+}
+
 export function SkillsView({
   activeSkillId,
   onActiveSkillIdChange,
@@ -204,6 +263,10 @@ export function SkillsView({
   const selectedProjectId = skillScope.startsWith("project:")
     ? skillScope.replace(/^project:/, "")
     : null;
+  const resolveSkillForSelectedScope = useCallback(
+    (skill: SkillInfo) => resolveSkillForProjectScope(skill, selectedProjectId),
+    [selectedProjectId],
+  );
 
   const selectedScopeLabel = useMemo(() => {
     if (selectedProjectId) {
@@ -225,10 +288,11 @@ export function SkillsView({
   }, [activeSkill, currentActiveSkillId, loading, setActiveSkill]);
 
   const handleDelete = (skill: SkillInfo) => {
-    if (skill.readonly) {
+    const scopedSkill = resolveSkillForSelectedScope(skill);
+    if (scopedSkill.readonly) {
       return;
     }
-    setDeletingSkill(skill);
+    setDeletingSkill(scopedSkill);
   };
 
   const handleConfirmDeleteSkill = async () => {
@@ -241,10 +305,38 @@ export function SkillsView({
     try {
       await deleteSkill(skillToDelete.path);
       setSkills((current) =>
-        current.filter(
-          (skill) =>
-            skill.id !== skillToDelete.id && skill.path !== skillToDelete.path,
-        ),
+        current.flatMap((skill) => {
+          if (
+            skill.sourceKind === "project" &&
+            skill.id === skillToDelete.id &&
+            skill.projectLinks.length > 1
+          ) {
+            const projectLinks = skill.projectLinks.filter(
+              (project) => project.path !== skillToDelete.path,
+            );
+            if (projectLinks.length === skill.projectLinks.length) {
+              return [skill];
+            }
+            if (projectLinks.length === 0) {
+              return [];
+            }
+
+            return [
+              {
+                ...skill,
+                path: projectLinks[0].path,
+                fileLocation: projectLinks[0].fileLocation,
+                sourceLabel: projectLinks[0].name,
+                projectLinks,
+              },
+            ];
+          }
+
+          return skill.id !== skillToDelete.id &&
+            skill.path !== skillToDelete.path
+            ? [skill]
+            : [];
+        }),
       );
       if (currentActiveSkillId === skillToDelete.id) {
         setActiveSkill(null, { replace: true });
@@ -257,32 +349,40 @@ export function SkillsView({
   };
 
   const handleEdit = (skill: SkillInfo) => {
-    if (skill.readonly) {
+    const scopedSkill = resolveSkillForSelectedScope(skill);
+    if (scopedSkill.readonly) {
       return;
     }
     setEditingSkill({
-      name: skill.name,
-      description: skill.description,
-      instructions: skill.instructions,
-      path: skill.path,
-      fileLocation: skill.fileLocation,
-      color: skill.color,
+      name: scopedSkill.name,
+      description: scopedSkill.description,
+      instructions: scopedSkill.instructions,
+      path: scopedSkill.path,
+      fileLocation: scopedSkill.fileLocation,
+      color: scopedSkill.color,
     });
     setDialogOpen(true);
   };
 
-  const handleReveal = useCallback((skill: SkillInfo) => {
-    if (skill.readonly) {
-      return;
-    }
-    void revealInFileManager(skill.path);
-  }, []);
+  const handleReveal = useCallback(
+    (skill: SkillInfo) => {
+      const scopedSkill = resolveSkillForSelectedScope(skill);
+      if (scopedSkill.readonly) {
+        return;
+      }
+      void revealInFileManager(scopedSkill.path);
+    },
+    [resolveSkillForSelectedScope],
+  );
 
   const handleStartChat = useCallback(
     (skill: SkillInfo) => {
-      onStartChatWithSkill?.(skill, skill.projectLinks[0]?.id ?? null);
+      const scopedSkill = resolveSkillForSelectedScope(skill);
+      const projectId =
+        getProjectLinkForScope(scopedSkill, selectedProjectId)?.id ?? null;
+      onStartChatWithSkill?.(scopedSkill, projectId);
     },
-    [onStartChatWithSkill],
+    [onStartChatWithSkill, resolveSkillForSelectedScope, selectedProjectId],
   );
 
   const handleDialogClose = () => {
@@ -294,11 +394,15 @@ export function SkillsView({
   // then surface the existing AlertDialog delete confirmation.
   const handleDeleteFromEditor = useCallback(
     (editing: EditingSkill) => {
-      const match = skills.find((skill) => skill.path === editing.path);
+      const match = skills.find(
+        (skill) =>
+          skill.path === editing.path ||
+          skill.projectLinks.some((project) => project.path === editing.path),
+      );
       setDialogOpen(false);
       setEditingSkill(undefined);
       if (match) {
-        setDeletingSkill(match);
+        setDeletingSkill(resolveSkillForPath(match, editing.path));
       }
     },
     [skills],
@@ -325,6 +429,9 @@ export function SkillsView({
           (skill) =>
             skill.id === savedSkill.id ||
             skill.path === savedSkill.path ||
+            skill.projectLinks.some(
+              (project) => project.path === savedSkill.path,
+            ) ||
             (previousPath ? skill.path === previousPath : false),
         );
         if (existingIndex === -1) {
@@ -445,12 +552,13 @@ export function SkillsView({
 
   const handleShare = useCallback(
     (skill: SkillInfo) => {
-      if (skill.readonly) {
+      const scopedSkill = resolveSkillForSelectedScope(skill);
+      if (scopedSkill.readonly) {
         return;
       }
-      void handleExport(skill);
+      void handleExport(scopedSkill);
     },
-    [handleExport],
+    [handleExport, resolveSkillForSelectedScope],
   );
 
   const handleSelectSkill = (skill: SkillInfo) => {
@@ -472,10 +580,11 @@ export function SkillsView({
   );
 
   if (activeSkill) {
+    const scopedActiveSkill = resolveSkillForSelectedScope(activeSkill);
     return (
       <>
         <SkillDetailPage
-          skill={activeSkill}
+          skill={scopedActiveSkill}
           onEdit={handleEdit}
           onReveal={handleReveal}
           onShare={handleShare}

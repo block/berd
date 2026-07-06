@@ -190,6 +190,38 @@ describe("ChatInput skill mentions", () => {
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
+  it("dedupes slash skill results by skill name", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      CODE_REVIEW_SKILL,
+      {
+        id: "project:/repo/.agents/skills/code-review",
+        name: "code-review",
+        description: "Reviews code",
+        sourceLabel: "Goose2",
+      },
+    ]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "/code");
+
+    const options = await screen.findAllByRole("option", {
+      name: /code-review/i,
+    });
+    expect(options).toHaveLength(1);
+
+    await user.keyboard("{Enter}");
+
+    expect(input).toHaveValue("");
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+  });
+
   it("selects skill name matches before earlier description matches", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([

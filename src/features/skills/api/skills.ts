@@ -6,6 +6,7 @@ import {
   basename,
   deriveProjectRoot,
   getSkillFileLocation,
+  normalizePath,
 } from "../lib/skillsPath";
 import { emitSkillsChanged } from "../lib/skillsEvents";
 
@@ -16,6 +17,8 @@ export interface SkillProjectLink {
   id: string;
   name: string;
   workingDir: string;
+  path: string;
+  fileLocation: string;
 }
 
 export type SkillSourceKind = "global" | "project" | "builtin";
@@ -103,6 +106,8 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
           id: projectRoot,
           name: projectName || projectRoot,
           workingDir: projectRoot,
+          path: source.path,
+          fileLocation: getSkillFileLocation(source.path),
         },
       ]
     : [];
@@ -134,6 +139,102 @@ function readStoredColor(
   return typeof raw === "string" && (isPillTone(raw) || isHexColor(raw))
     ? raw
     : null;
+}
+
+function readTaggedProjectDir(
+  properties: SourceEntry["properties"] | undefined,
+): string | null {
+  const raw = (properties as Record<string, unknown> | undefined)?.projectDir;
+  return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+function stripTrailingSlashes(path: string): string {
+  const normalized = normalizePath(path);
+  if (/^\/+$/.test(normalized)) {
+    return "/";
+  }
+  if (/^[A-Za-z]:\/+$/.test(normalized)) {
+    return `${normalized.slice(0, 2)}/`;
+  }
+  return normalized.replace(/\/+$/, "");
+}
+
+function canonicalizeManagedWorktreeRoot(projectRoot: string): string {
+  const normalizedRoot = stripTrailingSlashes(projectRoot);
+  const parts = normalizedRoot.split("/");
+  if (parts.length < 2) {
+    return normalizedRoot;
+  }
+
+  const parentName = parts[parts.length - 2];
+  if (!parentName.endsWith("-worktrees")) {
+    return normalizedRoot;
+  }
+
+  const repoName = parentName.slice(0, -"-worktrees".length);
+  if (!repoName) {
+    return normalizedRoot;
+  }
+
+  return [...parts.slice(0, -2), repoName].join("/");
+}
+
+function getRelativeSkillPath(sourcePath: string, projectRoot: string): string {
+  const normalizedPath = normalizePath(sourcePath);
+  const normalizedRoot = stripTrailingSlashes(projectRoot);
+  const rootPrefix = `${normalizedRoot}/`;
+
+  return normalizedPath.startsWith(rootPrefix)
+    ? normalizedPath.slice(normalizedRoot.length)
+    : basename(sourcePath);
+}
+
+function getSkillDedupeKey(source: SkillSourceEntry): string {
+  if (source.type === BUILTIN_SKILL_SOURCE_TYPE) {
+    return `builtin:${source.name}`;
+  }
+
+  if (source.global) {
+    return `global:${source.path}`;
+  }
+
+  const projectRoot =
+    deriveProjectRoot(source.path) ?? readTaggedProjectDir(source.properties);
+  if (!projectRoot) {
+    return `project:${source.path}`;
+  }
+
+  return [
+    "project",
+    canonicalizeManagedWorktreeRoot(projectRoot),
+    getRelativeSkillPath(source.path, projectRoot),
+    source.name,
+    source.description,
+    source.content,
+  ].join("\0");
+}
+
+function mergeProjectLinks(
+  existing: SkillInfo,
+  incoming: SkillInfo,
+): SkillInfo {
+  if (existing.sourceKind !== "project" || incoming.sourceKind !== "project") {
+    return existing;
+  }
+
+  const linksByWorkingDir = new Map(
+    existing.projectLinks.map((project) => [project.workingDir, project]),
+  );
+  for (const project of incoming.projectLinks) {
+    if (!linksByWorkingDir.has(project.workingDir)) {
+      linksByWorkingDir.set(project.workingDir, project);
+    }
+  }
+
+  return {
+    ...existing,
+    projectLinks: Array.from(linksByWorkingDir.values()),
+  };
 }
 
 function uniqueProjectDirs(projectDirs: string[]) {
@@ -207,7 +308,7 @@ export async function listSkills(
         : [],
     ),
   ];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   const skills: SkillInfo[] = [];
 
   responses.forEach(({ response, projectResponse }) => {
@@ -216,15 +317,17 @@ export async function listSkills(
         continue;
       }
 
-      const key =
-        source.type === BUILTIN_SKILL_SOURCE_TYPE
-          ? `builtin:${source.name}`
-          : `${source.global ? "global" : "project"}:${source.path}`;
-      if (seen.has(key)) {
+      const key = getSkillDedupeKey(source);
+      const existingIndex = seen.get(key);
+      if (existingIndex !== undefined) {
+        skills[existingIndex] = mergeProjectLinks(
+          skills[existingIndex],
+          toSkillInfo(source),
+        );
         continue;
       }
 
-      seen.add(key);
+      seen.set(key, skills.length);
       skills.push(toSkillInfo(source));
     }
   });

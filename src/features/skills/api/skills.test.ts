@@ -293,13 +293,13 @@ describe("listSkills", () => {
           sourceKind: "project",
           sourceLabel: "alpha",
           readonly: false,
-          projectLinks: [
-            {
+          projectLinks: expect.arrayContaining([
+            expect.objectContaining({
               id: "/tmp/alpha",
               name: "alpha",
               workingDir: "/tmp/alpha",
-            },
-          ],
+            }),
+          ]),
         }),
       ]),
     );
@@ -332,13 +332,13 @@ describe("listSkills", () => {
           sourceKind: "project",
           sourceLabel: "beta",
           readonly: false,
-          projectLinks: [
-            {
+          projectLinks: expect.arrayContaining([
+            expect.objectContaining({
               id: "/tmp/beta",
               name: "beta",
               workingDir: "/tmp/beta",
-            },
-          ],
+            }),
+          ]),
         }),
       ]),
     );
@@ -380,6 +380,102 @@ describe("listSkills", () => {
     expect(skills.map((skill) => skill.name)).toEqual([
       "code-review",
       "test-writer",
+    ]);
+  });
+
+  it("dedupes identical project skills from managed worktrees", async () => {
+    mockGooseSourcesList
+      .mockResolvedValueOnce({ sources: [] })
+      .mockResolvedValueOnce({ sources: [] })
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            type: "skill",
+            name: "test-writer",
+            description: "Writes tests",
+            content: "Write tests",
+            path: "/Users/test/goose2/.agents/skills/test-writer",
+            global: false,
+            properties: { projectDir: "/Users/test/goose2" },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            type: "skill",
+            name: "test-writer",
+            description: "Writes tests",
+            content: "Write tests",
+            path: "/Users/test/goose2-worktrees/feature/.agents/skills/test-writer",
+            global: false,
+            properties: { projectDir: "/Users/test/goose2-worktrees/feature" },
+          },
+        ],
+      });
+
+    const { listSkills } = await import("./skills");
+    const skills = await listSkills([
+      "/Users/test/goose2",
+      "/Users/test/goose2-worktrees/feature",
+    ]);
+
+    expect(skills.map((skill) => skill.name)).toEqual(["test-writer"]);
+    expect(skills[0]).toMatchObject({
+      id: "project:/Users/test/goose2/.agents/skills/test-writer",
+      projectLinks: [
+        {
+          id: "/Users/test/goose2",
+          name: "goose2",
+          workingDir: "/Users/test/goose2",
+        },
+        {
+          id: "/Users/test/goose2-worktrees/feature",
+          name: "feature",
+          workingDir: "/Users/test/goose2-worktrees/feature",
+        },
+      ],
+    });
+  });
+
+  it("keeps divergent worktree skill copies separate", async () => {
+    mockGooseSourcesList
+      .mockResolvedValueOnce({ sources: [] })
+      .mockResolvedValueOnce({ sources: [] })
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            type: "skill",
+            name: "test-writer",
+            description: "Writes tests",
+            content: "Write tests",
+            path: "/Users/test/goose2/.agents/skills/test-writer",
+            global: false,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            type: "skill",
+            name: "test-writer",
+            description: "Writes tests",
+            content: "Write different tests",
+            path: "/Users/test/goose2-worktrees/feature/.agents/skills/test-writer",
+            global: false,
+          },
+        ],
+      });
+
+    const { listSkills } = await import("./skills");
+    const skills = await listSkills([
+      "/Users/test/goose2",
+      "/Users/test/goose2-worktrees/feature",
+    ]);
+
+    expect(skills.map((skill) => skill.instructions)).toEqual([
+      "Write tests",
+      "Write different tests",
     ]);
   });
 

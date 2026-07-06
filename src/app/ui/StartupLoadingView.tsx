@@ -10,7 +10,7 @@ export function StartupLoadingView() {
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-dot-grid text-foreground"
+      className="flex h-screen w-screen select-none items-center justify-center bg-dot-grid text-foreground"
       role="status"
       aria-label={t("startup.loadingLabel")}
       data-tauri-drag-region

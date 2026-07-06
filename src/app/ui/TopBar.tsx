@@ -135,7 +135,7 @@ export function TopBar({
   return (
     <header
       className={cn(
-        "flex h-[var(--spacing-app-top-bar)] min-w-0 items-center gap-2 pr-4",
+        "flex h-[var(--spacing-app-top-bar)] min-w-0 select-none items-center gap-2 pr-4",
         className,
       )}
       data-tauri-drag-region

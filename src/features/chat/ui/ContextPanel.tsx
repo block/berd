@@ -117,6 +117,17 @@ export function ContextPanel({
     isLoading,
     isFetching,
   } = useGitState(gitTargetPath, activeTab === "details");
+  const shouldLoadFallbackGitState =
+    activeTab === "details" &&
+    Boolean(error) &&
+    !gitState &&
+    Boolean(projectDefaultWorkspaceRoot) &&
+    Boolean(gitTargetPath) &&
+    projectDefaultWorkspaceRoot !== gitTargetPath;
+  const { data: fallbackGitState } = useGitState(
+    projectDefaultWorkspaceRoot,
+    shouldLoadFallbackGitState,
+  );
 
   const {
     data: changedFiles,
@@ -338,6 +349,7 @@ export function ContextPanel({
             projectWorkingDirs={projectWorkingDirs}
             sessionWorkingDir={sessionWorkingDir}
             gitState={gitState}
+            fallbackGitState={fallbackGitState}
             isLoading={isLoading}
             isFetching={isFetching}
             error={error}

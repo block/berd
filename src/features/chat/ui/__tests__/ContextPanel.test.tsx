@@ -738,6 +738,84 @@ describe("ContextPanel", () => {
     ).toHaveTextContent("feat/context-panel");
   });
 
+  it("keeps the workspace picker available when the selected workspace status fails", async () => {
+    const user = userEvent.setup();
+    useChatSessionStore
+      .getState()
+      .setActiveWorkspace("test-session-broken-workspace", {
+        path: "/Users/test/goose2-broken",
+        branch: "broken",
+      });
+
+    mockUseGitState.mockImplementation((path: string | null | undefined) => {
+      if (path === "/Users/test/goose2-broken") {
+        return {
+          data: undefined,
+          error: new Error("Git status is unavailable right now."),
+          isLoading: false,
+          isFetching: false,
+          refetch: mockRefetch,
+        };
+      }
+
+      return {
+        data: {
+          isGitRepo: true,
+          currentBranch: "main",
+          dirtyFileCount: 0,
+          incomingCommitCount: 0,
+          worktrees: [
+            {
+              path: "/Users/test/goose2",
+              branch: "main",
+              isMain: true,
+            },
+            {
+              path: "/Users/test/goose2-broken",
+              branch: "broken",
+              isMain: false,
+            },
+          ],
+          isWorktree: false,
+          mainWorktreePath: "/Users/test/goose2",
+          localBranches: ["main", "broken"],
+        },
+        error: null,
+        isLoading: false,
+        isFetching: false,
+        refetch: mockRefetch,
+      };
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-broken-workspace",
+      projectWorkingDirs: ["/Users/test/goose2"],
+      sessionWorkingDir: "/Users/test/goose2",
+    });
+
+    expect(
+      screen.getByText("Git status is unavailable right now."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /select worktree/i }),
+    ).toHaveTextContent("~/goose2-broken");
+    expect(
+      screen.getByRole("button", { name: /select branch/i }),
+    ).toHaveTextContent("broken");
+
+    await user.click(screen.getByRole("button", { name: /select worktree/i }));
+    await user.click(getButtonFromText("goose2"));
+
+    expect(
+      useChatSessionStore.getState().activeWorkspaceBySession[
+        "test-session-broken-workspace"
+      ],
+    ).toEqual({
+      path: "/Users/test/goose2",
+      branch: "main",
+    });
+  });
+
   it("tells the user their changes are stashed when the switch fails after stashing", async () => {
     const user = userEvent.setup();
     vi.mocked(gitApi.switchBranch).mockRejectedValueOnce(

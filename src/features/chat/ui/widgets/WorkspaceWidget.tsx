@@ -25,6 +25,7 @@ interface WorkspaceWidgetProps {
   projectWorkingDirs: string[];
   sessionWorkingDir?: string | null;
   gitState: GitState | undefined;
+  fallbackGitState?: GitState;
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
@@ -64,6 +65,7 @@ export function WorkspaceWidget({
   projectWorkingDirs,
   sessionWorkingDir,
   gitState,
+  fallbackGitState,
   isLoading,
   isFetching,
   error,
@@ -93,6 +95,7 @@ export function WorkspaceWidget({
 
   const gitErrorMessage =
     error instanceof Error ? error.message : t("contextPanel.errors.gitRead");
+  const pickerGitState = gitState ?? fallbackGitState;
 
   return (
     <section className="w-full px-4 pb-2 pt-4 text-sm font-normal">
@@ -189,9 +192,22 @@ export function WorkspaceWidget({
               <span>{t("contextPanel.states.gitLoading")}</span>
             </div>
           ) : error ? (
-            <p className="rounded-sm bg-muted/60 px-4 py-3 text-destructive">
-              {gitErrorMessage}
-            </p>
+            <div className="space-y-3">
+              {pickerGitState?.isGitRepo ? (
+                <WorkingContextPicker
+                  currentProjectPath={primaryWorkspaceRoot}
+                  gitState={pickerGitState}
+                  activeContext={activeContext}
+                  onSelect={onContextChange}
+                  onSwitchBranch={onSwitchBranch}
+                  onStashAndSwitch={onStashAndSwitch}
+                  onCreateBranch={onCreateBranch}
+                />
+              ) : null}
+              <p className="rounded-sm bg-muted/60 px-4 py-3 text-destructive">
+                {gitErrorMessage}
+              </p>
+            </div>
           ) : gitState?.isGitRepo ? (
             <WorkingContextPicker
               currentProjectPath={primaryWorkspaceRoot}

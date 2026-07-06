@@ -10,6 +10,8 @@ import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetS
 import type { SkillInfo } from "../../api/skills";
 import { SkillsView } from "../SkillsView";
 
+const mockRevealInFileManager = vi.hoisted(() => vi.fn());
+
 type MockProject = {
   id: string;
   name: string;
@@ -67,6 +69,8 @@ const mockSkills: SkillInfo[] = [
         id: "/tmp/alpha",
         name: "alpha",
         workingDir: "/tmp/alpha",
+        path: "/tmp/alpha/.goose/skills/test-writer",
+        fileLocation: "/tmp/alpha/.goose/skills/test-writer/SKILL.md",
       },
     ],
   },
@@ -112,6 +116,10 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
   useProjectStore: (
     selector: (state: { projects: MockProject[] }) => unknown,
   ) => selector({ projects: mockProjects }),
+}));
+
+vi.mock("@/shared/lib/fileManager", () => ({
+  revealInFileManager: mockRevealInFileManager,
 }));
 
 const { listSkills, deleteSkill, updateSkill, exportSkill } = (await import(
@@ -214,6 +222,8 @@ describe("SkillsView", () => {
             id: "/tmp/beta",
             name: "beta",
             workingDir: "/tmp/beta",
+            path: "/tmp/beta/.goose/skills/beta-skill",
+            fileLocation: "/tmp/beta/.goose/skills/beta-skill/SKILL.md",
           },
         ],
       },
@@ -381,6 +391,80 @@ describe("SkillsView", () => {
     expect(onStartChatWithSkill).toHaveBeenCalledWith(
       expect.objectContaining({ name: "skill-builder" }),
       "project-alpha",
+    );
+  });
+
+  it("uses the selected project copy for merged project skill actions", async () => {
+    mockProjects = [
+      {
+        id: "project-alpha",
+        name: "alpha",
+        workingDirs: ["/tmp/goose"],
+      },
+      {
+        id: "project-beta",
+        name: "beta",
+        workingDirs: ["/tmp/goose-worktrees/feature"],
+      },
+    ];
+    const mergedSkill: SkillInfo = {
+      ...mockSkills[2],
+      id: "project:/tmp/goose/.agents/skills/test-writer",
+      path: "/tmp/goose/.agents/skills/test-writer",
+      fileLocation: "/tmp/goose/.agents/skills/test-writer/SKILL.md",
+      sourceLabel: "alpha",
+      projectLinks: [
+        {
+          id: "project-alpha",
+          name: "alpha",
+          workingDir: "/tmp/goose",
+          path: "/tmp/goose/.agents/skills/test-writer",
+          fileLocation: "/tmp/goose/.agents/skills/test-writer/SKILL.md",
+        },
+        {
+          id: "project-beta",
+          name: "beta",
+          workingDir: "/tmp/goose-worktrees/feature",
+          path: "/tmp/goose-worktrees/feature/.agents/skills/test-writer",
+          fileLocation:
+            "/tmp/goose-worktrees/feature/.agents/skills/test-writer/SKILL.md",
+        },
+      ],
+    };
+    listSkills.mockResolvedValue([mergedSkill]);
+    const onStartChatWithSkill = vi.fn();
+    const user = userEvent.setup();
+
+    renderSkillsViewWithTopBarActions({ onStartChatWithSkill });
+    await screen.findByText("test-writer");
+
+    await user.click(
+      screen.getByRole("button", { name: "Filter skills by source" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "beta" }));
+    await user.click(
+      screen.getByRole("button", { name: "Open test-writer details" }),
+    );
+
+    expect(
+      screen.getByText(
+        "/tmp/goose-worktrees/feature/.agents/skills/test-writer/SKILL.md",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+    expect(onStartChatWithSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/tmp/goose-worktrees/feature/.agents/skills/test-writer",
+        fileLocation:
+          "/tmp/goose-worktrees/feature/.agents/skills/test-writer/SKILL.md",
+      }),
+      "project-beta",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show in folder" }));
+    expect(mockRevealInFileManager).toHaveBeenCalledWith(
+      "/tmp/goose-worktrees/feature/.agents/skills/test-writer",
     );
   });
 
