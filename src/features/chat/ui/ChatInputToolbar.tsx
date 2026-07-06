@@ -2,8 +2,7 @@ import { useMemo, useState } from "react";
 import { Mic, ArrowUp, File, FolderOpen, Settings2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { SESSION_COST_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { IconPlayerStopFilled } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { ContextRing } from "./ContextRing";
@@ -165,13 +164,12 @@ export function ChatInputToolbar({
       compactDisplay: "short",
       maximumFractionDigits: value < 10_000 ? 1 : 0,
     });
-  // Per-session cost display is opt-in (default off). Users enable it from
-  // Settings → Experiments. Gated here so the cost number never shows unless
-  // the user explicitly turned it on.
-  const sessionCostExperiment = useExperiment(SESSION_COST_EXPERIMENT_ID);
-  const showSessionCost = sessionCostExperiment?.enabled ?? false;
+  const sessionCostPreference = useSessionCostPreference();
+  const showSessionCost = sessionCostPreference.enabled;
   const hasCost =
-    typeof accumulatedCost === "number" && Number.isFinite(accumulatedCost);
+    showSessionCost &&
+    typeof accumulatedCost === "number" &&
+    Number.isFinite(accumulatedCost);
   const formatCurrency = (value: number) =>
     formatNumber(value, {
       style: "currency",
@@ -311,7 +309,7 @@ export function ChatInputToolbar({
                         isCompact ? "px-0" : "px-2.5",
                       )}
                       aria-label={
-                        showSessionCost && costLabel
+                        costLabel
                           ? t("toolbar.contextUsageWithCost", {
                               cost: costLabel,
                             })
@@ -323,7 +321,7 @@ export function ChatInputToolbar({
                         limit={contextLimit}
                         size={16}
                       />
-                      {!isCompact && showSessionCost && costLabel ? (
+                      {!isCompact && costLabel ? (
                         <span className="ml-1.5 text-xs tabular-nums">
                           {costLabel}
                         </span>
@@ -361,7 +359,7 @@ export function ChatInputToolbar({
                     </div>
                     <div className="shrink-0">{usedPercentLabel}</div>
                   </div>
-                  {showSessionCost && costLabel ? (
+                  {costLabel ? (
                     <div className="flex items-center justify-between gap-3 text-xs text-foreground">
                       <div className="truncate text-muted-foreground">
                         {t("toolbar.sessionCost")}

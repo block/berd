@@ -237,10 +237,6 @@
       "description": "Groups thinking, tool calls, and progress into an Agent work panel with a separate final answer row.",
       "title": "Agent work transcript"
     },
-    "sessionCost": {
-      "title": "Show session cost",
-      "description": "Display an estimated running cost (USD) for the current chat next to the context indicator. Estimates only, based on model list prices — not your actual negotiated or billed cost."
-    },
     "localMarkdownImages": {
       "title": "Render local images in chat",
       "description": "Show Markdown image links that point at local files in the chat's working directory inline, instead of a broken image. Scoped to the working directory; remote http(s) images stay blocked."
@@ -323,7 +319,11 @@
       "saveError": "Couldn't update the terminal fallback folder. Try again.",
       "saveSuccess": "Terminal fallback folder updated."
     },
-    "title": "General"
+    "title": "General",
+    "sessionCost": {
+      "label": "Show session cost",
+      "description": "Display estimated running cost in chat when available."
+    }
   },
   "runtimeConfig": {
     "clearError": "Couldn't clear fake endpoint response.",

@@ -66,8 +66,6 @@ export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
 
 export const AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID = "agent-work-transcript";
 
-export const SESSION_COST_EXPERIMENT_ID = "session-cost-display";
-
 export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
 
 export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
@@ -108,16 +106,6 @@ export const EXPERIMENT_DEFINITIONS = [
     id: AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
     titleKey: "experiments.agentWorkTranscript.title",
     descriptionKey: "experiments.agentWorkTranscript.description",
-    defaultEnabled: false,
-  },
-  {
-    id: SESSION_COST_EXPERIMENT_ID,
-    titleKey: "experiments.sessionCost.title",
-    descriptionKey: "experiments.sessionCost.description",
-    // Always off unless the user explicitly opts in. Pinning defaultEnabled
-    // to false makes the "auto" state off even in dev builds (where the global
-    // auto-enable is on) and after a reset-to-auto, so the cost number never
-    // shows by default.
     defaultEnabled: false,
   },
   {

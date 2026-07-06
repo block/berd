@@ -15,6 +15,7 @@ import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/termi
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
 import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
 import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
+import { SESSION_COST_STORAGE_KEY } from "@/features/chat/lib/sessionCostPreference";
 import {
   INITIAL_RUNTIME_CONFIG_RESULT,
   useRuntimeConfigStore,
@@ -291,6 +292,25 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
+  });
+
+  it("toggles session cost display", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Show session cost",
+    });
+
+    expect(switchControl).toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(SESSION_COST_STORAGE_KEY)).toBe("false");
+    });
+    expect(switchControl).not.toBeChecked();
   });
 
   it("updates sidebar chat grouping", async () => {

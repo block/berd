@@ -32,6 +32,7 @@ import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
+import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -161,6 +162,7 @@ export function GeneralSettings({
     getUserTrustedDomains(),
   );
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
+  const sessionCostPreference = useSessionCostPreference();
   const sidebarFlatChatListExperiment = useExperiment(
     SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
   );
@@ -567,6 +569,17 @@ export function GeneralSettings({
               </Button>
             </div>
           </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.sessionCost.label")}
+          description={t("general.sessionCost.description")}
+        >
+          <Switch
+            checked={sessionCostPreference.enabled}
+            onCheckedChange={sessionCostPreference.setEnabled}
+            aria-label={t("general.sessionCost.label")}
+          />
         </SettingRow>
 
         {showAgentToolsTipsSetting ? (

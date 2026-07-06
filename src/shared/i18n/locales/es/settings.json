@@ -237,10 +237,6 @@
       "description": "Agrupa razonamiento, llamadas a herramientas y progreso en un panel de trabajo del agente con la respuesta final separada.",
       "title": "Transcripción de trabajo del agente"
     },
-    "sessionCost": {
-      "title": "Mostrar el costo de la sesión",
-      "description": "Muestra un costo estimado (USD) para el chat actual junto al indicador de contexto. Solo estimaciones, basadas en precios de lista del modelo, no en tu costo real negociado o facturado."
-    },
     "localMarkdownImages": {
       "title": "Mostrar imágenes locales en el chat",
       "description": "Muestra los enlaces de imagen de Markdown que apuntan a archivos locales en el directorio de trabajo del chat de forma insertada, en lugar de una imagen rota. Limitado al directorio de trabajo; las imágenes remotas http(s) siguen bloqueadas."
@@ -323,7 +319,11 @@
       "saveError": "No se pudo actualizar la carpeta de reserva del terminal. Inténtalo de nuevo.",
       "saveSuccess": "Carpeta de reserva del terminal actualizada."
     },
-    "title": "General"
+    "title": "General",
+    "sessionCost": {
+      "label": "Mostrar costo de sesión",
+      "description": "Muestra el costo estimado acumulado en el chat cuando esté disponible."
+    }
   },
   "runtimeConfig": {
     "clearError": "No se pudo limpiar la respuesta del endpoint falso.",
