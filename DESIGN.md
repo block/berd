@@ -187,7 +187,7 @@ The source palette is a semantic token system backed by a gray scale and small s
 **Body Font:** `font-sans`.
 **Label/Mono Font:** `font-sans` for labels, `font-mono` for code, paths, terminal output, and identifiers.
 
-The current repo does not define or bundle Cash Sans. [globals.css](/Users/morganm/Development/berd/src/shared/styles/globals.css:455) maps `font-sans` and `font-display` through `--font-sans` / `--font-display` to `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`; it also leaves an `@font-face` placeholder. If Berd should use Cash Sans, add it to the actual design system first, then `font-sans` and `font-display` will pick it up.
+The app font is **Inter**, self-hosted as variable fonts (optical size + weight axes, normal + italic) in `src/app/assets/fonts/` under the SIL Open Font License 1.1. `globals.css` maps `--font-sans` and `--font-display` to `"Inter"` with a system-font fallback stack. Inter's optical size axis adapts tracking automatically — body sizes render comfortably, display sizes render tighter — so do not add letter-spacing compensation in component code. The mono font is **Geist Mono**, self-hosted the same way and mapped through `--font-mono`. Cash Sans is not used or bundled anywhere — it is proprietary and must not be added to this externally distributed product.
 
 ### Hierarchy
 
@@ -200,7 +200,7 @@ The current repo does not define or bundle Cash Sans. [globals.css](/Users/morga
 
 ### Named Rules
 
-**The Source Font Rule.** Component code should use `font-sans`, `font-display`, and `font-mono`. If Cash Sans is required, install and map it in `globals.css` instead of hardcoding it in feature code.
+**The Source Font Rule.** Component code should use `font-sans`, `font-display`, and `font-mono`. If a new typeface is required, install and map it in `globals.css` instead of hardcoding it in feature code.
 
 **The Calm Scale Rule.** Product hierarchy should be tight. If text needs more importance, try placement, grouping, or weight before jumping to hero-scale type.
 

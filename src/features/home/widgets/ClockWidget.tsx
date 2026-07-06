@@ -142,14 +142,11 @@ function AnalogClockFace({ time }: { time: Date }) {
   );
 }
 
-/** Digital face: large light-weight Cash Sans Mono HH:MM that reuses the analog
- *  clock's three inks — white/near-black marks for the digits, the second-hand
- *  red for a colon that blinks once a second (mirroring the analog second
- *  hand's tick), and the muted minute-hand gray for the AM/PM label (absent in
- *  24h locales). */
-const DIGITAL_FONT_FAMILY =
-  '"Cash Sans Mono", "Cash Sans", ui-monospace, monospace';
-
+/** Digital face: large light-weight mono HH:MM for an even, instrument-like
+ *  readout that reuses the analog clock's three inks — white/near-black marks
+ *  for the digits, the second-hand red for a colon that blinks once a second
+ *  (mirroring the analog second hand's tick), and the muted minute-hand gray
+ *  for the AM/PM label (absent in 24h locales). */
 function DigitalClockFace({
   parts,
 }: {
@@ -161,9 +158,8 @@ function DigitalClockFace({
       className="flex h-full w-full items-center justify-center text-clock-mark"
     >
       <div
-        className="flex items-baseline font-light tabular-nums tracking-[-0.01em]"
+        className="flex items-baseline font-mono font-light tabular-nums tracking-[-0.01em]"
         style={{
-          fontFamily: DIGITAL_FONT_FAMILY,
           fontSize:
             "clamp(2.25rem, calc(4.25rem * var(--widget-scale, 1)), 6.5rem)",
         }}

@@ -38,81 +38,44 @@
 @custom-variant dark (&:is([data-theme="dark"] *, .dark *));
 
 /* ═══════════════════════════════════════════════════════════
-   Cash Sans — Light/Regular/Medium/Semibold/Bold from Block CDN.
-   The /woff2/ path segment is required; omitting it 403s (BOT-627).
-   Without 500/600/700 declared the browser synthesizes faux-bold
-   from Regular for font-medium/semibold/bold, so we declare them.
-   Self-host (Regulator PR #2308 pattern) is the longer-term move.
+   Inter — self-hosted variable fonts (SIL OFL 1.1, see
+   src/app/assets/fonts/INTER_OFL.txt). Bundled rather than
+   CDN-loaded so the desktop app has no runtime font dependency
+   and renders identically offline. The weight axis (100–900)
+   covers every weight the design system uses, and the optical
+   size axis (opsz) automatically renders body sizes with
+   comfortable tracking and display sizes tighter — so no
+   letter-spacing compensation is needed in component code.
    ═══════════════════════════════════════════════════════════ */
 
 @font-face {
-  font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Regular.woff2")
-    format("woff2");
-  font-weight: 400;
+  font-family: "Inter";
+  src: url("../../app/assets/fonts/Inter[opsz,wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-RegularItalic.woff2")
-    format("woff2");
-  font-weight: 400;
+  font-family: "Inter";
+  src: url("../../app/assets/fonts/Inter-Italic[opsz,wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
   font-style: italic;
   font-display: swap;
 }
 
+/* Geist Mono — self-hosted variable font (SIL OFL 1.1, see
+   src/app/assets/fonts/GEIST_MONO_OFL.txt). Backs the --font-mono
+   token (code, paths, terminal output) and the digital clock face.
+   Geist shares Inter's grotesque skeleton, so it pairs naturally
+   with Inter. Upstream ships no italic. */
 @font-face {
-  font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Light.woff2")
-    format("woff2");
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Medium.woff2")
-    format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Semibold.woff2")
-    format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Bold.woff2")
-    format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* Cash Sans Mono — self-hosted, used by the digital clock face for an even,
-   instrument-like readout. Only the two weights the face needs are bundled. */
-@font-face {
-  font-family: "Cash Sans Mono";
-  src: url("../../app/assets/fonts/cash-sans-mono-light.woff2") format("woff2");
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Cash Sans Mono";
-  src: url("../../app/assets/fonts/cash-sans-mono-medium.woff2") format("woff2");
-  font-weight: 500;
+  font-family: "Geist Mono";
+  src: url("../../app/assets/fonts/GeistMono[wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
@@ -1195,14 +1158,14 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
-  /* Fonts — Cash Sans across the board */
+  /* Fonts — Inter across the board */
   --font-sans:
-    "Cash Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, sans-serif;
+    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
   --font-terminal-symbols: "NerdFontsSymbols Nerd Font";
   --font-serif: serif;
-  --font-display: "Cash Sans", system-ui, sans-serif;
+  --font-display: "Inter", system-ui, sans-serif;
 
   /* Radii — 5-step scale: xs/sm/md/lg + rounded-full (999px).
      Each step differs by 6px, so adjacent tokens nest concentrically
@@ -1605,13 +1568,26 @@ body,
   body {
     @apply bg-canvas-base text-foreground;
     font-family: var(--font-sans);
+    /* Global tracking trim for Inter — pulls body text slightly tighter
+       than the opsz axis default. Tune here, never per-component. */
+    letter-spacing: -0.01em;
     font-feature-settings:
       "rlig" 1,
       "calt" 1;
   }
 
+  /* Keep technical monospace text neutral; the Inter body tracking trim should
+     not squeeze code, paths, terminal-adjacent labels, or identifiers. */
+  code,
+  kbd,
+  pre,
+  samp,
+  .font-mono {
+    letter-spacing: normal;
+  }
+
   /* Form controls don't inherit font-family by default — opt them into
-     Cash Sans (and other body typography) so they match the rest of the UI. */
+     the app typeface (and other body typography) so they match the rest of the UI. */
   input,
   textarea,
   select,
