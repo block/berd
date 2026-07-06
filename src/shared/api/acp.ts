@@ -19,8 +19,7 @@ import {
   claimPersonaHandoff,
   isGooseManagedProvider,
 } from "./acpPersonaHandoff";
-import { GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { getExperiment } from "@/features/experiments/experimentPreferences";
+import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   applySessionConfigOptionsSnapshot,
@@ -111,14 +110,6 @@ const BERD_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY = "berd_style_guidelines";
 const LEGACY_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY =
   "goose_internal_style_guidelines";
 
-function getEnabledGooseStyleGuidelinesPrompt(): string | null {
-  const experiment = getExperiment(GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID);
-  if (!experiment?.enabled) return null;
-
-  const prompt = experiment.config.prompt;
-  return typeof prompt === "string" && prompt.trim() ? prompt : null;
-}
-
 async function appendBerdStyleGuidelinesPrompt(
   sessionId: string,
   prompt: string,
@@ -167,10 +158,10 @@ export async function acpSendMessage(
   const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
   let personaHandoff: string | null = null;
   if (isGooseManaged) {
-    const styleGuidelinesPrompt = getEnabledGooseStyleGuidelinesPrompt();
-    if (styleGuidelinesPrompt) {
-      await appendBerdStyleGuidelinesPrompt(sessionId, styleGuidelinesPrompt);
-    }
+    await appendBerdStyleGuidelinesPrompt(
+      sessionId,
+      getStyleGuidelinesPrompt(),
+    );
     await directAcp.appendSessionSystemPrompt(
       sessionId,
       "client_system_prompt",

@@ -56,8 +56,6 @@ export interface ExperimentDefinition {
 
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
-export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
-
 export const GLOBAL_SHORTCUT_EXPERIMENT_ID = "global-shortcut";
 
 export const PANE_JUMP_NAVIGATION_EXPERIMENT_ID = "pane-jump-navigation";
@@ -80,19 +78,6 @@ export const NAVIGATION_REFRESH_EXPERIMENT_ID = "navigation-refresh";
 export const SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY =
   "groupChatsByProject";
 export const DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT = true;
-export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
-- Be concise, direct, and friendly; avoid unnecessary detail unless the user asks for it.
-- For simple answers or small changes, use plain sentences or a short list instead of heavy structure.
-- For final responses, lead with the outcome, mention verification or blockers, and stay compact by default.
-- Expand only when extra detail is needed for correctness or user understanding.
-
-Showing images:
-- Treat "show/display/see an image, photo, or picture" as a request to produce a visible image — not a description, link, or refusal.
-- Use the most direct image-capable tool in one shot: image search/fetch, an image generator, or read_image on a directly-loadable image URL (.jpg/.png/.webp/.gif, not a web page).
-- Render local images inline with a Markdown image link to the path, percent-encoding spaces: ![alt](/path/to/my%20folder/pic.png). Image tool results already render inline.
-- Never claim you "can't browse the web" or "can't show images" when an image, search, or fetch tool is available.
-- When fetching with your own script (curl/wget/etc.), set a descriptive User-Agent — some hosts (e.g. Wikimedia) 403 a blank one.
-- Only if no image-capable tool is enabled, say so in one short sentence.`;
 
 export const EXPERIMENT_DEFINITIONS = [
   {
@@ -110,20 +95,6 @@ export const EXPERIMENT_DEFINITIONS = [
         labelKey: "experiments.paneJumpNavigation.shortcutLabel",
         descriptionKey: "experiments.paneJumpNavigation.shortcutDescription",
         defaultValue: DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
-      },
-    },
-  },
-  {
-    id: GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID,
-    titleKey: "experiments.gooseStyleGuidelines.title",
-    descriptionKey: "experiments.gooseStyleGuidelines.description",
-    config: {
-      prompt: {
-        type: "text",
-        labelKey: "experiments.gooseStyleGuidelines.promptLabel",
-        descriptionKey: "experiments.gooseStyleGuidelines.promptDescription",
-        defaultValue: DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT,
-        placeholderKey: "experiments.gooseStyleGuidelines.promptPlaceholder",
       },
     },
   },

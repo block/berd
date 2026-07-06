@@ -223,13 +223,6 @@
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "defaultLabel": "predeterminado",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
-    "gooseStyleGuidelines": {
-      "description": "Agrega un prompt del sistema adicional con guía de estilo a proveedores administrados por Goose antes de cada mensaje del usuario.",
-      "promptDescription": "Se envía como un prompt del sistema adicional de Goose cuando el experimento está activado.",
-      "promptLabel": "Prompt",
-      "promptPlaceholder": "Ingresa la guía de estilo para Goose",
-      "title": "Guía de estilo de Goose"
-    },
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
     "sidebarDetachableChats": {
@@ -295,6 +288,15 @@
       "label": "Idioma",
       "spanish": "Español",
       "system": "Predeterminado del sistema ({{language}})"
+    },
+    "styleGuidelines": {
+      "promptDescription": "Personaliza la guía de estilo predeterminada que Goose recibe para el estilo y comportamiento de las respuestas.",
+      "promptLabel": "Guía",
+      "promptPlaceholder": "Ingresa la guía de estilo para Goose",
+      "reset": "Restablecer valores predeterminados",
+      "save": "Guardar guía",
+      "saveError": "No se pudo guardar tu guía de estilo. Inténtalo de nuevo.",
+      "title": "Guía de estilo"
     },
     "followUpBehavior": {
       "description": "Pon seguimientos en cola mientras Berd responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",

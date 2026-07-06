@@ -28,6 +28,7 @@ import {
   SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
   SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
 } from "@/features/experiments/experimentDefinitions";
+import { STYLE_GUIDELINES_STORAGE_KEY } from "@/shared/preferences/styleGuidelinesPreference";
 import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   setExperimentEnabled,
@@ -328,6 +329,30 @@ describe("GeneralSettings appearance section", () => {
         name: "Group Chats by Project",
       }),
     ).toBeNull();
+  });
+
+  it("updates style guidelines", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    expect(
+      screen.queryByRole("switch", {
+        name: "Use style guidelines",
+      }),
+    ).not.toBeInTheDocument();
+
+    const textarea = screen.getByLabelText("Guidelines");
+    await user.clear(textarea);
+    await user.type(textarea, "Use direct answers.");
+    await user.click(screen.getByRole("button", { name: "Save guidelines" }));
+
+    await waitFor(() => {
+      const storedPreference = JSON.parse(
+        localStorage.getItem(STYLE_GUIDELINES_STORAGE_KEY) ?? "{}",
+      );
+      expect(storedPreference.prompt).toBe("Use direct answers.");
+    });
   });
 
   it("updates the follow-up behavior", async () => {

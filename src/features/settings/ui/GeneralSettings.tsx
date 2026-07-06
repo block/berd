@@ -30,6 +30,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { Switch } from "@/shared/ui/switch";
+import { Textarea } from "@/shared/ui/textarea";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
@@ -67,6 +68,7 @@ import {
   setExperimentConfigValue,
   useExperiment,
 } from "@/features/experiments/experimentPreferences";
+import { useStyleGuidelinesPreference } from "@/shared/preferences/styleGuidelinesPreference";
 import {
   getBbCliStatus,
   installBbCli,
@@ -178,6 +180,10 @@ export function GeneralSettings({
     useSidebarGitBranchSubtitlePreference();
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
+  const styleGuidelinesPreference = useStyleGuidelinesPreference();
+  const [styleGuidelinesPromptDraft, setStyleGuidelinesPromptDraft] = useState(
+    styleGuidelinesPreference.prompt,
+  );
   const {
     themeMode,
     setThemeMode,
@@ -205,6 +211,10 @@ export function GeneralSettings({
   const terminalFallbackPath =
     terminalFallbackCwdPreference.fallbackCwd ??
     artifactRootPreference.rootPath;
+
+  useEffect(() => {
+    setStyleGuidelinesPromptDraft(styleGuidelinesPreference.prompt);
+  }, [styleGuidelinesPreference.prompt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,6 +318,22 @@ export function GeneralSettings({
       toast.error(t("account.logoutError"));
     } finally {
       setLoggingOut(false);
+    }
+  }
+
+  function handleStyleGuidelinesPromptSave() {
+    const didSave = styleGuidelinesPreference.setPrompt(
+      styleGuidelinesPromptDraft,
+    );
+    if (!didSave) {
+      toast.error(t("general.styleGuidelines.saveError"));
+    }
+  }
+
+  function handleStyleGuidelinesPromptReset() {
+    const didSave = styleGuidelinesPreference.resetPrompt();
+    if (!didSave) {
+      toast.error(t("general.styleGuidelines.saveError"));
     }
   }
 
@@ -667,6 +693,51 @@ export function GeneralSettings({
             aria-label={t("general.sidebarBranchSubtitles.label")}
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title={t("general.styleGuidelines.title")}>
+        <div className="space-y-3 px-4 py-4">
+          <div>
+            <label className="text-sm" htmlFor="style-guidelines-prompt">
+              {t("general.styleGuidelines.promptLabel")}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("general.styleGuidelines.promptDescription")}
+            </p>
+          </div>
+          <Textarea
+            id="style-guidelines-prompt"
+            value={styleGuidelinesPromptDraft}
+            onChange={(event) =>
+              setStyleGuidelinesPromptDraft(event.currentTarget.value)
+            }
+            onBlur={handleStyleGuidelinesPromptSave}
+            placeholder={t("general.styleGuidelines.promptPlaceholder")}
+            className="min-h-52"
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={handleStyleGuidelinesPromptReset}
+            >
+              <RotateCcw className="size-3.5" />
+              {t("general.styleGuidelines.reset")}
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              onClick={handleStyleGuidelinesPromptSave}
+              disabled={
+                styleGuidelinesPromptDraft === styleGuidelinesPreference.prompt
+              }
+            >
+              {t("general.styleGuidelines.save")}
+            </Button>
+          </div>
+        </div>
       </SettingsSection>
 
       {/* A restricted build compiled with the `no-bb-cli-install` Cargo feature

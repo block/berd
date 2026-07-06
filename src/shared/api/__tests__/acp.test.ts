@@ -1,14 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT,
-  GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID,
-} from "@/features/experiments/experimentDefinitions";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+  DEFAULT_STYLE_GUIDELINES_PROMPT,
+  STYLE_GUIDELINES_STORAGE_KEY,
+} from "@/shared/preferences/styleGuidelinesPreference";
 
 const mockLoadSession = vi.fn();
 const mockNewSession = vi.fn();
@@ -31,18 +26,10 @@ const reasoningEffortSnapshot = {
   ],
 };
 
-function enableStyleGuidelinesPrompt(prompt?: string) {
+function setStyleGuidelinesPreference(prompt: string) {
   localStorage.setItem(
-    EXPERIMENT_PREFERENCES_STORAGE_KEY,
-    JSON.stringify({
-      version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-      experiments: {
-        [GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID]: {
-          enabled: true,
-          ...(prompt === undefined ? {} : { config: { prompt } }),
-        },
-      },
-    }),
+    STYLE_GUIDELINES_STORAGE_KEY,
+    JSON.stringify({ prompt }),
   );
 }
 
@@ -76,55 +63,14 @@ describe("acpSendMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
-  });
-
-  it.each(
-    GOOSE_MANAGED_PROVIDER_IDS,
-  )("updates only the client system prompt when style guidelines are disabled for %s", async (providerId) => {
-    setExperimentEnabled(GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID, false);
-
-    const sessionRegistry = await import("../acpSessionRegistry");
-    const { acpSendMessage } = await import("../acp");
-    const sessionId = `acp-session-${providerId}`;
-
-    sessionRegistry.registerPreparedSession(
-      sessionId,
-      providerId,
-      "/tmp/project",
-    );
-
-    await acpSendMessage(sessionId, "hello", {
-      systemPrompt: "You are Starfriend.",
-      assistantPrompt: "Use these skills for this request: goose-help.",
-    });
-
-    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
-      1,
-      sessionId,
-      "client_system_prompt",
-      "You are Starfriend.",
-    );
-    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(1);
-    expect(mockPrompt).toHaveBeenCalledWith(
-      sessionId,
-      [
-        {
-          type: "text",
-          text: "Use these skills for this request: goose-help.",
-          annotations: { audience: ["assistant"] },
-        },
-        { type: "text", text: "hello" },
-      ],
-      undefined,
-    );
+    localStorage.removeItem(STYLE_GUIDELINES_STORAGE_KEY);
   });
 
   it.each(
     GOOSE_MANAGED_PROVIDER_IDS,
   )("adds configured style guidelines before sending for %s", async (providerId) => {
     const configuredPrompt = "Use concise, test-specific style guidance.";
-    enableStyleGuidelinesPrompt(configuredPrompt);
+    setStyleGuidelinesPreference(configuredPrompt);
 
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpSendMessage } = await import("../acp");
@@ -161,9 +107,7 @@ describe("acpSendMessage", () => {
     expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(3);
   });
 
-  it("adds the default style guidelines when enabled without config", async () => {
-    enableStyleGuidelinesPrompt();
-
+  it("adds the default style guidelines when unset", async () => {
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpSendMessage } = await import("../acp");
 
@@ -187,7 +131,31 @@ describe("acpSendMessage", () => {
       2,
       "acp-session-default-style",
       "berd_style_guidelines",
-      DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT,
+      DEFAULT_STYLE_GUIDELINES_PROMPT,
+    );
+  });
+
+  it("normalizes empty style guidelines to the default prompt", async () => {
+    setStyleGuidelinesPreference("   ");
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-empty-style",
+      "goose",
+      "/tmp/project",
+    );
+
+    await acpSendMessage("acp-session-empty-style", "hello", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      2,
+      "acp-session-empty-style",
+      "berd_style_guidelines",
+      DEFAULT_STYLE_GUIDELINES_PROMPT,
     );
   });
 

@@ -223,13 +223,6 @@
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "defaultLabel": "default",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
-    "gooseStyleGuidelines": {
-      "description": "Adds an extra style-guidance system prompt to Goose-managed providers before each user message.",
-      "promptDescription": "Sent as an additional Goose system prompt when the experiment is enabled.",
-      "promptLabel": "Prompt",
-      "promptPlaceholder": "Enter style guidance for Goose",
-      "title": "Goose style guidelines"
-    },
     "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
     "sidebarDetachableChats": {
@@ -295,6 +288,15 @@
       "label": "Language",
       "spanish": "Spanish",
       "system": "System default ({{language}})"
+    },
+    "styleGuidelines": {
+      "promptDescription": "Customize the default style guidance Goose receives for response style and behavior.",
+      "promptLabel": "Guidelines",
+      "promptPlaceholder": "Enter style guidance for Goose",
+      "reset": "Reset to default",
+      "save": "Save guidelines",
+      "saveError": "Couldn't save your style guidelines. Try again.",
+      "title": "Style guidelines"
     },
     "followUpBehavior": {
       "description": "Queue follow-ups while Berd responds or steer the current run. Press Cmd+Enter to do the opposite for one message.",
