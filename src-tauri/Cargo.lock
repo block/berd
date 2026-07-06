@@ -1304,7 +1304,7 @@ dependencies = [
 [[package]]
 name = "doctor"
 version = "0.1.0"
-source = "git+https://github.com/block/builderbot?rev=31d08d924f15bc4bb857b3d764dc9f9c4b20cd40#31d08d924f15bc4bb857b3d764dc9f9c4b20cd40"
+source = "git+https://github.com/block/builderbot?rev=7a6d3d717c881cfe842fc75fe3ffe343c4614159#7a6d3d717c881cfe842fc75fe3ffe343c4614159"
 dependencies = [
  "dirs",
  "futures",

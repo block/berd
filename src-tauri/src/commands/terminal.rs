@@ -1,4 +1,4 @@
-use crate::services::{path_env::build_extended_path, shell_env};
+use crate::services::{dir_env, path_env::build_extended_path_from_path, shell_env};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::{
@@ -90,9 +90,10 @@ pub async fn start_terminal(
 ) -> Result<String, String> {
     let cwd = resolve_terminal_cwd(&cwd)?;
 
-    let mut shell_env = shell_env::capture_shell_env().await;
+    let mut shell_env = dir_env::capture_home_interactive_env().await;
     add_fallback_env_vars(&mut shell_env);
     shell_env::sanitize_shell_env(&mut shell_env);
+    let extended_path = build_extended_path_from_path(shell_env.get("PATH").map(String::as_str));
     let shell = resolve_shell(&shell_env);
     let terminal_id = Uuid::new_v4().to_string();
     let size = terminal_size(cols, rows);
@@ -107,7 +108,7 @@ pub async fn start_terminal(
     for (key, value) in &shell_env {
         command.env(key, value);
     }
-    command.env("PATH", build_extended_path().await);
+    command.env("PATH", extended_path);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
 

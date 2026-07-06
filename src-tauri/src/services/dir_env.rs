@@ -8,6 +8,8 @@ use std::{
 };
 use tokio::{io::AsyncWriteExt, process::Command, sync::watch, time::timeout};
 
+use crate::services::shell_env;
+
 /// Per-directory environment cache entry.
 enum CacheEntry {
     Ready {
@@ -29,6 +31,7 @@ static DIR_ENV_CACHE: Mutex<Option<HashMap<PathBuf, CacheEntry>>> = Mutex::new(N
 /// Match Staged's default so shell startup cost is amortized across a session
 /// while still refreshing user shell changes without manual invalidation.
 const DIR_ENV_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+const HOME_ENV_CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct InFlightGuard {
     key: PathBuf,
@@ -144,6 +147,43 @@ pub async fn capture_dir_env(
             }
         }
     }
+}
+
+/// Capture the user's home/global interactive login environment.
+///
+/// This reuses the per-directory interactive-login cache with `$HOME` as the
+/// directory, then sanitizes only the returned clone. The cached per-directory
+/// environment remains raw so project/git callers still receive tool-manager
+/// variables such as Hermit or direnv state for their exact directory.
+pub async fn capture_home_interactive_env() -> HashMap<String, String> {
+    capture_home_interactive_env_with_timeout(HOME_ENV_CAPTURE_TIMEOUT).await
+}
+
+pub async fn capture_home_interactive_env_with_timeout(
+    timeout_duration: Duration,
+) -> HashMap<String, String> {
+    let Some(home) = home_dir_from_env() else {
+        return HashMap::new();
+    };
+    capture_home_interactive_env_for_dir(&home, timeout_duration).await
+}
+
+fn home_dir_from_env() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+}
+
+async fn capture_home_interactive_env_for_dir(
+    home: &Path,
+    timeout_duration: Duration,
+) -> HashMap<String, String> {
+    let mut env = capture_dir_env(home, timeout_duration)
+        .await
+        .unwrap_or_default();
+    shell_env::sanitize_shell_env(&mut env);
+    env
 }
 
 #[cfg(test)]
@@ -340,6 +380,33 @@ mod tests {
         let env = parse_env_output(format!("PATH={path}\0").as_bytes());
 
         assert_eq!(env.get("PATH"), Some(&path.to_string()));
+    }
+
+    #[tokio::test]
+    async fn home_interactive_env_sanitizes_clone_but_keeps_raw_cache() {
+        let home = PathBuf::from("/tmp/test-home-env");
+        let mut raw = HashMap::new();
+        raw.insert("PATH".to_string(), "/repo/.hermit/bin:/usr/bin".to_string());
+        raw.insert("HERMIT_ENV".to_string(), "/repo".to_string());
+        raw.insert("LANG".to_string(), "en_US.UTF-8".to_string());
+
+        put_cached(home.clone(), raw);
+
+        let sanitized = capture_home_interactive_env_for_dir(&home, Duration::from_secs(1)).await;
+
+        assert_eq!(sanitized.get("LANG"), Some(&"en_US.UTF-8".to_string()));
+        assert!(!sanitized.contains_key("HERMIT_ENV"));
+        assert_eq!(
+            sanitized.get("PATH"),
+            Some(&"/repo/.hermit/bin:/usr/bin".to_string())
+        );
+
+        let cached = get_cached(&home).expect("raw cached home env");
+        assert!(cached.contains_key("HERMIT_ENV"));
+        assert_eq!(
+            cached.get("PATH"),
+            Some(&"/repo/.hermit/bin:/usr/bin".to_string())
+        );
     }
 
     #[test]

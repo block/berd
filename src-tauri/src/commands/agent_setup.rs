@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::services::path_env;
 use doctor::FixType;
 use tauri::{AppHandle, Emitter, State};
 
@@ -309,7 +310,16 @@ fn crate_check_id(provider_id: &str) -> String {
 
 async fn find_check(provider_id: &str) -> Result<doctor::DoctorCheck, String> {
     let target = crate_check_id(provider_id);
-    let report = doctor::run_checks().await;
+    let report = doctor::run_checks_with_options(
+        doctor::RunChecksOptions {
+            npm_registry: npm_registry().map(str::to_string),
+            check_freshness: false,
+            offline: false,
+            env: None,
+        }
+        .with_env_snapshot(path_env::home_env_vars_with_extended_path().await),
+    )
+    .await;
     report
         .checks
         .into_iter()
@@ -522,14 +532,18 @@ async fn run_fix(
     let registry_for_lines = registry.clone();
     let provider_for_lines = provider_id.to_string();
     let log_tag_for_lines = log_tag.clone();
-    // No cancellation token in `execute_fix_streaming_with_options` by design —
+    // No cancellation token in `execute_fix_streaming_with_env_options` by design —
     // `run_fix` always runs to completion. Leaving the screen never stopped the
     // work; the registry just tracks the work that was already running.
-    let result = doctor::execute_fix_streaming_with_options(
+    let result = doctor::execute_fix_streaming_with_env_options(
         check_id,
         fix_type,
-        command_override,
-        npm_registry(),
+        doctor::ExecuteFixOptions {
+            command_override,
+            npm_registry: npm_registry().map(str::to_string),
+            env: None,
+        }
+        .with_env_snapshot(path_env::home_env_vars_with_extended_path().await),
         move |line| {
             log::info!("{log_tag_for_lines} {line}");
             append_output(

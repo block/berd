@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
-use crate::services::shell_env;
+use crate::services::{dir_env, shell_env};
 
 fn push_existing_path(paths: &mut Vec<PathBuf>, path: &str) {
     paths.extend(std::env::split_paths(path).filter(|p| {
@@ -82,14 +82,35 @@ pub fn build_extended_path_from_path(path: Option<&str>) -> String {
         .to_string()
 }
 
-pub async fn build_extended_path() -> String {
-    let shell_env = shell_env::capture_shell_env().await;
-    build_extended_path_from_path(shell_env.get("PATH").map(String::as_str))
+/// Build a deterministic environment snapshot with PATH normalized through
+/// `build_extended_path_from_path`.
+///
+/// If home env capture failed, fall back to the current process environment so
+/// callers that clear child environments still preserve essential variables.
+pub fn env_vars_with_extended_path(shell_env: &HashMap<String, String>) -> Vec<(String, String)> {
+    let mut env = if shell_env.is_empty() {
+        std::env::vars().collect()
+    } else {
+        shell_env.clone()
+    };
+    shell_env::sanitize_shell_env(&mut env);
+    let extended_path = build_extended_path_from_path(env.get("PATH").map(String::as_str));
+    env.insert("PATH".to_string(), extended_path);
+
+    let mut vars: Vec<_> = env.into_iter().collect();
+    vars.sort_by(|(left, _), (right, _)| left.cmp(right));
+    vars
+}
+
+pub async fn home_env_vars_with_extended_path() -> Vec<(String, String)> {
+    let shell_env = dir_env::capture_home_interactive_env().await;
+    env_vars_with_extended_path(&shell_env)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_extended_path_from_path;
+    use super::{build_extended_path_from_path, env_vars_with_extended_path};
+    use std::collections::HashMap;
 
     #[test]
     fn extended_path_starts_with_login_shell_path_and_tool_manager_shims() {
@@ -139,5 +160,32 @@ mod tests {
         let paths: Vec<_> = std::env::split_paths(&path).collect();
 
         assert!(!paths.is_empty());
+    }
+
+    #[test]
+    fn env_vars_with_extended_path_sanitizes_and_normalizes_path() {
+        let env = HashMap::from([
+            (
+                "PATH".to_string(),
+                "/repo/.hermit/bin:/shell/bin".to_string(),
+            ),
+            ("HERMIT_ENV".to_string(), "/repo".to_string()),
+            ("LANG".to_string(), "en_US.UTF-8".to_string()),
+        ]);
+
+        let vars = env_vars_with_extended_path(&env);
+        let map: HashMap<_, _> = vars.into_iter().collect();
+        let path = map.get("PATH").expect("PATH");
+        let paths: Vec<_> = std::env::split_paths(path).collect();
+
+        assert_eq!(map.get("LANG"), Some(&"en_US.UTF-8".to_string()));
+        assert!(!map.contains_key("HERMIT_ENV"));
+        assert!(paths
+            .iter()
+            .any(|p| p == std::path::Path::new("/shell/bin")));
+        assert!(!paths
+            .iter()
+            .any(|p| p == std::path::Path::new("/repo/.hermit/bin")));
+        assert!(paths.iter().any(|p| p.ends_with(".asdf/shims")));
     }
 }

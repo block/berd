@@ -13,12 +13,12 @@ use serde::{Deserialize, Serialize};
 use crate::services::diagnostic_log::{
     self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
 };
+use crate::services::dir_env;
 use crate::services::distro_bundle::DistroBundleState;
 use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
 use crate::services::path_env;
 use crate::services::process::{pid_t_from_u32, process_is_alive};
-use crate::services::shell_env;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, Command};
@@ -131,7 +131,7 @@ impl GooseServeProcess {
         // from .zshrc, not .zprofile), so override PATH with the extended
         // path used by every other subprocess spawn site in this app, with
         // the distro `bin_dir` (if any) prepended in front of it.
-        let shell_env = shell_env::capture_shell_env().await;
+        let shell_env = dir_env::capture_home_interactive_env().await;
         let mut prepend_dirs: Vec<PathBuf> = Vec::new();
         let mut distro_config_path: Option<PathBuf> = None;
 

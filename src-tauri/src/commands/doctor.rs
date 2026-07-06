@@ -14,11 +14,11 @@ use tauri::State;
 use tokio::time::timeout;
 
 use crate::services::{
+    dir_env,
     distro_bundle::DistroBundleState,
     goose_config::{self, AdditionalConfigFiles},
     kgoose::{KgooseContext, KgooseProbeResult},
-    path_env::{build_extended_path, build_extended_path_from_path},
-    shell_env,
+    path_env::{self, build_extended_path_from_path},
 };
 
 use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState, RuntimeDoctorConfig};
@@ -297,6 +297,7 @@ fn upstream_category(check_id: &str) -> (&'static str, &'static str) {
 async fn run_local_checks(
     registry: &LocalDoctorRegistry<'_>,
     distro_config_path: Option<&Path>,
+    captured_shell_env: &HashMap<String, String>,
 ) -> Vec<DoctorCheck> {
     let check_count =
         registry.path_checks.len() + registry.command_checks.len() + registry.custom_checks.len();
@@ -304,7 +305,6 @@ async fn run_local_checks(
         return Vec::new();
     }
 
-    let captured_shell_env = shell_env::capture_shell_env().await;
     let extended_path =
         build_extended_path_from_path(captured_shell_env.get("PATH").map(String::as_str));
     let mut results = Vec::with_capacity(check_count);
@@ -318,7 +318,7 @@ async fn run_local_checks(
     for check in registry.custom_checks {
         results.push((check.run)(
             &check.meta,
-            &captured_shell_env,
+            captured_shell_env,
             distro_config_path,
         ));
     }
@@ -995,8 +995,11 @@ fn find_local_fix<'a>(
         .filter(|fix| &fix.fix_type == fix_type)
 }
 
-async fn execute_local_fix(command: &'static str) -> Result<(), String> {
-    let extended_path = build_extended_path().await;
+async fn execute_local_fix(
+    command: &'static str,
+    shell_env: &HashMap<String, String>,
+) -> Result<(), String> {
+    let extended_path = build_extended_path_from_path(shell_env.get("PATH").map(String::as_str));
     let (shell, flag) = if cfg!(target_os = "windows") {
         ("cmd", "/C")
     } else {
@@ -1033,21 +1036,28 @@ async fn run_doctor_impl(
         return DoctorReport { checks: Vec::new() };
     }
 
-    let upstream = doctor::run_checks_with_options(doctor::RunChecksOptions {
-        npm_registry: crate::commands::agent_setup::npm_registry().map(str::to_string),
-        check_freshness,
-        // Freshness, when enabled, runs against the network (and the crate's
-        // 1-hour disk cache); `offline` would suppress the registry lookups we
-        // want here.
-        offline: false,
-    })
+    let captured_shell_env = dir_env::capture_home_interactive_env().await;
+    let doctor_env_vars = path_env::env_vars_with_extended_path(&captured_shell_env);
+    let upstream = doctor::run_checks_with_options(
+        doctor::RunChecksOptions {
+            npm_registry: crate::commands::agent_setup::npm_registry().map(str::to_string),
+            check_freshness,
+            // Freshness, when enabled, runs against the network (and the crate's
+            // 1-hour disk cache); `offline` would suppress the registry lookups we
+            // want here.
+            offline: false,
+            env: None,
+        }
+        .with_env_snapshot(doctor_env_vars),
+    )
     .await;
     let mut checks: Vec<DoctorCheck> = upstream.checks.into_iter().map(DoctorCheck::from).collect();
     let distro_config_path = distro_state
         .bundle()
         .and_then(|bundle| bundle.config_path.as_deref());
     if doctor_internal_tooling_checks_enabled(runtime_config) {
-        let mut local_checks = run_local_checks(registry, distro_config_path).await;
+        let mut local_checks =
+            run_local_checks(registry, distro_config_path, &captured_shell_env).await;
         if !doctor_block_checks_enabled() {
             local_checks.retain(|check| check.id != "sq-agent-tools");
         }
@@ -1209,16 +1219,21 @@ pub async fn run_doctor_fix(
     fix_type: FixType,
     command_override: Option<String>,
 ) -> Result<(), String> {
+    let captured_shell_env = dir_env::capture_home_interactive_env().await;
     if command_override.is_none() {
         if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
-            return execute_local_fix(fix.command).await;
+            return execute_local_fix(fix.command, &captured_shell_env).await;
         }
     }
-    doctor::execute_fix_with_options(
+    doctor::execute_fix_with_env_options(
         check_id,
         fix_type,
-        command_override,
-        crate::commands::agent_setup::npm_registry(),
+        doctor::ExecuteFixOptions {
+            command_override,
+            npm_registry: crate::commands::agent_setup::npm_registry().map(str::to_string),
+            env: None,
+        }
+        .with_env_snapshot(path_env::env_vars_with_extended_path(&captured_shell_env)),
     )
     .await
 }
@@ -1490,7 +1505,8 @@ mod tests {
             custom_checks: &checks,
         };
 
-        let results = run_local_checks(&registry, None).await;
+        let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
+        let results = run_local_checks(&registry, None, &shell_env).await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "fixture-check");
@@ -1521,7 +1537,8 @@ mod tests {
             custom_checks: &[],
         };
 
-        let results = run_local_checks(&registry, None).await;
+        let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
+        let results = run_local_checks(&registry, None, &shell_env).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message.trim(), "command-output");
@@ -1577,7 +1594,8 @@ mod tests {
             custom_checks: &[],
         };
 
-        let results = run_local_checks(&registry, None).await;
+        let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
+        let results = run_local_checks(&registry, None, &shell_env).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message, "path found");
