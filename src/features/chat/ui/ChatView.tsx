@@ -47,8 +47,6 @@ import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscript
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
-import { SESSION_FORK_FROM_MESSAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
@@ -99,11 +97,6 @@ export function ChatView({
   onComposerHandoffTarget,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
-  const sessionForkFromMessageExperiment = useExperiment(
-    SESSION_FORK_FROM_MESSAGE_EXPERIMENT_ID,
-  );
-  const enableSessionForkFromMessage =
-    sessionForkFromMessageExperiment?.enabled === true;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const chatColumnRef = useRef<HTMLDivElement | null>(null);
@@ -664,9 +657,7 @@ export function ChatView({
         isAgentBuilderSession ? undefined : handleOpenContextPanel
       }
       onForkFromMessage={
-        enableSessionForkFromMessage && !isReadOnly && onForkChat
-          ? handleForkFromMessage
-          : undefined
+        !isReadOnly && onForkChat ? handleForkFromMessage : undefined
       }
       showPlaceholder={showTimelineLoading}
       placeholder={conversationPlaceholder}

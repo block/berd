@@ -46,7 +46,6 @@ const mocks = vi.hoisted(() => ({
   >,
   afterNextPaintCallbacks: [] as Array<() => void>,
   autoFlushAfterNextPaint: true,
-  sessionForkFromMessageEnabled: true,
 }));
 
 vi.mock("motion/react", () => {
@@ -244,10 +243,6 @@ vi.mock("../../hooks/useChatSessionController", () => ({
   useChatSessionController: mocks.useChatSessionController,
 }));
 
-vi.mock("@/features/experiments/experimentPreferences", () => ({
-  useExperiment: () => ({ enabled: mocks.sessionForkFromMessageEnabled }),
-}));
-
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
@@ -378,7 +373,6 @@ describe("ChatView MCP app messaging", () => {
     mocks.activeWorkspaceBySession = {};
     mocks.afterNextPaintCallbacks = [];
     mocks.autoFlushAfterNextPaint = true;
-    mocks.sessionForkFromMessageEnabled = true;
     window.localStorage.clear();
     mockMatchMedia(false);
     mocks.useChatSessionController.mockReturnValue({
@@ -479,23 +473,6 @@ describe("ChatView MCP app messaging", () => {
         activeSession={chatSessionWithWorkingDir("/tmp/project")}
         onForkChat={vi.fn()}
         readOnlyStatus="Finishing current response..."
-      />,
-    );
-
-    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      onForkFromMessage?: unknown;
-    };
-    expect(timelineProps.onForkFromMessage).toBeUndefined();
-  });
-
-  it("does not pass fork-from-message when the experiment is disabled", () => {
-    mocks.sessionForkFromMessageEnabled = false;
-
-    render(
-      <ChatView
-        sessionId="session-1"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
-        onForkChat={vi.fn()}
       />,
     );
 

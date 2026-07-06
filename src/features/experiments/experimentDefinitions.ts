@@ -72,9 +72,6 @@ export const SESSION_COST_EXPERIMENT_ID = "session-cost-display";
 
 export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
 
-export const SESSION_FORK_FROM_MESSAGE_EXPERIMENT_ID =
-  "session-fork-from-message";
-
 export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
   "sidebar-detachable-chats";
 
@@ -185,12 +182,6 @@ export const EXPERIMENT_DEFINITIONS = [
         defaultValue: DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
       },
     },
-  },
-  {
-    id: SESSION_FORK_FROM_MESSAGE_EXPERIMENT_ID,
-    titleKey: "experiments.sessionForkFromMessage.title",
-    descriptionKey: "experiments.sessionForkFromMessage.description",
-    defaultEnabled: false,
   },
   {
     id: GLOBAL_SHORTCUT_EXPERIMENT_ID,
