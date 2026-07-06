@@ -87,6 +87,8 @@
   about: Read-only access to on-premises network device data.
 - name: notion
   about: Search, create, and manage pages, databases, views, and comments in Notion.
+- name: omni
+  about: Query Omni Analytics data and models via natural language, pick topics, and search Omni docs.
 - name: orders
   about: Look up Square orders, bills, and payments.
 - name: oracle-scm
