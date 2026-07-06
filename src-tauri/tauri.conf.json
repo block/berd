@@ -82,7 +82,7 @@
       "../resources/berd-sounds-5.mp3": "berd-sounds-5.mp3",
       "../resources/berd-sounds-6.mp3": "berd-sounds-6.mp3"
     },
-    "externalBin": ["binaries/goosed", "binaries/berdctl"],
+    "externalBin": ["binaries/goosed", "binaries/berdctl", "binaries/catch"],
     "linux": {
       "deb": {
         "depends": ["libvulkan1"]

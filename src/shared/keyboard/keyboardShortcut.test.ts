@@ -139,6 +139,12 @@ describe("keyboardShortcutFromEvent", () => {
     ).toBe("meta+plus");
   });
 
+  it("maps a space key event to space", () => {
+    expect(
+      keyboardShortcutFromEvent(keyEvent({ key: " ", altKey: true })),
+    ).toBe("alt+space");
+  });
+
   it("returns null for dead, IME, and lock keys", () => {
     expect(
       keyboardShortcutFromEvent(keyEvent({ key: "Dead", altKey: true })),

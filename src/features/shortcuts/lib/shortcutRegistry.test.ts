@@ -15,6 +15,7 @@ vi.mock("@/shared/lib/platform", () => ({
 
 import en from "@/shared/i18n/locales/en/shortcuts.json";
 import es from "@/shared/i18n/locales/es/shortcuts.json";
+import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   eventMatchesShortcutCommand,
   getShortcutBindings,
@@ -667,6 +668,71 @@ describe("pane-jump", () => {
     expect(getShortcutBindings("navigation.paneJump")).toEqual([
       { shortcut: "meta+9" },
     ]);
+  });
+});
+
+describe("global shortcut", () => {
+  it("exposes the Global shortcut only while the experiment is enabled", () => {
+    getExperimentMock.mockImplementation((id: string) =>
+      id === GLOBAL_SHORTCUT_EXPERIMENT_ID
+        ? { enabled: false, config: {} }
+        : undefined,
+    );
+
+    expect(
+      flattenGroups().map((shortcut) => shortcut.id),
+      "disabled experiment",
+    ).not.toContain("navigation.globalShortcut");
+    expect(
+      eventMatchesShortcutCommand(
+        keyEvent({ key: " ", altKey: true }),
+        "navigation.globalShortcut",
+      ),
+    ).toBe(false);
+
+    getExperimentMock.mockImplementation((id: string) =>
+      id === GLOBAL_SHORTCUT_EXPERIMENT_ID
+        ? { enabled: true, config: {} }
+        : undefined,
+    );
+
+    expect(
+      flattenGroups().find(
+        (shortcut) => shortcut.id === "navigation.globalShortcut",
+      )?.shortcut,
+    ).toBe("alt+space");
+    expect(getShortcutBindings("navigation.globalShortcut")).toEqual([
+      { shortcut: "alt+space" },
+    ]);
+    expect(
+      eventMatchesShortcutCommand(
+        keyEvent({ key: " ", altKey: true }),
+        "navigation.globalShortcut",
+      ),
+    ).toBe(true);
+  });
+
+  it("uses a configured Global shortcut while the experiment is enabled", () => {
+    getExperimentMock.mockImplementation((id: string) =>
+      id === GLOBAL_SHORTCUT_EXPERIMENT_ID
+        ? { enabled: true, config: {} }
+        : undefined,
+    );
+
+    expect(
+      setShortcutOverride("navigation.globalShortcut", "ctrl+alt+c"),
+    ).toEqual({
+      ok: true,
+    });
+
+    expect(getShortcutBindings("navigation.globalShortcut")).toEqual([
+      { shortcut: "ctrl+alt+c" },
+    ]);
+    expect(
+      flattenGroups().find(
+        (shortcut) => shortcut.id === "navigation.globalShortcut",
+      )?.shortcut,
+    ).toBe("ctrl+alt+c");
   });
 });
 

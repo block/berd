@@ -1,3 +1,5 @@
+*.ts text diff
+*.tsx text diff
 src/shared/assets/avatars/webm/**/*.webm filter=lfs diff=lfs merge=lfs -text
 src/shared/assets/avatars/hevc/**/*.mov filter=lfs diff=lfs merge=lfs -text
 src/shared/assets/avatars/hevc/**/*.mp4 filter=lfs diff=lfs merge=lfs -text

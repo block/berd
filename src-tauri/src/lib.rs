@@ -261,6 +261,7 @@ pub fn run() {
                     }
                 }
             }
+            app.manage(commands::global_shortcut::GlobalShortcutHandlerState::default());
 
             // Collect avatar refs from ALL agents (bundled + user-created) so
             // that startup warming recovers any missing avatar media, e.g. after
@@ -386,6 +387,8 @@ pub fn run() {
             commands::cli::get_bb_cli_status,
             #[cfg(not(feature = "no-bb-cli-install"))]
             commands::cli::install_bb_cli,
+            commands::global_shortcut::launch_global_shortcut_handler,
+            commands::global_shortcut::stop_global_shortcut_handler,
             commands::connections::list_connections,
             commands::automations::get_automation_tiles,
             commands::automations::get_automation_tile,
@@ -488,6 +491,8 @@ pub fn run() {
             RunEvent::Exit => {
                 app.state::<commands::automations::AutomationStreamState>()
                     .abort_all();
+                app.state::<commands::global_shortcut::GlobalShortcutHandlerState>()
+                    .stop();
                 app.state::<commands::terminal::TerminalState>().stop_all();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }

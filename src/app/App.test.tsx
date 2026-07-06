@@ -35,6 +35,8 @@ vi.mock("@/features/auth/api/auth", () => ({
 }));
 
 vi.mock("@/shared/profile/buildProfile", () => ({
+  filterExperimentRegistryForBuildProfile: <T,>(registry: readonly T[]) =>
+    registry,
   getBuildFeatureState: () => mocks.buildFeatures,
 }));
 

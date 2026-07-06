@@ -1,4 +1,5 @@
 import {
+  GLOBAL_SHORTCUT_EXPERIMENT_ID,
   DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
   PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
@@ -25,6 +26,7 @@ export type KnownShortcutCommandId =
   | "navigation.closeSession"
   | "navigation.openSettings"
   | "navigation.paneJump"
+  | "navigation.globalShortcut"
   | "session.quickSwitch"
   | "chat.archiveSession"
   | "chat.findInConversation"
@@ -112,6 +114,10 @@ function paneJumpExperiment() {
   return getExperiment(PANE_JUMP_NAVIGATION_EXPERIMENT_ID);
 }
 
+function globalShortcutExperiment() {
+  return getExperiment(GLOBAL_SHORTCUT_EXPERIMENT_ID);
+}
+
 /**
  * Every app-owned keyboard handler is represented here. Configurable
  * commands can be rebound from Settings → Keyboard shortcuts; fixed
@@ -165,6 +171,16 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     descriptionKey: "actions.quickSwitch",
     configurable: true,
     discoverable: true,
+  },
+  {
+    id: "navigation.globalShortcut",
+    category: "navigation",
+    scope: "global",
+    defaultBindings: [{ shortcut: "alt+space" }],
+    descriptionKey: "actions.globalShortcut",
+    configurable: true,
+    discoverable: true,
+    when: () => globalShortcutExperiment()?.enabled === true,
   },
   {
     id: "navigation.paneJump",

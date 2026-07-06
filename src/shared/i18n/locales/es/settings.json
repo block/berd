@@ -201,6 +201,11 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
+    "globalShortcut": {
+      "description": "Usa Opt-Space para crear y encontrar chats desde cualquier lugar de macOS.",
+      "shortcutLabel": "Atajo",
+      "title": "Atajo global"
+    },
     "sidebarFlatChatList": {
       "description": "Muestra el ajuste Agrupar chats por proyecto y permite una lista plana de chats en la barra lateral ordenada por actividad reciente.",
       "title": "Lista plana de chats en barra lateral"
@@ -216,8 +221,7 @@
       "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
       "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",
       "shortcutLabel": "Atajo",
-      "shortcutMoved": "Personaliza el atajo de salto de paneles en Ajustes → Atajos de teclado.",
-      "shortcutPlaceholder": "Ctrl+;",
+      "shortcutMoved": "Personaliza este atajo en Ajustes → Atajos de teclado.",
       "title": "Navegación de paneles"
     },
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",

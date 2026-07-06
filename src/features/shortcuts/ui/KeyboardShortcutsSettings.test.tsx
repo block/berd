@@ -1,7 +1,9 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { renderWithProviders } from "@/test/render";
 import { KeyboardShortcutsSettings } from "./KeyboardShortcutsSettings";
@@ -62,6 +64,18 @@ describe("KeyboardShortcutsSettings", () => {
 
     // No overrides yet: reset all is disabled.
     expect(screen.getByRole("button", { name: "Reset all" })).toBeDisabled();
+  });
+
+  it("shows the Global shortcut only while the experiment is enabled", () => {
+    renderWithProviders(<KeyboardShortcutsSettings />);
+    expect(screen.queryByText("Global shortcut")).not.toBeInTheDocument();
+
+    cleanup();
+    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+    renderWithProviders(<KeyboardShortcutsSettings />);
+
+    expect(screen.getByText("Global shortcut")).toBeInTheDocument();
+    expect(getShortcutButton("Global shortcut")).toHaveTextContent("⌥Space");
   });
 
   it("records a new shortcut for a command", async () => {

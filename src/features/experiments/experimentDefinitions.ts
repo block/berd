@@ -1,3 +1,5 @@
+import type { Platform } from "@/shared/lib/platform";
+
 export type ExperimentConfigValue = boolean | number | string;
 
 export type ExperimentConfigControl =
@@ -39,7 +41,6 @@ export type ExperimentConfigControl =
       labelKey: string;
       descriptionKey?: string;
       defaultValue: string;
-      placeholderKey?: string;
     };
 
 export interface ExperimentDefinition {
@@ -48,6 +49,8 @@ export interface ExperimentDefinition {
   descriptionKey: string;
   /** Default state for users without an explicit per-experiment override. */
   defaultEnabled?: boolean;
+  /** Omit the experiment outside these runtime platforms. */
+  platforms?: readonly Platform[];
   config?: Record<string, ExperimentConfigControl>;
 }
 
@@ -56,6 +59,8 @@ export const BERDCTL_EXPERIMENT_ID = "berdctl";
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
 export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
+
+export const GLOBAL_SHORTCUT_EXPERIMENT_ID = "global-shortcut";
 
 export const PANE_JUMP_NAVIGATION_EXPERIMENT_ID = "pane-jump-navigation";
 export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
@@ -110,7 +115,6 @@ export const EXPERIMENT_DEFINITIONS = [
         labelKey: "experiments.paneJumpNavigation.shortcutLabel",
         descriptionKey: "experiments.paneJumpNavigation.shortcutDescription",
         defaultValue: DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
-        placeholderKey: "experiments.paneJumpNavigation.shortcutPlaceholder",
       },
     },
   },
@@ -194,5 +198,19 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.sessionForkFromMessage.title",
     descriptionKey: "experiments.sessionForkFromMessage.description",
     defaultEnabled: false,
+  },
+  {
+    id: GLOBAL_SHORTCUT_EXPERIMENT_ID,
+    titleKey: "experiments.globalShortcut.title",
+    descriptionKey: "experiments.globalShortcut.description",
+    config: {
+      shortcut: {
+        type: "shortcut",
+        labelKey: "experiments.globalShortcut.shortcutLabel",
+        defaultValue: "alt+space",
+      },
+    },
+    defaultEnabled: false,
+    platforms: ["mac"],
   },
 ] as const satisfies readonly ExperimentDefinition[];

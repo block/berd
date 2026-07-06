@@ -14,6 +14,11 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 
+const getPlatformMock = vi.hoisted(() => vi.fn(() => "mac"));
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: getPlatformMock,
+}));
+
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
 }
@@ -58,8 +63,15 @@ const uiRegistry = [
   },
 ] as const satisfies readonly ExperimentDefinition[];
 
+function experimentDescriptionText(experimentKey: "globalShortcut") {
+  return i18n.t(`experiments.${experimentKey}.description`, {
+    ns: "settings",
+  });
+}
+
 describe("ExperimentsSettings", () => {
   beforeEach(() => {
+    getPlatformMock.mockReturnValue("mac");
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   });
 
@@ -99,6 +111,25 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("switch", {
+        name: i18n.t("experiments.globalShortcut.title", { ns: "settings" }),
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.textContent === experimentDescriptionText("globalShortcut"),
+      ),
+    ).toBeInTheDocument();
+    const paneJumpSection = screen
+      .getByRole("switch", {
+        name: i18n.t("experiments.paneJumpNavigation.title", {
+          ns: "settings",
+        }),
+      })
+      .closest("section");
+    expect(paneJumpSection).not.toBeNull();
+    expect(
+      within(paneJumpSection as HTMLElement).getByRole("switch", {
         name: i18n.t("experiments.paneJumpNavigation.title", {
           ns: "settings",
         }),
@@ -112,7 +143,7 @@ describe("ExperimentsSettings", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
+      within(paneJumpSection as HTMLElement).getByText(
         i18n.t("experiments.paneJumpNavigation.shortcutMoved", {
           ns: "settings",
         }),
@@ -178,6 +209,12 @@ describe("ExperimentsSettings", () => {
         }),
       }),
     ).toBeChecked();
+    expect(
+      screen
+        .getAllByRole("heading", { level: 4 })
+        .map((heading) => heading.textContent)
+        .at(-1),
+    ).toBe(i18n.t("experiments.globalShortcut.title", { ns: "settings" }));
   });
 
   it("keeps flat chat list as the default while project grouping remains configurable", async () => {
@@ -300,6 +337,45 @@ describe("ExperimentsSettings", () => {
     expect(groupChatsByProjectSwitch).not.toBeDisabled();
   });
 
+  it("hides the global shortcut experiment off macOS", () => {
+    vi.stubEnv("DEV", false);
+    getPlatformMock.mockReturnValue("windows");
+
+    renderWithProviders(<ExperimentsSettings />);
+
+    expect(
+      screen.queryByRole("switch", {
+        name: i18n.t("experiments.globalShortcut.title", { ns: "settings" }),
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens keyboard shortcut settings from the Global shortcut control", async () => {
+    vi.stubEnv("DEV", false);
+    const user = userEvent.setup();
+    const openSettingsListener = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+    renderWithProviders(<ExperimentsSettings />);
+
+    const globalShortcutSection = screen
+      .getByRole("switch", {
+        name: i18n.t("experiments.globalShortcut.title", { ns: "settings" }),
+      })
+      .closest("section");
+    expect(globalShortcutSection).not.toBeNull();
+
+    await user.click(
+      within(globalShortcutSection as HTMLElement).getByRole("button", {
+        name: i18n.t("nav.shortcuts", { ns: "settings" }),
+      }),
+    );
+
+    expect(openSettingsListener).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { section: "shortcuts" } }),
+    );
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+  });
+
   it("points the pane jump shortcut control at keyboard shortcut settings", async () => {
     vi.stubEnv("DEV", true);
     const user = userEvent.setup();
@@ -316,8 +392,17 @@ describe("ExperimentsSettings", () => {
       }),
     ).not.toBeInTheDocument();
 
+    const paneJumpSection = screen
+      .getByRole("switch", {
+        name: i18n.t("experiments.paneJumpNavigation.title", {
+          ns: "settings",
+        }),
+      })
+      .closest("section");
+    expect(paneJumpSection).not.toBeNull();
+
     await user.click(
-      screen.getByRole("button", {
+      within(paneJumpSection as HTMLElement).getByRole("button", {
         name: i18n.t("nav.shortcuts", { ns: "settings" }),
       }),
     );

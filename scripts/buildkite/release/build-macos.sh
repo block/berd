@@ -391,6 +391,7 @@ echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
 ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
+./scripts/prepare-catch-sidecar.sh "$TARGET_TRIPLE"
 # Pass the build-time env via `env`, not as shell assignment-prefix words.
 # Custom-only extra VITE_* values are expanded from an array, and bash
 # classifies `VITE_*=…` assignment prefixes at parse time — it never

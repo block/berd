@@ -15,6 +15,7 @@ pub mod doctor;
 pub mod feedback;
 pub mod git;
 pub mod git_changes;
+pub mod global_shortcut;
 pub mod layout;
 pub mod migration;
 pub mod model_setup;

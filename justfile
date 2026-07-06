@@ -166,6 +166,7 @@ bundle:
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
+    ./scripts/prepare-catch-sidecar.sh
 
     # Derive a git-based version so non-release bundles don't ship the 0.1.0
     # placeholder. Injected via a temp --config overlay to keep the tree clean.
@@ -219,6 +220,7 @@ bundle-debug:
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
+    ./scripts/prepare-catch-sidecar.sh
 
     # Use a temporary config overlay so normal release bundles keep devtools
     # disabled, and fold in the git-derived version so the bundle doesn't ship
@@ -362,6 +364,7 @@ clean:
 stage-sidecar:
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
+    ./scripts/prepare-catch-sidecar.sh
 
 avatars-manifest source version:
     pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"

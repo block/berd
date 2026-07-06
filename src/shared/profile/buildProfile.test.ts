@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const getPlatformMock = vi.hoisted(() => vi.fn(() => "mac"));
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: getPlatformMock,
+}));
 
 import {
   filterExperimentRegistryForBuildProfile,
@@ -12,6 +17,10 @@ const registry = [
 ] as const;
 
 describe("buildProfile", () => {
+  beforeEach(() => {
+    getPlatformMock.mockReturnValue("mac");
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -122,5 +131,27 @@ describe("buildProfile", () => {
 
   it("keeps every registered experiment for the single app build", () => {
     expect(filterExperimentRegistryForBuildProfile(registry)).toBe(registry);
+  });
+
+  it("filters platform-scoped experiments", () => {
+    const platformRegistry = [
+      { id: "general" },
+      { id: "mac-only", platforms: ["mac"] },
+      { id: "windows-only", platforms: ["windows"] },
+    ] as const;
+
+    expect(
+      filterExperimentRegistryForBuildProfile(platformRegistry).map(
+        (definition) => definition.id,
+      ),
+    ).toEqual(["general", "mac-only"]);
+
+    getPlatformMock.mockReturnValue("windows");
+
+    expect(
+      filterExperimentRegistryForBuildProfile(platformRegistry).map(
+        (definition) => definition.id,
+      ),
+    ).toEqual(["general", "windows-only"]);
   });
 });

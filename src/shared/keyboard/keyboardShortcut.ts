@@ -35,8 +35,8 @@ export interface ShortcutBinding {
 }
 
 function normalizeKey(key: string): string {
+  if (key === " ") return "space";
   const normalizedKey = key.trim().toLowerCase();
-  if (normalizedKey === " ") return "space";
   if (normalizedKey === "esc") return "escape";
   if (normalizedKey === "+") return "plus";
   return normalizedKey;

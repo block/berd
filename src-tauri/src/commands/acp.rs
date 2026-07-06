@@ -4,7 +4,6 @@ use crate::services::acp::GooseServeProcess;
 use serde::Serialize;
 
 const GOOSE_SERVE_URL_ENV: &str = "GOOSE_SERVE_URL";
-const GOOSE_SERVER_SECRET_KEY_ENV: &str = "GOOSE_SERVER__SECRET_KEY";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,10 +26,11 @@ pub async fn get_goose_serve_host_info(
     app_handle: tauri::AppHandle,
 ) -> Result<GooseServeHostInfo, String> {
     if let Some(url) = configured_goose_serve_url() {
+        let secret_key = goose_serve_url_token(&url)?;
         ensure_configured_goose_serve_supports_inline_apps(&url)?;
         return Ok(GooseServeHostInfo {
             http_base_url: goose_serve_http_base_url(&url)?,
-            secret_key: configured_goose_serve_secret_key()?,
+            secret_key,
         });
     }
 
@@ -49,27 +49,9 @@ fn configured_goose_serve_url() -> Option<String> {
 }
 
 fn configured_goose_serve_url_with_token(goose_serve_url: &str) -> Result<String, String> {
-    goose_serve_url_with_resolved_token(goose_serve_url, configured_goose_serve_secret_key)
-}
-
-fn goose_serve_url_with_resolved_token(
-    goose_serve_url: &str,
-    resolve_secret_key: impl FnOnce() -> Result<String, String>,
-) -> Result<String, String> {
-    let mut parsed = parse_goose_serve_url(goose_serve_url)?;
-
-    if parsed.query_pairs().any(|(key, _)| key == "token") {
-        return Ok(parsed.to_string());
-    }
-
-    let secret_key = resolve_secret_key()?;
-    parsed.query_pairs_mut().append_pair("token", &secret_key);
+    let parsed = parse_goose_serve_url(goose_serve_url)?;
+    ensure_goose_serve_url_has_token(&parsed)?;
     Ok(parsed.to_string())
-}
-
-#[cfg(test)]
-fn goose_serve_url_with_token(goose_serve_url: &str, secret_key: &str) -> Result<String, String> {
-    goose_serve_url_with_resolved_token(goose_serve_url, || Ok(secret_key.to_string()))
 }
 
 fn parse_goose_serve_url(goose_serve_url: &str) -> Result<reqwest::Url, String> {
@@ -77,14 +59,35 @@ fn parse_goose_serve_url(goose_serve_url: &str) -> Result<reqwest::Url, String> 
         .map_err(|error| format!("Invalid {GOOSE_SERVE_URL_ENV}: {error}"))
 }
 
-fn configured_goose_serve_secret_key() -> Result<String, String> {
-    env::var(GOOSE_SERVER_SECRET_KEY_ENV)
-        .ok()
-        .map(|secret| secret.trim().to_string())
-        .filter(|secret| !secret.is_empty())
-        .ok_or_else(|| {
-            format!("{GOOSE_SERVER_SECRET_KEY_ENV} must be set when {GOOSE_SERVE_URL_ENV} is set")
+fn goose_serve_url_token(goose_serve_url: &str) -> Result<String, String> {
+    let parsed = parse_goose_serve_url(goose_serve_url)?;
+    parsed
+        .query_pairs()
+        .find_map(|(key, value)| {
+            if key == "token" {
+                let token = value.trim().to_string();
+                if !token.is_empty() {
+                    return Some(token);
+                }
+            }
+            None
         })
+        .ok_or_else(missing_goose_serve_url_token_error)
+}
+
+fn ensure_goose_serve_url_has_token(goose_serve_url: &reqwest::Url) -> Result<(), String> {
+    if goose_serve_url
+        .query_pairs()
+        .any(|(key, value)| key == "token" && !value.trim().is_empty())
+    {
+        return Ok(());
+    }
+
+    Err(missing_goose_serve_url_token_error())
+}
+
+fn missing_goose_serve_url_token_error() -> String {
+    format!("{GOOSE_SERVE_URL_ENV} must include a non-empty token query parameter")
 }
 
 fn goose_serve_http_base_url(goose_serve_url: &str) -> Result<String, String> {
@@ -190,8 +193,8 @@ fn goose_serve_url_is_loopback(goose_serve_url: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_configured_goose_serve_supports_inline_apps, goose_serve_http_base_url,
-        goose_serve_url_is_loopback, goose_serve_url_with_token,
+        configured_goose_serve_url_with_token, ensure_configured_goose_serve_supports_inline_apps,
+        goose_serve_http_base_url, goose_serve_url_is_loopback, goose_serve_url_token,
     };
 
     #[test]
@@ -231,23 +234,25 @@ mod tests {
     }
 
     #[test]
-    fn appends_token_to_configured_websocket_url() {
+    fn preserves_tokenized_configured_websocket_url() {
         assert_eq!(
-            goose_serve_url_with_token("ws://127.0.0.1:12345/acp", "secret key").unwrap(),
-            "ws://127.0.0.1:12345/acp?token=secret+key"
-        );
-        assert_eq!(
-            goose_serve_url_with_token("ws://127.0.0.1:12345/acp?foo=bar", "secret").unwrap(),
+            configured_goose_serve_url_with_token("ws://127.0.0.1:12345/acp?foo=bar&token=secret")
+                .unwrap(),
             "ws://127.0.0.1:12345/acp?foo=bar&token=secret"
         );
     }
 
     #[test]
-    fn preserves_existing_configured_websocket_token() {
+    fn rejects_configured_websocket_url_without_token() {
+        assert!(configured_goose_serve_url_with_token("ws://127.0.0.1:12345/acp").is_err());
+        assert!(configured_goose_serve_url_with_token("ws://127.0.0.1:12345/acp?token=").is_err());
+    }
+
+    #[test]
+    fn extracts_secret_key_from_configured_websocket_token() {
         assert_eq!(
-            goose_serve_url_with_token("ws://127.0.0.1:12345/acp?token=existing", "secret")
-                .unwrap(),
-            "ws://127.0.0.1:12345/acp?token=existing"
+            goose_serve_url_token("ws://127.0.0.1:12345/acp?token=secret+key").unwrap(),
+            "secret key"
         );
     }
 

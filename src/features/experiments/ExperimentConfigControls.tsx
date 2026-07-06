@@ -147,9 +147,7 @@ export function ExperimentConfigControls({
               ) : null}
               {control.type === "shortcut" ? (
                 /* Shortcut editing moved to Settings → Keyboard shortcuts
-                   (pane jump is the only shortcut control). The stored
-                   config value stays untouched: the shortcut registry
-                   reads it as the fallback binding. */
+                   (app shortcuts are owned by the shortcut registry). */
                 <div className="flex flex-col items-start gap-1">
                   <p className="text-xs text-muted-foreground">
                     {t("experiments.paneJumpNavigation.shortcutMoved")}

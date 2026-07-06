@@ -201,6 +201,11 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
+    "globalShortcut": {
+      "description": "Use Opt-Space to create and find chats from anywhere in macOS.",
+      "shortcutLabel": "Shortcut",
+      "title": "Global shortcut"
+    },
     "sidebarFlatChatList": {
       "description": "Shows the Group Chats by Project setting and allows a flat recency-sorted sidebar chat list.",
       "title": "Flat sidebar chat list"
@@ -216,8 +221,7 @@
       "description": "Use Ctrl+; to jump between visible app panes with badge letters or h/j/k/l.",
       "shortcutDescription": "Choose the prefix that opens pane jump mode.",
       "shortcutLabel": "Shortcut",
-      "shortcutMoved": "Customize the pane jump shortcut in Settings → Keyboard shortcuts.",
-      "shortcutPlaceholder": "Ctrl+;",
+      "shortcutMoved": "Customize this shortcut in Settings → Keyboard shortcuts.",
       "title": "Pane jump navigation"
     },
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
