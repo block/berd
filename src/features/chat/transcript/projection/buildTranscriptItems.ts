@@ -1063,10 +1063,12 @@ function buildAgentWorkItem({
   message,
   content,
   isStreaming,
+  hasFinalAnswer = false,
 }: {
   message: Message;
   content: readonly MessageContent[];
   isStreaming: boolean;
+  hasFinalAnswer?: boolean;
 }): TranscriptAgentWorkItem {
   const workMessage: Message = {
     ...message,
@@ -1110,12 +1112,16 @@ function buildAgentWorkItem({
     workId: message.id,
     content,
     isActiveWork,
+    hasFinalAnswer,
     thoughtCount,
     toolCount,
     textCount,
-    renderRevision: ["agent-work", message.id, revisions.renderRevision].join(
-      ":",
-    ),
+    renderRevision: [
+      "agent-work",
+      message.id,
+      hasFinalAnswer ? "answered" : "unanswered",
+      revisions.renderRevision,
+    ].join(":"),
     heightRevision: [
       "agent-work-height",
       message.id,
@@ -1207,7 +1213,12 @@ function buildAgentWorkItems({
     answerBlocks.filter(isTextContent),
   );
   const items: TranscriptItemDescriptor[] = [
-    buildAgentWorkItem({ message, content: workContent, isStreaming }),
+    buildAgentWorkItem({
+      message,
+      content: workContent,
+      isStreaming,
+      hasFinalAnswer: finalTextContent.length > 0,
+    }),
   ];
 
   if (finalTextContent.length > 0) {

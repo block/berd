@@ -837,7 +837,7 @@ describe("AutomationsView", () => {
 
     expect(await screen.findByText("Session history")).toBeInTheDocument();
     expect(getAutomationSessionMessages).toHaveBeenCalledWith("session-1");
-    expect(await screen.findByText("Agent work")).toBeInTheDocument();
+    expect(await screen.findByText(/previous steps?$/)).toBeInTheDocument();
   });
 
   it("opens global history runs in place before navigating to the automation", async () => {

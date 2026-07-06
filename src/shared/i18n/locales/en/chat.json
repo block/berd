@@ -402,7 +402,6 @@
     "structuredOutputLines": "{{count}} lines"
   },
   "agent_work": {
-    "label": "Agent work",
     "redactedThinking": "Thinking redacted",
     "summary": {
       "previousSteps_one": "{{count}} previous step",

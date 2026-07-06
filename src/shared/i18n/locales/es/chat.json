@@ -399,7 +399,6 @@
     "structuredOutputLines": "{{count}} líneas"
   },
   "agent_work": {
-    "label": "Trabajo del agente",
     "redactedThinking": "Pensamiento redactado",
     "summary": {
       "previousSteps_one": "{{count}} paso anterior",

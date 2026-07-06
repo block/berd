@@ -58,6 +58,8 @@ export interface TranscriptAgentWorkPayload {
   message: Message;
   content: readonly MessageContent[];
   isActiveWork: boolean;
+  /** Whether a final answer row follows this work panel in the transcript. */
+  hasFinalAnswer: boolean;
   thoughtCount: number;
   toolCount: number;
   textCount: number;
@@ -182,6 +184,7 @@ export interface TranscriptAgentWorkItem {
   workId: string;
   content: readonly MessageContent[];
   isActiveWork: boolean;
+  hasFinalAnswer: boolean;
   thoughtCount: number;
   toolCount: number;
   textCount: number;

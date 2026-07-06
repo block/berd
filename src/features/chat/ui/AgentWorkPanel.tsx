@@ -54,7 +54,6 @@ interface ActivePreviewState {
   visibleItems: AgentWorkTimelineItem[];
   hiddenItems: AgentWorkTimelineItem[];
   hiddenStepCount: number;
-  liveTextTail: ProgressTimelineItem[];
 }
 
 type AgentWorkTimelineItem =
@@ -173,49 +172,17 @@ function buildAgentWorkTimeline(
   return items;
 }
 
-function isWorkSignalItem(item: AgentWorkTimelineItem): boolean {
-  return (
-    item.kind === "tool" ||
-    item.kind === "thought" ||
-    item.kind === "redactedThought"
-  );
-}
-
 function getActivePreviewState(
   items: readonly AgentWorkTimelineItem[],
 ): ActivePreviewState {
-  const latestProgressItem = items.findLast(
-    (item): item is ProgressTimelineItem => item.kind === "progress",
-  );
-  const workSignals = items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => isWorkSignalItem(item));
-  const liveTextTail =
-    workSignals.length > 0 && latestProgressItem ? [latestProgressItem] : [];
-
-  if (workSignals.length > 0) {
-    const visibleWorkSignals = workSignals.slice(
-      -COMPACT_ACTIVE_PREVIEW_ITEM_COUNT,
-    );
-    const firstVisibleIndex = visibleWorkSignals[0]?.index ?? items.length;
-    const hiddenItems = items
-      .slice(0, firstVisibleIndex)
-      .filter((item) => item !== latestProgressItem);
-    return {
-      visibleItems: visibleWorkSignals.map(({ item }) => item),
-      hiddenItems,
-      hiddenStepCount: hiddenItems.length,
-      liveTextTail,
-    };
-  }
-
+  // The active preview is a chronological window over the work stream: the
+  // last N items in true order, with everything older behind "previous steps".
   const visibleItems = items.slice(-COMPACT_ACTIVE_PREVIEW_ITEM_COUNT);
-  const hiddenItems = items.slice(0, -visibleItems.length);
+  const hiddenItems = items.slice(0, items.length - visibleItems.length);
   return {
     visibleItems,
     hiddenItems,
     hiddenStepCount: hiddenItems.length,
-    liveTextTail: [],
   };
 }
 
@@ -374,15 +341,6 @@ function AgentWorkItemRow({
   );
 }
 
-function getStepSummary(
-  payload: TranscriptAgentWorkPayload,
-  itemCount: number,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  const count = payload.toolCount || itemCount;
-  return t("agent_work.summary.steps", { count });
-}
-
 export function AgentWorkPanel({
   payload,
   settleOnMount = false,
@@ -439,7 +397,6 @@ export function AgentWorkPanel({
   }, [payload.isActiveWork, settleOnMount, shouldOpenActiveWork]);
 
   const showTrigger = !payload.isActiveWork;
-  const label = t("agent_work.label");
   const isActiveWorkPreview = payload.isActiveWork;
   const activePreviewState = isActiveWorkPreview
     ? getActivePreviewState(items)
@@ -447,14 +404,13 @@ export function AgentWorkPanel({
   const visibleItems = activePreviewState?.visibleItems ?? items;
   const hiddenItems = activePreviewState?.hiddenItems ?? [];
   const hiddenStepCount = activePreviewState?.hiddenStepCount ?? 0;
-  const liveTextTail = activePreviewState?.liveTextTail ?? [];
   const shouldShowPreviousSteps = isActiveWorkPreview && hiddenStepCount > 0;
 
   return (
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="my-3 w-full min-w-0 max-w-full"
+      className="mt-3 w-full min-w-0 max-w-full"
     >
       <div>
         <div>
@@ -465,19 +421,23 @@ export function AgentWorkPanel({
                 variant="quiet"
                 size="sm"
                 className="flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
+                rightIcon={
+                  <IconChevronRight
+                    aria-hidden
+                    className={cn(
+                      "size-3.5 transition-transform",
+                      open && "rotate-90",
+                    )}
+                  />
+                }
               >
-                <IconChevronRight
-                  aria-hidden
-                  className={cn(
-                    "size-3.5 text-foreground transition-transform",
-                    open && "rotate-90",
+                <span className="min-w-0 truncate text-sm font-normal">
+                  {t(
+                    payload.hasFinalAnswer
+                      ? "agent_work.summary.previousSteps"
+                      : "agent_work.summary.steps",
+                    { count: items.length },
                   )}
-                />
-                <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
-                  {label}
-                  <span className="ml-2 text-muted-foreground/70">
-                    {getStepSummary(payload, items.length, t)}
-                  </span>
                 </span>
               </Button>
             </CollapsibleTrigger>
@@ -495,16 +455,18 @@ export function AgentWorkPanel({
                     type="button"
                     variant="quiet"
                     size="sm"
-                    className="mb-1 flex h-auto w-full justify-start rounded-md px-0 py-1 text-left text-muted-foreground"
+                    className="mb-1 flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
+                    rightIcon={
+                      <IconChevronRight
+                        aria-hidden
+                        className={cn(
+                          "size-3.5 transition-transform",
+                          previousStepsOpen && "rotate-90",
+                        )}
+                      />
+                    }
                   >
-                    <IconChevronRight
-                      aria-hidden
-                      className={cn(
-                        "size-3.5 transition-transform",
-                        previousStepsOpen && "rotate-90",
-                      )}
-                    />
-                    <span className="text-xs">
+                    <span className="text-sm">
                       {t("agent_work.summary.previousSteps", {
                         count: hiddenStepCount,
                       })}
@@ -527,17 +489,7 @@ export function AgentWorkPanel({
               <AgentWorkItemRow
                 key={item.key}
                 item={item}
-                isLast={
-                  index === visibleItems.length - 1 && liveTextTail.length === 0
-                }
-                usePrimaryText={open}
-              />
-            ))}
-            {liveTextTail.map((item, index) => (
-              <AgentWorkItemRow
-                key={item.key}
-                item={item}
-                isLast={index === liveTextTail.length - 1}
+                isLast={index === visibleItems.length - 1}
                 usePrimaryText={open}
               />
             ))}

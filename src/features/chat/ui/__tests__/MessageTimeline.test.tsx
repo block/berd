@@ -1,4 +1,10 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
@@ -303,7 +309,7 @@ describe("MessageTimeline", () => {
       <MessageTimeline messages={[userMessage, assistantMessage]} />,
     );
 
-    expect(screen.getByText("Agent work")).toBeInTheDocument();
+    expect(screen.getByText(/previous steps?$/)).toBeInTheDocument();
     expect(screen.getByText("Done.")).toBeInTheDocument();
     expect(
       screen.queryByText(/Thought for a few seconds/i),
@@ -343,7 +349,7 @@ describe("MessageTimeline", () => {
     expect(
       screen.queryByText(/Thought for a few seconds/i),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Agent work")).not.toBeInTheDocument();
+    expect(screen.queryByText(/previous steps?$/)).not.toBeInTheDocument();
     expect(
       screen.getByTestId(
         "virtual-transcript-row-message:assistant-1:tool-chain",
@@ -494,23 +500,29 @@ describe("MessageTimeline", () => {
     const workRow = screen.getByTestId(
       "virtual-transcript-row-message:assistant-1:agent-work",
     );
-    expect(workRow).toHaveTextContent("3 previous steps");
+    expect(workRow).toHaveTextContent("4 previous steps");
     expect(workRow).not.toHaveTextContent("Planning");
     expect(workRow).not.toHaveTextContent("Checking git branch status");
     expect(workRow).not.toHaveTextContent(
       "Reviewing transcript projection tests",
     );
-    expect(workRow).toHaveTextContent("Running targeted tests");
-    expect(workRow).toHaveTextContent("Writing review summary");
-    expect(workRow).toHaveTextContent("Recording diagnostics");
-    expect(workRow).toHaveTextContent("Streaming answer");
-    expect(workRow).not.toHaveTextContent("Agent work");
+    expect(workRow).not.toHaveTextContent("Running targeted tests");
+    // The preview is a chronological window: text stays in stream order
+    // between the tool calls instead of being pinned to the bottom.
+    expect(workRow).toHaveTextContent(
+      "Checking virtual timeline behaviorWriting review summaryStreaming answerRecording diagnostics",
+    );
+    // While streaming there is no settled header trigger; the only
+    // collapsible trigger inside the row is the nested hidden-steps one.
+    expect(
+      within(workRow).getAllByRole("button", { name: /previous steps?/ }),
+    ).toHaveLength(1);
     expect(
       workRow.querySelector('[data-slot="collapsible-content"]'),
     ).toHaveAttribute("data-state", "open");
     expect(workRow.querySelector(".max-h-\\[18rem\\]")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "3 previous steps" }));
+    fireEvent.click(screen.getByRole("button", { name: "4 previous steps" }));
     expect(workRow).toHaveTextContent("Planning");
     expect(workRow).toHaveTextContent("Checking git branch status");
 
@@ -538,7 +550,7 @@ describe("MessageTimeline", () => {
     );
 
     expect(screen.getByText("Final answer")).toBeInTheDocument();
-    expect(screen.getByText("Agent work")).toBeInTheDocument();
+    expect(screen.getByText(/previous steps?$/)).toBeInTheDocument();
   });
 
   it("jumps from the final answer back to the agent work response start", async () => {

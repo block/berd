@@ -530,7 +530,9 @@ describe("VirtualMessageTimeline", () => {
         .getAllByTestId("bubble-fragmented")
         .map((element) => element.getAttribute("data-fragment-role")),
     ).toEqual(["start", "middle", "end"]);
-    expect(screen.getByText("Agent work")).toBeInTheDocument();
+    // This turn ends on a tool call with no final answer text below the
+    // panel, so the trigger drops the "previous" qualifier.
+    expect(screen.getByText(/^\d+ steps?$/)).toBeInTheDocument();
 
     const list = screen.getByTestId("virtual-message-timeline-list");
     expect(list).toHaveAttribute("data-virtual-fragment-rows", "3");
@@ -1034,7 +1036,7 @@ describe("VirtualMessageTimeline", () => {
     const agentWorkRow = screen.getByTestId(
       "virtual-transcript-row-message:assistant-work:agent-work",
     );
-    expect(agentWorkRow).toHaveTextContent("Agent work");
+    expect(agentWorkRow).toHaveTextContent(/previous steps?/);
     const collapsibleContent = agentWorkRow.querySelector(
       '[data-slot="collapsible-content"]',
     );

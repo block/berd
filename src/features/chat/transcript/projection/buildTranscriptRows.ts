@@ -114,6 +114,7 @@ export function buildTranscriptRows(
             message: item.message,
             content: item.content,
             isActiveWork: item.isActiveWork,
+            hasFinalAnswer: item.hasFinalAnswer,
             thoughtCount: item.thoughtCount,
             toolCount: item.toolCount,
             textCount: item.textCount,
@@ -340,6 +341,7 @@ function agentWorkPayloadsEqual(
       fragmentContentEqual(content, right.content[index]),
     ) &&
     left.isActiveWork === right.isActiveWork &&
+    left.hasFinalAnswer === right.hasFinalAnswer &&
     left.thoughtCount === right.thoughtCount &&
     left.toolCount === right.toolCount &&
     left.textCount === right.textCount
