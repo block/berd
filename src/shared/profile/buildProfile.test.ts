@@ -12,7 +12,6 @@ import {
 
 const registry = [
   { id: "builderbot-surface", label: "Builderbot" },
-  { id: "pane-jump-navigation", label: "Pane jump" },
   { id: "transcript-virtual-renderer", label: "Virtual transcript" },
 ] as const;
 

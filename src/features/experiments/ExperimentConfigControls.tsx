@@ -150,7 +150,7 @@ export function ExperimentConfigControls({
                    (app shortcuts are owned by the shortcut registry). */
                 <div className="flex flex-col items-start gap-1">
                   <p className="text-xs text-muted-foreground">
-                    {t("experiments.paneJumpNavigation.shortcutMoved")}
+                    {t("experiments.shortcutMoved")}
                   </p>
                   <Button
                     type="button"

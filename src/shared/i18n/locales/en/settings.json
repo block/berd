@@ -213,13 +213,6 @@
     "navigationExperiments": {
       "title": "Navigation experiments"
     },
-    "paneJumpNavigation": {
-      "description": "Use Ctrl+; to jump between visible app panes with badge letters or h/j/k/l.",
-      "shortcutDescription": "Choose the prefix that opens pane jump mode.",
-      "shortcutLabel": "Shortcut",
-      "shortcutMoved": "Customize this shortcut in Settings → Keyboard shortcuts.",
-      "title": "Pane jump navigation"
-    },
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "defaultLabel": "default",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
@@ -241,7 +234,8 @@
       "title": "Render local images in chat",
       "description": "Show Markdown image links that point at local files in the chat's working directory inline, instead of a broken image. Scoped to the working directory; remote http(s) images stay blocked."
     },
-    "title": "Experiments"
+    "title": "Experiments",
+    "shortcutMoved": "Customize this shortcut in Settings → Keyboard shortcuts."
   },
   "general": {
     "agentToolsTips": {

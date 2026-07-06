@@ -150,7 +150,6 @@ import {
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
   NAVIGATION_REFRESH_EXPERIMENT_ID,
-  PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
   SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -398,12 +397,6 @@ export function AppShell({
   const isFeedbackEnabled = capabilities.feedback;
   const sessionWindowSupport = useSessionWindowSupport();
   const isMultiWindowEnabled = sessionWindowSupport.supported;
-  const paneJumpNavigationExperiment = useExperiment(
-    PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
-  );
-  const isPaneJumpNavigationEnabled = Boolean(
-    paneJumpNavigationExperiment?.enabled,
-  );
   const detachableSidebarChatsExperiment = useExperiment(
     SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
   );
@@ -3561,7 +3554,7 @@ export function AppShell({
   }
 
   return (
-    <FocusRegionProvider enabled={isPaneJumpNavigationEnabled}>
+    <FocusRegionProvider>
       <AppShellLayout
         topBar={{
           breadcrumbs: topBarBreadcrumbs,

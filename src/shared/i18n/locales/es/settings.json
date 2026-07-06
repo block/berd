@@ -213,13 +213,6 @@
     "navigationExperiments": {
       "title": "Experimentos de navegación"
     },
-    "paneJumpNavigation": {
-      "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
-      "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",
-      "shortcutLabel": "Atajo",
-      "shortcutMoved": "Personaliza este atajo en Ajustes → Atajos de teclado.",
-      "title": "Navegación de paneles"
-    },
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "defaultLabel": "predeterminado",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
@@ -241,7 +234,8 @@
       "title": "Mostrar imágenes locales en el chat",
       "description": "Muestra los enlaces de imagen de Markdown que apuntan a archivos locales en el directorio de trabajo del chat de forma insertada, en lugar de una imagen rota. Limitado al directorio de trabajo; las imágenes remotas http(s) siguen bloqueadas."
     },
-    "title": "Experimentos"
+    "title": "Experimentos",
+    "shortcutMoved": "Personaliza este atajo en Ajustes → Atajos de teclado."
   },
   "general": {
     "agentToolsTips": {

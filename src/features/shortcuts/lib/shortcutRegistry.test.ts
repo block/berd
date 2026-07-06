@@ -364,22 +364,6 @@ describe("reading stored preferences", () => {
       ),
     ).toBe(true);
   });
-
-  it("re-validates overrides when experiment preferences change", () => {
-    // ctrl+; is free while the pane-jump experiment is off…
-    getExperimentMock.mockReturnValue(undefined);
-    storePreferences({ "view.toggleSidebar": "ctrl+;" });
-    expect(overridesById()).toEqual({ "view.toggleSidebar": "ctrl+;" });
-
-    // …but collides with pane-jump once it turns on. The experiment write
-    // bumps its storage key, which must invalidate the sanitize cache.
-    getExperimentMock.mockReturnValue({ enabled: true, config: {} });
-    localStorage.setItem("goose:experimental-features", '{"version":2}');
-    expect(overridesById()).toEqual({});
-    expect(getShortcutBindings("view.toggleSidebar")).toEqual([
-      { shortcut: "meta+b" },
-    ]);
-  });
 });
 
 describe("setShortcutOverride", () => {
@@ -602,71 +586,21 @@ describe("resolveShortcutGroups", () => {
 });
 
 describe("pane-jump", () => {
-  it("gates on the experiment and falls back from configured to static combo", () => {
-    // Disabled: omitted from the reference groups.
-    getExperimentMock.mockReturnValue({ enabled: false, config: {} });
-    expect(
-      flattenGroups().map((shortcut) => shortcut.id),
-      "disabled experiment",
-    ).not.toContain("navigation.paneJump");
-
-    // Enabled with a configured combo: groups and bindings both use it.
-    getExperimentMock.mockReturnValue({
-      enabled: true,
-      config: { shortcut: "ctrl+j" },
-    });
+  it("is always available with the static default combo", () => {
     expect(
       flattenGroups().find((s) => s.id === "navigation.paneJump")?.shortcut,
-      "configured combo in groups",
-    ).toBe("ctrl+j");
-    expect(getShortcutBindings("navigation.paneJump")).toEqual([
-      { shortcut: "ctrl+j" },
-    ]);
-
-    // Enabled without a configured combo: static default.
-    getExperimentMock.mockReturnValue({ enabled: true, config: {} });
-    expect(
-      flattenGroups().find((s) => s.id === "navigation.paneJump")?.shortcut,
-      "static fallback",
     ).toBe("ctrl+;");
+    expect(getShortcutBindings("navigation.paneJump")).toEqual([
+      { shortcut: "ctrl+;" },
+    ]);
   });
 
-  it("prefers a user override over the experiment combo", () => {
-    getExperimentMock.mockReturnValue({
-      enabled: true,
-      config: { shortcut: "ctrl+j" },
-    });
+  it("prefers a user override over the static default combo", () => {
     expect(setShortcutOverride("navigation.paneJump", "meta+shift+j")).toEqual({
       ok: true,
     });
     expect(getShortcutBindings("navigation.paneJump")).toEqual([
       { shortcut: "meta+shift+j" },
-    ]);
-  });
-
-  it("falls back to the static combo when the experiment combo collides", () => {
-    // Legacy experiment configs were never conflict-checked at write time;
-    // on Windows ctrl+j is view.toggleTerminal's default.
-    getPlatformMock.mockReturnValue("windows");
-    getExperimentMock.mockReturnValue({
-      enabled: true,
-      config: { shortcut: "ctrl+j" },
-    });
-    expect(getShortcutBindings("navigation.paneJump")).toEqual([
-      { shortcut: "ctrl+;" },
-    ]);
-    expect(getShortcutBindings("view.toggleTerminal")).toEqual([
-      { shortcut: "ctrl+j" },
-    ]);
-  });
-
-  it("expands mod in a hand-edited experiment combo", () => {
-    getExperimentMock.mockReturnValue({
-      enabled: true,
-      config: { shortcut: "mod+9" },
-    });
-    expect(getShortcutBindings("navigation.paneJump")).toEqual([
-      { shortcut: "meta+9" },
     ]);
   });
 });

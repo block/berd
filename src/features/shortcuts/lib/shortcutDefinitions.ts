@@ -1,15 +1,7 @@
-import {
-  GLOBAL_SHORTCUT_EXPERIMENT_ID,
-  DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
-  PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
-} from "@/features/experiments/experimentDefinitions";
+import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { getExperiment } from "@/features/experiments/experimentPreferences";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
-import {
-  normalizeKeyboardShortcut,
-  type ShortcutBinding,
-} from "@/shared/keyboard/keyboardShortcut";
-import { getPlatform } from "@/shared/lib/platform";
+import type { ShortcutBinding } from "@/shared/keyboard/keyboardShortcut";
 
 export const SHORTCUT_CATEGORIES = [
   "navigation",
@@ -86,6 +78,9 @@ export function shortcutScopesOverlap(
   return scopeAncestors(a).has(b) || scopeAncestors(b).has(a);
 }
 
+const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
+const DEFAULT_GLOBAL_SHORTCUT = "alt+space";
+
 export interface ShortcutCommandDefinition {
   id: ShortcutCommandId;
   category: ShortcutCategory;
@@ -108,10 +103,6 @@ export interface ShortcutCommandDefinition {
   allowUnmodified?: boolean;
   /** Hide and disable the command while this returns false. */
   when?: () => boolean;
-}
-
-function paneJumpExperiment() {
-  return getExperiment(PANE_JUMP_NAVIGATION_EXPERIMENT_ID);
 }
 
 function globalShortcutExperiment() {
@@ -176,7 +167,7 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     id: "navigation.globalShortcut",
     category: "navigation",
     scope: "global",
-    defaultBindings: [{ shortcut: "alt+space" }],
+    defaultBindings: [{ shortcut: DEFAULT_GLOBAL_SHORTCUT }],
     descriptionKey: "actions.globalShortcut",
     configurable: true,
     discoverable: true,
@@ -187,31 +178,9 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     category: "navigation",
     scope: "global",
     defaultBindings: [{ shortcut: DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT }],
-    resolveDefaultBindings: () => {
-      // Resolve "mod" like the registry does for every other combo before
-      // normalizing; legacy experiment configs are concrete, but stay
-      // consistent for hand-edited values.
-      const configured = paneJumpExperiment()?.config.shortcut;
-      const resolved =
-        typeof configured === "string"
-          ? configured.replace(
-              /\bmod\b/g,
-              getPlatform() === "mac" ? "meta" : "ctrl",
-            )
-          : configured;
-      return [
-        {
-          shortcut: normalizeKeyboardShortcut(
-            resolved,
-            DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
-          ),
-        },
-      ];
-    },
     descriptionKey: "actions.paneJump",
     configurable: true,
     discoverable: true,
-    when: () => paneJumpExperiment()?.enabled === true,
   },
   // Chat
   {

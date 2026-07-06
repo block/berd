@@ -120,35 +120,6 @@ describe("ExperimentsSettings", () => {
           element?.textContent === experimentDescriptionText("globalShortcut"),
       ),
     ).toBeInTheDocument();
-    const paneJumpSection = screen
-      .getByRole("switch", {
-        name: i18n.t("experiments.paneJumpNavigation.title", {
-          ns: "settings",
-        }),
-      })
-      .closest("section");
-    expect(paneJumpSection).not.toBeNull();
-    expect(
-      within(paneJumpSection as HTMLElement).getByRole("switch", {
-        name: i18n.t("experiments.paneJumpNavigation.title", {
-          ns: "settings",
-        }),
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByText(
-        i18n.t("experiments.paneJumpNavigation.description", {
-          ns: "settings",
-        }),
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(paneJumpSection as HTMLElement).getByText(
-        i18n.t("experiments.paneJumpNavigation.shortcutMoved", {
-          ns: "settings",
-        }),
-      ),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("switch", {
         name: i18n.t("experiments.sidebarDetachableChats.title", {
@@ -366,43 +337,6 @@ describe("ExperimentsSettings", () => {
 
     await user.click(
       within(globalShortcutSection as HTMLElement).getByRole("button", {
-        name: i18n.t("nav.shortcuts", { ns: "settings" }),
-      }),
-    );
-
-    expect(openSettingsListener).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: { section: "shortcuts" } }),
-    );
-    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
-  });
-
-  it("points the pane jump shortcut control at keyboard shortcut settings", async () => {
-    vi.stubEnv("DEV", true);
-    const user = userEvent.setup();
-    const openSettingsListener = vi.fn();
-    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
-    renderWithProviders(<ExperimentsSettings />);
-
-    // Editing moved to Settings → Keyboard shortcuts; no recording input.
-    expect(
-      screen.queryByRole("textbox", {
-        name: i18n.t("experiments.paneJumpNavigation.shortcutLabel", {
-          ns: "settings",
-        }),
-      }),
-    ).not.toBeInTheDocument();
-
-    const paneJumpSection = screen
-      .getByRole("switch", {
-        name: i18n.t("experiments.paneJumpNavigation.title", {
-          ns: "settings",
-        }),
-      })
-      .closest("section");
-    expect(paneJumpSection).not.toBeNull();
-
-    await user.click(
-      within(paneJumpSection as HTMLElement).getByRole("button", {
         name: i18n.t("nav.shortcuts", { ns: "settings" }),
       }),
     );

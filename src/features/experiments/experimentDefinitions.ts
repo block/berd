@@ -58,9 +58,6 @@ export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
 export const GLOBAL_SHORTCUT_EXPERIMENT_ID = "global-shortcut";
 
-export const PANE_JUMP_NAVIGATION_EXPERIMENT_ID = "pane-jump-navigation";
-export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
-
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
@@ -82,19 +79,6 @@ export const EXPERIMENT_DEFINITIONS = [
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
     titleKey: "experiments.builderbot.title",
     descriptionKey: "experiments.builderbot.description",
-  },
-  {
-    id: PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
-    titleKey: "experiments.paneJumpNavigation.title",
-    descriptionKey: "experiments.paneJumpNavigation.description",
-    config: {
-      shortcut: {
-        type: "shortcut",
-        labelKey: "experiments.paneJumpNavigation.shortcutLabel",
-        descriptionKey: "experiments.paneJumpNavigation.shortcutDescription",
-        defaultValue: DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
-      },
-    },
   },
   {
     id: TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,

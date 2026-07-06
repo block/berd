@@ -14,11 +14,6 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
-import { PANE_JUMP_NAVIGATION_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import {
-  setExperimentConfigValue,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
@@ -698,36 +693,6 @@ describe("AppShell global navigation", () => {
     });
 
     expect(screen.getByTestId("pane-jump-overlay")).toBeInTheDocument();
-  });
-
-  it("starts pane jump mode from the configured experiment shortcut", () => {
-    setExperimentConfigValue(
-      PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
-      "shortcut",
-      "Ctrl+.",
-    );
-    mockVisibleRegionRects();
-    renderAppShell();
-
-    fireEvent.keyDown(window, { key: ";", ctrlKey: true });
-    expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
-
-    fireEvent.keyDown(window, { key: ".", ctrlKey: true });
-    expect(screen.getByTestId("pane-jump-overlay")).toBeInTheDocument();
-  });
-
-  it("does not start pane jump mode when the experiment is disabled", () => {
-    setExperimentEnabled(PANE_JUMP_NAVIGATION_EXPERIMENT_ID, false);
-    mockVisibleRegionRects();
-    renderAppShell();
-
-    screen.getByPlaceholderText("Start a conversation").focus();
-    fireEvent.keyDown(screen.getByPlaceholderText("Start a conversation"), {
-      key: ";",
-      ctrlKey: true,
-    });
-
-    expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
   });
 
   it("starts a full blank chat from the saved artifact location", async () => {
