@@ -54,8 +54,6 @@ export interface ExperimentDefinition {
   config?: Record<string, ExperimentConfigControl>;
 }
 
-export const BERDCTL_EXPERIMENT_ID = "berdctl";
-
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
 export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
@@ -143,11 +141,6 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.agentWorkTranscript.title",
     descriptionKey: "experiments.agentWorkTranscript.description",
     defaultEnabled: false,
-  },
-  {
-    id: BERDCTL_EXPERIMENT_ID,
-    titleKey: "experiments.berdctl.title",
-    descriptionKey: "experiments.berdctl.description",
   },
   {
     id: SESSION_COST_EXPERIMENT_ID,

@@ -10,8 +10,6 @@ import {
   clearBerdctlQueryClient,
   registerBerdctlQueryClient,
 } from "@/features/berdctl/bridge/runtimeContext";
-import { BERDCTL_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { installStartupSessionDeepLinkHandler } from "./startupDeepLinks";
 import { useBerdctlQueuedMessageDrain } from "./useBerdctlQueuedMessageDrain";
 
@@ -23,8 +21,6 @@ import { useBerdctlQueuedMessageDrain } from "./useBerdctlQueuedMessageDrain";
  * the broker StrictMode double-mount safe.
  */
 export function BerdctlBridge() {
-  const experiment = useExperiment(BERDCTL_EXPERIMENT_ID);
-  const enabled = experiment?.enabled ?? false;
   const queryClient = useQueryClient();
 
   useBerdctlQueuedMessageDrain();
@@ -53,13 +49,12 @@ export function BerdctlBridge() {
 
   // Broker lifecycle: declare desired state; the lifecycle reconciler
   // serializes start/stop and goes inert if the plugin is not in this build.
-  // useExperiment already subscribes to same-window and cross-window changes.
   useEffect(() => {
-    setBerdctlDesired(enabled);
+    setBerdctlDesired(true);
     return () => {
       setBerdctlDesired(false);
     };
-  }, [enabled]);
+  }, []);
 
   return null;
 }

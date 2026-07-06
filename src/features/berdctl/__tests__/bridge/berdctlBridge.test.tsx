@@ -10,8 +10,6 @@ import {
   handleBerdctlRequest,
 } from "@/features/berdctl/bridge/lifecycle";
 import { CommandError } from "@/features/berdctl/commands/types";
-import { BERDCTL_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -67,12 +65,6 @@ function renderBridge(ui: ReactNode = <BerdctlBridge />): void {
   render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
-async function renderEnabledBridge(): Promise<void> {
-  setExperimentEnabled(BERDCTL_EXPERIMENT_ID, true);
-  renderBridge();
-  await flushAsync();
-}
-
 beforeEach(() => {
   // restoreMocks only restores vi.spyOn spies; vi.fn() mocks keep their call
   // history across tests unless cleared explicitly.
@@ -113,8 +105,9 @@ afterEach(async () => {
 });
 
 describe("BerdctlBridge lifecycle", () => {
-  it("starts the broker and pushes the per-group timeouts when the experiment is enabled", async () => {
-    await renderEnabledBridge();
+  it("starts the broker and pushes the per-group timeouts by default", async () => {
+    renderBridge();
+    await flushAsync();
 
     expect(invokeCalls("plugin:berdctl|start")).toHaveLength(1);
     // Per-group max of the actions' bridge timeouts (sessions.create is 60s).
@@ -129,16 +122,7 @@ describe("BerdctlBridge lifecycle", () => {
     });
   });
 
-  it("never invokes the plugin when the experiment is disabled", async () => {
-    setExperimentEnabled(BERDCTL_EXPERIMENT_ID, false);
-    renderBridge();
-    await flushAsync();
-
-    expect(mocks.invoke).not.toHaveBeenCalled();
-  });
-
   it("starts exactly once under a StrictMode double-mount", async () => {
-    setExperimentEnabled(BERDCTL_EXPERIMENT_ID, true);
     renderBridge(
       <StrictMode>
         <BerdctlBridge />
@@ -150,18 +134,7 @@ describe("BerdctlBridge lifecycle", () => {
     expect(invokeCalls("plugin:berdctl|stop")).toHaveLength(0);
   });
 
-  it("disabling stops the broker", async () => {
-    await renderEnabledBridge();
-
-    act(() => {
-      setExperimentEnabled(BERDCTL_EXPERIMENT_ID, false);
-    });
-    await flushAsync();
-
-    expect(invokeCalls("plugin:berdctl|stop")).toHaveLength(1);
-  });
-
-  it("goes inert when the plugin is not in this build, retrying once per enable", async () => {
+  it("goes inert when the plugin is not in this build", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.invoke.mockImplementation(async (command: string) => {
       if (command === "plugin:berdctl|start") {
@@ -171,26 +144,12 @@ describe("BerdctlBridge lifecycle", () => {
       }
       return undefined;
     });
-    await renderEnabledBridge();
+    renderBridge();
+    await flushAsync();
 
     expect(invokeCalls("plugin:berdctl|start")).toHaveLength(1);
+    expect(invokeCalls("plugin:berdctl|stop")).toHaveLength(0);
     expect(warnSpy).toHaveBeenCalled();
-
-    // Disabling does not call the missing stop command; nothing retries.
-    act(() => {
-      setExperimentEnabled(BERDCTL_EXPERIMENT_ID, false);
-    });
-    await flushAsync();
-    expect(invokeCalls("plugin:berdctl|start")).toHaveLength(1);
-    expect(invokeCalls("plugin:berdctl|stop")).toHaveLength(0);
-
-    // Re-enabling clears the unavailable flag and retries the start once.
-    act(() => {
-      setExperimentEnabled(BERDCTL_EXPERIMENT_ID, true);
-    });
-    await flushAsync();
-    expect(invokeCalls("plugin:berdctl|start")).toHaveLength(2);
-    expect(invokeCalls("plugin:berdctl|stop")).toHaveLength(0);
   });
 
   it("does not retry-storm after a transient start failure", async () => {
@@ -201,7 +160,8 @@ describe("BerdctlBridge lifecycle", () => {
       }
       return undefined;
     });
-    await renderEnabledBridge();
+    renderBridge();
+    await flushAsync();
     await flushAsync();
 
     expect(invokeCalls("plugin:berdctl|start")).toHaveLength(1);
@@ -220,7 +180,8 @@ describe("BerdctlBridge lifecycle", () => {
       return undefined;
     });
 
-    await renderEnabledBridge();
+    renderBridge();
+    await flushAsync();
     await flushAsync();
 
     expect(invokeCalls("plugin:berdctl|start")).toHaveLength(1);
@@ -235,7 +196,6 @@ describe("BerdctlBridge lifecycle", () => {
 
 describe("BerdctlBridge request handling", () => {
   it("dispatches a bridge request and submits an ok result", async () => {
-    setExperimentEnabled(BERDCTL_EXPERIMENT_ID, false);
     renderBridge();
     await flushAsync();
     mocks.dispatchCommand.mockResolvedValue({ projects: [] });
@@ -281,7 +241,6 @@ describe("BerdctlBridge request handling", () => {
   });
 
   it("maps a CommandError to ok:false with its stable code", async () => {
-    setExperimentEnabled(BERDCTL_EXPERIMENT_ID, false);
     renderBridge();
     await flushAsync();
     mocks.dispatchCommand.mockRejectedValue(
