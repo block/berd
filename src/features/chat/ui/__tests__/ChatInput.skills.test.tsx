@@ -218,7 +218,7 @@ describe("ChatInput skill mentions", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(input).toHaveValue("");
+    expect(input).toHaveValue("/code-review ");
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
