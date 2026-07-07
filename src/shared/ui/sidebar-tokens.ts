@@ -65,6 +65,7 @@ export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
   default: {
     contentPadding: SIDEBAR_CHAT_ROW_PADDING_CLASS,
     menuReserve: "pr-8",
+    timestampReserve: "pr-12",
     menuInset: "right-3",
     flatProjectGap: "gap-1",
     flatProjectIconInset: "ml-3",
@@ -73,6 +74,7 @@ export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
   dense: {
     contentPadding: "pl-1",
     menuReserve: "pr-6",
+    timestampReserve: "pr-10",
     menuInset: "right-1",
     flatProjectGap: "gap-1.5",
     flatProjectIconInset: "ml-1",
@@ -83,6 +85,7 @@ export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
   {
     contentPadding: string;
     menuReserve: string;
+    timestampReserve: string;
     menuInset: string;
     flatProjectGap: string;
     flatProjectIconInset: string;

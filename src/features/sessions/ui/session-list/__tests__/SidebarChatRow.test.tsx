@@ -7,7 +7,7 @@ import {
   useHomeWidgetStore,
 } from "@/features/home/stores/homeWidgetStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { SidebarChatRow } from "../SidebarChatRow";
+import { formatSidebarChatTimestamp, SidebarChatRow } from "../SidebarChatRow";
 import {
   focusSessionWindow,
   getSessionWindowSupport,
@@ -586,6 +586,39 @@ describe("SidebarChatRow", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
+  it("formats sidebar chat activity as compact single-unit relative time", () => {
+    const now = new Date("2026-07-07T12:00:00");
+
+    expect(formatSidebarChatTimestamp("2026-07-07T11:59:40", { now })).toBe(
+      "now",
+    );
+    expect(formatSidebarChatTimestamp("2026-07-07T11:55:00", { now })).toBe(
+      "5m",
+    );
+    expect(formatSidebarChatTimestamp("2026-07-07T09:00:00", { now })).toBe(
+      "3h",
+    );
+    expect(formatSidebarChatTimestamp("2026-07-05T12:00:00", { now })).toBe(
+      "2d",
+    );
+    expect(formatSidebarChatTimestamp("2026-06-22T12:00:00", { now })).toBe(
+      "2w",
+    );
+    expect(formatSidebarChatTimestamp("2026-05-01T12:00:00", { now })).toBe(
+      "2mo",
+    );
+    expect(formatSidebarChatTimestamp("2024-07-07T12:00:00", { now })).toBe(
+      "2y",
+    );
+  });
+
+  it("returns empty for missing or invalid activity values", () => {
+    expect(formatSidebarChatTimestamp(undefined)).toBe("");
+    expect(formatSidebarChatTimestamp(null)).toBe("");
+    expect(formatSidebarChatTimestamp("  ")).toBe("");
+    expect(formatSidebarChatTimestamp("not a timestamp")).toBe("");
+  });
+
   it("renders a muted subtitle line beneath the title when a snippet is present", () => {
     render(
       <SidebarChatRow
@@ -601,6 +634,74 @@ describe("SidebarChatRow", () => {
     expect(subtitle).toHaveClass("truncate");
   });
 
+  it("renders a compact activity timestamp on the right edge of the row", () => {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000);
+
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Refactor session list"
+        subtitle="Let's refactor the session list query"
+        activityAt={fiveMinutesAgo.toISOString()}
+        isActive={false}
+      />,
+    );
+
+    const timestamp = container.querySelector(
+      "[data-sidebar-chat-timestamp]",
+    ) as HTMLElement;
+    expect(timestamp).toBeInTheDocument();
+    expect(timestamp).toHaveTextContent("5m");
+    expect(timestamp).toHaveClass("text-muted-foreground/70");
+    // The row title and snippet stay visible alongside the timestamp.
+    expect(screen.getByText("Refactor session list")).toBeInTheDocument();
+    expect(
+      screen.getByText("Let's refactor the session list query"),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the timestamp when the activity value is missing or invalid", () => {
+    const { container, rerender } = render(
+      <SidebarChatRow id="session-1" title="No activity" isActive={false} />,
+    );
+    expect(
+      container.querySelector("[data-sidebar-chat-timestamp]"),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <SidebarChatRow
+        id="session-1"
+        title="No activity"
+        activityAt="not a timestamp"
+        isActive={false}
+      />,
+    );
+    expect(
+      container.querySelector("[data-sidebar-chat-timestamp]"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the timestamp on flat chat rows too", () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60_000);
+
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Refactor session list"
+        activityAt={twoHoursAgo.toISOString()}
+        isActive={false}
+        density="dense"
+        flatProjectName="Project One"
+      />,
+    );
+
+    const timestamp = container.querySelector(
+      "[data-sidebar-chat-timestamp]",
+    ) as HTMLElement;
+    expect(timestamp).toBeInTheDocument();
+    expect(timestamp).toHaveTextContent("2h");
+    expect(screen.getByText("Refactor session list")).toBeInTheDocument();
+  });
   it("stays a single line for sessions without a usable snippet", () => {
     const { container, rerender } = render(
       <SidebarChatRow id="session-1" title="No snippet" isActive={false} />,

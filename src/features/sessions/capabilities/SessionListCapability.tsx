@@ -29,6 +29,7 @@ import {
 import {
   compareSessionsByActivityDesc,
   isSessionRunning,
+  sessionActivityAt,
 } from "@/features/chat/lib/sessionActivity";
 import { getPinnedHomeChatSessionIds } from "@/features/home/lib/pinnedHomeChats";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
@@ -150,6 +151,7 @@ function toSessionListItem(
     id: session.id,
     title: session.title,
     subtitle: branchName ?? session.subtitle ?? undefined,
+    activityAt: sessionActivityAt(session),
     projectId: session.projectId ?? undefined,
     updatedAt: session.updatedAt,
     lastMessageAt: session.lastMessageAt,

@@ -30,6 +30,7 @@ export interface SidebarSessionItem {
   id: string;
   title: string;
   subtitle?: string;
+  activityAt?: string | null;
   updatedAt: string;
   lastMessageAt?: string | null;
   projectId?: string;
@@ -294,6 +295,7 @@ export function SidebarProjectSection({
                 id={session.id}
                 title={session.title}
                 subtitle={session.subtitle}
+                activityAt={session.activityAt}
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}

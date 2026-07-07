@@ -318,6 +318,7 @@ export function SidebarFlatChatsSection({
                       key={session.id}
                       id={session.id}
                       title={session.title}
+                      activityAt={session.activityAt}
                       isActive={isActive}
                       isRunning={session.isRunning ?? false}
                       hasUnread={session.hasUnread ?? false}
