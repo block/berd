@@ -1,5 +1,6 @@
 import {
   type ComponentType,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode,
   useEffect,
@@ -124,14 +125,26 @@ type MenuItemComponent = ComponentType<{
   className?: string;
   disabled?: boolean;
   onClick?: () => void;
+  style?: CSSProperties;
 }>;
 
 type MenuLabelComponent = ComponentType<{
   children?: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }>;
 
-type MenuSeparatorComponent = ComponentType<Record<string, never>>;
+type MenuSeparatorComponent = ComponentType<{
+  className?: string;
+}>;
+
+type RenderMenuItemsOptions = {
+  Item: MenuItemComponent;
+  Label: MenuLabelComponent;
+  Separator: MenuSeparatorComponent;
+  itemClassName?: string;
+  itemStyle?: CSSProperties;
+};
 
 interface SidebarChatRowProps {
   id: string;
@@ -149,8 +162,17 @@ interface SidebarChatRowProps {
   selectionActionsDisabled?: boolean;
   selectedSessionIds?: Set<string>;
   className?: string;
+  contentPaddingClassName?: string;
   nested?: boolean;
   density?: SidebarChatRowDensity;
+  showLeadingIcon?: boolean;
+  leadingIconTestId?: string;
+  leadingIcon?: ReactNode;
+  menuContentClassName?: string;
+  menuItemClassName?: string;
+  menuItemStyle?: CSSProperties;
+  menuLabelClassName?: string;
+  menuLabelStyle?: CSSProperties;
   flatProjectName?: string;
   flatProjectIcon?: string | null;
   flatProjectColor?: string | null;
@@ -166,10 +188,12 @@ interface SidebarChatRowProps {
   onArchiveSelected?: () => void;
   onPinSelectedToHome?: () => void;
   isPinningSelectedToHome?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
   onMarkRead?: (id: string) => void;
   onMarkUnread?: (id: string) => void;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  renderExtraMenuItems?: (options: RenderMenuItemsOptions) => ReactNode;
 }
 
 export function SidebarChatRow({
@@ -186,8 +210,17 @@ export function SidebarChatRow({
   selectionActionsDisabled = false,
   selectedSessionIds,
   className,
+  contentPaddingClassName,
   nested = false,
   density = "default",
+  showLeadingIcon = true,
+  leadingIconTestId,
+  leadingIcon,
+  menuContentClassName,
+  menuItemClassName,
+  menuItemStyle,
+  menuLabelClassName,
+  menuLabelStyle,
   flatProjectName,
   flatProjectIcon,
   flatProjectColor,
@@ -202,10 +235,12 @@ export function SidebarChatRow({
   onArchiveSelected,
   onPinSelectedToHome,
   isPinningSelectedToHome = false,
+  onMenuOpenChange,
   onMarkRead,
   onMarkUnread,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  renderExtraMenuItems,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const { beginSessionDrag, updateSessionDragTarget, endSessionDrag } =
@@ -250,7 +285,9 @@ export function SidebarChatRow({
   const hasFlatProjectColumn = flatProjectName != null;
   const hasSubtitle = trimmedSubtitle.length > 0 && !hasFlatProjectColumn;
   const densityClasses = SIDEBAR_CHAT_ROW_DENSITY_CLASSES[density];
-  const rowPaddingClass = nested ? "pl-9" : densityClasses.contentPadding;
+  const rowPaddingClass =
+    contentPaddingClassName ??
+    (nested ? "pl-9" : densityClasses.contentPadding);
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
   const isOpenInWindow = useSessionWindowStore((s) =>
@@ -362,6 +399,7 @@ export function SidebarChatRow({
   const closeMenus = () => {
     setMenuOpen(false);
     setContextMenuOpen(false);
+    onMenuOpenChange?.(false);
   };
 
   const startRename = () => {
@@ -515,15 +553,17 @@ export function SidebarChatRow({
     Item,
     Label,
     Separator,
-  }: {
-    Item: MenuItemComponent;
-    Label: MenuLabelComponent;
-    Separator: MenuSeparatorComponent;
-  }) => (
+  }: RenderMenuItemsOptions) => (
     <>
       {shouldApplyToSelection && (
         <>
-          <Label className="text-sm font-medium text-muted-foreground">
+          <Label
+            className={cn(
+              "text-sm font-medium text-muted-foreground",
+              menuLabelClassName,
+            )}
+            style={menuLabelStyle}
+          >
             {t("bulk.selectedContext", {
               count: selectionCount,
               displayCount: selectionCount,
@@ -536,32 +576,48 @@ export function SidebarChatRow({
         <>
           {isMultiWindowEnabled ? (
             <Item
+              className={menuItemClassName}
               onClick={
                 isOpenInWindow ? focusExistingWindow : handleOpenInWindow
               }
+              style={menuItemStyle}
             >
               <ExternalLink className="size-3.5" />
               {isOpenInWindow ? openWindowLabel : openNewWindowLabel}
             </Item>
           ) : null}
-          <Item onClick={startRename}>
+          <Item
+            className={menuItemClassName}
+            onClick={startRename}
+            style={menuItemStyle}
+          >
             <Pencil className="size-3.5" />
             {t("common:actions.rename")}
           </Item>
           {onFork ? (
             <Item
+              className={menuItemClassName}
               onClick={() => {
                 closeMenus();
                 onFork(id);
               }}
+              style={menuItemStyle}
             >
               <CopyPlus className="size-3.5" />
               {t("common:actions.duplicate")}
             </Item>
           ) : null}
+          {renderExtraMenuItems?.({
+            Item,
+            Label,
+            Separator,
+            itemClassName: menuItemClassName,
+            itemStyle: menuItemStyle,
+          })}
         </>
       )}
       <Item
+        className={menuItemClassName}
         onClick={() => {
           if (shouldApplyToSelection) {
             onPinSelectedToHome?.();
@@ -576,6 +632,7 @@ export function SidebarChatRow({
         disabled={
           shouldApplyToSelection ? isPinningSelectedToHome : isPinningToHome
         }
+        style={menuItemStyle}
       >
         <IconPin className="size-3.5" />
         {shouldApplyToSelection
@@ -590,6 +647,7 @@ export function SidebarChatRow({
       </Item>
       {hasUnread ? (
         <Item
+          className={menuItemClassName}
           onClick={() => {
             if (shouldApplyToSelection) {
               onMarkSelectedRead?.();
@@ -598,12 +656,14 @@ export function SidebarChatRow({
             onMarkRead?.(id);
           }}
           disabled={shouldApplyToSelection && selectionActionsDisabled}
+          style={menuItemStyle}
         >
           <MailOpen className="size-3.5" />
           {t("actions.markRead")}
         </Item>
       ) : (
         <Item
+          className={menuItemClassName}
           onClick={() => {
             if (shouldApplyToSelection) {
               onMarkSelectedUnread?.();
@@ -612,12 +672,14 @@ export function SidebarChatRow({
             onMarkUnread?.(id);
           }}
           disabled={shouldApplyToSelection && selectionActionsDisabled}
+          style={menuItemStyle}
         >
           <Mail className="size-3.5" />
           {t("actions.markUnread")}
         </Item>
       )}
       <Item
+        className={menuItemClassName}
         onClick={() => {
           if (shouldApplyToSelection) {
             onArchiveSelected?.();
@@ -626,6 +688,7 @@ export function SidebarChatRow({
           onArchive?.(id);
         }}
         disabled={shouldApplyToSelection && selectionActionsDisabled}
+        style={menuItemStyle}
       >
         <Archive className="size-3.5" />
         {t("common:actions.archive")}
@@ -669,7 +732,12 @@ export function SidebarChatRow({
   }
 
   return (
-    <ContextMenu onOpenChange={setContextMenuOpen}>
+    <ContextMenu
+      onOpenChange={(open) => {
+        setContextMenuOpen(open);
+        onMenuOpenChange?.(open);
+      }}
+    >
       <ContextMenuTrigger asChild>
         <div
           data-session-id={id}
@@ -757,6 +825,7 @@ export function SidebarChatRow({
                 title={
                   isOpenInWindow ? openWindowLabel : t("actions.renameHint")
                 }
+                aria-label={displayTitle}
                 className={cn(
                   "min-w-0 flex-1 justify-start rounded-sm pl-0",
                   activityTimestamp
@@ -796,6 +865,7 @@ export function SidebarChatRow({
               onClick={handleRowClick}
               onDoubleClick={handleRowDoubleClick}
               title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
+              aria-label={displayTitle}
               className={cn(
                 "flex-1 min-w-0 justify-start rounded-sm",
                 activityTimestamp
@@ -807,42 +877,51 @@ export function SidebarChatRow({
                       SIDEBAR_ROW_HEIGHT_CLASS,
                       SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
                     ),
-                SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+                showLeadingIcon && SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
                 SIDEBAR_NAV_TEXT_CLASS,
                 rowPaddingClass,
                 rowButtonStateClass,
               )}
               aria-pressed={selectionEnabled ? selected : undefined}
             >
-              {isRunning ? (
-                <span
-                  className={leadingIconSlotClass}
-                  role="status"
-                  aria-label={t("status.chatActive")}
-                >
-                  <ActiveChatBerdIndicator size={16} />
-                </span>
-              ) : hasUnread ? (
-                <span
-                  className={leadingIconSlotClass}
-                  role="status"
-                  aria-label={t("status.unreadMessages")}
-                >
-                  <SidebarUnreadDot />
-                </span>
-              ) : isPinned ? (
-                <span
-                  className={leadingIconSlotClass}
-                  role="img"
-                  aria-label={t("status.pinnedChat")}
-                >
-                  <IconPin className="size-4" />
-                </span>
-              ) : (
-                <span className={leadingIconSlotClass} aria-hidden="true">
-                  <SidebarChatMenuIcon />
-                </span>
-              )}
+              {showLeadingIcon ? (
+                isRunning ? (
+                  <span
+                    className={leadingIconSlotClass}
+                    role="status"
+                    aria-label={t("status.chatActive")}
+                    data-testid={leadingIconTestId}
+                  >
+                    <ActiveChatBerdIndicator size={16} />
+                  </span>
+                ) : hasUnread ? (
+                  <span
+                    className={leadingIconSlotClass}
+                    role="status"
+                    aria-label={t("status.unreadMessages")}
+                    data-testid={leadingIconTestId}
+                  >
+                    <SidebarUnreadDot />
+                  </span>
+                ) : isPinned ? (
+                  <span
+                    className={leadingIconSlotClass}
+                    role="img"
+                    aria-label={t("status.pinnedChat")}
+                    data-testid={leadingIconTestId}
+                  >
+                    <IconPin className="size-4" />
+                  </span>
+                ) : (
+                  <span
+                    className={leadingIconSlotClass}
+                    aria-hidden="true"
+                    data-testid={leadingIconTestId}
+                  >
+                    {leadingIcon ?? <SidebarChatMenuIcon />}
+                  </span>
+                )
+              ) : null}
               {hasSubtitle ? (
                 <span className="flex min-w-0 flex-1 flex-col text-left">
                   <span className="truncate leading-snug">{displayTitle}</span>
@@ -884,7 +963,13 @@ export function SidebarChatRow({
             </span>
           ) : null}
 
-          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenu
+            open={menuOpen}
+            onOpenChange={(open) => {
+              setMenuOpen(open);
+              onMenuOpenChange?.(open);
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
@@ -911,6 +996,7 @@ export function SidebarChatRow({
               align="start"
               alignOffset={-4}
               sideOffset={4}
+              className={menuContentClassName}
             >
               {renderMenuItems({
                 Item: DropdownMenuItem as MenuItemComponent,
@@ -921,7 +1007,7 @@ export function SidebarChatRow({
           </DropdownMenu>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent variant="inverse">
+      <ContextMenuContent variant="inverse" className={menuContentClassName}>
         {renderMenuItems({
           Item: ContextMenuItem as MenuItemComponent,
           Label: ContextMenuLabel as MenuLabelComponent,

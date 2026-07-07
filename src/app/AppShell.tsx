@@ -60,7 +60,10 @@ import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProv
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
-import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import {
+  DEFAULT_CHAT_TITLE,
+  isDefaultChatTitle,
+} from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
@@ -151,6 +154,7 @@ import {
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
+  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   NAVIGATION_REFRESH_EXPERIMENT_ID,
   SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
@@ -164,10 +168,15 @@ import {
 import {
   NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX,
   NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX,
+  NAV_PROTOTYPE_PRIMARY_MAX_WIDTH_PX,
+  NAV_PROTOTYPE_PRIMARY_MIN_WIDTH_PX,
   NAV_PROTOTYPE_PANEL_GAP_PX,
   NAV_PROTOTYPE_PANEL_OVERLAP_PX,
+  NAV_PROTOTYPE_SECONDARY_MAX_WIDTH_PX,
+  NAV_PROTOTYPE_SECONDARY_MIN_WIDTH_PX,
   NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
   type NavigationPrototypeMode,
+  type NavigationSelectSessionOptions,
   type NavigationSecondaryTarget,
 } from "./views/NavigationPanesView";
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
@@ -175,7 +184,10 @@ import {
   getProfileCapabilitySnapshot,
   useProfileCapabilities,
 } from "@/shared/profile/capabilities";
-import { resolveNavigationPrototypePrimaryCollapsed } from "./navigationPrototypeState";
+import {
+  resolveEffectiveNavigationSecondaryTarget,
+  resolveNavigationPrototypePrimaryCollapsed,
+} from "./navigationPrototypeState";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -221,6 +233,46 @@ const GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS = 220;
 
 type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
+function clampPrototypePanelWidth(width: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, width));
+}
+
+export function getPrototypeSecondaryWidthForDockedLayout({
+  dockedPrimaryWidth,
+  requestedSecondaryWidth,
+  secondaryPush,
+  viewportWidth,
+}: {
+  dockedPrimaryWidth: number;
+  requestedSecondaryWidth: number;
+  secondaryPush: boolean;
+  viewportWidth: number;
+}) {
+  if (!secondaryPush) {
+    return requestedSecondaryWidth;
+  }
+
+  const preferredDockedWidth =
+    dockedPrimaryWidth +
+    NAV_PROTOTYPE_PANEL_GAP_PX +
+    requestedSecondaryWidth -
+    NAV_PROTOTYPE_PANEL_OVERLAP_PX;
+  const responsiveDockedWidth = getResponsiveSidebarWidth(
+    preferredDockedWidth,
+    viewportWidth,
+  );
+  const availableSecondaryWidth =
+    responsiveDockedWidth -
+    dockedPrimaryWidth -
+    NAV_PROTOTYPE_PANEL_GAP_PX +
+    NAV_PROTOTYPE_PANEL_OVERLAP_PX;
+
+  return Math.max(
+    0,
+    Math.min(requestedSecondaryWidth, availableSecondaryWidth),
+  );
+}
+
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
   label,
@@ -238,7 +290,10 @@ function validateBooleanPreference(value: unknown, defaults: boolean) {
 function getNavigationSecondaryTargetKey(target: NavigationSecondaryTarget) {
   if (!target) return "none";
   if (target.kind === "settings") return "settings";
-  return target.kind === "project" ? `project:${target.projectId}` : "chats";
+  if (target.kind === "chats") {
+    return target.variant ? `chats:${target.variant}` : "chats";
+  }
+  return `project:${target.projectId}`;
 }
 
 function getNavigationPrototypeMode(): NavigationPrototypeMode {
@@ -496,8 +551,14 @@ export function AppShell({
   const navigationRefreshExperiment = useExperiment(
     NAVIGATION_REFRESH_EXPERIMENT_ID,
   );
+  const navigationChatsUnderProjectsExperiment = useExperiment(
+    NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
+  );
   const isNavigationPrototypeEnabled =
     Boolean(navigationRefreshExperiment?.enabled) && !import.meta.env.VITEST;
+  const showNavigationPrototypeChatsUnderProjects = Boolean(
+    navigationChatsUnderProjectsExperiment?.enabled,
+  );
   const navigationPrototypeMode = getNavigationPrototypeMode();
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
@@ -505,6 +566,10 @@ export function AppShell({
     useState<NavigationSecondaryTarget>(null);
   const [navigationSecondaryPreview, setNavigationSecondaryPreview] =
     useState(false);
+  const [
+    navigationSecondarySuppressedSessionId,
+    setNavigationSecondarySuppressedSessionId,
+  ] = useState<string | null>(null);
   const [
     navigationSecondarySelectionCommitted,
     setNavigationSecondarySelectionCommitted,
@@ -536,6 +601,7 @@ export function AppShell({
   const resetNavigationSecondary = useCallback(() => {
     setNavigationSecondaryTarget(null);
     setNavigationSecondaryPreview(false);
+    setNavigationSecondarySuppressedSessionId(null);
     setNavigationSecondarySelectionCommitted(false);
   }, []);
   const isEffectiveDetachableSidebarChatsEnabled =
@@ -544,6 +610,30 @@ export function AppShell({
     baseNavigationWidth: sidebarWidth,
     enabled: isEffectiveDetachableSidebarChatsEnabled,
   });
+  const [prototypePanelWidths, setPrototypePanelWidths] = useState(() => ({
+    primary: NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX,
+    secondary: NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
+  }));
+  const resizePrototypePrimaryWidth = useCallback((width: number) => {
+    setPrototypePanelWidths((currentWidths) => ({
+      ...currentWidths,
+      primary: clampPrototypePanelWidth(
+        width,
+        NAV_PROTOTYPE_PRIMARY_MIN_WIDTH_PX,
+        NAV_PROTOTYPE_PRIMARY_MAX_WIDTH_PX,
+      ),
+    }));
+  }, []);
+  const resizePrototypeSecondaryWidth = useCallback((width: number) => {
+    setPrototypePanelWidths((currentWidths) => ({
+      ...currentWidths,
+      secondary: clampPrototypePanelWidth(
+        width,
+        NAV_PROTOTYPE_SECONDARY_MIN_WIDTH_PX,
+        NAV_PROTOTYPE_SECONDARY_MAX_WIDTH_PX,
+      ),
+    }));
+  }, []);
   const sidebarOuterGutterWidth = Math.max(
     0,
     sidebarPanelOuterWidth - sidebarWidth,
@@ -551,10 +641,17 @@ export function AppShell({
   const activeNavigationSession = activeSessionId
     ? (sessions.find((session) => session.id === activeSessionId) ?? null)
     : null;
+  const activeNavigationSessionIsEmptyDefaultChat =
+    activeView === "chat" &&
+    (activeNavigationSession === null ||
+      (isDefaultChatTitle(activeNavigationSession.title) &&
+        activeNavigationSession.messageCount === 0));
+  const showDetachedSessionList = isEffectiveDetachableSidebarChatsEnabled;
   const activeChatNavigationSecondaryTarget =
     useMemo<NavigationSecondaryTarget>(() => {
       if (activeView === "settings") return { kind: "settings" };
       if (activeView !== "chat") return null;
+      if (activeNavigationSessionIsEmptyDefaultChat) return null;
       if (activeNavigationSession?.projectId) {
         return {
           kind: "project",
@@ -562,9 +659,22 @@ export function AppShell({
         };
       }
       return { kind: "chats" };
-    }, [activeNavigationSession?.projectId, activeView]);
+    }, [
+      activeNavigationSession?.projectId,
+      activeNavigationSessionIsEmptyDefaultChat,
+      activeView,
+    ]);
+  const resolvedNavigationSecondaryTarget =
+    resolveEffectiveNavigationSecondaryTarget({
+      activeChatNavigationSecondaryTarget,
+      activeSessionId,
+      navigationSecondarySuppressedSessionId,
+      navigationSecondaryTarget,
+    });
   const effectiveNavigationSecondaryTarget =
-    navigationSecondaryTarget ?? activeChatNavigationSecondaryTarget;
+    activeNavigationSessionIsEmptyDefaultChat
+      ? null
+      : resolvedNavigationSecondaryTarget;
   const effectiveNavigationSecondaryMatchesActiveChat =
     getNavigationSecondaryTargetKey(effectiveNavigationSecondaryTarget) ===
     getNavigationSecondaryTargetKey(activeChatNavigationSecondaryTarget);
@@ -606,9 +716,11 @@ export function AppShell({
           prototypePrimaryRestCollapsed,
           prototypeSecondaryOpen,
         });
+  const prototypePrimaryExpandedWidth = prototypePanelWidths.primary;
+  const requestedPrototypeSecondaryWidth = prototypePanelWidths.secondary;
   const prototypePrimaryWidth = prototypePrimaryCollapsed
     ? NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX
-    : NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX;
+    : prototypePrimaryExpandedWidth;
   const prototypePrimaryOverlaysContent =
     navigationPrototypeMode === "manual-float" ||
     prototypePrimaryRestCollapsed ||
@@ -619,35 +731,40 @@ export function AppShell({
   const prototypeDockedPrimaryWidth = prototypePrimaryOverlaysContent
     ? NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX
     : prototypePrimaryWidth;
+  const prototypeSecondaryWidth = getPrototypeSecondaryWidthForDockedLayout({
+    dockedPrimaryWidth: prototypeDockedPrimaryWidth,
+    requestedSecondaryWidth: requestedPrototypeSecondaryWidth,
+    secondaryPush: prototypeSecondaryPush,
+    viewportWidth,
+  });
   const prototypeSidebarDockedWidth =
     prototypeDockedPrimaryWidth +
     (prototypeSecondaryPush
       ? NAV_PROTOTYPE_PANEL_GAP_PX +
-        NAV_PROTOTYPE_SECONDARY_WIDTH_PX -
+        prototypeSecondaryWidth -
         NAV_PROTOTYPE_PANEL_OVERLAP_PX
       : 0);
   const prototypeSidebarVisualWidth =
     prototypePrimaryWidth +
     (prototypeSecondaryVisual
       ? NAV_PROTOTYPE_PANEL_GAP_PX +
-        NAV_PROTOTYPE_SECONDARY_WIDTH_PX -
+        prototypeSecondaryWidth -
         NAV_PROTOTYPE_PANEL_OVERLAP_PX
       : 0);
   const preferredSidebarDockedWidth = isNavigationPrototypeEnabled
     ? prototypeSidebarDockedWidth
-    : isEffectiveDetachableSidebarChatsEnabled &&
-        paneDockingLayout.chatListDock === "side"
+    : showDetachedSessionList && paneDockingLayout.chatListDock === "side"
       ? paneDockingLayout.navigationPaneSizes.primaryNav +
         SIDEBAR_DETACHED_PANEL_GAP_PX +
         paneDockingLayout.navigationPaneSizes.chatList
-      : isEffectiveDetachableSidebarChatsEnabled
+      : showDetachedSessionList
         ? getStackedNavigationPaneWidth(paneDockingLayout.navigationPaneSizes)
         : sidebarWidth;
   const responsiveSidebarDockedWidth = getResponsiveSidebarWidth(
     preferredSidebarDockedWidth,
     viewportWidth,
   );
-  const visibleNavigationPaneSizes = isEffectiveDetachableSidebarChatsEnabled
+  const visibleNavigationPaneSizes = showDetachedSessionList
     ? paneDockingLayout.chatListDock === "side"
       ? resolveSideBySideNavigationPaneSizesForAvailableWidth(
           paneDockingLayout.navigationPaneSizes,
@@ -658,12 +775,11 @@ export function AppShell({
     : paneDockingLayout.navigationPaneSizes;
   const sidebarDockedWidth = isNavigationPrototypeEnabled
     ? prototypeSidebarDockedWidth
-    : isEffectiveDetachableSidebarChatsEnabled &&
-        paneDockingLayout.chatListDock === "side"
+    : showDetachedSessionList && paneDockingLayout.chatListDock === "side"
       ? visibleNavigationPaneSizes.primaryNav +
         SIDEBAR_DETACHED_PANEL_GAP_PX +
         visibleNavigationPaneSizes.chatList
-      : isEffectiveDetachableSidebarChatsEnabled
+      : showDetachedSessionList
         ? getStackedNavigationPaneWidth(visibleNavigationPaneSizes)
         : sidebarWidth;
   const sidebarDockedPanelOuterWidth =
@@ -2973,8 +3089,26 @@ export function AppShell({
   );
 
   const selectSessionDirect = useCallback(
-    (id: string, options: { preserveNavigationSecondary?: boolean } = {}) => {
-      if (!options.preserveNavigationSecondary) {
+    (
+      id: string,
+      options: {
+        preserveNavigationSecondary?: boolean;
+        suppressNavigationSecondary?: boolean;
+      } = {},
+    ) => {
+      if (options.suppressNavigationSecondary) {
+        setNavigationSecondaryTarget(null);
+        setNavigationSecondaryPreview(false);
+        setNavigationSecondarySelectionCommitted(false);
+        setNavigationSecondarySuppressedSessionId(id);
+      } else {
+        setNavigationSecondarySuppressedSessionId(null);
+      }
+
+      if (
+        !options.preserveNavigationSecondary &&
+        !options.suppressNavigationSecondary
+      ) {
         resetNavigationSecondary();
       }
       activateChatSession(id);
@@ -2987,7 +3121,7 @@ export function AppShell({
   navigateAgentBuilderChatRef.current = selectSessionDirect;
 
   const handleSelectSession = useCallback(
-    (id: string) => {
+    (id: string, options: NavigationSelectSessionOptions = {}) => {
       if (
         isMultiWindowEnabled &&
         useSessionWindowStore.getState().isOpenInWindow(id)
@@ -2995,14 +3129,23 @@ export function AppShell({
         void focusSessionWindow(id);
         return;
       }
-      if (id === useChatSessionStore.getState().activeSessionId) {
+      const suppressPrototypeSecondary =
+        isNavigationPrototypeEnabled &&
+        showNavigationPrototypeChatsUnderProjects &&
+        options.suppressPrototypeSecondary;
+      if (
+        id === useChatSessionStore.getState().activeSessionId &&
+        !suppressPrototypeSecondary
+      ) {
         return;
       }
       guardAppNavigation(() => {
         selectSessionDirect(id, {
           preserveNavigationSecondary:
             isNavigationPrototypeEnabled &&
+            !suppressPrototypeSecondary &&
             effectiveNavigationSecondaryTarget?.kind === "chats",
+          suppressNavigationSecondary: suppressPrototypeSecondary,
         });
       });
     },
@@ -3012,6 +3155,7 @@ export function AppShell({
       isMultiWindowEnabled,
       isNavigationPrototypeEnabled,
       selectSessionDirect,
+      showNavigationPrototypeChatsUnderProjects,
     ],
   );
 
@@ -3846,8 +3990,7 @@ export function AppShell({
           activeView,
           activeSettingsSection,
           activeSessionId,
-          detachableSessionListEnabled:
-            isEffectiveDetachableSidebarChatsEnabled,
+          detachableSessionListEnabled: showDetachedSessionList,
           onPaneResizeBegin: paneDockingLayout.beginNavigationPaneResize,
           onPaneResizeEnd: paneDockingLayout.endNavigationPaneResize,
           onPaneResize: paneDockingLayout.resizeNavigationPane,
@@ -3868,10 +4011,14 @@ export function AppShell({
           prototypeSecondaryPreview: effectiveNavigationSecondaryPreview,
           onPrototypeSecondaryPreviewChange: setNavigationSecondaryPreview,
           prototypePrimaryWidth,
-          prototypeSecondaryWidth: NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
+          prototypeSecondaryWidth,
+          onPrototypePrimaryWidthResize: resizePrototypePrimaryWidth,
+          onPrototypeSecondaryWidthResize: resizePrototypeSecondaryWidth,
           prototypeSecondaryFloating,
           prototypePrimaryOverlaysContent,
           prototypeSecondaryPush,
+          prototypeChatsUnderProjects:
+            showNavigationPrototypeChatsUnderProjects,
           projects,
           className: "h-full rounded-md",
         }}

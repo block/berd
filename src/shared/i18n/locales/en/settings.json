@@ -210,6 +210,10 @@
       "description": "Try the refreshed primary and secondary navigation for projects, chats, and settings.",
       "title": "Refreshed navigation"
     },
+    "navigationChatsUnderProjects": {
+      "description": "Show recent chats beneath the projects list, with View all opening the full chat list panel.",
+      "title": "Chats under projects"
+    },
     "navigationExperiments": {
       "title": "Navigation experiments"
     },

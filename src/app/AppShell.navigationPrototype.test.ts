@@ -1,5 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { resolveNavigationPrototypePrimaryCollapsed } from "./navigationPrototypeState";
+import {
+  resolveEffectiveNavigationSecondaryTarget,
+  resolveNavigationPrototypePrimaryCollapsed,
+} from "./navigationPrototypeState";
+
+describe("resolveEffectiveNavigationSecondaryTarget", () => {
+  it("uses the active chat target when no secondary panel is explicitly selected", () => {
+    expect(
+      resolveEffectiveNavigationSecondaryTarget({
+        activeChatNavigationSecondaryTarget: { kind: "chats" },
+        activeSessionId: "session-1",
+        navigationSecondarySuppressedSessionId: null,
+        navigationSecondaryTarget: null,
+      }),
+    ).toEqual({ kind: "chats" });
+  });
+
+  it("suppresses the active chat fallback for the selected primary chat", () => {
+    expect(
+      resolveEffectiveNavigationSecondaryTarget({
+        activeChatNavigationSecondaryTarget: { kind: "chats" },
+        activeSessionId: "session-1",
+        navigationSecondarySuppressedSessionId: "session-1",
+        navigationSecondaryTarget: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("lets an explicit secondary target override chat fallback suppression", () => {
+    expect(
+      resolveEffectiveNavigationSecondaryTarget({
+        activeChatNavigationSecondaryTarget: { kind: "chats" },
+        activeSessionId: "session-1",
+        navigationSecondarySuppressedSessionId: "session-1",
+        navigationSecondaryTarget: { kind: "settings" },
+      }),
+    ).toEqual({ kind: "settings" });
+  });
+
+  it("returns to suppressed chat fallback after an explicit target closes", () => {
+    const suppressedSessionId = "session-1";
+
+    expect(
+      resolveEffectiveNavigationSecondaryTarget({
+        activeChatNavigationSecondaryTarget: { kind: "chats" },
+        activeSessionId: suppressedSessionId,
+        navigationSecondarySuppressedSessionId: suppressedSessionId,
+        navigationSecondaryTarget: { kind: "chats", variant: "more" },
+      }),
+    ).toEqual({ kind: "chats", variant: "more" });
+
+    expect(
+      resolveEffectiveNavigationSecondaryTarget({
+        activeChatNavigationSecondaryTarget: { kind: "chats" },
+        activeSessionId: suppressedSessionId,
+        navigationSecondarySuppressedSessionId: suppressedSessionId,
+        navigationSecondaryTarget: null,
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("resolveNavigationPrototypePrimaryCollapsed", () => {
   it("keeps hybrid prototype nav collapsed by default and expands only while primary is hovered", () => {
@@ -55,5 +115,16 @@ describe("resolveNavigationPrototypePrimaryCollapsed", () => {
         prototypeSecondaryOpen: false,
       }),
     ).toBe(true);
+  });
+
+  it("expands rest-collapsed new chat primary nav while hovered", () => {
+    expect(
+      resolveNavigationPrototypePrimaryCollapsed({
+        mode: "hybrid-push-overlay",
+        navigationPrimaryHovered: true,
+        prototypePrimaryRestCollapsed: true,
+        prototypeSecondaryOpen: false,
+      }),
+    ).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   NAVIGATION_REFRESH_EXPERIMENT_ID,
   SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
   SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
@@ -154,6 +155,22 @@ describe("ExperimentsSettings", () => {
         }),
       ),
     ).toBeInTheDocument();
+    const chatsUnderProjectsSwitch = within(
+      navigationExperimentsCard,
+    ).getByRole("switch", {
+      name: i18n.t("experiments.navigationChatsUnderProjects.title", {
+        ns: "settings",
+      }),
+    });
+    expect(chatsUnderProjectsSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).toBeDisabled();
+    expect(
+      screen.getByText(
+        i18n.t("experiments.navigationChatsUnderProjects.description", {
+          ns: "settings",
+        }),
+      ),
+    ).toBeInTheDocument();
     expect(
       within(navigationExperimentsCard).getByRole("switch", {
         name: i18n.t("experiments.sidebarFlatChatList.title", {
@@ -204,6 +221,11 @@ describe("ExperimentsSettings", () => {
         ns: "settings",
       }),
     });
+    const chatsUnderProjectsSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.navigationChatsUnderProjects.title", {
+        ns: "settings",
+      }),
+    });
     const flatChatListSwitch = screen.getByRole("switch", {
       name: i18n.t("experiments.sidebarFlatChatList.title", {
         ns: "settings",
@@ -223,6 +245,8 @@ describe("ExperimentsSettings", () => {
 
     await waitFor(() => {
       expect(navigationRefreshSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).not.toBeDisabled();
       expect(flatChatListSwitch).not.toBeChecked();
       expect(groupChatsByProjectSwitch).not.toBeChecked();
       expect(groupChatsByProjectSwitch).toBeDisabled();
@@ -236,6 +260,8 @@ describe("ExperimentsSettings", () => {
     await user.click(navigationRefreshSwitch);
 
     expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).toBeDisabled();
     expect(flatChatListSwitch).toBeChecked();
     expect(groupChatsByProjectSwitch).not.toBeChecked();
     expect(groupChatsByProjectSwitch).not.toBeDisabled();
@@ -250,6 +276,8 @@ describe("ExperimentsSettings", () => {
 
     expect(navigationRefreshSwitch).toBeChecked();
     await waitFor(() => {
+      expect(chatsUnderProjectsSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).not.toBeDisabled();
       expect(flatChatListSwitch).not.toBeChecked();
       expect(groupChatsByProjectSwitch).not.toBeChecked();
       expect(groupChatsByProjectSwitch).toBeDisabled();
@@ -281,6 +309,11 @@ describe("ExperimentsSettings", () => {
         ns: "settings",
       }),
     });
+    const chatsUnderProjectsSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.navigationChatsUnderProjects.title", {
+        ns: "settings",
+      }),
+    });
     const flatChatListSwitch = screen.getByRole("switch", {
       name: i18n.t("experiments.sidebarFlatChatList.title", {
         ns: "settings",
@@ -296,6 +329,8 @@ describe("ExperimentsSettings", () => {
 
     await waitFor(() => {
       expect(navigationRefreshSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).not.toBeDisabled();
       expect(flatChatListSwitch).not.toBeChecked();
       expect(groupChatsByProjectSwitch).toBeDisabled();
     });
@@ -303,6 +338,8 @@ describe("ExperimentsSettings", () => {
     await user.click(flatChatListSwitch);
 
     expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).toBeDisabled();
     expect(flatChatListSwitch).toBeChecked();
     expect(groupChatsByProjectSwitch).not.toBeChecked();
     expect(groupChatsByProjectSwitch).not.toBeDisabled();
@@ -347,6 +384,52 @@ describe("ExperimentsSettings", () => {
     window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
   });
 
+  it("nests chats under projects under refreshed navigation", async () => {
+    vi.stubEnv("DEV", false);
+    const user = userEvent.setup();
+
+    renderWithProviders(<ExperimentsSettings />);
+
+    const navigationRefreshSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.navigationRefresh.title", {
+        ns: "settings",
+      }),
+    });
+    const chatsUnderProjectsSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.navigationChatsUnderProjects.title", {
+        ns: "settings",
+      }),
+    });
+    const flatChatListSwitch = screen.getByRole("switch", {
+      name: i18n.t("experiments.sidebarFlatChatList.title", {
+        ns: "settings",
+      }),
+    });
+
+    expect(navigationRefreshSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).not.toBeChecked();
+    expect(chatsUnderProjectsSwitch).toBeDisabled();
+    expect(flatChatListSwitch).toBeChecked();
+
+    await user.click(navigationRefreshSwitch);
+
+    await waitFor(() => {
+      expect(navigationRefreshSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).toBeChecked();
+      expect(chatsUnderProjectsSwitch).not.toBeDisabled();
+      expect(flatChatListSwitch).not.toBeChecked();
+    });
+
+    await user.click(chatsUnderProjectsSwitch);
+
+    expect(navigationRefreshSwitch).toBeChecked();
+    expect(chatsUnderProjectsSwitch).not.toBeChecked();
+    expect(flatChatListSwitch).not.toBeChecked();
+    expect(
+      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
+        .experiments[NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID].enabled,
+    ).toBe(false);
+  });
   it("renders dev default copy on a separate line", () => {
     vi.stubEnv("DEV", true);
     renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);

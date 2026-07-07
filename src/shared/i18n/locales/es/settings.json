@@ -210,6 +210,10 @@
       "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
       "title": "Navegación renovada"
     },
+    "navigationChatsUnderProjects": {
+      "description": "Muestra chats recientes debajo de la lista de proyectos, con Ver todo para abrir el panel completo de chats.",
+      "title": "Chats debajo de proyectos"
+    },
     "navigationExperiments": {
       "title": "Experimentos de navegación"
     },

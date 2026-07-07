@@ -338,11 +338,13 @@ export function PaneLayoutFrame({
 }
 
 export function PaneResizeRail<SurfaceId extends string>({
+  dividerClassName,
   onResizeStart,
   surfaceId,
   testId,
   title,
 }: {
+  dividerClassName?: string;
   onResizeStart: (
     surfaceId: SurfaceId,
     event: ReactMouseEvent<HTMLElement>,
@@ -359,7 +361,12 @@ export function PaneResizeRail<SurfaceId extends string>({
       title={title}
       aria-hidden="true"
     >
-      <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover/pane-resize:bg-border" />
+      <div
+        className={cn(
+          "h-8 w-px rounded-full bg-transparent transition-colors group-hover/pane-resize:bg-border",
+          dividerClassName,
+        )}
+      />
     </div>
   );
 }

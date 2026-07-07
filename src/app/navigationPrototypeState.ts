@@ -1,4 +1,30 @@
 import type { NavigationPrototypeMode } from "@/app/views/NavigationPanesView";
+import type { NavigationSecondaryTarget } from "@/app/views/NavigationPanesView";
+
+export function resolveEffectiveNavigationSecondaryTarget({
+  activeChatNavigationSecondaryTarget,
+  activeSessionId,
+  navigationSecondarySuppressedSessionId,
+  navigationSecondaryTarget,
+}: {
+  activeChatNavigationSecondaryTarget: NavigationSecondaryTarget;
+  activeSessionId: string | null;
+  navigationSecondarySuppressedSessionId: string | null;
+  navigationSecondaryTarget: NavigationSecondaryTarget;
+}): NavigationSecondaryTarget {
+  if (navigationSecondaryTarget !== null) {
+    return navigationSecondaryTarget;
+  }
+
+  if (
+    activeSessionId !== null &&
+    navigationSecondarySuppressedSessionId === activeSessionId
+  ) {
+    return null;
+  }
+
+  return activeChatNavigationSecondaryTarget;
+}
 
 export function resolveNavigationPrototypePrimaryCollapsed({
   mode,

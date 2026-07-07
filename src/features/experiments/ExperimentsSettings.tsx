@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import {
   EXPERIMENT_DEFINITIONS,
+  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   NAVIGATION_REFRESH_EXPERIMENT_ID,
   SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
   SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
@@ -20,6 +21,7 @@ import {
 } from "./experimentPreferences";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
+import { Label } from "@/shared/ui/label";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Switch } from "@/shared/ui/switch";
 
@@ -36,6 +38,7 @@ interface RenderExperimentControlsOptions {
 
 const NAVIGATION_EXPERIMENT_IDS = new Set([
   NAVIGATION_REFRESH_EXPERIMENT_ID,
+  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
 ]);
 
@@ -113,10 +116,20 @@ export function ExperimentsSettings({
                 false,
                 registry,
               ),
+              setExperimentEnabled(
+                NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
+                true,
+                registry,
+              ),
               setExperimentEnabled(definition.id, true, registry),
             ].every(Boolean)
           : [
               setExperimentEnabled(definition.id, false, registry),
+              setExperimentEnabled(
+                NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
+                false,
+                registry,
+              ),
               setExperimentEnabled(
                 SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
                 true,
@@ -129,6 +142,11 @@ export function ExperimentsSettings({
           ? [
               setExperimentEnabled(
                 NAVIGATION_REFRESH_EXPERIMENT_ID,
+                false,
+                registry,
+              ),
+              setExperimentEnabled(
+                NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
                 false,
                 registry,
               ),
@@ -145,6 +163,11 @@ export function ExperimentsSettings({
                 ),
                 setExperimentEnabled(
                   NAVIGATION_REFRESH_EXPERIMENT_ID,
+                  true,
+                  registry,
+                ),
+                setExperimentEnabled(
+                  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
                   true,
                   registry,
                 ),
@@ -252,6 +275,64 @@ export function ExperimentsSettings({
     </section>
   );
 
+  const renderExperimentSubsectionToggle = (
+    definition: ExperimentDefinition,
+    { disabled = false }: { disabled?: boolean } = {},
+  ) => {
+    const experiment = experimentsById.get(definition.id);
+    if (!experiment) return null;
+
+    const titleId = `experiment-${definition.id}-title`;
+    const descriptionId = `experiment-${definition.id}-description`;
+    const controlId = `experiment-${definition.id}-toggle`;
+
+    return (
+      <div key={definition.id} className="bg-muted/20">
+        <div className="relative flex items-center justify-between gap-6 py-3 pl-8 pr-4 before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']">
+          <div className="min-w-0 flex-1">
+            <Label
+              id={titleId}
+              htmlFor={controlId}
+              className="text-xs text-muted-foreground"
+            >
+              {t(definition.titleKey)}
+            </Label>
+            <p
+              id={descriptionId}
+              className="mt-1 text-xs text-muted-foreground"
+            >
+              {t(definition.descriptionKey)}
+            </p>
+          </div>
+          <div className="flex shrink-0 justify-end">
+            <Switch
+              id={controlId}
+              checked={experiment.enabled}
+              disabled={disabled}
+              onCheckedChange={(enabled) => {
+                handleExperimentEnabledChange(definition, enabled);
+              }}
+              aria-labelledby={titleId}
+              aria-describedby={descriptionId}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const navigationRefreshDefinition = navigationExperimentDefinitions.find(
+    (definition) => definition.id === NAVIGATION_REFRESH_EXPERIMENT_ID,
+  );
+  const navigationChatsUnderProjectsDefinition =
+    navigationExperimentDefinitions.find(
+      (definition) =>
+        definition.id === NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
+    );
+  const sidebarFlatChatListDefinition = navigationExperimentDefinitions.find(
+    (definition) => definition.id === SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  );
+
   let didRenderNavigationSection = false;
   const experimentCards = visibleRegistry.map((definition) => {
     if (isNavigationExperiment(definition)) {
@@ -272,24 +353,30 @@ export function ExperimentsSettings({
               {t("experiments.navigationExperiments.title")}
             </h4>
           </div>
-          {navigationExperimentDefinitions.map((navigationDefinition) =>
-            renderExperimentControls(
-              navigationDefinition,
-              "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']",
-              {
-                showDefaultLabel:
-                  navigationDefinition.id ===
-                  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-                showResetToAuto: false,
-                configDisabled:
-                  navigationDefinition.id ===
-                    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID &&
-                  isNavigationRefreshEnabled
-                    ? true
-                    : undefined,
-              },
-            ),
-          )}
+          {navigationRefreshDefinition
+            ? renderExperimentControls(
+                navigationRefreshDefinition,
+                "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']",
+                { showResetToAuto: false },
+              )
+            : null}
+          {navigationChatsUnderProjectsDefinition
+            ? renderExperimentSubsectionToggle(
+                navigationChatsUnderProjectsDefinition,
+                { disabled: !isNavigationRefreshEnabled },
+              )
+            : null}
+          {sidebarFlatChatListDefinition
+            ? renderExperimentControls(
+                sidebarFlatChatListDefinition,
+                "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']",
+                {
+                  configDisabled: isNavigationRefreshEnabled ? true : undefined,
+                  showDefaultLabel: true,
+                  showResetToAuto: false,
+                },
+              )
+            : null}
         </section>
       );
     }

@@ -14,6 +14,9 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
+import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import { SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
@@ -30,7 +33,10 @@ import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
 } from "@/shared/runtime-config/schema";
-import { AppShell } from "./AppShell";
+import {
+  AppShell,
+  getPrototypeSecondaryWidthForDockedLayout,
+} from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
@@ -170,17 +176,33 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
   NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX: 230,
   NAV_PROTOTYPE_SECONDARY_WIDTH_PX: 230,
   NavigationPanesView: ({
+    collapsed,
+    detachableSessionListEnabled,
     onNavigate,
     onNewChat,
     onSettingsClick,
     onSettingsSectionChange,
+    prototypeSecondaryTarget,
+    width,
   }: {
+    collapsed?: boolean;
+    detachableSessionListEnabled?: boolean;
     onNavigate?: (view: string) => void;
     onNewChat?: () => void;
     onSettingsClick?: () => void;
     onSettingsSectionChange?: (section: "providers") => void;
+    prototypeSecondaryTarget?: unknown;
+    width?: number;
   }) => (
     <nav aria-label="mock sidebar">
+      <div data-testid="mock-sidebar-collapsed">{String(collapsed)}</div>
+      <div data-testid="mock-sidebar-width">{String(width)}</div>
+      <div data-testid="mock-sidebar-detachable-enabled">
+        {String(detachableSessionListEnabled)}
+      </div>
+      <div data-testid="mock-sidebar-prototype-secondary-target">
+        {JSON.stringify(prototypeSecondaryTarget)}
+      </div>
       <button type="button" onClick={onNewChat}>
         Sidebar new chat
       </button>
@@ -504,6 +526,26 @@ function enableBuilderbotExperiment() {
 }
 
 describe("AppShell global navigation", () => {
+  it("clamps pushed prototype secondary width to available viewport space", () => {
+    expect(
+      getPrototypeSecondaryWidthForDockedLayout({
+        dockedPrimaryWidth: 48,
+        requestedSecondaryWidth: 420,
+        secondaryPush: true,
+        viewportWidth: 1000,
+      }),
+    ).toBe(393);
+
+    expect(
+      getPrototypeSecondaryWidthForDockedLayout({
+        dockedPrimaryWidth: 48,
+        requestedSecondaryWidth: 420,
+        secondaryPush: false,
+        viewportWidth: 1000,
+      }),
+    ).toBe(420);
+  });
+
   beforeEach(() => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
@@ -599,6 +641,66 @@ describe("AppShell global navigation", () => {
         "--project-tint",
       ),
     ).toBe("transparent");
+  });
+
+  it("keeps the default sidebar expanded for empty default-title chats", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID, true);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: DEFAULT_CHAT_TITLE,
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(screen.getByTestId("mock-sidebar-collapsed")).toHaveTextContent(
+      "false",
+    );
+    expect(
+      screen.getByTestId("mock-sidebar-detachable-enabled"),
+    ).toHaveTextContent("true");
+  });
+
+  it("keeps secondary chat target for default-titled chats with messages", async () => {
+    const user = userEvent.setup();
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: DEFAULT_CHAT_TITLE,
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
   });
 
   it("starts general chats with the resolved provider when a stored agent is unavailable", async () => {
