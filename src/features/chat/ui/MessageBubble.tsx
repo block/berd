@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, FileText, FolderClosed } from "lucide-react";
+import { Check, FileText, FolderClosed, ImageIcon } from "lucide-react";
 import { IconRobot } from "@tabler/icons-react";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -17,6 +18,7 @@ import {
 } from "@/shared/ui/icons/ProviderIcons";
 import {
   useTranscriptActiveStreamingProtection,
+  useTranscriptOpenOverlayProtection,
   useTranscriptRowRootAdapter,
   useTranscriptRowStateAdapter,
 } from "@/features/chat/transcript/row-state";
@@ -57,40 +59,270 @@ import type {
 import { Button } from "@/shared/ui/button";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
+import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 
-function MessageAttachmentRow({
-  attachment,
-}: {
+interface MessageAttachmentPreviewItem {
+  key: string;
   attachment: MessageAttachment;
+  attachmentIndex: number;
+  imageSrc: string | null;
+  imageContentIndex?: number;
+}
+
+const EMPTY_MESSAGE_ATTACHMENTS: readonly MessageAttachment[] = [];
+
+function isImageAttachment(attachment: MessageAttachment): boolean {
+  return attachment.mimeType?.toLowerCase().startsWith("image/") ?? false;
+}
+
+function getAttachmentExtension(attachment: MessageAttachment): string {
+  if (attachment.type === "directory") {
+    return "DIR";
+  }
+
+  const trimmedName = attachment.name.trim();
+  const lastDot = trimmedName.lastIndexOf(".");
+  if (lastDot > 0 && lastDot < trimmedName.length - 1) {
+    return trimmedName.slice(lastDot + 1, lastDot + 6).toUpperCase();
+  }
+
+  const subtype = attachment.mimeType?.split("/")[1]?.split(/[;+]/)[0];
+  return subtype ? subtype.slice(0, 5).toUpperCase() : "FILE";
+}
+
+function resolveAttachmentImageSrc(
+  attachment: MessageAttachment,
+  imageContent?: ImageContent,
+): string | null {
+  const contentSrc = imageContent ? resolveImageContentSrc(imageContent) : null;
+  if (contentSrc) {
+    return contentSrc;
+  }
+
+  if (!isImageAttachment(attachment)) {
+    return null;
+  }
+
+  if (attachment.path) {
+    return convertFileSrc(attachment.path, "asset");
+  }
+
+  return attachment.url ?? null;
+}
+
+function buildAttachmentPreviewItems(
+  attachments: readonly MessageAttachment[],
+  content: readonly MessageContent[],
+): MessageAttachmentPreviewItem[] {
+  const imageContentBlocks = content.flatMap((block, contentIndex) =>
+    block.type === "image"
+      ? [{ block: block as ImageContent, contentIndex }]
+      : [],
+  );
+  const imageAttachmentCount = attachments.filter(isImageAttachment).length;
+  const canPairImageContent =
+    imageContentBlocks.length === imageAttachmentCount;
+  let imageContentCursor = 0;
+
+  return attachments.map((attachment, attachmentIndex) => {
+    const imageContent =
+      canPairImageContent && isImageAttachment(attachment)
+        ? imageContentBlocks[imageContentCursor++]
+        : undefined;
+
+    return {
+      key: `${attachment.type}-${attachment.path ?? attachment.url ?? attachment.name}-${attachmentIndex}`,
+      attachment,
+      attachmentIndex,
+      imageSrc: resolveAttachmentImageSrc(attachment, imageContent?.block),
+      ...(imageContent ? { imageContentIndex: imageContent.contentIndex } : {}),
+    };
+  });
+}
+
+function collectAttachedImageContentIndexes(
+  attachmentItems: readonly MessageAttachmentPreviewItem[],
+): Set<number> {
+  return new Set(
+    attachmentItems.flatMap((item) =>
+      item.imageContentIndex == null ? [] : [item.imageContentIndex],
+    ),
+  );
+}
+
+function MessageAttachmentTile({
+  item,
+  onViewImage,
+}: {
+  item: MessageAttachmentPreviewItem;
+  onViewImage: (item: MessageAttachmentPreviewItem) => void;
 }) {
   const { t } = useTranslation("chat");
-  const Icon = attachment.type === "directory" ? FolderClosed : FileText;
-  const canOpen = Boolean(attachment.path);
+  const { attachment, imageSrc } = item;
+  const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
+  const displayedImageSrc =
+    imageSrc && failedImageSrc !== imageSrc ? imageSrc : null;
+  const canOpen = Boolean(
+    displayedImageSrc || attachment.path || attachment.url,
+  );
+  const extension = getAttachmentExtension(attachment);
+  const Icon =
+    attachment.type === "directory"
+      ? FolderClosed
+      : isImageAttachment(attachment)
+        ? ImageIcon
+        : FileText;
 
   return (
     <button
       type="button"
+      data-role="message-attachment-tile"
       onClick={() => {
-        if (!attachment.path) {
+        if (displayedImageSrc) {
+          onViewImage(item);
           return;
         }
-        void openPath(attachment.path);
+        if (attachment.path) {
+          void openPath(attachment.path);
+          return;
+        }
+        if (attachment.url) {
+          void openUrl(attachment.url);
+        }
       }}
       disabled={!canOpen}
       className={cn(
-        "flex max-w-full items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-xs text-foreground",
-        canOpen ? "hover:bg-muted/70" : "opacity-80",
+        "group relative flex size-16 shrink-0 overflow-hidden rounded-xl border border-border/70 bg-background/50 text-left shadow-sm transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        canOpen
+          ? "hover:border-foreground/20 hover:bg-muted/70"
+          : "cursor-default opacity-75",
       )}
       aria-label={
-        canOpen
-          ? t("attachments.open", { name: attachment.name })
-          : attachment.name
+        displayedImageSrc
+          ? t("attachments.viewFullSize", { name: attachment.name })
+          : canOpen
+            ? t("attachments.open", { name: attachment.name })
+            : t("attachments.unavailable", { name: attachment.name })
       }
-      title={attachment.path ?? attachment.name}
+      title={attachment.path ?? attachment.url ?? attachment.name}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="truncate">{attachment.name}</span>
+      {displayedImageSrc ? (
+        <>
+          <img
+            src={displayedImageSrc}
+            alt=""
+            onError={() => setFailedImageSrc(displayedImageSrc)}
+            className="h-full w-full object-cover transition-transform duration-150 group-hover:scale-[1.03]"
+          />
+          <span className="absolute bottom-1 right-1 rounded bg-background/85 px-1 text-[9px] font-medium leading-4 text-foreground shadow-sm backdrop-blur-sm">
+            {extension}
+          </span>
+        </>
+      ) : (
+        <span className="flex h-full w-full flex-col items-center justify-center gap-1 px-1.5 text-center">
+          <Icon className="size-5 text-muted-foreground" aria-hidden="true" />
+          <span className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground">
+            {extension}
+          </span>
+        </span>
+      )}
+      <span className="sr-only">{attachment.name}</span>
     </button>
+  );
+}
+
+function MessageAttachmentGrid({
+  items,
+}: {
+  items: readonly MessageAttachmentPreviewItem[];
+}) {
+  const { t } = useTranslation("chat");
+  const [lightboxImageIndex, setLightboxImageIndex] = useState<number | null>(
+    null,
+  );
+  const imageItems = items.filter((item) => item.imageSrc);
+  const currentLightboxItem =
+    lightboxImageIndex == null
+      ? null
+      : (imageItems[lightboxImageIndex] ?? null);
+
+  useTranscriptOpenOverlayProtection({
+    open: Boolean(currentLightboxItem),
+    overlayKind: "lightbox",
+    overlayId: "attachment-image-lightbox",
+  });
+
+  useEffect(() => {
+    if (imageItems.length === 0) {
+      setLightboxImageIndex(null);
+      return;
+    }
+
+    if (lightboxImageIndex != null && lightboxImageIndex >= imageItems.length) {
+      setLightboxImageIndex(imageItems.length - 1);
+    }
+  }, [imageItems.length, lightboxImageIndex]);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      <fieldset
+        data-role="message-attachments"
+        aria-label={t("attachments.groupLabel", { count: items.length })}
+        className="m-0 mb-2 flex min-w-0 flex-wrap gap-2 border-0 p-0"
+      >
+        {items.map((item) => (
+          <MessageAttachmentTile
+            key={item.key}
+            item={item}
+            onViewImage={(selectedItem) => {
+              const imageIndex = imageItems.findIndex(
+                (imageItem) => imageItem.key === selectedItem.key,
+              );
+              setLightboxImageIndex(imageIndex >= 0 ? imageIndex : null);
+            }}
+          />
+        ))}
+      </fieldset>
+      <ImageLightbox
+        src={currentLightboxItem?.imageSrc ?? ""}
+        alt={
+          currentLightboxItem
+            ? t("attachments.previewAlt", {
+                name: currentLightboxItem.attachment.name,
+              })
+            : t("attachments.imagePreviewTitle")
+        }
+        open={Boolean(currentLightboxItem)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLightboxImageIndex(null);
+          }
+        }}
+        onPrevious={
+          imageItems.length > 1
+            ? () =>
+                setLightboxImageIndex((current) =>
+                  current == null
+                    ? current
+                    : (current - 1 + imageItems.length) % imageItems.length,
+                )
+            : undefined
+        }
+        onNext={
+          imageItems.length > 1
+            ? () =>
+                setLightboxImageIndex((current) =>
+                  current == null ? current : (current + 1) % imageItems.length,
+                )
+            : undefined
+        }
+      />
+    </>
   );
 }
 
@@ -519,6 +751,30 @@ export const MessageBubble = memo(function MessageBubble({
     );
   }, [isCopyConfirmed, updateRowState]);
 
+  const isUser = role === "user";
+  const messageAttachments =
+    message.metadata?.attachments ?? EMPTY_MESSAGE_ATTACHMENTS;
+  const attachmentPreviewItems = useMemo(
+    () =>
+      isUser ? buildAttachmentPreviewItems(messageAttachments, content) : [],
+    [isUser, messageAttachments, content],
+  );
+  const attachedImageContentIndexes = useMemo(
+    () => collectAttachedImageContentIndexes(attachmentPreviewItems),
+    [attachmentPreviewItems],
+  );
+  const visibleContent = useMemo(
+    () =>
+      attachedImageContentIndexes.size === 0
+        ? content
+        : content.filter(
+            (block, index) =>
+              block.type !== "image" || !attachedImageContentIndexes.has(index),
+          ),
+    [attachedImageContentIndexes, content],
+  );
+  const messageChips = message.metadata?.chips ?? [];
+
   // Skip empty user bubbles (all blocks filtered as assistant-only).
   if (role === "user" && content.length === 0) return null;
 
@@ -553,7 +809,6 @@ export const MessageBubble = memo(function MessageBubble({
       </div>
     );
   }
-  const isUser = role === "user";
   const assistantProviderId = message.metadata?.providerId;
   const assistantProviderName = assistantProviderId
     ? (getCatalogEntryFromEntries(catalogEntries, assistantProviderId)
@@ -600,8 +855,6 @@ export const MessageBubble = memo(function MessageBubble({
   const isSteeredMessage = isUser && message.metadata?.delivery === "steer";
   const isBerdctlCrossSessionMessage =
     isUser && message.metadata?.origin === "berdctl_cross_session";
-  const messageAttachments = message.metadata?.attachments ?? [];
-  const messageChips = message.metadata?.chips ?? [];
   const timestamp = (
     <span
       data-role="message-timestamp"
@@ -737,17 +990,10 @@ export const MessageBubble = memo(function MessageBubble({
               ))}
             </div>
           )}
-          {messageAttachments.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {messageAttachments.map((attachment) => (
-                <MessageAttachmentRow
-                  key={`${attachment.type}-${attachment.path ?? attachment.name}`}
-                  attachment={attachment}
-                />
-              ))}
-            </div>
+          {attachmentPreviewItems.length > 0 && (
+            <MessageAttachmentGrid items={attachmentPreviewItems} />
           )}
-          {groupContentSections(content).map((section, sectionIdx) => {
+          {groupContentSections(visibleContent).map((section, sectionIdx) => {
             if (section.type === "toolChain") {
               const toolItems = section.items as ToolChainItem[];
               return (

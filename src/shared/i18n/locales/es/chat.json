@@ -4,9 +4,14 @@
     "chooseFilesDialogTitle": "Elegir archivos para adjuntar",
     "chooseFoldersDialogTitle": "Elegir carpetas para adjuntar",
     "dropToAttach": "Suelta archivos o carpetas para adjuntarlos",
+    "groupLabel_one": "1 adjunto",
+    "groupLabel_other": "{{count}} adjuntos",
     "open": "Abrir adjunto {{name}}",
+    "previewAlt": "Vista previa de {{name}}",
     "remove": "Eliminar adjunto",
-    "view": "Ver adjunto {{index}}"
+    "unavailable": "El adjunto {{name}} no está disponible",
+    "view": "Ver adjunto {{index}}",
+    "viewFullSize": "Ver adjunto {{name}} en tamaño completo"
   },
   "agentToolsTip": {
     "connect": "Conectar",

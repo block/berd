@@ -4,10 +4,15 @@
     "chooseFilesDialogTitle": "Choose files to attach",
     "chooseFoldersDialogTitle": "Choose folders to attach",
     "dropToAttach": "Drop files or folders",
+    "groupLabel_one": "1 attachment",
+    "groupLabel_other": "{{count}} attachments",
     "imagePreviewTitle": "Image preview",
     "open": "Open attachment {{name}}",
+    "previewAlt": "Preview of {{name}}",
     "remove": "Remove attachment",
-    "view": "View attachment {{index}}"
+    "unavailable": "Attachment {{name}} is unavailable",
+    "view": "View attachment {{index}}",
+    "viewFullSize": "View full-size attachment {{name}}"
   },
   "agentToolsTip": {
     "connect": "Connect",

@@ -21,7 +21,7 @@ import type {
 } from "@/shared/types/messages";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 const mockPathExists = vi.hoisted(() =>
   vi.fn<(path: string) => Promise<boolean>>(),
 );
@@ -87,8 +87,14 @@ vi.mock("@/shared/api/system", async (importOriginal) => {
   };
 });
 
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string, scheme?: string) =>
+    `${scheme ?? "asset"}://${path}`,
+}));
+
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: vi.fn(),
+  openUrl: vi.fn(),
 }));
 
 function userMessage(text: string, overrides: Partial<Message> = {}): Message {
@@ -130,6 +136,7 @@ describe("MessageBubble", () => {
     useAgentStore.setState({ personas: [] });
     useProviderCatalogStore.getState().setEntries(providerCatalogEntries);
     vi.mocked(openPath).mockClear();
+    vi.mocked(openUrl).mockClear();
     mockPathExists.mockReset();
     mockPathExists.mockResolvedValue(false);
     mockWriteText.mockClear();
@@ -818,10 +825,10 @@ describe("MessageBubble", () => {
     expect(screen.getByText(/readfile/i)).toBeInTheDocument();
   });
 
-  it("renders metadata attachments and opens them on click", async () => {
+  it("renders metadata attachments as uniform tiles and opens files on click", async () => {
     const user = userEvent.setup();
 
-    render(
+    const { container } = render(
       <MessageBubble
         message={userMessage("See attached", {
           metadata: {
@@ -842,6 +849,10 @@ describe("MessageBubble", () => {
       />,
     );
 
+    expect(
+      container.querySelectorAll('[data-role="message-attachment-tile"]'),
+    ).toHaveLength(2);
+
     await user.click(
       screen.getByRole("button", { name: /open attachment report\.pdf/i }),
     );
@@ -849,6 +860,79 @@ describe("MessageBubble", () => {
     expect(
       screen.getByRole("button", { name: /open attachment screenshots/i }),
     ).toBeInTheDocument();
+  });
+
+  it("deduplicates attached image blocks into a thumbnail that opens a preview", async () => {
+    const user = userEvent.setup();
+
+    const { container } = render(
+      <MessageBubble
+        message={userMessage("See attached", {
+          content: [
+            { type: "text", text: "See attached" },
+            { type: "image", data: "abc123", mimeType: "image/png" },
+          ],
+          metadata: {
+            attachments: [
+              {
+                type: "file",
+                name: "diagram.png",
+                path: "/Users/test/diagram.png",
+                mimeType: "image/png",
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: /view full-size attachment diagram\.png/i,
+      }),
+    ).toBeInTheDocument();
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,abc123",
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /view full-size attachment diagram\.png/i,
+      }),
+    );
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByAltText("Preview of diagram.png")).toHaveLength(1);
+  });
+
+  it("opens URL attachments from attachment tiles", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MessageBubble
+        message={userMessage("See attached", {
+          metadata: {
+            attachments: [
+              {
+                type: "url",
+                name: "report.csv",
+                url: "https://example.com/report.csv",
+                mimeType: "text/csv",
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /open attachment report\.csv/i }),
+    );
+
+    expect(vi.mocked(openUrl)).toHaveBeenCalledWith(
+      "https://example.com/report.csv",
+    );
   });
 
   it("renders standalone tool responses without dropping surrounding text", () => {
