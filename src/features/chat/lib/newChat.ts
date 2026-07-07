@@ -5,6 +5,9 @@ import { isDefaultChatTitle } from "./sessionTitle";
 interface NewChatRequest {
   title: string;
   projectId?: string;
+  providerId?: string;
+  modelId?: string;
+  reasoningEffortValue?: string;
 }
 
 interface FindExistingDraftArgs {
@@ -20,7 +23,13 @@ function isMatchingContext(
   session: ChatSession,
   request: Omit<NewChatRequest, "title">,
 ): boolean {
-  return session.projectId === request.projectId;
+  return (
+    session.projectId === request.projectId &&
+    (!request.providerId || session.providerId === request.providerId) &&
+    (!request.modelId || session.modelId === request.modelId) &&
+    (!request.reasoningEffortValue ||
+      session.reasoningEffort?.currentValue === request.reasoningEffortValue)
+  );
 }
 
 function sessionHasTerminal(

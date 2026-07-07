@@ -295,6 +295,7 @@
   },
   "globalPill": {
     "ariaLabel": "Quick compose",
+    "expand": "Expand to full chat",
     "placeholder": "Start a conversation"
   },
   "emptyState": {

@@ -879,6 +879,152 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("expands with the current prompt, attachments, agent, project, and skills", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn();
+    setPersonas();
+    renderGlobalComposer(vi.fn(), {
+      onExpand,
+      starterRequest: {
+        id: 1,
+        personaId: "persona-1",
+        projectId: "project-1",
+        skill: {
+          id: "skill-1",
+          name: "code-review",
+        },
+      },
+    });
+    mockOpenDialog.mockResolvedValue("/Users/test/brief.md");
+    mockInspectAttachmentPaths.mockResolvedValue([
+      {
+        name: "brief.md",
+        path: "/Users/test/brief.md",
+        kind: "file",
+        mimeType: "text/markdown",
+      },
+    ]);
+
+    await user.type(screen.getByRole("textbox"), "Review this");
+    await user.click(
+      screen.getByRole("button", { name: "Choose files to attach" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("brief.md")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Expand to full chat" }),
+    );
+
+    expect(onExpand).toHaveBeenCalledWith({
+      text: "Review this",
+      selectedSkills: [
+        expect.objectContaining({
+          id: "skill-1",
+          name: "code-review",
+        }),
+      ],
+      options: expect.objectContaining({
+        projectId: "project-1",
+        personaId: "persona-1",
+        attachments: [
+          expect.objectContaining({
+            kind: "file",
+            name: "brief.md",
+            path: "/Users/test/brief.md",
+          }),
+        ],
+      }),
+    });
+  });
+
+  it("keeps the composer focused when expanding an empty focused draft", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn();
+    renderGlobalComposer(vi.fn(), { onExpand });
+
+    const textbox = screen.getByRole("textbox");
+    await user.click(textbox);
+    expect(textbox).toHaveFocus();
+
+    await user.click(
+      screen.getByRole("button", { name: "Expand to full chat" }),
+    );
+
+    expect(onExpand).toHaveBeenCalledWith({
+      text: "",
+      selectedSkills: [],
+      options: undefined,
+    });
+    expect(textbox).toHaveFocus();
+  });
+
+  it("keeps the draft when expand is rejected", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn().mockResolvedValue(false);
+    renderGlobalComposer(vi.fn(), { onExpand });
+
+    const textbox = screen.getByRole("textbox");
+    await user.type(textbox, "Keep this draft");
+    await user.click(
+      screen.getByRole("button", { name: "Expand to full chat" }),
+    );
+
+    await waitFor(() => {
+      expect(onExpand).toHaveBeenCalled();
+    });
+    expect(textbox).toHaveValue("Keep this draft");
+  });
+
+  it("revokes pasted image preview URLs after accepted expand", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn().mockResolvedValue(true);
+    renderGlobalComposer(vi.fn(), { onExpand });
+    const textbox = screen.getByRole("textbox");
+    const pastedImage = new File(["image"], "pasted.png", {
+      type: "image/png",
+    });
+
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        items: [
+          {
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => pastedImage,
+          },
+        ],
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByAltText("Attachment 1")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Expand to full chat" }),
+    );
+
+    await waitFor(() => {
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview");
+    });
+    expect(onExpand).toHaveBeenCalledWith({
+      text: "",
+      selectedSkills: [],
+      options: {
+        attachments: [
+          expect.objectContaining({
+            kind: "image",
+            name: "pasted.png",
+            previewUrl: "data:image/png;base64,base64:pasted.png",
+          }),
+        ],
+      },
+    });
+  });
+
   it("turns pasted image files into image attachments", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer();

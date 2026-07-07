@@ -257,6 +257,7 @@ interface ChatStoreState {
   draftsBySession: Record<string, string>;
   nonEmptyDraftSessionIds: Set<string>;
   skillDraftsBySession: Record<string, ChatSkillDraft[]>;
+  draftAttachmentsBySession: Record<string, ChatAttachmentDraft[]>;
   activeSessionId: string | null;
   recentMessageSessionIds: string[];
   isViewingActiveSession: boolean;
@@ -320,6 +321,11 @@ interface ChatStoreActions {
   clearDraft: (sessionId: string) => void;
   setSkillDrafts: (sessionId: string, skills: ChatSkillDraft[]) => void;
   clearSkillDrafts: (sessionId: string) => void;
+  setDraftAttachments: (
+    sessionId: string,
+    attachments: ChatAttachmentDraft[],
+  ) => void;
+  clearDraftAttachments: (sessionId: string) => void;
   setSessionLoading: (sessionId: string, loading: boolean) => void;
   setScrollTargetMessage: (
     sessionId: string,
@@ -346,6 +352,7 @@ const createChatStore: StateCreator<
   draftsBySession: cachedDrafts,
   nonEmptyDraftSessionIds: buildNonEmptyDraftSessionIds(cachedDrafts),
   skillDraftsBySession: {},
+  draftAttachmentsBySession: {},
   activeSessionId: null,
   recentMessageSessionIds: [],
   isViewingActiveSession: false,
@@ -1120,6 +1127,27 @@ const createChatStore: StateCreator<
       return { skillDraftsBySession: rest };
     }),
 
+  setDraftAttachments: (sessionId, attachments) =>
+    set((state) => {
+      if (attachments.length === 0) {
+        const { [sessionId]: _, ...rest } = state.draftAttachmentsBySession;
+        return { draftAttachmentsBySession: rest };
+      }
+
+      return {
+        draftAttachmentsBySession: {
+          ...state.draftAttachmentsBySession,
+          [sessionId]: attachments,
+        },
+      };
+    }),
+
+  clearDraftAttachments: (sessionId) =>
+    set((state) => {
+      const { [sessionId]: _, ...rest } = state.draftAttachmentsBySession;
+      return { draftAttachmentsBySession: rest };
+    }),
+
   // Session loading (replay)
   setSessionLoading: (sessionId, loading) =>
     set((state) => {
@@ -1171,6 +1199,10 @@ const createChatStore: StateCreator<
       }
       const { [draftSessionId]: skillDrafts, ...remainingSkillDrafts } =
         state.skillDraftsBySession;
+      const {
+        [draftSessionId]: draftAttachments,
+        ...remainingDraftAttachments
+      } = state.draftAttachmentsBySession;
       const { [draftSessionId]: scrollTarget, ...remainingTargets } =
         state.scrollTargetMessageBySession;
       const loadingSessionIds = new Set(state.loadingSessionIds);
@@ -1197,6 +1229,12 @@ const createChatStore: StateCreator<
         skillDraftsBySession: skillDrafts
           ? { ...remainingSkillDrafts, [backendSessionId]: skillDrafts }
           : remainingSkillDrafts,
+        draftAttachmentsBySession: draftAttachments
+          ? {
+              ...remainingDraftAttachments,
+              [backendSessionId]: draftAttachments,
+            }
+          : remainingDraftAttachments,
         scrollTargetMessageBySession: scrollTarget
           ? { ...remainingTargets, [backendSessionId]: scrollTarget }
           : remainingTargets,
@@ -1236,6 +1274,11 @@ const createChatStore: StateCreator<
       const { [sessionId]: removedSkillDrafts, ...remainingSkillDrafts } =
         state.skillDraftsBySession;
       void removedSkillDrafts;
+      const {
+        [sessionId]: removedDraftAttachments,
+        ...remainingDraftAttachments
+      } = state.draftAttachmentsBySession;
+      void removedDraftAttachments;
       const { [sessionId]: removedTarget, ...remainingTargets } =
         state.scrollTargetMessageBySession;
       void removedTarget;
@@ -1246,6 +1289,7 @@ const createChatStore: StateCreator<
         draftsBySession: remainingDrafts,
         nonEmptyDraftSessionIds,
         skillDraftsBySession: remainingSkillDrafts,
+        draftAttachmentsBySession: remainingDraftAttachments,
         scrollTargetMessageBySession: remainingTargets,
         activeSessionId:
           state.activeSessionId === sessionId ? null : state.activeSessionId,

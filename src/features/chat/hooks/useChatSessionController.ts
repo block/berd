@@ -73,6 +73,7 @@ interface UseChatSessionControllerOptions {
 const DRAFT_STORE_UPDATE_DEBOUNCE_MS = 300;
 const PENDING_HOME_SESSION_ID = "__home_pending__";
 const EMPTY_SKILL_DRAFTS: ChatSkillDraft[] = [];
+const EMPTY_ATTACHMENT_DRAFTS: ChatAttachmentDraft[] = [];
 const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
 const STEERING_SUPPORTED_AGENT_ID = "goose";
 
@@ -1947,6 +1948,11 @@ export function useChatSessionController({
       ? (s.skillDraftsBySession[sessionId] ?? EMPTY_SKILL_DRAFTS)
       : EMPTY_SKILL_DRAFTS,
   );
+  const sessionDraftAttachments = useChatStore((s) =>
+    sessionId
+      ? (s.draftAttachmentsBySession[sessionId] ?? EMPTY_ATTACHMENT_DRAFTS)
+      : EMPTY_ATTACHMENT_DRAFTS,
+  );
   const draftValue = sessionId ? sessionDraftValue : pendingDraftValue;
   const storedSelectedSkills = sessionId
     ? sessionSkillDrafts
@@ -2019,6 +2025,9 @@ export function useChatSessionController({
     },
     [session?.intent, stateSessionId],
   );
+  const handleInitialDraftAttachmentsConsumed = useCallback(() => {
+    useChatStore.getState().clearDraftAttachments(stateSessionId);
+  }, [stateSessionId]);
 
   useEffect(() => {
     if (
@@ -2275,6 +2284,8 @@ export function useChatSessionController({
     steerQueuedMessage,
     draftValue,
     handleDraftChange,
+    draftAttachments: sessionDraftAttachments,
+    handleInitialDraftAttachmentsConsumed,
     selectedSkills,
     handleSkillsChange,
     scrollTarget,

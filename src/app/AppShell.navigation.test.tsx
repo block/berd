@@ -548,6 +548,9 @@ describe("AppShell global navigation", () => {
       messagesBySession: {},
       sessionStateById: {},
       draftsBySession: {},
+      nonEmptyDraftSessionIds: new Set(),
+      skillDraftsBySession: {},
+      draftAttachmentsBySession: {},
       queuedMessageBySession: {},
       scrollTargetMessageBySession: {},
       activeSessionId: null,
@@ -2479,6 +2482,82 @@ describe("AppShell global navigation", () => {
       expect(screen.getByText("Project One")).toBeInTheDocument();
     });
     expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("expands the Home composer into a full chat with the current draft context", async () => {
+    useAgentStore.setState({
+      selectedProvider: "goose",
+      providers: [{ id: "goose", label: "Goose" }],
+      personas: [
+        {
+          id: "persona-resolves",
+          displayName: "Reviewer",
+          systemPrompt: "Review code.",
+          provider: "goose",
+          model: "goose-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-1",
+          path: "/tmp/project.yaml",
+          name: "Project One",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "",
+          workingDirs: ["/workspace/project"],
+          useWorktrees: false,
+          order: 0,
+          archivedAt: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: null,
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer agent" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer project" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Tag home composer skill" }),
+    );
+
+    const textbox = screen.getByPlaceholderText("Start a conversation");
+    await user.type(textbox, "expand this");
+    await user.click(
+      screen.getByRole("button", { name: "Expand to full chat" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+        id: "created-session",
+        projectId: "project-1",
+        personaId: "persona-resolves",
+        modelId: "goose-model",
+      });
+      expect(useChatStore.getState().draftsBySession).toMatchObject({
+        "created-session": "expand this",
+      });
+      expect(useChatStore.getState().skillDraftsBySession).toMatchObject({
+        "created-session": [
+          expect.objectContaining({
+            id: "global:/Users/test/.agents/skills/code-review/SKILL.md",
+            name: "code-review",
+          }),
+        ],
+      });
+    });
   });
 
   it("applies later Home starters after consuming the previous starter request", async () => {

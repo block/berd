@@ -43,6 +43,7 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import {
   type ChatSession,
+  type ChatSessionReasoningEffortConfig,
   SessionNotFoundError,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
@@ -135,6 +136,7 @@ import { SessionQuickSwitcher } from "@/features/sessions/ui/SessionQuickSwitche
 import { useForkSession } from "@/features/sessions/hooks/useForkSession";
 import {
   GlobalComposerPill,
+  type GlobalComposerExpandPayload,
   type GlobalComposerHandoffRect,
   type GlobalComposerModelSelection,
   type GlobalComposerStarterRequest,
@@ -202,6 +204,12 @@ type ResolvedSessionModelPreference = Awaited<
   ReturnType<typeof resolveSupportedSessionModelPreference>
 >;
 type MaybePromise<T> = T | Promise<T>;
+type DraftSessionCreationReady = {
+  backendSessionId: string;
+  configOptionsSnapshot: Awaited<
+    ReturnType<typeof acpCreateSession>
+  >["configOptionsSnapshot"];
+};
 
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const PINNED_CHAT_HYDRATION_CONCURRENCY = 5;
@@ -270,6 +278,88 @@ function resolveLiveSessionId(sessionId: string): string | null {
         candidate.id === sessionId || candidate.clientSessionId === sessionId,
     );
   return session && !session.archivedAt ? session.id : null;
+}
+
+function readSessionReasoningEffort(
+  sessionId: string,
+): ChatSessionReasoningEffortConfig | undefined {
+  return useChatSessionStore.getState().getSession(sessionId)?.reasoningEffort;
+}
+
+function patchSessionReasoningEffort(
+  sessionId: string,
+  reasoningEffort: ChatSessionReasoningEffortConfig,
+) {
+  useChatSessionStore.getState().patchSession(sessionId, { reasoningEffort });
+}
+
+async function applyReasoningEffortToSession(
+  sessionId: string,
+  reasoningEffort: NonNullable<GlobalComposeOptions["reasoningEffort"]>,
+  options: {
+    currentReasoningEffort?: ChatSessionReasoningEffortConfig;
+    patchSessionId?: string;
+  } = {},
+) {
+  const currentReasoningEffort =
+    options.currentReasoningEffort ?? readSessionReasoningEffort(sessionId);
+  if (!currentReasoningEffort) {
+    return;
+  }
+
+  const patchSessionId = options.patchSessionId ?? sessionId;
+  const optimisticReasoningEffort =
+    currentReasoningEffort.configId === reasoningEffort.configId
+      ? {
+          ...currentReasoningEffort,
+          currentValue: reasoningEffort.value,
+        }
+      : currentReasoningEffort;
+  patchSessionReasoningEffort(patchSessionId, optimisticReasoningEffort);
+
+  try {
+    const configOptionsSnapshot = await acpSetSessionConfigOption(
+      sessionId,
+      reasoningEffort.configId,
+      reasoningEffort.value,
+    );
+    if (configOptionsSnapshot.reasoningEffort) {
+      patchSessionReasoningEffort(
+        patchSessionId,
+        configOptionsSnapshot.reasoningEffort,
+      );
+    }
+  } catch (error) {
+    patchSessionReasoningEffort(patchSessionId, currentReasoningEffort);
+    throw error;
+  }
+}
+
+function applyReasoningEffortAfterDraftCreation(
+  draftSessionId: string,
+  reasoningEffort: GlobalComposeOptions["reasoningEffort"] | undefined,
+): ((result: DraftSessionCreationReady) => Promise<void>) | undefined {
+  if (!reasoningEffort) {
+    return undefined;
+  }
+
+  return async ({ backendSessionId, configOptionsSnapshot }) => {
+    if (!configOptionsSnapshot?.reasoningEffort) {
+      return;
+    }
+
+    try {
+      await applyReasoningEffortToSession(backendSessionId, reasoningEffort, {
+        currentReasoningEffort: configOptionsSnapshot.reasoningEffort,
+        patchSessionId: draftSessionId,
+      });
+    } catch (error) {
+      console.error(
+        "Failed to apply reasoning effort during draft session creation:",
+        error,
+      );
+    }
+  };
 }
 
 function prefersReducedMotion(): boolean {
@@ -1355,11 +1445,13 @@ export function AppShell({
       sessionModelPreference,
       workingDir,
       projectId,
+      onReady,
     }: {
       session: ChatSession;
       sessionModelPreference: MaybePromise<ResolvedSessionModelPreference>;
       workingDir: MaybePromise<string>;
       projectId?: string;
+      onReady?: (result: DraftSessionCreationReady) => Promise<void> | void;
     }) => {
       void Promise.all([
         Promise.resolve(sessionModelPreference),
@@ -1383,7 +1475,7 @@ export function AppShell({
           })),
         )
         .then(
-          ({
+          async ({
             sessionId,
             configOptionsSnapshot,
             sessionModelPreference,
@@ -1394,16 +1486,46 @@ export function AppShell({
             if (!latestSession || latestSession.archivedAt) {
               return;
             }
+            let resolvedConfigOptionsSnapshot = configOptionsSnapshot;
+            if (onReady) {
+              await onReady({
+                backendSessionId: sessionId,
+                configOptionsSnapshot,
+              });
+              const pendingReasoningEffort = useChatSessionStore
+                .getState()
+                .getSession(session.id)?.reasoningEffort;
+              if (pendingReasoningEffort) {
+                resolvedConfigOptionsSnapshot = {
+                  ...configOptionsSnapshot,
+                  reasoningEffort: pendingReasoningEffort,
+                };
+              }
+            }
+
+            const sessionStoreAfterReady = useChatSessionStore.getState();
+            const latestSessionAfterReady = sessionStoreAfterReady.getSession(
+              session.id,
+            );
+            if (
+              !latestSessionAfterReady ||
+              latestSessionAfterReady.archivedAt
+            ) {
+              return;
+            }
             const shouldRemainActive =
-              sessionStore.activeSessionId === session.id;
+              sessionStoreAfterReady.activeSessionId === session.id;
             promoteChatSessionId(session.id, sessionId);
             promoteDraftSession(session.id, sessionId, {
               providerId: sessionModelPreference.providerId,
               modelId: sessionModelPreference.modelId,
               modelName: sessionModelPreference.modelName,
               workingDir,
-              ...(configOptionsSnapshot?.reasoningEffort
-                ? { reasoningEffort: configOptionsSnapshot.reasoningEffort }
+              ...(resolvedConfigOptionsSnapshot?.reasoningEffort
+                ? {
+                    reasoningEffort:
+                      resolvedConfigOptionsSnapshot.reasoningEffort,
+                  }
                 : {}),
             });
             useHomeWidgetStore
@@ -1582,6 +1704,7 @@ export function AppShell({
         providerId?: string;
         modelId?: string;
         modelName?: string;
+        reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
       } = {},
     ) => {
       const shouldActivate = options.activate !== false;
@@ -1617,6 +1740,9 @@ export function AppShell({
         request: {
           title,
           projectId: project?.id,
+          providerId: sessionModelPreference.providerId,
+          modelId: sessionModelPreference.modelId,
+          reasoningEffortValue: options.reasoningEffort?.value,
         },
       });
 
@@ -1668,6 +1794,10 @@ export function AppShell({
         sessionModelPreference,
         workingDir: resolveSessionCwd(project),
         projectId: project?.id,
+        onReady: applyReasoningEffortAfterDraftCreation(
+          session.id,
+          options.reasoningEffort,
+        ),
       });
       return session;
     },
@@ -1781,6 +1911,7 @@ export function AppShell({
         modelId?: string;
         modelName?: string;
         reuseExistingDraft?: boolean;
+        reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
       } = {},
     ) => {
       const tStart = performance.now();
@@ -1804,6 +1935,9 @@ export function AppShell({
               request: {
                 title,
                 projectId: project.id,
+                providerId,
+                modelId: options.modelId,
+                reasoningEffortValue: options.reasoningEffort?.value,
               },
             });
 
@@ -1846,6 +1980,10 @@ export function AppShell({
         sessionModelPreference,
         workingDir: resolveSessionCwd(project),
         projectId: project.id,
+        onReady: applyReasoningEffortAfterDraftCreation(
+          session.id,
+          options.reasoningEffort,
+        ),
       });
       return session;
     },
@@ -1866,6 +2004,7 @@ export function AppShell({
         providerId?: string;
         modelId?: string;
         modelName?: string;
+        reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
       } = {},
     ) => {
       const tStart = performance.now();
@@ -1884,6 +2023,9 @@ export function AppShell({
         request: {
           title,
           projectId: project?.id,
+          providerId,
+          modelId: options.modelId,
+          reasoningEffortValue: options.reasoningEffort?.value,
         },
       });
 
@@ -1920,6 +2062,10 @@ export function AppShell({
         sessionModelPreference,
         workingDir: resolveSessionCwd(project),
         projectId: project?.id,
+        onReady: applyReasoningEffortAfterDraftCreation(
+          session.id,
+          options.reasoningEffort,
+        ),
       });
       return session;
     },
@@ -2218,6 +2364,7 @@ export function AppShell({
         providerId: options?.providerId,
         modelId: options?.modelId,
         modelName: options?.modelName,
+        reasoningEffort: options?.reasoningEffort,
       };
       const enqueueMessage = async (session: ChatSession) => {
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
@@ -2238,10 +2385,9 @@ export function AppShell({
         }
         if (options?.reasoningEffort) {
           try {
-            await acpSetSessionConfigOption(
+            await applyReasoningEffortToSession(
               sessionId,
-              options.reasoningEffort.configId,
-              options.reasoningEffort.value,
+              options.reasoningEffort,
             );
           } catch (error) {
             console.error(
@@ -2313,6 +2459,98 @@ export function AppShell({
       patchSession,
       projects,
       guardAppNavigation,
+      resetGlobalComposerTransition,
+    ],
+  );
+
+  const handleGlobalComposerExpand = useCallback(
+    (payload: GlobalComposerExpandPayload): Promise<boolean> => {
+      const options = payload.options;
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
+      const chatOptions = {
+        providerId: options?.providerId,
+        modelId: options?.modelId,
+        modelName: options?.modelName,
+        reasoningEffort: options?.reasoningEffort,
+      };
+
+      const shouldDismissCenteredComposer =
+        globalComposerPlacement === "centered";
+
+      const openExpandedDraft = async () => {
+        const session = project
+          ? await createNewProjectDraft(
+              DEFAULT_CHAT_TITLE,
+              project,
+              chatOptions,
+            )
+          : await createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
+        const sessionId = resolveLiveSessionId(session.id) ?? session.id;
+
+        if (options?.providerId || options?.modelId || options?.personaId) {
+          patchSession(sessionId, {
+            ...(options.providerId ? { providerId: options.providerId } : {}),
+            ...(options.modelId
+              ? {
+                  modelId: options.modelId,
+                  modelName: options.modelName ?? options.modelId,
+                }
+              : {}),
+            ...(options.personaId ? { personaId: options.personaId } : {}),
+          });
+        }
+
+        if (options?.reasoningEffort) {
+          try {
+            await applyReasoningEffortToSession(
+              sessionId,
+              options.reasoningEffort,
+            );
+          } catch (error) {
+            console.error(
+              "Failed to apply reasoning effort from expanded global composer:",
+              error,
+            );
+          }
+        }
+
+        const chatState = useChatStore.getState();
+        chatState.setDraft(sessionId, payload.text);
+        chatState.setSkillDrafts(sessionId, payload.selectedSkills);
+        chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
+
+        if (shouldDismissCenteredComposer) {
+          resetGlobalComposerTransition();
+        }
+      };
+
+      return new Promise<boolean>((resolve) => {
+        guardAppNavigation(
+          () => {
+            void openExpandedDraft()
+              .then(() => {
+                resolve(true);
+              })
+              .catch((error) => {
+                console.error("Failed to expand global composer:", error);
+                resolve(false);
+              });
+          },
+          () => {
+            resolve(false);
+          },
+        );
+      });
+    },
+    [
+      createNewProjectDraft,
+      createNewTab,
+      guardAppNavigation,
+      globalComposerPlacement,
+      patchSession,
+      projects,
       resetGlobalComposerTransition,
     ],
   );
@@ -3766,6 +4004,7 @@ export function AppShell({
               <GlobalComposerPill
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}
+                onExpand={handleGlobalComposerExpand}
                 onDismiss={dismissCenteredGlobalComposer}
                 onHandoffStart={handleGlobalComposerHandoffStart}
                 placement={globalComposerPlacement}

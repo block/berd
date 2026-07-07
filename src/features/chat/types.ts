@@ -143,6 +143,8 @@ export interface ChatInputControls {
 export interface ChatInputProps {
   composerActions: ChatInputComposerActions;
   initialValue?: string;
+  initialAttachments?: ChatAttachmentDraft[];
+  onInitialAttachmentsConsumed?: () => void;
   placeholder?: string;
   onDraftChange?: (text: string) => void;
   selectedSkills?: ChatSkillDraft[];

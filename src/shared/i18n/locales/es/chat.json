@@ -294,6 +294,7 @@
   },
   "globalPill": {
     "ariaLabel": "Redacción rápida",
+    "expand": "Expandir a chat completo",
     "placeholder": "Inicia una conversación"
   },
   "emptyState": {

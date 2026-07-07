@@ -42,6 +42,7 @@ import {
   logReasoningEffortInfo,
   reasoningEffortConfigLogFields,
 } from "@/shared/lib/reasoningEffortDiagnostics";
+import { Button } from "@/shared/ui/button";
 import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
@@ -61,6 +62,12 @@ export interface GlobalComposeOptions {
     configId: string;
     value: string;
   };
+}
+
+export interface GlobalComposerExpandPayload {
+  text: string;
+  selectedSkills: ChatSkillDraft[];
+  options?: GlobalComposeOptions;
 }
 
 export interface GlobalComposerModelSelection {
@@ -86,6 +93,9 @@ export interface GlobalComposerStarterRequest {
 interface GlobalComposerPillProps {
   focusRequest?: number;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
+  onExpand?: (
+    payload: GlobalComposerExpandPayload,
+  ) => boolean | undefined | Promise<boolean | undefined>;
   onDismiss?: () => void;
   onHandoffStart?: (rect: GlobalComposerHandoffRect) => void;
   suggestedPersonaId?: string | null;
@@ -171,9 +181,29 @@ function getPreferredModel(
   return model ? modelOptionToSelection(model, fallbackProviderId) : null;
 }
 
+function makeTransferableAttachments(
+  attachments: ChatAttachmentDraft[],
+): ChatAttachmentDraft[] {
+  return attachments.map((attachment) => {
+    if (
+      attachment.kind === "image" &&
+      !attachment.path &&
+      attachment.previewUrl.startsWith("blob:")
+    ) {
+      return {
+        ...attachment,
+        previewUrl: `data:${attachment.mimeType};base64,${attachment.base64}`,
+      };
+    }
+
+    return attachment;
+  });
+}
+
 export function GlobalComposerPill({
   focusRequest = 0,
   onSend,
+  onExpand,
   onDismiss,
   onHandoffStart,
   suggestedPersonaId = null,
@@ -244,6 +274,7 @@ export function GlobalComposerPill({
     clearAttachments,
   } = useChatInputAttachments();
   const attachmentWorkPending = attachmentWorkCount > 0;
+  const [expandPending, setExpandPending] = useState(false);
   const { resetHeight: resetTextarea } = useTextareaAutosize({
     textareaRef,
     value: text,
@@ -779,6 +810,96 @@ export function GlobalComposerPill({
     ],
   );
 
+  const handleExpand = useCallback(() => {
+    if (!onExpand || attachmentWorkPending || handoffActive || expandPending) {
+      return;
+    }
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      onHandoffStart?.({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+
+    const options: GlobalComposeOptions = {};
+    const transferableAttachments = makeTransferableAttachments(attachments);
+    if (transferableAttachments.length > 0) {
+      options.attachments = transferableAttachments;
+    }
+    if (providerOverride) {
+      options.providerId = providerOverride;
+    }
+    if (modelOverride) {
+      options.providerId = modelOverride.providerId;
+      options.modelId = modelOverride.modelId;
+      options.modelName = modelOverride.modelName;
+    }
+    if (selectedProjectId) {
+      options.projectId = selectedProjectId;
+    }
+    if (selectedPersonaId) {
+      options.personaId = selectedPersonaId;
+    }
+    if (activeReasoningEffort?.config) {
+      options.reasoningEffort = {
+        configId: activeReasoningEffort.config.configId,
+        value: activeReasoningEffort.config.currentValue,
+      };
+    }
+
+    const payload: GlobalComposerExpandPayload = {
+      text,
+      selectedSkills,
+      options: Object.keys(options).length > 0 ? options : undefined,
+    };
+
+    setExpandPending(true);
+    void Promise.resolve(onExpand(payload))
+      .then((accepted) => {
+        if (accepted === false) {
+          return;
+        }
+
+        setText("");
+        clearAttachments();
+        setProviderOverride(null);
+        setModelOverride(null);
+        setSelectedProjectId(null);
+        setSelectedPersonaId(null);
+        personaSelectionSourceRef.current = "none";
+        userTouchedRoutePersonaRef.current = false;
+        personaOverrideActiveRef.current = false;
+        personaOverrideAppliedForRef.current = null;
+        personaOverrideUserOverrideForRef.current = null;
+        setSelectedSkills([]);
+      })
+      .catch((error) => {
+        console.error("Failed to expand global composer:", error);
+      })
+      .finally(() => {
+        setExpandPending(false);
+      });
+  }, [
+    activeReasoningEffort?.config,
+    attachmentWorkPending,
+    attachments,
+    clearAttachments,
+    expandPending,
+    handoffActive,
+    modelOverride,
+    onExpand,
+    onHandoffStart,
+    providerOverride,
+    selectedPersonaId,
+    selectedProjectId,
+    selectedSkills,
+    text,
+  ]);
+
   const dictation = useVoiceDictation({
     text,
     setText,
@@ -962,6 +1083,41 @@ export function GlobalComposerPill({
           "global-composer-pill-handoff-pending",
       )}
     >
+      {onExpand ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          onClick={handleExpand}
+          disabled={attachmentWorkPending || handoffActive || expandPending}
+          aria-label={t("globalPill.expand")}
+          title={t("globalPill.expand")}
+          className={cn(
+            "absolute z-20 h-6 w-6 rounded-sm transition-[color,opacity] duration-150 ease-out hover:text-foreground hover:opacity-100 focus-visible:opacity-100 disabled:pointer-events-none disabled:opacity-0",
+            expanded
+              ? "-top-1.5 -left-1.5 text-muted-foreground/50 opacity-60"
+              : "-top-2 -left-2 text-muted-foreground/60 opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            fill="none"
+            className="h-[18px] w-[18px] -rotate-2"
+          >
+            <path
+              d="M4 12V4H12"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </Button>
+      ) : null}
       {isAttachmentDragOver ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border/80 bg-card/60">
           <span className="rounded-md bg-secondary px-3 py-1 text-sm text-secondary-foreground">

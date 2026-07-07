@@ -179,6 +179,8 @@ function getAgentToolsTipPresentation({
 export function ChatInput({
   composerActions,
   initialValue = "",
+  initialAttachments,
+  onInitialAttachmentsConsumed,
   placeholder,
   onDraftChange,
   selectedSkills: selectedSkillsProp,
@@ -315,6 +317,22 @@ export function ChatInput({
     replaceAttachments,
     clearAttachments,
   } = useChatInputAttachments();
+  const consumedInitialAttachmentsRef = useRef<
+    ChatInputProps["initialAttachments"] | null
+  >(null);
+  useEffect(() => {
+    if (
+      !initialAttachments ||
+      initialAttachments.length === 0 ||
+      consumedInitialAttachmentsRef.current === initialAttachments
+    ) {
+      return;
+    }
+
+    consumedInitialAttachmentsRef.current = initialAttachments;
+    replaceAttachments(initialAttachments);
+    onInitialAttachmentsConsumed?.();
+  }, [initialAttachments, onInitialAttachmentsConsumed, replaceAttachments]);
   const attachmentWorkPending = attachmentWorkCount > 0;
   const runAttachmentWork = useCallback(async (task: () => Promise<void>) => {
     setAttachmentWorkCount((count) => count + 1);

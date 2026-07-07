@@ -58,6 +58,88 @@ describe("findExistingDraft", () => {
     ).toBeUndefined();
   });
 
+  it("does not reuse a draft with a different requested provider or model", () => {
+    const draft = makeSession("alpha-draft", {
+      projectId: "alpha",
+      providerId: "goose",
+      modelId: "default-model",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: { "alpha-draft": "alpha draft" },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          providerId: "goose",
+          modelId: "specific-model",
+        },
+      }),
+    ).toBeUndefined();
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: { "alpha-draft": "alpha draft" },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          providerId: "other-provider",
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("matches requested reasoning effort before reusing a draft", () => {
+    const draft = makeSession("alpha-draft", {
+      projectId: "alpha",
+      providerId: "goose",
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "low" },
+          { id: "high", name: "high" },
+        ],
+      },
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: { "alpha-draft": "alpha draft" },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          providerId: "goose",
+          reasoningEffortValue: "high",
+        },
+      }),
+    ).toEqual(draft);
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: { "alpha-draft": "alpha draft" },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          providerId: "goose",
+          reasoningEffortValue: "low",
+        },
+      }),
+    ).toBeUndefined();
+  });
+
   it("reuses a matching empty draft with a terminal", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",

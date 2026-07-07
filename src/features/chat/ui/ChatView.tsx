@@ -552,6 +552,10 @@ export function ChatView({
           attachmentDropTargetRef={conversationDropTargetRef}
           onAttachmentDragOverChange={setConversationAttachmentDragOver}
           initialValue={controller.draftValue}
+          initialAttachments={controller.draftAttachments}
+          onInitialAttachmentsConsumed={
+            controller.handleInitialDraftAttachmentsConsumed
+          }
           onDraftChange={controller.handleDraftChange}
           selectedSkills={controller.selectedSkills}
           onSkillsChange={controller.handleSkillsChange}
