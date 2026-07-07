@@ -174,7 +174,7 @@ export function RuntimeConfigSettings() {
           </Button>
           <Button
             type="button"
-            variant="default"
+            variant="primary"
             size="xs"
             onClick={() => void handleSave()}
             disabled={pendingAction !== null}

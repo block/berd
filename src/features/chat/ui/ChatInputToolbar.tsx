@@ -7,6 +7,7 @@ import { IconPlayerStopFilled } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { ContextRing } from "./ContextRing";
 import { Button } from "@/shared/ui/button";
+import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -220,15 +221,14 @@ export function ChatInputToolbar({
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button
+                  <ComposerActionButton
                     type="button"
-                    variant="composer-action"
                     size="icon-pill-sm"
                     disabled={disabled}
                     aria-label={t("toolbar.attach")}
                   >
                     <Plus aria-hidden="true" />
-                  </Button>
+                  </ComposerActionButton>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent>{t("toolbar.attach")}</TooltipContent>
@@ -371,7 +371,7 @@ export function ChatInputToolbar({
                     <div className="flex items-center gap-1 pt-0.5">
                       <Button
                         type="button"
-                        variant="secondary"
+                        variant="subtle"
                         size="xs"
                         className="min-w-0 flex-1 justify-center"
                         onClick={handleCompactContext}
@@ -403,9 +403,8 @@ export function ChatInputToolbar({
             <Tooltip>
               <TooltipTrigger asChild>
                 <span>
-                  <Button
+                  <ComposerActionButton
                     type="button"
-                    variant="composer-action"
                     size="icon-pill-sm"
                     disabled={!voiceRecording && (!voiceEnabled || disabled)}
                     onClick={onVoiceToggle}
@@ -421,7 +420,7 @@ export function ChatInputToolbar({
                     )}
                   >
                     <Mic aria-hidden="true" />
-                  </Button>
+                  </ComposerActionButton>
                 </span>
               </TooltipTrigger>
               <TooltipContent>
@@ -437,43 +436,40 @@ export function ChatInputToolbar({
 
         <div>
           {isStreaming && onStop ? (
-            <Button
+            <ComposerActionButton
               type="button"
               onClick={onStop}
-              variant="composer-action"
               size="icon-pill-sm"
               aria-label={t("toolbar.stopGeneration")}
               title={t("toolbar.stopGeneration")}
             >
               <IconPlayerStopFilled className="size-3.5" aria-hidden="true" />
-            </Button>
+            </ComposerActionButton>
           ) : !sendButtonTooltip ? (
-            <Button
+            <ComposerActionButton
               type="button"
               onClick={onSend}
               disabled={!canSend}
-              variant="composer-action"
               size="icon-pill-sm"
               className={cn(!canSend && "disabled:opacity-100")}
               aria-label={t("toolbar.sendMessage")}
             >
               <ArrowUp aria-hidden="true" />
-            </Button>
+            </ComposerActionButton>
           ) : (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span>
-                  <Button
+                  <ComposerActionButton
                     type="button"
                     onClick={onSend}
                     disabled={!canSend}
-                    variant="composer-action"
                     size="icon-pill-sm"
                     className={cn(!canSend && "disabled:opacity-100")}
                     aria-label={sendButtonTooltip ?? t("toolbar.sendMessage")}
                   >
                     <ArrowUp aria-hidden="true" />
-                  </Button>
+                  </ComposerActionButton>
                 </span>
               </TooltipTrigger>
               {sendButtonTooltip ? (

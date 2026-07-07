@@ -633,7 +633,7 @@ function renderContentBlock(
             <div className="mt-2">
               <Button
                 type="button"
-                variant="alert-action"
+                variant="alert"
                 size="xs"
                 onClick={notificationAction.onClick}
               >

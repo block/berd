@@ -41,7 +41,17 @@ import {
   BreadcrumbSeparator,
   BreadcrumbTrail,
 } from "@/shared/ui/breadcrumb";
-import { Button, buttonVariants } from "@/shared/ui/button";
+import {
+  Button,
+  buttonVariants,
+  isButtonDestructiveEmphasis,
+} from "@/shared/ui/button";
+import { AgentTileButton } from "@/shared/ui/agent-tile-button";
+import { ComposerActionButton } from "@/shared/ui/composer-action-button";
+import { GlassButton } from "@/shared/ui/glass-button";
+import { JumpToLatestButton } from "@/shared/ui/jump-to-latest-button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
+import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { ButtonGroup, ButtonGroupText } from "@/shared/ui/button-group";
 import { Calendar } from "@/shared/ui/calendar";
 import { Carousel, CarouselContent, CarouselItem } from "@/shared/ui/carousel";
@@ -749,7 +759,7 @@ const buttonTextSizeBySize = {
 } satisfies Record<ButtonSize, string>;
 
 const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
-  default: [
+  primary: [
     {
       anatomy: "Button",
       state: "Default",
@@ -763,51 +773,23 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       textIcon: "--primary-foreground",
     },
   ],
-  destructive: [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--destructive",
-      textIcon: "--destructive-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--destructive / 90%",
-      textIcon: "--destructive-foreground",
-    },
-  ],
-  "destructive-flat": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--destructive",
-      textIcon: "--destructive-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--destructive / 90%",
-      textIcon: "--destructive-foreground",
-    },
-  ],
-  secondary: [
+  subtle: [
     {
       anatomy: "Button",
       state: "Default",
       background: "--accent",
       textIcon: "--accent-foreground",
-      border: "--input",
+      border: "none",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--accent",
+      background: "--accent-hover",
       textIcon: "--accent-foreground",
-      border: "--input",
+      border: "none",
     },
   ],
-  "alert-action": [
+  alert: [
     {
       anatomy: "Button",
       state: "Default",
@@ -839,91 +821,6 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       border: "--input",
     },
   ],
-  "outline-flat": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--background",
-      textIcon: "--foreground",
-      border: "--border / 80%",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--accent",
-      textIcon: "--accent-foreground",
-      border: "--border / 80%",
-    },
-  ],
-  glass: [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--surface-composer",
-      textIcon: "--foreground",
-      border: "none; contained by --shadow-chat",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--surface-composer / 80%",
-      textIcon: "--foreground",
-      border: "none; contained by --shadow-chat",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "--surface-composer",
-      textIcon: "--foreground",
-      border: "none; contained by --shadow-chat",
-    },
-  ],
-  "glass-strong": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--surface-glass-strong",
-      textIcon: "--surface-glass-strong-fg",
-      border: "none; contained by --shadow-chat",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--surface-glass-strong-hover",
-      textIcon: "--surface-glass-strong-fg",
-      border: "none; contained by --shadow-chat",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "--surface-glass-strong",
-      textIcon: "--surface-glass-strong-fg",
-      border: "none; contained by --shadow-chat",
-    },
-  ],
-  "agent-tile-action": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--surface-agent-tile-action-bg",
-      textIcon: "--surface-agent-tile-action-fg",
-      border: "none; contained by --shadow-chat",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--surface-agent-tile-action-bg-hover",
-      textIcon: "--surface-agent-tile-action-fg-hover",
-      border: "none; contained by --shadow-chat",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "--surface-agent-tile-action-bg-hover",
-      textIcon: "--surface-agent-tile-action-fg-hover",
-      border: "none; contained by --shadow-chat",
-    },
-  ],
   ghost: [
     {
       anatomy: "Button",
@@ -936,189 +833,6 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       state: "Hover",
       background: "--accent",
       textIcon: "--accent-foreground",
-    },
-  ],
-  "ghost-light": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--accent",
-      textIcon: "--accent-foreground",
-    },
-  ],
-  "inline-subtle": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--muted-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--muted / 70%",
-      textIcon: "--foreground",
-    },
-  ],
-  quiet: [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--muted-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "transparent",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "transparent",
-      textIcon: "--foreground",
-    },
-  ],
-  "quiet-inverse": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "transparent",
-      textIcon: "--muted-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "transparent",
-      textIcon: "--muted-foreground",
-    },
-  ],
-  "page-header": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--background",
-      textIcon: "--muted-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--background",
-      textIcon: "--foreground",
-    },
-  ],
-  toolbar: [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--accent",
-      textIcon: "--accent-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "--accent",
-      textIcon: "--accent-foreground",
-    },
-  ],
-  "top-bar-icon": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--app-top-bar-control-fg",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "transparent",
-      textIcon:
-        "--app-top-bar-control-fg @ --app-top-bar-control-hover-opacity",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "transparent",
-      textIcon: "--app-top-bar-control-fg",
-    },
-    {
-      anatomy: "Button",
-      state: "Disabled",
-      background: "transparent",
-      textIcon: "--app-top-bar-control-fg-disabled",
-    },
-  ],
-  "composer-action": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--surface-composer-action",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--surface-composer-action-hover",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Active",
-      background: "--surface-composer-action-active",
-      textIcon: "--foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Open",
-      background: "--surface-composer-action-hover",
-      textIcon: "--foreground",
-    },
-  ],
-  "jump-to-latest": [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "--surface-chat-responding-pill-bg",
-      textIcon: "--surface-chat-responding-pill-fg",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "--surface-chat-responding-pill-bg / 90%",
-      textIcon: "--surface-chat-responding-pill-fg",
-    },
-  ],
-  back: [
-    {
-      anatomy: "Button",
-      state: "Default",
-      background: "transparent",
-      textIcon: "--muted-foreground",
-    },
-    {
-      anatomy: "Button",
-      state: "Hover",
-      background: "transparent",
-      textIcon: "--foreground",
     },
   ],
   link: [
@@ -1170,20 +884,91 @@ function withDisabledOpacity(value?: string) {
   return `${value} / 50%`;
 }
 
+const buttonDestructiveColorRows: Partial<
+  Record<ButtonVariant, TokenColorRow[]>
+> = {
+  primary: [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--destructive",
+      textIcon: "--destructive-foreground",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--destructive / 90%",
+      textIcon: "--destructive-foreground",
+    },
+  ],
+  outline: [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--background",
+      textIcon: "--destructive",
+      border: "--destructive / 30%",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--destructive / 8%",
+      textIcon: "--destructive",
+      border: "--destructive / 40%",
+    },
+  ],
+  subtle: [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--destructive / 10%",
+      textIcon: "--destructive",
+      border: "none",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--destructive / 16%",
+      textIcon: "--destructive",
+      border: "none",
+    },
+  ],
+  ghost: [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "transparent",
+      textIcon: "--destructive",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--destructive / 10%",
+      textIcon: "--destructive",
+    },
+  ],
+};
+
 function getButtonTokenDetails({
   variant,
   size,
+  destructive = false,
 }: {
   variant: ButtonVariant;
   size: ButtonSize;
+  destructive?: boolean;
 }): {
   colorRows: TokenColorRow[];
   textRows: TokenTextRow[];
 } {
+  const destructiveRows = destructive
+    ? buttonDestructiveColorRows[variant]
+    : undefined;
   const colorRows =
-    variant === "ghost" && isIconButtonSize(size)
+    destructiveRows ??
+    (variant === "ghost" && isIconButtonSize(size)
       ? buttonIconGhostColorRows
-      : buttonVariantColorRows[variant];
+      : buttonVariantColorRows[variant]);
   const defaultRow = colorRows.find((row) => row.state === "Default");
   const disabledRows = colorRows.some((row) => row.state === "Disabled")
     ? []
@@ -2444,7 +2229,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   "Alert Dialog": () => (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button type="button" variant="destructive-flat">
+        <Button type="button" variant="primary" destructive>
           Delete project
         </Button>
       </AlertDialogTrigger>
@@ -2568,7 +2353,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
     </Command>
   ),
   "Confirm Dialog": () => (
-    <Button type="button" variant="destructive-flat">
+    <Button type="button" variant="primary" destructive>
       Confirm action
     </Button>
   ),
@@ -3257,9 +3042,136 @@ function OverviewPage() {
   );
 }
 
+type ChromeButtonEntry = {
+  manifestName: string;
+  base: string;
+  useWhen: string;
+  surfaceClassName: string;
+  surfaceLabel: string;
+  preview: React.ReactNode;
+};
+
+const chromeButtonEntries: ChromeButtonEntry[] = [
+  {
+    manifestName: "Top Bar Icon Button",
+    base: "ghost",
+    useWhen: "Icon actions in the app top bar / window chrome.",
+    surfaceClassName: "bg-sidebar",
+    surfaceLabel: "top bar",
+    preview: (
+      <TopBarIconButton aria-label="Search">
+        <Search aria-hidden="true" />
+      </TopBarIconButton>
+    ),
+  },
+  {
+    manifestName: "Composer Action Button",
+    base: "subtle",
+    useWhen: "Controls on the chat composer surface.",
+    surfaceClassName: "bg-surface-composer",
+    surfaceLabel: "composer",
+    preview: (
+      <ComposerActionButton size="icon-pill-sm" aria-label="Attach">
+        <Plus aria-hidden="true" />
+      </ComposerActionButton>
+    ),
+  },
+  {
+    manifestName: "Page Header Button",
+    base: "subtle",
+    useWhen: "View-header actions rendered into the app top strip.",
+    surfaceClassName: "bg-canvas-base",
+    surfaceLabel: "canvas chrome",
+    preview: <PageHeaderButton>Search chat</PageHeaderButton>,
+  },
+  {
+    manifestName: "Agent Tile Button",
+    base: "subtle",
+    useWhen: "Actions floating over agent/persona tile artwork.",
+    surfaceClassName: "bg-muted",
+    surfaceLabel: "agent tile",
+    preview: (
+      <AgentTileButton size="icon-xs" aria-label="Open agent menu">
+        <Plus aria-hidden="true" />
+      </AgentTileButton>
+    ),
+  },
+  {
+    manifestName: "Glass Button",
+    base: "subtle",
+    useWhen: "Controls floating over media, canvases, or artwork.",
+    surfaceClassName: "bg-muted",
+    surfaceLabel: "media/canvas",
+    preview: <GlassButton size="sm">Recenter</GlassButton>,
+  },
+  {
+    manifestName: "Jump To Latest Button",
+    base: "primary",
+    useWhen: "Floating back-to-the-live-edge affordances over streams.",
+    surfaceClassName: "bg-muted",
+    surfaceLabel: "chat transcript",
+    preview: <JumpToLatestButton size="sm">Jump to latest</JumpToLatestButton>,
+  },
+];
+
+function ChromeButtonsShowcase() {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="font-medium text-foreground text-sm">Chrome buttons</h3>
+        <p className="text-muted-foreground text-xs">
+          Named wrappers that compose Button for specific app surfaces. Each
+          recipe owns all of its interactive states; the base variant
+          contributes role, geometry, and focus behavior. Full "when to use"
+          docs live in each component's source and the generated manifest.
+        </p>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border">
+        {chromeButtonEntries.map((entry) => {
+          const item = getManifestItem(entry.manifestName);
+          return (
+            <div
+              key={entry.manifestName}
+              className="flex items-center gap-4 border-border border-b px-4 py-3 last:border-b-0"
+            >
+              <div className="w-56 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-foreground text-xs">
+                    {entry.manifestName.replaceAll(" ", "")}
+                  </span>
+                  <Badge variant="secondary" className="text-[10px]">
+                    base: {entry.base}
+                  </Badge>
+                </div>
+                {item ? (
+                  <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                    {item.source.replace("src/shared/ui/", "")}
+                  </div>
+                ) : null}
+              </div>
+              <div
+                className={cn(
+                  "flex shrink-0 items-center justify-center rounded-md px-4 py-2.5",
+                  entry.surfaceClassName,
+                )}
+                title={`Rendered on a mock ${entry.surfaceLabel} surface`}
+              >
+                {entry.preview}
+              </div>
+              <p className="min-w-0 text-muted-foreground text-xs">
+                {entry.useWhen}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ButtonPage() {
   const [playgroundVariant, setPlaygroundVariant] =
-    useState<ButtonVariant>("default");
+    useState<ButtonVariant>("primary");
   const [playgroundSize, setPlaygroundSize] = useState<ButtonSize>("default");
   const [playgroundFeedbackState, setPlaygroundFeedbackState] =
     useState<ButtonFeedbackState>("idle");
@@ -3268,12 +3180,16 @@ function ButtonPage() {
   const [playgroundPreserveWidth, setPlaygroundPreserveWidth] = useState(true);
   const [playgroundLabel, setPlaygroundLabel] = useState("Button");
   const [playgroundDisabled, setPlaygroundDisabled] = useState(false);
+  const [playgroundDestructive, setPlaygroundDestructive] = useState(false);
+  const [playgroundFlush, setPlaygroundFlush] = useState(false);
   const [playgroundLeftIcon, setPlaygroundLeftIcon] = useState(false);
   const [playgroundRightIcon, setPlaygroundRightIcon] = useState(false);
   const playgroundIsIconOnly = isIconButtonSize(playgroundSize);
   const playgroundTokenDetails = getButtonTokenDetails({
     variant: playgroundVariant,
     size: playgroundSize,
+    destructive:
+      playgroundDestructive && isButtonDestructiveEmphasis(playgroundVariant),
   });
 
   return (
@@ -3291,6 +3207,11 @@ function ButtonPage() {
             type="button"
             variant={playgroundVariant}
             size={playgroundSize}
+            destructive={
+              isButtonDestructiveEmphasis(playgroundVariant) &&
+              playgroundDestructive
+            }
+            flush={playgroundVariant === "ghost" && playgroundFlush}
             feedbackState={playgroundFeedbackState}
             loadingLabel="Saving"
             successLabel="Saved"
@@ -3336,6 +3257,28 @@ function ButtonPage() {
             options: buttonSizeOptions,
             onChange: (value) => setPlaygroundSize(value as ButtonSize),
           },
+          ...(isButtonDestructiveEmphasis(playgroundVariant)
+            ? [
+                {
+                  id: "button-destructive",
+                  label: "Destructive",
+                  type: "switch" as const,
+                  checked: playgroundDestructive,
+                  onChange: setPlaygroundDestructive,
+                },
+              ]
+            : []),
+          ...(playgroundVariant === "ghost"
+            ? [
+                {
+                  id: "button-flush",
+                  label: "Flush",
+                  type: "switch" as const,
+                  checked: playgroundFlush,
+                  onChange: setPlaygroundFlush,
+                },
+              ]
+            : []),
           {
             id: "button-feedback-state",
             label: "Feedback state",
@@ -3405,6 +3348,7 @@ function ButtonPage() {
           />
         }
       />
+      <ChromeButtonsShowcase />
     </>
   );
 }
@@ -3444,7 +3388,7 @@ function ButtonGroupPage() {
                 type="button"
                 size="sm"
                 variant={
-                  playgroundValue === option.value ? "secondary" : "outline"
+                  playgroundValue === option.value ? "subtle" : "outline"
                 }
                 aria-pressed={playgroundValue === option.value}
                 disabled={playgroundDisabled}
@@ -4315,9 +4259,8 @@ function AlertDialogPage() {
             <AlertDialogTrigger asChild>
               <Button
                 type="button"
-                variant={
-                  actionTone === "destructive" ? "destructive-flat" : "outline"
-                }
+                variant={actionTone === "destructive" ? "primary" : "outline"}
+                destructive={actionTone === "destructive"}
                 disabled={triggerDisabled}
               >
                 {alertDialogCopy.trigger}
@@ -4335,7 +4278,10 @@ function AlertDialogPage() {
                 <AlertDialogAction
                   className={
                     actionTone === "destructive"
-                      ? buttonVariants({ variant: "destructive-flat" })
+                      ? buttonVariants({
+                          variant: "primary",
+                          destructive: true,
+                        })
                       : undefined
                   }
                 >
@@ -4857,7 +4803,7 @@ function ColorPage() {
         <Button
           size="sm"
           type="button"
-          variant="outline-flat"
+          variant="outline"
           onClick={() => setScanVersion((version) => version + 1)}
         >
           <RefreshCw aria-hidden="true" className="size-4" />

@@ -4,7 +4,7 @@ import {
 } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
-import { Button } from "@/shared/ui/button";
+import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 
 interface SessionWindowTopBarProps {
   title: string;
@@ -55,9 +55,8 @@ export function SessionWindowTopBar({
         data-tauri-drag-region
       >
         {showContextPanelToggle ? (
-          <Button
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onToggleContextPanel}
             aria-label={contextPanelLabel}
@@ -65,7 +64,7 @@ export function SessionWindowTopBar({
             data-context-panel-toggle="true"
           >
             <ContextPanelIcon aria-hidden="true" />
-          </Button>
+          </TopBarIconButton>
         ) : null}
       </div>
     </header>

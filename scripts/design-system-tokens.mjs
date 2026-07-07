@@ -70,6 +70,7 @@ const paletteUtilityPattern =
 const allowedBridgeNames = new Set([
   "accent",
   "accent-foreground",
+  "accent-hover",
   "background",
   "border",
   "card",

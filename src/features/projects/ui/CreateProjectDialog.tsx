@@ -457,7 +457,7 @@ export function CreateProjectDialog({
             <Button
               type="submit"
               form="project-form"
-              variant="default"
+              variant="primary"
               size="sm"
               disabled={!canSave}
               className="h-10 rounded-full bg-foreground px-5 text-sm text-background hover:bg-foreground/90 disabled:bg-foreground disabled:text-background"

@@ -53,7 +53,7 @@ function ProjectCardMenu({
           variant="ghost"
           size="icon-xs"
           aria-label={t("view.optionsAria", { name: project.name })}
-          className="size-6 rounded-md text-muted-foreground hover:text-foreground"
+          className="size-6 rounded-md"
         >
           <MoreHorizontal className="size-3.5" />
         </Button>
@@ -317,7 +317,10 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common:actions.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className={buttonVariants({
+                variant: "primary",
+                destructive: true,
+              })}
               onClick={handleConfirmDeleteProject}
             >
               {t("common:actions.delete")}

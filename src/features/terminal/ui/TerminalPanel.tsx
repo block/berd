@@ -532,7 +532,8 @@ export function TerminalPanel({
                     </Button>
                     <Button
                       type="button"
-                      variant="destructive"
+                      variant="primary"
+                      destructive
                       size="xs"
                       onClick={handleStop}
                     >

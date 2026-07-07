@@ -567,7 +567,7 @@ export function AgentProviderCard({
               <div className="flex items-center justify-end gap-2">
                 <Button
                   type="button"
-                  variant="ghost-light"
+                  variant="ghost"
                   size="xs"
                   onClick={handleRetry}
                 >
@@ -576,7 +576,7 @@ export function AgentProviderCard({
                 {setupFailureAnalysis && onStartTroubleshootingChat ? (
                   <Button
                     type="button"
-                    variant="default"
+                    variant="primary"
                     size="xs"
                     leftIcon={<IconMessageCircle aria-hidden="true" />}
                     onClick={handleTroubleshoot}

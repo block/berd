@@ -26,7 +26,7 @@ import { AutomationHistoryFeed } from "@/features/automations/ui/AutomationHisto
 import { AutomationsOverview } from "@/features/automations/ui/AutomationsOverview";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { PageShell } from "@/shared/ui/page-shell";
@@ -430,10 +430,8 @@ export function AutomationsWorkbench({
 
       setTopBarActions(
         <>
-          <Button
+          <PageHeaderButton
             type="button"
-            variant="page-header"
-            size="xs"
             onClick={() => {
               if (!detailTile.id) return;
               refreshMutate(detailTile.id);
@@ -446,11 +444,9 @@ export function AutomationsWorkbench({
             {isRefreshing || isRunActive
               ? t("actions.running")
               : t("actions.runNow")}
-          </Button>
-          <Button
+          </PageHeaderButton>
+          <PageHeaderButton
             type="button"
-            variant="page-header"
-            size="xs"
             onClick={() => {
               void refetchAutomations();
               void refetchDetail();
@@ -460,7 +456,7 @@ export function AutomationsWorkbench({
             leftIcon={<IconRefresh aria-hidden="true" />}
           >
             {t("actions.refreshShort")}
-          </Button>
+          </PageHeaderButton>
         </>,
       );
       return () => setTopBarActions(null);
@@ -468,28 +464,24 @@ export function AutomationsWorkbench({
 
     setTopBarActions(
       <>
-        <Button
+        <PageHeaderButton
           type="button"
-          variant="page-header"
-          size="xs"
           onClick={() => refetchAutomations()}
           aria-label={t("actions.refresh")}
           title={t("actions.refresh")}
           leftIcon={<IconRefresh aria-hidden="true" />}
         >
           {t("actions.refreshShort")}
-        </Button>
-        <Button
+        </PageHeaderButton>
+        <PageHeaderButton
           type="button"
-          variant="page-header"
-          size="xs"
           onClick={openBuilder}
           aria-label={t("actions.add")}
           title={t("actions.add")}
           leftIcon={<IconPlus aria-hidden="true" />}
         >
           {t("actions.add")}
-        </Button>
+        </PageHeaderButton>
       </>,
     );
     return () => setTopBarActions(null);

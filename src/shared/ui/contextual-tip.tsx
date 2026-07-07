@@ -53,9 +53,9 @@ function ContextualTip({
       {actionLabel && onAction ? (
         <Button
           type="button"
-          variant="inline-subtle"
+          variant="subtle"
           size="xxs"
-          className="h-6 rounded-sm bg-muted/70 px-2 text-[11px] text-foreground hover:bg-muted"
+          className="h-6 rounded-sm px-2 text-[11px]"
           onClick={onAction}
         >
           {actionLabel}

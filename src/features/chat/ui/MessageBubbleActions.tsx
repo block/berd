@@ -46,7 +46,7 @@ export function MessageBubbleActions({
   const jumpToResponseStartAction = onJumpToResponseStart ? (
     <MessageAction
       size="icon-xs"
-      variant="ghost-light"
+      variant="ghost"
       className="text-muted-foreground/80"
       label={jumpToResponseStartLabel}
       // Use a native title for the hover affordance instead of MessageAction's
@@ -69,7 +69,7 @@ export function MessageBubbleActions({
       {textContent && (
         <MessageAction
           size="icon-xs"
-          variant="ghost-light"
+          variant="ghost"
           className={cn(
             "text-muted-foreground/80",
             copied &&
@@ -89,7 +89,7 @@ export function MessageBubbleActions({
       {onForkFromMessage ? (
         <MessageAction
           size="icon-xs"
-          variant="ghost-light"
+          variant="ghost"
           className="text-muted-foreground/80"
           label={forkFromHereLabel}
           tooltip={forkFromHereLabel}
@@ -144,7 +144,7 @@ export function MessageBubbleActions({
       {!isUser && onRetryMessage && (
         <MessageAction
           size="icon-xs"
-          variant="ghost-light"
+          variant="ghost"
           className="text-muted-foreground/80"
           tooltip={t("common:actions.retry")}
           onClick={() => onRetryMessage(messageId)}
@@ -155,7 +155,7 @@ export function MessageBubbleActions({
       {isUser && onEditMessage && (
         <MessageAction
           size="icon-xs"
-          variant="ghost-light"
+          variant="ghost"
           className="text-muted-foreground/80"
           tooltip={t("common:actions.edit")}
           onClick={() => onEditMessage(messageId)}

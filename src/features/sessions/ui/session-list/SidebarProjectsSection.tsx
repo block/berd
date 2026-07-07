@@ -287,7 +287,8 @@ export function SidebarProjectsSection({
             <div className="flex flex-col items-center gap-1">
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="icon-xs"
                 onClick={onCreateProject}
                 aria-label={t("empty.createProject")}
@@ -301,7 +302,8 @@ export function SidebarProjectsSection({
             <div className="space-y-0.5">
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="xs"
                 onClick={onCreateProject}
                 className={emptyActionClasses}
@@ -316,7 +318,8 @@ export function SidebarProjectsSection({
           <div className="flex flex-col items-center gap-1">
             <Button
               type="button"
-              variant="quiet"
+              variant="ghost"
+              flush
               size="icon-xs"
               onClick={onNewChat}
               aria-label={t("empty.startChat")}
@@ -365,7 +368,8 @@ export function SidebarProjectsSection({
             <div className="space-y-0.5">
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="xs"
                 onClick={onNewChat}
                 className={emptyActionClasses}

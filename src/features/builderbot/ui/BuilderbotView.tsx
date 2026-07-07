@@ -665,7 +665,6 @@ function DetailLink({
       type="button"
       variant="link"
       size="xs"
-      className="h-auto px-0 text-xs"
       onClick={() => void openUrl(href)}
     >
       {children}
@@ -1676,7 +1675,7 @@ function AutomationDetailPage({
                 ) : (
                   <Button
                     type="button"
-                    variant="outline-flat"
+                    variant="outline"
                     size="xs"
                     onClick={startEditingPayload}
                     disabled={isSaving}

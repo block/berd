@@ -524,7 +524,7 @@ export function GeneralSettings({
               </Button>
               <Button
                 type="button"
-                variant="default"
+                variant="primary"
                 size="xs"
                 onClick={() => void handleChooseArtifactRoot()}
               >
@@ -560,7 +560,7 @@ export function GeneralSettings({
               </Button>
               <Button
                 type="button"
-                variant="default"
+                variant="primary"
                 size="xs"
                 onClick={() => void handleChooseTerminalFallbackCwd()}
               >
@@ -635,7 +635,7 @@ export function GeneralSettings({
               aria-pressed={followUpBehavior === "queue"}
               className="min-w-16"
               size="sm"
-              variant={followUpBehavior === "queue" ? "default" : "ghost"}
+              variant={followUpBehavior === "queue" ? "primary" : "ghost"}
               onClick={() =>
                 streamingShortcutPreference.setMode(
                   "cmd-enter-steers" satisfies StreamingShortcutMode,
@@ -649,7 +649,7 @@ export function GeneralSettings({
               aria-pressed={followUpBehavior === "steer"}
               className="min-w-16"
               size="sm"
-              variant={followUpBehavior === "steer" ? "default" : "ghost"}
+              variant={followUpBehavior === "steer" ? "primary" : "ghost"}
               onClick={() =>
                 streamingShortcutPreference.setMode(
                   "enter-steers" satisfies StreamingShortcutMode,
@@ -675,7 +675,7 @@ export function GeneralSettings({
               className="min-w-16"
               size="sm"
               variant={
-                atMentionDefaultCategory === "agents" ? "default" : "ghost"
+                atMentionDefaultCategory === "agents" ? "primary" : "ghost"
               }
               onClick={() => setAtMentionDefaultCategory("agents")}
             >
@@ -687,7 +687,7 @@ export function GeneralSettings({
               className="min-w-16"
               size="sm"
               variant={
-                atMentionDefaultCategory === "files" ? "default" : "ghost"
+                atMentionDefaultCategory === "files" ? "primary" : "ghost"
               }
               onClick={() => setAtMentionDefaultCategory("files")}
             >
@@ -740,7 +740,7 @@ export function GeneralSettings({
             </Button>
             <Button
               type="button"
-              variant="default"
+              variant="primary"
               size="xs"
               onClick={handleStyleGuidelinesPromptSave}
               disabled={
@@ -781,7 +781,7 @@ export function GeneralSettings({
                 </Button>
                 <Button
                   type="button"
-                  variant={bbCliStatus?.installed ? "outline" : "default"}
+                  variant={bbCliStatus?.installed ? "outline" : "primary"}
                   size="xs"
                   onClick={() => void handleInstallBbCli()}
                   disabled={bbCliBusy || bbCliStatus?.canInstall === false}
@@ -925,7 +925,7 @@ export function GeneralSettings({
         >
           <Button
             type="button"
-            variant="default"
+            variant="primary"
             size="xs"
             onClick={() => setClearCacheDialogOpen(true)}
           >

@@ -155,7 +155,7 @@ export function AutomationHistoryFeed({
                   <Button
                     type="button"
                     size="xs"
-                    variant="outline-flat"
+                    variant="outline"
                     onClick={() => {
                       if (automation.id) {
                         onOpenAutomation({

@@ -11,7 +11,7 @@ import { PinIcon } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
-import { Button } from "@/shared/ui/button";
+import { AgentTileButton } from "@/shared/ui/agent-tile-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,9 +75,8 @@ export const PersonaCard = memo(function PersonaCard({
   const optionsMenu = (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
-        <Button
+        <AgentTileButton
           type="button"
-          variant="agent-tile-action"
           size="icon-xs"
           aria-label={t("card.options")}
           onClick={(e) => e.stopPropagation()}
@@ -91,7 +90,7 @@ export const PersonaCard = memo(function PersonaCard({
           )}
         >
           <IconDots className="size-3.5" />
-        </Button>
+        </AgentTileButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         variant="inverse"
@@ -151,28 +150,26 @@ export const PersonaCard = memo(function PersonaCard({
         )}
       >
         {onSelect ? (
-          <Button
+          <AgentTileButton
             type="button"
-            variant="agent-tile-action"
             size="sm"
             onClick={() => onSelect(persona)}
             aria-label={t("card.viewAria", { name: persona.displayName })}
             className="pointer-events-auto"
           >
             {t("card.view")}
-          </Button>
+          </AgentTileButton>
         ) : null}
         {onStartChat ? (
-          <Button
+          <AgentTileButton
             type="button"
-            variant="agent-tile-action"
             size="sm"
             onClick={() => onStartChat(persona)}
             aria-label={t("card.chatAria", { name: persona.displayName })}
             className="pointer-events-auto"
           >
             {t("card.chat")}
-          </Button>
+          </AgentTileButton>
         ) : null}
       </div>
     ) : null;

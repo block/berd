@@ -418,7 +418,8 @@ export function AgentWorkPanel({
             <CollapsibleTrigger asChild>
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="sm"
                 className="flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
                 rightIcon={
@@ -453,7 +454,8 @@ export function AgentWorkPanel({
                 <CollapsibleTrigger asChild>
                   <Button
                     type="button"
-                    variant="quiet"
+                    variant="ghost"
+                    flush
                     size="sm"
                     className="mb-1 flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
                     rightIcon={

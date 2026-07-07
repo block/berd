@@ -64,7 +64,7 @@ export function ExtensionItem({
         {showAlwaysOnWarning && onReset && (
           <Button
             type="button"
-            variant="outline-flat"
+            variant="outline"
             size="xs"
             onClick={() => onReset(extension.config_key)}
             aria-label={t("extensions.alwaysOn.resetAria", {

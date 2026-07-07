@@ -69,18 +69,27 @@ function ToastActionButton({
   type = "button",
   ...props
 }: ToastActionButtonProps) {
-  const variant =
-    emphasis === "secondary" ? "quiet-inverse" : "composer-action";
+  // Toast chrome recipes, kept local to the toast surface:
+  // - primary: composer-action-style fill (subtle base, composer tokens)
+  // - secondary: the old "quiet-inverse" recipe (transparent, foreground
+  //   text, dims to muted on hover)
+  const primaryEmphasisClassName =
+    "bg-surface-composer-action text-foreground shadow-none hover:bg-surface-composer-action-hover hover:text-foreground active:bg-surface-composer-action-active active:text-foreground";
+  const secondaryEmphasisClassName =
+    "bg-transparent font-normal text-foreground shadow-none hover:bg-transparent hover:text-muted-foreground active:bg-transparent active:text-muted-foreground";
 
   return (
     <Button
       {...props}
       type={type}
-      variant={variant}
+      variant={emphasis === "secondary" ? "ghost" : "subtle"}
       size="xxs"
       className={cn(
         toastActionButtonLayoutClassName,
         "relative select-none cursor-pointer",
+        emphasis === "secondary"
+          ? secondaryEmphasisClassName
+          : primaryEmphasisClassName,
         className,
       )}
     >

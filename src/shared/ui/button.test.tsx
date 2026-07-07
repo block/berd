@@ -1,7 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { IconArrowDown, IconArrowNarrowLeft } from "@tabler/icons-react";
+import { AgentTileButton } from "./agent-tile-button";
 import { Button } from "./button";
+import { ComposerActionButton } from "./composer-action-button";
+import { GlassButton } from "./glass-button";
+import { JumpToLatestButton } from "./jump-to-latest-button";
+import { TopBarIconButton } from "./top-bar-icon-button";
 
 describe("Button", () => {
   it("applies the button size to unsized icons", () => {
@@ -70,9 +75,9 @@ describe("Button", () => {
 
   it("applies top-bar icon sizing through the shared icon button logic", () => {
     render(
-      <Button variant="top-bar-icon" size="icon-top-bar" aria-label="Search">
+      <TopBarIconButton aria-label="Search">
         <IconArrowDown data-testid="icon" />
-      </Button>,
+      </TopBarIconButton>,
     );
 
     const button = screen.getByRole("button", { name: "Search" });
@@ -102,7 +107,7 @@ describe("Button", () => {
   });
 
   it("keeps the jump-to-latest label unselectable", () => {
-    render(<Button variant="jump-to-latest">Jump to latest</Button>);
+    render(<JumpToLatestButton>Jump to latest</JumpToLatestButton>);
 
     expect(screen.getByRole("button", { name: "Jump to latest" })).toHaveClass(
       "select-none",
@@ -153,28 +158,8 @@ describe("Button", () => {
     );
   });
 
-  it("renders the back variant with its default chevron icon", () => {
-    render(
-      <Button variant="back" size="sm">
-        Back
-      </Button>,
-    );
-
-    const button = screen.getByRole("button", { name: "Back" });
-    const icon = button.querySelector("svg");
-
-    expect(button).toHaveClass(
-      "h-8",
-      "px-0",
-      "text-xs",
-      "text-muted-foreground",
-    );
-    expect(icon).not.toBeNull();
-    expect(icon).toHaveClass("size-3");
-  });
-
-  it("renders the composer action variant with composer action tokens", () => {
-    render(<Button variant="composer-action">Branch</Button>);
+  it("renders the composer action chrome recipe over the subtle base", () => {
+    render(<ComposerActionButton>Branch</ComposerActionButton>);
 
     const button = screen.getByRole("button", { name: "Branch" });
     expect(button).toHaveClass(
@@ -184,8 +169,8 @@ describe("Button", () => {
     );
   });
 
-  it("renders the alert-action variant inheriting the surrounding alert color", () => {
-    render(<Button variant="alert-action">Edit project</Button>);
+  it("renders the alert variant inheriting the surrounding alert color", () => {
+    render(<Button variant="alert">Edit project</Button>);
 
     const button = screen.getByRole("button", { name: "Edit project" });
     expect(button).toHaveClass(
@@ -196,19 +181,19 @@ describe("Button", () => {
     );
   });
 
-  it("renders the strong glass variant with strong glass tokens", () => {
-    render(<Button variant="glass-strong">View</Button>);
+  it("renders the strong glass recipe over the subtle base", () => {
+    render(<GlassButton>View</GlassButton>);
 
     const button = screen.getByRole("button", { name: "View" });
     expect(button).toHaveClass(
       "bg-surface-glass-strong",
       "text-surface-glass-strong-fg",
-      "hover:bg-surface-glass-strong-hover",
+      "backdrop-blur-md",
     );
   });
 
-  it("renders the agent tile action variant with agent tile tokens", () => {
-    render(<Button variant="agent-tile-action">View</Button>);
+  it("renders the agent tile chrome recipe over the subtle base", () => {
+    render(<AgentTileButton>View</AgentTileButton>);
 
     const button = screen.getByRole("button", { name: "View" });
     expect(button).toHaveClass(
@@ -287,5 +272,129 @@ describe("Button", () => {
     fireEvent.click(screen.getByRole("link", { name: "Settings" }));
 
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("destructive intent flag", () => {
+  it("applies the red fill recipe on primary", () => {
+    render(
+      <Button variant="primary" destructive>
+        Delete
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveClass(
+      "bg-destructive",
+      "text-destructive-foreground",
+      "hover:bg-destructive/90",
+    );
+  });
+
+  it("applies the quiet red recipe on ghost", () => {
+    render(
+      <Button variant="ghost" destructive>
+        Delete
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveClass(
+      "text-destructive",
+      "hover:bg-destructive/10",
+      "hover:text-destructive",
+    );
+  });
+
+  it("applies the red border recipe on outline", () => {
+    render(
+      <Button variant="outline" destructive>
+        Delete
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveClass(
+      "border-destructive/30",
+      "text-destructive",
+      "hover:bg-destructive/8",
+    );
+  });
+
+  it("ignores the flag on unsupported variants", () => {
+    render(
+      <Button variant="link" destructive>
+        Remove
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Remove" });
+    expect(button).not.toHaveClass("text-destructive");
+    expect(button).toHaveClass("text-primary");
+  });
+});
+
+describe("flush recipe flag", () => {
+  it("applies the text-raise recipe on ghost", () => {
+    render(
+      <Button variant="ghost" flush>
+        Show more
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Show more" })).toHaveClass(
+      "text-muted-foreground",
+      "hover:bg-transparent",
+      "hover:text-foreground",
+    );
+  });
+
+  it("ignores flush on unsupported variants", () => {
+    render(
+      <Button variant="subtle" flush>
+        Compact
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Compact" });
+    expect(button).toHaveClass("bg-accent");
+    expect(button).not.toHaveClass("hover:bg-transparent");
+  });
+});
+
+describe("subtle variant", () => {
+  it("renders the soft fill recipe without a border", () => {
+    render(<Button variant="subtle">Compact context</Button>);
+
+    const button = screen.getByRole("button", { name: "Compact context" });
+    expect(button).toHaveClass(
+      "bg-accent",
+      "text-accent-foreground",
+      "hover:bg-accent-hover",
+    );
+    expect(button).not.toHaveClass("border-input");
+  });
+
+  it("applies the red tinted fill with the destructive flag", () => {
+    render(
+      <Button variant="subtle" destructive>
+        Delete
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveClass(
+      "bg-destructive/10",
+      "text-destructive",
+      "hover:bg-destructive/16",
+    );
+  });
+});
+
+describe("link variant defaults", () => {
+  it("collapses to text height without padding", () => {
+    render(<Button variant="link">Shortcuts</Button>);
+
+    expect(screen.getByRole("button", { name: "Shortcuts" })).toHaveClass(
+      "h-auto",
+      "p-0",
+      "underline-offset-4",
+    );
   });
 });

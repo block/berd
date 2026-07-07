@@ -139,7 +139,7 @@ export function WorkspaceWidget({
                 size="icon-xs"
                 onClick={onRefresh}
                 disabled={!primaryWorkspaceRoot || isFetching}
-                className="rounded-full text-muted-foreground hover:text-foreground"
+                className="rounded-full"
                 aria-label={t("contextPanel.actions.refreshLocalStatus")}
                 title={t("contextPanel.actions.refreshLocalStatus")}
               >
@@ -157,7 +157,7 @@ export function WorkspaceWidget({
                   variant="ghost"
                   size="icon-xs"
                   onClick={onToggleTerminal}
-                  className="rounded-full text-muted-foreground hover:text-foreground"
+                  className="rounded-full"
                   aria-label={t("terminal.open")}
                   title={t("terminal.open")}
                 >

@@ -42,7 +42,7 @@ import {
   logReasoningEffortInfo,
   reasoningEffortConfigLogFields,
 } from "@/shared/lib/reasoningEffortDiagnostics";
-import { Button } from "@/shared/ui/button";
+import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
@@ -1149,19 +1149,18 @@ export function GlobalComposerPill({
               : "pointer-events-none absolute bottom-0 left-0 translate-y-4 opacity-0",
           )}
         >
-          <Button
+          <ComposerActionButton
             type="button"
             tabIndex={expanded ? 0 : -1}
             onClick={() => {
               runAttachmentWork(handleAttachFiles);
             }}
             disabled={handoffActive}
-            variant="composer-action"
             size="icon-pill-sm"
             aria-label={t("attachments.chooseFilesDialogTitle")}
           >
             <IconPlus aria-hidden="true" />
-          </Button>
+          </ComposerActionButton>
 
           <AgentModelPicker
             agents={pickerAgents}
@@ -1197,11 +1196,10 @@ export function GlobalComposerPill({
 
         <div className="pointer-events-auto absolute inset-y-0 right-0 z-10 flex items-center gap-2">
           {(dictation.isEnabled || dictation.isRecording) && (
-            <Button
+            <ComposerActionButton
               type="button"
               disabled={!dictation.isRecording && !dictation.isEnabled}
               onClick={dictation.toggleRecording}
-              variant="composer-action"
               size="icon-pill-sm"
               className={cn(
                 dictation.isRecording &&
@@ -1223,19 +1221,18 @@ export function GlobalComposerPill({
               }
             >
               <IconMicrophone aria-hidden="true" />
-            </Button>
+            </ComposerActionButton>
           )}
-          <Button
+          <ComposerActionButton
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            variant="composer-action"
             size="icon-pill-sm"
             className={cn(!canSend && "disabled:opacity-100")}
             aria-label={t("toolbar.sendMessage")}
           >
             <IconArrowUp aria-hidden="true" />
-          </Button>
+          </ComposerActionButton>
         </div>
       </div>
     </div>

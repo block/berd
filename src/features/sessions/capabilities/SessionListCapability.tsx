@@ -788,7 +788,7 @@ export function SessionListCapability({
           })}
           cancelLabel={t("common:actions.cancel")}
           confirmLabel={t("common:actions.archive")}
-          confirmVariant="default"
+          destructive={false}
           loadingLabel={t("common:bulkActions.archiving")}
           isLoading={isApplyingSelectionAction}
           onConfirm={() => confirmArchiveSelected(onArchiveChat)}

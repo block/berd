@@ -23,6 +23,7 @@ This follows the shadcn theming model: core tokens describe component anatomy an
 | Floating overlay | `popover` + `popover-foreground` | `bg-popover text-popover-foreground` | Menus, popovers, dropdowns, inspectors. |
 | Quiet fill or secondary zone | `muted` + `muted-foreground` | `bg-muted text-muted-foreground` | Low-emphasis blocks and secondary text. |
 | Hover, active, selected, highlighted | `accent` + `accent-foreground` | `hover:bg-accent hover:text-accent-foreground` | The standard gray interaction fill. |
+| Hover step for accent-filled controls | `accent-hover` | `bg-accent hover:bg-accent-hover` | One visible step past `accent` in both themes (gray-50→gray-100 light, gray-700→gray-600 dark). For controls that already rest on `accent`, like the subtle button. |
 | Primary action | `primary` + `primary-foreground` | `bg-primary text-primary-foreground` | Main action buttons and strong selected states. |
 | Destructive action | `destructive` + `destructive-foreground` | `bg-destructive text-destructive-foreground` | Delete/remove/danger actions. |
 | Default border | `border` | `border-border` | Structure and dividers. |

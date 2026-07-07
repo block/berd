@@ -179,7 +179,8 @@ export function SidebarRecentsSection({
         <div className="flex flex-col items-center gap-1">
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
+            flush
             size="icon-xs"
             onClick={onNewChat}
             aria-label={t("empty.startChat")}
@@ -193,7 +194,8 @@ export function SidebarRecentsSection({
         <div className="space-y-0.5">
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
+            flush
             size="xs"
             onClick={onNewChat}
             className={cn(

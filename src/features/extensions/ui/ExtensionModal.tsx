@@ -238,9 +238,10 @@ export function ExtensionModal({
               <Button
                 type="button"
                 variant="ghost"
+                destructive
                 onClick={() => setIsDeleteDialogOpen(true)}
                 disabled={isSaving || isDeleting}
-                className="mr-auto text-destructive hover:text-destructive hover:bg-destructive/10"
+                className="mr-auto"
               >
                 <IconTrash className="size-4" />
                 {t("extensions.deleteExtension")}

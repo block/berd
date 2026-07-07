@@ -156,7 +156,7 @@ export function ExperimentConfigControls({
                     type="button"
                     variant="link"
                     size="sm"
-                    className="h-auto p-0 text-xs"
+                    className="text-xs"
                     onClick={() => requestOpenSettings("shortcuts")}
                   >
                     {t("nav.shortcuts")}

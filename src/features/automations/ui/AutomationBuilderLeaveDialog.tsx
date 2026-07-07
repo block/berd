@@ -53,7 +53,8 @@ export function AutomationBuilderLeaveDialog({
           </Button>
           <Button
             type="button"
-            variant="destructive"
+            variant="primary"
+            destructive
             disabled={isSaving}
             onClick={onDiscard}
           >

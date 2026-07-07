@@ -207,6 +207,7 @@
   --muted: var(--color-gray-100);
   --muted-foreground: var(--color-gray-600);
   --accent: var(--color-gray-50);
+  --accent-hover: var(--color-gray-100);
   --accent-foreground: var(--foreground);
   --destructive: var(--color-red-600);
   --destructive-foreground: var(--color-white);
@@ -652,6 +653,7 @@
   --muted: var(--color-gray-700);
   --muted-foreground: var(--color-gray-500);
   --accent: var(--color-gray-700);
+  --accent-hover: var(--color-gray-600);
   --accent-foreground: var(--foreground);
   --destructive: var(--color-red-400);
   --destructive-foreground: var(--color-black);
@@ -1008,6 +1010,7 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
@@ -1742,6 +1745,7 @@ body,
     --muted-foreground: var(--chat-context-panel-muted-fg);
     --border: var(--chat-context-panel-border);
     --accent: var(--chat-context-panel-accent);
+    --accent-hover: var(--chat-context-panel-hover);
     --accent-foreground: var(--chat-context-panel-accent-fg);
     --sidebar-accent: var(--chat-context-panel-hover);
     --sidebar-foreground: var(--chat-context-panel-fg);
@@ -1756,6 +1760,7 @@ body,
     --muted: var(--chat-context-dropdown-hover);
     --muted-foreground: var(--chat-context-dropdown-muted-fg);
     --accent: var(--chat-context-dropdown-hover);
+    --accent-hover: var(--chat-context-dropdown-hover);
     --accent-foreground: var(--chat-context-dropdown-fg);
     --sidebar-accent: var(--chat-context-dropdown-hover);
     --sidebar-foreground: var(--chat-context-dropdown-fg);

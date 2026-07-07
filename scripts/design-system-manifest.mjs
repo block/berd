@@ -390,6 +390,20 @@ function displayNameFromFile(fileName, exportEntries) {
     .join(" ");
 }
 
+function getLeadingDocComment(sourceText) {
+  // First /** ... */ block in the file (wrapper components document
+  // themselves with one leading JSDoc block above their recipe/export).
+  const match = sourceText.match(/\/\*\*\n((?: \*.*\n)+) \*\//);
+  if (!match) {
+    return "";
+  }
+  return match[1]
+    .split("\n")
+    .map((line) => line.replace(/^ \*( |$)/, ""))
+    .join("\n")
+    .trim();
+}
+
 export function buildDesignSystemManifest() {
   const files = fs
     .readdirSync(sharedUiDir)
@@ -413,6 +427,7 @@ export function buildDesignSystemManifest() {
     return {
       name: displayNameFromFile(file, exportEntries),
       source: path.relative(repoRoot, absolutePath),
+      description: getLeadingDocComment(sourceText),
       exports,
       slots: getDataSlots(sourceText),
       cva: getCvaMaps(sourceFile),
@@ -439,6 +454,7 @@ export type DesignSystemCvaMap = {
 export type DesignSystemComponentManifestItem = {
   name: string;
   source: string;
+  description: string;
   exports: string[];
   slots: string[];
   cva: DesignSystemCvaMap[];

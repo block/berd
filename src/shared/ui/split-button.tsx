@@ -35,7 +35,7 @@ export function SplitButton<T extends string = string>({
   disabled = false,
   className,
   menuTriggerLabel,
-  variant = "outline-flat",
+  variant = "outline",
   size = "xs",
 }: SplitButtonProps<T>) {
   const activeAction =

@@ -745,7 +745,7 @@ export function DesignSystemInspector({
         ) : null}
         <Button
           type="button"
-          variant={active ? "default" : "secondary"}
+          variant={active ? "primary" : "subtle"}
           size="sm"
           leftIcon={<Crosshair aria-hidden="true" />}
           className="cursor-grab touch-none active:cursor-grabbing"
@@ -761,7 +761,7 @@ export function DesignSystemInspector({
         </Button>
         <Button
           type="button"
-          variant="secondary"
+          variant="subtle"
           size="icon-sm"
           aria-label={`${themeModeLabel} theme. Switch to ${nextThemeModeLabel} theme`}
           onClick={() => setThemeMode(nextThemeMode)}
@@ -771,7 +771,7 @@ export function DesignSystemInspector({
         {onOpenExplorer ? (
           <Button
             type="button"
-            variant="secondary"
+            variant="subtle"
             size="icon-sm"
             aria-label="Open design system explorer"
             title="Open design system explorer"

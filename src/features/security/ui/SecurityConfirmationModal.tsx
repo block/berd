@@ -106,7 +106,12 @@ export function SecurityConfirmationModal() {
           <Button type="button" variant="outline" onClick={handleAllow}>
             {t("securityConfirmation.allow")}
           </Button>
-          <Button type="button" variant="destructive" onClick={handleBlock}>
+          <Button
+            type="button"
+            variant="primary"
+            destructive
+            onClick={handleBlock}
+          >
             {t("securityConfirmation.block")}
           </Button>
         </DialogFooter>

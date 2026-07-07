@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, ClipboardCopy, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
-import { Button } from "@/shared/ui/button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { Spinner } from "@/shared/ui/spinner";
 import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
 import {
@@ -194,25 +194,21 @@ export function DoctorSettings() {
     setTopBarActions(
       <>
         {report ? (
-          <Button
+          <PageHeaderButton
             type="button"
-            variant="page-header"
-            size="xs"
             onClick={copyDebugInfo}
             leftIcon={copied ? <Check /> : <ClipboardCopy />}
           >
             {copied ? t("doctor.copied") : t("doctor.copyDetails")}
-          </Button>
+          </PageHeaderButton>
         ) : null}
-        <Button
+        <PageHeaderButton
           type="button"
-          variant="page-header"
-          size="xs"
           onClick={runChecks}
           leftIcon={<RefreshCw />}
         >
           {t("doctor.rerun")}
-        </Button>
+        </PageHeaderButton>
       </>,
     );
     return () => setTopBarActions(null);

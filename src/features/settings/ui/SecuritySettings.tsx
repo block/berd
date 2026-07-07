@@ -134,7 +134,7 @@ export function SecuritySettings() {
             />
             <Button
               type="button"
-              variant="default"
+              variant="primary"
               size="default"
               disabled={!isValid || !isDirty || saving}
               onClick={handleSave}

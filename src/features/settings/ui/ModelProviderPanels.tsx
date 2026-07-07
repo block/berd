@@ -179,17 +179,17 @@ export function ConnectedFieldsPanel({
 
       <div className="flex justify-end gap-2">
         {showSavedState ? (
-          <Button type="button" variant="secondary" size="sm" disabled>
+          <Button type="button" variant="subtle" size="sm" disabled>
             {t("providers.saved")}
           </Button>
         ) : null}
         <Button
           type="button"
           variant="outline"
+          destructive
           size="sm"
           onClick={() => onRemove()}
           disabled={saving}
-          className="text-destructive hover:text-destructive"
         >
           {saving ? <Spinner className="size-3" /> : null}
           {t("providers.disconnect")}

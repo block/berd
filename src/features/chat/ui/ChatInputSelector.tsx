@@ -1,6 +1,7 @@
 import { Fragment, useRef, type ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Button } from "@/shared/ui/button";
+import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,12 +74,17 @@ export function ChatInputSelector({
       ? "xs"
       : "sm";
 
+  const TriggerButton =
+    triggerVariant === "toolbar" ? ComposerActionButton : Button;
+
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <Button
+        <TriggerButton
           type="button"
-          variant={triggerVariant === "toolbar" ? "composer-action" : "outline"}
+          {...(triggerVariant === "toolbar"
+            ? {}
+            : { variant: "outline" as const })}
           size={buttonSize}
           aria-label={ariaLabel}
           title={triggerTitle}
@@ -100,7 +106,7 @@ export function ChatInputSelector({
               {triggerLabel}
             </span>
           )}
-        </Button>
+        </TriggerButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align={contentAlign}

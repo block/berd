@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { BreadcrumbTrail } from "@/shared/ui/breadcrumb";
-import { Button } from "@/shared/ui/button";
+import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 
 type TopBarLeadingChromeInset = "compact" | "trafficLights";
@@ -146,43 +146,39 @@ export function TopBar({
       />
       <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         {onGoHome ? (
-          <Button
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onGoHome}
             aria-label={t("navigation.gooseHome")}
             title={t("navigation.gooseHome")}
           >
             <BerdIcon className="size-5" />
-          </Button>
+          </TopBarIconButton>
         ) : null}
-        <Button
+        <TopBarIconButton
           type="button"
-          variant="top-bar-icon"
           size="icon-top-bar"
           onClick={onToggleSidebar}
           aria-label={sidebarLabel}
           title={sidebarLabel}
         >
           <SidebarIcon aria-hidden="true" />
-        </Button>
+        </TopBarIconButton>
         {onSearchClick ? (
-          <Button
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onSearchClick}
             aria-label={t("actions.search")}
             title={t("actions.search")}
           >
             <IconSearch aria-hidden="true" />
-          </Button>
+          </TopBarIconButton>
         ) : null}
         <div className="flex items-center gap-0.5">
-          <Button
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onGoBack}
             disabled={!canGoBack}
@@ -190,10 +186,9 @@ export function TopBar({
             title={t("actions.back")}
           >
             <IconArrowLeft aria-hidden="true" />
-          </Button>
-          <Button
+          </TopBarIconButton>
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onGoForward}
             disabled={!canGoForward}
@@ -201,7 +196,7 @@ export function TopBar({
             title={t("actions.forward")}
           >
             <IconArrowRight aria-hidden="true" />
-          </Button>
+          </TopBarIconButton>
         </div>
       </div>
       <div
@@ -225,21 +220,19 @@ export function TopBar({
       ) : null}
       <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         {onFeedbackClick ? (
-          <Button
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onFeedbackClick}
             aria-label={t("feedback:title")}
             title={t("feedback:title")}
           >
             <IconMessageReport aria-hidden="true" />
-          </Button>
+          </TopBarIconButton>
         ) : null}
         {showContextPanelToggle && (
-          <Button
+          <TopBarIconButton
             type="button"
-            variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onToggleContextPanel}
             aria-pressed={contextPanelOpen}
@@ -248,7 +241,7 @@ export function TopBar({
             data-context-panel-toggle="true"
           >
             <ContextPanelIcon aria-hidden="true" />
-          </Button>
+          </TopBarIconButton>
         )}
       </div>
     </header>

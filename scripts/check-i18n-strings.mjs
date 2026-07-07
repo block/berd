@@ -16,14 +16,9 @@ const CHECKED_PATHS = [
   "src/features/status",
   "src/features/sessions",
   "src/shared/ui/ai-elements/code-block.tsx",
-  "src/shared/ui/ai-elements/environment-variables.tsx",
+  "src/shared/ui/ai-elements/commit.tsx",
   "src/shared/ui/ai-elements/message.tsx",
   "src/shared/ui/ai-elements/plan.tsx",
-  "src/shared/ui/ai-elements/snippet.tsx",
-  "src/shared/ui/ai-elements/stack-trace.tsx",
-  "src/shared/ui/ai-elements/terminal.tsx",
-  "src/shared/ui/ai-elements/context.tsx",
-  "src/shared/ui/ai-elements/commit.tsx",
 ];
 
 const EXCLUDED_PATH_SEGMENTS = ["__tests__"];

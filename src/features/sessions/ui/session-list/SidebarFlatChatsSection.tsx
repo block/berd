@@ -181,7 +181,8 @@ export function SidebarFlatChatsSection({
               {onCreateProject ? (
                 <Button
                   type="button"
-                  variant="quiet"
+                  variant="ghost"
+                  flush
                   size="icon-xs"
                   onClick={onCreateProject}
                   aria-label={t("actions.newProject")}
@@ -193,7 +194,8 @@ export function SidebarFlatChatsSection({
               ) : null}
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="icon-xs"
                 onClick={onNewChat}
                 aria-label={t("empty.startChat")}
@@ -207,7 +209,8 @@ export function SidebarFlatChatsSection({
             <div className="space-y-0.5">
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="xs"
                 onClick={onNewChat}
                 className={cn(
@@ -226,7 +229,8 @@ export function SidebarFlatChatsSection({
             {onCreateProject ? (
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="icon-xs"
                 onClick={onCreateProject}
                 aria-label={t("actions.newProject")}
@@ -239,7 +243,8 @@ export function SidebarFlatChatsSection({
             {onNewChat ? (
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
+                flush
                 size="icon-xs"
                 onClick={onNewChat}
                 aria-label={t("actions.newChat")}

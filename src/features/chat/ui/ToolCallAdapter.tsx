@@ -135,7 +135,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
     return (
       <Button
         type="button"
-        variant="outline-flat"
+        variant="outline"
         onClick={() => void openLocation(location)}
         className={className}
         title={location.path}

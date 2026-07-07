@@ -15,6 +15,7 @@ import {
   reasoningEffortConfigLogFields,
 } from "@/shared/lib/reasoningEffortDiagnostics";
 import { Button } from "@/shared/ui/button";
+import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Spinner } from "@/shared/ui/spinner";
@@ -394,10 +395,9 @@ export function AgentModelPicker({
       }}
     >
       <PopoverTrigger asChild>
-        <Button
+        <ComposerActionButton
           ref={triggerRef}
           type="button"
-          variant="composer-action"
           size={triggerButtonSize}
           aria-label={t("toolbar.chooseAgentModel")}
           title={triggerTitle}
@@ -431,7 +431,7 @@ export function AgentModelPicker({
               ) : null}
             </span>
           )}
-        </Button>
+        </ComposerActionButton>
       </PopoverTrigger>
       <PopoverContent
         ref={contentRef}

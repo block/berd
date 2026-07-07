@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/dialog";
-import { Button, type ButtonProps } from "@/shared/ui/button";
+import { Button } from "@/shared/ui/button";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -18,7 +18,12 @@ interface ConfirmDialogProps {
   confirmLabel: React.ReactNode;
   loadingLabel?: React.ReactNode;
   isLoading?: boolean;
-  confirmVariant?: ButtonProps["variant"];
+  /**
+   * Danger intent for the confirm action. Defaults to true because most
+   * confirmation dialogs guard destructive operations; pass false for
+   * neutral confirmations like archiving.
+   */
+  destructive?: boolean;
   contentClassName?: string;
   overlayClassName?: string;
   positionerClassName?: string;
@@ -35,7 +40,7 @@ export function ConfirmDialog({
   confirmLabel,
   loadingLabel,
   isLoading = false,
-  confirmVariant = "destructive",
+  destructive = true,
   contentClassName = "max-w-sm",
   overlayClassName,
   positionerClassName,
@@ -79,7 +84,8 @@ export function ConfirmDialog({
           </Button>
           <Button
             type="button"
-            variant={confirmVariant}
+            variant="primary"
+            destructive={destructive}
             disabled={isLoading}
             onClick={() => void handleConfirm()}
           >

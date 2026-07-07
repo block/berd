@@ -90,8 +90,8 @@ export function ArchivedProjectsSection() {
                 type="button"
                 variant="ghost"
                 size="xs"
+                destructive
                 onClick={() => setDeletingProject(project)}
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 {t("common:actions.delete")}
               </Button>
@@ -120,7 +120,10 @@ export function ArchivedProjectsSection() {
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common:actions.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className={buttonVariants({
+                variant: "primary",
+                destructive: true,
+              })}
               onClick={() => {
                 if (deletingProject) {
                   void handleDelete(deletingProject.id);

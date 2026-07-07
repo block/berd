@@ -736,7 +736,8 @@ function TerminalPanelShell({
                         </Button>
                         <Button
                           type="button"
-                          variant="destructive"
+                          variant="primary"
+                          destructive
                           size="xs"
                           onClick={() => controller.closeTab(tab.id)}
                         >

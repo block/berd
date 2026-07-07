@@ -1,10 +1,8 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
-import { IconArrowLeft } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
-import { APP_CHROME_NAV_TEXT_IMPORTANT_CLASS } from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 import { Spinner } from "@/shared/ui/spinner";
 
@@ -13,46 +11,15 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:
+        primary:
           "bg-primary text-primary-foreground shadow-none hover:bg-primary/90",
-        destructive:
-          "bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90",
-        "destructive-flat":
-          "bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90",
         outline:
           "border border-input bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
-        "outline-flat":
-          "border border-border/80 bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
-        secondary:
-          "border border-input bg-accent text-accent-foreground hover:bg-accent",
-        "alert-action":
+        subtle:
+          "bg-accent text-accent-foreground shadow-none hover:bg-accent-hover",
+        alert:
           "border border-current/30 bg-transparent font-medium text-current shadow-none hover:bg-current/10 hover:text-current",
-        glass:
-          "bg-surface-composer text-foreground shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-composer-hover hover:text-foreground active:bg-surface-composer data-[state=open]:bg-surface-composer aria-expanded:bg-surface-composer",
-        "glass-strong":
-          "bg-surface-glass-strong text-surface-glass-strong-fg shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-glass-strong-hover hover:text-surface-glass-strong-fg active:bg-surface-glass-strong data-[state=open]:bg-surface-glass-strong aria-expanded:bg-surface-glass-strong",
-        "agent-tile-action":
-          "bg-surface-agent-tile-action-bg text-surface-agent-tile-action-fg shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-agent-tile-action-bg-hover hover:text-surface-agent-tile-action-fg-hover active:bg-surface-agent-tile-action-bg-hover active:text-surface-agent-tile-action-fg-hover data-[state=open]:bg-surface-agent-tile-action-bg-hover data-[state=open]:text-surface-agent-tile-action-fg-hover aria-expanded:bg-surface-agent-tile-action-bg-hover aria-expanded:text-surface-agent-tile-action-fg-hover",
         ghost: "hover:bg-accent hover:text-accent-foreground",
-        "ghost-light":
-          "font-normal hover:bg-accent hover:text-accent-foreground",
-        "inline-subtle":
-          "rounded-md bg-transparent font-normal text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground",
-        quiet:
-          "bg-transparent font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
-        "quiet-inverse":
-          "bg-transparent font-normal text-foreground shadow-none hover:bg-transparent hover:text-muted-foreground active:bg-transparent active:text-muted-foreground data-[state=open]:bg-transparent data-[state=open]:text-muted-foreground aria-expanded:bg-transparent aria-expanded:text-muted-foreground",
-        toolbar:
-          "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground",
-        "top-bar-icon":
-          "bg-transparent text-app-top-bar-control-fg shadow-none transition-[color,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-transparent hover:text-app-top-bar-control-fg hover:opacity-[var(--app-top-bar-control-hover-opacity)] active:bg-transparent active:text-app-top-bar-control-fg active:opacity-[var(--app-top-bar-control-hover-opacity)] focus-visible:bg-transparent data-[state=open]:bg-transparent data-[state=open]:text-app-top-bar-control-fg aria-expanded:bg-transparent aria-expanded:text-app-top-bar-control-fg disabled:!opacity-100 disabled:text-app-top-bar-control-fg-disabled disabled:hover:opacity-100 disabled:hover:text-app-top-bar-control-fg-disabled disabled:active:text-app-top-bar-control-fg-disabled disabled:focus-visible:text-app-top-bar-control-fg-disabled",
-        "composer-action":
-          "bg-surface-composer-action text-foreground shadow-none hover:bg-surface-composer-action-hover hover:text-foreground active:bg-surface-composer-action-active active:text-foreground data-[state=open]:bg-surface-composer-action-hover data-[state=open]:text-foreground aria-expanded:bg-surface-composer-action-hover aria-expanded:text-foreground",
-        "jump-to-latest":
-          "select-none bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] hover:opacity-90",
-        "page-header":
-          "bg-background text-muted-foreground shadow-none hover:bg-background hover:text-foreground focus-visible:text-foreground active:text-foreground",
-        back: "justify-start text-muted-foreground hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
@@ -74,41 +41,49 @@ const buttonVariants = cva(
         "icon-lg":
           "h-10 w-10 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-5",
       },
+      destructive: {
+        true: "",
+        false: "",
+      },
+      flush: {
+        true: "",
+        false: "",
+      },
     },
     compoundVariants: [
       {
-        variant: "page-header",
-        size: "xs",
-        className: cn(
-          "!h-[30px] !gap-[5px] !px-3",
-          APP_CHROME_NAV_TEXT_IMPORTANT_CLASS,
-          "[&_svg]:!size-3.5",
-        ),
+        variant: "primary",
+        destructive: true,
+        className:
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
       },
       {
-        variant: "toolbar",
-        size: "xs",
-        className: "gap-1.5 px-1.5 text-[13px]",
+        variant: "outline",
+        destructive: true,
+        className:
+          "border-destructive/30 text-destructive hover:border-destructive/40 hover:bg-destructive/8 hover:text-destructive",
       },
       {
-        variant: "toolbar",
-        size: "sm",
-        className: "gap-1.5 px-2 text-[13px]",
+        variant: "ghost",
+        destructive: true,
+        className:
+          "text-destructive hover:bg-destructive/10 hover:text-destructive",
       },
       {
-        variant: "toolbar",
-        size: "default",
-        className: "gap-1.5 px-2.5 text-[13px]",
+        variant: "subtle",
+        destructive: true,
+        className:
+          "bg-destructive/10 text-destructive hover:bg-destructive/16 hover:text-destructive",
       },
       {
-        variant: "inline-subtle",
-        size: "xs",
-        className: "h-6 gap-1.5 px-2 text-[11px]",
+        variant: "ghost",
+        flush: true,
+        className:
+          "bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
       },
       {
-        variant: "back",
-        size: "sm",
-        className: "px-0",
+        variant: "link",
+        className: "h-auto p-0",
       },
       {
         variant: "ghost",
@@ -136,8 +111,10 @@ const buttonVariants = cva(
       },
     ],
     defaultVariants: {
-      variant: "default",
+      variant: "primary",
       size: "default",
+      destructive: false,
+      flush: false,
     },
   },
 );
@@ -252,8 +229,40 @@ function renderIconOnlyButtonChildren(
     : children;
 }
 
+type ButtonCvaProps = VariantProps<typeof buttonVariants>;
+type ButtonEmphasis = NonNullable<ButtonCvaProps["variant"]>;
+
+/** Variants that support the destructive intent flag. */
+const DESTRUCTIVE_EMPHASES = ["primary", "outline", "subtle", "ghost"] as const;
+
+export type ButtonDestructiveEmphasis = (typeof DESTRUCTIVE_EMPHASES)[number];
+
+export function isButtonDestructiveEmphasis(
+  variant: ButtonEmphasis,
+): variant is ButtonDestructiveEmphasis {
+  return (DESTRUCTIVE_EMPHASES as readonly string[]).includes(variant);
+}
+
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonVariants> & {
+  Omit<ButtonCvaProps, "destructive" | "flush"> & {
+    /**
+     * Danger intent. Recolors the emphasis recipe with destructive tokens:
+     * primary = red fill, outline = red border + red text, subtle = red
+     * tinted fill, ghost = red text with a destructive/10 hover tint. Only
+     * meaningful on primary, outline, subtle, and ghost; other variants
+     * ignore it (dev builds warn).
+     */
+    destructive?: boolean;
+    /**
+     * Inline geometry for ghost buttons that sit flush with surrounding
+     * content (list section actions, inline "show more" affordances).
+     * Rests at muted-foreground and raises the label on hover instead of
+     * painting a background pill. Only meaningful on ghost; other variants
+     * ignore it (dev builds warn). Pair with px-0 spacing via size or
+     * className layout-only utilities where the design calls for true
+     * edge alignment.
+     */
+    flush?: boolean;
     asChild?: boolean;
     leftIcon?: React.ReactNode;
     rightIcon?: React.ReactNode;
@@ -272,6 +281,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       className,
       variant,
       size,
+      destructive,
+      flush,
       asChild = false,
       leftIcon,
       rightIcon,
@@ -291,6 +302,23 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const [displayStatus, setDisplayStatus] =
       React.useState<ButtonFeedbackState>(feedbackState);
+    const resolvedEmphasis = variant ?? "primary";
+    const resolvedDestructive = Boolean(
+      destructive && isButtonDestructiveEmphasis(resolvedEmphasis),
+    );
+    if (import.meta.env.DEV && destructive && !resolvedDestructive) {
+      console.warn(
+        `Button: the destructive flag is only supported on ${DESTRUCTIVE_EMPHASES.join(
+          ", ",
+        )} variants; it is ignored on variant="${resolvedEmphasis}".`,
+      );
+    }
+    const resolvedFlush = Boolean(flush && resolvedEmphasis === "ghost");
+    if (import.meta.env.DEV && flush && !resolvedFlush) {
+      console.warn(
+        `Button: the flush flag is only supported on the ghost variant; it is ignored on variant="${resolvedEmphasis}".`,
+      );
+    }
     const Comp = asChild ? Slot : "button";
     const renderedChildren = asChild
       ? children
@@ -301,10 +329,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       children.type !== React.Fragment
         ? children.props.children
         : renderedChildren;
-    const resolvedLeftIcon =
-      variant === "back"
-        ? (leftIcon ?? <IconArrowLeft aria-hidden="true" />)
-        : leftIcon;
+    const resolvedLeftIcon = leftIcon;
     const isLoading = feedbackState === "loading";
     const resolvedDisabled = disabled || isLoading;
     const spinnerClass = getButtonSpinnerClass(size);
@@ -414,9 +439,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           component: "Button",
           slot: "button",
           source: "src/shared/ui/button.tsx",
-          variant: variant ?? "default",
+          variant: variant ?? "primary",
           size: size ?? "default",
           props: {
+            destructive: resolvedDestructive,
+            flush: resolvedFlush,
             asChild,
             disabled: resolvedDisabled,
             leftIcon: Boolean(resolvedLeftIcon),
@@ -432,7 +459,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         aria-disabled={asChild && resolvedDisabled ? true : undefined}
         disabled={resolvedDisabled}
         className={cn(
-          buttonVariants({ variant, size, className }),
+          buttonVariants({
+            variant,
+            size,
+            destructive: resolvedDestructive,
+            flush: resolvedFlush,
+            className,
+          }),
           asChild && resolvedDisabled && "pointer-events-none",
         )}
         onClick={handleClick}

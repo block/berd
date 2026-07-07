@@ -11,6 +11,60 @@ Use the primitives in `src/shared/ui/` as the default way to build interface ele
 
 ## Buttons
 
+The button system is a closed menu. Every button in the app is one of these
+named things — never a custom-styled Button.
+
+### The semantic menu (Button variants)
+
+| Variant | Use when |
+| --- | --- |
+| `primary` | The one main action (save, create, submit, confirm). Filled. |
+| `outline` | The paired secondary action next to a primary. Bordered. |
+| `subtle` | Soft-fill mid-weight action on background-colored surfaces. |
+| `ghost` | Quiet action in a row or toolbar. Invisible until hover. |
+| `alert` | Action inside a colored alert/banner; inherits `currentColor`. |
+| `link` | Inline text link that behaves as a button. Collapses to text. |
+
+Two flags modify variants:
+
+- `destructive` — danger intent. Works on `primary` (red fill), `outline`
+  (red border/text), `subtle` (red tinted fill), and `ghost` (red text +
+  tint hover). Other variants ignore it and warn in dev.
+- `flush` — ghost only. Inline geometry: no padding pill; rests at
+  `muted-foreground` and raises the label on hover. For quiet actions that
+  sit flush with surrounding content (list section actions, "show more").
+
+Pick the emphasis first; if the action is dangerous, add `destructive`.
+
+### Chrome buttons (named wrappers)
+
+Surface-specific recipes live in named components that compose Button. Use
+these instead of restyling Button for app chrome:
+
+| Component | Base | Use when |
+| --- | --- | --- |
+| `TopBarIconButton` | ghost | Icon actions in the app top bar / window chrome. |
+| `ComposerActionButton` | subtle | Controls on the chat composer surface. |
+| `PageHeaderButton` | subtle | View-header actions in the app top strip. |
+| `AgentTileButton` | subtle | Actions floating over agent/persona tiles. |
+| `GlassButton` | subtle | Controls floating over media, canvases, artwork. |
+| `JumpToLatestButton` | primary | Floating back-to-live-edge pills over streams. |
+
+Each wrapper's recipe owns all of its interactive states; see the doc
+comment in its source for the full contract.
+
+### The rule (audited in CI)
+
+Feature code never puts color or interactive-state classes (`bg-*`,
+`text-foreground`/`text-muted-foreground`/..., `hover:*`, `active:*`,
+`shadow-*`, `opacity-*`) on a `<Button>`. Layout-only classes (`ml-auto`,
+`w-full`, `justify-start`, `shrink-0`, truncation) are fine. If no variant,
+flag, or wrapper fits, that is a design-system conversation — extend the
+menu, don't restyle locally. `pnpm design-system:audit` enforces this and
+fails on new violations.
+
+### General guidance
+
 - Use `Button` for clickable controls unless there is a strong reason not to.
 - Use `variant` and `size` before adding custom classes.
 - Use `leftIcon` and `rightIcon` for leading and trailing icons instead of manually placing icon children.

@@ -637,7 +637,7 @@ export function AutomationDetailPage({
                   ) : (
                     <Button
                       type="button"
-                      variant="outline-flat"
+                      variant="outline"
                       size="xs"
                       onClick={startEditingInstructions}
                       disabled={isSaving}

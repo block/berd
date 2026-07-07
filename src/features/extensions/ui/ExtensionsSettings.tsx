@@ -11,6 +11,7 @@ import { isCompanyManagedExtension } from "@/features/connections/lib/managedExt
 import { useMigrationStore } from "@/features/migration/stores/migrationStore";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { FilterRow } from "@/shared/ui/page-shell";
 import { useExtensionsSettings } from "../hooks/useExtensionsSettings";
@@ -46,7 +47,7 @@ function FilterButton({
     <Button
       type="button"
       size="xs"
-      variant={active ? "default" : "outline-flat"}
+      variant={active ? "primary" : "outline"}
       onClick={onClick}
     >
       {children}
@@ -82,15 +83,13 @@ export function ExtensionsSettings({
     }
 
     setTopBarActions(
-      <Button
+      <PageHeaderButton
         type="button"
-        variant="page-header"
-        size="xs"
         onClick={handleAdd}
         leftIcon={<IconPlus />}
       >
         {t("extensions.addExtension")}
-      </Button>,
+      </PageHeaderButton>,
     );
     return () => setTopBarActions(null);
   }, [handleAdd, setTopBarActions, showAddAction, t]);

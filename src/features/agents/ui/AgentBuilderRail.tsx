@@ -286,7 +286,7 @@ export function AgentBuilderRail({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground"
+            className="-ml-1 shrink-0"
             aria-label={t("builderRail.backToAgent")}
             onClick={() => onBack?.(data)}
           >
@@ -307,7 +307,7 @@ export function AgentBuilderRail({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground"
+          className="-mr-1 shrink-0"
           aria-label={t("builderRail.closeBuilder")}
           title={t("builderRail.closeBuilder")}
           onClick={onClose}

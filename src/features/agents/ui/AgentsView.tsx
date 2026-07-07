@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { IconPlus, IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { Button, buttonVariants } from "@/shared/ui/button";
+import { buttonVariants } from "@/shared/ui/button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { PageShell } from "@/shared/ui/page-shell";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import {
@@ -388,24 +389,20 @@ export function AgentsView({
     }
     setTopBarActions(
       <>
-        <Button
+        <PageHeaderButton
           type="button"
-          variant="page-header"
-          size="xs"
           onClick={() => void handleImportPicker()}
           leftIcon={<IconUpload />}
         >
           {t("common:actions.import")}
-        </Button>
-        <Button
+        </PageHeaderButton>
+        <PageHeaderButton
           type="button"
-          variant="page-header"
-          size="xs"
           onClick={handleCreatePersona}
           leftIcon={<IconPlus />}
         >
           {t("view.newPersona")}
-        </Button>
+        </PageHeaderButton>
       </>,
     );
     return () => setTopBarActions(null);
@@ -439,7 +436,10 @@ export function AgentsView({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common:actions.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className={buttonVariants({
+                variant: "primary",
+                destructive: true,
+              })}
               onClick={handleConfirmDeletePersona}
             >
               {t("common:actions.delete")}

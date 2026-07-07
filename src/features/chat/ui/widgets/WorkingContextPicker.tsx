@@ -386,7 +386,7 @@ export function WorkingContextPicker({
               variant="ghost"
               size="icon-xs"
               onClick={handleCreateBranchClick}
-              className="rounded-full text-muted-foreground hover:text-foreground"
+              className="rounded-full"
               aria-label={t("contextPanel.createDialog.createBranch")}
               title={t("contextPanel.createDialog.createBranch")}
             >
@@ -516,7 +516,7 @@ export function WorkingContextPicker({
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={switching}
-              className={buttonVariants({ variant: "secondary" })}
+              className={buttonVariants({ variant: "subtle" })}
               onClick={() => {
                 if (pendingSwitch?.branch) {
                   void performCarrySwitch(

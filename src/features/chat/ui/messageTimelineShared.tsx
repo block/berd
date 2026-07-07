@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronsDown, IconChevronsUp } from "@tabler/icons-react";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
-import { Button } from "@/shared/ui/button";
+import { JumpToLatestButton } from "@/shared/ui/jump-to-latest-button";
 import {
   Tooltip,
   TooltipContent,
@@ -184,9 +184,8 @@ export function MessageTimelineJumpToLatestButton({
         data-jump-to-latest-state={visible ? "visible" : "hidden"}
         className={fadeClassName}
       >
-        <Button
+        <JumpToLatestButton
           type="button"
-          variant="jump-to-latest"
           size="icon-sm"
           onClick={handleClick}
           aria-hidden={!visible}
@@ -195,7 +194,7 @@ export function MessageTimelineJumpToLatestButton({
           title={label}
         >
           <IconChevronsDown aria-hidden="true" />
-        </Button>
+        </JumpToLatestButton>
       </span>
     );
   }
@@ -205,9 +204,8 @@ export function MessageTimelineJumpToLatestButton({
       data-jump-to-latest-state={visible ? "visible" : "hidden"}
       className={fadeClassName}
     >
-      <Button
+      <JumpToLatestButton
         type="button"
-        variant="jump-to-latest"
         size="sm"
         onClick={handleClick}
         aria-hidden={!visible}
@@ -215,7 +213,7 @@ export function MessageTimelineJumpToLatestButton({
         leftIcon={<IconChevronsDown />}
       >
         {label}
-      </Button>
+      </JumpToLatestButton>
     </span>
   );
 }
@@ -267,9 +265,8 @@ export function MessageTimelineJumpToResponseStartGutterButton({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
+              <JumpToLatestButton
                 type="button"
-                variant="jump-to-latest"
                 size="icon-sm"
                 // Matched fade in/out. Scroll only controls the visible state;
                 // CSS owns the transition so short messages still get a clear
@@ -291,7 +288,7 @@ export function MessageTimelineJumpToResponseStartGutterButton({
                 aria-label={ariaLabel}
               >
                 <IconChevronsUp aria-hidden="true" />
-              </Button>
+              </JumpToLatestButton>
             </TooltipTrigger>
             <TooltipContent>
               <p>{label}</p>

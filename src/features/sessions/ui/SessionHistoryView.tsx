@@ -18,6 +18,7 @@ import { cn } from "@/shared/lib/cn";
 import { BottomFade } from "@/shared/ui/BottomFade";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { ToastActionButton } from "@/shared/ui/sonner";
@@ -803,10 +804,8 @@ export function SessionHistoryView({
 
   useEffect(() => {
     setTopBarActions(
-      <Button
+      <PageHeaderButton
         type="button"
-        variant="page-header"
-        size="xs"
         onClick={handleTriggerImport}
         leftIcon={<IconUpload />}
         feedbackState={isImporting ? "loading" : "idle"}
@@ -814,7 +813,7 @@ export function SessionHistoryView({
         preserveWidth
       >
         {t("common:actions.import")}
-      </Button>,
+      </PageHeaderButton>,
     );
     return () => setTopBarActions(null);
   }, [setTopBarActions, t, handleTriggerImport, isImporting]);
@@ -1046,7 +1045,7 @@ export function SessionHistoryView({
                     {onSelectSession && (
                       <Button
                         type="button"
-                        variant="alert-action"
+                        variant="alert"
                         size="xxs"
                         onClick={() =>
                           handleOpenImportedSession(importNotice.sessionId)
@@ -1057,7 +1056,7 @@ export function SessionHistoryView({
                     )}
                     <Button
                       type="button"
-                      variant="alert-action"
+                      variant="alert"
                       size="xxs"
                       onClick={handleDismissImportNotice}
                     >
@@ -1254,7 +1253,7 @@ export function SessionHistoryView({
         })}
         cancelLabel={t("common:actions.cancel")}
         confirmLabel={t("common:actions.archive")}
-        confirmVariant="default"
+        destructive={false}
         loadingLabel={t("common:bulkActions.archiving")}
         isLoading={isApplyingSelectionAction}
         onConfirm={() => confirmArchiveSelected(handleArchive)}

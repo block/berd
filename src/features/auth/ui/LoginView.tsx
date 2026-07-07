@@ -414,7 +414,8 @@ export function LoginView({
           >
             <Button
               type="button"
-              variant="inline-subtle"
+              variant="ghost"
+              flush
               size="xs"
               className="self-center"
               disabled={!pending}
@@ -435,7 +436,8 @@ export function LoginView({
             <p>Couldn't check sign-in status.</p>
             <Button
               type="button"
-              variant="inline-subtle"
+              variant="ghost"
+              flush
               size="xs"
               leftIcon={<RotateCcwIcon aria-hidden="true" />}
               tabIndex={statusError ? undefined : -1}

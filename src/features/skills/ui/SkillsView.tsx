@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { Button } from "@/shared/ui/button";
+import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -461,15 +461,13 @@ export function SkillsView({
       <>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
+            <PageHeaderButton
               type="button"
-              variant="page-header"
-              size="xs"
               aria-label={t("view.scope.ariaLabel")}
               rightIcon={<IconChevronDown />}
             >
               {selectedScopeLabel}
-            </Button>
+            </PageHeaderButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem
@@ -504,25 +502,18 @@ export function SkillsView({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
+        <PageHeaderButton
           type="button"
-          variant="page-header"
-          size="xs"
           onClick={openFilePicker}
           leftIcon={<IconUpload />}
         >
           {t("common:actions.import")}
-        </Button>
+        </PageHeaderButton>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="page-header"
-              size="xs"
-              leftIcon={<IconPlus />}
-            >
+            <PageHeaderButton type="button" leftIcon={<IconPlus />}>
               {t("view.newSkill")}
-            </Button>
+            </PageHeaderButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={handleNewSkillWithChat}>

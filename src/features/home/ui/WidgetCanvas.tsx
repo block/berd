@@ -7,7 +7,7 @@ import type {
   LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { cn } from "@/shared/lib/cn";
-import { Button } from "@/shared/ui/button";
+import { GlassButton } from "@/shared/ui/glass-button";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import {
   hasVisibleHomeCanvasWidget,
@@ -717,9 +717,8 @@ export function WidgetCanvas({
           }
           aria-hidden={showRecenterControl ? undefined : true}
         >
-          <Button
+          <GlassButton
             type="button"
-            variant="glass-strong"
             size="sm"
             className={cn(
               "transition-[opacity,transform] duration-[180ms] ease-out motion-reduce:animate-none motion-reduce:transition-none",
@@ -734,7 +733,7 @@ export function WidgetCanvas({
             onClick={showRecenterControl ? onRecenter : undefined}
           >
             {resolvedRecenterLabel}
-          </Button>
+          </GlassButton>
         </div>
       ) : null}
 

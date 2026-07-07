@@ -67,7 +67,10 @@ export function SkillsDialogs({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common:actions.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
+              className={buttonVariants({
+                variant: "primary",
+                destructive: true,
+              })}
               onClick={onConfirmDelete}
             >
               {t("common:actions.delete")}

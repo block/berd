@@ -6,6 +6,7 @@ import { Switch } from "@/shared/ui/switch";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Button } from "@/shared/ui/button";
+import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import {
   getNotificationPrefs,
   setNotificationPrefs,
@@ -158,9 +159,8 @@ function SoundSelect({
                         selected ? "opacity-100" : "opacity-0",
                       )}
                     >
-                      <Button
+                      <TopBarIconButton
                         type="button"
-                        variant="top-bar-icon"
                         size="icon-xs"
                         aria-label={getPreviewAriaLabel(sound.label)}
                         className="size-7"
@@ -177,7 +177,7 @@ function SoundSelect({
                           className="size-3"
                           aria-hidden="true"
                         />
-                      </Button>
+                      </TopBarIconButton>
                     </span>
                   ) : (
                     <span className="size-7" aria-hidden="true" />
