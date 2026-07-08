@@ -9,7 +9,7 @@ import {
   type CSSProperties,
 } from "react";
 import { cn } from "@/shared/lib/cn";
-import { ContextPanel } from "./ContextPanel";
+import { ContextPanel, ContextPanelWorktreeTracker } from "./ContextPanel";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 
 const CP_PANEL_W = 250;
@@ -198,90 +198,97 @@ export function ChatContextPanel({
   }, [isCompactViewport, isOpen, onRequestClose]);
 
   return (
-    <div
-      className={cn(
-        allowVerticalShrink ? "min-h-0 shrink overflow-hidden" : "shrink-0",
-        frameMode === "docking" && "relative",
-        frameMode === "docked" ? "overflow-hidden" : "overflow-visible",
-        // Pin the fixed-width panel to the rail's right edge so the rail's
-        // own growing/shrinking width reveals and hides it right-to-left
-        // instead of unfolding its left edge. Cross-axis `self-end` (not
-        // `ml-auto`) is required: in this flex column the panel is wider than
-        // the rail for the whole width transition, and auto margins collapse
-        // to 0 under overflow, whereas flex-end alignment still pins the
-        // trailing (right) edge and lets the leading edge overflow into the
-        // rail's clip.
-        frameMode === "docked" && "self-end",
-      )}
-      style={
-        {
-          // In the normal docked case the panel keeps a fixed width and the
-          // enclosing rail animates its own width, clipping this panel to
-          // produce the right-to-left reveal. The docking (compact -> docked)
-          // reflow still animates width here so the panel grows into place.
-          width:
-            frameMode === "docked"
-              ? panelWidth
-              : isOpen && !isCompactViewport
+    <>
+      <ContextPanelWorktreeTracker
+        sessionId={activeSessionId}
+        projectWorkingDirs={project?.workingDirs ?? []}
+        sessionWorkingDir={sessionWorkingDir}
+      />
+      <div
+        className={cn(
+          allowVerticalShrink ? "min-h-0 shrink overflow-hidden" : "shrink-0",
+          frameMode === "docking" && "relative",
+          frameMode === "docked" ? "overflow-hidden" : "overflow-visible",
+          // Pin the fixed-width panel to the rail's right edge so the rail's
+          // own growing/shrinking width reveals and hides it right-to-left
+          // instead of unfolding its left edge. Cross-axis `self-end` (not
+          // `ml-auto`) is required: in this flex column the panel is wider than
+          // the rail for the whole width transition, and auto margins collapse
+          // to 0 under overflow, whereas flex-end alignment still pins the
+          // trailing (right) edge and lets the leading edge overflow into the
+          // rail's clip.
+          frameMode === "docked" && "self-end",
+        )}
+        style={
+          {
+            // In the normal docked case the panel keeps a fixed width and the
+            // enclosing rail animates its own width, clipping this panel to
+            // produce the right-to-left reveal. The docking (compact -> docked)
+            // reflow still animates width here so the panel grows into place.
+            width:
+              frameMode === "docked"
                 ? panelWidth
-                : 0,
-          transition:
-            frameMode === "docking" && widthTransitionEnabled
-              ? `width ${reflowDuration}ms ease`
-              : "none",
-          "--context-panel-width": `${panelWidth}px`,
-        } as CSSProperties
-      }
-    >
-      <AnimatePresence initial={false}>
-        {isOpen ? (
-          <motion.div
-            ref={handlePanelRef}
-            key="context-panel"
-            className={cn(
-              allowVerticalShrink
-                ? "flex min-h-0 max-h-full self-start overflow-hidden"
-                : "flex self-start",
-              frameMode === "compact" &&
-                "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]",
-              frameMode === "docking" && "absolute right-0 top-0 max-h-full",
-              frameMode === "docked" && "max-h-full",
-            )}
-            style={
-              frameMode === "compact"
-                ? ({
-                    "--context-panel-width": `${panelWidth}px`,
-                  } as CSSProperties)
-                : { width: panelWidth }
-            }
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={fadeTransition}
-          >
-            <aside
+                : isOpen && !isCompactViewport
+                  ? panelWidth
+                  : 0,
+            transition:
+              frameMode === "docking" && widthTransitionEnabled
+                ? `width ${reflowDuration}ms ease`
+                : "none",
+            "--context-panel-width": `${panelWidth}px`,
+          } as CSSProperties
+        }
+      >
+        <AnimatePresence initial={false}>
+          {isOpen ? (
+            <motion.div
+              ref={handlePanelRef}
+              key="context-panel"
               className={cn(
-                "chat-context-panel-surface flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground",
-                "[backdrop-filter:var(--backdrop-chat-context-panel)] [-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
-                "h-auto max-h-full overflow-y-auto",
-                isCompactViewport && "shadow-popover",
+                allowVerticalShrink
+                  ? "flex min-h-0 max-h-full self-start overflow-hidden"
+                  : "flex self-start",
+                frameMode === "compact" &&
+                  "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]",
+                frameMode === "docking" && "absolute right-0 top-0 max-h-full",
+                frameMode === "docked" && "max-h-full",
               )}
+              style={
+                frameMode === "compact"
+                  ? ({
+                      "--context-panel-width": `${panelWidth}px`,
+                    } as CSSProperties)
+                  : { width: panelWidth }
+              }
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={fadeTransition}
             >
-              <ContextPanel
-                sessionId={activeSessionId}
-                projectId={project?.id}
-                projectName={project?.name}
-                projectIcon={project?.icon}
-                projectColor={project?.color}
-                projectWorkingDirs={project?.workingDirs ?? []}
-                sessionWorkingDir={sessionWorkingDir}
-                terminalOpen={terminalOpen}
-                onToggleTerminal={onToggleTerminal}
-              />
-            </aside>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-    </div>
+              <aside
+                className={cn(
+                  "chat-context-panel-surface flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground",
+                  "[backdrop-filter:var(--backdrop-chat-context-panel)] [-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
+                  "h-auto max-h-full overflow-y-auto",
+                  isCompactViewport && "shadow-popover",
+                )}
+              >
+                <ContextPanel
+                  sessionId={activeSessionId}
+                  projectId={project?.id}
+                  projectName={project?.name}
+                  projectIcon={project?.icon}
+                  projectColor={project?.color}
+                  projectWorkingDirs={project?.workingDirs ?? []}
+                  sessionWorkingDir={sessionWorkingDir}
+                  terminalOpen={terminalOpen}
+                  onToggleTerminal={onToggleTerminal}
+                />
+              </aside>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
+    </>
   );
 }

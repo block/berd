@@ -9,6 +9,8 @@ import {
   useChatContextPanelCompactViewport,
 } from "../ChatContextPanel";
 
+const mockContextPanelWorktreeTracker = vi.hoisted(() => vi.fn());
+
 vi.mock("motion/react", () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => children,
   motion: {
@@ -24,6 +26,10 @@ vi.mock("motion/react", () => ({
 
 vi.mock("../ContextPanel", () => ({
   ContextPanel: () => <div data-testid="context-panel-content" />,
+  ContextPanelWorktreeTracker: (props: unknown) => {
+    mockContextPanelWorktreeTracker(props);
+    return <div data-testid="context-panel-worktree-tracker" />;
+  },
 }));
 
 function mockMatchMedia(matches: boolean) {
@@ -41,6 +47,7 @@ function mockMatchMedia(matches: boolean) {
 describe("ChatContextPanel", () => {
   beforeEach(() => {
     mockMatchMedia(false);
+    mockContextPanelWorktreeTracker.mockClear();
   });
 
   it("switches to compact overlay mode at 800px and below", () => {
@@ -112,6 +119,25 @@ describe("ChatContextPanel", () => {
     expect(panel).not.toHaveClass("backdrop-blur-md");
     expect(panel).not.toHaveClass("h-full");
     expect(panel).not.toHaveClass("shadow-popover");
+  });
+
+  it("keeps worktree tracking mounted while the panel is closed", () => {
+    render(
+      <ChatContextPanel
+        activeSessionId="session-1"
+        isOpen={false}
+        project={{ workingDirs: ["/Users/test/project"] }}
+        sessionWorkingDir="/Users/test/project"
+      />,
+    );
+
+    expect(screen.getByTestId("context-panel-worktree-tracker")).toBeVisible();
+    expect(mockContextPanelWorktreeTracker).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      projectWorkingDirs: ["/Users/test/project"],
+      sessionWorkingDir: "/Users/test/project",
+    });
+    expect(screen.queryByTestId("context-panel-content")).toBeNull();
   });
 
   it("hugs content and uses a shadow in compact overlay mode", () => {

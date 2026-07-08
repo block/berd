@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as gitApi from "@/shared/api/git";
+import type { GitStateChangedPayload } from "@/shared/api/git";
 import type { GitState } from "@/shared/types/git";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
-import { ContextPanel } from "../ContextPanel";
+import { useChatStore } from "../../stores/chatStore";
+import { ContextPanel, ContextPanelWorktreeTracker } from "../ContextPanel";
 
 const {
   mockUseGitState,
@@ -18,18 +20,33 @@ const {
   mockOpenDialog,
   mockToastError,
   mockToastSuccess,
-} = vi.hoisted(() => ({
-  mockUseGitState: vi.fn(),
-  mockRefetch: vi.fn(),
-  mockRefetchFiles: vi.fn(),
-  mockListDirectoryEntries: vi.fn(),
-  mockGetAllSessionArtifacts: vi.fn(),
-  mockEnsureDirectory: vi.fn(),
-  mockUpdateWorkingDir: vi.fn(),
-  mockOpenDialog: vi.fn(),
-  mockToastError: vi.fn(),
-  mockToastSuccess: vi.fn(),
-}));
+  mockListenGitStateChanged,
+  gitStateChangedHandlers,
+} = vi.hoisted(() => {
+  const gitStateChangedHandlers: Array<
+    (payload: GitStateChangedPayload) => void
+  > = [];
+
+  return {
+    mockUseGitState: vi.fn(),
+    mockRefetch: vi.fn(),
+    mockRefetchFiles: vi.fn(),
+    mockListDirectoryEntries: vi.fn(),
+    mockGetAllSessionArtifacts: vi.fn(),
+    mockEnsureDirectory: vi.fn(),
+    mockUpdateWorkingDir: vi.fn(),
+    mockOpenDialog: vi.fn(),
+    mockToastError: vi.fn(),
+    mockToastSuccess: vi.fn(),
+    mockListenGitStateChanged: vi.fn(
+      (handler: (payload: GitStateChangedPayload) => void) => {
+        gitStateChangedHandlers.push(handler);
+        return Promise.resolve(() => {});
+      },
+    ),
+    gitStateChangedHandlers,
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {
@@ -79,6 +96,7 @@ vi.mock("@/shared/api/git", () => ({
   switchBranch: vi.fn(),
   stashChanges: vi.fn(),
   initRepo: vi.fn(),
+  listenGitStateChanged: mockListenGitStateChanged,
 }));
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
@@ -127,6 +145,7 @@ describe("ContextPanel", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    gitStateChangedHandlers.length = 0;
     window.localStorage.clear();
     mockRefetch.mockResolvedValue(undefined);
     mockRefetchFiles.mockResolvedValue(undefined);
@@ -135,6 +154,7 @@ describe("ContextPanel", () => {
     mockUpdateWorkingDir.mockResolvedValue(undefined);
     mockOpenDialog.mockResolvedValue(null);
     mockGetAllSessionArtifacts.mockReturnValue([]);
+    useChatStore.setState({ sessionStateById: {} });
     vi.mocked(gitApi.createWorktree).mockResolvedValue({
       path: "/Users/test/goose2-worktrees/new-worktree",
       branch: "new-worktree",
@@ -576,6 +596,118 @@ describe("ContextPanel", () => {
     expect(
       screen.getByRole("button", { name: /select branch/i }),
     ).not.toHaveTextContent("dev");
+  });
+
+  it("selects the event-attributed worktree only for the session that just settled", async () => {
+    let gitState: GitState = {
+      isGitRepo: true,
+      currentBranch: "main",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        {
+          path: "/Users/test/goose2",
+          branch: "main",
+          isMain: true,
+        },
+      ],
+      isWorktree: false,
+      mainWorktreePath: "/Users/test/goose2",
+      localBranches: ["main"],
+    };
+    mockUseGitState.mockImplementation(() => ({
+      data: gitState,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    }));
+    useChatStore
+      .getState()
+      .setChatState("test-session-new-worktree", "streaming");
+    useChatStore
+      .getState()
+      .setStreamingMessageId("test-session-new-worktree", "message-1");
+
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ContextPanelWorktreeTracker
+          sessionId="test-session-new-worktree"
+          projectWorkingDirs={["/Users/test/goose2"]}
+        />
+        <ContextPanelWorktreeTracker
+          sessionId="test-session-other-worktree"
+          projectWorkingDirs={["/Users/test/goose2"]}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(gitStateChangedHandlers).toHaveLength(1);
+    });
+    act(() => {
+      for (const handler of gitStateChangedHandlers) {
+        handler({
+          operation: "create_worktree",
+          path: "/Users/test/goose2",
+          affectedPaths: ["/Users/test/goose2-test2"],
+          branch: "tulsi/test2",
+        });
+      }
+    });
+
+    gitState = {
+      ...gitState,
+      worktrees: [
+        ...gitState.worktrees,
+        {
+          path: "/Users/test/goose2-test2",
+          branch: "tulsi/test2",
+          isMain: false,
+        },
+        {
+          path: "/Users/test/goose2-unrelated",
+          branch: "tulsi/unrelated",
+          isMain: false,
+        },
+      ],
+      localBranches: ["tulsi/test2", "tulsi/unrelated", "main"],
+    };
+    act(() => {
+      useChatStore.getState().setChatState("test-session-new-worktree", "idle");
+      useChatStore
+        .getState()
+        .setStreamingMessageId("test-session-new-worktree", null);
+    });
+
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <ContextPanelWorktreeTracker
+          sessionId="test-session-new-worktree"
+          projectWorkingDirs={["/Users/test/goose2"]}
+        />
+        <ContextPanelWorktreeTracker
+          sessionId="test-session-other-worktree"
+          projectWorkingDirs={["/Users/test/goose2"]}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().activeWorkspaceBySession[
+          "test-session-new-worktree"
+        ],
+      ).toEqual({
+        path: "/Users/test/goose2-test2",
+        branch: "tulsi/test2",
+      });
+    });
+    expect(
+      useChatSessionStore.getState().activeWorkspaceBySession[
+        "test-session-other-worktree"
+      ],
+    ).toBeUndefined();
   });
 
   it("separates worktrees from available branch targets", async () => {

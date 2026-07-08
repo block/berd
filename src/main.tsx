@@ -11,6 +11,7 @@ import {
   reportRendererError,
 } from "@/app/lib/rendererDiagnostics";
 import { App } from "@/app/App";
+import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
@@ -159,6 +160,7 @@ if (bootError) {
     <React.StrictMode>
       <RendererErrorBoundary>
         <QueryClientProvider client={queryClient}>
+          <GitStateEvents />
           <LocalMediaCacheEvents />
           <OptionalBerdctlBridge />
           <RendererTelemetry />

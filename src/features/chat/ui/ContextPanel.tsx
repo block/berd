@@ -1,16 +1,18 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { FilesList } from "./FilesList";
 import { useGitState } from "@/shared/hooks/useGitState";
 import { useChangedFiles } from "@/shared/hooks/useChangedFiles";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
+import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { ensureDirectory } from "@/shared/api/system";
 import {
   createBranch,
   createWorktree,
   fetchRepo,
   initRepo,
+  listenGitStateChanged,
   pullRepo,
   stashChanges,
   switchBranch,
@@ -27,6 +29,8 @@ import { ArtifactsWidget } from "./widgets/ArtifactsWidget";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { updateWorkingDir } from "@/shared/api/acpApi";
 import { toast } from "sonner";
+import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
+import { useChatStore } from "../stores/chatStore";
 
 interface ContextPanelProps {
   sessionId: string;
@@ -38,6 +42,17 @@ interface ContextPanelProps {
   sessionWorkingDir?: string | null;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
+}
+
+interface ContextPanelWorktreeTrackerProps {
+  sessionId: string;
+  projectWorkingDirs?: string[];
+  sessionWorkingDir?: string | null;
+}
+
+interface PendingCreatedWorktree {
+  path: string;
+  branch: string | null;
 }
 
 type ContextPanelTab = "details" | "files";
@@ -75,6 +90,123 @@ function uniquePaths(paths: Array<string | null | undefined>): string[] {
   return Array.from(
     new Set(paths.filter((path): path is string => Boolean(path))),
   );
+}
+
+function normalizeComparablePath(path: string | null | undefined) {
+  if (!path) return null;
+  let normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (normalized.startsWith("/private/var/")) {
+    normalized = normalized.replace(/^\/private\/var\//, "/var/");
+  }
+  return normalized;
+}
+
+export function ContextPanelWorktreeTracker({
+  sessionId,
+  projectWorkingDirs = [],
+  sessionWorkingDir,
+}: ContextPanelWorktreeTrackerProps) {
+  const projectDefaultWorkspaceRoot = projectWorkingDirs[0] ?? null;
+  const activeContext = useChatSessionStore(
+    (s) => s.activeWorkspaceBySession[sessionId],
+  );
+  const runtime = useChatStore((state) => state.sessionStateById[sessionId]);
+  const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
+  const gitTargetPath =
+    activeContext?.path ??
+    sessionWorkingDir ??
+    projectDefaultWorkspaceRoot ??
+    null;
+  const { data: gitState } = useGitState(gitTargetPath, Boolean(gitTargetPath));
+  const previousWorktreeKeyRef = useRef<string | null>(null);
+  const pendingCreatedWorktreeRef = useRef<PendingCreatedWorktree | null>(null);
+  const chatRuntime = runtime ?? INITIAL_SESSION_CHAT_RUNTIME;
+  const isWorking =
+    isSessionRunning(chatRuntime.chatState) ||
+    chatRuntime.activeRunId !== null ||
+    chatRuntime.streamingMessageId !== null ||
+    chatRuntime.isRunCancellationPending;
+  const eventSourcePaths = uniquePaths([
+    gitTargetPath,
+    activeContext?.path,
+    sessionWorkingDir,
+    ...projectWorkingDirs,
+  ]);
+  const normalizedEventSourcePaths = eventSourcePaths
+    .map((path) => normalizeComparablePath(path))
+    .filter((path): path is string => Boolean(path));
+  const eventSourcePathKey = normalizedEventSourcePaths.join("\0");
+
+  useEffect(() => {
+    if (!isWorking) return;
+    const eventSourcePathSet = new Set(
+      eventSourcePathKey ? eventSourcePathKey.split("\0") : [],
+    );
+
+    const unlisten = listenGitStateChanged((payload) => {
+      if (payload.operation !== "create_worktree") return;
+
+      const createdPath = payload.affectedPaths.at(-1);
+      if (!createdPath) return;
+
+      const sourcePath = normalizeComparablePath(payload.path);
+      if (!sourcePath || !eventSourcePathSet.has(sourcePath)) return;
+
+      pendingCreatedWorktreeRef.current = {
+        path: createdPath,
+        branch: payload.branch,
+      };
+    });
+
+    return () => {
+      void unlisten.then((cleanup) => cleanup());
+    };
+  }, [eventSourcePathKey, isWorking]);
+
+  useEffect(() => {
+    const trackingKey = `${sessionId}:${normalizeComparablePath(
+      gitTargetPath,
+    )}`;
+    if (previousWorktreeKeyRef.current !== trackingKey) {
+      previousWorktreeKeyRef.current = trackingKey;
+      pendingCreatedWorktreeRef.current = null;
+    }
+
+    if (!gitState?.isGitRepo) {
+      pendingCreatedWorktreeRef.current = null;
+      return;
+    }
+
+    const pendingCreatedWorktree = pendingCreatedWorktreeRef.current;
+    if (pendingCreatedWorktree && !isWorking) {
+      const pendingPath = normalizeComparablePath(pendingCreatedWorktree.path);
+      const createdWorktree = gitState.worktrees.find((worktree) => {
+        const path = normalizeComparablePath(worktree.path);
+        return path && path === pendingPath;
+      });
+
+      if (createdWorktree) {
+        const activePath = normalizeComparablePath(activeContext?.path);
+        if (pendingPath && pendingPath !== activePath) {
+          setActiveWorkspace(sessionId, {
+            path: createdWorktree.path,
+            branch: createdWorktree.branch ?? pendingCreatedWorktree.branch,
+          });
+        }
+        pendingCreatedWorktreeRef.current = null;
+      }
+      return;
+    }
+  }, [
+    activeContext?.path,
+    gitState,
+    gitTargetPath,
+    isWorking,
+    sessionId,
+    setActiveWorkspace,
+  ]);
+
+  return null;
 }
 
 export function ContextPanel({

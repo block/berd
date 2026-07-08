@@ -2,6 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 
 import { TopBarActionsProvider } from "@/app/contexts/TopBarActionsContext";
+import { GitStateEvents } from "@/app/GitStateEvents";
 import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
 import { useZoom } from "@/shared/hooks/useZoom";
@@ -45,6 +46,7 @@ export function SessionWindowRuntime({
 
   return (
     <QueryClientProvider client={queryClient}>
+      <GitStateEvents />
       <I18nProvider>
         <ThemeProvider>
           <TopBarActionsProvider>{children}</TopBarActionsProvider>

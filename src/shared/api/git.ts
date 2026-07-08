@@ -1,9 +1,31 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ChangedFile,
   CreatedWorktree,
   GitState,
 } from "@/shared/types/git";
+
+export const GIT_STATE_CHANGED_EVENT = "berd:git-state-changed";
+
+export interface GitStateChangedPayload {
+  operation: string;
+  path: string;
+  affectedPaths: string[];
+  branch: string | null;
+}
+
+export function listenGitStateChanged(
+  handler: (payload: GitStateChangedPayload) => void,
+): Promise<UnlistenFn> {
+  if (!window.__TAURI_INTERNALS__) {
+    return Promise.resolve(() => {});
+  }
+
+  return listen<GitStateChangedPayload>(GIT_STATE_CHANGED_EVENT, (event) => {
+    handler(event.payload);
+  });
+}
 
 export async function getGitState(path: string): Promise<GitState> {
   return invoke<GitState>("get_git_state", { path });

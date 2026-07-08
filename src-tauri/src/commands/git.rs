@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
@@ -37,6 +38,16 @@ pub struct CreatedWorktree {
     pub branch: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStateChangedPayload {
+    operation: &'static str,
+    path: String,
+    affected_paths: Vec<String>,
+    branch: Option<String>,
+}
+
+const GIT_STATE_CHANGED_EVENT: &str = "berd:git-state-changed";
 pub(crate) const GIT_READ_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const GIT_STATUS_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const GIT_MUTATING_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
@@ -163,7 +174,7 @@ async fn get_git_state_inner(path: String) -> Result<GitState, String> {
 }
 
 #[tauri::command]
-pub async fn git_switch_branch(path: String, branch: String) -> Result<(), String> {
+pub async fn git_switch_branch(app: AppHandle, path: String, branch: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
     run_git_success_async(
         &repo_path,
@@ -171,25 +182,28 @@ pub async fn git_switch_branch(path: String, branch: String) -> Result<(), Strin
         GIT_MUTATING_COMMAND_TIMEOUT,
     )
     .await?;
+    emit_git_state_changed(&app, "switch_branch", &path, Vec::new(), Some(branch));
     Ok(())
 }
 
 #[tauri::command]
-pub async fn git_stash(path: String) -> Result<(), String> {
+pub async fn git_stash(app: AppHandle, path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
     run_git_success_async(&repo_path, &["stash"], GIT_MUTATING_COMMAND_TIMEOUT).await?;
+    emit_git_state_changed(&app, "stash", &path, Vec::new(), None);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn git_init(path: String) -> Result<(), String> {
+pub async fn git_init(app: AppHandle, path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
     run_git_success_async(&repo_path, &["init"], GIT_MUTATING_COMMAND_TIMEOUT).await?;
+    emit_git_state_changed(&app, "init", &path, Vec::new(), None);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn git_fetch(path: String) -> Result<(), String> {
+pub async fn git_fetch(app: AppHandle, path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
     run_git_success_async(
         &repo_path,
@@ -197,11 +211,12 @@ pub async fn git_fetch(path: String) -> Result<(), String> {
         GIT_MUTATING_COMMAND_TIMEOUT,
     )
     .await?;
+    emit_git_state_changed(&app, "fetch", &path, Vec::new(), None);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn git_pull(path: String) -> Result<(), String> {
+pub async fn git_pull(app: AppHandle, path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
     run_git_success_async(
         &repo_path,
@@ -209,11 +224,13 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         GIT_MUTATING_COMMAND_TIMEOUT,
     )
     .await?;
+    emit_git_state_changed(&app, "pull", &path, Vec::new(), None);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn git_create_branch(
+    app: AppHandle,
     path: String,
     name: String,
     base_branch: String,
@@ -227,11 +244,13 @@ pub async fn git_create_branch(
         GIT_MUTATING_COMMAND_TIMEOUT,
     )
     .await?;
+    emit_git_state_changed(&app, "create_branch", &path, Vec::new(), Some(branch_name));
     Ok(())
 }
 
 #[tauri::command]
 pub async fn git_create_worktree(
+    app: AppHandle,
     path: String,
     name: String,
     branch: String,
@@ -284,10 +303,38 @@ pub async fn git_create_worktree(
         .await?;
     }
 
-    Ok(CreatedWorktree {
+    let created_worktree = CreatedWorktree {
         path: normalize_path_string(&target_path_string),
         branch: branch_name,
-    })
+    };
+    emit_git_state_changed(
+        &app,
+        "create_worktree",
+        &path,
+        vec![created_worktree.path.clone()],
+        Some(created_worktree.branch.clone()),
+    );
+    Ok(created_worktree)
+}
+
+fn emit_git_state_changed(
+    app: &AppHandle,
+    operation: &'static str,
+    path: &str,
+    affected_paths: Vec<String>,
+    branch: Option<String>,
+) {
+    if let Err(error) = app.emit(
+        GIT_STATE_CHANGED_EVENT,
+        GitStateChangedPayload {
+            operation,
+            path: normalize_path_string(path),
+            affected_paths,
+            branch,
+        },
+    ) {
+        log::warn!("Failed to emit git state changed event: {error}");
+    }
 }
 
 pub(crate) async fn is_git_repo_async(path: &Path) -> Result<bool, String> {
