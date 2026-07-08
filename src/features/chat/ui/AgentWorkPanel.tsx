@@ -7,8 +7,8 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { Streamdown } from "streamdown";
 import { cn } from "@/shared/lib/cn";
+import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
   Collapsible,
   CollapsibleContent,
@@ -259,7 +259,8 @@ function AgentWorkItemRow({
             usePrimaryText ? "text-foreground" : "text-muted-foreground",
           )}
         >
-          <Streamdown
+          <MessageResponse
+            mode="static"
             className={cn(
               AGENT_THOUGHT_MARKDOWN_CLASSNAME,
               usePrimaryText &&
@@ -267,7 +268,7 @@ function AgentWorkItemRow({
             )}
           >
             {item.content.text}
-          </Streamdown>
+          </MessageResponse>
         </div>
       </div>
     );
@@ -299,7 +300,7 @@ function AgentWorkItemRow({
             usePrimaryText ? "text-foreground" : "text-muted-foreground",
           )}
         >
-          <Streamdown>{item.text}</Streamdown>
+          <MessageResponse mode="static">{item.text}</MessageResponse>
         </div>
       </div>
     );

@@ -57,6 +57,7 @@ import type {
   SystemNotificationContent,
 } from "@/shared/types/messages";
 import { Button } from "@/shared/ui/button";
+import { LinkifiedText } from "@/shared/ui/LinkifiedText";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
@@ -510,14 +511,7 @@ function renderContentBlock(
         if (!tc.text.trim()) {
           return null;
         }
-        return (
-          <p
-            key={`text-${index}`}
-            className="whitespace-pre-wrap wrap-anywhere"
-          >
-            {tc.text}
-          </p>
-        );
+        return <LinkifiedText key={`text-${index}`} text={tc.text} />;
       }
       const providerErrorNotice =
         options.resolveProviderErrorNotice?.(tc.text) ?? null;

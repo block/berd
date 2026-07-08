@@ -122,6 +122,37 @@ describe("Reasoning row-state adapters", () => {
     expect(content).not.toHaveAttribute(VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE);
   });
 
+  it("renders external links through the custom link handler, not Streamdown's built-in modal", () => {
+    const registry = createTranscriptRowStateRegistry();
+    const { container } = render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="session-1"
+        rowId="row-1"
+      >
+        <Reasoning defaultOpen>
+          <ReasoningTrigger>Toggle reasoning</ReasoningTrigger>
+          <ReasoningContent>
+            {"See [the PR](https://github.com/squareup/berd/pull/759)"}
+          </ReasoningContent>
+        </Reasoning>
+      </TranscriptRowStateProvider>,
+    );
+
+    // Our MarkdownLink renders a real <a> so the app's link handling and the
+    // working LinkSafetyModal apply. Streamdown's built-in link safety renders
+    // a <button> and its own broken modal, which must not be used here.
+    const link = screen.getByRole("link", { name: "the PR" });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://github.com/squareup/berd/pull/759",
+    );
+    expect(link).toHaveAttribute("data-streamdown", "link");
+    expect(
+      container.querySelector('[data-streamdown="link-safety-modal"]'),
+    ).toBeNull();
+  });
+
   it("marks nested Streamdown layout pending while reasoning is streaming", () => {
     const registry = createTranscriptRowStateRegistry();
     const { container } = render(

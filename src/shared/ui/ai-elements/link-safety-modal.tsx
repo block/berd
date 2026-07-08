@@ -93,12 +93,13 @@ export function LinkSafetyModal({
             {t("components.linkSafety.description")}
           </DialogDescription>
         </DialogHeader>
-        <div className="break-all rounded-md bg-muted p-3 font-mono text-sm">
+        <div className="break-all font-mono text-sm text-muted-foreground">
           {url}
         </div>
         {domain && (
           <Label className="cursor-pointer items-center text-muted-foreground">
             <Checkbox
+              className="border-current"
               checked={trustChecked}
               onCheckedChange={(checked) => setTrustChecked(checked === true)}
             />
