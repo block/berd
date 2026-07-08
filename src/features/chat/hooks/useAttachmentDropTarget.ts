@@ -143,9 +143,9 @@ export function useAttachmentDropTarget({
   }, [clearNativeDragWatchdog, disabled]);
 
   // Safety-net: force-reset the overlay when the drag operation ends without a
-  // proper drop/leave cycle. This covers OS-level drag cancellation (Escape in
-  // Finder, window losing focus mid-drag, etc.) that can leave the overlay
-  // stuck because neither `dragleave` nor the Tauri `leave` event fires.
+  // proper target drop/leave cycle. This covers OS-level drag cancellation
+  // (Escape in Finder, window losing focus mid-drag, etc.) and drops that land
+  // elsewhere in the app after first entering the attachment target.
   useEffect(() => {
     const resetDragState = () => {
       if (dragDepthRef.current > 0 || isAttachmentDragOver) {
@@ -173,15 +173,32 @@ export function useAttachmentDropTarget({
     // effectively cancelled from our perspective.
     const handleWindowBlur = () => resetDragState();
 
+    // A document-level drop means the drag operation finished, even if it did
+    // not finish on the attachment target itself.
+    const handleDocumentDrop = (event: DragEvent) => {
+      const target = targetRef.current;
+      const eventTarget = event.target;
+      if (
+        target &&
+        eventTarget instanceof Node &&
+        target.contains(eventTarget)
+      ) {
+        return;
+      }
+      resetDragState();
+    };
+
     window.addEventListener("dragend", handleDragEnd);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("drop", handleDocumentDrop);
     return () => {
       window.removeEventListener("dragend", handleDragEnd);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("drop", handleDocumentDrop);
     };
-  }, [clearNativeDragWatchdog, isAttachmentDragOver]);
+  }, [clearNativeDragWatchdog, isAttachmentDragOver, targetRef]);
 
   const handleDragEnter = useCallback(
     (event: AttachmentDragEvent) => {

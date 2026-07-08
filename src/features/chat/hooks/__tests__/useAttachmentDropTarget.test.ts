@@ -366,6 +366,73 @@ describe("useAttachmentDropTarget", () => {
     cleanup();
   });
 
+  it("preserves an expected native drop when a target DOM drop bubbles to document", async () => {
+    const { target, targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        targetRef,
+        bindTargetEvents: true,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    const dataTransfer = {
+      files: [
+        new File(["pdf"], "report.pdf", {
+          type: "application/pdf",
+        }),
+      ],
+      items: [{ kind: "file" }],
+      types: ["Files"],
+      dropEffect: "copy",
+    } as unknown as DataTransfer;
+    const domDropEvent = new Event("drop", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(domDropEvent, "dataTransfer", {
+      configurable: true,
+      value: dataTransfer,
+    });
+
+    act(() => {
+      target.dispatchEvent(domDropEvent);
+    });
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 500, y: 500 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(onDropPaths).toHaveBeenCalledWith(["/Users/test/report.pdf"]);
+    expect(onDropFiles).not.toHaveBeenCalled();
+
+    unmount();
+    cleanup();
+  });
+
   it("resets the overlay when Escape is pressed while drag is active", async () => {
     const { targetRef, cleanup } = createDropTarget();
     const onDropFiles = vi.fn();
@@ -443,6 +510,55 @@ describe("useAttachmentDropTarget", () => {
     });
 
     expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    cleanup();
+  });
+
+  it("resets the overlay when a file is dropped outside the target", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    const file = new File(["text"], "notes.txt", { type: "text/plain" });
+    const dragEnterEvent = createDomDropEvent(file);
+    act(() => {
+      result.current.handleDragEnter(dragEnterEvent);
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    const outsideDropEvent = new Event("drop", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(outsideDropEvent, "dataTransfer", {
+      configurable: true,
+      value: {
+        files: [file],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+      },
+    });
+
+    act(() => {
+      document.body.dispatchEvent(outsideDropEvent);
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(false);
+    expect(onDropFiles).not.toHaveBeenCalled();
+    expect(onDropPaths).not.toHaveBeenCalled();
 
     unmount();
     cleanup();

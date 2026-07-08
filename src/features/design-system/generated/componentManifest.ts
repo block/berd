@@ -1787,6 +1787,18 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
+    name: "Linkified Text",
+    source: "src/shared/ui/LinkifiedText.tsx",
+    description:
+      "Renders plain text while turning bare http(s) URLs into real links.\n\nIntended for user-authored text (e.g. chat messages the user typed or\npasted). Because the user is the source of these URLs, links open directly\nwithout the LinkSafetyModal confirmation — that guard is reserved for\nagent-generated Markdown links, where the URL may be untrusted.",
+    exports: ["LinkifiedText", "LinkifiedTextProps"],
+    slots: [],
+    cva: [],
+    tokenClasses: ["text-primary"],
+    stateClasses: [],
+    sourceTokenClasses: ["text-primary"],
+  },
+  {
     name: "Main Panel Layout",
     source: "src/shared/ui/MainPanelLayout.tsx",
     description:
