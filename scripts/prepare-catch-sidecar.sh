@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-CATCH_VERSION="${CATCH_VERSION:-0.5.0}"
+CATCH_VERSION="${CATCH_VERSION:-0.5.1}"
 CATCH_TARBALL_SHA256="${CATCH_TARBALL_SHA256:-a14aed082cc3ed695a94ad6ce62e1a09f18f0dbc81aa8c77485c7b200fe6130f}"
 
 usage() {
@@ -74,8 +74,8 @@ stage_macos_binary() {
     return 1
   fi
 
-  # The upstream Catch macOS asset is universal, and v0.5.0 contains an
-  # unsigned x86_64 slice. Release CI builds an arm64 app, so thin universal
+  # The upstream Catch macOS asset is universal and may contain an unsigned
+  # x86_64 slice. Release CI builds an arm64 app, so thin universal
   # inputs to the exact target architecture before Tauri bundles them. Local
   # CATCH_BIN overrides may already be thin target-arch binaries, so copy those
   # through unchanged. Normalize the staged result with an ad-hoc signature so
