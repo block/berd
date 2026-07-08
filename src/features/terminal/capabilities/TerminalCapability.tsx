@@ -30,6 +30,7 @@ import {
   terminalTabPanelId,
   resolveFloatingTerminalResizeRect,
   resolveTerminalDockHeight,
+  TERMINAL_DOCK_HEADER_HEIGHT_PX,
   TERMINAL_DOCK_MIN_HEIGHT_PX,
   TERMINAL_FLOATING_COLLAPSED_HEIGHT_PX,
   TERMINAL_FLOATING_MIN_WIDTH_PX,
@@ -580,6 +581,25 @@ function TerminalPanelShell({
       ? ["top", "bottom"]
       : ["top"];
 
+  // On first mount the docked shell is already expanded, so the height
+  // transition never has a starting frame to animate from and the terminal
+  // pops in at full height. Render one collapsed frame, then flip to the real
+  // height so the transition grows the shell from the bottom up, pushing the
+  // conversation smoothly instead of snapping it.
+  const [hasEnteredHeight, setHasEnteredHeight] = useState(floating);
+  useEffect(() => {
+    if (floating) {
+      setHasEnteredHeight(true);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      setHasEnteredHeight(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [floating]);
+
+  const dockEntering = !floating && controller.expanded && !hasEnteredHeight;
+
   return (
     <div
       data-terminal-shell
@@ -613,7 +633,17 @@ function TerminalPanelShell({
       )}
       style={
         !floating && controller.expanded
-          ? { height: dockHeight, minHeight: TERMINAL_DOCK_MIN_HEIGHT_PX }
+          ? {
+              // Grow from the collapsed header height up to the dock height on
+              // the first mounted frame so the shell animates open from the
+              // bottom rather than popping in at full height.
+              height: dockEntering
+                ? TERMINAL_DOCK_HEADER_HEIGHT_PX
+                : dockHeight,
+              minHeight: dockEntering
+                ? TERMINAL_DOCK_HEADER_HEIGHT_PX
+                : TERMINAL_DOCK_MIN_HEIGHT_PX,
+            }
           : undefined
       }
     >
@@ -856,7 +886,12 @@ function TerminalPanelShell({
                       key={tab.id}
                       sessionKey={`${sessionId}:${tab.id}`}
                       cwd={tab.cwd}
-                      collapsed={false}
+                      // Treat the first entering frame as collapsed so xterm
+                      // defers fitting until the 44px-to-dockHeight open
+                      // transition ends, instead of fitting to intermediate
+                      // tiny heights and sending bad row counts to the pty.
+                      // This reuses TerminalPanel's collapse->expand defer path.
+                      collapsed={dockEntering}
                       showHeader={false}
                       focusRequest={controller.focusRequest}
                       className="h-full bg-card"

@@ -53,6 +53,22 @@ describe("flattenGroupedSessionRows", () => {
 
     expect(rows).toHaveLength(3);
   });
+
+  it("accumulates cardOffset continuously across rows and groups", () => {
+    const rows = flattenGroupedSessionRows(
+      [
+        { label: "Today", sessions: ["a", "b", "c", "d"].map(makeSession) },
+        { label: "Yesterday", sessions: ["e", "f"].map(makeSession) },
+      ],
+      3,
+    );
+
+    const cardOffsets = rows.flatMap((row) =>
+      row.kind === "cards" ? [row.cardOffset] : [],
+    );
+    // Today: rows start at 0 and 3 (3 + 1 cards); Yesterday: starts at 4.
+    expect(cardOffsets).toEqual([0, 3, 4]);
+  });
 });
 
 describe("flattenFlatSessionRows", () => {
@@ -76,5 +92,6 @@ describe("flattenFlatSessionRows", () => {
     expect(rows[0].key).toBe("r:a");
     expect(rows[0].items.map((item) => item.session.id)).toEqual(["a", "b"]);
     expect(rows[1].items.map((item) => item.snippet)).toEqual(["snippet c"]);
+    expect(rows.map((row) => row.cardOffset)).toEqual([0, 2]);
   });
 });

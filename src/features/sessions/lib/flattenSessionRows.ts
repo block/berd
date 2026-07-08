@@ -3,12 +3,16 @@ import type { SessionDateGroup } from "./groupSessionsByDate";
 
 export type GroupedSessionRow =
   | { kind: "header"; key: string; label: string }
-  | { kind: "cards"; key: string; sessions: ChatSession[] };
+  // `cardOffset` is the number of cards that precede this row across the whole
+  // list, so a staggered entrance can cascade continuously instead of
+  // restarting its delay on every row.
+  | { kind: "cards"; key: string; sessions: ChatSession[]; cardOffset: number };
 
 export interface FlatSessionRow<T> {
   kind: "cards";
   key: string;
   items: T[];
+  cardOffset: number;
 }
 
 function normalizeColumns(columns: number): number {
@@ -21,6 +25,7 @@ export function flattenGroupedSessionRows(
 ): GroupedSessionRow[] {
   const rows: GroupedSessionRow[] = [];
   const chunkSize = normalizeColumns(columns);
+  let cardOffset = 0;
 
   for (const group of groups) {
     rows.push({ kind: "header", key: `h:${group.label}`, label: group.label });
@@ -34,7 +39,9 @@ export function flattenGroupedSessionRows(
         kind: "cards",
         key: `r:${group.label}:${firstSession.id}`,
         sessions: chunk,
+        cardOffset,
       });
+      cardOffset += chunk.length;
     }
   }
 
@@ -59,6 +66,7 @@ export function flattenFlatSessionRows<T extends { session: ChatSession }>(
       kind: "cards",
       key: `r:${toSession(firstItem).id}`,
       items: chunk,
+      cardOffset: index,
     });
   }
 

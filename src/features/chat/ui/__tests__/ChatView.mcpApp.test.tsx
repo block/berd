@@ -1088,7 +1088,7 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.placeholder).toBe("input.agentBuilderPlaceholder");
   });
 
-  it("passes runnable shell commands through to the terminal runner for a non-git working dir", () => {
+  it("passes runnable shell commands through to the terminal runner for a non-git working dir", async () => {
     const activeSession = chatSessionWithWorkingDir("/Users/test/not-a-repo");
 
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
@@ -1112,7 +1112,11 @@ describe("ChatView MCP app messaging", () => {
     );
     expect(sessionKey).toEqual(expect.stringMatching(/^session-1:tab-/));
     expect(terminalPanel).toHaveAttribute("data-cwd", "/Users/test/not-a-repo");
-    expect(terminalPanel).toHaveAttribute("data-collapsed", "false");
+    // The docked terminal opens collapsed for one entering frame, then
+    // settles expanded once the open animation starts.
+    await waitFor(() =>
+      expect(terminalPanel).toHaveAttribute("data-collapsed", "false"),
+    );
     expect(terminalPanel).toHaveAttribute("data-show-header", "false");
   });
 
@@ -1219,9 +1223,12 @@ describe("ChatView MCP app messaging", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "toggle terminal" }));
-    expect(await screen.findByTestId("terminal-panel")).toHaveAttribute(
-      "data-collapsed",
-      "false",
+    await screen.findByTestId("terminal-panel");
+    await waitFor(() =>
+      expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+        "data-collapsed",
+        "false",
+      ),
     );
     expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-cwd",
@@ -1236,9 +1243,12 @@ describe("ChatView MCP app messaging", () => {
       <ChatView sessionId="session-1" activeSession={activeSession} />,
     );
 
-    expect(await screen.findByTestId("terminal-panel")).toHaveAttribute(
-      "data-collapsed",
-      "false",
+    await screen.findByTestId("terminal-panel");
+    await waitFor(() =>
+      expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+        "data-collapsed",
+        "false",
+      ),
     );
 
     await user.click(
@@ -1286,7 +1296,11 @@ describe("ChatView MCP app messaging", () => {
     await user.click(screen.getByRole("button", { name: "toggle terminal" }));
 
     const panel = await screen.findByTestId("terminal-panel");
-    expect(panel).toHaveAttribute("data-collapsed", "false");
+    // The docked terminal opens collapsed for one entering frame, then
+    // settles expanded once the open animation starts.
+    await waitFor(() =>
+      expect(panel).toHaveAttribute("data-collapsed", "false"),
+    );
     // A user-initiated open bumps focusRequest above its initial 0.
     expect(panel.getAttribute("data-focus-request")).not.toBe("0");
   });

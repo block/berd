@@ -73,6 +73,20 @@ import type { SessionSearchDisplayResult } from "../lib/buildSessionSearchResult
 const SESSION_GRID_COLS =
   "grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(4,minmax(0,235px))] 2xl:grid-cols-[repeat(5,minmax(0,235px))] xl:justify-evenly";
 
+// Matches the gallery stagger used by the agents and skills pages.
+const GALLERY_CARD_STAGGER_MS = 55;
+// Cap how many steps the cascade spans so a long list does not keep delaying
+// entrances well past the fold. Beyond this the delay plateaus.
+const GALLERY_CARD_STAGGER_MAX_STEPS = 10;
+// The gallery-card-enter keyframe runs for 320ms; keep the reveal window open
+// long enough for the last (capped) card to finish before the class is
+// removed, so no card is cut off mid-animation.
+const GALLERY_CARD_ENTER_MS = 320;
+const GALLERY_CARD_REVEAL_WINDOW_MS =
+  GALLERY_CARD_STAGGER_MAX_STEPS * GALLERY_CARD_STAGGER_MS +
+  GALLERY_CARD_ENTER_MS +
+  120;
+
 interface SessionHistoryViewProps {
   onSelectSession?: (sessionId: string) => void;
   onSelectSearchResult?: (
@@ -200,6 +214,18 @@ export function SessionHistoryView({
   );
   const [importNotice, setImportNotice] = useState<ImportNotice | null>(null);
   const [copiedImportCommand, setCopiedImportCommand] = useState(false);
+  // The session list is virtualized, so an unconditional card-enter would
+  // replay every time a row is recycled during scroll. Gate the staggered
+  // reveal to a short window after mount so it matches the agents/skills
+  // pages on first paint without re-triggering as the user scrolls.
+  const [isInitialReveal, setIsInitialReveal] = useState(true);
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setIsInitialReveal(false),
+      GALLERY_CARD_REVEAL_WINDOW_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
   const sessions = useChatSessionStore(selectSessions);
   const localMessageCountsBySession = useChatStore(
     useShallow(selectLocalMessageCountsBySession),
@@ -836,17 +862,18 @@ export function SessionHistoryView({
         snippet?: string;
         matchCount?: number;
         messageId?: string;
+        isSearchResult?: boolean;
+        revealIndex?: number;
       },
     ) => {
-      const isSearchResult = options !== undefined;
+      const isSearchResult = options?.isSearchResult ?? false;
       const messageId = options?.messageId;
-      const snippet = options
-        ? options.snippet
+      const snippet = isSearchResult
+        ? options?.snippet
         : (session.subtitle ?? undefined);
-
-      return (
+      const revealIndex = options?.revealIndex;
+      const card = (
         <SessionCard
-          key={session.id}
           id={session.id}
           title={session.title}
           updatedAt={sessionActivityAt(session)}
@@ -893,6 +920,31 @@ export function SessionHistoryView({
           isPinningSelectedToHome={isPinningBatch}
         />
       );
+
+      // Only stagger-reveal on the initial paint; virtualized rows recycle on
+      // scroll and must not replay the entrance animation. Keep the wrapper
+      // element stable across that transition (toggle the class, not the tree
+      // shape) so the card is never unmounted mid-edit or mid-hover.
+      const reveal = isInitialReveal && revealIndex !== undefined;
+
+      return (
+        <div
+          key={session.id}
+          className={cn("h-full", reveal && "gallery-card-enter")}
+          style={
+            reveal
+              ? {
+                  animationDelay: `${
+                    Math.min(revealIndex + 1, GALLERY_CARD_STAGGER_MAX_STEPS) *
+                    GALLERY_CARD_STAGGER_MS
+                  }ms`,
+                }
+              : undefined
+          }
+        >
+          {card}
+        </div>
+      );
     },
     [
       getPersonaName,
@@ -907,6 +959,7 @@ export function SessionHistoryView({
       handleExportSelected,
       handleOpenInWindow,
       handlePinSelectedToHome,
+      isInitialReveal,
       isMultiWindowEnabled,
       isPinningBatch,
       handleSelectResult,
@@ -940,7 +993,9 @@ export function SessionHistoryView({
 
       return (
         <div className={cn(SESSION_GRID_COLS, "gap-y-4 pb-3 pt-2")}>
-          {row.sessions.map((session) => renderSessionCard(session))}
+          {row.sessions.map((session, index) =>
+            renderSessionCard(session, { revealIndex: row.cardOffset + index }),
+          )}
         </div>
       );
     },
@@ -950,11 +1005,13 @@ export function SessionHistoryView({
   const renderSearchRow = useCallback(
     (row: FlatSessionRow<SessionSearchDisplayResult>) => (
       <div className={cn(SESSION_GRID_COLS, "gap-y-4 pb-3")}>
-        {row.items.map((result) =>
+        {row.items.map((result, index) =>
           renderSessionCard(result.session, {
             snippet: result.snippet,
             matchCount: result.matchCount,
             messageId: result.messageId,
+            isSearchResult: true,
+            revealIndex: row.cardOffset + index,
           }),
         )}
       </div>

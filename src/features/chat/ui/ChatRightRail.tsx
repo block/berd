@@ -255,7 +255,16 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
             ? "overflow-visible"
             : "overflow-hidden",
         )}
-        style={{ width: railVisible ? railWidth : 0 }}
+        style={{
+          width: railVisible ? railWidth : 0,
+          // Animate the rail's own width so opening/closing the context panel
+          // slides the whole rail in/out from the right edge instead of
+          // snapping the chat column reflow. Skip the transition while the
+          // user is dragging the resize handle so it tracks the pointer.
+          transition: isResizingRail
+            ? "none"
+            : "width 200ms cubic-bezier(0.22, 1, 0.36, 1)",
+        }}
       >
         {railVisible ? (
           <button

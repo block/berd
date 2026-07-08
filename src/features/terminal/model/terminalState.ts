@@ -76,6 +76,9 @@ export const TERMINAL_FLOATING_COLLAPSED_HEIGHT_PX = 44;
 export const TERMINAL_DOCK_DROP_ZONE_HEIGHT_PX = 140;
 export const TERMINAL_DOCK_DEFAULT_HEIGHT_PX = 300;
 export const TERMINAL_DOCK_MIN_HEIGHT_PX = 120;
+// Height of the docked terminal header row (`h-11`). The shell collapses to
+// this height, and the first-mount open animation grows from it.
+export const TERMINAL_DOCK_HEADER_HEIGHT_PX = 44;
 export const TERMINAL_DOCK_MAX_HEIGHT_PX = 560;
 
 export function getDefaultTerminalDockedPlacement(
