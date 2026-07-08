@@ -49,6 +49,54 @@ OUT_DIR="src-tauri/binaries"
 OUT="$OUT_DIR/catch-$TRIPLE"
 mkdir -p "$OUT_DIR"
 
+macos_target_arch() {
+  case "$TRIPLE" in
+    aarch64-apple-darwin) echo "arm64" ;;
+    x86_64-apple-darwin) echo "x86_64" ;;
+    *)
+      echo "Unsupported macOS Catch target triple: $TRIPLE" >&2
+      return 1
+      ;;
+  esac
+}
+
+stage_macos_binary() {
+  local source="$1"
+  local arch
+  arch="$(macos_target_arch)" || return 1
+
+  if ! command -v lipo >/dev/null 2>&1; then
+    echo "lipo is required to stage the macOS Catch sidecar." >&2
+    return 1
+  fi
+  if ! command -v codesign >/dev/null 2>&1; then
+    echo "codesign is required to stage the macOS Catch sidecar." >&2
+    return 1
+  fi
+
+  # The upstream Catch macOS asset is universal, and v0.5.0 contains an
+  # unsigned x86_64 slice. Release CI builds an arm64 app, so thin universal
+  # inputs to the exact target architecture before Tauri bundles them. Local
+  # CATCH_BIN overrides may already be thin target-arch binaries, so copy those
+  # through unchanged. Normalize the staged result with an ad-hoc signature so
+  # the outer app signing pass can verify it.
+  local lipo_info
+  lipo_info="$(lipo -info "$source")"
+  if [[ "$lipo_info" == Non-fat\ file:* ]]; then
+    if [[ "$lipo_info" != *" is architecture: $arch" ]]; then
+      echo "Catch binary architecture does not match $TRIPLE: $lipo_info" >&2
+      return 1
+    fi
+    if [[ "$source" != "$OUT" ]]; then
+      cp "$source" "$OUT"
+    fi
+  else
+    lipo "$source" -thin "$arch" -output "$OUT"
+  fi
+  chmod +x "$OUT"
+  codesign --force --sign - "$OUT"
+}
+
 if [[ "$TRIPLE" != *"apple-darwin" ]]; then
   cat >"$OUT" <<'STUB'
 #!/usr/bin/env sh
@@ -65,8 +113,7 @@ if [[ -n "${CATCH_BIN:-}" ]]; then
     echo "Catch binary is not executable: $CATCH_BIN" >&2
     exit 1
   fi
-  cp "$CATCH_BIN" "$OUT"
-  chmod +x "$OUT"
+  stage_macos_binary "$CATCH_BIN"
   echo "Staged local Catch sidecar: $OUT"
   exit 0
 fi
@@ -118,6 +165,5 @@ if [[ ! -x "$WORK_DIR/catch" ]]; then
   exit 1
 fi
 
-cp "$WORK_DIR/catch" "$OUT"
-chmod +x "$OUT"
+stage_macos_binary "$WORK_DIR/catch"
 echo "Staged Catch sidecar: $OUT"
