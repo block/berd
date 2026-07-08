@@ -17,6 +17,14 @@ import type {
   AppsListRequestUnstable,
   AppsListResponseUnstable,
   ArchiveSessionRequestUnstable,
+  CanonicalModelInfoRequestUnstable,
+  CanonicalModelInfoResponseUnstable,
+  ConfigReadAllRequestUnstable,
+  ConfigReadAllResponseUnstable,
+  ConfigReadRequestUnstable,
+  ConfigReadResponseUnstable,
+  ConfigRemoveRequestUnstable,
+  ConfigUpsertRequestUnstable,
   CreateScheduleRequestUnstable,
   CreateScheduleResponseUnstable,
   CreateSourceRequestUnstable,
@@ -31,6 +39,7 @@ import type {
   CustomProviderUpdateResponseUnstable,
   DecodeRecipeRequestUnstable,
   DecodeRecipeResponseUnstable,
+  DefaultsClearRequestUnstable,
   DefaultsReadRequestUnstable,
   DefaultsReadResponseUnstable,
   DefaultsSaveRequestUnstable,
@@ -98,6 +107,25 @@ import type {
   ListSlashCommandsResponseUnstable,
   ListSourcesRequestUnstable,
   ListSourcesResponseUnstable,
+  LocalInferenceBuiltinChatTemplatesListRequestUnstable,
+  LocalInferenceBuiltinChatTemplatesListResponseUnstable,
+  LocalInferenceHuggingFaceRepoVariantsRequestUnstable,
+  LocalInferenceHuggingFaceRepoVariantsResponseUnstable,
+  LocalInferenceHuggingFaceSearchRequestUnstable,
+  LocalInferenceHuggingFaceSearchResponseUnstable,
+  LocalInferenceModelDeleteRequestUnstable,
+  LocalInferenceModelDownloadCancelRequestUnstable,
+  LocalInferenceModelDownloadProgressRequestUnstable,
+  LocalInferenceModelDownloadProgressResponseUnstable,
+  LocalInferenceModelDownloadRequestUnstable,
+  LocalInferenceModelDownloadResponseUnstable,
+  LocalInferenceModelEvictRequestUnstable,
+  LocalInferenceModelSettingsReadRequestUnstable,
+  LocalInferenceModelSettingsReadResponseUnstable,
+  LocalInferenceModelSettingsUpdateRequestUnstable,
+  LocalInferenceModelSettingsUpdateResponseUnstable,
+  LocalInferenceModelsListRequestUnstable,
+  LocalInferenceModelsListResponseUnstable,
   OnboardingImportApplyRequestUnstable,
   OnboardingImportApplyResponseUnstable,
   OnboardingImportScanRequestUnstable,
@@ -122,6 +150,9 @@ import type {
   ProviderConfigSaveRequestUnstable,
   ProviderConfigStatusRequestUnstable,
   ProviderConfigStatusResponseUnstable,
+  ProviderSecretDeleteRequestUnstable,
+  ProviderSecretsListRequestUnstable,
+  ProviderSecretsListResponseUnstable,
   ProviderSetupCatalogListRequestUnstable,
   ProviderSetupCatalogListResponseUnstable,
   ProviderSupportedModelsListRequestUnstable,
@@ -167,6 +198,9 @@ import {
   zAppsExportResponseUnstable,
   zAppsImportResponseUnstable,
   zAppsListResponseUnstable,
+  zCanonicalModelInfoResponseUnstable,
+  zConfigReadAllResponseUnstable,
+  zConfigReadResponseUnstable,
   zCreateScheduleResponseUnstable,
   zCreateSourceResponseUnstable,
   zCustomProviderCreateResponseUnstable,
@@ -202,6 +236,14 @@ import {
   zListSchedulesResponseUnstable,
   zListSlashCommandsResponseUnstable,
   zListSourcesResponseUnstable,
+  zLocalInferenceBuiltinChatTemplatesListResponseUnstable,
+  zLocalInferenceHuggingFaceRepoVariantsResponseUnstable,
+  zLocalInferenceHuggingFaceSearchResponseUnstable,
+  zLocalInferenceModelDownloadProgressResponseUnstable,
+  zLocalInferenceModelDownloadResponseUnstable,
+  zLocalInferenceModelSettingsReadResponseUnstable,
+  zLocalInferenceModelSettingsUpdateResponseUnstable,
+  zLocalInferenceModelsListResponseUnstable,
   zOnboardingImportApplyResponseUnstable,
   zOnboardingImportScanResponseUnstable,
   zParseRecipeResponseUnstable,
@@ -212,6 +254,7 @@ import {
   zProviderConfigChangeResponseUnstable,
   zProviderConfigReadResponseUnstable,
   zProviderConfigStatusResponseUnstable,
+  zProviderSecretsListResponseUnstable,
   zProviderSetupCatalogListResponseUnstable,
   zProviderSupportedModelsListResponseUnstable,
   zReadResourceResponseUnstable,
@@ -644,6 +687,39 @@ export class GooseExtClient {
     ) as ProviderConfigChangeResponseUnstable;
   }
 
+  async GooseUnstableProvidersSecretsList(
+    params: ProviderSecretsListRequestUnstable,
+  ): Promise<ProviderSecretsListResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/secrets/list",
+      params,
+    );
+    return zProviderSecretsListResponseUnstable.parse(
+      raw,
+    ) as ProviderSecretsListResponseUnstable;
+  }
+
+  async GooseUnstableProvidersSecretsDelete(
+    params: ProviderSecretDeleteRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/providers/secrets/delete",
+      params,
+    );
+  }
+
+  async GooseUnstableProvidersCanonicalModelInfo(
+    params: CanonicalModelInfoRequestUnstable,
+  ): Promise<CanonicalModelInfoResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/canonical-model-info",
+      params,
+    );
+    return zCanonicalModelInfoResponseUnstable.parse(
+      raw,
+    ) as CanonicalModelInfoResponseUnstable;
+  }
+
   async GooseUnstablePreferencesRead(
     params: PreferencesReadRequestUnstable,
   ): Promise<PreferencesReadResponseUnstable> {
@@ -668,6 +744,40 @@ export class GooseExtClient {
     await this.conn.extMethod("_goose/unstable/preferences/remove", params);
   }
 
+  async GooseUnstableConfigRead(
+    params: ConfigReadRequestUnstable,
+  ): Promise<ConfigReadResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/config/read",
+      params,
+    );
+    return zConfigReadResponseUnstable.parse(raw) as ConfigReadResponseUnstable;
+  }
+
+  async GooseUnstableConfigUpsert(
+    params: ConfigUpsertRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/config/upsert", params);
+  }
+
+  async GooseUnstableConfigRemove(
+    params: ConfigRemoveRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/config/remove", params);
+  }
+
+  async GooseUnstableConfigReadAll(
+    params: ConfigReadAllRequestUnstable,
+  ): Promise<ConfigReadAllResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/config/read-all",
+      params,
+    );
+    return zConfigReadAllResponseUnstable.parse(
+      raw,
+    ) as ConfigReadAllResponseUnstable;
+  }
+
   async GooseUnstableDefaultsRead(
     params: DefaultsReadRequestUnstable,
   ): Promise<DefaultsReadResponseUnstable> {
@@ -685,6 +795,18 @@ export class GooseExtClient {
   ): Promise<DefaultsReadResponseUnstable> {
     const raw = await this.conn.extMethod(
       "_goose/unstable/defaults/save",
+      params,
+    );
+    return zDefaultsReadResponseUnstable.parse(
+      raw,
+    ) as DefaultsReadResponseUnstable;
+  }
+
+  async GooseUnstableDefaultsClear(
+    params: DefaultsClearRequestUnstable,
+  ): Promise<DefaultsReadResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/defaults/clear",
       params,
     );
     return zDefaultsReadResponseUnstable.parse(
@@ -1184,5 +1306,128 @@ export class GooseExtClient {
       "_goose/unstable/dictation/models/select",
       params,
     );
+  }
+
+  async GooseUnstableLocalInferenceModelsList(
+    params: LocalInferenceModelsListRequestUnstable,
+  ): Promise<LocalInferenceModelsListResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/list",
+      params,
+    );
+    return zLocalInferenceModelsListResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceModelsListResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceModelsDownload(
+    params: LocalInferenceModelDownloadRequestUnstable,
+  ): Promise<LocalInferenceModelDownloadResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/download",
+      params,
+    );
+    return zLocalInferenceModelDownloadResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceModelDownloadResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceModelsDownloadProgress(
+    params: LocalInferenceModelDownloadProgressRequestUnstable,
+  ): Promise<LocalInferenceModelDownloadProgressResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/download/progress",
+      params,
+    );
+    return zLocalInferenceModelDownloadProgressResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceModelDownloadProgressResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceModelsDownloadCancel(
+    params: LocalInferenceModelDownloadCancelRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/download/cancel",
+      params,
+    );
+  }
+
+  async GooseUnstableLocalInferenceModelsDelete(
+    params: LocalInferenceModelDeleteRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/delete",
+      params,
+    );
+  }
+
+  async GooseUnstableLocalInferenceModelsEvict(
+    params: LocalInferenceModelEvictRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/evict",
+      params,
+    );
+  }
+
+  async GooseUnstableLocalInferenceModelsSettingsRead(
+    params: LocalInferenceModelSettingsReadRequestUnstable,
+  ): Promise<LocalInferenceModelSettingsReadResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/settings/read",
+      params,
+    );
+    return zLocalInferenceModelSettingsReadResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceModelSettingsReadResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceModelsSettingsUpdate(
+    params: LocalInferenceModelSettingsUpdateRequestUnstable,
+  ): Promise<LocalInferenceModelSettingsUpdateResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/models/settings/update",
+      params,
+    );
+    return zLocalInferenceModelSettingsUpdateResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceModelSettingsUpdateResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceHuggingfaceSearch(
+    params: LocalInferenceHuggingFaceSearchRequestUnstable,
+  ): Promise<LocalInferenceHuggingFaceSearchResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/huggingface/search",
+      params,
+    );
+    return zLocalInferenceHuggingFaceSearchResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceHuggingFaceSearchResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceHuggingfaceRepoVariants(
+    params: LocalInferenceHuggingFaceRepoVariantsRequestUnstable,
+  ): Promise<LocalInferenceHuggingFaceRepoVariantsResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/huggingface/repo/variants",
+      params,
+    );
+    return zLocalInferenceHuggingFaceRepoVariantsResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceHuggingFaceRepoVariantsResponseUnstable;
+  }
+
+  async GooseUnstableLocalInferenceChatTemplatesBuiltinList(
+    params: LocalInferenceBuiltinChatTemplatesListRequestUnstable,
+  ): Promise<LocalInferenceBuiltinChatTemplatesListResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/local-inference/chat-templates/builtin/list",
+      params,
+    );
+    return zLocalInferenceBuiltinChatTemplatesListResponseUnstable.parse(
+      raw,
+    ) as LocalInferenceBuiltinChatTemplatesListResponseUnstable;
   }
 }

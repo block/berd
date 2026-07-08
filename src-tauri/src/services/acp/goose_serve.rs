@@ -27,6 +27,7 @@ use tokio::sync::OnceCell;
 const GOOSE_SERVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 const LOCALHOST: &str = "127.0.0.1";
+const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
 
 // ---------------------------------------------------------------------------
 // GooseServeProcess — singleton that owns the long-lived `goose serve` child
@@ -177,7 +178,9 @@ impl GooseServeProcess {
             .arg("--host")
             .arg(LOCALHOST)
             .arg("--port")
-            .arg(port.to_string())
+            .arg(port.to_string());
+        add_release_webview_origin_arg(&mut command);
+        command
             .current_dir(&working_dir)
             .env("GOOSE_SERVER__SECRET_KEY", &secret_key)
             .stdin(std::process::Stdio::null())
@@ -281,6 +284,14 @@ fn acp_websocket_url(port: u16, secret_key: &str) -> String {
         .expect("local ACP WebSocket URL should be valid");
     url.query_pairs_mut().append_pair("token", secret_key);
     url.to_string()
+}
+
+fn add_release_webview_origin_arg(command: &mut Command) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+
+    command.arg("--allowed-origin").arg(TAURI_WEBVIEW_ORIGIN);
 }
 
 fn spawn_log_reader<R>(stream: Option<R>, stream_name: &'static str)
@@ -885,7 +896,10 @@ fn reserve_free_port() -> Result<u16, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{acp_websocket_url, apply_shell_env_with_extended_path};
+    use super::{
+        acp_websocket_url, add_release_webview_origin_arg, apply_shell_env_with_extended_path,
+        TAURI_WEBVIEW_ORIGIN,
+    };
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
@@ -907,6 +921,24 @@ mod tests {
             acp_websocket_url(12345, "berd/secret"),
             "ws://127.0.0.1:12345/acp?token=berd%2Fsecret"
         );
+    }
+
+    #[test]
+    fn release_build_allows_tauri_webview_origin_for_acp_websocket() {
+        let mut command = Command::new("goose");
+
+        add_release_webview_origin_arg(&mut command);
+
+        let args: Vec<_> = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect();
+        if cfg!(debug_assertions) {
+            assert!(args.is_empty());
+        } else {
+            assert_eq!(args, ["--allowed-origin", TAURI_WEBVIEW_ORIGIN]);
+        }
     }
 
     // Verifies the two pieces of behavior that are unique to

@@ -53,6 +53,18 @@ describe("extensions api", () => {
             },
           },
         },
+        {
+          configKey: "local-acp",
+          enabled: true,
+          extension: {
+            type: "mcp",
+            description: "ACP MCP",
+            server: {
+              name: "local-acp",
+              id: "acp-server-1",
+            },
+          },
+        },
       ],
     });
 
@@ -76,6 +88,14 @@ describe("extensions api", () => {
         headers: { Authorization: "Bearer token" },
         config_key: "remote",
         enabled: false,
+      },
+      {
+        type: "acp",
+        name: "local-acp",
+        description: "ACP MCP",
+        id: "acp-server-1",
+        config_key: "local-acp",
+        enabled: true,
       },
     ]);
   });

@@ -48,6 +48,18 @@ function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
       };
     }
 
+    if ("id" in extension.server) {
+      return {
+        type: "acp",
+        name: extension.server.name,
+        description,
+        id: extension.server.id,
+        ...(extension.bundled != null ? { bundled: extension.bundled } : {}),
+        config_key: configKey,
+        enabled: entry.enabled,
+      };
+    }
+
     if (extension.server.type === "sse") {
       return {
         type: "sse",
@@ -123,6 +135,18 @@ function toGooseExtension(extensionConfig: ExtensionConfig): GooseExtension {
       },
       socket: extensionConfig.socket,
       timeout: extensionConfig.timeout,
+      bundled: extensionConfig.bundled,
+    };
+  }
+
+  if (extensionConfig.type === "acp") {
+    return {
+      type: "mcp",
+      description: extensionConfig.description,
+      server: {
+        name: extensionConfig.name,
+        id: extensionConfig.id,
+      },
       bundled: extensionConfig.bundled,
     };
   }

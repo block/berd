@@ -1,11 +1,4 @@
 {
-  "agentRequests": [
-    {
-      "method": "_goose/unstable/session/recipe/request-params",
-      "requestType": "RequestRecipeParams_unstable",
-      "responseType": "RecipeParamsResponse_unstable"
-    }
-  ],
   "methods": [
     {
       "method": "_goose/unstable/session/extensions/add",
@@ -203,6 +196,21 @@
       "responseType": "ProviderConfigChangeResponse_unstable"
     },
     {
+      "method": "_goose/unstable/providers/secrets/list",
+      "requestType": "ProviderSecretsListRequest_unstable",
+      "responseType": "ProviderSecretsListResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/providers/secrets/delete",
+      "requestType": "ProviderSecretDeleteRequest_unstable",
+      "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/providers/canonical-model-info",
+      "requestType": "CanonicalModelInfoRequest_unstable",
+      "responseType": "CanonicalModelInfoResponse_unstable"
+    },
+    {
       "method": "_goose/unstable/preferences/read",
       "requestType": "PreferencesReadRequest_unstable",
       "responseType": "PreferencesReadResponse_unstable"
@@ -218,6 +226,26 @@
       "responseType": "EmptyResponse"
     },
     {
+      "method": "_goose/unstable/config/read",
+      "requestType": "ConfigReadRequest_unstable",
+      "responseType": "ConfigReadResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/config/upsert",
+      "requestType": "ConfigUpsertRequest_unstable",
+      "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/config/remove",
+      "requestType": "ConfigRemoveRequest_unstable",
+      "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/config/read-all",
+      "requestType": "ConfigReadAllRequest_unstable",
+      "responseType": "ConfigReadAllResponse_unstable"
+    },
+    {
       "method": "_goose/unstable/defaults/read",
       "requestType": "DefaultsReadRequest_unstable",
       "responseType": "DefaultsReadResponse_unstable"
@@ -225,6 +253,11 @@
     {
       "method": "_goose/unstable/defaults/save",
       "requestType": "DefaultsSaveRequest_unstable",
+      "responseType": "DefaultsReadResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/defaults/clear",
+      "requestType": "DefaultsClearRequest_unstable",
       "responseType": "DefaultsReadResponse_unstable"
     },
     {
@@ -471,12 +504,74 @@
       "method": "_goose/unstable/dictation/models/select",
       "requestType": "DictationModelSelectRequest_unstable",
       "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/list",
+      "requestType": "LocalInferenceModelsListRequest_unstable",
+      "responseType": "LocalInferenceModelsListResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/download",
+      "requestType": "LocalInferenceModelDownloadRequest_unstable",
+      "responseType": "LocalInferenceModelDownloadResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/download/progress",
+      "requestType": "LocalInferenceModelDownloadProgressRequest_unstable",
+      "responseType": "LocalInferenceModelDownloadProgressResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/download/cancel",
+      "requestType": "LocalInferenceModelDownloadCancelRequest_unstable",
+      "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/delete",
+      "requestType": "LocalInferenceModelDeleteRequest_unstable",
+      "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/evict",
+      "requestType": "LocalInferenceModelEvictRequest_unstable",
+      "responseType": "EmptyResponse"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/settings/read",
+      "requestType": "LocalInferenceModelSettingsReadRequest_unstable",
+      "responseType": "LocalInferenceModelSettingsReadResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/models/settings/update",
+      "requestType": "LocalInferenceModelSettingsUpdateRequest_unstable",
+      "responseType": "LocalInferenceModelSettingsUpdateResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/huggingface/search",
+      "requestType": "LocalInferenceHuggingFaceSearchRequest_unstable",
+      "responseType": "LocalInferenceHuggingFaceSearchResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/huggingface/repo/variants",
+      "requestType": "LocalInferenceHuggingFaceRepoVariantsRequest_unstable",
+      "responseType": "LocalInferenceHuggingFaceRepoVariantsResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/local-inference/chat-templates/builtin/list",
+      "requestType": "LocalInferenceBuiltinChatTemplatesListRequest_unstable",
+      "responseType": "LocalInferenceBuiltinChatTemplatesListResponse_unstable"
     }
   ],
   "notifications": [
     {
       "method": "_goose/unstable/session/update",
       "paramsType": "GooseSessionNotification_unstable"
+    }
+  ],
+  "agentRequests": [
+    {
+      "method": "_goose/unstable/session/recipe/request-params",
+      "requestType": "RequestRecipeParams_unstable",
+      "responseType": "RecipeParamsResponse_unstable"
     }
   ]
 }
