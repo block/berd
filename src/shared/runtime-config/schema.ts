@@ -122,6 +122,7 @@ export const runtimeGooseModelSchema = z
     id: runtimeIdString("goose model id"),
     name: nonEmptyString("goose model name"),
     recommended: z.boolean().optional(),
+    featured: z.boolean().optional(),
     contextLimit: z.number().int().positive().nullable().optional(),
   })
   .strict();
@@ -350,6 +351,22 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
           {
             id: DEFAULT_RUNTIME_MODEL_ID,
             name: "GPT-5.5",
+            recommended: true,
+          },
+          {
+            id: "goose-gpt-5-6-sol",
+            name: "GPT-5.6 Sol",
+            recommended: true,
+            featured: true,
+          },
+          {
+            id: "goose-gpt-5-6-terra",
+            name: "GPT-5.6 Terra",
+            recommended: true,
+          },
+          {
+            id: "goose-gpt-5-6-luna",
+            name: "GPT-5.6 Luna",
             recommended: true,
           },
         ],

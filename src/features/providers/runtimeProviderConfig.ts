@@ -101,7 +101,7 @@ export function mergeRuntimeProviderCatalog(
 function runtimeModelToOption(
   provider: RuntimeGooseModelProvider,
   model: RuntimeGooseModel,
-  options: { featured: boolean; sortOrder: number },
+  options: { sortOrder: number },
 ): ModelOption {
   return {
     id: model.id,
@@ -111,7 +111,7 @@ function runtimeModelToOption(
     providerName: provider.displayName,
     contextLimit: model.contextLimit,
     recommended: model.recommended ?? false,
-    featured: options.featured,
+    featured: model.featured ?? false,
     sortOrder: options.sortOrder,
   };
 }
@@ -120,25 +120,12 @@ export function runtimeModelInventory(
   runtimeConfig: RuntimeConfig,
 ): Map<string, ModelOption[]> {
   return new Map(
-    runtimeConfig.goose.modelProviders.map((provider) => {
-      const defaultModelId =
-        provider.id === runtimeConfig.goose.defaultModelProviderId
-          ? runtimeConfig.goose.defaultModelId
-          : undefined;
-      const featuredModelId =
-        provider.models.find((model) => model.id === defaultModelId)?.id ??
-        provider.models.find((model) => model.recommended)?.id ??
-        null;
-      return [
-        provider.id,
-        provider.models.map((model, sortOrder) =>
-          runtimeModelToOption(provider, model, {
-            featured: model.id === featuredModelId,
-            sortOrder,
-          }),
-        ),
-      ];
-    }),
+    runtimeConfig.goose.modelProviders.map((provider) => [
+      provider.id,
+      provider.models.map((model, sortOrder) =>
+        runtimeModelToOption(provider, model, { sortOrder }),
+      ),
+    ]),
   );
 }
 

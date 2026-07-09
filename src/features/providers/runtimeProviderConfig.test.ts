@@ -36,7 +36,7 @@ function catalogEntry(
 }
 
 describe("runtimeModelInventory", () => {
-  it("preserves inline admin model metadata and derives featured from default", () => {
+  it("preserves inline admin model metadata with featured independent of default", () => {
     const config: RuntimeConfig = {
       schemaVersion: 1,
       goose: {
@@ -51,6 +51,7 @@ describe("runtimeModelInventory", () => {
                 id: "qwen3.6:27b-mlx",
                 name: "Qwen 3.6 27B MLX",
                 recommended: true,
+                featured: true,
                 contextLimit: 128000,
               },
               {
@@ -80,14 +81,14 @@ describe("runtimeModelInventory", () => {
         id: "qwen3.6:27b-mlx",
         contextLimit: 128000,
         recommended: true,
-        featured: false,
+        featured: true,
         sortOrder: 0,
       },
       {
         id: "llama4:70b",
         contextLimit: null,
         recommended: false,
-        featured: true,
+        featured: false,
         sortOrder: 1,
       },
     ]);
@@ -281,9 +282,7 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
 
 describe("defaultModelInventoryModeForLoadResult", () => {
   it("treats the bundled file like the app default (refreshable)", () => {
-    // Official no-endpoint builds load runtime config from the bundled file;
-    // they must keep refreshing the model list from the backend, exactly as the
-    // pre-bundle appDefault path did.
+    // Individual bundled providers can still opt into authoritative inventory.
     expect(
       defaultModelInventoryModeForLoadResult({
         status: "ready",

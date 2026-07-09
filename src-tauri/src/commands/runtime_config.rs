@@ -122,6 +122,8 @@ pub struct RuntimeGooseModel {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub recommended: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub featured: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub context_limit: Option<i64>,
 }
 
@@ -700,12 +702,36 @@ pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
                 DEFAULT_DATABRICKS_HOST.to_string(),
             )])),
             model_inventory_mode: None,
-            models: vec![RuntimeGooseModel {
-                id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
-                name: "GPT-5.5".to_string(),
-                recommended: Some(true),
-                context_limit: None,
-            }],
+            models: vec![
+                RuntimeGooseModel {
+                    id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
+                    name: "GPT-5.5".to_string(),
+                    recommended: Some(true),
+                    featured: None,
+                    context_limit: None,
+                },
+                RuntimeGooseModel {
+                    id: "goose-gpt-5-6-sol".to_string(),
+                    name: "GPT-5.6 Sol".to_string(),
+                    recommended: Some(true),
+                    featured: Some(true),
+                    context_limit: None,
+                },
+                RuntimeGooseModel {
+                    id: "goose-gpt-5-6-terra".to_string(),
+                    name: "GPT-5.6 Terra".to_string(),
+                    recommended: Some(true),
+                    featured: None,
+                    context_limit: None,
+                },
+                RuntimeGooseModel {
+                    id: "goose-gpt-5-6-luna".to_string(),
+                    name: "GPT-5.6 Luna".to_string(),
+                    recommended: Some(true),
+                    featured: None,
+                    context_limit: None,
+                },
+            ],
         }],
     }
 }
@@ -1580,12 +1606,14 @@ mod tests {
                 id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
                 name: "GPT-5.5".to_string(),
                 recommended: None,
+                featured: None,
                 context_limit: None,
             },
             RuntimeGooseModel {
                 id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
                 name: "GPT-5.5 duplicate".to_string(),
                 recommended: None,
+                featured: None,
                 context_limit: None,
             },
         ];

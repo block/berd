@@ -15,6 +15,7 @@ export interface CachedProviderModels {
   models: ModelOption[];
   fetchedAt: number;
   runtimeManaged?: boolean;
+  configuredModels?: ModelOption[];
   error?: string;
 }
 
@@ -163,7 +164,9 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
             providerId,
             models,
             fetchedAt: runtimeManaged || options.fresh ? Date.now() : 0,
-            ...(runtimeManaged ? { runtimeManaged } : {}),
+            ...(runtimeManaged
+              ? { runtimeManaged }
+              : { configuredModels: models }),
           });
           if (runtimeManaged) {
             nextRuntimeManagedProviderIds.add(providerId);
@@ -240,10 +243,23 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
 
         try {
           const ids = await fetchProviderSupportedModels(providerId);
+          const discoveredModels = providerModelOptionsFromIds(providerId, ids);
+          const configuredModels = existing?.configuredModels ?? [];
+          const configuredModelsById = new Map(
+            configuredModels.map((model) => [model.id, model]),
+          );
+          const hasConfiguredFeaturedModel = configuredModels.some(
+            (model) => model.featured,
+          );
           const entry: CachedProviderModels = {
             providerId,
-            models: providerModelOptionsFromIds(providerId, ids),
+            models: discoveredModels.map((model) => ({
+              ...model,
+              ...(hasConfiguredFeaturedModel ? { featured: false } : {}),
+              ...configuredModelsById.get(model.id),
+            })),
             fetchedAt: Date.now(),
+            ...(configuredModels.length > 0 ? { configuredModels } : {}),
           };
           if (versionAtStart !== refreshVersion(providerId)) {
             return;

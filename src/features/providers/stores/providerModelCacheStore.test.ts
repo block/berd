@@ -100,14 +100,21 @@ describe("providerModelCacheStore", () => {
     expect(mocks.supportedModelsList).not.toHaveBeenCalled();
   });
 
-  it("seeds bundled runtime models as stale refreshable entries", async () => {
+  it("preserves bundled metadata while refreshing the available model list", async () => {
+    const configuredModel = seededModel({
+      id: "goose-gpt-5-6-sol",
+      name: "GPT-5.6 Sol",
+      displayName: "GPT-5.6 Sol",
+      recommended: true,
+      featured: true,
+    });
     useProviderModelCacheStore
       .getState()
-      .seedRuntimeModels(new Map([["databricks_v2", [seededModel()]]]), {
+      .seedRuntimeModels(new Map([["databricks_v2", [configuredModel]]]), {
         runtimeManagedProviderIds: new Set(),
       });
     mocks.supportedModelsList.mockResolvedValueOnce({
-      models: ["goose-gpt-5-5"],
+      models: ["goose-gpt-5-5", "goose-gpt-5-6-sol", "goose-claude-opus-4"],
     });
 
     await useProviderModelCacheStore
@@ -117,12 +124,25 @@ describe("providerModelCacheStore", () => {
     expect(mocks.supportedModelsList).toHaveBeenCalledWith({
       providerId: "databricks_v2",
     });
-    expect(
-      useProviderModelCacheStore
-        .getState()
-        .getModelsForProvider("databricks_v2")
-        .map((model) => model.id),
-    ).toEqual(["goose-gpt-5-5"]);
+    const models = useProviderModelCacheStore
+      .getState()
+      .getModelsForProvider("databricks_v2");
+    expect(models).toHaveLength(3);
+    expect(models.find((model) => model.id === "goose-gpt-5-5")).toEqual(
+      expect.objectContaining({
+        id: "goose-gpt-5-5",
+        featured: false,
+      }),
+    );
+    expect(models.find((model) => model.id === "goose-gpt-5-6-sol")).toEqual(
+      expect.objectContaining(configuredModel),
+    );
+    expect(models.find((model) => model.id === "goose-claude-opus-4")).toEqual(
+      expect.objectContaining({
+        id: "goose-claude-opus-4",
+        featured: false,
+      }),
+    );
   });
 
   it("removes stale runtime-managed providers when runtime config changes", () => {
