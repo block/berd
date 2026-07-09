@@ -83,35 +83,72 @@
   },
   "contextPanel": {
     "actions": {
-      "chooseCreateAction": "Choose create action",
       "fetchRemoteStatus": "Fetch remote status",
       "openWorkspaceMenu": "Open project folder actions",
+      "openWorkspaceContextFor": "Open workspace context for {{name}}",
+      "openWorkspaceActionsFor": "Open actions for {{name}}",
       "refreshLocalStatus": "Refresh local status",
       "refreshGitStatus": "Refresh git status"
     },
     "createDialog": {
       "baseBranch": "Base branch",
-      "branchDescription": "Create a new branch and switch the active worktree to it.",
+      "branchDescription": "Create a new branch in this repository.",
       "branchError": "Failed to create branch {{branch}}.",
       "branchName": "Branch name",
       "branchNamePlaceholder": "feature/my-branch",
-      "branchSuccess": "Created and switched to {{branch}}.",
+      "branchSuccess": "Created {{branch}}.",
       "branchTitle": "New branch",
       "branchToOpen": "Branch to open",
       "cancel": "Cancel",
+      "chooseSourceRepo": "Choose source repository",
       "createBranch": "Create branch",
       "createNewBranch": "Create a new branch",
       "createWorktree": "Create worktree",
       "creatingBranch": "Creating branch...",
       "creatingWorktree": "Creating worktree...",
       "noAvailableBranches": "No branches available",
-      "worktreeDescription": "Create a separate worktree for a new or existing branch.",
+      "sourceRepoError": "Couldn't choose the source repository.",
+      "sourceRepoRequired": "Choose a Git repository to create a worktree.",
+      "worktreeDescription": "Create a separate worktree and include it in this chat.",
       "worktreeError": "Failed to create worktree {{worktree}}.",
       "worktreeName": "Worktree name",
       "worktreeNamePlaceholder": "my-worktree",
       "worktreePath": "Folder: {{path}}",
-      "worktreeSuccess": "Created worktree {{worktree}}.",
+      "worktreeSuccess": "Created and included worktree {{worktree}}.",
       "worktreeTitle": "New worktree"
+    },
+    "addWorkspaceDialog": {
+      "add": "Add",
+      "cancel": "Cancel",
+      "chooseDirectory": "Choose",
+      "chooseFolder": "Choose folder",
+      "chooseFolderDialogTitle": "Select folder",
+      "chooseWorkspace": "Add workspace",
+      "createWorktree": "Create worktree",
+      "createWorktreeDescription": "Create a new worktree from this repo before adding the workspace.",
+      "description": "Workspace will be associated with this chat.",
+      "projectDescription": "Folder will be associated with the project chats.",
+      "projectError": "Couldn't add the folder.",
+      "projectTitle": "Add folder",
+      "error": "Couldn't add the workspace.",
+      "folder": "Folder",
+      "folderPlaceholder": "Choose a folder",
+      "folderInRepository": "Folder in repository",
+      "folderInWorktree": "Folder in worktree",
+      "gitRepository": "Git repository",
+      "gitWorktree": "Git worktree",
+      "loadingWorktrees": "Loading worktrees",
+      "addAnotherWorkspace": "Add another workspace",
+      "localRepo": "Local repo",
+      "mainCheckout": "main checkout",
+      "noDirectorySelected": "No folder selected",
+      "pickDirectory": "Pick a folder",
+      "pickDirectoryDescription": "Choose any folder on this computer",
+      "plainFolder": "Folder",
+      "startFrom": "Start from",
+      "title": "Add workspace",
+      "worktree": "Worktree",
+      "worktreePlaceholder": "--"
     },
     "empty": {
       "folderNotSet": "Folder not set",
@@ -131,7 +168,58 @@
       "change": "Change folder",
       "changeDialogTitle": "Choose working folder",
       "changeSuccess": "Working folder updated.",
-      "label": "Working folder"
+      "label": "Working folder",
+      "repositoryLabel": "Repository folder",
+      "repositoryWithBranch": "Repository folder - {{branch}}"
+    },
+    "includedWorkspaces": {
+      "addWorkspaceAction": "Add a workspace",
+      "changed": "{{count}} changed",
+      "clean": "clean",
+      "copyError": "Couldn't copy workspace paths.",
+      "copyPathError": "Couldn't copy workspace path.",
+      "copyPathSuccess": "Workspace path copied.",
+      "copyPaths": "Copy paths",
+      "copySuccess": "Workspace paths copied.",
+      "description": "All listed workspaces are shared with Goose for this chat.",
+      "empty": "No workspaces included yet.",
+      "includeSuccess": "Included {{name}}.",
+      "mainCheckout": "main checkout",
+      "worktree": "worktree",
+      "kind": {
+        "detachedCheckout": "Detached checkout",
+        "directory": "Directory",
+        "linkedWorktree": "Linked worktree",
+        "mainWorktree": "Main worktree",
+        "nonGitDirectory": "Non-git directory",
+        "repository": "Repository",
+        "subdirectory": "Subdirectory"
+      },
+      "remove": "Remove from chat",
+      "cleanupResource": {
+        "branch": "branch",
+        "worktree": "worktree"
+      },
+      "removeError": "Couldn't remove workspace.",
+      "removeConfirmAction": "Remove workspace",
+      "removeConfirmBody": "This removes the workspace from the chat. Files and local changes stay on disk.",
+      "removeConfirmBodyWithChanges_one": "This workspace has {{count}} uncommitted change. Removing it from the chat will not delete files or local changes.",
+      "removeConfirmBodyWithChanges_other": "This workspace has {{count}} uncommitted changes. Removing it from the chat will not delete files or local changes.",
+      "removeConfirmCancel": "Cancel",
+      "removeConfirmTitle": "Are you sure you want to remove this workspace?",
+      "removeManagedConfirmAction": "Remove {{resource}}",
+      "removeManagedConfirmBody": "This removes the Goose-created {{resource}} and detaches the workspace from this chat.",
+      "removeManagedConfirmBodyWithChanges_one": "This {{resource}} has {{count}} uncommitted change. Removing it will discard local changes and delete the Goose-created {{resource}}.",
+      "removeManagedConfirmBodyWithChanges_other": "This {{resource}} has {{count}} uncommitted changes. Removing it will discard local changes and delete the Goose-created {{resource}}.",
+      "removeManagedConfirmTitle": "Are you sure you want to remove this {{resource}}?",
+      "removeManagedError": "Couldn't clean up {{resource}}.",
+      "removeWorktreeConfirmAction": "Remove workspace",
+      "removeWorktreeConfirmBody": "If you remove this workspace, the Goose-created worktree {{worktree}} will be deleted from disk.",
+      "removeWorktreeConfirmBodyWithChanges_one": "You have {{count}} uncommitted change on this worktree. If you remove this workspace, that change will be lost and {{worktree}} will be deleted from disk.",
+      "removeWorktreeConfirmBodyWithChanges_other": "You have {{count}} uncommitted changes on this worktree. If you remove this workspace, those changes will be lost and {{worktree}} will be deleted from disk.",
+      "removeWorktreeConfirmTitle": "Are you sure you want to remove this worktree?",
+      "removeSharedManagedConfirmBody": "This Goose-created {{resource}} is still used by another active chat or workspace. It will only be removed from this chat.",
+      "terminal": "Terminal"
     },
     "picker": {
       "selectContext": "Select worktree or branch",
@@ -174,31 +262,28 @@
       "pullSuccess": "Pulled latest changes."
     },
     "labels": {
-      "git": "Git",
-      "local": "Local",
       "project": "Project",
       "remote": "Remote",
-      "workspace": "Project folders"
+      "workspace": "Workspace",
+      "workspaces": "Workspaces"
     },
     "states": {
       "detached": "detached",
       "gitLoading": "Loading git status..."
     },
+    "summary": {
+      "changes_one": "{{count}} change",
+      "changes_other": "{{count}} changes"
+    },
     "tabs": {
       "details": "Context",
       "files": "Files"
-    },
-    "summary": {
-      "behind_one": "{{count}} behind",
-      "behind_other": "{{count}} behind",
-      "changes_one": "{{count}} change",
-      "changes_other": "{{count}} changes",
-      "refreshStatus": "Refresh status"
     },
     "widgets": {
       "artifacts": "Artifacts",
       "changes": "Changes",
       "changesOnBranch": "on",
+      "includedWorkspaces": "Included workspaces",
       "workspace": "Active worktree"
     }
   },

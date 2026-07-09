@@ -88,6 +88,7 @@ function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     icon: "",
     color: "",
     workingDirs: [],
+    projectWorkspaces: [],
     useWorktrees: false,
     order: 0,
     archivedAt: null,

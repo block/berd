@@ -1,8 +1,21 @@
 import { create } from "zustand";
 import { acpCreateSession, acpListSessionsPage } from "@/shared/api/acp";
-import type { Session } from "@/shared/types/chat";
+import type {
+  Session,
+  WorkspaceAttachment,
+  WorkspaceAttachmentLifecycle,
+  WorkspaceAttachmentKind,
+  WorkspaceAttachmentSource,
+} from "@/shared/types/chat";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { messageSnippet } from "@/features/chat/lib/messageSnippet";
+import {
+  ensureWorkspaceAttachment,
+  getWorkspaceAttachments,
+  isSameWorkspacePath,
+  removeWorkspaceAttachment,
+  withWorkspaceBackfill,
+} from "@/features/chat/lib/workspaceAttachments";
 import {
   archiveSession as acpArchiveSession,
   unarchiveSession as acpUnarchiveSession,
@@ -15,6 +28,11 @@ import {
   reasoningEffortConfigLogFields,
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
+import {
+  migratePersistedChatWorkspaceMetadata,
+  persistChatWorkspaceMetadata,
+  removePersistedChatWorkspaceMetadata,
+} from "./workspaceAttachmentPersistence";
 
 const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
@@ -39,6 +57,8 @@ export interface ChatSession {
   modelName?: string;
   reasoningEffort?: ChatSessionReasoningEffortConfig;
   workingDir?: string | null;
+  workspaceAttachments?: WorkspaceAttachment[];
+  activeWorkspaceId?: string | null;
   createdAt: string;
   updatedAt: string;
   lastMessageAt?: string;
@@ -145,9 +165,20 @@ interface CreateSessionOpts {
   providerId?: string;
   personaId?: string;
   workingDir?: string;
+  workspaceAttachments?: WorkspaceAttachment[];
   modelId?: string;
   modelName?: string;
   deferProviderSetup?: boolean;
+}
+
+interface AttachWorkspaceOpts {
+  path: string;
+  branch?: string | null;
+  kind?: WorkspaceAttachmentKind;
+  source?: WorkspaceAttachmentSource;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+  lifecycle?: WorkspaceAttachmentLifecycle | null;
 }
 
 interface ChatSessionStoreActions {
@@ -185,6 +216,13 @@ interface ChatSessionStoreActions {
   setContextPanelOpen: (sessionId: string, open: boolean) => void;
   setActiveWorkspace: (sessionId: string, context: ActiveWorkspace) => void;
   clearActiveWorkspace: (sessionId: string) => void;
+  attachWorkspace: (sessionId: string, workspace: AttachWorkspaceOpts) => void;
+  removeWorkspaceAttachment: (sessionId: string, attachmentId: string) => void;
+  markWorkspaceUsedByAgent: (
+    sessionId: string,
+    path?: string | null,
+    source?: WorkspaceAttachmentSource,
+  ) => void;
   switchSessionProvider: (sessionId: string, providerId: string) => void;
   beginModelSelectionIntent: (
     sessionId: string,
@@ -334,8 +372,15 @@ function releaseWindowedSession(sessionId: string): void {
   );
 }
 
+function persistWorkspaceMetadataForSession(session: ChatSession): void {
+  persistChatWorkspaceMetadata(session.id, {
+    workspaceAttachments: session.workspaceAttachments ?? [],
+    activeWorkspaceId: session.activeWorkspaceId ?? null,
+  });
+}
+
 export function sessionToChatSession(session: Session): ChatSession {
-  return {
+  return withWorkspaceBackfill({
     id: session.id,
     title: session.title,
     projectId: session.projectId,
@@ -344,13 +389,15 @@ export function sessionToChatSession(session: Session): ChatSession {
     modelId: session.modelId,
     modelName: session.modelName,
     workingDir: session.workingDir,
+    workspaceAttachments: session.workspaceAttachments,
+    activeWorkspaceId: session.activeWorkspaceId,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     lastMessageAt: session.lastMessageAt,
     archivedAt: session.archivedAt,
     messageCount: session.messageCount,
     userSetName: session.userSetName,
-  };
+  });
 }
 
 export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
@@ -388,7 +435,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       modelId: opts.modelId ?? null,
       hasReasoningEffort: Boolean(configOptionsSnapshot?.reasoningEffort),
     });
-    const chatSession: ChatSession = {
+    const chatSession: ChatSession = withWorkspaceBackfill({
       id: sessionId,
       title: opts.title ?? DEFAULT_CHAT_TITLE,
       projectId: opts.projectId,
@@ -398,6 +445,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       modelName: opts.modelName ?? configOptionsSnapshot?.model?.modelName,
       reasoningEffort: configOptionsSnapshot?.reasoningEffort ?? undefined,
       workingDir: opts.workingDir,
+      workspaceAttachments: opts.workspaceAttachments,
       createdAt: now,
       updatedAt: now,
       messageCount: 0,
@@ -405,7 +453,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: null,
-    };
+    });
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     logReasoningEffortInfo("createSession inserted", {
       sessionId: shortLogId(sessionId),
@@ -413,6 +461,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       modelId: opts.modelId ?? null,
       hasReasoningEffort: Boolean(chatSession.reasoningEffort),
     });
+    persistWorkspaceMetadataForSession(chatSession);
     return chatSession;
   },
 
@@ -423,7 +472,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     const now = new Date().toISOString();
     const providerId = opts.providerId ?? "goose";
     const id = crypto.randomUUID();
-    const chatSession: ChatSession = {
+    const chatSession: ChatSession = withWorkspaceBackfill({
       id,
       title: opts.title ?? DEFAULT_CHAT_TITLE,
       projectId: opts.projectId,
@@ -432,6 +481,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       modelId: opts.modelId,
       modelName: opts.modelName,
       workingDir: opts.workingDir,
+      workspaceAttachments: opts.workspaceAttachments,
       createdAt: now,
       updatedAt: now,
       messageCount: 0,
@@ -441,12 +491,13 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: null,
-    };
+    });
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
   },
 
   promoteDraftSession: (draftSessionId, backendSessionId, patch = {}) => {
+    let promotedForPersistence: ChatSession | null = null;
     set((state) => {
       const existingIndex = state.sessions.findIndex(
         (session) => session.id === draftSessionId,
@@ -461,7 +512,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       }
 
       const existing = state.sessions[existingIndex];
-      const promoted: ChatSession = {
+      const promotedBase: ChatSession = {
         ...existing,
         ...patch,
         id: backendSessionId,
@@ -469,6 +520,15 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         creationError: undefined,
         updatedAt: patch.updatedAt ?? existing.updatedAt,
       };
+      const promoted: ChatSession =
+        patch.workingDir !== undefined
+          ? ensureWorkspaceAttachment(promotedBase, {
+              path: patch.workingDir,
+              source: "inferred",
+              makeActive: true,
+            })
+          : withWorkspaceBackfill(promotedBase);
+      promotedForPersistence = promoted;
       const sessions = state.sessions
         .filter((session) => session.id !== backendSessionId)
         .map((session) => (session.id === draftSessionId ? promoted : session));
@@ -506,6 +566,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           : remainingIntents,
       };
     });
+    if (promotedForPersistence) {
+      migratePersistedChatWorkspaceMetadata(draftSessionId, backendSessionId);
+      persistWorkspaceMetadataForSession(promotedForPersistence);
+    }
   },
 
   markSessionCreationFailed: (id, error) => {
@@ -608,6 +672,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
   patchSession: (id, patch) => {
     const includesReasoningEffort = patchIncludesReasoningEffort(patch);
+    let sessionForWorkspacePersistence: ChatSession | null = null;
     set((state) => {
       const existing = state.sessions.find((session) => session.id === id);
       if (!existing) {
@@ -620,11 +685,19 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         }
         return state;
       }
-      const merged: ChatSession = {
+      const mergedBase: ChatSession = {
         ...existing,
         ...patch,
         updatedAt: patch.updatedAt ?? existing.updatedAt,
       };
+      const merged =
+        patch.workingDir !== undefined
+          ? ensureWorkspaceAttachment(mergedBase, {
+              path: patch.workingDir,
+              source: "inferred",
+              makeActive: true,
+            })
+          : withWorkspaceBackfill(mergedBase);
       let changed = false;
       for (const key of Object.keys(merged) as (keyof ChatSession)[]) {
         if (merged[key] !== existing[key]) {
@@ -657,12 +730,22 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           ...reasoningEffortConfigLogFields("next", merged.reasoningEffort),
         });
       }
+      if (
+        patch.workingDir !== undefined ||
+        patch.workspaceAttachments !== undefined ||
+        patch.activeWorkspaceId !== undefined
+      ) {
+        sessionForWorkspacePersistence = merged;
+      }
       return {
         sessions: state.sessions.map((session) =>
           session.id === id ? merged : session,
         ),
       };
     });
+    if (sessionForWorkspacePersistence) {
+      persistWorkspaceMetadataForSession(sessionForWorkspacePersistence);
+    }
   },
 
   // Update a session's sidebar subtitle in place from raw message text, mirroring
@@ -683,12 +766,22 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const existing = state.sessions.findIndex(
         (candidate) => candidate.id === session.id,
       );
+      const backfilledSession = withWorkspaceBackfill(session);
       if (existing >= 0) {
         const updated = [...state.sessions];
-        updated[existing] = { ...updated[existing], ...session };
+        updated[existing] = withWorkspaceBackfill({
+          ...updated[existing],
+          ...backfilledSession,
+          workspaceAttachments:
+            updated[existing].workspaceAttachments ??
+            backfilledSession.workspaceAttachments,
+          activeWorkspaceId:
+            updated[existing].activeWorkspaceId ??
+            backfilledSession.activeWorkspaceId,
+        });
         return { sessions: updated };
       }
-      return { sessions: [session, ...state.sessions] };
+      return { sessions: [backfilledSession, ...state.sessions] };
     });
   },
 
@@ -718,6 +811,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         archiveMutationBySessionId,
       };
     });
+    removePersistedChatWorkspaceMetadata(id);
     releaseWindowedSession(id);
   },
 
@@ -830,6 +924,129 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const { [sessionId]: _, ...rest } = state.activeWorkspaceBySession;
       return { activeWorkspaceBySession: rest };
     });
+  },
+
+  attachWorkspace: (sessionId, workspace) => {
+    let sessionForWorkspacePersistence: ChatSession | null = null;
+    set((state) => {
+      const existing = state.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existing) return state;
+
+      const nextSession = ensureWorkspaceAttachment(existing, {
+        path: workspace.path,
+        source: workspace.source ?? "selected",
+        kind: workspace.kind,
+        branch: workspace.branch,
+        repositoryPath: workspace.repositoryPath,
+        worktreePath: workspace.worktreePath,
+        lifecycle: workspace.lifecycle,
+        makeActive: false,
+      });
+      sessionForWorkspacePersistence = nextSession;
+
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+      };
+    });
+    if (sessionForWorkspacePersistence) {
+      persistWorkspaceMetadataForSession(sessionForWorkspacePersistence);
+    }
+  },
+
+  removeWorkspaceAttachment: (sessionId, attachmentId) => {
+    let sessionForWorkspacePersistence: ChatSession | null = null;
+    set((state) => {
+      const existing = state.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existing) return state;
+
+      const removedWorkspacePath =
+        getWorkspaceAttachments(existing).find(
+          (attachment) => attachment.id === attachmentId,
+        )?.path ??
+        (attachmentId.startsWith("path:")
+          ? attachmentId.slice("path:".length)
+          : null);
+      const nextSession = removeWorkspaceAttachment(existing, { attachmentId });
+      sessionForWorkspacePersistence = nextSession;
+      const activeWorkspace = state.activeWorkspaceBySession[sessionId];
+      const shouldClearActiveWorkspace =
+        activeWorkspace &&
+        isSameWorkspacePath(activeWorkspace.path, removedWorkspacePath);
+      const activeWorkspaceBySession = shouldClearActiveWorkspace
+        ? Object.fromEntries(
+            Object.entries(state.activeWorkspaceBySession).filter(
+              ([activeSessionId]) => activeSessionId !== sessionId,
+            ),
+          )
+        : state.activeWorkspaceBySession;
+
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+        activeWorkspaceBySession,
+      };
+    });
+    if (sessionForWorkspacePersistence) {
+      persistWorkspaceMetadataForSession(sessionForWorkspacePersistence);
+    }
+  },
+
+  markWorkspaceUsedByAgent: (sessionId, path, source) => {
+    let sessionForWorkspacePersistence: ChatSession | null = null;
+    set((state) => {
+      const existing = state.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existing) return state;
+
+      const activeWorkspacePath =
+        state.activeWorkspaceBySession[sessionId]?.path;
+      const workspacePath = path ?? activeWorkspacePath ?? null;
+      if (!workspacePath) {
+        const workspaceAttachments = getWorkspaceAttachments(existing);
+        if (workspaceAttachments.length === 0) {
+          return state;
+        }
+        const nextSession = withWorkspaceBackfill({
+          ...existing,
+          workspaceAttachments: workspaceAttachments.map((attachment) => ({
+            ...attachment,
+            usedByAgent: true,
+          })),
+        });
+        sessionForWorkspacePersistence = nextSession;
+
+        return {
+          sessions: state.sessions.map((session) =>
+            session.id === sessionId ? nextSession : session,
+          ),
+        };
+      }
+
+      const nextSession = ensureWorkspaceAttachment(existing, {
+        path: workspacePath,
+        source: source ?? (activeWorkspacePath ? "selected" : "inferred"),
+        usedByAgent: true,
+        makeActive: true,
+      });
+      sessionForWorkspacePersistence = nextSession;
+
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+      };
+    });
+    if (sessionForWorkspacePersistence) {
+      persistWorkspaceMetadataForSession(sessionForWorkspacePersistence);
+    }
   },
 
   switchSessionProvider: (sessionId, providerId) => {

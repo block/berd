@@ -3,10 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { applyLatestSessionConfig } from "../../lib/sessionConfigRequests";
+import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { ChatSendOptions } from "../../types";
 
 const mockAcpPrepareSession = vi.fn();
@@ -20,6 +23,7 @@ const mockGoosePreferencesSave = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseChatSteerMessage = vi.fn();
+const mockUseChatHook = vi.fn();
 const mockUseMessageQueue = vi.fn();
 const mockPickerOpen = vi.fn();
 const mockPreSeedDraftAgent = vi.fn();
@@ -31,6 +35,8 @@ const mockUseChatRuntime = {
   activeRunId: null as string | null,
   isRunCancellationPending: false,
 };
+const mockListSkills = vi.fn();
+const mockLoadWorkspaceInstructionFiles = vi.fn();
 const mockPickerState = {
   selectedAgentId: "goose",
   pickerAgents: [{ id: "goose", label: "Goose" }],
@@ -99,10 +105,10 @@ vi.mock("@/shared/api/acpConnection", () => ({
 
 vi.mock("../useChat", () => ({
   useChat: (
-    _sessionId: string,
-    _providerOverride?: string,
-    _systemPromptOverride?: string,
-    _personaInfo?: { id: string; name: string },
+    sessionId: string,
+    providerOverride?: string,
+    systemPromptOverride?: string,
+    personaInfo?: { id: string; name: string },
     options?: {
       ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
       onMessageAccepted?: (
@@ -111,7 +117,13 @@ vi.mock("../useChat", () => ({
       ) => boolean | undefined;
     },
   ) => {
-    const optionsWithSessionId = { ...options, __sessionId: _sessionId };
+    mockUseChatHook(
+      sessionId,
+      providerOverride,
+      systemPromptOverride,
+      personaInfo,
+    );
+    const optionsWithSessionId = { ...options, __sessionId: sessionId };
     return {
       messages: [],
       chatState: mockUseChatRuntime.chatState,
@@ -138,6 +150,15 @@ vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
 
 vi.mock("@/shared/api/agents", () => ({
   deletePersonaSource: (...args: unknown[]) => mockDeletePersonaSource(...args),
+}));
+
+vi.mock("@/features/skills/api/skills", () => ({
+  listSkills: (...args: unknown[]) => mockListSkills(...args),
+}));
+
+vi.mock("@/features/chat/api/workspaceContext", () => ({
+  loadWorkspaceInstructionFiles: (...args: unknown[]) =>
+    mockLoadWorkspaceInstructionFiles(...args),
 }));
 
 vi.mock("@/features/agents/hooks/useProviderSelection", () => ({
@@ -244,6 +265,8 @@ describe("useChatSessionController", () => {
       dismiss: vi.fn(),
     }));
     mockDeletePersonaSource.mockResolvedValue(undefined);
+    mockListSkills.mockResolvedValue([]);
+    mockLoadWorkspaceInstructionFiles.mockResolvedValue([]);
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
       {
@@ -711,6 +734,359 @@ describe("useChatSessionController", () => {
     ).toEqual({ text: "queued from pill" });
   });
 
+  it("passes all included workspaces to the agent system prompt", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+            {
+              id: workspaceAttachmentIdForPath(
+                "/tmp/project-worktrees/phase-3",
+              ),
+              path: "/tmp/project-worktrees/phase-3",
+              kind: "git-linked-worktree",
+              source: "selected",
+              branch: "phase-3",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2];
+    expect(systemPrompt).toContain("<included-workspaces>");
+    expect(systemPrompt).toContain("path: /tmp/project");
+    expect(systemPrompt).toContain("branch: main");
+    expect(systemPrompt).toContain("path: /tmp/project-worktrees/phase-3");
+    expect(systemPrompt).toContain("branch: phase-3");
+    expect(systemPrompt).not.toContain("<active-working-context>");
+  });
+
+  it("omits multi-workspace context when the experiment is disabled", () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+    mockListSkills.mockResolvedValue([
+      {
+        id: "project:/tmp/project/.agents/skills/code-review",
+        name: "code-review",
+        description: "Review code changes for bugs and regressions.",
+        instructions: "Full instructions are not part of the catalog.",
+        path: "/tmp/project/.agents/skills/code-review",
+        fileLocation: "/tmp/project/.agents/skills/code-review/SKILL.md",
+        sourceKind: "project",
+        sourceLabel: "project",
+        projectLinks: [],
+        readonly: false,
+        color: null,
+      },
+    ]);
+    mockLoadWorkspaceInstructionFiles.mockResolvedValue([
+      {
+        path: "/tmp/project/AGENTS.md",
+        workspacePaths: ["/tmp/project"],
+        content: "repo-only instructions",
+      },
+    ]);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+            {
+              id: workspaceAttachmentIdForPath(
+                "/tmp/project-worktrees/phase-3",
+              ),
+              path: "/tmp/project-worktrees/phase-3",
+              kind: "git-linked-worktree",
+              source: "selected",
+              branch: "phase-3",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+    expect(systemPrompt).not.toContain("<included-workspaces>");
+    expect(systemPrompt).not.toContain("<available-skills>");
+    expect(systemPrompt).not.toContain("repo-only instructions");
+    expect(systemPrompt).not.toContain("/tmp/project-worktrees/phase-3");
+    expect(mockListSkills).not.toHaveBeenCalled();
+    expect(mockLoadWorkspaceInstructionFiles).not.toHaveBeenCalled();
+    expect(result.current.skillProjectDirs).toBeUndefined();
+    expect(result.current.fileMentionProjectDirs).toEqual(["/tmp/project"]);
+  });
+
+  it("passes an available skills catalog to the agent system prompt", async () => {
+    mockListSkills.mockResolvedValue([
+      {
+        id: "project:/tmp/project/.agents/skills/code-review",
+        name: "code-review",
+        description: "Review code changes for bugs and regressions.",
+        instructions: "Full instructions are not part of the catalog.",
+        path: "/tmp/project/.agents/skills/code-review",
+        fileLocation: "/tmp/project/.agents/skills/code-review/SKILL.md",
+        sourceKind: "project",
+        sourceLabel: "project",
+        projectLinks: [
+          {
+            id: "/tmp/project",
+            name: "project",
+            workingDir: "/tmp/project",
+          },
+        ],
+        readonly: false,
+        color: null,
+      },
+    ]);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+      expect(systemPrompt).toContain("<available-skills>");
+      expect(systemPrompt).toContain(
+        "- code-review: Review code changes for bugs and regressions.",
+      );
+      expect(systemPrompt).toContain(
+        "Source: /tmp/project/.agents/skills/code-review/SKILL.md",
+      );
+      expect(systemPrompt).not.toContain(
+        "Full instructions are not part of the catalog.",
+      );
+    });
+    expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
+      providerId: "goose",
+    });
+  });
+
+  it("uses the resolved external agent id for available skill discovery", async () => {
+    mockPickerState.selectedAgentId = "codex-acp";
+    useAgentStore.setState({ selectedProvider: "codex" });
+    mockListSkills.mockResolvedValue([]);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "codex",
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
+        providerId: "codex-acp",
+      });
+    });
+  });
+
+  it("does not pass a project artifact folder as an included workspace", () => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-1",
+          path: "/Users/test/.goose/projects/project-1.md",
+          name: "Desktop UX",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "#22c55e",
+          projectWorkspaces: [],
+          workingDirs: [],
+          useWorktrees: true,
+          order: 0,
+          archivedAt: null,
+          artifact: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: null,
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          projectId: "project-1",
+          workingDir: "/Users/test/goose artifacts",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+    expect(systemPrompt).not.toContain("<included-workspaces>");
+    expect(systemPrompt).not.toContain("goose artifacts");
+  });
+
+  it("does not seed project workspaces into an existing chat prompt", () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-1",
+          path: "/Users/test/.goose/projects/project-1.md",
+          name: "Builderbot",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "#22c55e",
+          projectWorkspaces: [
+            {
+              id: "workspace-builderbot",
+              path: "/repo/builderbot",
+              kind: "subdirectory",
+              source: "selected",
+              branch: "main",
+              usedByAgent: false,
+              startupMode: "worktree",
+            },
+            {
+              id: "workspace-bbsubscriber",
+              path: "/repo/bbsubscriber",
+              kind: "subdirectory",
+              source: "selected",
+              branch: "main",
+              usedByAgent: false,
+              startupMode: "worktree",
+            },
+          ],
+          workingDirs: ["/repo/builderbot", "/repo/bbsubscriber"],
+          useWorktrees: true,
+          order: 0,
+          archivedAt: null,
+          artifact: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: null,
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          projectId: "project-1",
+          workingDir: "/repo/builderbot",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/repo/builderbot"),
+              path: "/repo/builderbot",
+              kind: "subdirectory",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+    expect(systemPrompt).toContain("<included-workspaces>");
+    expect(systemPrompt).toContain("path: /repo/builderbot");
+    expect(systemPrompt).not.toContain("/repo/bbsubscriber");
+  });
+
   it("allows a queued draft message to drain after promotion to the backend session id", () => {
     useChatSessionStore.setState({
       sessions: [
@@ -856,6 +1232,144 @@ describe("useChatSessionController", () => {
       undefined,
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("waits for workspace context discovery before accepting workspace sends", async () => {
+    const skillsDeferred = deferred<[]>();
+    const enqueue = vi.fn();
+    mockListSkills.mockReturnValue(skillsDeferred.promise);
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      enqueue,
+      dismiss: vi.fn(),
+    }));
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(latestMessageQueueArgs()[1]).toBe("thinking");
+
+    act(() => {
+      expect(result.current.handleSend("hello")).toBe(true);
+    });
+
+    expect(enqueue).toHaveBeenCalledWith(
+      "hello",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      skillsDeferred.resolve([]);
+      await skillsDeferred.promise;
+    });
+
+    await waitFor(() => {
+      expect(latestMessageQueueArgs()[1]).toBe("idle");
+    });
+  });
+
+  it("does not reuse stale workspace instructions after included workspaces are removed", async () => {
+    mockLoadWorkspaceInstructionFiles.mockResolvedValue([
+      {
+        path: "/tmp/project/AGENTS.md",
+        workspacePaths: ["/tmp/project"],
+        content: "repo-only instructions",
+      },
+    ]);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    const { rerender } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    await waitFor(() => {
+      expect(mockUseChatHook.mock.calls.at(-1)?.[2]).toContain(
+        "repo-only instructions",
+      );
+    });
+    const callsBeforeWorkspaceRemoval = mockUseChatHook.mock.calls.length;
+
+    act(() => {
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "session-1",
+            title: "Chat",
+            providerId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+            workspaceAttachments: [],
+            createdAt: "2026-04-20T00:00:00.000Z",
+            updatedAt: "2026-04-20T00:00:00.000Z",
+            messageCount: 0,
+          },
+        ],
+      });
+    });
+    rerender();
+
+    const promptsAfterWorkspaceRemoval = mockUseChatHook.mock.calls
+      .slice(callsBeforeWorkspaceRemoval)
+      .map((call) => String(call[2] ?? ""));
+    expect(promptsAfterWorkspaceRemoval.length).toBeGreaterThan(0);
+    expect(
+      promptsAfterWorkspaceRemoval.some((prompt) =>
+        prompt.includes("repo-only instructions"),
+      ),
+    ).toBe(false);
   });
 
   it("keeps a queued message when steer is not accepted", async () => {
@@ -1286,6 +1800,83 @@ describe("useChatSessionController", () => {
       | { assistantPrompt?: string }
       | undefined;
     expect(sendOptions?.assistantPrompt).toContain("draft-from-chat.md");
+  });
+
+  it("waits for refreshed workspace context before sending after a persona provider switch", async () => {
+    const codexSkills = deferred<[]>();
+    mockListSkills.mockImplementation(
+      async (_paths: string[], options?: { providerId?: string }) =>
+        options?.providerId === "codex-acp" ? codexSkills.promise : [],
+    );
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Codex Planner",
+          systemPrompt: "Plan clearly.",
+          provider: "codex-acp",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    await waitFor(() => {
+      expect(latestMessageQueueArgs()[1]).toBe("idle");
+    });
+    mockUseChatSendMessage.mockClear();
+
+    let sendResult!: boolean | Promise<boolean>;
+    act(() => {
+      sendResult = result.current.handleSend("plan", "persona-1");
+    });
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
+        providerId: "codex-acp",
+      });
+    });
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      codexSkills.resolve([]);
+      await codexSkills.promise;
+    });
+
+    await waitFor(() => {
+      expect(latestMessageQueueArgs()[1]).toBe("idle");
+      expect(mockUseChatSendMessage).toHaveBeenCalledOnce();
+    });
+    await expect(sendResult).resolves.toBe(true);
   });
 
   it("blocks deferred persona sends while read-only", async () => {

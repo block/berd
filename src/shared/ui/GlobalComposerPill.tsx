@@ -687,7 +687,8 @@ export function GlobalComposerPill({
     handleMentionConfirm,
   } = useMentionHandlers({
     personas,
-    projectWorkingDirs: selectedProject?.workingDirs,
+    skillProjectDirs: selectedProject?.workingDirs,
+    fileMentionProjectDirs: selectedProject?.workingDirs,
     skillsEnabled: true,
     fileMentionsEnabled: true,
     text,
@@ -696,6 +697,10 @@ export function GlobalComposerPill({
     onPersonaChange: handlePersonaChange,
     onSkillMentionSelect: handleSkillMentionSelected,
     onFileMentionSelect: handleFileMentionAttachmentSelect,
+    skillProviderId:
+      modelOverride?.providerId ??
+      providerOverride ??
+      selectedProviderForPicker,
   });
   const mentionListboxId = useId();
   const mentionStatusId = useId();
@@ -752,6 +757,12 @@ export function GlobalComposerPill({
         trimmed,
         selectedSkills,
         null,
+        {
+          providerId:
+            modelOverride?.providerId ??
+            providerOverride ??
+            selectedProviderForPicker,
+        },
       );
       if (sendOptions) {
         options.sendOptions = sendOptions;
@@ -806,6 +817,7 @@ export function GlobalComposerPill({
       placement,
       selectedPersonaId,
       selectedProjectId,
+      selectedProviderForPicker,
       selectedSkills,
     ],
   );

@@ -131,6 +131,25 @@ export function useTerminalController({
     );
   }, [commitState, cwd, requestFocus, t]);
 
+  const openAtPath = useCallback(
+    (path: string) => {
+      const normalizedPath = path.trim();
+      if (!normalizedPath) {
+        toast.message(t("terminal.noWorkspace"));
+        return;
+      }
+
+      requestFocus();
+      commitState((current) => {
+        const defaultTab = findDefaultTerminalTab(current.tabs, normalizedPath);
+        return defaultTab
+          ? { ...current, activeTabId: defaultTab.id, expanded: true }
+          : appendActiveTerminalTab(current, createTerminalTab(normalizedPath));
+      });
+    },
+    [commitState, requestFocus, t],
+  );
+
   const selectTab = useCallback(
     (tabId: string) => {
       commitState((current) => {
@@ -430,6 +449,7 @@ export function useTerminalController({
     focusRequest,
     getTabLabel,
     isFloating,
+    openAtPath,
     placement,
     popOut,
     popOutToRect,

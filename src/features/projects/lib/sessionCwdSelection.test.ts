@@ -20,6 +20,7 @@ function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: "folder",
     color: "#000000",
+    projectWorkspaces: [],
     workingDirs: [],
     useWorktrees: false,
     order: 0,

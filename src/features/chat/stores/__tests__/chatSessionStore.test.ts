@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionInfo } from "@/shared/api/acp";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import {
+  getIncludedWorkspaceAttachments,
+  workspaceAttachmentIdForPath,
+} from "@/features/chat/lib/workspaceAttachments";
+import {
+  CHAT_WORKSPACE_METADATA_STORAGE_KEY,
+  type PersistedChatWorkspaceMetadata,
+} from "../workspaceAttachmentPersistence";
+import {
   type ChatSession,
   SessionNotFoundError,
   useChatSessionStore,
@@ -97,6 +105,15 @@ function mockPage(
   return { sessions, nextCursor };
 }
 
+function readPersistedWorkspaceMetadata(): Record<
+  string,
+  PersistedChatWorkspaceMetadata
+> {
+  return JSON.parse(
+    window.localStorage.getItem(CHAT_WORKSPACE_METADATA_STORAGE_KEY) ?? "{}",
+  );
+}
+
 function createDeferredPromise<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -110,6 +127,7 @@ function createDeferredPromise<T>() {
 describe("chatSessionStore", () => {
   beforeEach(() => {
     window.localStorage.removeItem("goose:context-panel-open");
+    window.localStorage.removeItem(CHAT_WORKSPACE_METADATA_STORAGE_KEY);
     resetStore();
     useSessionWindowStore.getState().setSnapshot([]);
     vi.clearAllMocks();
@@ -461,7 +479,24 @@ describe("chatSessionStore", () => {
         modelName: "GPT-4.1",
         workingDir: "/tmp/project",
       });
+      expect(session.workspaceAttachments).toEqual([
+        {
+          id: workspaceAttachmentIdForPath("/tmp/project"),
+          path: "/tmp/project",
+          kind: "directory",
+          source: "inferred",
+          branch: null,
+          usedByAgent: false,
+        },
+      ]);
+      expect(session.activeWorkspaceId).toBe(
+        workspaceAttachmentIdForPath("/tmp/project"),
+      );
       expect(useChatSessionStore.getState().sessions).toContainEqual(session);
+      expect(readPersistedWorkspaceMetadata()["acp-1"]).toEqual({
+        workspaceAttachments: session.workspaceAttachments,
+        activeWorkspaceId: workspaceAttachmentIdForPath("/tmp/project"),
+      });
     });
 
     it("seeds reasoning effort from ACP session creation config", async () => {
@@ -531,6 +566,17 @@ describe("chatSessionStore", () => {
         messageCount: 0,
         creationState: "pending",
       });
+      expect(session.workspaceAttachments).toEqual([
+        expect.objectContaining({
+          id: workspaceAttachmentIdForPath("/tmp/project"),
+          path: "/tmp/project",
+          source: "inferred",
+          usedByAgent: false,
+        }),
+      ]);
+      expect(session.activeWorkspaceId).toBe(
+        workspaceAttachmentIdForPath("/tmp/project"),
+      );
       expect(session.id).toEqual(expect.any(String));
       expect(useChatSessionStore.getState().sessions).toContainEqual(session);
     });
@@ -675,6 +721,47 @@ describe("chatSessionStore", () => {
         clientSessionId: draft.id,
       });
     });
+
+    it("persists draft workspace attachments under the real ACP session id when promoting", () => {
+      const draft = useChatSessionStore.getState().createDraftSession({
+        title: "New Chat",
+        providerId: "openai",
+        workingDir: "/tmp/main",
+        workspaceAttachments: [
+          {
+            id: workspaceAttachmentIdForPath("/tmp/main"),
+            path: "/tmp/main",
+            kind: "git-main-worktree",
+            source: "inferred",
+            branch: "main",
+            usedByAgent: false,
+          },
+          {
+            id: workspaceAttachmentIdForPath("/tmp/main-worktrees/feature"),
+            path: "/tmp/main-worktrees/feature",
+            kind: "git-linked-worktree",
+            source: "created",
+            branch: "feature",
+            repositoryPath: "/tmp/main",
+            worktreePath: "/tmp/main-worktrees/feature",
+            usedByAgent: false,
+          },
+        ],
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession(draft.id, "acp-session");
+
+      const persisted = readPersistedWorkspaceMetadata();
+      expect(persisted[draft.id]).toBeUndefined();
+      expect(persisted["acp-session"]).toEqual({
+        workspaceAttachments: useChatSessionStore
+          .getState()
+          .getSession("acp-session")?.workspaceAttachments,
+        activeWorkspaceId: null,
+      });
+    });
   });
 
   describe("ensurePinnedSessionPlaceholder", () => {
@@ -760,6 +847,19 @@ describe("chatSessionStore", () => {
       expect(sessions[0].personaId).toBe("persona-1");
       expect(sessions[0].modelId).toBe("gpt-4.1");
       expect(sessions[0].workingDir).toBe("/tmp/acp-1");
+      expect(sessions[0].workspaceAttachments).toEqual([
+        {
+          id: workspaceAttachmentIdForPath("/tmp/acp-1"),
+          path: "/tmp/acp-1",
+          kind: "directory",
+          source: "inferred",
+          branch: null,
+          usedByAgent: true,
+        },
+      ]);
+      expect(sessions[0].activeWorkspaceId).toBe(
+        workspaceAttachmentIdForPath("/tmp/acp-1"),
+      );
       expect(sessions[0].userSetName).toBe(true);
       expect(sessions[1].id).toBe("acp-2");
       expect(sessions[1].title).toBe("Untitled");
@@ -797,6 +897,66 @@ describe("chatSessionStore", () => {
         personaId: "persona-1",
         updatedAt: "2026-04-02T00:00:00.000Z",
       });
+    });
+
+    it("hydrates persisted workspace attachments when loading sessions from ACP", async () => {
+      window.localStorage.setItem(
+        CHAT_WORKSPACE_METADATA_STORAGE_KEY,
+        JSON.stringify({
+          "acp-1": {
+            workspaceAttachments: [
+              {
+                id: workspaceAttachmentIdForPath("/tmp/main"),
+                path: "/tmp/main",
+                kind: "git-main-worktree",
+                source: "inferred",
+                branch: "main",
+                usedByAgent: true,
+              },
+              {
+                id: workspaceAttachmentIdForPath("/tmp/main-worktrees/feature"),
+                path: "/tmp/main-worktrees/feature",
+                kind: "git-linked-worktree",
+                source: "selected",
+                branch: "feature",
+                repositoryPath: "/tmp/main",
+                worktreePath: "/tmp/main-worktrees/feature",
+                usedByAgent: true,
+              },
+            ],
+            activeWorkspaceId: workspaceAttachmentIdForPath("/tmp/main"),
+          },
+        }),
+      );
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage([
+          makeAcpSession({
+            sessionId: "acp-1",
+            workingDir: "/tmp/main",
+          }),
+        ]),
+      );
+
+      await useChatSessionStore.getState().loadSessions();
+
+      const session = useChatSessionStore.getState().getSession("acp-1");
+      expect(session?.workspaceAttachments).toEqual([
+        expect.objectContaining({
+          path: "/tmp/main",
+          kind: "git-main-worktree",
+          source: "inferred",
+        }),
+        expect.objectContaining({
+          path: "/tmp/main-worktrees/feature",
+          kind: "git-linked-worktree",
+          source: "selected",
+          repositoryPath: "/tmp/main",
+          worktreePath: "/tmp/main-worktrees/feature",
+        }),
+      ]);
+      expect(session?.activeWorkspaceId).toBe(
+        workspaceAttachmentIdForPath("/tmp/main"),
+      );
     });
 
     it("hydrates the first page without dropping local sessions or clearing active session", async () => {
@@ -1247,6 +1407,323 @@ describe("chatSessionStore", () => {
 
       const updated = useChatSessionStore.getState().getSession(session.id);
       expect(updated?.updatedAt).toBe(newTimestamp);
+    });
+
+    it("adds and activates a workspace attachment when the working directory changes", () => {
+      const oldAttachmentId = workspaceAttachmentIdForPath("/tmp/old");
+      const session = seedSession({
+        workingDir: "/tmp/old",
+        workspaceAttachments: [
+          {
+            id: oldAttachmentId,
+            path: "/tmp/old",
+            kind: "directory",
+            source: "inferred",
+            branch: null,
+            usedByAgent: false,
+          },
+        ],
+        activeWorkspaceId: oldAttachmentId,
+      });
+
+      useChatSessionStore.getState().patchSession(session.id, {
+        workingDir: "/tmp/new",
+      });
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(
+        updated?.workspaceAttachments?.map((attachment) => attachment.path),
+      ).toEqual(["/tmp/old", "/tmp/new"]);
+      expect(updated?.workspaceAttachments?.[1]).toMatchObject({
+        id: workspaceAttachmentIdForPath("/tmp/new"),
+        path: "/tmp/new",
+        source: "inferred",
+        usedByAgent: false,
+      });
+      expect(updated?.activeWorkspaceId).toBe(
+        workspaceAttachmentIdForPath("/tmp/new"),
+      );
+    });
+
+    it("attaches an included workspace without changing the active workspace", () => {
+      const mainAttachmentId = workspaceAttachmentIdForPath("/tmp/main");
+      const session = seedSession({
+        workingDir: "/tmp/main",
+        workspaceAttachments: [
+          {
+            id: mainAttachmentId,
+            path: "/tmp/main",
+            kind: "git-main-worktree",
+            source: "inferred",
+            branch: "main",
+            usedByAgent: false,
+          },
+        ],
+        activeWorkspaceId: mainAttachmentId,
+      });
+
+      useChatSessionStore.getState().attachWorkspace(session.id, {
+        path: "/tmp/main-worktrees/feature",
+        branch: "feature",
+        kind: "git-linked-worktree",
+        source: "selected",
+      });
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(updated?.activeWorkspaceId).toBe(mainAttachmentId);
+      expect(updated?.workspaceAttachments).toEqual([
+        expect.objectContaining({
+          path: "/tmp/main",
+          branch: "main",
+        }),
+        expect.objectContaining({
+          path: "/tmp/main-worktrees/feature",
+          branch: "feature",
+          kind: "git-linked-worktree",
+          source: "selected",
+          usedByAgent: false,
+        }),
+      ]);
+      expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
+        workspaceAttachments: updated?.workspaceAttachments,
+        activeWorkspaceId: mainAttachmentId,
+      });
+    });
+
+    it("persists Goose-created workspace cleanup metadata", () => {
+      const mainAttachmentId = workspaceAttachmentIdForPath("/tmp/main");
+      const featurePath = "/tmp/main-worktrees/feature";
+      const session = seedSession({
+        workingDir: "/tmp/main",
+        workspaceAttachments: [
+          {
+            id: mainAttachmentId,
+            path: "/tmp/main",
+            kind: "git-main-worktree",
+            source: "inferred",
+            branch: "main",
+            usedByAgent: false,
+          },
+        ],
+        activeWorkspaceId: mainAttachmentId,
+      });
+
+      useChatSessionStore.getState().attachWorkspace(session.id, {
+        path: featurePath,
+        branch: "feature",
+        kind: "git-linked-worktree",
+        source: "created",
+        repositoryPath: "/tmp/main",
+        worktreePath: featurePath,
+        lifecycle: {
+          owner: "goose",
+          cleanup: "worktree",
+          branch: "feature",
+          baseBranch: "main",
+          repositoryPath: "/tmp/main",
+          worktreePath: featurePath,
+          createdBranch: true,
+        },
+      });
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(updated?.workspaceAttachments?.[1]).toMatchObject({
+        path: featurePath,
+        source: "created",
+        lifecycle: {
+          owner: "goose",
+          cleanup: "worktree",
+          branch: "feature",
+          baseBranch: "main",
+          repositoryPath: "/tmp/main",
+          worktreePath: featurePath,
+          createdBranch: true,
+        },
+      });
+      expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
+        workspaceAttachments: updated?.workspaceAttachments,
+        activeWorkspaceId: mainAttachmentId,
+      });
+    });
+
+    it("removes an included workspace attachment", () => {
+      const mainAttachmentId = workspaceAttachmentIdForPath("/tmp/main");
+      const featureAttachmentId = workspaceAttachmentIdForPath(
+        "/tmp/main-worktrees/feature",
+      );
+      const session = seedSession({
+        workingDir: "/tmp/main",
+        workspaceAttachments: [
+          {
+            id: mainAttachmentId,
+            path: "/tmp/main",
+            kind: "git-main-worktree",
+            source: "inferred",
+            branch: "main",
+            usedByAgent: false,
+          },
+          {
+            id: featureAttachmentId,
+            path: "/tmp/main-worktrees/feature",
+            kind: "git-linked-worktree",
+            source: "selected",
+            branch: "feature",
+            usedByAgent: false,
+          },
+        ],
+      });
+
+      useChatSessionStore
+        .getState()
+        .removeWorkspaceAttachment(session.id, featureAttachmentId);
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(
+        updated?.workspaceAttachments?.map((attachment) => attachment.path),
+      ).toEqual(["/tmp/main"]);
+      expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
+        workspaceAttachments: updated?.workspaceAttachments,
+        activeWorkspaceId: mainAttachmentId,
+      });
+    });
+
+    it("clears the transient active workspace when removing that workspace", () => {
+      const mainAttachmentId = workspaceAttachmentIdForPath("/tmp/main");
+      const featurePath = "/tmp/main-worktrees/feature";
+      const featureAttachmentId = workspaceAttachmentIdForPath(featurePath);
+      const session = seedSession({
+        workingDir: "/tmp/main",
+        workspaceAttachments: [
+          {
+            id: mainAttachmentId,
+            path: "/tmp/main",
+            kind: "git-main-worktree",
+            source: "inferred",
+            branch: "main",
+            usedByAgent: false,
+          },
+          {
+            id: featureAttachmentId,
+            path: featurePath,
+            kind: "git-linked-worktree",
+            source: "selected",
+            branch: "feature",
+            usedByAgent: false,
+          },
+        ],
+        activeWorkspaceId: mainAttachmentId,
+      });
+      useChatSessionStore.setState({
+        activeWorkspaceBySession: {
+          [session.id]: { path: featurePath, branch: "feature" },
+        },
+      });
+
+      useChatSessionStore
+        .getState()
+        .removeWorkspaceAttachment(session.id, featureAttachmentId);
+
+      expect(useChatSessionStore.getState().activeWorkspaceBySession).toEqual(
+        {},
+      );
+      expect(
+        useChatSessionStore
+          .getState()
+          .getSession(session.id)
+          ?.workspaceAttachments?.map((attachment) => attachment.path),
+      ).toEqual(["/tmp/main"]);
+    });
+
+    it("removes an inferred default workspace from the chat", () => {
+      const mainAttachmentId = workspaceAttachmentIdForPath("/tmp/main");
+      const session = seedSession({
+        workingDir: "/tmp/main",
+      });
+
+      useChatSessionStore
+        .getState()
+        .removeWorkspaceAttachment(session.id, mainAttachmentId);
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(updated?.workspaceAttachments).toEqual([
+        expect.objectContaining({
+          path: "/tmp/main",
+          source: "excluded",
+        }),
+      ]);
+      expect(getIncludedWorkspaceAttachments(updated)).toEqual([]);
+      expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
+        workspaceAttachments: updated?.workspaceAttachments,
+        activeWorkspaceId: null,
+      });
+    });
+
+    it("marks every included workspace as used by the agent when sending", () => {
+      const session = seedSession({
+        workingDir: "/tmp/main",
+        workspaceAttachments: [
+          {
+            id: workspaceAttachmentIdForPath("/tmp/main"),
+            path: "/tmp/main",
+            kind: "git-main-worktree",
+            source: "inferred",
+            branch: "main",
+            usedByAgent: false,
+          },
+          {
+            id: workspaceAttachmentIdForPath("/tmp/main-worktrees/feature"),
+            path: "/tmp/main-worktrees/feature",
+            kind: "git-linked-worktree",
+            source: "selected",
+            branch: "feature",
+            usedByAgent: false,
+          },
+        ],
+      });
+
+      useChatSessionStore.getState().markWorkspaceUsedByAgent(session.id);
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(
+        updated?.workspaceAttachments?.map((attachment) => ({
+          path: attachment.path,
+          usedByAgent: attachment.usedByAgent,
+        })),
+      ).toEqual([
+        { path: "/tmp/main", usedByAgent: true },
+        { path: "/tmp/main-worktrees/feature", usedByAgent: true },
+      ]);
+      expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
+        workspaceAttachments: updated?.workspaceAttachments,
+        activeWorkspaceId: null,
+      });
+    });
+
+    it("marks only the chat working directory as used when no explicit workspaces exist", () => {
+      const session = seedSession({
+        workingDir: "/tmp/main",
+      });
+
+      useChatSessionStore.getState().markWorkspaceUsedByAgent(session.id);
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(
+        updated?.workspaceAttachments?.map((attachment) => ({
+          path: attachment.path,
+          source: attachment.source,
+          usedByAgent: attachment.usedByAgent,
+        })),
+      ).toEqual([
+        {
+          path: "/tmp/main",
+          source: "inferred",
+          usedByAgent: true,
+        },
+      ]);
+      expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
+        workspaceAttachments: updated?.workspaceAttachments,
+        activeWorkspaceId: workspaceAttachmentIdForPath("/tmp/main"),
+      });
     });
   });
 

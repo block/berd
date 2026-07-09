@@ -1,10 +1,12 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   IconChevronDown,
   IconFolder,
+  IconFolderCode,
   IconGitBranch,
+  IconGitFork,
   IconPlus,
   IconSearch,
 } from "@tabler/icons-react";
@@ -25,6 +27,7 @@ import { SIDEBAR_MENU_HOVER_TRANSITION_CLASS } from "@/shared/ui/sidebar-tokens"
 import type { GitState } from "@/shared/types/git";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
+import type { WorkspaceIdentityIconKind } from "./WorkspaceIdentity";
 import { formatErrorMessage } from "./formatError";
 import { shortenPath } from "./workspacePath";
 
@@ -62,6 +65,48 @@ function isSamePath(
 
 function includesSearch(value: string | null | undefined, query: string) {
   return Boolean(value?.toLowerCase().includes(query));
+}
+
+function IconWithActiveDot({
+  active,
+  children,
+  className,
+}: {
+  active: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={cn("relative inline-flex size-4 shrink-0", className)}>
+      {children}
+      {active ? (
+        <span className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-1 ring-background" />
+      ) : null}
+    </span>
+  );
+}
+
+function iconKindForWorktree(
+  worktree: { isMain: boolean } | null,
+): WorkspaceIdentityIconKind {
+  if (!worktree) return "folder";
+  return worktree.isMain ? "repository" : "worktree";
+}
+
+function WorkspacePickerIcon({
+  kind,
+  className,
+}: {
+  kind: WorkspaceIdentityIconKind;
+  className?: string;
+}) {
+  if (kind === "worktree") {
+    return <IconGitFork className={className} />;
+  }
+  if (kind === "repository") {
+    return <IconFolderCode className={className} />;
+  }
+  return <IconFolder className={className} />;
 }
 
 export function WorkingContextPicker({
@@ -293,7 +338,10 @@ export function WorkingContextPicker({
               )}
               aria-label={t("contextPanel.picker.selectWorktree")}
             >
-              <IconFolder className="mt-0.5 size-4 shrink-0 text-foreground" />
+              <WorkspacePickerIcon
+                kind={iconKindForWorktree(activeWorktree)}
+                className="mt-0.5 size-4 shrink-0 text-foreground"
+              />
               <span className="min-w-0 flex-1 truncate text-left">
                 <span className="block truncate text-foreground">
                   {pickerPrimaryLabel}
@@ -351,7 +399,15 @@ export function WorkingContextPicker({
                             handleWorktreeSelect(worktree.path, worktree.branch)
                           }
                         >
-                          <IconFolder className="mt-0.5 size-4 shrink-0 text-foreground" />
+                          <IconWithActiveDot
+                            active={isCurrentWorktree}
+                            className="mt-0.5"
+                          >
+                            <WorkspacePickerIcon
+                              kind={iconKindForWorktree(worktree)}
+                              className="size-4 text-foreground"
+                            />
+                          </IconWithActiveDot>
                           <div className="min-w-0 flex-1">
                             <span className="block truncate font-normal text-foreground">
                               {worktreeName(worktree.path)}

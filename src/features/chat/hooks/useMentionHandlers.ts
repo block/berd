@@ -22,7 +22,9 @@ import { useSessionArtifacts } from "./ArtifactPolicyContext";
 
 interface MentionHandlersOptions {
   personas: Persona[];
-  projectWorkingDirs?: string[] | undefined;
+  skillProjectDirs?: string[] | undefined;
+  fileMentionProjectDirs?: string[] | undefined;
+  skillProviderId?: string | null | undefined;
   skillsEnabled?: boolean;
   fileMentionsEnabled?: boolean;
   text: string;
@@ -367,7 +369,9 @@ function withTrailingPathSeparator(path: string): string {
  */
 export function useMentionHandlers({
   personas,
-  projectWorkingDirs,
+  skillProjectDirs,
+  fileMentionProjectDirs,
+  skillProviderId,
   skillsEnabled = true,
   fileMentionsEnabled = true,
   text,
@@ -379,13 +383,17 @@ export function useMentionHandlers({
   onFileMentionSelect,
 }: MentionHandlersOptions) {
   const sessionArtifacts = useSessionArtifacts();
-  const normalizedProjectRoots = useMemo(
-    () => normalizeRoots(projectWorkingDirs),
-    [projectWorkingDirs],
+  const normalizedSkillRoots = useMemo(
+    () => normalizeRoots(skillProjectDirs),
+    [skillProjectDirs],
+  );
+  const normalizedFileMentionRoots = useMemo(
+    () => normalizeRoots(fileMentionProjectDirs),
+    [fileMentionProjectDirs],
   );
   const rootsKey = useMemo(
-    () => normalizedProjectRoots.join("\n"),
-    [normalizedProjectRoots],
+    () => normalizedFileMentionRoots.join("\n"),
+    [normalizedFileMentionRoots],
   );
   const [projectFileEntries, setProjectFileEntries] = useState<
     FileMentionPathEntry[]
@@ -442,7 +450,7 @@ export function useMentionHandlers({
       const currentRequestId = requestId + 1;
       requestId = currentRequestId;
 
-      void listSkills(normalizedProjectRoots)
+      void listSkills(normalizedSkillRoots, { providerId: skillProviderId })
         .then((skills) => {
           if (cancelled || currentRequestId !== requestId) return;
           setSkillMentionItems(
@@ -452,6 +460,8 @@ export function useMentionHandlers({
                 name: skill.name,
                 description: skill.description,
                 sourceLabel: skill.sourceLabel,
+                instructions: skill.instructions,
+                fileLocation: skill.fileLocation,
               })),
             ),
           );
@@ -470,7 +480,7 @@ export function useMentionHandlers({
       cancelled = true;
       cleanup();
     };
-  }, [normalizedProjectRoots, skillsEnabled]);
+  }, [normalizedSkillRoots, skillProviderId, skillsEnabled]);
 
   const fileMentionItems: FileMentionItem[] = useMemo(() => {
     const dedup = new Map<string, FileMentionItem>();
@@ -489,7 +499,10 @@ export function useMentionHandlers({
       });
     }
 
-    for (const item of buildStaticPathItems(normalizedProjectRoots, homeDir)) {
+    for (const item of buildStaticPathItems(
+      normalizedFileMentionRoots,
+      homeDir,
+    )) {
       addFileMentionItem(dedup, item);
     }
     for (const entry of projectFileEntries) {
@@ -502,7 +515,7 @@ export function useMentionHandlers({
     sessionArtifacts,
     homeDir,
     projectFileEntries,
-    normalizedProjectRoots,
+    normalizedFileMentionRoots,
   ]);
 
   const {
@@ -533,14 +546,16 @@ export function useMentionHandlers({
   const pathMentionQuery = mentionQuery.trim();
   const normalizedPathMentionSearch = normalizeProjectRootPrefixedQuery(
     pathMentionQuery,
-    normalizedProjectRoots,
+    normalizedFileMentionRoots,
   );
   const pathMentionSearchQuery = normalizedPathMentionSearch.query;
   const pathMentionSearchRoot = normalizedPathMentionSearch.projectRoot;
   const pathMentionSearchRoots = useMemo(
     () =>
-      pathMentionSearchRoot ? [pathMentionSearchRoot] : normalizedProjectRoots,
-    [normalizedProjectRoots, pathMentionSearchRoot],
+      pathMentionSearchRoot
+        ? [pathMentionSearchRoot]
+        : normalizedFileMentionRoots,
+    [normalizedFileMentionRoots, pathMentionSearchRoot],
   );
   const pathMentionSearchRootsKey = pathMentionSearchRoots.join("\0");
   const pathMentionSearchKey =

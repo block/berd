@@ -1,4 +1,6 @@
 import type { SourceEntry } from "@aaif/goose-sdk";
+import { invoke } from "@tauri-apps/api/core";
+import { getSkillProviderCapabilities } from "@/features/chat/lib/skillProviderCapabilities";
 import { getClient } from "@/shared/api/acpConnection";
 import { isHexColor } from "@/features/projects/lib/customPillColor";
 import { isPillTone } from "@/features/projects/lib/pillTones";
@@ -52,6 +54,24 @@ type BuiltinSkillSourceEntry = SourceEntry & {
   type: typeof BUILTIN_SKILL_SOURCE_TYPE;
 };
 type SkillSourceEntry = FilesystemSkillSourceEntry | BuiltinSkillSourceEntry;
+
+interface AgentSkillEntry {
+  name: string;
+  description: string;
+  content: string;
+  path: string;
+  fileLocation: string;
+  sourceKind: SkillSourceKind;
+  sourceLabel: string;
+}
+
+interface ListAgentSkillsResponse {
+  skills: AgentSkillEntry[];
+}
+
+export interface ListSkillsOptions {
+  providerId?: string | null;
+}
 
 function isFilesystemSkillSource(
   source: SourceEntry,
@@ -241,6 +261,44 @@ function uniqueProjectDirs(projectDirs: string[]) {
   return [...new Set(projectDirs.map((dir) => dir.trim()).filter(Boolean))];
 }
 
+function isDesktopRuntime(): boolean {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+}
+
+function toAgentSkillInfo(
+  source: AgentSkillEntry,
+  providerId: string | null | undefined,
+): SkillInfo {
+  const projectRoot =
+    source.sourceKind === "project" ? deriveProjectRoot(source.path) : null;
+  const projectName = projectRoot ? basename(projectRoot) : source.sourceLabel;
+
+  return {
+    id: `agent:${providerId ?? "unknown"}:${source.path}`,
+    name: source.name,
+    description: source.description,
+    instructions: source.content,
+    path: source.path,
+    fileLocation: source.fileLocation,
+    sourceKind: source.sourceKind,
+    sourceLabel:
+      source.sourceKind === "global" ? source.sourceLabel : projectName,
+    projectLinks: projectRoot
+      ? [
+          {
+            id: projectRoot,
+            name: projectName || projectRoot,
+            workingDir: projectRoot,
+            path: source.path,
+            fileLocation: source.fileLocation,
+          },
+        ]
+      : [],
+    readonly: true,
+    color: null,
+  };
+}
+
 export interface CreateSkillOptions {
   /** Project source ID (kebab slug). When set, the skill is created under
    *  that project's first working directory. */
@@ -275,8 +333,27 @@ export async function createSkill(
   return skill;
 }
 
-export async function listSkills(
-  projectDirs: string[] = [],
+async function listAgentFileSkills(
+  projectDirs: string[],
+  providerId: string | null | undefined,
+): Promise<SkillInfo[]> {
+  if (!isDesktopRuntime()) {
+    return [];
+  }
+
+  const normalizedProjectDirs = uniqueProjectDirs(projectDirs);
+  const response = await invoke<ListAgentSkillsResponse>("list_agent_skills", {
+    request: {
+      providerId,
+      workspacePaths: normalizedProjectDirs,
+    },
+  });
+
+  return response.skills.map((skill) => toAgentSkillInfo(skill, providerId));
+}
+
+async function listGooseSourceSkills(
+  projectDirs: string[],
 ): Promise<SkillInfo[]> {
   const client = await getClient();
   const fetchSources = (
@@ -333,6 +410,18 @@ export async function listSkills(
   });
 
   return skills;
+}
+
+export async function listSkills(
+  projectDirs: string[] = [],
+  options: ListSkillsOptions = {},
+): Promise<SkillInfo[]> {
+  const capabilities = getSkillProviderCapabilities(options.providerId);
+  if (capabilities.discoveryMode === "agent-skill-files") {
+    return listAgentFileSkills(projectDirs, options.providerId);
+  }
+
+  return listGooseSourceSkills(projectDirs);
 }
 
 export async function deleteSkill(path: string): Promise<void> {

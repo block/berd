@@ -9,6 +9,7 @@ interface UseChatInputSubmitOptions {
   attachmentsRef: RefObject<ChatAttachmentDraft[]>;
   selectedSkillsRef: RefObject<ChatSkillDraft[]>;
   selectedChipsRef: RefObject<MessageChip[]>;
+  skillProviderId?: string | null;
   selectedPersonaId?: string | null;
   onSend: ChatInputSendHandler;
   setSelectedSkills: (skills: ChatSkillDraft[]) => void;
@@ -21,6 +22,7 @@ export function useChatInputSubmit({
   attachmentsRef,
   selectedSkillsRef,
   selectedChipsRef,
+  skillProviderId,
   selectedPersonaId,
   onSend,
   setSelectedSkills,
@@ -38,11 +40,18 @@ export function useChatInputSubmit({
         attachments: submittedAttachments,
         skills: submittedSkills,
         chips: selectedChipsRef.current,
+        skillProviderId,
         selectedPersonaId,
         onSend: submitHandler,
         resolveSkillSlashCommand,
       }),
-    [onSend, resolveSkillSlashCommand, selectedChipsRef, selectedPersonaId],
+    [
+      onSend,
+      resolveSkillSlashCommand,
+      selectedChipsRef,
+      selectedPersonaId,
+      skillProviderId,
+    ],
   );
 
   const handleVoiceAutoSubmit = useCallback(

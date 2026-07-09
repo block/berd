@@ -60,6 +60,45 @@ export const INITIAL_SESSION_CHAT_RUNTIME: SessionChatRuntime = {
   hasUnread: false,
 };
 
+export type WorkspaceAttachmentKind =
+  | "directory"
+  | "repository"
+  | "git-main-worktree"
+  | "git-linked-worktree"
+  | "git-detached-checkout"
+  | "subdirectory"
+  | "non-git-directory";
+
+export type WorkspaceAttachmentSource =
+  | "excluded"
+  | "inferred"
+  | "selected"
+  | "created";
+
+export type WorkspaceAttachmentCleanupKind = "branch" | "worktree";
+
+export interface WorkspaceAttachmentLifecycle {
+  owner: "goose";
+  cleanup: WorkspaceAttachmentCleanupKind;
+  branch?: string | null;
+  baseBranch?: string | null;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+  createdBranch?: boolean;
+}
+
+export interface WorkspaceAttachment {
+  id: string;
+  path: string;
+  kind: WorkspaceAttachmentKind;
+  source: WorkspaceAttachmentSource;
+  branch?: string | null;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+  lifecycle?: WorkspaceAttachmentLifecycle;
+  usedByAgent: boolean;
+}
+
 // Session
 export interface Session {
   id: string;
@@ -70,6 +109,8 @@ export interface Session {
   modelId?: string;
   modelName?: string;
   workingDir?: string | null;
+  workspaceAttachments?: WorkspaceAttachment[];
+  activeWorkspaceId?: string | null;
   createdAt: string;
   updatedAt: string;
   lastMessageAt?: string;

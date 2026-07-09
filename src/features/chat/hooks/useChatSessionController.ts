@@ -17,12 +17,20 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { resolveSelectedAgentId } from "@/features/chat/lib/agentProviderResolution";
 import {
   composeSystemPrompt,
   formatArtifactFolderInstructions,
   formatPersonaSystemPrompt,
   resolveProjectDefaultArtifactRoot,
 } from "@/features/projects/lib/chatProjectContext";
+import { formatIncludedWorkspacesPrompt } from "@/features/chat/lib/workspaceAttachments";
+import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
+import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
+import { formatWorkspaceInstructionsPrompt } from "@/features/chat/lib/workspaceContextPrompt";
+import { getSkillProviderCapabilities } from "@/features/chat/lib/skillProviderCapabilities";
+import { listSkills } from "@/features/skills/api/skills";
+import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillChatPrompt";
 import { setStoredModelPreference } from "../lib/modelPreferences";
 import { saveDefaultReasoningEffort } from "../lib/reasoningEffortPreferences";
 import { applyLatestSessionConfig } from "../lib/sessionConfigRequests";
@@ -76,6 +84,19 @@ const EMPTY_SKILL_DRAFTS: ChatSkillDraft[] = [];
 const EMPTY_ATTACHMENT_DRAFTS: ChatAttachmentDraft[] = [];
 const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
 const STEERING_SUPPORTED_AGENT_ID = "goose";
+const EMPTY_PROMPT_STATE: { key: string; prompt: string | undefined } = {
+  key: "",
+  prompt: undefined,
+};
+
+function nextPromptState(
+  current: { key: string; prompt: string | undefined },
+  next: { key: string; prompt: string | undefined },
+) {
+  return current.key === next.key && current.prompt === next.prompt
+    ? current
+    : next;
+}
 
 function isAgentBuilderMentionOnlyDraft(text: string): boolean {
   return AGENT_BUILDER_MENTION_INVOCATION.test(text.trim());
@@ -295,6 +316,7 @@ export function useChatSessionController({
   const projects = useProjectStore(selectProjects);
   const projectsLoading = useProjectStore((s) => s.loading);
   const catalogEntries = useProviderCatalogStore((s) => s.entries);
+  const catalogLoaded = useProviderCatalogStore((s) => s.loaded);
   const [pendingPersonaId, setPendingPersonaId] = useState<string | null>();
   const [pendingProjectId, setPendingProjectId] = useState<string | null>();
   const [pendingProviderId, setPendingProviderId] = useState<string>();
@@ -371,10 +393,17 @@ export function useChatSessionController({
     }
     return personas;
   }, [personas, selectedPersona]);
+  const workspaceRepository = useWorkspaceRepository();
+  const chatWorkspaceSet = useMemo(
+    () =>
+      workspaceRepository.chatWorkspaces(session, {
+        activePath: activeWorkspace?.path,
+      }),
+    [activeWorkspace?.path, session, workspaceRepository],
+  );
+  const sessionWorkspacePath = chatWorkspaceSet.primary?.path;
   const sessionCwd =
-    activeWorkspace?.path ??
-    session?.workingDir ??
-    resolveProjectDefaultArtifactRoot(project);
+    sessionWorkspacePath ?? resolveProjectDefaultArtifactRoot(project);
   const projectDefaultArtifactRoot = useMemo(
     () => resolveProjectDefaultArtifactRoot(project),
     [project],
@@ -399,29 +428,168 @@ export function useChatSessionController({
         })),
     [projects],
   );
-  const workingContextPrompt = useMemo(() => {
-    if (!activeWorkspace?.branch) return undefined;
-    return `<active-working-context>\nActive branch: ${activeWorkspace.branch}\nWorking directory: ${activeWorkspace.path}\n</active-working-context>`;
-  }, [activeWorkspace?.branch, activeWorkspace?.path]);
+  const includedWorkspacesPrompt =
+    workspaceRepository.mode === "multi"
+      ? formatIncludedWorkspacesPrompt(session)
+      : undefined;
+  const includedWorkspacePaths = useMemo(
+    () =>
+      workspaceRepository.mode === "multi"
+        ? chatWorkspaceSet.workspaces.map((workspace) => workspace.path)
+        : [],
+    [chatWorkspaceSet.workspaces, workspaceRepository.mode],
+  );
+  const workspaceContextKey = useMemo(
+    () => includedWorkspacePaths.join("\0"),
+    [includedWorkspacePaths],
+  );
+  const skillProviderId = useMemo(
+    () =>
+      resolveSelectedAgentId({
+        catalogEntries,
+        catalogLoaded,
+        selectedProvider,
+      }),
+    [catalogEntries, catalogLoaded, selectedProvider],
+  );
+  const skillsCatalogKey = useMemo(
+    () => `${skillProviderId}\0${workspaceContextKey}`,
+    [skillProviderId, workspaceContextKey],
+  );
+  const hasIncludedWorkspacePaths = includedWorkspacePaths.length > 0;
+  const [workspaceInstructionsState, setWorkspaceInstructionsState] =
+    useState(EMPTY_PROMPT_STATE);
+  const [availableSkillsCatalogState, setAvailableSkillsCatalogState] =
+    useState(EMPTY_PROMPT_STATE);
+  const workspaceInstructionsReady =
+    !hasIncludedWorkspacePaths ||
+    workspaceInstructionsState.key === workspaceContextKey;
+  const availableSkillsCatalogReady =
+    !hasIncludedWorkspacePaths ||
+    availableSkillsCatalogState.key === skillsCatalogKey;
+  const workspaceContextReady =
+    workspaceInstructionsReady && availableSkillsCatalogReady;
+  const skillProjectDirs =
+    workspaceRepository.mode === "multi" ? includedWorkspacePaths : undefined;
+  const fileMentionProjectDirs =
+    workspaceRepository.mode === "multi"
+      ? includedWorkspacePaths
+      : sessionCwd
+        ? [sessionCwd]
+        : undefined;
+  const workspaceInstructionsPrompt =
+    workspaceInstructionsState.key === workspaceContextKey
+      ? workspaceInstructionsState.prompt
+      : undefined;
+  const availableSkillsCatalogPrompt =
+    availableSkillsCatalogState.key === skillsCatalogKey
+      ? availableSkillsCatalogState.prompt
+      : undefined;
   const artifactFolderInstructions = useMemo(() => {
     if (project) return undefined;
     return formatArtifactFolderInstructions(sessionArtifactCwd);
   }, [project, sessionArtifactCwd]);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (includedWorkspacePaths.length === 0) {
+      setWorkspaceInstructionsState((current) =>
+        nextPromptState(current, {
+          key: workspaceContextKey,
+          prompt: undefined,
+        }),
+      );
+      return;
+    }
+
+    void loadWorkspaceInstructionFiles(includedWorkspacePaths)
+      .then((instructionFiles) => {
+        if (cancelled) return;
+        setWorkspaceInstructionsState((current) =>
+          nextPromptState(current, {
+            key: workspaceContextKey,
+            prompt: formatWorkspaceInstructionsPrompt(instructionFiles),
+          }),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load workspace instructions:", error);
+        setWorkspaceInstructionsState((current) =>
+          nextPromptState(current, {
+            key: workspaceContextKey,
+            prompt: undefined,
+          }),
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [includedWorkspacePaths, workspaceContextKey]);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (includedWorkspacePaths.length === 0) {
+      setAvailableSkillsCatalogState((current) =>
+        nextPromptState(current, {
+          key: skillsCatalogKey,
+          prompt: undefined,
+        }),
+      );
+      return;
+    }
+
+    void listSkills(includedWorkspacePaths, { providerId: skillProviderId })
+      .then((skills) => {
+        if (cancelled) return;
+        setAvailableSkillsCatalogState((current) =>
+          nextPromptState(current, {
+            key: skillsCatalogKey,
+            prompt: formatAvailableSkillsCatalogPrompt(skills),
+          }),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load available skills catalog:", error);
+        setAvailableSkillsCatalogState((current) =>
+          nextPromptState(current, {
+            key: skillsCatalogKey,
+            prompt: undefined,
+          }),
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [includedWorkspacePaths, skillProviderId, skillsCatalogKey]);
   const effectiveSystemPrompt = useMemo(
     () =>
       composeSystemPrompt(
         formatPersonaSystemPrompt(selectedPersona),
-        workingContextPrompt,
+        includedWorkspacesPrompt,
+        workspaceInstructionsPrompt,
+        availableSkillsCatalogPrompt,
       ),
-    [selectedPersona, workingContextPrompt],
+    [
+      selectedPersona,
+      includedWorkspacesPrompt,
+      workspaceInstructionsPrompt,
+      availableSkillsCatalogPrompt,
+    ],
+  );
+  const skillProviderCapabilities = useMemo(
+    () => getSkillProviderCapabilities(skillProviderId),
+    [skillProviderId],
   );
 
   const prepareCurrentSession = useCallback(
     async (
       providerId: string,
       nextProject = project,
-      nextWorkspacePath: string | null | undefined = activeWorkspace?.path ??
-        session?.workingDir,
+      nextWorkspacePath: string | null | undefined = sessionWorkspacePath,
       requestId?: string,
     ) => {
       if (!sessionId) {
@@ -454,14 +622,13 @@ export function useChatSessionController({
       });
       return true;
     },
-    [activeWorkspace?.path, project, session?.workingDir, sessionId],
+    [project, sessionId, sessionWorkspacePath],
   );
   const prepareCurrentSessionWithModel = useCallback(
     async (
       providerId: string,
       nextProject = project,
-      nextWorkspacePath: string | null | undefined = activeWorkspace?.path ??
-        session?.workingDir,
+      nextWorkspacePath: string | null | undefined = sessionWorkspacePath,
     ) => {
       if (!sessionId) {
         return false;
@@ -555,30 +722,17 @@ export function useChatSessionController({
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
-    [
-      activeWorkspace?.path,
-      prepareCurrentSession,
-      project,
-      session?.workingDir,
-      sessionId,
-    ],
+    [prepareCurrentSession, project, sessionWorkspacePath, sessionId],
   );
   const prepareSelectedProvider = useCallback(
     (providerId: string, options?: ModelSelectionApplyOptions) =>
       prepareCurrentSession(
         providerId,
         options?.nextProject ?? project,
-        options?.nextWorkspacePath ??
-          activeWorkspace?.path ??
-          session?.workingDir,
+        options?.nextWorkspacePath ?? sessionWorkspacePath,
         options?.requestId,
       ),
-    [
-      activeWorkspace?.path,
-      prepareCurrentSession,
-      project,
-      session?.workingDir,
-    ],
+    [prepareCurrentSession, project, sessionWorkspacePath],
   );
 
   const applySessionModelSelection = useCallback<ApplySessionModelSelection>(
@@ -598,9 +752,7 @@ export function useChatSessionController({
       }
       const workingDir = await resolveSessionCwd(
         options?.nextProject ?? project,
-        options?.nextWorkspacePath ??
-          activeWorkspace?.path ??
-          session?.workingDir,
+        options?.nextWorkspacePath ?? sessionWorkspacePath,
       );
       // resolveSessionCwd can yield while the user changes models; do not send
       // a stale provider/model pair to ACP after that happens.
@@ -649,13 +801,7 @@ export function useChatSessionController({
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
-    [
-      activeWorkspace?.path,
-      isHomeSession,
-      project,
-      session?.workingDir,
-      sessionId,
-    ],
+    [isHomeSession, project, sessionId, sessionWorkspacePath],
   );
 
   // Escape hatch for the "Provider not set" trap. When an in-place provider or
@@ -1098,14 +1244,11 @@ export function useChatSessionController({
         setPendingProjectId(projectId);
         return;
       }
-      void moveSessionToProject(sessionId, projectId, {
-        providerId: selectedProvider,
-        activeWorkspacePath: activeWorkspace?.path,
-      }).catch((error) => {
+      void moveSessionToProject(sessionId, projectId).catch((error) => {
         console.error("Failed to move session to project:", error);
       });
     },
-    [activeWorkspace?.path, selectedProvider, sessionId],
+    [sessionId],
   );
 
   const handlePersonaChange = useCallback(
@@ -1645,7 +1788,9 @@ export function useChatSessionController({
     resolve?: (accepted: boolean) => void;
   } | null>(null);
   const queueChatState =
-    sessionId && session?.creationState == null ? chatState : "thinking";
+    sessionId && session?.creationState == null && workspaceContextReady
+      ? chatState
+      : "thinking";
   const sendQueuedMessageWithAutoCompact = useCallback(
     (
       text: string,
@@ -1780,6 +1925,13 @@ export function useChatSessionController({
         return false;
       }
 
+      if (!workspaceContextReady) {
+        if (!queue.queuedMessage) {
+          queue.enqueue(text, personaId, attachments, sendOptions);
+        }
+        return true;
+      }
+
       if (personaId && personaId !== selectedPersonaId) {
         handlePersonaChange(personaId);
         return new Promise<boolean>((resolve) => {
@@ -1849,6 +2001,7 @@ export function useChatSessionController({
       selectedPersona,
       selectedPersonaId,
       sendWithAutoCompact,
+      workspaceContextReady,
     ],
   );
 
@@ -1892,6 +2045,9 @@ export function useChatSessionController({
 
   useEffect(() => {
     if (deferredSend.current && selectedPersona) {
+      if (!workspaceContextReady) {
+        return;
+      }
       const { text, attachments, sendOptions, resolve } = deferredSend.current;
       deferredSend.current = null;
       if (readOnly) {
@@ -1938,6 +2094,7 @@ export function useChatSessionController({
     sendWithAutoCompact,
     session?.intent,
     stateSessionId,
+    workspaceContextReady,
   ]);
 
   const handleCreatePersona = useCallback(() => {
@@ -2296,6 +2453,9 @@ export function useChatSessionController({
     handleInitialDraftAttachmentsConsumed,
     selectedSkills,
     handleSkillsChange,
+    skillProjectDirs,
+    fileMentionProjectDirs,
+    skillsEnabled: skillProviderCapabilities.supportsSkillMentions,
     scrollTarget,
     handleScrollTargetHandled,
     projectMetadataPending,

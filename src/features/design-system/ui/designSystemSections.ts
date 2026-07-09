@@ -163,6 +163,7 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-resizable-handle", label: "Resizable Handle" },
   { id: "component-separator", label: "Separator" },
   { id: "component-sidebar", label: "Sidebar" },
+  { id: "component-split-button", label: "Split Button" },
   { id: "component-table", label: "Table" },
   { id: "component-toggle", label: "Toggle" },
   { id: "component-toggle-group", label: "Toggle Group" },

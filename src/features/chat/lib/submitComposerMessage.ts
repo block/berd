@@ -9,6 +9,7 @@ interface SubmitComposerMessageOptions {
   attachments: ChatAttachmentDraft[];
   skills: ChatSkillDraft[];
   chips?: MessageChip[];
+  skillProviderId?: string | null;
   selectedPersonaId?: string | null;
   onSend: ChatInputSendHandler;
   resolveSkillSlashCommand: (
@@ -21,6 +22,7 @@ export async function submitComposerMessage({
   attachments,
   skills,
   chips = [],
+  skillProviderId,
   selectedPersonaId,
   onSend,
   resolveSkillSlashCommand,
@@ -31,6 +33,7 @@ export async function submitComposerMessage({
     text,
     skills,
     slashSkillCommand,
+    { providerId: skillProviderId },
   );
   const mergedChips =
     sendOptions?.chips && sendOptions.chips.length > 0

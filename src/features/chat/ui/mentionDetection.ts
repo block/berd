@@ -49,6 +49,8 @@ export interface SkillMentionItem {
   name: string;
   description: string;
   sourceLabel: string;
+  instructions?: string;
+  fileLocation?: string;
 }
 
 type IndexedSkillMention = {

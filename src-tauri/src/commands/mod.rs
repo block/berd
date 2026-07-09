@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod agent_setup;
+pub mod agent_skills;
 pub mod agents;
 pub mod artifacts;
 pub mod auth;
@@ -31,3 +32,4 @@ pub mod telemetry;
 pub mod terminal;
 pub mod whoami;
 pub mod window_session;
+pub mod workspace_context;

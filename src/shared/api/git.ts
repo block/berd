@@ -62,6 +62,20 @@ export async function createBranch(
   return invoke("git_create_branch", { path, name, baseBranch });
 }
 
+export async function deleteBranch(
+  path: string,
+  branch: string,
+  force = false,
+  switchToBranch?: string,
+): Promise<void> {
+  return invoke("git_delete_branch", {
+    path,
+    branch,
+    force,
+    switchToBranch,
+  });
+}
+
 export async function getChangedFiles(path: string): Promise<ChangedFile[]> {
   return invoke<ChangedFile[]>("get_changed_files", { path });
 }
@@ -80,4 +94,12 @@ export async function createWorktree(
     createBranch,
     baseBranch,
   });
+}
+
+export async function removeWorktree(
+  path: string,
+  worktreePath: string,
+  force = false,
+): Promise<void> {
+  return invoke("git_remove_worktree", { path, worktreePath, force });
 }

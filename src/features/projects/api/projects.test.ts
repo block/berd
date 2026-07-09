@@ -48,6 +48,7 @@ function projectInfo(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "Ship it",
     icon: "tabler:folder-code",
     color: "olive",
+    projectWorkspaces: [],
     workingDirs: ["/tmp/launch"],
     useWorktrees: false,
     order: 0,
@@ -130,6 +131,51 @@ describe("projects API artifact metadata", () => {
       color: "peach",
     });
     expect(project.artifact).toEqual(updateRequest.properties.artifact);
+  });
+
+  it("persists structured project workspaces while deriving working dirs", async () => {
+    mocks.sourcesList.mockResolvedValue({ sources: [] });
+    mocks.sourcesCreate.mockImplementation(async (request) => ({
+      source: source(request.properties),
+    }));
+
+    const { createProject, projectWorkspaceFromDirectory } = await import(
+      "./projects"
+    );
+    const workspace = projectWorkspaceFromDirectory(
+      "/tmp/launch/packages/app",
+      "worktree",
+    );
+
+    const project = await createProject(
+      "Launch",
+      "",
+      "Ship it",
+      "tabler:folder-code",
+      "olive",
+      [],
+      false,
+      workspace ? [workspace] : [],
+    );
+
+    const createRequest = mocks.sourcesCreate.mock.calls[0]?.[0];
+    expect(createRequest.properties.workingDirs).toEqual([
+      "/tmp/launch/packages/app",
+    ]);
+    expect(createRequest.properties.useWorktrees).toBeUndefined();
+    expect(createRequest.properties.projectWorkspaces).toEqual([
+      expect.objectContaining({
+        path: "/tmp/launch/packages/app",
+        startupMode: "worktree",
+      }),
+    ]);
+    expect(project.workingDirs).toEqual(["/tmp/launch/packages/app"]);
+    expect(project.projectWorkspaces).toEqual([
+      expect.objectContaining({
+        path: "/tmp/launch/packages/app",
+        startupMode: "worktree",
+      }),
+    ]);
   });
 
   it("recomputes existing artifact identity when renaming a project", async () => {

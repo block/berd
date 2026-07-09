@@ -128,7 +128,7 @@ export function WorkspaceActionsMenu({
             type="button"
             variant="ghost"
             size="icon-xs"
-            className="rounded-full data-[state=open]:bg-muted"
+            className="rounded-full text-muted-foreground hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
             aria-label={t("contextPanel.actions.openWorkspaceMenu")}
           >
             <IconDots className="size-4" />

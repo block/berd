@@ -38,6 +38,8 @@ export interface ChatSkillDraft {
   name: string;
   description?: string;
   sourceLabel?: string;
+  instructions?: string;
+  fileLocation?: string;
 }
 
 export interface ChatSendOptions {
@@ -149,7 +151,9 @@ export interface ChatInputProps {
   onDraftChange?: (text: string) => void;
   selectedSkills?: ChatSkillDraft[];
   onSkillsChange?: (skills: ChatSkillDraft[]) => void;
-  fileMentionRoots?: string[];
+  skillProjectDirs?: string[];
+  fileMentionProjectDirs?: string[];
+  skillProviderId?: string | null;
   attachmentsEnabled?: boolean;
   className?: string;
   personaPicker?: ChatInputPersonaPicker;

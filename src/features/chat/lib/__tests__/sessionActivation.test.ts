@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureReplayBuffer } from "@/features/chat/hooks/replayBuffer";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   type ChatSession,
@@ -44,6 +46,7 @@ function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: "",
     color: "",
+    projectWorkspaces: [],
     workingDirs: ["/missing/project"],
     useWorktrees: false,
     order: 0,
@@ -117,6 +120,7 @@ function notificationFromLastMessage(
 describe("loadSessionMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     acpGetSessionInfo.mockResolvedValue(null);
     acpLoadSession.mockResolvedValue(undefined);
     resolvePath.mockImplementation(({ parts }: { parts: string[] }) =>
@@ -261,6 +265,61 @@ describe("loadSessionMessages", () => {
       type: "editProject",
       projectId: "project-1",
     });
+  });
+
+  it("uses explicit chat workspace context when resolving the reload cwd", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    seedSession(
+      {
+        id: "s-project-workspaces",
+        workspaceAttachments: [
+          {
+            id: "path:/attached/workspace",
+            path: "/attached/workspace",
+            kind: "directory",
+            source: "selected",
+            branch: null,
+            usedByAgent: false,
+          },
+          {
+            id: "path:/second/attached/workspace",
+            path: "/second/attached/workspace",
+            kind: "directory",
+            source: "selected",
+            branch: null,
+            usedByAgent: false,
+          },
+        ],
+      },
+      {
+        project: makeProject({
+          workingDirs: ["/project/root"],
+          projectWorkspaces: [
+            {
+              id: "path:/project/root",
+              path: "/project/root",
+              kind: "directory",
+              source: "selected",
+              branch: null,
+              usedByAgent: false,
+              startupMode: "none",
+            },
+          ],
+        }),
+      },
+    );
+
+    await expect(loadSessionMessages("s-project-workspaces")).resolves.toBe(
+      true,
+    );
+
+    expect(checkDirectoriesExist).toHaveBeenCalledWith([
+      "/resolved/attached/workspace",
+    ]);
+    expect(acpLoadSession).toHaveBeenCalledWith(
+      "s-project-workspaces",
+      "/resolved/attached/workspace",
+    );
   });
 
   it("missing workspace cwd falls back, warns, and clears the stale workspace entry", async () => {

@@ -6,6 +6,8 @@ import type {
 } from "@/features/chat/stores/chatSessionStore";
 import { compareSessionsByActivityDesc } from "@/features/chat/lib/sessionActivity";
 import { normalizeAcpTitle } from "@/features/chat/lib/sessionTitle";
+import { withWorkspaceBackfill } from "@/features/chat/lib/workspaceAttachments";
+import { loadPersistedChatWorkspaceMetadata } from "@/features/chat/stores/workspaceAttachmentPersistence";
 
 interface SessionPageState {
   sessions: ChatSession[];
@@ -16,7 +18,10 @@ interface SessionPageState {
 
 export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
   const now = new Date().toISOString();
-  return {
+  const persistedWorkspaceMetadata = loadPersistedChatWorkspaceMetadata(
+    session.sessionId,
+  );
+  return withWorkspaceBackfill({
     id: session.sessionId,
     title: normalizeAcpTitle(session.title) ?? "Untitled",
     projectId: session.projectId ?? undefined,
@@ -24,6 +29,8 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
     personaId: session.personaId ?? undefined,
     modelId: session.modelId ?? undefined,
     workingDir: session.workingDir ?? undefined,
+    workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
+    activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
     createdAt: session.createdAt ?? session.updatedAt ?? now,
     updatedAt: session.updatedAt ?? now,
     lastMessageAt: session.lastMessageAt ?? undefined,
@@ -31,7 +38,7 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
     messageCount: session.messageCount,
     subtitle: session.subtitle ?? undefined,
     userSetName: session.userSetName,
-  };
+  });
 }
 
 function mergeSessionMetadata(
@@ -62,14 +69,21 @@ function mergeSessionMetadata(
     const modelName =
       existing?.modelId === session.modelId ? existing?.modelName : undefined;
     const personaId = session.personaId ?? existing?.personaId;
-    byId.set(session.id, {
-      ...existing,
-      ...session,
-      personaId,
-      modelName,
-      creationState: undefined,
-      creationError: undefined,
-    });
+    byId.set(
+      session.id,
+      withWorkspaceBackfill({
+        ...existing,
+        ...session,
+        personaId,
+        modelName,
+        workspaceAttachments:
+          existing?.workspaceAttachments ?? session.workspaceAttachments,
+        activeWorkspaceId:
+          existing?.activeWorkspaceId ?? session.activeWorkspaceId,
+        creationState: undefined,
+        creationError: undefined,
+      }),
+    );
   }
 
   let nextArchiveMutationBySessionId = archiveMutationBySessionId;

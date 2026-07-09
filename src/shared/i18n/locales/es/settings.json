@@ -182,6 +182,10 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
+    "multiWorkspace": {
+      "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
+      "title": "Chats con varios espacios de trabajo"
+    },
     "globalShortcut": {
       "description": "Usa Opt-Space para crear y encontrar chats desde cualquier lugar de macOS.",
       "shortcutLabel": "Atajo",

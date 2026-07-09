@@ -249,6 +249,64 @@ pub async fn git_create_branch(
 }
 
 #[tauri::command]
+pub async fn git_delete_branch(
+    path: String,
+    branch: String,
+    force: bool,
+    switch_to_branch: Option<String>,
+) -> Result<(), String> {
+    let repo_path = resolve_repo_path(&path)?;
+    let branch_name = require_nonempty(&branch, "Branch name")?;
+    let current_branch = trim_to_option(
+        run_git_success_async(
+            &repo_path,
+            &["branch", "--show-current"],
+            GIT_READ_COMMAND_TIMEOUT,
+        )
+        .await?,
+    );
+
+    if current_branch.as_deref() == Some(branch_name.as_str()) {
+        let target_branch = require_nonempty(
+            switch_to_branch.as_deref().unwrap_or_default(),
+            "Switch target branch",
+        )?;
+        if target_branch == branch_name {
+            return Err(
+                "Switch target branch must differ from the branch being deleted".to_string(),
+            );
+        }
+
+        let switch_args = delete_branch_switch_args(force, target_branch.as_str());
+        run_git_success_async(&repo_path, &switch_args, GIT_MUTATING_COMMAND_TIMEOUT).await?;
+    }
+
+    let delete_flag = if force { "-D" } else { "-d" };
+    run_git_success_async(
+        &repo_path,
+        &["branch", delete_flag, "--", branch_name.as_str()],
+        GIT_MUTATING_COMMAND_TIMEOUT,
+    )
+    .await?;
+    Ok(())
+}
+
+fn delete_branch_switch_args(force: bool, target_branch: &str) -> Vec<&str> {
+    let mut switch_args = vec!["switch"];
+    if force {
+        switch_args.push("-f");
+    }
+    if target_branch == "HEAD" {
+        switch_args.push("--detach");
+        switch_args.push(target_branch);
+    } else {
+        switch_args.push("--");
+        switch_args.push(target_branch);
+    }
+    switch_args
+}
+
+#[tauri::command]
 pub async fn git_create_worktree(
     app: AppHandle,
     path: String,
@@ -335,6 +393,24 @@ fn emit_git_state_changed(
     ) {
         log::warn!("Failed to emit git state changed event: {error}");
     }
+}
+
+#[tauri::command]
+pub async fn git_remove_worktree(
+    path: String,
+    worktree_path: String,
+    force: bool,
+) -> Result<(), String> {
+    let repo_path = resolve_repo_path(&path)?;
+    let worktree_path = require_nonempty(&worktree_path, "Worktree path")?;
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push("--");
+    args.push(worktree_path.as_str());
+    run_git_success_async(&repo_path, &args, GIT_MUTATING_COMMAND_TIMEOUT).await?;
+    Ok(())
 }
 
 pub(crate) async fn is_git_repo_async(path: &Path) -> Result<bool, String> {
@@ -446,7 +522,9 @@ fn env_source_for_git_args(args: &[&str]) -> EnvSource {
         | ["init", ..]
         | ["fetch", ..]
         | ["pull", ..]
-        | ["worktree", "add", ..] => EnvSource::Captured,
+        | ["branch", "-d" | "-D", ..]
+        | ["worktree", "add", ..]
+        | ["worktree", "remove", ..] => EnvSource::Captured,
         _ => EnvSource::Smart,
     }
 }
@@ -952,6 +1030,26 @@ mod tests {
         assert_eq!(
             env_source_for_git_args(&["worktree", "add", "../repo-worktrees/foo", "main"]),
             EnvSource::Captured
+        );
+        assert_eq!(
+            env_source_for_git_args(&["worktree", "remove", "--force", "../repo-worktrees/foo"]),
+            EnvSource::Captured
+        );
+        assert_eq!(
+            env_source_for_git_args(&["branch", "-D", "--", "feature/foo"]),
+            EnvSource::Captured
+        );
+    }
+
+    #[test]
+    fn delete_branch_switch_args_detaches_at_head() {
+        assert_eq!(
+            delete_branch_switch_args(true, "HEAD"),
+            vec!["switch", "-f", "--detach", "HEAD"]
+        );
+        assert_eq!(
+            delete_branch_switch_args(false, "main"),
+            vec!["switch", "--", "main"]
         );
     }
 

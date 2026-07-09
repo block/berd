@@ -4,7 +4,22 @@ import {
   createProjectArtifactMetadata,
   parseProjectArtifactMetadata,
 } from "../artifact/deriveProjectArtifactState";
+import type {
+  WorkspaceAttachment,
+  WorkspaceAttachmentKind,
+  WorkspaceAttachmentSource,
+} from "@/shared/types/chat";
+import {
+  normalizeWorkspacePath,
+  workspaceAttachmentIdForPath,
+} from "@/features/chat/lib/workspaceAttachments";
 import type { ProjectArtifactMetadata } from "../artifact/types";
+
+export type ProjectWorkspaceStartupMode = "none" | "branch" | "worktree";
+
+export interface ProjectWorkspace extends WorkspaceAttachment {
+  startupMode: ProjectWorkspaceStartupMode;
+}
 
 export interface ProjectInfo {
   id: string;
@@ -15,6 +30,7 @@ export interface ProjectInfo {
   prompt: string;
   icon: string;
   color: string;
+  projectWorkspaces: ProjectWorkspace[];
   workingDirs: string[];
   useWorktrees: boolean;
   order: number;
@@ -46,6 +62,130 @@ function createArtifactMetadata(
   });
 }
 
+function validStartupMode(value: unknown): ProjectWorkspaceStartupMode {
+  return value === "branch" || value === "worktree" ? value : "none";
+}
+
+function validWorkspaceKind(value: unknown): WorkspaceAttachmentKind {
+  return value === "repository" ||
+    value === "git-main-worktree" ||
+    value === "git-linked-worktree" ||
+    value === "git-detached-checkout" ||
+    value === "subdirectory" ||
+    value === "non-git-directory"
+    ? value
+    : "directory";
+}
+
+function validWorkspaceSource(value: unknown): WorkspaceAttachmentSource {
+  return value === "selected" ||
+    value === "created" ||
+    value === "excluded" ||
+    value === "inferred"
+    ? value
+    : "inferred";
+}
+
+function normalizeProjectWorkspace(value: unknown): ProjectWorkspace | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const raw = value as Partial<ProjectWorkspace>;
+  const path = normalizeWorkspacePath(raw.path);
+  if (!path) {
+    return null;
+  }
+
+  const workspace: ProjectWorkspace = {
+    id: raw.id || workspaceAttachmentIdForPath(path),
+    path,
+    kind: validWorkspaceKind(raw.kind),
+    source: validWorkspaceSource(raw.source),
+    branch: typeof raw.branch === "string" ? raw.branch : null,
+    usedByAgent: false,
+    startupMode: validStartupMode(raw.startupMode),
+  };
+
+  if (typeof raw.repositoryPath === "string" && raw.repositoryPath.trim()) {
+    workspace.repositoryPath = raw.repositoryPath.trim();
+  }
+  if (typeof raw.worktreePath === "string" && raw.worktreePath.trim()) {
+    workspace.worktreePath = raw.worktreePath.trim();
+  }
+
+  return workspace;
+}
+
+export function projectWorkspaceFromDirectory(
+  directory: string,
+  startupMode: ProjectWorkspaceStartupMode = "none",
+): ProjectWorkspace | null {
+  const path = normalizeWorkspacePath(directory);
+  if (!path) {
+    return null;
+  }
+
+  return {
+    id: workspaceAttachmentIdForPath(path),
+    path,
+    kind: "directory",
+    source: "inferred",
+    branch: null,
+    usedByAgent: false,
+    startupMode,
+  };
+}
+
+function dedupeProjectWorkspaces(
+  workspaces: ProjectWorkspace[],
+): ProjectWorkspace[] {
+  const byPath = new Map<string, ProjectWorkspace>();
+  for (const workspace of workspaces) {
+    const path = normalizeWorkspacePath(workspace.path);
+    if (!path) {
+      continue;
+    }
+    byPath.set(path.replace(/\\/g, "/").replace(/\/+$/, ""), {
+      ...workspace,
+      id: workspace.id || workspaceAttachmentIdForPath(path),
+      path,
+      usedByAgent: false,
+      startupMode: validStartupMode(workspace.startupMode),
+    });
+  }
+  return [...byPath.values()];
+}
+
+export function normalizeProjectWorkspaces(
+  workspaces: ProjectWorkspace[] | undefined,
+  workingDirs: string[] = [],
+  useWorktrees = false,
+): ProjectWorkspace[] {
+  const normalizedFromWorkspaces = (workspaces ?? [])
+    .map(normalizeProjectWorkspace)
+    .filter((workspace): workspace is ProjectWorkspace => workspace !== null);
+
+  if (normalizedFromWorkspaces.length > 0) {
+    return dedupeProjectWorkspaces(normalizedFromWorkspaces);
+  }
+
+  return dedupeProjectWorkspaces(
+    workingDirs
+      .map((directory) =>
+        projectWorkspaceFromDirectory(
+          directory,
+          useWorktrees ? "worktree" : "none",
+        ),
+      )
+      .filter((workspace): workspace is ProjectWorkspace => workspace !== null),
+  );
+}
+
+function projectWorkspacePaths(workspaces: ProjectWorkspace[]): string[] {
+  return workspaces.map((workspace) => workspace.path);
+}
+
 // Shape returned by _goose/sources/*. Narrowed to project-type sources here.
 interface SourceEntry {
   type: "project";
@@ -59,6 +199,13 @@ interface SourceEntry {
 
 function toProjectInfo(source: SourceEntry): ProjectInfo {
   const p = source.properties ?? {};
+  const rawWorkingDirs = (p.workingDirs as string[]) ?? [];
+  const useWorktrees = (p.useWorktrees as boolean) ?? false;
+  const projectWorkspaces = normalizeProjectWorkspaces(
+    p.projectWorkspaces as ProjectWorkspace[] | undefined,
+    rawWorkingDirs,
+    useWorktrees,
+  );
   return {
     id: source.name,
     path: source.path,
@@ -67,8 +214,9 @@ function toProjectInfo(source: SourceEntry): ProjectInfo {
     prompt: source.content,
     icon: (p.icon as string) ?? "",
     color: (p.color as string) ?? "",
-    workingDirs: (p.workingDirs as string[]) ?? [],
-    useWorktrees: (p.useWorktrees as boolean) ?? false,
+    projectWorkspaces,
+    workingDirs: projectWorkspacePaths(projectWorkspaces),
+    useWorktrees,
     order: (p.order as number) ?? 0,
     archivedAt: (p.archivedAt as string) ?? null,
     artifact: parseProjectArtifactMetadata(p.artifact),
@@ -80,6 +228,7 @@ interface ProjectMetadataFields {
   name: string;
   icon: string;
   color: string;
+  projectWorkspaces: ProjectWorkspace[];
   workingDirs: string[];
   useWorktrees: boolean;
   order: number;
@@ -90,10 +239,17 @@ interface ProjectMetadataFields {
 
 function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
   const props: Record<string, unknown> = {};
+  const projectWorkspaces = normalizeProjectWorkspaces(
+    info.projectWorkspaces,
+    info.workingDirs,
+    info.useWorktrees,
+  );
+  const workingDirs = projectWorkspacePaths(projectWorkspaces);
   if (info.name) props.title = info.name;
   if (info.icon) props.icon = info.icon;
   if (info.color) props.color = info.color;
-  if (info.workingDirs?.length) props.workingDirs = info.workingDirs;
+  if (workingDirs.length) props.workingDirs = workingDirs;
+  if (projectWorkspaces.length) props.projectWorkspaces = projectWorkspaces;
   if (info.useWorktrees) props.useWorktrees = info.useWorktrees;
   if (typeof info.order === "number") props.order = info.order;
   if (info.archivedAt) props.archivedAt = info.archivedAt;
@@ -201,15 +357,28 @@ export async function createProject(
   color: string,
   workingDirs: string[],
   useWorktrees: boolean,
+  projectWorkspaces: ProjectWorkspace[] = normalizeProjectWorkspaces(
+    undefined,
+    workingDirs,
+    useWorktrees,
+  ),
 ): Promise<ProjectInfo> {
   const client = await getClient();
   const existing = await listAllProjects();
   const id = uniqueProjectSlug(name, new Set(existing.map((p) => p.id)));
+  const normalizedProjectWorkspaces = normalizeProjectWorkspaces(
+    projectWorkspaces,
+    workingDirs,
+    useWorktrees,
+  );
+  const normalizedWorkingDirs = projectWorkspacePaths(
+    normalizedProjectWorkspaces,
+  );
   const artifact = createArtifactMetadata(id, {
     name,
     prompt,
     color,
-    workingDirs,
+    workingDirs: normalizedWorkingDirs,
   });
   const raw = await client.goose.GooseUnstableSourcesCreate({
     type: "project",
@@ -221,7 +390,8 @@ export async function createProject(
       name,
       icon,
       color,
-      workingDirs,
+      projectWorkspaces: normalizedProjectWorkspaces,
+      workingDirs: normalizedWorkingDirs,
       useWorktrees,
       order: 0,
       archivedAt: null,
@@ -273,6 +443,13 @@ export async function updateProject(
   updates: Partial<Omit<ProjectInfo, "id" | "path">>,
 ): Promise<ProjectInfo> {
   const merged = { ...existing, ...updates };
+  const mergedProjectWorkspaces = normalizeProjectWorkspaces(
+    merged.projectWorkspaces,
+    merged.workingDirs,
+    merged.useWorktrees,
+  );
+  merged.projectWorkspaces = mergedProjectWorkspaces;
+  merged.workingDirs = projectWorkspacePaths(mergedProjectWorkspaces);
   const artifact = artifactForUpdate(existing, updates, merged);
   const client = await getClient();
   const raw = await client.goose.GooseUnstableSourcesUpdate({
@@ -285,6 +462,7 @@ export async function updateProject(
       name: merged.name,
       icon: merged.icon,
       color: merged.color,
+      projectWorkspaces: merged.projectWorkspaces,
       workingDirs: merged.workingDirs,
       useWorktrees: merged.useWorktrees,
       order: merged.order,

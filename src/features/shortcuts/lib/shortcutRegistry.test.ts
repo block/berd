@@ -482,14 +482,18 @@ describe("setShortcutOverride", () => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
-        getItem: originalLocalStorage.getItem.bind(originalLocalStorage),
-        removeItem: originalLocalStorage.removeItem.bind(originalLocalStorage),
+        get length() {
+          return originalLocalStorage.length;
+        },
+        clear: () => originalLocalStorage.clear(),
+        getItem: (key: string) => originalLocalStorage.getItem(key),
+        key: (index: number) => originalLocalStorage.key(index),
+        removeItem: (key: string) => originalLocalStorage.removeItem(key),
         setItem: () => {
           throw new Error("quota exceeded");
         },
-      },
+      } satisfies Storage,
     });
-
     try {
       expect(setShortcutOverride("navigation.search", "meta+shift+x")).toEqual({
         ok: false,

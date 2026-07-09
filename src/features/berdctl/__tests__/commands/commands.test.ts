@@ -200,6 +200,7 @@ function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: DEFAULT_PROJECT_ICON,
     color: DEFAULT_PROJECT_COLOR,
+    projectWorkspaces: [],
     workingDirs: ["/projects/one"],
     useWorktrees: false,
     order: 0,
@@ -1626,6 +1627,7 @@ describe("projects", () => {
       DEFAULT_PROJECT_COLOR,
       ["/work"],
       false,
+      undefined,
     );
     expect(result).toEqual({ project_id: "p-new" });
   });

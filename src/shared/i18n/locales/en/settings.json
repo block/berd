@@ -182,6 +182,10 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
+    "multiWorkspace": {
+      "description": "Enable multiple chat and project workspaces, project workspace startup policies, and multi-workspace agent context.",
+      "title": "Multi-workspace chats"
+    },
     "globalShortcut": {
       "description": "Use Opt-Space to create and find chats from anywhere in macOS.",
       "shortcutLabel": "Shortcut",

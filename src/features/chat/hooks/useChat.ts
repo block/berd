@@ -27,6 +27,7 @@ import {
   clearBufferedStreamingUpdatesForSession,
   flushBufferedStreamingUpdatesForSession,
 } from "../acp/liveStreamingUpdates";
+import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 
 // TODO: Remove this fallback once goose2 has first-class /-commands.
 const MANUAL_COMPACT_TRIGGER = "/compact";
@@ -94,6 +95,7 @@ export function useChat(
   },
 ) {
   const abortRef = useRef<AbortController | null>(null);
+  const workspaceRepository = useWorkspaceRepository();
 
   const messages = useChatStore(
     (s) => s.messagesBySession[sessionId] ?? EMPTY_MESSAGES,
@@ -307,11 +309,13 @@ export function useChat(
 
   const getWorkingDir = useCallback(() => {
     const sessionStore = useChatSessionStore.getState();
-    return (
-      sessionStore.activeWorkspaceBySession[sessionId]?.path ??
-      sessionStore.getSession(sessionId)?.workingDir
-    );
-  }, [sessionId]);
+    return workspaceRepository.chatWorkspaces(
+      sessionStore.getSession(sessionId),
+      {
+        activePath: sessionStore.activeWorkspaceBySession[sessionId]?.path,
+      },
+    ).primary?.path;
+  }, [sessionId, workspaceRepository]);
 
   const compactConversation = useCallback(
     async (overridePersona?: { id: string; name?: string }) => {
@@ -370,7 +374,7 @@ export function useChat(
         clearBufferedStreamingUpdatesForSession(sessionId);
         clearReplayBuffer(sessionId);
         const workingDir = getWorkingDir();
-        await acpLoadSession(sessionId, workingDir);
+        await acpLoadSession(sessionId, workingDir ?? undefined);
 
         setSessionLoading(sessionId, false);
 

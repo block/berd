@@ -302,13 +302,20 @@ export function LoginView({
   const [pending, setPending] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
   const loginAttemptRef = useRef(0);
+  const previousAuthOrgRef = useRef(authStatus?.org ?? "");
   const canSubmit = !pending && org.trim().length > 0;
   const transitionDurationMs = prefersReducedMotion
     ? 0
     : LOGIN_UI_TRANSITION_MS;
 
   useEffect(() => {
-    setOrg(authStatus?.org ?? "");
+    const nextAuthOrg = authStatus?.org ?? "";
+    if (previousAuthOrgRef.current === nextAuthOrg) {
+      return;
+    }
+
+    previousAuthOrgRef.current = nextAuthOrg;
+    setOrg(nextAuthOrg);
   }, [authStatus?.org]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {

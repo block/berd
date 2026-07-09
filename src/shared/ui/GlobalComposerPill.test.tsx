@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { listSkills } from "@/features/skills/api/skills";
 import { GlobalComposerPill } from "./GlobalComposerPill";
 
 const mockOpenDialog = vi.fn();
@@ -113,6 +114,7 @@ function setProjectStore() {
         prompt: "",
         icon: "",
         color: "",
+        projectWorkspaces: [],
         workingDirs: ["/workspace/project"],
         useWorktrees: false,
         order: 0,
@@ -190,6 +192,8 @@ describe("GlobalComposerPill", () => {
     mockReadImageAttachment.mockReset();
     mockSearchFilesForMentions.mockReset();
     mockResizeImage.mockReset();
+    vi.mocked(listSkills).mockReset();
+    vi.mocked(listSkills).mockResolvedValue([]);
     mockGetModelsForAgent.mockReset();
     mockGetModelsForAgent.mockReturnValue([]);
     mockRefreshAllModelProviders.mockReset();
@@ -485,6 +489,49 @@ describe("GlobalComposerPill", () => {
 
     expect(await screen.findByText("code-review")).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  it("uses the selected provider for skill discovery and instruction prompts", async () => {
+    const user = userEvent.setup();
+    const skill = {
+      id: "global:/Users/test/.agents/skills/code-review/SKILL.md",
+      name: "code-review",
+      description: "Review code before PR",
+      instructions: "Inspect the changed files.",
+      path: "/Users/test/.agents/skills/code-review",
+      fileLocation: "/Users/test/.agents/skills/code-review/SKILL.md",
+      sourceKind: "global" as const,
+      sourceLabel: "Personal",
+      projectLinks: [],
+      readonly: false,
+      color: null,
+    };
+    vi.mocked(listSkills).mockResolvedValue([skill]);
+    useAgentStore.setState({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      selectedProvider: "claude-acp",
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      starterRequest: { id: 1, skill },
+    });
+
+    await waitFor(() => {
+      expect(listSkills).toHaveBeenCalledWith([], {
+        providerId: "claude-acp",
+      });
+    });
+    expect(await screen.findByText("code-review")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox"), "Review this");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    const [, options] = onSend.mock.calls[0];
+    expect(options?.sendOptions?.assistantPrompt).toContain(
+      "Claude Code-compatible Agent Skills",
+    );
   });
 
   it("tags a starter project in the composer", async () => {

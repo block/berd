@@ -187,6 +187,7 @@ export async function dispatchPrompt(
     await prepare?.();
     throwIfAborted(signal);
 
+    useChatSessionStore.getState().markWorkspaceUsedByAgent(sessionId);
     setChatState(sessionId, "streaming");
     throwIfAborted(signal);
     const promptWithPaths = appendAttachmentPaths(

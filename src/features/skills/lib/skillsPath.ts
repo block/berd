@@ -2,6 +2,8 @@ const PROJECT_SKILLS_MARKERS = [
   "/.agents/skills/",
   "/.goose/skills/",
   "/.claude/skills/",
+  "/.codex/skills/",
+  "/.gemini/skills/",
 ];
 
 export function normalizePath(path: string): string {

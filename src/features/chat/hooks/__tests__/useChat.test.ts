@@ -2,7 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "../../stores/chatStore";
-import { useChatSessionStore } from "../../stores/chatSessionStore";
+import {
+  useChatSessionStore,
+  type ChatSession,
+} from "../../stores/chatSessionStore";
+import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { Message } from "@/shared/types/messages";
 import { clearReplayBuffer } from "../replayBuffer";
 
@@ -54,6 +58,21 @@ function createDeferredPromise<T = void>() {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+function seedChatSession(overrides: Partial<ChatSession> = {}) {
+  useChatSessionStore.setState({
+    sessions: [
+      {
+        id: "session-1",
+        title: "New Chat",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        messageCount: 0,
+        ...overrides,
+      },
+    ],
+  });
 }
 
 describe("useChat", () => {
@@ -682,7 +701,61 @@ describe("useChat", () => {
     );
   });
 
+  it("marks the active workspace used before prompting", async () => {
+    const defaultWorkspaceId = workspaceAttachmentIdForPath("/tmp/default");
+    const activeWorkspaceId = workspaceAttachmentIdForPath("/tmp/worktree");
+    seedChatSession({
+      workingDir: "/tmp/default",
+      workspaceAttachments: [
+        {
+          id: defaultWorkspaceId,
+          path: "/tmp/default",
+          kind: "directory",
+          source: "inferred",
+          branch: null,
+          usedByAgent: false,
+        },
+      ],
+      activeWorkspaceId: defaultWorkspaceId,
+    });
+    useChatSessionStore.setState({
+      activeWorkspaceBySession: {
+        "session-1": { path: "/tmp/worktree", branch: "feature/worktree" },
+      },
+    });
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.sendMessage("Hello");
+    });
+
+    const session = useChatSessionStore.getState().getSession("session-1");
+    expect(session?.workspaceAttachments).toEqual([
+      expect.objectContaining({
+        id: defaultWorkspaceId,
+        path: "/tmp/default",
+        source: "inferred",
+        usedByAgent: false,
+      }),
+      expect.objectContaining({
+        id: activeWorkspaceId,
+        path: "/tmp/worktree",
+        source: "selected",
+        usedByAgent: true,
+      }),
+    ]);
+    expect(session?.activeWorkspaceId).toBe(activeWorkspaceId);
+    expect(mockAcpSendMessage).toHaveBeenCalledWith("session-1", "Hello", {
+      systemPrompt: undefined,
+      personaId: undefined,
+      personaName: undefined,
+      images: undefined,
+    });
+  });
+
   it("does not prompt when preparation is superseded", async () => {
+    seedChatSession({ workingDir: "/tmp/project" });
     const ensurePrepared = vi.fn().mockResolvedValue(false);
 
     const { result } = renderHook(() =>
@@ -715,6 +788,15 @@ describe("useChat", () => {
     );
     expect(runtime.chatState).toBe("idle");
     expect(runtime.streamingMessageId).toBeNull();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")
+        ?.workspaceAttachments,
+    ).toEqual([
+      expect.objectContaining({
+        path: "/tmp/project",
+        usedByAgent: false,
+      }),
+    ]);
   });
 
   it("appends an error message and removes the empty assistant placeholder when send fails", async () => {

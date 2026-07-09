@@ -35,6 +35,14 @@ import {
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
+import {
+  planProjectChatWorkspacesAsIs,
+  planProjectChatWorkspaces,
+  projectRequiresStartupWorkspaceName,
+  rollbackProjectChatWorkspacePlan,
+} from "@/features/projects/lib/projectChatWorkspaces";
+import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
+import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
@@ -216,6 +224,23 @@ type DraftSessionCreationReady = {
     ReturnType<typeof acpCreateSession>
   >["configOptionsSnapshot"];
 };
+type ProjectChatDraftOptions = {
+  providerId?: string;
+  modelId?: string;
+  modelName?: string;
+  reuseExistingDraft?: boolean;
+  reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
+  startupWorkspaceName?: string;
+  skipProjectWorkspaceStartup?: boolean;
+};
+
+interface PendingProjectChatDraftRequest {
+  title: string;
+  project: ProjectInfo;
+  options: ProjectChatDraftOptions;
+  resolve: (session: ChatSession) => void;
+  reject: (error: unknown) => void;
+}
 
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const PINNED_CHAT_HYDRATION_CONCURRENCY = 5;
@@ -224,6 +249,10 @@ const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const GLOBAL_COMPOSER_HANDOFF_MS = 620;
 const GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS = 220;
+const PROJECT_WORKSPACE_STARTUP_CANCELLED =
+  "Project workspace startup cancelled.";
+const PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING =
+  "Project workspace startup already pending.";
 
 type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
@@ -424,6 +453,22 @@ function applyReasoningEffortAfterDraftCreation(
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.(REDUCED_MOTION_QUERY).matches ?? false;
+}
+
+function isProjectWorkspaceStartupCancelled(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message === PROJECT_WORKSPACE_STARTUP_CANCELLED ||
+      error.message === PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING)
+  );
+}
+
+function logProjectChatStartError(message: string, error: unknown): void {
+  if (isProjectWorkspaceStartupCancelled(error)) {
+    return;
+  }
+  console.error(message, error);
+  toast.error(formatAcpErrorMessage(error, "Failed to start project chat."));
 }
 
 function useWindowFullscreenState() {
@@ -874,6 +919,13 @@ export function AppShell({
   const [automationLeavePromptOpen, setAutomationLeavePromptOpen] =
     useState(false);
   const [automationLeaveSaving, setAutomationLeaveSaving] = useState(false);
+  const [pendingProjectChatDraftRequest, setPendingProjectChatDraftRequest] =
+    useState<PendingProjectChatDraftRequest | null>(null);
+  const pendingProjectChatDraftRequestRef =
+    useRef<PendingProjectChatDraftRequest | null>(null);
+  const [projectWorkspaceStartupCreating, setProjectWorkspaceStartupCreating] =
+    useState(false);
+  const workspaceRepository = useWorkspaceRepository();
 
   const homeSessionMessages = useChatStore((s) =>
     homeSessionId ? s.messagesBySession[homeSessionId] : undefined,
@@ -1559,13 +1611,47 @@ export function AppShell({
       workingDir,
       projectId,
       onReady,
+      onCreationFailed,
     }: {
       session: ChatSession;
       sessionModelPreference: MaybePromise<ResolvedSessionModelPreference>;
       workingDir: MaybePromise<string>;
       projectId?: string;
       onReady?: (result: DraftSessionCreationReady) => Promise<void> | void;
+      onCreationFailed?: (error: unknown) => Promise<void> | void;
     }) => {
+      let hasHandledCreationFailure = false;
+      const handleCreationFailure = async (
+        error: unknown,
+      ): Promise<unknown | null> => {
+        if (!onCreationFailed || hasHandledCreationFailure) {
+          return null;
+        }
+        hasHandledCreationFailure = true;
+        try {
+          await onCreationFailed(error);
+          return null;
+        } catch (cleanupError) {
+          console.error(
+            "Failed to clean up project workspace startup after session creation failure:",
+            cleanupError,
+          );
+          return cleanupError;
+        }
+      };
+      const appendCleanupFailure = (
+        message: string,
+        cleanupError: unknown | null,
+      ): string => {
+        if (!cleanupError) {
+          return message;
+        }
+        const cleanupMessage =
+          cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError);
+        return `${message} Workspace cleanup also failed: ${cleanupMessage}`;
+      };
       void Promise.all([
         Promise.resolve(sessionModelPreference),
         Promise.resolve(workingDir),
@@ -1597,6 +1683,11 @@ export function AppShell({
             const sessionStore = useChatSessionStore.getState();
             const latestSession = sessionStore.getSession(session.id);
             if (!latestSession || latestSession.archivedAt) {
+              await handleCreationFailure(
+                new Error(
+                  "Draft session disappeared before session creation completed.",
+                ),
+              );
               return;
             }
             let resolvedConfigOptionsSnapshot = configOptionsSnapshot;
@@ -1624,6 +1715,11 @@ export function AppShell({
               !latestSessionAfterReady ||
               latestSessionAfterReady.archivedAt
             ) {
+              await handleCreationFailure(
+                new Error(
+                  "Draft session disappeared before session creation completed.",
+                ),
+              );
               return;
             }
             const shouldRemainActive =
@@ -1653,6 +1749,7 @@ export function AppShell({
         )
         .catch(async (error) => {
           const chatStore = useChatStore.getState();
+          const cleanupError = await handleCreationFailure(error);
 
           // Before falling back to the opaque backend error, check whether the
           // failure is actually a missing project folder. We confirm against
@@ -1673,15 +1770,23 @@ export function AppShell({
                     : "toolbar.sessionMissingProjectDirs",
                   { paths: missing.join(", ") },
                 );
-                markSessionCreationFailed(session.id, message);
+                const messageWithCleanupStatus = appendCleanupFailure(
+                  message,
+                  cleanupError,
+                );
+                markSessionCreationFailed(session.id, messageWithCleanupStatus);
                 chatStore.addMessage(
                   session.id,
-                  createSystemNotificationMessage(message, "error", {
-                    type: "editProject",
-                    projectId: project.id,
-                  }),
+                  createSystemNotificationMessage(
+                    messageWithCleanupStatus,
+                    "error",
+                    {
+                      type: "editProject",
+                      projectId: project.id,
+                    },
+                  ),
                 );
-                chatStore.setError(session.id, message);
+                chatStore.setError(session.id, messageWithCleanupStatus);
                 return;
               }
             } catch (checkError) {
@@ -1696,12 +1801,16 @@ export function AppShell({
             error,
             "Failed to create session.",
           );
-          markSessionCreationFailed(session.id, message);
+          const messageWithCleanupStatus = appendCleanupFailure(
+            message,
+            cleanupError,
+          );
+          markSessionCreationFailed(session.id, messageWithCleanupStatus);
           chatStore.addMessage(
             session.id,
-            createSystemNotificationMessage(message, "error"),
+            createSystemNotificationMessage(messageWithCleanupStatus, "error"),
           );
-          chatStore.setError(session.id, message);
+          chatStore.setError(session.id, messageWithCleanupStatus);
         });
     },
     [
@@ -2019,13 +2128,7 @@ export function AppShell({
     async (
       title = DEFAULT_CHAT_TITLE,
       project: ProjectInfo,
-      options: {
-        providerId?: string;
-        modelId?: string;
-        modelName?: string;
-        reuseExistingDraft?: boolean;
-        reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
-      } = {},
+      options: ProjectChatDraftOptions = {},
     ) => {
       const tStart = performance.now();
       perfLog(
@@ -2034,25 +2137,34 @@ export function AppShell({
       const providerId = options.providerId ?? selectedProvider ?? "goose";
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
+      const isMultiWorkspaceMode = workspaceRepository.mode === "multi";
+      const shouldCreateExplicitProjectWorkspacePlan =
+        isMultiWorkspaceMode && project.projectWorkspaces.length > 0;
+      const shouldApplyProjectWorkspaceStartup =
+        shouldCreateExplicitProjectWorkspacePlan &&
+        options.skipProjectWorkspaceStartup !== true;
+      const shouldUseProjectWorkspaceStartup =
+        shouldApplyProjectWorkspaceStartup &&
+        projectRequiresStartupWorkspaceName(project);
       // New chats always start at the project default folder; worktree
       // selections in other chats are per-chat state and do not carry over.
-      const existingDraft =
-        options.reuseExistingDraft === false
-          ? undefined
-          : findExistingDraft({
-              sessions: sessionState.sessions,
-              activeSessionId: sessionState.activeSessionId,
-              draftsBySession: chatState.draftsBySession,
-              messagesBySession: chatState.messagesBySession,
-              sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
-              request: {
-                title,
-                projectId: project.id,
-                providerId,
-                modelId: options.modelId,
-                reasoningEffortValue: options.reasoningEffort?.value,
-              },
-            });
+      const existingDraft = findExistingDraft({
+        sessions: sessionState.sessions,
+        activeSessionId: sessionState.activeSessionId,
+        draftsBySession: chatState.draftsBySession,
+        messagesBySession: chatState.messagesBySession,
+        sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
+        request: {
+          title,
+          projectId: project.id,
+          providerId,
+          modelId: options.modelId,
+          reasoningEffortValue: options.reasoningEffort?.value,
+        },
+        allowDraftReuse:
+          options.reuseExistingDraft !== false &&
+          !shouldUseProjectWorkspaceStartup,
+      });
 
       if (existingDraft) {
         clearSettingsSectionUrl();
@@ -2065,6 +2177,26 @@ export function AppShell({
         return existingDraft;
       }
 
+      const startupWorkspaceName = options.startupWorkspaceName?.trim();
+      if (shouldUseProjectWorkspaceStartup && !startupWorkspaceName) {
+        if (pendingProjectChatDraftRequestRef.current) {
+          return Promise.reject(
+            new Error(PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING),
+          );
+        }
+        return new Promise<ChatSession>((resolve, reject) => {
+          const request = {
+            title,
+            project,
+            options,
+            resolve,
+            reject,
+          };
+          pendingProjectChatDraftRequestRef.current = request;
+          setPendingProjectChatDraftRequest(request);
+        });
+      }
+
       const sessionModelPreference = resolveSupportedSessionModelPreference(
         providerId,
         undefined,
@@ -2074,31 +2206,46 @@ export function AppShell({
           ? { ...preference, modelName: options.modelName }
           : preference,
       );
-      const optimisticWorkingDir = getOptimisticSessionCwd(project);
-      const session = createDraftSession({
-        title,
-        projectId: project.id,
-        providerId,
-        workingDir: optimisticWorkingDir,
-      });
-      clearSettingsSectionUrl();
-      setActiveSession(session.id);
-      setActiveView("chat");
-      setChatActiveSession(session.id);
-      perfLog(
-        `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
-      );
-      startDraftSessionCreation({
-        session,
-        sessionModelPreference,
-        workingDir: resolveSessionCwd(project),
-        projectId: project.id,
-        onReady: applyReasoningEffortAfterDraftCreation(
-          session.id,
-          options.reasoningEffort,
-        ),
-      });
-      return session;
+      const workspacePlan = shouldCreateExplicitProjectWorkspacePlan
+        ? shouldApplyProjectWorkspaceStartup
+          ? await planProjectChatWorkspaces(project, startupWorkspaceName)
+          : planProjectChatWorkspacesAsIs(project)
+        : null;
+      const optimisticWorkingDir =
+        workspacePlan?.workingDir ?? getOptimisticSessionCwd(project);
+      try {
+        const session = createDraftSession({
+          title,
+          projectId: project.id,
+          providerId,
+          workingDir: optimisticWorkingDir,
+          workspaceAttachments: workspacePlan?.workspaceAttachments,
+        });
+        clearSettingsSectionUrl();
+        setActiveSession(session.id);
+        setActiveView("chat");
+        setChatActiveSession(session.id);
+        perfLog(
+          `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+        );
+        startDraftSessionCreation({
+          session,
+          sessionModelPreference,
+          workingDir: workspacePlan?.workingDir ?? resolveSessionCwd(project),
+          projectId: project.id,
+          onReady: applyReasoningEffortAfterDraftCreation(
+            session.id,
+            options.reasoningEffort,
+          ),
+          onCreationFailed: workspacePlan
+            ? () => rollbackProjectChatWorkspacePlan(workspacePlan)
+            : undefined,
+        });
+        return session;
+      } catch (error) {
+        await rollbackProjectChatWorkspacePlan(workspacePlan);
+        throw error;
+      }
     },
     [
       selectedProvider,
@@ -2106,6 +2253,7 @@ export function AppShell({
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
+      workspaceRepository,
     ],
   );
 
@@ -2201,10 +2349,82 @@ export function AppShell({
     [setActiveSession, setChatActiveSession],
   );
 
+  const handleProjectWorkspaceStartupNameCancel = useCallback(() => {
+    const request = pendingProjectChatDraftRequest;
+    if (!request || projectWorkspaceStartupCreating) {
+      return;
+    }
+    pendingProjectChatDraftRequestRef.current = null;
+    setPendingProjectChatDraftRequest(null);
+    request.reject(new Error(PROJECT_WORKSPACE_STARTUP_CANCELLED));
+  }, [pendingProjectChatDraftRequest, projectWorkspaceStartupCreating]);
+
+  const handleProjectWorkspaceStartupNameSubmit = useCallback(
+    (startupWorkspaceName: string) => {
+      const request = pendingProjectChatDraftRequest;
+      if (!request || projectWorkspaceStartupCreating) {
+        return;
+      }
+
+      setProjectWorkspaceStartupCreating(true);
+      void createNewProjectDraft(request.title, request.project, {
+        ...request.options,
+        startupWorkspaceName,
+      })
+        .then(request.resolve, request.reject)
+        .finally(() => {
+          setProjectWorkspaceStartupCreating(false);
+          setPendingProjectChatDraftRequest((current) => {
+            const nextRequest = current === request ? null : current;
+            pendingProjectChatDraftRequestRef.current = nextRequest;
+            return nextRequest;
+          });
+        });
+    },
+    [
+      createNewProjectDraft,
+      pendingProjectChatDraftRequest,
+      projectWorkspaceStartupCreating,
+    ],
+  );
+
+  const handleProjectWorkspaceStartupNameSkip = useCallback(() => {
+    const request = pendingProjectChatDraftRequest;
+    if (!request || projectWorkspaceStartupCreating) {
+      return;
+    }
+
+    setProjectWorkspaceStartupCreating(true);
+    void createNewProjectDraft(request.title, request.project, {
+      ...request.options,
+      skipProjectWorkspaceStartup: true,
+    })
+      .then(request.resolve, request.reject)
+      .finally(() => {
+        setProjectWorkspaceStartupCreating(false);
+        setPendingProjectChatDraftRequest((current) => {
+          const nextRequest = current === request ? null : current;
+          pendingProjectChatDraftRequestRef.current = nextRequest;
+          return nextRequest;
+        });
+      });
+  }, [
+    createNewProjectDraft,
+    pendingProjectChatDraftRequest,
+    projectWorkspaceStartupCreating,
+  ]);
+
   const handleStartChatFromProject = useCallback(
     (project: ProjectInfo) => {
       guardAppNavigation(() => {
-        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project).catch(
+          (error) => {
+            logProjectChatStartError(
+              "Failed to start chat from project:",
+              error,
+            );
+          },
+        );
       });
     },
     [createNewProjectDraft, guardAppNavigation],
@@ -2215,7 +2435,11 @@ export function AppShell({
       const project = projects.find((candidate) => candidate.id === projectId);
       if (project) {
         guardAppNavigation(() => {
-          void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+          void createNewProjectDraft(DEFAULT_CHAT_TITLE, project).catch(
+            (error) => {
+              logProjectChatStartError("Failed to start project chat:", error);
+            },
+          );
         });
       }
     },
@@ -2239,7 +2463,7 @@ export function AppShell({
               .setSkillDrafts(session.id, [toChatSkillDraft(skill)]);
           })
           .catch((error) => {
-            console.error("Failed to start chat with skill:", error);
+            logProjectChatStartError("Failed to start chat with skill:", error);
           });
       });
     },
@@ -2461,18 +2685,28 @@ export function AppShell({
 
   const handleGlobalCompose = useCallback(
     (text: string, options?: GlobalComposeOptions) => {
-      const shouldRunComposerHandoff = globalComposerPlacement === "centered";
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
+      const requiresProjectWorkspaceDraftPlan =
+        workspaceRepository.mode === "multi" &&
+        Boolean(project?.projectWorkspaces.length);
+      const shouldRunComposerHandoff =
+        globalComposerPlacement === "centered" &&
+        !requiresProjectWorkspaceDraftPlan;
       if (shouldRunComposerHandoff) {
         clearGlobalComposerHandoffTimer();
         setGlobalComposerPlacement("handoff");
         setChatComposerHandoffRequest((request) => request + 1);
         setChatComposerHandoffSessionId(null);
         setGlobalComposerHandoffTargetRect(null);
+      } else if (
+        globalComposerPlacement === "centered" &&
+        requiresProjectWorkspaceDraftPlan
+      ) {
+        resetGlobalComposerTransition();
       }
 
-      const project = options?.projectId
-        ? projects.find((candidate) => candidate.id === options.projectId)
-        : undefined;
       const chatOptions = {
         providerId: options?.providerId,
         modelId: options?.modelId,
@@ -2523,7 +2757,10 @@ export function AppShell({
           : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
 
         void createChat.then(enqueueMessage).catch((error) => {
-          console.error("Failed to start chat from global composer:", error);
+          logProjectChatStartError(
+            "Failed to start chat from global composer:",
+            error,
+          );
         });
       };
 
@@ -2547,7 +2784,10 @@ export function AppShell({
             activateDeferredChatSession(session.id);
           }, GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS);
         } catch (error) {
-          console.error("Failed to start chat from global composer:", error);
+          logProjectChatStartError(
+            "Failed to start chat from global composer:",
+            error,
+          );
           resetGlobalComposerTransition();
         }
       };
@@ -2573,6 +2813,7 @@ export function AppShell({
       projects,
       guardAppNavigation,
       resetGlobalComposerTransition,
+      workspaceRepository,
     ],
   );
 
@@ -2714,7 +2955,10 @@ export function AppShell({
             )
               .then(resolve)
               .catch((error) => {
-                console.error("Failed to start project chat:", error);
+                logProjectChatStartError(
+                  "Failed to start project chat:",
+                  error,
+                );
                 resolve(undefined);
               });
           },
@@ -3048,17 +3292,14 @@ export function AppShell({
         return;
       }
 
-      void moveSessionToProject(sessionId, projectId, {
-        providerId: selectedProvider,
-        modelId: session.modelId,
-      }).catch((error) => {
+      void moveSessionToProject(sessionId, projectId).catch((error) => {
         console.error("Failed to move session to project:", error);
         toast.error(
           formatAcpErrorMessage(error, t("chat:notifications.moveError")),
         );
       });
     },
-    [selectedProvider, t],
+    [t],
   );
 
   const handleRenameChat = useCallback(
@@ -4192,6 +4433,21 @@ export function AppShell({
           </>
         )}
       </AppShellLayout>
+      <ProjectWorkspaceStartupNameDialog
+        open={Boolean(pendingProjectChatDraftRequest)}
+        creating={projectWorkspaceStartupCreating}
+        workspaces={
+          pendingProjectChatDraftRequest?.project.projectWorkspaces ?? []
+        }
+        requiresWorktreeSafeName={Boolean(
+          pendingProjectChatDraftRequest?.project.projectWorkspaces.some(
+            (workspace) => workspace.startupMode === "worktree",
+          ),
+        )}
+        onCancel={handleProjectWorkspaceStartupNameCancel}
+        onSkip={handleProjectWorkspaceStartupNameSkip}
+        onSubmit={handleProjectWorkspaceStartupNameSubmit}
+      />
       <SessionQuickSwitcher
         open={quickSwitcherOpen}
         onOpenChange={setQuickSwitcherOpen}

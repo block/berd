@@ -30,6 +30,7 @@ function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: "folder",
     color: "blue",
+    projectWorkspaces: [],
     workingDirs: [],
     useWorktrees: false,
     order: 0,

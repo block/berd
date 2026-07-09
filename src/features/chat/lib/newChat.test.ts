@@ -38,6 +38,27 @@ describe("findExistingDraft", () => {
     ).toEqual(draft);
   });
 
+  it("does not reuse a matching project draft when draft reuse is disabled", () => {
+    const draft = makeSession("alpha-draft", {
+      projectId: "alpha",
+      providerId: "goose",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: null,
+        draftsBySession: { "alpha-draft": "alpha draft" },
+        messagesBySession: {},
+        request: {
+          title: "New chat",
+          projectId: "alpha",
+        },
+        allowDraftReuse: false,
+      }),
+    ).toBeUndefined();
+  });
+
   it("does not reuse a draft from a different project", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",

@@ -64,6 +64,7 @@ function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "Ship Alpha",
     icon: "tabler:code",
     color: "olive",
+    projectWorkspaces: [],
     workingDirs: ["/tmp/alpha"],
     useWorktrees: false,
     order: 0,

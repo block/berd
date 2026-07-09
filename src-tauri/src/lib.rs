@@ -429,7 +429,9 @@ pub fn run() {
             commands::git::git_fetch,
             commands::git::git_pull,
             commands::git::git_create_branch,
+            commands::git::git_delete_branch,
             commands::git::git_create_worktree,
+            commands::git::git_remove_worktree,
             commands::layout::get_layout,
             commands::layout::save_layout_items,
             commands::layout::save_layout_camera,
@@ -486,6 +488,8 @@ pub fn run() {
             commands::window_session::recover_session_handoff,
             commands::window_session::focus_session_window,
             commands::window_session::list_session_windows,
+            commands::agent_skills::list_agent_skills,
+            commands::workspace_context::load_workspace_context,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

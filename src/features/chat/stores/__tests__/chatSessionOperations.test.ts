@@ -1,6 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProjectInfo } from "@/features/projects/api/projects";
-import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useChatSessionStore, type ChatSession } from "../chatSessionStore";
 import {
   moveSessionToProject,
@@ -10,8 +8,6 @@ import {
 
 const mockRenameSession = vi.fn();
 const mockUpdateSessionProject = vi.fn();
-const mockResolveSessionCwd = vi.fn();
-const mockApplyLatestSessionConfig = vi.fn();
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -30,15 +26,6 @@ vi.mock("@/shared/api/acpApi", () => ({
     mockUpdateSessionProject(...args),
 }));
 
-vi.mock("@/features/projects/lib/sessionCwdSelection", () => ({
-  resolveSessionCwd: (...args: unknown[]) => mockResolveSessionCwd(...args),
-}));
-
-vi.mock("@/features/chat/lib/sessionConfigRequests", () => ({
-  applyLatestSessionConfig: (...args: unknown[]) =>
-    mockApplyLatestSessionConfig(...args),
-}));
-
 function resetStore() {
   useChatSessionStore.setState({
     sessions: [],
@@ -47,11 +34,6 @@ function resetStore() {
     hasHydratedSessions: false,
     activeWorkspaceBySession: {},
     modelSelectionIntentBySession: {},
-  });
-  useProjectStore.setState({
-    projects: [],
-    loading: false,
-    activeProjectId: null,
   });
 }
 
@@ -70,29 +52,10 @@ function seedSession(overrides: Partial<ChatSession> = {}) {
   });
 }
 
-function buildProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
-  return {
-    id: "project-new",
-    path: "/tmp/project-source",
-    name: "Project",
-    description: "",
-    prompt: "",
-    icon: "",
-    color: "#000000",
-    workingDirs: ["/tmp/project-new"],
-    useWorktrees: false,
-    order: 0,
-    archivedAt: null,
-    ...overrides,
-  };
-}
-
 describe("chatSessionOperations", () => {
   beforeEach(() => {
     resetStore();
     vi.clearAllMocks();
-    mockResolveSessionCwd.mockResolvedValue("/tmp/project-new");
-    mockApplyLatestSessionConfig.mockResolvedValue({ applied: true });
   });
 
   describe("updateSessionTitle", () => {
@@ -168,43 +131,56 @@ describe("chatSessionOperations", () => {
       ).resolves.toBeUndefined();
 
       expect(mockUpdateSessionProject).not.toHaveBeenCalled();
-      expect(mockResolveSessionCwd).not.toHaveBeenCalled();
-      expect(mockApplyLatestSessionConfig).not.toHaveBeenCalled();
     });
 
-    it("persists project, applies cwd config, and patches local state", async () => {
+    it("persists project association without changing chat cwd or workspaces", async () => {
+      const workspaceAttachments = [
+        {
+          id: "path:/tmp/old",
+          path: "/tmp/old",
+          kind: "git-main-worktree" as const,
+          source: "selected" as const,
+          branch: "main",
+          usedByAgent: false,
+        },
+        {
+          id: "path:/tmp/other",
+          path: "/tmp/other",
+          kind: "subdirectory" as const,
+          source: "selected" as const,
+          branch: "feature",
+          repositoryPath: "/tmp/repo",
+          worktreePath: "/tmp/repo-worktrees/feature",
+          usedByAgent: true,
+        },
+      ];
       seedSession({
         projectId: null,
         providerId: "openai",
         modelId: "gpt-5.4",
+        modelName: "GPT 5.4",
         workingDir: "/tmp/old",
+        workspaceAttachments,
+        activeWorkspaceId: "path:/tmp/other",
       });
-      useProjectStore.setState({ projects: [buildProject()] });
       mockUpdateSessionProject.mockResolvedValue(undefined);
 
-      await moveSessionToProject("session-1", "project-new", {
-        activeWorkspacePath: "/tmp/worktree",
-      });
+      await moveSessionToProject("session-1", "project-new");
 
       expect(mockUpdateSessionProject).toHaveBeenCalledWith(
         "session-1",
         "project-new",
       );
-      expect(mockResolveSessionCwd).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "project-new" }),
-        "/tmp/worktree",
-      );
-      expect(mockApplyLatestSessionConfig).toHaveBeenCalledWith({
-        sessionId: "session-1",
-        providerId: "openai",
-        workingDir: "/tmp/project-new",
-        modelId: "gpt-5.4",
-      });
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
         projectId: "project-new",
-        workingDir: "/tmp/project-new",
+        providerId: "openai",
+        modelId: "gpt-5.4",
+        modelName: "GPT 5.4",
+        workingDir: "/tmp/old",
+        workspaceAttachments,
+        activeWorkspaceId: "path:/tmp/other",
       });
     });
 
@@ -216,8 +192,6 @@ describe("chatSessionOperations", () => {
         moveSessionToProject("session-1", "project-new"),
       ).rejects.toThrow("project failed");
 
-      expect(mockResolveSessionCwd).not.toHaveBeenCalled();
-      expect(mockApplyLatestSessionConfig).not.toHaveBeenCalled();
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
@@ -240,39 +214,24 @@ describe("chatSessionOperations", () => {
         "session-1",
         "project-new",
       );
-      expect(mockResolveSessionCwd).not.toHaveBeenCalled();
-      expect(mockApplyLatestSessionConfig).not.toHaveBeenCalled();
     });
 
     it("moves a session back to no project", async () => {
-      seedSession({ projectId: "project-old", providerId: "goose" });
+      seedSession({
+        projectId: "project-old",
+        providerId: "goose",
+        workingDir: "/tmp/current",
+      });
       mockUpdateSessionProject.mockResolvedValue(undefined);
-      mockResolveSessionCwd.mockResolvedValue("/Users/test");
 
       await moveSessionToProject("session-1", null);
 
       expect(mockUpdateSessionProject).toHaveBeenCalledWith("session-1", null);
-      expect(mockResolveSessionCwd).toHaveBeenCalledWith(null, undefined);
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
         projectId: null,
-        workingDir: "/Users/test",
-      });
-    });
-
-    it("patches project but preserves working directory when config is superseded", async () => {
-      seedSession({ projectId: "project-old", workingDir: "/tmp/old" });
-      mockUpdateSessionProject.mockResolvedValue(undefined);
-      mockApplyLatestSessionConfig.mockResolvedValue({ applied: false });
-
-      await moveSessionToProject("session-1", "project-new");
-
-      expect(
-        useChatSessionStore.getState().getSession("session-1"),
-      ).toMatchObject({
-        projectId: "project-new",
-        workingDir: "/tmp/old",
+        workingDir: "/tmp/current",
       });
     });
 
@@ -294,7 +253,7 @@ describe("chatSessionOperations", () => {
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
         projectId: "project-b",
-        workingDir: "/tmp/project-new",
+        workingDir: "/tmp/old",
       });
 
       olderMove.resolve();
@@ -304,75 +263,7 @@ describe("chatSessionOperations", () => {
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
         projectId: "project-b",
-        workingDir: "/tmp/project-new",
-      });
-    });
-
-    it("applies a pending model intent when moving project", async () => {
-      seedSession({
-        projectId: "project-old",
-        providerId: "openai",
-        modelId: "gpt-5.3",
-        modelName: "GPT 5.3",
         workingDir: "/tmp/old",
-      });
-      mockUpdateSessionProject.mockResolvedValue(undefined);
-      useChatSessionStore.getState().beginModelSelectionIntent("session-1", {
-        requestId: "request-1",
-        kind: "model",
-        providerId: "openai",
-        modelId: "gpt-5.4",
-        modelName: "GPT 5.4",
-      });
-
-      await moveSessionToProject("session-1", "project-new");
-
-      expect(mockApplyLatestSessionConfig).toHaveBeenCalledWith({
-        sessionId: "session-1",
-        providerId: "openai",
-        workingDir: "/tmp/project-new",
-        modelId: "gpt-5.4",
-      });
-      expect(
-        useChatSessionStore.getState().getSession("session-1"),
-      ).toMatchObject({
-        projectId: "project-new",
-        workingDir: "/tmp/project-new",
-        modelId: "gpt-5.4",
-        modelName: "GPT 5.4",
-      });
-    });
-
-    it("skips config when model intent changes during project move", async () => {
-      seedSession({
-        projectId: "project-old",
-        providerId: "openai",
-        modelId: "gpt-5.3",
-        modelName: "GPT 5.3",
-        workingDir: "/tmp/old",
-      });
-      mockUpdateSessionProject.mockResolvedValue(undefined);
-      mockResolveSessionCwd.mockImplementationOnce(async () => {
-        useChatSessionStore.getState().beginModelSelectionIntent("session-1", {
-          requestId: "request-1",
-          kind: "model",
-          providerId: "openai",
-          modelId: "gpt-5.4",
-          modelName: "GPT 5.4",
-        });
-        return "/tmp/project-new";
-      });
-
-      await moveSessionToProject("session-1", "project-new");
-
-      expect(mockApplyLatestSessionConfig).not.toHaveBeenCalled();
-      expect(
-        useChatSessionStore.getState().getSession("session-1"),
-      ).toMatchObject({
-        projectId: "project-new",
-        workingDir: "/tmp/old",
-        modelId: "gpt-5.3",
-        modelName: "GPT 5.3",
       });
     });
   });

@@ -4,11 +4,27 @@ import {
   createProject,
   updateProject,
   deleteProject,
+  normalizeProjectWorkspaces,
   reorderProjects as apiReorderProjects,
   type ProjectInfo,
+  type ProjectWorkspace,
 } from "../api/projects";
 
 const PROJECT_CACHE_STORAGE_KEY = "goose:projects";
+
+function normalizeCachedProject(project: ProjectInfo): ProjectInfo {
+  const rawProject = project as Partial<ProjectInfo>;
+  const projectWorkspaces = normalizeProjectWorkspaces(
+    rawProject.projectWorkspaces,
+    rawProject.workingDirs ?? [],
+    rawProject.useWorktrees ?? false,
+  );
+  return {
+    ...project,
+    projectWorkspaces,
+    workingDirs: projectWorkspaces.map((workspace) => workspace.path),
+  };
+}
 
 function loadCachedProjects(): ProjectInfo[] {
   if (typeof window === "undefined") return [];
@@ -16,7 +32,9 @@ function loadCachedProjects(): ProjectInfo[] {
     const stored = window.localStorage.getItem(PROJECT_CACHE_STORAGE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as ProjectInfo[]) : [];
+    return Array.isArray(parsed)
+      ? (parsed as ProjectInfo[]).map(normalizeCachedProject)
+      : [];
   } catch {
     return [];
   }
@@ -53,6 +71,7 @@ export interface ProjectStore {
     color: string,
     workingDirs: string[],
     useWorktrees: boolean,
+    projectWorkspaces?: ProjectWorkspace[],
   ) => Promise<ProjectInfo>;
   editProject: (
     id: string,
@@ -63,6 +82,7 @@ export interface ProjectStore {
     color: string,
     workingDirs: string[],
     useWorktrees: boolean,
+    projectWorkspaces?: ProjectWorkspace[],
   ) => Promise<ProjectInfo>;
   removeProject: (id: string) => Promise<void>;
   reorderProjects: (
@@ -103,6 +123,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     color,
     workingDirs,
     useWorktrees,
+    projectWorkspaces,
   ) => {
     const project = await createProject(
       name,
@@ -112,6 +133,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       color,
       workingDirs,
       useWorktrees,
+      projectWorkspaces,
     );
     set((state) => ({ projects: [...state.projects, project] }));
     persistProjects(get().projects);
@@ -127,6 +149,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     color,
     workingDirs,
     useWorktrees,
+    projectWorkspaces,
   ) => {
     const existing = get().projects.find((p) => p.id === id);
     if (!existing) throw new Error(`Project ${id} not found`);
@@ -138,6 +161,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       color,
       workingDirs,
       useWorktrees,
+      projectWorkspaces,
     });
     set((state) => ({
       projects: state.projects.map((p) => (p.id === id ? project : p)),

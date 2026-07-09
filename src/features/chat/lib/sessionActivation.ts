@@ -26,6 +26,11 @@ import {
   type Message,
   type SystemNotificationAction,
 } from "@/shared/types/messages";
+import { getWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
+import {
+  getWorkspaceAttachments,
+  isSameWorkspacePath,
+} from "@/features/chat/lib/workspaceAttachments";
 
 function fallbackTitleFromReplay(messages: Message[]): string | null {
   for (const message of messages) {
@@ -64,9 +69,24 @@ async function resolveWorkingDirForSessionLoad(
     session?.id != null
       ? useChatSessionStore.getState().activeWorkspaceBySession[session.id]
       : undefined;
+  const workspaceSet = getWorkspaceRepository().chatWorkspaces(session, {
+    activePath: activeWorkspace?.path,
+  });
+  const primaryWorkspacePath = workspaceSet.primary?.path;
+  const primaryIsSessionAttachment =
+    session && primaryWorkspacePath
+      ? getWorkspaceAttachments(session).some(
+          (attachment) =>
+            attachment.source !== "excluded" &&
+            isSameWorkspacePath(attachment.path, primaryWorkspacePath),
+        )
+      : false;
+  const activeWorkspacePath =
+    activeWorkspace?.path ??
+    (primaryIsSessionAttachment ? primaryWorkspacePath : undefined);
   const explicitCwdSource = getExplicitCwdSource(
     project,
-    activeWorkspace?.path,
+    activeWorkspacePath,
     session?.workingDir,
   );
   const explicitCwd = explicitCwdSource

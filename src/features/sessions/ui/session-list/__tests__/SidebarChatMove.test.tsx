@@ -15,6 +15,7 @@ const PROJECT: ProjectInfo = {
   prompt: "",
   icon: "",
   color: "",
+  projectWorkspaces: [],
   workingDirs: [],
   useWorktrees: false,
   order: 0,

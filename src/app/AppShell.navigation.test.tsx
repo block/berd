@@ -15,7 +15,10 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
-import { SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  MULTI_WORKSPACE_EXPERIMENT_ID,
+  SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
+} from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
@@ -44,6 +47,14 @@ const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockAcpGetSessionInfo = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
+const mockPathExists = vi.hoisted(() => vi.fn());
+const gitMocks = vi.hoisted(() => ({
+  createBranch: vi.fn(),
+  createWorktree: vi.fn(),
+  deleteBranch: vi.fn(),
+  getGitState: vi.fn(),
+  removeWorktree: vi.fn(),
+}));
 const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
 const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
@@ -249,6 +260,13 @@ vi.mock("@/shared/api/acpApi", () => ({
   updateSessionProject: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/shared/api/git", () => ({
+  createBranch: (...args: unknown[]) => gitMocks.createBranch(...args),
+  createWorktree: (...args: unknown[]) => gitMocks.createWorktree(...args),
+  deleteBranch: (...args: unknown[]) => gitMocks.deleteBranch(...args),
+  getGitState: (...args: unknown[]) => gitMocks.getGitState(...args),
+  removeWorktree: (...args: unknown[]) => gitMocks.removeWorktree(...args),
+}));
 vi.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),
@@ -274,6 +292,11 @@ vi.mock("@/shared/api/pathResolver", () => ({
   }),
   checkDirectoriesExist: (...args: unknown[]) =>
     mockCheckDirectoriesExist(...args),
+}));
+
+vi.mock("@/shared/api/system", () => ({
+  getHomeDir: vi.fn().mockResolvedValue("/Users/test"),
+  pathExists: (...args: unknown[]) => mockPathExists(...args),
 }));
 
 vi.mock("@/features/updates/ui/UpdateButton", () => ({
@@ -324,6 +347,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onTagHomeComposerProject,
     onTagHomeComposerSkill,
     onSelectSession,
+    onStartProjectChat,
   }) => {
     const activeView = targetLocation.view;
     const activeSettingsSection =
@@ -360,6 +384,12 @@ vi.mock("./ui/AppShellContent", () => ({
         <div data-testid="builderbot-route">
           {JSON.stringify(activeBuilderbotRoute)}
         </div>
+        <button
+          type="button"
+          onClick={() => onStartProjectChat?.("project-startup")}
+        >
+          Start project chat
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -566,6 +596,30 @@ describe("AppShell global navigation", () => {
     mockToastError.mockReset();
     mockListenSessionDeepLinkErrors.mockReset();
     mockListenSessionDeepLinkErrors.mockResolvedValue(vi.fn());
+    gitMocks.getGitState.mockReset();
+    gitMocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "main",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [{ path: "/repo", branch: "main", isMain: true }],
+      isWorktree: false,
+      mainWorktreePath: "/repo",
+      localBranches: ["main"],
+    });
+    gitMocks.createBranch.mockReset();
+    gitMocks.createBranch.mockResolvedValue(undefined);
+    gitMocks.createWorktree.mockReset();
+    gitMocks.createWorktree.mockResolvedValue({
+      path: "/repo-worktrees/chat-123",
+      branch: "chat-123",
+    });
+    gitMocks.deleteBranch.mockReset();
+    gitMocks.deleteBranch.mockResolvedValue(undefined);
+    gitMocks.removeWorktree.mockReset();
+    gitMocks.removeWorktree.mockResolvedValue(undefined);
+    mockPathExists.mockReset();
+    mockPathExists.mockResolvedValue(false);
     mockCheckDirectoriesExist.mockReset();
     mockCheckDirectoriesExist.mockResolvedValue([]);
     mockCreatePersonaSource.mockReset();
@@ -751,6 +805,423 @@ describe("AppShell global navigation", () => {
         modelId: undefined,
         projectId: undefined,
       },
+    );
+  });
+
+  it("shows a toast when project workspace startup planning fails", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    gitMocks.getGitState.mockResolvedValueOnce({
+      isGitRepo: false,
+      currentBranch: null,
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: [],
+    });
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const user = userEvent.setup();
+
+    const project: ProjectInfo = {
+      id: "project-startup",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/not-a-repo/builderbot",
+          path: "/not-a-repo/builderbot",
+          kind: "directory",
+          source: "selected",
+          branch: null,
+          repositoryPath: null,
+          worktreePath: null,
+          usedByAgent: false,
+          startupMode: "branch",
+        },
+      ],
+      workingDirs: ["/not-a-repo/builderbot"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    useProjectStore.setState({ projects: [project] });
+
+    try {
+      renderAppShell();
+
+      await user.click(
+        screen.getByRole("button", { name: "Start project chat" }),
+      );
+      const startupNameInput = document.getElementById(
+        "project-workspace-startup-name",
+      );
+      if (!startupNameInput) {
+        throw new Error("Startup name input not found.");
+      }
+      await user.type(startupNameInput, "chat-123");
+      const startupNameForm = document.getElementById(
+        "project-workspace-startup-name-form",
+      );
+      if (!startupNameForm) {
+        throw new Error("Startup name form not found.");
+      }
+      fireEvent.submit(startupNameForm);
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith(
+          "Project workspace startup requires a Git repository, but /not-a-repo/builderbot is not inside one.",
+        );
+      });
+
+      expect(mockAcpCreateSession).not.toHaveBeenCalled();
+      expect(useChatSessionStore.getState().sessions).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("creates a project chat from a startup worktree plan", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    const createSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(createSession.promise);
+    const user = userEvent.setup();
+
+    const project: ProjectInfo = {
+      id: "project-startup",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/repo/builderbot",
+          path: "/repo/builderbot",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "worktree",
+        },
+      ],
+      workingDirs: ["/repo/builderbot"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    useProjectStore.setState({ projects: [project] });
+
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start project chat" }),
+    );
+    const startupNameInput = document.getElementById(
+      "project-workspace-startup-name",
+    );
+    if (!startupNameInput) {
+      throw new Error("Startup name input not found.");
+    }
+    await user.type(startupNameInput, "chat-123");
+    const startupNameForm = document.getElementById(
+      "project-workspace-startup-name-form",
+    );
+    if (!startupNameForm) {
+      throw new Error("Startup name form not found.");
+    }
+    fireEvent.submit(startupNameForm);
+
+    await waitFor(() => {
+      expect(gitMocks.createWorktree).toHaveBeenCalledWith(
+        "/repo",
+        "chat-123",
+        "chat-123",
+        true,
+        "main",
+      );
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "/repo-worktrees/chat-123/builderbot",
+      {
+        deferProviderSetup: true,
+        modelId: undefined,
+        projectId: "project-startup",
+      },
+    );
+
+    const draft = useChatSessionStore.getState().sessions[0];
+    expect(draft).toEqual(
+      expect.objectContaining({
+        projectId: "project-startup",
+        workingDir: "/repo-worktrees/chat-123/builderbot",
+        creationState: "pending",
+      }),
+    );
+    expect(draft?.workspaceAttachments).toEqual([
+      expect.objectContaining({
+        path: "/repo-worktrees/chat-123/builderbot",
+        kind: "subdirectory",
+        source: "created",
+        branch: "chat-123",
+        repositoryPath: "/repo",
+        worktreePath: "/repo-worktrees/chat-123",
+      }),
+    ]);
+
+    createSession.resolve({ sessionId: "created-session" });
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().sessions[0]?.id).toBe(
+        "created-session",
+      );
+    });
+  });
+
+  it("rolls back startup worktrees when project chat session creation fails", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    mockAcpCreateSession.mockRejectedValueOnce(new Error("backend down"));
+    const user = userEvent.setup();
+
+    const project: ProjectInfo = {
+      id: "project-startup",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/repo/builderbot",
+          path: "/repo/builderbot",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "worktree",
+        },
+      ],
+      workingDirs: ["/repo/builderbot"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    useProjectStore.setState({ projects: [project] });
+
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start project chat" }),
+    );
+    const startupNameInput = document.getElementById(
+      "project-workspace-startup-name",
+    );
+    if (!startupNameInput) {
+      throw new Error("Startup name input not found.");
+    }
+    await user.type(startupNameInput, "chat-123");
+    const startupNameForm = document.getElementById(
+      "project-workspace-startup-name-form",
+    );
+    if (!startupNameForm) {
+      throw new Error("Startup name form not found.");
+    }
+    fireEvent.submit(startupNameForm);
+
+    await waitFor(() => {
+      expect(gitMocks.createWorktree).toHaveBeenCalledWith(
+        "/repo",
+        "chat-123",
+        "chat-123",
+        true,
+        "main",
+      );
+    });
+    await waitFor(() => {
+      expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
+        "/repo",
+        "/repo-worktrees/chat-123",
+        true,
+      );
+    });
+    expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
+      "/repo",
+      "chat-123",
+      true,
+      "main",
+    );
+    expect(useChatSessionStore.getState().sessions[0]).toEqual(
+      expect.objectContaining({
+        creationState: "failed",
+        creationError: "backend down",
+      }),
+    );
+  });
+
+  it("skips project workspace startup planning when using the default configuration", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    const user = userEvent.setup();
+
+    const project: ProjectInfo = {
+      id: "project-startup",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/repo/builderbot",
+          path: "/repo/builderbot",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "worktree",
+        },
+        {
+          id: "path:/repo/bbsubscriber",
+          path: "/repo/bbsubscriber",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "branch",
+        },
+      ],
+      workingDirs: ["/repo/builderbot", "/repo/bbsubscriber"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    useProjectStore.setState({ projects: [project] });
+
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start project chat" }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Skip and use as-is",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "goose",
+        "/repo/builderbot",
+        {
+          deferProviderSetup: true,
+          modelId: undefined,
+          projectId: "project-startup",
+        },
+      );
+    });
+
+    expect(gitMocks.getGitState).not.toHaveBeenCalled();
+    expect(gitMocks.createWorktree).not.toHaveBeenCalled();
+    expect(gitMocks.createBranch).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().sessions[0]).toEqual(
+      expect.objectContaining({
+        projectId: "project-startup",
+        workingDir: "/repo/builderbot",
+      }),
+    );
+    expect(
+      useChatSessionStore
+        .getState()
+        .sessions[0]?.workspaceAttachments?.map((attachment) => ({
+          path: attachment.path,
+          source: attachment.source,
+          branch: attachment.branch,
+        })),
+    ).toEqual([
+      { path: "/repo/builderbot", source: "inferred", branch: "main" },
+      { path: "/repo/bbsubscriber", source: "inferred", branch: "main" },
+    ]);
+  });
+
+  it("reuses project drafts with hidden startup metadata when multi-workspace is disabled", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+    const user = userEvent.setup();
+    const project: ProjectInfo = {
+      id: "project-startup",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/repo/builderbot",
+          path: "/repo/builderbot",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "worktree",
+        },
+      ],
+      workingDirs: ["/repo/builderbot"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    const draft: ChatSession = {
+      id: "existing-project-draft",
+      title: "New chat",
+      projectId: "project-startup",
+      providerId: "goose",
+      workingDir: "/repo/builderbot",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 0,
+    };
+    useProjectStore.setState({ projects: [project] });
+    useChatSessionStore.setState({ sessions: [draft] });
+    useChatStore.setState({
+      draftsBySession: { "existing-project-draft": "continue this draft" },
+    });
+
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start project chat" }),
+    );
+
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    expect(gitMocks.createWorktree).not.toHaveBeenCalled();
+    expect(
+      document.getElementById("project-workspace-startup-name"),
+    ).not.toBeInTheDocument();
+    expect(useChatSessionStore.getState().activeSessionId).toBe(
+      "existing-project-draft",
     );
   });
 
@@ -1330,6 +1801,221 @@ describe("AppShell global navigation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("uses project startup planning for centered composer sends to startup worktree projects", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    const createSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(createSession.promise);
+    const project: ProjectInfo = {
+      id: "project-1",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/repo/builderbot",
+          path: "/repo/builderbot",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "worktree",
+        },
+      ],
+      workingDirs: ["/repo/builderbot"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    useProjectStore.setState({ projects: [project] });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    mockAcpCreateSession.mockClear();
+    await user.keyboard("{Meta>}n{/Meta}");
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    await waitFor(() => {
+      expect(textbox.closest("[data-placement]")).toHaveAttribute(
+        "data-placement",
+        "centered",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: /Project Startup/i }),
+    );
+    expect(await screen.findByText("Project Startup")).toBeInTheDocument();
+    await user.type(textbox, "send from centered composer");
+    await user.keyboard("{Enter}");
+
+    const startupNameInput = await waitFor(() => {
+      const input = document.getElementById("project-workspace-startup-name");
+      if (!input) {
+        throw new Error("Startup name input not found.");
+      }
+      return input;
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    expect(gitMocks.createWorktree).not.toHaveBeenCalled();
+
+    await user.type(startupNameInput, "chat-123");
+    const startupNameForm = document.getElementById(
+      "project-workspace-startup-name-form",
+    );
+    if (!startupNameForm) {
+      throw new Error("Startup name form not found.");
+    }
+    fireEvent.submit(startupNameForm);
+
+    await waitFor(() => {
+      expect(gitMocks.createWorktree).toHaveBeenCalledWith(
+        "/repo",
+        "chat-123",
+        "chat-123",
+        true,
+        "main",
+      );
+    });
+    const draftSessionId = useChatSessionStore.getState().sessions[0]?.id;
+    expect(draftSessionId).toEqual(expect.any(String));
+    expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+      [draftSessionId as string]: {
+        text: "send from centered composer",
+      },
+    });
+
+    createSession.resolve({ sessionId: "created-session" });
+    await waitFor(() => {
+      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+        "created-session": {
+          text: "send from centered composer",
+        },
+      });
+    });
+  });
+
+  it("attaches all as-is project workspaces for centered composer sends", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    const createSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(createSession.promise);
+    const project: ProjectInfo = {
+      id: "project-1",
+      path: "/tmp/project-startup.md",
+      name: "Project Startup",
+      description: "",
+      prompt: "",
+      icon: "tabler:folder-code",
+      color: "olive",
+      projectWorkspaces: [
+        {
+          id: "path:/repo/builderbot",
+          path: "/repo/builderbot",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "none",
+        },
+        {
+          id: "path:/repo/bbsubscriber",
+          path: "/repo/bbsubscriber",
+          kind: "subdirectory",
+          source: "selected",
+          branch: "main",
+          repositoryPath: "/repo",
+          worktreePath: "/repo",
+          usedByAgent: false,
+          startupMode: "none",
+        },
+      ],
+      workingDirs: ["/repo/builderbot", "/repo/bbsubscriber"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      artifact: null,
+    };
+    useProjectStore.setState({ projects: [project] });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    mockAcpCreateSession.mockClear();
+    await user.keyboard("{Meta>}n{/Meta}");
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    await waitFor(() => {
+      expect(textbox.closest("[data-placement]")).toHaveAttribute(
+        "data-placement",
+        "centered",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: /Project Startup/i }),
+    );
+    expect(await screen.findByText("Project Startup")).toBeInTheDocument();
+    await user.type(textbox, "send with all folders");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "goose",
+        "/repo/builderbot",
+        {
+          deferProviderSetup: true,
+          modelId: undefined,
+          projectId: "project-1",
+        },
+      );
+    });
+    expect(gitMocks.getGitState).not.toHaveBeenCalled();
+    expect(gitMocks.createWorktree).not.toHaveBeenCalled();
+    expect(gitMocks.createBranch).not.toHaveBeenCalled();
+
+    const draftSessionId = useChatSessionStore.getState().sessions[0]?.id;
+    expect(draftSessionId).toEqual(expect.any(String));
+    expect(
+      useChatSessionStore
+        .getState()
+        .sessions[0]?.workspaceAttachments?.map((attachment) => ({
+          path: attachment.path,
+          source: attachment.source,
+        })),
+    ).toEqual([
+      { path: "/repo/builderbot", source: "inferred" },
+      { path: "/repo/bbsubscriber", source: "inferred" },
+    ]);
+    expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+      [draftSessionId as string]: {
+        text: "send with all folders",
+      },
+    });
+
+    createSession.resolve({ sessionId: "created-session" });
+    await waitFor(() => {
+      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+        "created-session": {
+          text: "send with all folders",
+        },
+      });
+    });
   });
 
   it("skips the centered composer handoff delay for reduced-motion users", async () => {
@@ -2399,6 +3085,7 @@ describe("AppShell global navigation", () => {
       prompt: "",
       icon: "folder",
       color: "blue",
+      projectWorkspaces: [],
       workingDirs: [],
       useWorktrees: false,
       order: 0,
@@ -2564,6 +3251,7 @@ describe("AppShell global navigation", () => {
           icon: "",
           color: "",
           workingDirs: ["/workspace/project"],
+          projectWorkspaces: [],
           useWorktrees: false,
           order: 0,
           archivedAt: null,
@@ -2613,6 +3301,7 @@ describe("AppShell global navigation", () => {
           icon: "",
           color: "",
           workingDirs: ["/workspace/project"],
+          projectWorkspaces: [],
           useWorktrees: false,
           order: 0,
           archivedAt: null,
@@ -2689,6 +3378,7 @@ describe("AppShell global navigation", () => {
           icon: "",
           color: "",
           workingDirs: ["/workspace/project"],
+          projectWorkspaces: [],
           useWorktrees: false,
           order: 0,
           archivedAt: null,

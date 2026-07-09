@@ -1282,7 +1282,8 @@ describe("ChatInput", () => {
     render(
       <ChatInput
         onSend={vi.fn()}
-        fileMentionRoots={["/Users/wesb/Development/squareup/berd"]}
+        skillProjectDirs={["/Users/wesb/Development/squareup/skills-only"]}
+        fileMentionProjectDirs={["/Users/wesb/Development/squareup/berd"]}
       />,
     );
 
@@ -1336,7 +1337,8 @@ describe("ChatInput", () => {
     render(
       <ChatInput
         onSend={vi.fn()}
-        fileMentionRoots={["/workspace/frontend", "/workspace/backend"]}
+        skillProjectDirs={["/workspace/skills-only"]}
+        fileMentionProjectDirs={["/workspace/frontend", "/workspace/backend"]}
       />,
     );
 

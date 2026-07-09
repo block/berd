@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { FilesList } from "./FilesList";
@@ -10,27 +10,54 @@ import { ensureDirectory } from "@/shared/api/system";
 import {
   createBranch,
   createWorktree,
+  deleteBranch,
   fetchRepo,
   initRepo,
   listenGitStateChanged,
   pullRepo,
+  removeWorktree,
   stashChanges,
   switchBranch,
 } from "@/shared/api/git";
 import type { CreatedWorktree } from "@/shared/types/git";
+import type { WorkspaceAttachment } from "@/shared/types/chat";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { SIDEBAR_NAV_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
-import { useChatSessionStore } from "../stores/chatSessionStore";
-import type { ActiveWorkspace } from "../stores/chatSessionStore";
+import {
+  useChatSessionStore,
+  type ActiveWorkspace,
+} from "../stores/chatSessionStore";
 import { WorkspaceWidget } from "./widgets/WorkspaceWidget";
-import { formatErrorMessage } from "./widgets/formatError";
-import { ChangesWidget } from "./widgets/ChangesWidget";
+import { LegacyWorkspaceWidget } from "./widgets/LegacyWorkspaceWidget";
+import { ChangesWidget, WorkspaceChangesWidget } from "./widgets/ChangesWidget";
 import { ArtifactsWidget } from "./widgets/ArtifactsWidget";
+import { formatErrorMessage } from "./widgets/formatError";
+import {
+  WorkspaceAddDialog,
+  type WorkspaceAddCandidate,
+} from "./widgets/WorkspaceAddDialog";
+import {
+  type WorkspaceGitRuntime,
+  useWorkspaceChangedFilesRuntimes,
+  useWorkspaceGitRuntimes,
+} from "./hooks/useWorkspaceGitRuntimes";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { updateWorkingDir } from "@/shared/api/acpApi";
 import { toast } from "sonner";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
+import {
+  classifyWorkspaceAttachment,
+  getWorkspaceAttachments,
+  getWorkspaceCleanupTarget,
+  getRelativeWorkspacePath,
+  getWorkspaceDisplayName,
+  isSameWorkspacePath,
+  workspaceAttachmentUsesCleanupTarget,
+} from "@/features/chat/lib/workspaceAttachments";
+import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import { useChatStore } from "../stores/chatStore";
+import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
+import type { WorkspaceRemovalPlan } from "./widgets/WorkspaceRowActionsMenu";
 
 interface ContextPanelProps {
   sessionId: string;
@@ -42,6 +69,7 @@ interface ContextPanelProps {
   sessionWorkingDir?: string | null;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
+  onOpenTerminalAtPath?: (path: string) => void;
 }
 
 interface ContextPanelWorktreeTrackerProps {
@@ -219,67 +247,110 @@ export function ContextPanel({
   sessionWorkingDir,
   terminalOpen = false,
   onToggleTerminal,
+  onOpenTerminalAtPath,
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
+  const workspaceRepository = useWorkspaceRepository();
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
   const [isChangingFolder, setIsChangingFolder] = useState(false);
+  const [isAddWorkspaceOpen, setIsAddWorkspaceOpen] = useState(false);
   const [sectionVisibility, setSectionVisibility] = usePersistedState(
     SECTION_VISIBILITY_STORAGE_KEY,
     DEFAULT_SECTION_VISIBILITY,
     validateSectionVisibility,
   );
-  const projectDefaultWorkspaceRoot = projectWorkingDirs[0] ?? null;
-
   const activeContext = useChatSessionStore(
     (s) => s.activeWorkspaceBySession[sessionId],
   );
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
   const patchSession = useChatSessionStore((s) => s.patchSession);
+  const session = useChatSessionStore((s) =>
+    s.sessions.find((candidate) => candidate.id === sessionId),
+  );
+  const allSessions = useChatSessionStore((s) => s.sessions);
+  const attachWorkspace = useChatSessionStore((s) => s.attachWorkspace);
+  const removeWorkspaceAttachment = useChatSessionStore(
+    (s) => s.removeWorkspaceAttachment,
+  );
 
-  const gitTargetPath =
-    activeContext?.path ??
-    sessionWorkingDir ??
-    projectDefaultWorkspaceRoot ??
-    null;
-  const fileBrowserRoots = uniquePaths([gitTargetPath]);
+  const workspaceSet = workspaceRepository.chatWorkspaces(session, {
+    activePath: activeContext?.path,
+  });
+  const isMultiWorkspaceMode = workspaceRepository.mode === "multi";
+  const workspaceAttachments = workspaceSet.workspaces;
+  const projectDefaultWorkspaceRoot = projectWorkingDirs[0] ?? null;
+  const gitTargetPath = isMultiWorkspaceMode
+    ? (activeContext?.path ??
+      workspaceSet.primary?.path ??
+      projectDefaultWorkspaceRoot ??
+      (!projectName ? sessionWorkingDir : null) ??
+      null)
+    : (activeContext?.path ??
+      sessionWorkingDir ??
+      projectDefaultWorkspaceRoot ??
+      workspaceSet.primary?.path ??
+      null);
+  const fileBrowserRoots = uniquePaths(
+    isMultiWorkspaceMode && workspaceAttachments.length > 0
+      ? workspaceAttachments.map((workspace) => workspace.path)
+      : [gitTargetPath],
+  );
+  const hasWorkspaceAttachments =
+    isMultiWorkspaceMode && workspaceAttachments.length > 0;
   const queryClient = useQueryClient();
   const {
-    data: gitState,
-    error,
-    isLoading,
-    isFetching,
-  } = useGitState(gitTargetPath, activeTab === "details");
-  const shouldLoadFallbackGitState =
-    activeTab === "details" &&
-    Boolean(error) &&
-    !gitState &&
-    Boolean(projectDefaultWorkspaceRoot) &&
-    Boolean(gitTargetPath) &&
-    projectDefaultWorkspaceRoot !== gitTargetPath;
-  const { data: fallbackGitState } = useGitState(
-    projectDefaultWorkspaceRoot,
-    shouldLoadFallbackGitState,
+    data: fallbackGitState,
+    error: fallbackGitError,
+    isLoading: fallbackGitIsLoading,
+    isFetching: fallbackGitIsFetching,
+  } = useGitState(
+    gitTargetPath,
+    activeTab === "details" && !hasWorkspaceAttachments,
+  );
+  const workspaceGitRuntimes = useWorkspaceGitRuntimes(
+    workspaceAttachments,
+    isMultiWorkspaceMode && (activeTab === "details" || isAddWorkspaceOpen),
+  );
+  const workspaceChangedFileRuntimes = useWorkspaceChangedFilesRuntimes(
+    workspaceGitRuntimes,
+    activeTab === "details",
+  );
+  const renderedWorkspaceAttachments = useMemo(
+    () => workspaceGitRuntimes.map((runtime) => runtime.workspace),
+    [workspaceGitRuntimes],
+  );
+  const workspaceGitStateById = useMemo(
+    () =>
+      Object.fromEntries(
+        workspaceGitRuntimes.map((runtime) => [
+          runtime.workspace.id,
+          runtime.gitState,
+        ]),
+      ),
+    [workspaceGitRuntimes],
   );
 
   const {
-    data: changedFiles,
-    error: changedFilesError,
-    isLoadingError: isChangedFilesLoadingError,
-    isLoading: isFilesLoading,
-  } = useChangedFiles(gitTargetPath, activeTab === "details");
-  const shouldShowChanges = gitState?.isGitRepo !== false;
-  const shouldShowArtifacts = gitState?.isGitRepo === false;
-
-  const handleContextChange = useCallback(
-    (context: ActiveWorkspace) => {
-      setActiveWorkspace(sessionId, context);
-    },
-    [sessionId, setActiveWorkspace],
+    data: fallbackChangedFiles,
+    error: fallbackChangedFilesError,
+    isLoadingError: isFallbackChangedFilesLoadingError,
+    isLoading: isFallbackFilesLoading,
+  } = useChangedFiles(
+    gitTargetPath,
+    activeTab === "details" && !hasWorkspaceAttachments,
   );
+  const shouldShowChanges = hasWorkspaceAttachments
+    ? workspaceChangedFileRuntimes.length > 0
+    : Boolean(gitTargetPath) && fallbackGitState?.isGitRepo !== false;
+  const shouldShowArtifacts =
+    hasWorkspaceAttachments && workspaceGitRuntimes.length > 0
+      ? workspaceGitRuntimes.every(
+          (runtime) => runtime.gitState?.isGitRepo === false,
+        )
+      : Boolean(gitTargetPath) && fallbackGitState?.isGitRepo === false;
 
-  // Git mutations can move branches in any worktree of the repo, and the
-  // routing decisions in the picker depend on that repo-wide picture, so
-  // invalidate every cached path — not just the one this panel is showing.
+  // Git mutations can move branches in any worktree of the repo, so invalidate
+  // every cached path, not just the one this panel is showing.
   const refetchAll = useCallback(async () => {
     await Promise.all([
       queryClient
@@ -291,13 +362,18 @@ export function ContextPanel({
     ]);
   }, [queryClient]);
 
+  const handleContextChange = useCallback(
+    (context: ActiveWorkspace) => {
+      setActiveWorkspace(sessionId, context);
+    },
+    [sessionId, setActiveWorkspace],
+  );
+
   const handleSwitchBranch = useCallback(
     async (path: string, branch: string) => {
       try {
         await switchBranch(path, branch);
       } finally {
-        // Re-sync even when git refuses the switch, so the picker reflects
-        // reality without a manual refresh.
         await refetchAll();
       }
     },
@@ -311,8 +387,6 @@ export function ContextPanel({
         try {
           await switchBranch(path, branch);
         } catch (error) {
-          // The stash already succeeded: make sure the failure toast tells
-          // the user their changes are parked in the stash, not lost.
           throw new Error(
             `${formatErrorMessage(
               error,
@@ -357,6 +431,14 @@ export function ContextPanel({
       await updateWorkingDir(sessionId, selected);
       patchSession(sessionId, { workingDir: selected });
       setActiveWorkspace(sessionId, { path: selected, branch: null });
+      if (isMultiWorkspaceMode && projectName) {
+        attachWorkspace(sessionId, {
+          path: selected,
+          branch: null,
+          kind: "directory",
+          source: "selected",
+        });
+      }
       await refetchAll();
       toast.success(t("contextPanel.folder.changeSuccess"));
     } catch (error) {
@@ -367,12 +449,130 @@ export function ContextPanel({
     }
   }, [
     gitTargetPath,
+    attachWorkspace,
+    isMultiWorkspaceMode,
     patchSession,
+    projectName,
     refetchAll,
     sessionId,
     setActiveWorkspace,
     t,
   ]);
+
+  const handleIncludeWorkspaceCandidate = useCallback(
+    (candidate: WorkspaceAddCandidate) => {
+      attachWorkspace(sessionId, {
+        path: candidate.path,
+        branch: candidate.classification.branch,
+        kind: candidate.classification.kind,
+        repositoryPath: candidate.classification.repositoryPath,
+        worktreePath: candidate.classification.worktreePath,
+        source: "selected",
+      });
+      void refetchAll();
+      toast.success(
+        t("contextPanel.includedWorkspaces.includeSuccess", {
+          name: getWorkspaceDisplayName(candidate.path),
+        }),
+      );
+    },
+    [attachWorkspace, refetchAll, sessionId, t],
+  );
+
+  const getWorkspaceRemovalPlan = useCallback(
+    (workspace: WorkspaceAttachment): WorkspaceRemovalPlan => {
+      const target = getWorkspaceCleanupTarget(workspace);
+      if (!target) {
+        return {
+          cleanup: "none",
+          isLastUse: false,
+          branch: null,
+          baseBranch: null,
+          repositoryPath: null,
+          worktreePath: null,
+          createdBranch: false,
+        };
+      }
+
+      const activeUsageCount = allSessions
+        .filter((candidate) => !candidate.archivedAt)
+        .flatMap((candidate) =>
+          getWorkspaceAttachments(candidate).filter(
+            (attachment) => attachment.source !== "excluded",
+          ),
+        )
+        .filter((attachment) =>
+          workspaceAttachmentUsesCleanupTarget(attachment, target),
+        ).length;
+
+      return {
+        cleanup: target.cleanup,
+        isLastUse: activeUsageCount <= 1,
+        branch: target.branch,
+        baseBranch: target.baseBranch,
+        repositoryPath: target.repositoryPath,
+        worktreePath: target.worktreePath,
+        createdBranch: target.createdBranch,
+      };
+    },
+    [allSessions],
+  );
+
+  const cleanupWorkspace = useCallback(
+    async (workspace: WorkspaceAttachment, plan: WorkspaceRemovalPlan) => {
+      if (plan.cleanup === "none" || !plan.isLastUse) {
+        return;
+      }
+
+      const repositoryPath =
+        plan.repositoryPath ??
+        workspace.repositoryPath ??
+        workspace.worktreePath ??
+        workspace.path;
+
+      if (plan.cleanup === "worktree") {
+        const worktreePath =
+          plan.worktreePath ?? workspace.worktreePath ?? workspace.path;
+        await removeWorktree(repositoryPath, worktreePath, true);
+        if (plan.createdBranch && plan.branch) {
+          await deleteBranch(
+            repositoryPath,
+            plan.branch,
+            true,
+            plan.baseBranch ?? undefined,
+          );
+        }
+        return;
+      }
+
+      if (plan.branch) {
+        const checkoutPath =
+          plan.worktreePath ??
+          workspace.worktreePath ??
+          plan.repositoryPath ??
+          workspace.path;
+        await deleteBranch(
+          checkoutPath,
+          plan.branch,
+          true,
+          plan.baseBranch ?? undefined,
+        );
+      }
+    },
+    [],
+  );
+
+  const handleRemoveWorkspace = useCallback(
+    async (
+      workspace: WorkspaceAttachment,
+      removalPlan: WorkspaceRemovalPlan,
+    ) => {
+      await cleanupWorkspace(workspace, removalPlan);
+      removeWorkspaceAttachment(sessionId, workspace.id);
+      await refetchAll();
+    },
+    [cleanupWorkspace, refetchAll, removeWorkspaceAttachment, sessionId],
+  );
 
   const handleFetch = useCallback(
     async (path: string) => {
@@ -391,6 +591,61 @@ export function ContextPanel({
   );
 
   const handleCreateBranch = useCallback(
+    async (
+      runtime: WorkspaceGitRuntime,
+      path: string,
+      name: string,
+      baseBranch: string,
+    ) => {
+      await createBranch(path, name, baseBranch);
+      const updatedGitState = runtime.gitState
+        ? {
+            ...runtime.gitState,
+            currentBranch: name,
+            worktrees: runtime.gitState.worktrees.map((worktree) =>
+              isSameWorkspacePath(
+                worktree.path,
+                runtime.gitContext.worktreePath ?? path,
+              )
+                ? { ...worktree, branch: name }
+                : worktree,
+            ),
+          }
+        : null;
+      const classification = updatedGitState
+        ? classifyWorkspaceAttachment(runtime.workspace.path, updatedGitState)
+        : null;
+      attachWorkspace(sessionId, {
+        path: runtime.workspace.path,
+        branch: name,
+        kind: classification?.kind ?? runtime.workspace.kind,
+        repositoryPath:
+          classification?.repositoryPath ?? runtime.workspace.repositoryPath,
+        worktreePath:
+          classification?.worktreePath ?? runtime.workspace.worktreePath,
+        source: "created",
+        lifecycle: {
+          owner: "goose",
+          cleanup: "branch",
+          branch: name,
+          baseBranch,
+          repositoryPath:
+            classification?.repositoryPath ??
+            runtime.workspace.repositoryPath ??
+            null,
+          worktreePath:
+            classification?.worktreePath ??
+            runtime.workspace.worktreePath ??
+            null,
+          createdBranch: true,
+        },
+      });
+      await refetchAll();
+    },
+    [attachWorkspace, refetchAll, sessionId],
+  );
+
+  const handleLegacyCreateBranch = useCallback(
     async (path: string, name: string, baseBranch: string) => {
       await createBranch(path, name, baseBranch);
       await refetchAll();
@@ -419,6 +674,135 @@ export function ContextPanel({
     [refetchAll],
   );
 
+  const handleWorkspaceWorktreeCreated = useCallback(
+    (
+      runtime: WorkspaceGitRuntime,
+      worktree: CreatedWorktree,
+      context: CreatedWorkspaceWorktreeContext,
+    ) => {
+      if (!runtime.gitState) return;
+      const { workspace, gitState, gitContext } = runtime;
+      const sourceWorktreePath =
+        gitContext.worktreePath ??
+        workspace.worktreePath ??
+        workspace.repositoryPath ??
+        workspace.path;
+      const relativePath = getRelativeWorkspacePath(
+        workspace.path,
+        sourceWorktreePath,
+      );
+      const includedPath =
+        relativePath && relativePath.length > 0
+          ? `${worktree.path.replace(/\/+$/, "")}/${relativePath}`
+          : worktree.path;
+      const classification = classifyWorkspaceAttachment(includedPath, {
+        ...gitState,
+        isWorktree: true,
+        currentBranch: worktree.branch,
+        worktrees: [
+          ...gitState.worktrees.filter(
+            (existingWorktree) => existingWorktree.path !== worktree.path,
+          ),
+          {
+            path: worktree.path,
+            branch: worktree.branch,
+            isMain: false,
+          },
+        ],
+      });
+      attachWorkspace(sessionId, {
+        path: includedPath,
+        branch: classification.branch,
+        kind: classification.kind,
+        repositoryPath:
+          classification.repositoryPath ?? workspace.repositoryPath,
+        worktreePath: classification.worktreePath ?? worktree.path,
+        source: "created",
+        lifecycle: {
+          owner: "goose",
+          cleanup: "worktree",
+          branch: worktree.branch,
+          baseBranch: context.baseBranch,
+          repositoryPath:
+            classification.repositoryPath ??
+            workspace.repositoryPath ??
+            gitState.mainWorktreePath ??
+            null,
+          worktreePath: worktree.path,
+          createdBranch: context.createdBranch,
+        },
+      });
+      toast.success(
+        t("contextPanel.includedWorkspaces.includeSuccess", {
+          name: getWorkspaceDisplayName(includedPath),
+        }),
+      );
+    },
+    [attachWorkspace, sessionId, t],
+  );
+
+  const handleIncludeCreatedWorktree = useCallback(
+    (
+      candidate: WorkspaceAddCandidate,
+      worktree: CreatedWorktree,
+      context: CreatedWorkspaceWorktreeContext,
+    ) => {
+      const relativePath = getRelativeWorkspacePath(
+        candidate.path,
+        candidate.classification.worktreePath,
+      );
+      const includedPath =
+        relativePath && relativePath.length > 0
+          ? `${worktree.path.replace(/\/+$/, "")}/${relativePath}`
+          : worktree.path;
+      const classification = classifyWorkspaceAttachment(includedPath, {
+        ...candidate.gitState,
+        isWorktree: true,
+        currentBranch: worktree.branch,
+        worktrees: [
+          ...candidate.gitState.worktrees.filter(
+            (existingWorktree) => existingWorktree.path !== worktree.path,
+          ),
+          {
+            path: worktree.path,
+            branch: worktree.branch,
+            isMain: false,
+          },
+        ],
+      });
+      attachWorkspace(sessionId, {
+        path: includedPath,
+        branch: classification.branch,
+        kind: classification.kind,
+        repositoryPath:
+          classification.repositoryPath ??
+          candidate.classification.repositoryPath,
+        worktreePath: classification.worktreePath ?? worktree.path,
+        source: "created",
+        lifecycle: {
+          owner: "goose",
+          cleanup: "worktree",
+          branch: worktree.branch,
+          baseBranch: context.baseBranch,
+          repositoryPath:
+            classification.repositoryPath ??
+            candidate.classification.repositoryPath ??
+            candidate.gitState.mainWorktreePath ??
+            null,
+          worktreePath: worktree.path,
+          createdBranch: context.createdBranch,
+        },
+      });
+      void refetchAll();
+      toast.success(
+        t("contextPanel.includedWorkspaces.includeSuccess", {
+          name: getWorkspaceDisplayName(includedPath),
+        }),
+      );
+    },
+    [attachWorkspace, refetchAll, sessionId, t],
+  );
+
   const handleOpenChangedFile = useCallback(
     (filePath: string) => {
       if (!gitTargetPath) return;
@@ -427,6 +811,9 @@ export function ContextPanel({
     },
     [gitTargetPath],
   );
+  const handleOpenWorkspaceChangedFile = useCallback((filePath: string) => {
+    void openPath(filePath);
+  }, []);
 
   const handleRefresh = useCallback(() => {
     void refetchAll();
@@ -441,6 +828,7 @@ export function ContextPanel({
     },
     [setSectionVisibility],
   );
+  const isProjectContext = Boolean(projectName);
 
   return (
     <Tabs
@@ -473,49 +861,105 @@ export function ContextPanel({
         className="scrollbar-none w-full min-h-0 flex-1 overflow-y-auto"
       >
         <div className="w-full pb-4">
-          <WorkspaceWidget
-            projectId={projectId}
-            projectName={projectName}
-            projectIcon={projectIcon}
-            projectColor={projectColor}
-            projectWorkingDirs={projectWorkingDirs}
-            sessionWorkingDir={sessionWorkingDir}
-            gitState={gitState}
-            fallbackGitState={fallbackGitState}
-            isLoading={isLoading}
-            isFetching={isFetching}
-            error={error}
-            activeContext={activeContext}
-            onContextChange={handleContextChange}
-            onSwitchBranch={handleSwitchBranch}
-            onStashAndSwitch={handleStashAndSwitch}
-            onInitRepo={handleInitRepo}
-            onChangeFolder={handleChangeFolder}
-            onFetch={handleFetch}
-            onPull={handlePull}
-            onCreateBranch={handleCreateBranch}
-            onCreateWorktree={handleCreateWorktree}
-            onRefresh={handleRefresh}
-            isChangingFolder={isChangingFolder}
-            isOpen={sectionVisibility.workspace}
-            onToggleOpen={() => toggleSection("workspace")}
-            terminalOpen={terminalOpen}
-            onToggleTerminal={onToggleTerminal}
-          />
-          {shouldShowChanges && (
-            <ChangesWidget
-              files={changedFiles}
-              isLoading={isFilesLoading}
-              error={changedFilesError}
-              isLoadingError={isChangedFilesLoadingError}
-              currentBranch={gitState?.currentBranch ?? null}
-              dirtyFileCount={gitState?.dirtyFileCount ?? 0}
-              repoPath={gitTargetPath ?? ""}
-              onOpenFile={handleOpenChangedFile}
-              isOpen={sectionVisibility.changes}
-              onToggleOpen={() => toggleSection("changes")}
+          {isMultiWorkspaceMode ? (
+            <>
+              <WorkspaceWidget
+                projectId={projectId}
+                projectName={projectName}
+                projectIcon={projectIcon}
+                projectColor={projectColor}
+                projectWorkingDirs={projectWorkingDirs}
+                sessionWorkingDir={sessionWorkingDir}
+                primaryWorkspaceRoot={gitTargetPath}
+                fallbackGitState={fallbackGitState}
+                fallbackIsLoading={fallbackGitIsLoading}
+                fallbackIsFetching={fallbackGitIsFetching}
+                fallbackError={
+                  fallbackGitError instanceof Error ? fallbackGitError : null
+                }
+                workspaceRuntimes={workspaceGitRuntimes}
+                isProjectContext={isProjectContext}
+                onInitRepo={handleInitRepo}
+                onChangeFolder={handleChangeFolder}
+                onFetch={handleFetch}
+                onPull={handlePull}
+                onCreateBranch={handleCreateBranch}
+                onCreateWorktree={handleCreateWorktree}
+                onWorktreeCreated={handleWorkspaceWorktreeCreated}
+                onAddWorkspace={() => setIsAddWorkspaceOpen(true)}
+                onRemoveWorkspace={handleRemoveWorkspace}
+                getRemovalPlan={getWorkspaceRemovalPlan}
+                onOpenTerminalAtPath={onOpenTerminalAtPath}
+                isChangingFolder={isChangingFolder}
+              />
+              <WorkspaceAddDialog
+                open={isAddWorkspaceOpen}
+                context="chat"
+                currentProjectPath={gitTargetPath}
+                includedWorkspaces={renderedWorkspaceAttachments}
+                gitStateByWorkspaceId={workspaceGitStateById}
+                onClose={() => setIsAddWorkspaceOpen(false)}
+                onInclude={handleIncludeWorkspaceCandidate}
+                onCreateWorktree={handleCreateWorktree}
+                onIncludeCreatedWorktree={handleIncludeCreatedWorktree}
+              />
+            </>
+          ) : (
+            <LegacyWorkspaceWidget
+              projectId={projectId}
+              projectName={projectName}
+              projectIcon={projectIcon}
+              projectColor={projectColor}
+              projectWorkingDirs={projectWorkingDirs}
+              sessionWorkingDir={sessionWorkingDir}
+              gitState={fallbackGitState}
+              isLoading={fallbackGitIsLoading}
+              isFetching={fallbackGitIsFetching}
+              error={
+                fallbackGitError instanceof Error ? fallbackGitError : null
+              }
+              activeContext={activeContext}
+              onContextChange={handleContextChange}
+              onSwitchBranch={handleSwitchBranch}
+              onStashAndSwitch={handleStashAndSwitch}
+              onInitRepo={handleInitRepo}
+              onChangeFolder={handleChangeFolder}
+              onFetch={handleFetch}
+              onPull={handlePull}
+              onCreateBranch={handleLegacyCreateBranch}
+              onCreateWorktree={handleCreateWorktree}
+              onRefresh={handleRefresh}
+              isChangingFolder={isChangingFolder}
+              isOpen={sectionVisibility.workspace}
+              onToggleOpen={() => toggleSection("workspace")}
+              terminalOpen={terminalOpen}
+              onToggleTerminal={onToggleTerminal}
             />
           )}
+          {shouldShowChanges &&
+            (hasWorkspaceAttachments ? (
+              <WorkspaceChangesWidget
+                groups={workspaceChangedFileRuntimes}
+                onOpenFile={handleOpenWorkspaceChangedFile}
+              />
+            ) : (
+              <ChangesWidget
+                files={fallbackChangedFiles}
+                isLoading={isFallbackFilesLoading}
+                error={
+                  fallbackChangedFilesError instanceof Error
+                    ? fallbackChangedFilesError
+                    : null
+                }
+                isLoadingError={isFallbackChangedFilesLoadingError}
+                currentBranch={fallbackGitState?.currentBranch ?? null}
+                dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
+                repoPath={gitTargetPath ?? ""}
+                onOpenFile={handleOpenChangedFile}
+                isOpen={sectionVisibility.changes}
+                onToggleOpen={() => toggleSection("changes")}
+              />
+            ))}
           {shouldShowArtifacts && (
             <ArtifactsWidget
               isOpen={sectionVisibility.artifacts}

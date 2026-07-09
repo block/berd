@@ -17,6 +17,7 @@ interface FindExistingDraftArgs {
   messagesBySession: Record<string, Message[]>;
   sessionIdsWithTerminals?: ReadonlySet<string>;
   request: NewChatRequest;
+  allowDraftReuse?: boolean;
 }
 
 function isMatchingContext(
@@ -63,7 +64,12 @@ export function findExistingDraft({
   messagesBySession,
   sessionIdsWithTerminals = new Set(),
   request,
+  allowDraftReuse = true,
 }: FindExistingDraftArgs): ChatSession | undefined {
+  if (!allowDraftReuse) {
+    return undefined;
+  }
+
   if (!isDefaultChatTitle(request.title)) {
     return undefined;
   }

@@ -13,6 +13,7 @@ export function buildSkillSendPayload(
   submittedText: string,
   submittedSkills: ChatSkillDraft[],
   slashSkillCommand: SkillCommandMatch | null,
+  options: { providerId?: string | null } = {},
 ): SkillSendPayload {
   const chips =
     submittedSkills.length > 0
@@ -34,7 +35,9 @@ export function buildSkillSendPayload(
       : slashSkillCommand
         ? [slashSkillCommand.skill]
         : [];
-  const assistantPrompt = formatSkillInstructionPrompt(skillsForPrompt);
+  const assistantPrompt = formatSkillInstructionPrompt(skillsForPrompt, {
+    providerId: options.providerId,
+  });
   const displayText =
     submittedSkills.length > 0
       ? submittedText.trim()

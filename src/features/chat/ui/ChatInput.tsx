@@ -184,7 +184,9 @@ export function ChatInput({
   onDraftChange,
   selectedSkills: selectedSkillsProp,
   onSkillsChange,
-  fileMentionRoots,
+  skillProjectDirs,
+  fileMentionProjectDirs: fileMentionProjectDirsProp,
+  skillProviderId,
   attachmentsEnabled = true,
   className,
   personaPicker,
@@ -443,8 +445,11 @@ export function ChatInput({
       null,
     [availableProjects, selectedProjectId],
   );
-  const effectiveFileMentionRoots =
-    fileMentionRoots ?? selectedProject?.workingDirs;
+  const selectedProjectWorkingDirs = selectedProject?.workingDirs;
+  const skillMentionProjectDirs =
+    skillProjectDirs ?? selectedProjectWorkingDirs;
+  const fileMentionProjectDirs =
+    fileMentionProjectDirsProp ?? selectedProjectWorkingDirs;
   const stickyPersona = activePersona;
   const selectedPersonasForChips = useMemo(
     () =>
@@ -533,7 +538,9 @@ export function ChatInput({
     skillMentionItems,
   } = useMentionHandlers({
     personas,
-    projectWorkingDirs: effectiveFileMentionRoots,
+    skillProjectDirs: skillMentionProjectDirs,
+    fileMentionProjectDirs,
+    skillProviderId,
     skillsEnabled: scopedControls.skills,
     fileMentionsEnabled: scopedControls.fileMentions,
     text,
@@ -591,6 +598,7 @@ export function ChatInput({
     selectedSkillsRef,
     selectedChipsRef: selectedMessageChipsRef,
     selectedPersonaId,
+    skillProviderId,
     onSend,
     setSelectedSkills,
     resolveSkillSlashCommand,

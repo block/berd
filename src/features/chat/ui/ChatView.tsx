@@ -23,6 +23,7 @@ import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
+import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import {
   useChatSessionStore,
   type ChatSession,
@@ -165,6 +166,7 @@ export function ChatView({
     onComposerHandoffTarget,
     sessionId,
   ]);
+  const workspaceRepository = useWorkspaceRepository();
   const effectiveSession = controller.session ?? activeSession ?? null;
   const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
     leftViewportOcclusionPx,
@@ -173,7 +175,9 @@ export function ChatView({
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const terminalWorkspacePath = useChatSessionStore((s) =>
     effectiveSession?.id
-      ? (s.activeWorkspaceBySession[effectiveSession.id]?.path ?? null)
+      ? workspaceRepository.chatWorkspaces(effectiveSession, {
+          activePath: s.activeWorkspaceBySession[effectiveSession.id]?.path,
+        }).primary?.path
       : null,
   );
   const { fallbackCwd: terminalFallbackCwd } =
@@ -217,24 +221,7 @@ export function ChatView({
       : effectiveSession?.workingDir;
   const terminalCwd =
     terminalWorkspacePath ?? sessionTerminalCwd ?? projectTerminalCwd ?? null;
-  const fileMentionRoots = useMemo(() => {
-    const roots = new Map<string, string>();
-    for (const root of [
-      terminalWorkspacePath,
-      sessionTerminalCwd,
-      ...(controller.project?.workingDirs ?? []),
-      terminalCwd,
-    ]) {
-      const normalizedRoot = root?.trim();
-      if (normalizedRoot) roots.set(normalizedRoot, normalizedRoot);
-    }
-    return Array.from(roots.values());
-  }, [
-    controller.project?.workingDirs,
-    sessionTerminalCwd,
-    terminalCwd,
-    terminalWorkspacePath,
-  ]);
+
   // When a user action closes/collapses the terminal there is nowhere else
   // meaningful to land focus, so return it to the chat composer.
   const focusChatComposer = useCallback(() => {
@@ -377,8 +364,20 @@ export function ChatView({
       };
     }
 
-    return composerHandoffActive ? { autoFocus: false } : undefined;
-  }, [composerHandoffActive, effectiveSession?.intent, isReadOnly]);
+    if (!controller.skillsEnabled || composerHandoffActive) {
+      return {
+        ...(!controller.skillsEnabled ? { skills: false } : {}),
+        ...(composerHandoffActive ? { autoFocus: false } : {}),
+      };
+    }
+
+    return undefined;
+  }, [
+    composerHandoffActive,
+    controller.skillsEnabled,
+    effectiveSession?.intent,
+    isReadOnly,
+  ]);
   const shouldStageTranscript = shouldStageInitialTranscript(
     controller.messages,
     controller.isLoadingHistory,
@@ -519,6 +518,9 @@ export function ChatView({
             isAgentBuilderSession ? agentBuilderComposerPlaceholder : undefined
           }
           controls={chatInputControls}
+          skillProjectDirs={controller.skillProjectDirs}
+          fileMentionProjectDirs={controller.fileMentionProjectDirs}
+          skillProviderId={controller.selectedProvider}
           composerActions={{
             onSend: controller.handleSend,
             onSteerMessage: controller.steerDraftMessage,
@@ -559,7 +561,6 @@ export function ChatView({
           onDraftChange={controller.handleDraftChange}
           selectedSkills={controller.selectedSkills}
           onSkillsChange={controller.handleSkillsChange}
-          fileMentionRoots={fileMentionRoots}
           personaPicker={{
             personas: controller.personas,
             selectedPersonaId: controller.selectedPersonaId,
@@ -780,7 +781,10 @@ export function ChatView({
           ref={rightRailRef}
           session={effectiveSession}
           project={controller.project}
-          sessionWorkingDir={effectiveSession?.workingDir}
+          sessionWorkingDir={
+            workspaceRepository.chatWorkspaces(effectiveSession).primary
+              ?.path ?? effectiveSession?.workingDir
+          }
           onDraftPromoted={onAgentBuilderSaved}
           onAgentBuilderClose={onAgentBuilderClose}
           builderColumnClassName={
@@ -796,6 +800,7 @@ export function ChatView({
           terminalRootRef={terminalRootRef}
           getTerminalDockTargetForPointer={getTerminalDockTargetForPointer}
           onTerminalDockPreviewChange={setTerminalDockPreview}
+          onOpenTerminalAtPath={terminal.openAtPath}
         />
       </div>
     </ArtifactPolicyProvider>

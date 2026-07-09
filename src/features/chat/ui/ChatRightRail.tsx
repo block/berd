@@ -58,6 +58,7 @@ interface ChatRightRailProps {
   contextPanelLeftViewportOcclusionPx?: number;
   onRequestCloseContextPanel?: () => void;
   onToggleTerminal?: () => void;
+  onOpenTerminalAtPath?: (path: string) => void;
 }
 
 export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
@@ -79,6 +80,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       contextPanelLeftViewportOcclusionPx = 0,
       onRequestCloseContextPanel,
       onToggleTerminal,
+      onOpenTerminalAtPath,
     },
     ref,
   ) {
@@ -289,6 +291,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
           leftViewportOcclusionPx={contextPanelLeftViewportOcclusionPx}
           onRequestClose={onRequestCloseContextPanel}
           onToggleTerminal={onToggleTerminal}
+          onOpenTerminalAtPath={onOpenTerminalAtPath}
         />
         {railPreviewActive ? (
           <TerminalDockPreview

@@ -77,6 +77,7 @@ interface ChatContextPanelProps {
   leftViewportOcclusionPx?: number;
   onRequestClose?: () => void;
   onToggleTerminal?: () => void;
+  onOpenTerminalAtPath?: (path: string) => void;
 }
 
 export function ChatContextPanel({
@@ -91,6 +92,7 @@ export function ChatContextPanel({
   leftViewportOcclusionPx = 0,
   onRequestClose,
   onToggleTerminal,
+  onOpenTerminalAtPath,
 }: ChatContextPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
@@ -209,32 +211,13 @@ export function ChatContextPanel({
           allowVerticalShrink ? "min-h-0 shrink overflow-hidden" : "shrink-0",
           frameMode === "docking" && "relative",
           frameMode === "docked" ? "overflow-hidden" : "overflow-visible",
-          // Pin the fixed-width panel to the rail's right edge so the rail's
-          // own growing/shrinking width reveals and hides it right-to-left
-          // instead of unfolding its left edge. Cross-axis `self-end` (not
-          // `ml-auto`) is required: in this flex column the panel is wider than
-          // the rail for the whole width transition, and auto margins collapse
-          // to 0 under overflow, whereas flex-end alignment still pins the
-          // trailing (right) edge and lets the leading edge overflow into the
-          // rail's clip.
-          frameMode === "docked" && "self-end",
         )}
         style={
           {
-            // In the normal docked case the panel keeps a fixed width and the
-            // enclosing rail animates its own width, clipping this panel to
-            // produce the right-to-left reveal. The docking (compact -> docked)
-            // reflow still animates width here so the panel grows into place.
-            width:
-              frameMode === "docked"
-                ? panelWidth
-                : isOpen && !isCompactViewport
-                  ? panelWidth
-                  : 0,
-            transition:
-              frameMode === "docking" && widthTransitionEnabled
-                ? `width ${reflowDuration}ms ease`
-                : "none",
+            width: isOpen && !isCompactViewport ? panelWidth : 0,
+            transition: widthTransitionEnabled
+              ? `width ${reflowDuration}ms ease`
+              : "none",
             "--context-panel-width": `${panelWidth}px`,
           } as CSSProperties
         }
@@ -283,6 +266,7 @@ export function ChatContextPanel({
                   sessionWorkingDir={sessionWorkingDir}
                   terminalOpen={terminalOpen}
                   onToggleTerminal={onToggleTerminal}
+                  onOpenTerminalAtPath={onOpenTerminalAtPath}
                 />
               </aside>
             </motion.div>
