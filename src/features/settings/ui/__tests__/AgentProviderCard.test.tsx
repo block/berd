@@ -464,7 +464,9 @@ describe("AgentProviderCard", () => {
     expect(clearAgentSetupStatus).not.toHaveBeenCalled();
   });
 
-  it("surfaces install source and version from the shared report", () => {
+  it("surfaces install source and version from the shared report", async () => {
+    const user = userEvent.setup();
+
     renderCard(
       <AgentProviderCard
         provider={createProvider({ supportsAuth: false })}
@@ -476,6 +478,8 @@ describe("AgentProviderCard", () => {
         })}
       />,
     );
+
+    await user.click(screen.getByRole("button", { name: /claude provider/i }));
 
     expect(
       screen.getByText("Installed via Homebrew · v1.2.3"),
@@ -512,6 +516,7 @@ describe("AgentProviderCard", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: /claude provider/i }));
     expect(screen.getByText("Update available → v1.3.0")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /update claude/i }));
@@ -809,7 +814,9 @@ describe("AgentProviderCard", () => {
     });
   });
 
-  it("flags the missing ACP bridge in danger text when only the main CLI is installed", () => {
+  it("flags the missing ACP bridge in danger text when only the main CLI is installed", async () => {
+    const user = userEvent.setup();
+
     // Same partial-install scenario as above: Codex's CLI is on PATH but the
     // codex-acp bridge is absent. The card body must name the missing bridge in
     // danger-colored text so it isn't mistaken for a healthy install, while
@@ -850,6 +857,8 @@ describe("AgentProviderCard", () => {
         })}
       />,
     );
+
+    await user.click(screen.getAllByRole("button", { name: /codex/i })[0]);
 
     const missing = screen.getByText(/codex-acp not installed/i);
     expect(missing).toBeInTheDocument();

@@ -40,7 +40,7 @@ export function getModelCacheRefreshProviderIds(
     : getModelProviders();
   if (byoKeyProvidersEnabled) {
     for (const provider of modelProviders) {
-      if (isByoKeyProvider(provider)) {
+      if (isByoKeyProvider(provider) || provider.customProvider === true) {
         ids.add(provider.id);
       }
     }

@@ -128,15 +128,15 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     ).toEqual([providers[0]]);
   });
 
-  it("defaults to the build feature (off in tests), keeping fields-bearing providers out", () => {
-    // Without an explicit option the function reads getBuildFeatureState(),
-    // which is off by default — so a normal build behaves as it did before the
-    // bring-your-own-key feature.
+  it("defaults to the build feature (on by default), letting BYO providers bypass the allowlist", () => {
+    // Without an explicit option the function reads getBuildFeatureState().
+    // byoKeyProviders defaults ON (restricted builds opt out with
+    // VITE_BYO_KEY_PROVIDERS=0), so goose-setup-catalog BYO providers pass.
     expect(
       filterModelProvidersForRuntimeConfig(
         fieldsProviders,
         DEFAULT_RUNTIME_CONFIG,
       ),
-    ).toEqual([providers[0]]);
+    ).toEqual([providers[0], fieldsProviders[3]]);
   });
 });

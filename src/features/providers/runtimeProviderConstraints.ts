@@ -36,7 +36,8 @@ export function filterModelProvidersForRuntimeConfig(
   return providers.filter(
     (provider) =>
       allowlist.has(provider.id) ||
-      (byoKeyProvidersEnabled && isByoKeyProvider(provider)),
+      (byoKeyProvidersEnabled &&
+        (isByoKeyProvider(provider) || provider.customProvider === true)),
   );
 }
 

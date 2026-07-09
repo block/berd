@@ -146,7 +146,7 @@ describe("selectByoKeyProviders", () => {
         entry("ollama"),
         entry("openai", false),
       ]).map((provider) => provider.id),
-    ).toEqual(["openai", "anthropic"]);
+    ).toEqual(["openai", "anthropic", "google"]);
   });
 
   it("selects only the editable Databricks host field", () => {

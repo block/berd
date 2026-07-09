@@ -31,7 +31,7 @@ describe("buildProfile", () => {
       agentToolsTip: true,
       automations: true,
       builderbot: true,
-      byoKeyProviders: false,
+      byoKeyProviders: true,
       telemetry: true,
       voiceDictation: true,
       kgooseConnections: true,
@@ -40,18 +40,18 @@ describe("buildProfile", () => {
     });
   });
 
-  it("enables bring-your-own-key providers only when VITE_BYO_KEY_PROVIDERS is 1 (default off)", async () => {
+  it("disables bring-your-own-key providers when VITE_BYO_KEY_PROVIDERS is 0 (inverse-positive default-on)", async () => {
     vi.resetModules();
-    vi.stubEnv("VITE_BYO_KEY_PROVIDERS", "1");
+    vi.stubEnv("VITE_BYO_KEY_PROVIDERS", "0");
 
     const { getBuildFeatureState: getFreshBuildFeatureState } = await import(
       "./buildProfile"
     );
 
-    expect(getFreshBuildFeatureState().byoKeyProviders).toBe(true);
+    expect(getFreshBuildFeatureState().byoKeyProviders).toBe(false);
   });
 
-  it("keeps bring-your-own-key providers off for any VITE_BYO_KEY_PROVIDERS value other than 1", async () => {
+  it("keeps bring-your-own-key providers on for any VITE_BYO_KEY_PROVIDERS value other than 0", async () => {
     vi.resetModules();
     vi.stubEnv("VITE_BYO_KEY_PROVIDERS", "true");
 
@@ -59,7 +59,7 @@ describe("buildProfile", () => {
       "./buildProfile"
     );
 
-    expect(getFreshBuildFeatureState().byoKeyProviders).toBe(false);
+    expect(getFreshBuildFeatureState().byoKeyProviders).toBe(true);
   });
 
   it("disables telemetry when VITE_TELEMETRY is set to 0 (inverse-positive default-on)", async () => {

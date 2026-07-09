@@ -264,7 +264,9 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
     expect(ids).toContain("databricks_v2");
   });
 
-  it("defaults to the build feature (off in tests), wholesale-replacing the catalog", async () => {
+  it("defaults to the build feature (on by default), preserving fields-bearing entries", async () => {
+    // byoKeyProviders defaults ON (restricted builds opt out with
+    // VITE_BYO_KEY_PROVIDERS=0), so the merge path is the default behavior.
     seedFieldsBearingEntry();
 
     await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG);
@@ -272,7 +274,7 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
     const ids = useProviderCatalogStore
       .getState()
       .entries.map((entry) => entry.id);
-    expect(ids).not.toContain("openai");
+    expect(ids).toContain("openai");
     expect(ids).toContain("databricks_v2");
   });
 });

@@ -29,11 +29,12 @@ export function mapProviderSetupCatalogEntryDto(
 
 // Model providers berd surfaces from goose's setup catalog so users can bring
 // their own API key. goose serves these with their own secret API-key `fields`
-// (OPENAI_API_KEY / ANTHROPIC_API_KEY); the runtime-config catalog does not, so
-// they are merged into the catalog store at startup.
+// (OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY); the runtime-config
+// catalog does not, so they are merged into the catalog store at startup.
 export const SETUP_CATALOG_BYO_KEY_PROVIDER_IDS = [
   "openai",
   "anthropic",
+  "google",
 ] as const;
 
 const SETUP_CATALOG_BYO_KEY_PROVIDER_ID_SET = new Set<string>(

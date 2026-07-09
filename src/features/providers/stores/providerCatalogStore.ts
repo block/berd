@@ -15,6 +15,7 @@ interface ProviderCatalogActions {
   load: () => Promise<ProviderCatalogEntry[]>;
   setEntries: (entries: ProviderCatalogEntry[]) => void;
   mergeEntries: (entries: ProviderCatalogEntry[]) => void;
+  removeEntries: (providerIds: string[]) => void;
   reset: () => void;
 }
 
@@ -54,6 +55,18 @@ export const useProviderCatalogStore = create<ProviderCatalogStore>((set) => ({
       const kept = state.entries.filter((entry) => !incomingIds.has(entry.id));
       return {
         entries: [...kept, ...entries],
+        loading: false,
+        loaded: true,
+        error: null,
+      };
+    });
+  },
+
+  removeEntries: (providerIds) => {
+    set((state) => {
+      const ids = new Set(providerIds);
+      return {
+        entries: state.entries.filter((entry) => !ids.has(entry.id)),
         loading: false,
         loaded: true,
         error: null,

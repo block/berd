@@ -505,7 +505,8 @@
   "providers": {
     "agents": {
       "applyUpdates": "Update",
-      "description": "Goose is built into Block. Install others to add new agents.",
+      "description": "Connect a model provider to use Goose, or connect another agent harness.",
+      "refresh": "Refresh",
       "errors": {
         "genericSetupFailure": "Setup hit a snag.",
         "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal.",
@@ -533,6 +534,15 @@
       "troubleshootInChat": "Troubleshoot in chat",
       "updateLabel": "Update {{name}}"
     },
+    "catalog": {
+      "loading": "Loading provider catalog..."
+    },
+    "connectionHints": {
+      "keyRejected": "That key was rejected — double-check it in your provider's console. ({{message}})",
+      "urlLooksWrong": "The server answered, but not at that path — check the URL (did you include /v1?). ({{message}})",
+      "unreachable": "Can't reach the server — check the URL and make sure it's running. ({{message}})",
+      "rateLimited": "The key works, but the provider is rate-limiting requests. Try again shortly. ({{message}})"
+    },
     "custom": {
       "actions": {
         "addHeader": "Add header",
@@ -550,18 +560,18 @@
         "saving": "Saving...",
         "showApiKey": "Show API key"
       },
-      "addButton": "Add custom provider",
+      "addButton": "Add provider",
       "addTitle": "Add custom provider",
       "confirmDelete": "This removes {{name}} and its saved API key.",
       "confirmDeleteTitle": "Delete {{name}}?",
-      "description": "Connect an OpenAI-compatible, Anthropic-compatible, or local model endpoint.",
+      "description": "Connect a model provider using its API endpoint and key.",
       "editTitle": "Edit custom provider",
       "emptyHeaders": "No custom headers.",
       "emptyModels": "Add at least one model.",
       "engines": {
-        "anthropic_compatible": "Anthropic-compatible",
-        "ollama_compatible": "Ollama-compatible",
-        "openai_compatible": "OpenAI-compatible"
+        "anthropic_compatible": "Anthropic API",
+        "ollama_compatible": "Ollama (local)",
+        "openai_compatible": "OpenAI API"
       },
       "errors": {
         "deleteFailed": "Couldn't delete the custom provider.",
@@ -579,7 +589,7 @@
         "basePathPlaceholder": "/v1/chat/completions",
         "displayName": "Display name",
         "displayNamePlaceholder": "My provider",
-        "engine": "Engine",
+        "engine": "API type",
         "headerKey": "Header",
         "headerValue": "Value",
         "headers": "Custom headers",
@@ -598,7 +608,7 @@
         "apiUrlInvalid": "Enter a valid HTTP or HTTPS URL.",
         "apiUrlRequired": "API URL is required.",
         "displayNameRequired": "Display name is required.",
-        "engineRequired": "Choose a provider engine.",
+        "engineRequired": "Choose an API type.",
         "headerDuplicate": "Header names must be unique.",
         "headerNameInvalid": "Header names can only contain valid HTTP token characters.",
         "headerNameRequired": "Header name is required.",
@@ -609,24 +619,29 @@
         "template": "Start from template"
       },
       "templates": {
-        "compatibility": {
-          "all": "All compatibility types"
-        },
         "clear": "Clear template",
+        "compatibility": {
+          "all": "All types"
+        },
         "empty": "No templates available yet.",
-        "manual": "Fully custom",
+        "manual": "Add a custom provider",
         "manualDescription": "Start from a blank provider configuration.",
+        "manualLead": "Provider not in the list?",
         "searchPlaceholder": "Search templates",
         "useTemplate": "Use a template",
         "useTemplateDescription": "Start with endpoint and model defaults for a known provider."
       }
     },
-    "catalog": {
-      "loading": "Loading provider catalog..."
-    },
     "disconnect": "Disconnect",
+    "getApiKey": "Get an API key",
+    "loadingModels": "Loading models...",
+    "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
     "models": {
-      "description": "AI models power your agents. Goose requires one to work, but some agents bring their own.",
+      "active": "Active",
+      "connectPrompt": "Connect a model provider",
+      "description": "Goose requires an AI model to run.",
+      "summaryLabel": "Model provider",
+      "summaryLabelPlural": "Model providers",
       "details": {
         "configuredUrl": "Configured URL"
       },
@@ -654,10 +669,9 @@
         }
       },
       "checkingStatus": "Checking provider status...",
-      "title": "Models"
+      "title": "Model providers"
     },
-    "loadingModels": "Loading models...",
-    "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
+    "needsAttention": "Needs attention",
     "saved": "Saved",
     "saving": "Saving...",
     "setupDetour": {

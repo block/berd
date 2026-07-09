@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
@@ -14,6 +15,7 @@ import {
   renderSetupMessage,
   renderInlineCodeMessage,
 } from "./modelProviderHelpers";
+import { connectionHintKeyForError } from "@/features/providers/lib/connectionErrorHints";
 
 interface ModelRefreshMessageProps {
   syncing: boolean;
@@ -39,12 +41,15 @@ export function ModelRefreshMessage({
   }
 
   if (warning) {
+    const hintKey = connectionHintKeyForError(warning);
     return (
       <p
         role="status"
         className="rounded-sm border border-warning bg-warning/20 px-2.5 py-2 text-xs text-warning"
       >
-        {t("providers.modelRefreshWarning", { message: warning })}
+        {hintKey
+          ? t(hintKey, { message: warning })
+          : t("providers.modelRefreshWarning", { message: warning })}
       </p>
     );
   }
@@ -94,7 +99,7 @@ export function ConnectedFieldsPanel({
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="focus-override mx-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+      className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
     >
       {fields.map((field) => {
         const isEditing = editingKey === field.key;
@@ -216,6 +221,7 @@ interface SetupFieldsPanelProps {
   setupMessage: string | null;
   fieldSetupDescription: string | null;
   isConnected: boolean;
+  docsUrl?: string;
   onDraftChange: (key: string, value: string) => void;
   onSaveSetup: () => void;
 }
@@ -234,6 +240,7 @@ export function SetupFieldsPanel({
   setupMessage,
   fieldSetupDescription,
   isConnected,
+  docsUrl,
   onDraftChange,
   onSaveSetup,
 }: SetupFieldsPanelProps) {
@@ -242,10 +249,25 @@ export function SetupFieldsPanel({
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="focus-override mx-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+      className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
     >
       {!isConnected && fieldSetupDescription ? (
-        <p className="text-xs text-muted-foreground">{fieldSetupDescription}</p>
+        <p className="text-xs text-muted-foreground">
+          {fieldSetupDescription}
+          {docsUrl ? (
+            <>
+              {" "}
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                onClick={() => void openUrl(docsUrl)}
+              >
+                {t("providers.getApiKey")}
+              </Button>
+            </>
+          ) : null}
+        </p>
       ) : null}
       {fields.map((field) => {
         const fieldValue = resolveFieldValue(field, fieldValueMap);

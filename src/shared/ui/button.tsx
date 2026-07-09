@@ -79,7 +79,7 @@ const buttonVariants = cva(
         variant: "ghost",
         flush: true,
         className:
-          "bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
+          "bg-transparent px-0 text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
       },
       {
         variant: "link",
@@ -256,11 +256,9 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
     /**
      * Inline geometry for ghost buttons that sit flush with surrounding
      * content (list section actions, inline "show more" affordances).
-     * Rests at muted-foreground and raises the label on hover instead of
-     * painting a background pill. Only meaningful on ghost; other variants
-     * ignore it (dev builds warn). Pair with px-0 spacing via size or
-     * className layout-only utilities where the design calls for true
-     * edge alignment.
+     * Removes horizontal padding, rests at muted-foreground, and raises the
+     * label on hover instead of painting a background pill. Only meaningful
+     * on ghost; other variants ignore it (dev builds warn).
      */
     flush?: boolean;
     asChild?: boolean;

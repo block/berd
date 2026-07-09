@@ -130,10 +130,11 @@ export async function runChatRuntimeStartup(): Promise<void> {
     });
   };
 
-  // Merge goose's BYO setup catalog entries into the catalog. For openai and
-  // anthropic this provides API-key fields; for BYO Databricks builds this
-  // provides the editable DATABRICKS_HOST field after the runtime default URL is
-  // removed. Gated behind VITE_BYO_KEY_PROVIDERS=1.
+  // Merge goose's BYO setup catalog entries into the catalog. For openai,
+  // anthropic, and google this provides API-key fields; for external
+  // Databricks builds this provides the editable DATABRICKS_HOST field when
+  // the runtime config injects no managed host. On by default; restricted
+  // builds opt out with VITE_BYO_KEY_PROVIDERS=0.
   const loadSetupCatalog = async () => {
     if (!getBuildFeatureState().byoKeyProviders) {
       return;

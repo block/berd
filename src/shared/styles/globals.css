@@ -400,10 +400,17 @@
   /* Theme-adaptive glass for floating popovers/modals — mirrors the sidebar
      glass (light here, dark in the .dark block) so dialogs follow the theme
      and inherit the correct foreground, unlike the always-light tile glass. */
-  --surface-popover-glass: rgba(255, 255, 255, 0.8);
-  /* Scrim behind modal/dialog/sheet overlays. Intentionally theme-independent
-     (it darkens whatever is behind it), so the .dark value matches. */
-  --overlay-scrim: rgba(0, 0, 0, 0.3);
+  --surface-popover-glass: rgba(255, 255, 255, 0.2);
+  /* Overlay + dialog glass recipe: depth comes from two levels of defocus,
+     not darkness. In light mode the scrim tints WHITE — the page behind
+     brightens like a macOS sheet backdrop instead of graying out — while
+     dark mode dims. The overlay blur keeps the page recognizable ("paused,
+     still there"); the dialog pane blurs much harder with a thin tint so
+     content ghosts through it. Blur radii stay modest for WKWebView
+     performance (see --backdrop-composer-glass). */
+  --overlay-scrim: rgba(255, 255, 255, 0.12);
+  --backdrop-overlay-glass: blur(8px) saturate(130%) brightness(1.03);
+  --backdrop-popover-glass: blur(24px) saturate(150%);
   --overlay-global-composer-shim: rgba(255, 255, 255, 0.28);
   --overlay-global-composer-shim-peak: rgba(255, 255, 255, 0.96);
   --overlay-global-composer-shim-clear: rgba(255, 255, 255, 0);
@@ -834,8 +841,10 @@
   --surface-glass-strong: rgba(255, 255, 255, 0.72);
   --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
   --surface-glass-strong-fg: var(--color-gray-900);
-  --surface-popover-glass: rgba(0, 0, 0, 0.8);
-  --overlay-scrim: rgba(0, 0, 0, 0.3);
+  --surface-popover-glass: rgba(20, 20, 20, 0.35);
+  --overlay-scrim: rgba(0, 0, 0, 0.25);
+  --backdrop-overlay-glass: blur(8px) saturate(130%);
+  --backdrop-popover-glass: blur(24px) saturate(150%);
   --overlay-global-composer-shim: rgba(255, 255, 255, 0.18);
   --overlay-global-composer-shim-peak: rgba(255, 255, 255, 0.72);
   --overlay-global-composer-shim-clear: rgba(255, 255, 255, 0);

@@ -1,9 +1,20 @@
 import type {
   CustomProviderConfigDto,
   CustomProviderCreateRequestUnstable,
+  CustomProviderCreateResponseUnstable as CustomProviderCreateResponse,
+  CustomProviderDeleteResponseUnstable as CustomProviderDeleteResponse,
+  CustomProviderReadResponseUnstable as CustomProviderReadResponse,
   CustomProviderUpdateRequestUnstable,
+  CustomProviderUpdateResponseUnstable as CustomProviderUpdateResponse,
+  ProviderTemplateCatalogEntryDto,
+  ProviderTemplateDto,
 } from "@aaif/goose-sdk";
 import { getClient } from "@/shared/api/acpConnection";
+import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import type {
+  CustomProviderFormat,
+  CustomProviderUpsertRequest,
+} from "@/features/providers/lib/customProviderTypes";
 import type {
   RuntimeConfig,
   RuntimeCustomProvider,
@@ -174,4 +185,99 @@ export async function syncRuntimeCustomProviders(
   for (const provider of config.goose.modelProviders) {
     await syncRuntimeCustomProvider(provider);
   }
+}
+
+// --- User-driven custom provider CRUD + template catalog ------------------
+// Restored from the pre-#291 provider flow, adapted to the current
+// providerModelCacheStore (the old inventory cache no longer exists).
+
+function invalidateProviderModels(providerId: string) {
+  useProviderModelCacheStore.getState().invalidateProvider(providerId);
+}
+
+export interface CustomProviderSummary {
+  providerId: string;
+  displayName: string;
+  description?: string;
+  configured: boolean;
+  modelCount: number;
+}
+
+/**
+ * List the user's existing custom providers from the live provider
+ * inventory (entries with providerType "Custom").
+ */
+export async function listCustomProviders(): Promise<CustomProviderSummary[]> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersList({});
+  return response.entries
+    .filter((entry) => entry.providerType === "Custom")
+    .map((entry) => ({
+      providerId: entry.providerId,
+      displayName: entry.providerName,
+      description: entry.description || undefined,
+      configured: entry.configured,
+      modelCount: entry.models.length,
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export async function listCustomProviderCatalog(
+  format?: CustomProviderFormat,
+): Promise<ProviderTemplateCatalogEntryDto[]> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersCatalogList(
+    format ? { format } : {},
+  );
+  return response.providers;
+}
+
+export async function getCustomProviderTemplate(
+  providerId: string,
+): Promise<ProviderTemplateDto> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersCatalogTemplate({
+    providerId,
+  });
+  return response.template;
+}
+
+export async function createCustomProvider(
+  input: CustomProviderUpsertRequest,
+): Promise<CustomProviderCreateResponse> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersCustomCreate(input);
+  invalidateProviderModels(response.providerId);
+  return response;
+}
+
+export async function readCustomProvider(
+  providerId: string,
+): Promise<CustomProviderReadResponse> {
+  const client = await getClient();
+  return client.goose.GooseUnstableProvidersCustomRead({ providerId });
+}
+
+export async function updateCustomProvider(
+  providerId: string,
+  input: CustomProviderUpsertRequest,
+): Promise<CustomProviderUpdateResponse> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersCustomUpdate({
+    ...input,
+    providerId,
+  });
+  invalidateProviderModels(providerId);
+  return response;
+}
+
+export async function deleteCustomProvider(
+  providerId: string,
+): Promise<CustomProviderDeleteResponse> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersCustomDelete({
+    providerId,
+  });
+  invalidateProviderModels(providerId);
+  return response;
 }

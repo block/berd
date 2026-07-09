@@ -22,6 +22,41 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+interface ExpandableCardProps extends React.ComponentProps<"div"> {
+  active?: boolean;
+  interactive?: boolean;
+}
+
+/**
+ * Compact settings-style card for surfaces that expand in place.
+ * Use for row/card hybrids whose collapsed state is the primary control.
+ */
+function ExpandableCard({
+  active = false,
+  interactive = false,
+  className,
+  ...props
+}: ExpandableCardProps) {
+  return (
+    <div
+      {...getDesignSystemMetadata({
+        component: "Card",
+        slot: "expandable-card",
+        source: "src/shared/ui/card.tsx",
+        customClassName: typeof className === "string" ? className : undefined,
+      })}
+      data-slot="expandable-card"
+      className={cn(
+        "flex flex-col rounded-md bg-background p-3 text-foreground transition-colors",
+        active && "bg-linear-to-b from-primary/10 to-primary/10",
+        interactive && "cursor-pointer",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -129,6 +164,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
 
 export {
   Card,
+  ExpandableCard,
   CardHeader,
   CardFooter,
   CardTitle,

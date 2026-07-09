@@ -1,8 +1,37 @@
 import type * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { Slot } from "@radix-ui/react-slot";
 import { XIcon } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
+
+/**
+ * Dialog — the app's one modal surface.
+ *
+ * Compose what the use case needs; the anatomy is built in, not forked into
+ * separate components (industry-standard single-dialog model):
+ *
+ * - `DialogContent` owns the glass surface, close button, and a `size`
+ *   preset ("md" | "lg" | "xl") instead of ad-hoc `max-w-*` classes.
+ * - Simple dialogs: `DialogHeader` + content + `DialogFooter`, everything
+ *   scrolls together (default).
+ * - Content-heavy dialogs: add `DialogBody` around the scrollable middle.
+ *   Its presence automatically pins the header and footer, moves padding to
+ *   the zones, and gives the footer its divider — no separate "structured"
+ *   component. Use `asChild` to make the body a `<form>` so submit/Enter
+ *   semantics live on the scroll region.
+ *
+ * Semantic variants stay separate on purpose: `AlertDialog` (interruptive)
+ * and `ConfirmDialog` (yes/no preset). Everything else is this Dialog.
+ */
+
+type DialogSize = "md" | "lg" | "xl";
+
+const DIALOG_SIZE_TO_MAX_W: Record<DialogSize, string> = {
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-2xl",
+};
 
 function Dialog({
   ...props
@@ -36,7 +65,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[60] bg-[var(--overlay-scrim)] backdrop-blur-sm",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[60] bg-[var(--overlay-scrim)] [backdrop-filter:var(--backdrop-overlay-glass)] [-webkit-backdrop-filter:var(--backdrop-overlay-glass)]",
         className,
       )}
       {...props}
@@ -50,11 +79,13 @@ function DialogContent({
   overlayClassName,
   positionerClassName,
   showCloseButton = true,
+  size = "lg",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   overlayClassName?: string;
   positionerClassName?: string;
   showCloseButton?: boolean;
+  size?: DialogSize;
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
@@ -69,7 +100,12 @@ function DialogContent({
         <DialogPrimitive.Content
           data-slot="dialog-content"
           className={cn(
-            "pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full max-w-lg gap-4 overflow-y-auto rounded-md bg-[var(--surface-popover-glass)] p-6 shadow-[var(--shadow-modal)] backdrop-blur-md data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+            "group/dialog pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full gap-4 overflow-y-auto rounded-md bg-[var(--surface-popover-glass)] p-6 shadow-[var(--shadow-modal)] [backdrop-filter:var(--backdrop-popover-glass)] [-webkit-backdrop-filter:var(--backdrop-popover-glass)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+            // Zoned mode: a DialogBody child switches the content to a pinned
+            // header / scrollable body / pinned footer column. Padding moves
+            // from the surface to the zones (see DialogHeader/Body/Footer).
+            "has-data-[slot=dialog-body]:flex has-data-[slot=dialog-body]:flex-col has-data-[slot=dialog-body]:gap-0 has-data-[slot=dialog-body]:overflow-hidden has-data-[slot=dialog-body]:p-0",
+            DIALOG_SIZE_TO_MAX_W[size],
             className,
           )}
           {...props}
@@ -91,7 +127,36 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      className={cn(
+        "flex flex-col gap-1.5 text-center sm:text-left",
+        // Zoned mode: pinned above the scrolling DialogBody, owns its padding.
+        "group-has-data-[slot=dialog-body]/dialog:shrink-0 group-has-data-[slot=dialog-body]/dialog:px-6 group-has-data-[slot=dialog-body]/dialog:pt-6 group-has-data-[slot=dialog-body]/dialog:pb-4",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * DialogBody — opt-in scrollable middle zone. Rendering one automatically
+ * pins DialogHeader/DialogFooter and moves padding to the zones. Use
+ * `asChild` with a `<form>` when the body is a single form, so submit and
+ * Enter semantics live on the scroll region.
+ */
+function DialogBody({
+  className,
+  asChild = false,
+  ...props
+}: React.ComponentProps<"div"> & { asChild?: boolean }) {
+  const Comp = asChild ? Slot : "div";
+  return (
+    <Comp
+      data-slot="dialog-body"
+      className={cn(
+        "min-h-0 flex-1 space-y-4 overflow-y-auto px-6 pt-1 pb-6",
+        className,
+      )}
       {...props}
     />
   );
@@ -102,7 +167,9 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        "flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end",
+        // Zoned mode: pinned below the scrolling DialogBody with a divider.
+        "group-has-data-[slot=dialog-body]/dialog:shrink-0 group-has-data-[slot=dialog-body]/dialog:border-t group-has-data-[slot=dialog-body]/dialog:border-border/80 group-has-data-[slot=dialog-body]/dialog:px-6 group-has-data-[slot=dialog-body]/dialog:py-4",
         className,
       )}
       {...props}
@@ -118,7 +185,7 @@ function DialogTitle({
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "font-display text-lg font-medium leading-none tracking-[-0.01em]",
+        "font-display text-base font-medium leading-none tracking-[-0.01em]",
         className,
       )}
       {...props}
@@ -141,6 +208,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,

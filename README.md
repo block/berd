@@ -27,17 +27,23 @@ development, run:
 VITE_PREVIEW_READY_UPDATE=true just dev
 ```
 
-To surface the bring-your-own-key model providers (OpenAI/Anthropic) so you can
-enter your own API key, opt in with the `VITE_BYO_KEY_PROVIDERS` build feature.
-It defaults off: a normal `just dev` and the official release build expose only
-`databricks_v2` and no provider key-entry UI. Enable it for dev with:
+Bring-your-own-key model providers (OpenAI/Anthropic/Google Gemini) are on by
+default: a normal `just dev` shows their API-key entry rows alongside the
+managed `databricks_v2` provider. A restricted build opts out with
+`VITE_BYO_KEY_PROVIDERS=0` (the official internal release build does this
+explicitly in `scripts/buildkite/release/build-macos.sh`).
+
+To also simulate the external-build Databricks posture in dev — no injected
+`DATABRICKS_HOST`, so the Databricks row shows an editable host field instead
+of the managed read-only URL — set the env var explicitly:
 
 ```bash
 VITE_BYO_KEY_PROVIDERS=1 just dev
 ```
 
-For a build, pass the same env var to the build command (e.g.
-`VITE_BYO_KEY_PROVIDERS=1 just bundle`).
+(In debug builds, `VITE_BYO_KEY_PROVIDERS=1` additionally strips the default
+Databricks host from the bundled runtime config; release builds achieve the
+same via the build script's runtime-config rewrite.)
 
 To bump the default Goose backend, update the lockfile in a PR:
 

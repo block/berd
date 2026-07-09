@@ -504,7 +504,8 @@
   "providers": {
     "agents": {
       "applyUpdates": "Actualizar",
-      "description": "Berd está integrado en tu espacio de trabajo. Instala otros para ampliar tu configuración.",
+      "description": "Conecta un proveedor de modelos para usar Goose, o conecta otro harness de agente.",
+      "refresh": "Actualizar",
       "errors": {
         "genericSetupFailure": "La configuración tuvo un tropiezo.",
         "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal.",
@@ -532,6 +533,15 @@
       "troubleshootInChat": "Solucionar en chat",
       "updateLabel": "Actualizar {{name}}"
     },
+    "catalog": {
+      "loading": "Cargando catálogo de proveedores..."
+    },
+    "connectionHints": {
+      "keyRejected": "La clave fue rechazada: verifícala en la consola de tu proveedor. ({{message}})",
+      "urlLooksWrong": "El servidor respondió, pero no en esa ruta: revisa la URL (¿incluiste /v1?). ({{message}})",
+      "unreachable": "No se puede acceder al servidor: revisa la URL y asegúrate de que esté en ejecución. ({{message}})",
+      "rateLimited": "La clave funciona, pero el proveedor está limitando las solicitudes. Inténtalo de nuevo en breve. ({{message}})"
+    },
     "custom": {
       "actions": {
         "addHeader": "Agregar encabezado",
@@ -549,18 +559,18 @@
         "saving": "Guardando...",
         "showApiKey": "Mostrar clave API"
       },
-      "addButton": "Agregar proveedor personalizado",
+      "addButton": "Agregar proveedor",
       "addTitle": "Agregar proveedor personalizado",
       "confirmDelete": "Esto elimina {{name}} y cualquier clave API que le pertenezca.",
       "confirmDeleteTitle": "¿Eliminar {{name}}?",
-      "description": "Conecta un endpoint de modelo compatible con OpenAI, Anthropic o local.",
+      "description": "Conecta un proveedor de modelos usando su endpoint y clave de API.",
       "editTitle": "Editar proveedor personalizado",
       "emptyHeaders": "No hay encabezados personalizados.",
       "emptyModels": "Agrega al menos un modelo.",
       "engines": {
-        "anthropic_compatible": "Compatible con Anthropic",
-        "ollama_compatible": "Compatible con Ollama",
-        "openai_compatible": "Compatible con OpenAI"
+        "anthropic_compatible": "API de Anthropic",
+        "ollama_compatible": "Ollama (local)",
+        "openai_compatible": "API de OpenAI"
       },
       "errors": {
         "deleteFailed": "No se pudo eliminar el proveedor personalizado.",
@@ -578,7 +588,7 @@
         "basePathPlaceholder": "/v1/chat/completions",
         "displayName": "Nombre visible",
         "displayNamePlaceholder": "Mi proveedor",
-        "engine": "Motor",
+        "engine": "Tipo de API",
         "headerKey": "Encabezado",
         "headerValue": "Valor",
         "headers": "Encabezados personalizados",
@@ -597,7 +607,7 @@
         "apiUrlInvalid": "Introduce una URL HTTP o HTTPS válida.",
         "apiUrlRequired": "La URL de API es obligatoria.",
         "displayNameRequired": "El nombre visible es obligatorio.",
-        "engineRequired": "Elige un motor de proveedor.",
+        "engineRequired": "Elige un tipo de API.",
         "headerDuplicate": "Los nombres de encabezado deben ser únicos.",
         "headerNameInvalid": "Los nombres de encabezado solo pueden contener caracteres HTTP token válidos.",
         "headerNameRequired": "El nombre del encabezado es obligatorio.",
@@ -608,24 +618,29 @@
         "template": "Comenzar con plantilla"
       },
       "templates": {
-        "compatibility": {
-          "all": "Todos los tipos de compatibilidad"
-        },
         "clear": "Borrar plantilla",
+        "compatibility": {
+          "all": "Todos los tipos"
+        },
         "empty": "Todavía no hay plantillas disponibles.",
-        "manual": "Totalmente personalizado",
+        "manual": "Agregar un proveedor personalizado",
         "manualDescription": "Comienza con una configuración de proveedor en blanco.",
+        "manualLead": "¿Tu proveedor no está en la lista?",
         "searchPlaceholder": "Buscar plantillas",
         "useTemplate": "Usar una plantilla",
         "useTemplateDescription": "Comienza con valores predeterminados de endpoint y modelos para un proveedor conocido."
       }
     },
-    "catalog": {
-      "loading": "Cargando catálogo de proveedores..."
-    },
     "disconnect": "Desconectar",
+    "getApiKey": "Obtener una clave de API",
+    "loadingModels": "Cargando modelos...",
+    "modelRefreshWarning": "Credenciales guardadas. La actualización de modelos necesita atención: {{message}}",
     "models": {
-      "description": "Necesitas al menos un proveedor de modelos para usar el harness Goose. Algunos agentes pueden traer sus propias conexiones de modelo.",
+      "active": "Activo",
+      "connectPrompt": "Conectar un proveedor de modelos",
+      "description": "Goose requiere un modelo de IA para ejecutarse.",
+      "summaryLabel": "Proveedor de modelos",
+      "summaryLabelPlural": "Proveedores de modelos",
       "details": {
         "configuredUrl": "URL configurada"
       },
@@ -653,10 +668,9 @@
         }
       },
       "checkingStatus": "Comprobando estado del proveedor...",
-      "title": "Modelos"
+      "title": "Proveedores de modelos"
     },
-    "loadingModels": "Cargando modelos...",
-    "modelRefreshWarning": "Credenciales guardadas. La actualización de modelos necesita atención: {{message}}",
+    "needsAttention": "Requiere atención",
     "saved": "Guardado",
     "saving": "Guardando...",
     "setupDetour": {

@@ -74,7 +74,9 @@ export function mergeRuntimeProviderCatalog(
   const runtimeIds = new Set(runtimeCatalog.map((entry) => entry.id));
 
   const preserved = existingEntries.filter(
-    (entry) => isByoKeyProvider(entry) && !runtimeIds.has(entry.id),
+    (entry) =>
+      (isByoKeyProvider(entry) || entry.customProvider === true) &&
+      !runtimeIds.has(entry.id),
   );
   const databricks = runtimeConfig.goose.modelProviders.find(
     (provider) => provider.id === DATABRICKS_PROVIDER_ID,

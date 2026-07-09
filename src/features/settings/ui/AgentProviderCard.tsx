@@ -1,10 +1,22 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { ExpandableCard } from "@/shared/ui/card";
 import { Spinner } from "@/shared/ui/spinner";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/shared/ui/collapsible";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import {
   IconCheck,
@@ -54,6 +66,12 @@ interface AgentProviderCardProps {
     request: AgentSetupTroubleshootingRequest,
   ) => void;
   onProviderReady?: (providerId: string) => void;
+  // Optional collapsible region rendered inside the card below the header
+  // row (the goose card hosts its model providers here). Purely
+  // presentational: the parent owns the content.
+  expandedContent?: ReactNode;
+  collapsedSupplement?: ReactNode;
+  statusIndicator?: ReactNode;
 }
 
 export function AgentProviderCard({
@@ -63,6 +81,9 @@ export function AgentProviderCard({
   statusLoading = false,
   onStartTroubleshootingChat,
   onProviderReady,
+  expandedContent,
+  collapsedSupplement,
+  statusIndicator,
 }: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
@@ -92,6 +113,7 @@ export function AgentProviderCard({
   // `rerunDoctorReport`, so the card doesn't flash back to "Install"/"Sign in"
   // between the backend reporting success and the doctor report repainting.
   const [finalizing, setFinalizing] = useState(false);
+  const [expandedOpen, setExpandedOpen] = useState(false);
   const reportedRef = useRef(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
@@ -291,6 +313,12 @@ export function AgentProviderCard({
       )
     : null;
 
+  useEffect(() => {
+    if (isActive || setupError) {
+      setExpandedOpen(true);
+    }
+  }, [isActive, setupError]);
+
   function handleRetry() {
     const action = operation?.action;
     switch (action) {
@@ -407,6 +435,10 @@ export function AgentProviderCard({
   }
 
   function renderStatusIndicator() {
+    if (statusIndicator) {
+      return statusIndicator;
+    }
+
     if (setupError) {
       return (
         <div className="flex h-6 flex-shrink-0 items-center">
@@ -501,7 +533,7 @@ export function AgentProviderCard({
           : t("providers.agents.progress.verifyingInstallation");
 
     return (
-      <div className="mt-3 space-y-2 border-t pt-3">
+      <div className="space-y-2">
         <div className="flex items-center gap-2">
           <Spinner className="size-3.5 text-primary" />
           <div className="min-w-0 flex-1">
@@ -515,50 +547,69 @@ export function AgentProviderCard({
   }
 
   const setupFailureMessage = getSetupFailureMessage();
+  const hasProviderDetails =
+    Boolean(versionCheck && !isActive) ||
+    (!isActive && missingComponents.length > 0) ||
+    isActive ||
+    Boolean(setupError && !isActive);
+  const hasExpandableDetails = hasProviderDetails || Boolean(expandedContent);
 
-  return (
-    <div
-      className={cn(
-        "flex flex-col rounded-md bg-background p-3 transition-colors",
-        isActive && "bg-linear-to-b from-primary/10 to-primary/10",
-      )}
-    >
-      <div className="flex items-start justify-between">
-        <div className="min-w-0 flex-1">
-          {icon ? (
-            <div className="flex size-6 items-center justify-center [&>*]:size-6">
-              {icon}
-            </div>
-          ) : null}
-          <span className={cn("block text-sm", icon && "mt-2")}>
-            {provider.displayName}
-          </span>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {provider.description}
-          </p>
-          {versionCheck && !isActive ? (
-            <AgentVersionInfo check={versionCheck} className="mt-1" />
-          ) : null}
-          {!isActive && missingComponents.length > 0 ? (
-            <div className="mt-1 flex flex-col gap-1">
-              {missingComponents.map((name) => (
-                <span
-                  key={name}
-                  className="break-words text-xs text-destructive"
-                >
-                  {t("providers.agents.missingComponent", { name })}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        {renderStatusIndicator()}
+  function renderSummaryContent() {
+    return (
+      <div className="min-w-0 flex-1 text-left">
+        {icon ? (
+          <div className="flex size-6 items-center justify-center [&>*]:size-6">
+            {icon}
+          </div>
+        ) : null}
+        <span className={cn("block text-sm", icon && "mt-2")}>
+          {provider.displayName}
+        </span>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {provider.description}
+        </p>
       </div>
+    );
+  }
+
+  const summaryRow = hasExpandableDetails ? (
+    <div className="flex items-start justify-between gap-3">
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {renderSummaryContent()}
+        </button>
+      </CollapsibleTrigger>
+      {renderStatusIndicator()}
+    </div>
+  ) : (
+    <div className="flex items-start justify-between gap-3">
+      {renderSummaryContent()}
+      {renderStatusIndicator()}
+    </div>
+  );
+
+  const providerDetails = hasProviderDetails ? (
+    <div className="space-y-3">
+      {versionCheck && !isActive ? (
+        <AgentVersionInfo check={versionCheck} />
+      ) : null}
+      {!isActive && missingComponents.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          {missingComponents.map((name) => (
+            <span key={name} className="break-words text-xs text-destructive">
+              {t("providers.agents.missingComponent", { name })}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {renderSetupProgress()}
 
       {setupError && !isActive && (
-        <div className="mt-3 space-y-2 border-t pt-3">
+        <div className="space-y-2">
           <div className="rounded-sm bg-destructive/10 px-3 py-2.5">
             <div className="flex flex-col gap-2">
               <p className="min-w-0 text-xs font-medium leading-relaxed text-destructive">
@@ -591,6 +642,94 @@ export function AgentProviderCard({
           {renderSetupOutput()}
         </div>
       )}
+    </div>
+  ) : null;
+
+  const expandedDetails = hasExpandableDetails ? (
+    <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+      <div className="mt-3 space-y-3">
+        {providerDetails}
+        {expandedContent ? <div>{expandedContent}</div> : null}
+      </div>
+    </CollapsibleContent>
+  ) : null;
+
+  const cardContent = hasExpandableDetails ? (
+    <Collapsible open={expandedOpen} onOpenChange={setExpandedOpen}>
+      {summaryRow}
+      {expandedDetails}
+    </Collapsible>
+  ) : (
+    summaryRow
+  );
+
+  const canOpenCollapsedCard = hasExpandableDetails && !expandedOpen;
+  const canOpenCollapsedStack = Boolean(collapsedSupplement && !expandedOpen);
+  const openCollapsedCard = () => {
+    if (canOpenCollapsedCard) {
+      setExpandedOpen(true);
+    }
+  };
+  const handleCardSurfaceClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest(
+        "button, a, input, textarea, select, [role='button'], [data-no-card-toggle]",
+      )
+    ) {
+      return;
+    }
+    openCollapsedCard();
+  };
+
+  const card = (
+    <ExpandableCard
+      active={isActive}
+      interactive={canOpenCollapsedCard}
+      onClick={canOpenCollapsedCard ? handleCardSurfaceClick : undefined}
+    >
+      {cardContent}
+    </ExpandableCard>
+  );
+
+  if (!collapsedSupplement) {
+    return card;
+  }
+
+  return (
+    <div
+      className={cn(
+        "relative overflow-visible transition-[padding-bottom] duration-200 ease-out motion-reduce:transition-none",
+        expandedOpen ? "pb-0" : "pb-11",
+      )}
+    >
+      <div className="relative z-10">{card}</div>
+      <div
+        aria-hidden={expandedOpen}
+        role={canOpenCollapsedStack ? "button" : undefined}
+        tabIndex={canOpenCollapsedStack ? 0 : -1}
+        onClick={canOpenCollapsedStack ? openCollapsedCard : undefined}
+        onKeyDown={
+          canOpenCollapsedStack
+            ? (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openCollapsedCard();
+                }
+              }
+            : undefined
+        }
+        className={cn(
+          "absolute inset-x-0 bottom-0 z-0 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+          expandedOpen
+            ? "translate-y-3 opacity-0"
+            : "-translate-y-1 opacity-100",
+          canOpenCollapsedStack &&
+            "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        {collapsedSupplement}
+      </div>
     </div>
   );
 }

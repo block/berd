@@ -15,13 +15,14 @@ import { Button } from "@/shared/ui/button";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import {
-  EditDialog,
-  EditDialogBody,
-  EditDialogContent,
-  EditDialogFooter,
-  EditDialogForm,
-  EditDialogHeader,
-} from "@/shared/ui/EditDialog";
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/dialog";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
@@ -204,7 +205,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
 
   return (
     <>
-      <EditDialog
+      <Dialog
         open={open}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
@@ -214,15 +215,14 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
           onOpenChange(true);
         }}
       >
-        <EditDialogContent size="md">
-          <EditDialogHeader
-            title={t("dialog.title")}
-            description={t("dialog.description")}
-            className="px-5 py-3.5"
-          />
+        <DialogContent size="md">
+          <DialogHeader className="py-3.5">
+            <DialogTitle>{t("dialog.title")}</DialogTitle>
+            <DialogDescription>{t("dialog.description")}</DialogDescription>
+          </DialogHeader>
           {success ? (
             <>
-              <EditDialogBody>
+              <DialogBody>
                 <div className="space-y-2 py-2">
                   <p className="text-sm font-medium text-foreground">
                     {t("dialog.successTitle")}
@@ -231,168 +231,167 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                     {t("dialog.successBody")}
                   </p>
                 </div>
-              </EditDialogBody>
-              <EditDialogFooter>
+              </DialogBody>
+              <DialogFooter>
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   onClick={handleSubmitAnother}
                 >
                   {t("dialog.submitAnother")}
                 </Button>
                 {success.issueUrl ? (
-                  <Button type="button" size="sm" onClick={handleViewTicket}>
+                  <Button type="button" onClick={handleViewTicket}>
                     {t("dialog.viewTicket")}
                   </Button>
                 ) : null}
-              </EditDialogFooter>
+              </DialogFooter>
             </>
           ) : (
             <>
-              <EditDialogForm
-                id={FEEDBACK_FORM_ID}
-                className="space-y-3 px-5 pb-4"
-                onSubmit={(event) => {
-                  void handleSubmit(event);
-                }}
-                onPaste={handlePasteImages}
-              >
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="feedback-title"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {t("dialog.titleLabel")}
-                  </Label>
-                  <Input
-                    id="feedback-title"
-                    autoFocus
-                    value={title}
-                    onChange={(event) => {
-                      setTitle(event.target.value);
-                      setError(null);
-                    }}
-                    placeholder={t("dialog.titlePlaceholder")}
-                    disabled={submitting}
-                    className="h-8 rounded-md"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="feedback-description"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {t("dialog.descriptionLabel")}
-                  </Label>
-                  <Textarea
-                    id="feedback-description"
-                    value={description}
-                    onChange={(event) => {
-                      setDescription(event.target.value);
-                      setError(null);
-                    }}
-                    placeholder={t("dialog.descriptionPlaceholder")}
-                    rows={3}
-                    disabled={submitting}
-                    className="min-h-[72px] rounded-md py-2"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">
-                    {t("dialog.attachmentsLabel")}
-                  </Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-auto w-full justify-start gap-2 rounded-md px-3 py-2 text-left"
-                    onClick={handleAddImages}
-                    disabled={!canAddImages}
-                  >
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-background">
-                      <ImagePlus className="size-3.5" aria-hidden="true" />
-                    </span>
-                    <span className="flex min-w-0 flex-col items-start gap-0.5">
-                      <span className="text-xs font-medium text-foreground">
-                        {t("dialog.addImages")}
-                      </span>
-                      <span className="text-[11px] font-normal leading-snug text-muted-foreground">
-                        {t("dialog.attachmentsHelp")}
-                      </span>
-                    </span>
-                  </Button>
-                  {attachments.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {attachments.map((attachment) => (
-                        <div
-                          key={attachment.id}
-                          className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/20 p-2"
-                        >
-                          <img
-                            src={attachment.previewUrl}
-                            alt=""
-                            className="size-9 shrink-0 rounded object-cover"
-                          />
-                          <span
-                            className="min-w-0 flex-1 truncate text-xs text-foreground"
-                            title={attachment.name}
-                          >
-                            {attachment.name}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => removeAttachment(attachment.id)}
-                            disabled={submitting}
-                            aria-label={t("dialog.removeAttachment", {
-                              name: attachment.name,
-                            })}
-                          >
-                            <X className="size-3.5" aria-hidden="true" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex items-start gap-2 rounded-md border border-input bg-background px-3 py-2">
-                  <Checkbox
-                    id="feedback-include-logs"
-                    checked={includeLogs}
-                    onCheckedChange={(checked) => {
-                      setIncludeLogs(checked === true);
-                      setError(null);
-                    }}
-                    disabled={submitting}
-                    className="mt-0.5"
-                  />
-                  <div className="min-w-0">
+              <DialogBody asChild className="space-y-3 pb-4">
+                <form
+                  id={FEEDBACK_FORM_ID}
+                  onSubmit={(event) => {
+                    void handleSubmit(event);
+                  }}
+                  onPaste={handlePasteImages}
+                >
+                  <div className="space-y-1.5">
                     <Label
-                      htmlFor="feedback-include-logs"
-                      className="text-xs font-medium text-foreground"
+                      htmlFor="feedback-title"
+                      className="text-xs font-medium text-muted-foreground"
                     >
-                      {t("dialog.attachLogs")}
+                      {t("dialog.titleLabel")}
                     </Label>
-                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                      {t("dialog.attachLogsHelp")}
-                    </p>
+                    <Input
+                      id="feedback-title"
+                      autoFocus
+                      value={title}
+                      onChange={(event) => {
+                        setTitle(event.target.value);
+                        setError(null);
+                      }}
+                      placeholder={t("dialog.titlePlaceholder")}
+                      disabled={submitting}
+                      className="h-8 rounded-md"
+                    />
                   </div>
-                </div>
-                {error ? (
-                  <p
-                    role="alert"
-                    className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-                  >
-                    {error}
-                  </p>
-                ) : null}
-              </EditDialogForm>
-              <EditDialogFooter className="px-5 py-3">
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="feedback-description"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      {t("dialog.descriptionLabel")}
+                    </Label>
+                    <Textarea
+                      id="feedback-description"
+                      value={description}
+                      onChange={(event) => {
+                        setDescription(event.target.value);
+                        setError(null);
+                      }}
+                      placeholder={t("dialog.descriptionPlaceholder")}
+                      rows={3}
+                      disabled={submitting}
+                      className="min-h-[72px] rounded-md py-2"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-muted-foreground">
+                      {t("dialog.attachmentsLabel")}
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-auto w-full justify-start gap-2 rounded-md px-3 py-2 text-left"
+                      onClick={handleAddImages}
+                      disabled={!canAddImages}
+                    >
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-background">
+                        <ImagePlus className="size-3.5" aria-hidden="true" />
+                      </span>
+                      <span className="flex min-w-0 flex-col items-start gap-0.5">
+                        <span className="text-xs font-medium text-foreground">
+                          {t("dialog.addImages")}
+                        </span>
+                        <span className="text-[11px] font-normal leading-snug text-muted-foreground">
+                          {t("dialog.attachmentsHelp")}
+                        </span>
+                      </span>
+                    </Button>
+                    {attachments.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {attachments.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/20 p-2"
+                          >
+                            <img
+                              src={attachment.previewUrl}
+                              alt=""
+                              className="size-9 shrink-0 rounded object-cover"
+                            />
+                            <span
+                              className="min-w-0 flex-1 truncate text-xs text-foreground"
+                              title={attachment.name}
+                            >
+                              {attachment.name}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => removeAttachment(attachment.id)}
+                              disabled={submitting}
+                              aria-label={t("dialog.removeAttachment", {
+                                name: attachment.name,
+                              })}
+                            >
+                              <X className="size-3.5" aria-hidden="true" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex items-start gap-2 rounded-md border border-input bg-background px-3 py-2">
+                    <Checkbox
+                      id="feedback-include-logs"
+                      checked={includeLogs}
+                      onCheckedChange={(checked) => {
+                        setIncludeLogs(checked === true);
+                        setError(null);
+                      }}
+                      disabled={submitting}
+                      className="mt-0.5"
+                    />
+                    <div className="min-w-0">
+                      <Label
+                        htmlFor="feedback-include-logs"
+                        className="text-xs font-medium text-foreground"
+                      >
+                        {t("dialog.attachLogs")}
+                      </Label>
+                      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                        {t("dialog.attachLogsHelp")}
+                      </p>
+                    </div>
+                  </div>
+                  {error ? (
+                    <p
+                      role="alert"
+                      className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                    >
+                      {error}
+                    </p>
+                  ) : null}
+                </form>
+              </DialogBody>
+              <DialogFooter className="py-3">
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   onClick={handleClose}
                   disabled={submitting}
                 >
@@ -401,18 +400,17 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                 <Button
                   type="submit"
                   form={FEEDBACK_FORM_ID}
-                  size="sm"
                   disabled={!canSubmit}
                   feedbackState={submitting ? "loading" : "idle"}
                   loadingLabel={t("dialog.submitting")}
                 >
                   {t("dialog.submit")}
                 </Button>
-              </EditDialogFooter>
+              </DialogFooter>
             </>
           )}
-        </EditDialogContent>
-      </EditDialog>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={discardOpen}
         onOpenChange={setDiscardOpen}

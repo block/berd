@@ -207,7 +207,8 @@ describe("ProvidersSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the loaded provider catalog while credential status is loading", () => {
+  it("renders the loaded provider catalog while credential status is loading", async () => {
+    const user = userEvent.setup();
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(),
       loading: true,
@@ -223,11 +224,14 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("Checking provider status...")).toBeInTheDocument();
   });
 
-  it("matches main by ordering connected model providers first after status loads", () => {
+  it("matches main by ordering connected model providers first after status loads", async () => {
+    const user = userEvent.setup();
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(["openai", "databricks_v2"]),
       loading: false,
@@ -243,6 +247,11 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
+    expect(screen.getByText("Model providers")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI, Databricks")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+
     const openai = screen.getByText("OpenAI");
     const databricks = screen.getByText("Databricks");
     const anthropic = screen.getByText("Anthropic");
@@ -257,12 +266,16 @@ describe("ProvidersSettings", () => {
     ).toBeTruthy();
   });
 
-  it("does not show the custom provider creation entry point", () => {
+  it("shows the custom provider creation entry point (BYO default-on)", async () => {
+    const user = userEvent.setup();
+
     renderProviders(<ProvidersSettings />);
 
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+
     expect(
-      screen.queryByRole("button", { name: /add custom provider/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /add provider/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows the agent draft return action after setup succeeds during a detour", async () => {
@@ -292,7 +305,8 @@ describe("ProvidersSettings", () => {
     });
   });
 
-  it("hides non-allowlisted model and custom providers for runtime config", () => {
+  it("hides non-allowlisted model and custom providers for runtime config", async () => {
+    const user = userEvent.setup();
     useRuntimeConfigStore.setState({
       loaded: true,
       result: {
@@ -304,13 +318,17 @@ describe("ProvidersSettings", () => {
     });
     renderProviders(<ProvidersSettings />);
 
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+
     expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
     expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
   });
 
-  it("falls back to the default allowlist when runtime config is unavailable", () => {
+  it("falls back to the default allowlist when runtime config is unavailable", async () => {
+    const user = userEvent.setup();
+
     useRuntimeConfigStore.setState({
       loaded: true,
       result: {
@@ -323,6 +341,8 @@ describe("ProvidersSettings", () => {
     });
 
     renderProviders(<ProvidersSettings />);
+
+    await user.click(screen.getByRole("button", { name: /goose/i }));
 
     expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();

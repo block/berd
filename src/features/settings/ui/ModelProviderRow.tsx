@@ -8,15 +8,21 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { getBuildFeatureState } from "@/shared/profile/buildProfile";
+import { cn } from "@/shared/lib/cn";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { Button } from "@/shared/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/shared/ui/collapsible";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Spinner } from "@/shared/ui/spinner";
 import {
   getProviderIcon,
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
-import { IconCheck } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import type {
@@ -40,10 +46,21 @@ import {
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
 
 const INTERNAL_DATABRICKS_PROVIDER_ID = "databricks_v2";
-// Mirrors the DATABRICKS_HOST value injected into goose serve by the Tauri backend.
-// Keep in sync with src-tauri/src/services/acp/goose_serve.rs.
-const INTERNAL_DATABRICKS_HOST =
-  "https://block-lakehouse-production.cloud.databricks.com";
+const DATABRICKS_HOST_ENV_KEY = "DATABRICKS_HOST";
+
+// The org-managed Databricks host, when the runtime config injects one into
+// `goose serve` (see apply_runtime_goose_provider_env in
+// src-tauri/src/services/acp/goose_serve.rs). Present on internal/managed
+// builds; absent on external builds, where the same card exposes the editable
+// DATABRICKS_HOST field instead (mergeRuntimeProviderCatalog).
+function useInjectedDatabricksHost(): string | null {
+  return useRuntimeConfigStore(
+    (state) =>
+      state.config.goose.modelProviders.find(
+        (provider) => provider.id === INTERNAL_DATABRICKS_PROVIDER_ID,
+      )?.endpointEnv?.[DATABRICKS_HOST_ENV_KEY] ?? null,
+  );
+}
 
 interface ProviderFieldSaveInput {
   key: string;
@@ -66,14 +83,18 @@ interface ModelProviderRowProps {
   modelWarning?: string | null;
 }
 
-function InternalDatabricksDetails({ label }: { label: string }) {
+function InternalDatabricksDetails({
+  label,
+  host,
+}: {
+  label: string;
+  host: string;
+}) {
   return (
     <div className="rounded-sm border border-border bg-card px-3 py-2.5">
       <div className="space-y-1 rounded-xs bg-background px-2.5 py-2">
         <p className="text-sm">{label}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {INTERNAL_DATABRICKS_HOST}
-        </p>
+        <p className="truncate text-xs text-muted-foreground">{host}</p>
       </div>
     </div>
   );
@@ -138,9 +159,12 @@ export function ModelProviderRow({
   const fields = provider.fields ?? [];
   const hasFields = fields.length > 0;
   const supportsNativeConnect = !!provider.nativeConnectQuery;
+  // Only shown when the runtime config actually injects a managed host;
+  // external builds have no injected host and get the editable field instead.
+  const injectedDatabricksHost = useInjectedDatabricksHost();
   const showInternalDatabricksDetails =
     provider.id === INTERNAL_DATABRICKS_PROVIDER_ID &&
-    !getBuildFeatureState().byoKeyProviders;
+    injectedDatabricksHost != null;
   const isConnected =
     provider.status === "connected" || provider.status === "built_in";
   const fieldValueMap = useMemo(
@@ -271,13 +295,11 @@ export function ModelProviderRow({
     });
   }
 
-  function handleToggle() {
-    setExpanded((current) => {
-      if (current) {
-        setShowSavedState(false);
-      }
-      return !current;
-    });
+  function handleExpandedChange(nextExpanded: boolean) {
+    if (!nextExpanded) {
+      setShowSavedState(false);
+    }
+    setExpanded(nextExpanded);
     setEditingKey(null);
     setError("");
   }
@@ -392,8 +414,6 @@ export function ModelProviderRow({
   }
 
   function renderExpandedContent() {
-    if (!expanded) return null;
-
     const setupMessage = getSetupMessage(
       provider.setupMethod,
       isConnected,
@@ -415,7 +435,7 @@ export function ModelProviderRow({
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="focus-override mx-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+          className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
         >
           <Skeleton className="h-12 w-full rounded-sm" />
           <Skeleton className="h-12 w-full rounded-sm" />
@@ -428,7 +448,7 @@ export function ModelProviderRow({
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="focus-override mx-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+          className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
         >
           {!isConnected && nativeConnectDescription ? (
             <div className="flex items-center justify-between gap-3">
@@ -450,9 +470,10 @@ export function ModelProviderRow({
             </div>
           ) : (
             <>
-              {showInternalDatabricksDetails ? (
+              {showInternalDatabricksDetails && injectedDatabricksHost ? (
                 <InternalDatabricksDetails
                   label={t("providers.models.details.configuredUrl")}
+                  host={injectedDatabricksHost}
                 />
               ) : null}
               {renderSetupMessage(setupMessage)}
@@ -515,6 +536,7 @@ export function ModelProviderRow({
           setupMessage={setupMessage}
           fieldSetupDescription={fieldSetupDescription}
           isConnected={isConnected}
+          docsUrl={provider.docsUrl}
           onDraftChange={handleDraftChange}
           onSaveSetup={() => void handleSaveSetup()}
         />
@@ -525,7 +547,7 @@ export function ModelProviderRow({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="focus-override mx-3 space-y-2 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+        className="focus-override mx-3 mb-3 space-y-2 rounded-b-sm border-x border-b px-3 py-3 outline-none"
       >
         {renderSetupMessage(setupMessage)}
         <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
@@ -534,40 +556,58 @@ export function ModelProviderRow({
   }
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={handleToggle}
-        aria-expanded={expanded}
-        disabled={authenticating}
-        className="flex w-full items-center gap-3 rounded-sm px-3 py-2.5 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
-      >
-        {icon ? (
-          <div className="flex size-6 flex-shrink-0 items-center justify-center">
-            {icon}
-          </div>
-        ) : (
-          <div className="flex size-6 flex-shrink-0 items-center justify-center">
-            <span className="text-xs font-medium text-muted-foreground">
-              {formatProviderLabel(provider.id).charAt(0)}
-            </span>
-          </div>
-        )}
+    <Collapsible open={expanded} onOpenChange={handleExpandedChange}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          disabled={authenticating}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-sm border border-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:hover:bg-transparent",
+            expanded && "border-border hover:bg-transparent",
+          )}
+        >
+          {icon ? (
+            <div className="flex size-6 flex-shrink-0 items-center justify-center">
+              {icon}
+            </div>
+          ) : (
+            <div className="flex size-6 flex-shrink-0 items-center justify-center">
+              <span className="text-xs font-medium text-muted-foreground">
+                {formatProviderLabel(provider.id).charAt(0)}
+              </span>
+            </div>
+          )}
 
-        <span className="min-w-0 flex-1 text-sm">{provider.displayName}</span>
+          <span className="flex min-w-0 flex-1 items-baseline gap-2 text-sm">
+            <span className="min-w-0 truncate">{provider.displayName}</span>
+            {isConnected ? (
+              <span className="shrink-0 text-muted-foreground/60">
+                {t("providers.models.active")}
+              </span>
+            ) : null}
+          </span>
 
-        {isConnected ? (
-          <IconCheck className="size-4 flex-shrink-0 text-success" />
-        ) : null}
-        {modelSyncing ? (
-          <Spinner className="size-3.5 flex-shrink-0 text-primary" />
-        ) : null}
-        {!isConnected && authenticating ? (
-          <Spinner className="size-3.5 flex-shrink-0 text-primary" />
-        ) : null}
-      </button>
+          {!modelSyncing && modelWarning ? (
+            <IconAlertTriangle
+              aria-label={t("providers.needsAttention")}
+              className="size-4 flex-shrink-0 text-warning"
+            />
+          ) : isConnected ? (
+            <IconCheck className="size-4 flex-shrink-0 text-success" />
+          ) : null}
+          {modelSyncing ? (
+            <Spinner className="size-3.5 flex-shrink-0 text-primary" />
+          ) : null}
+          {!isConnected && authenticating ? (
+            <Spinner className="size-3.5 flex-shrink-0 text-primary" />
+          ) : null}
+        </button>
+      </CollapsibleTrigger>
 
-      {renderExpandedContent()}
-    </div>
+      <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+        {renderExpandedContent()}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

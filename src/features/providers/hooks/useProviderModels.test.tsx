@@ -94,5 +94,25 @@ describe("useProviderModels", () => {
       "copilot-acp",
       "cursor-agent",
     ]);
+
+    act(() => {
+      useProviderCatalogStore.getState().mergeEntries([
+        {
+          ...modelProvider("custom-openrouter"),
+          displayName: "OpenRouter",
+          group: "additional",
+          customProvider: true,
+        },
+      ]);
+    });
+
+    expect(result.current.configuredModelProviderIds).toEqual([
+      "databricks_v2",
+      "anthropic",
+      "custom-openrouter",
+    ]);
+    expect(result.current.modelCacheRefreshProviderIds).toContain(
+      "custom-openrouter",
+    );
   });
 });

@@ -36,6 +36,7 @@ export type ProviderCatalogEntry = Omit<
   supportsInstall?: ProviderSetupCatalogEntryDto["supportsInstall"];
   supportsAuth?: ProviderSetupCatalogEntryDto["supportsAuth"];
   supportsAuthStatus?: ProviderSetupCatalogEntryDto["supportsAuthStatus"];
+  customProvider?: boolean;
   supportsModelList?: boolean;
   modelSelectionHint?: string;
 };

@@ -34,7 +34,7 @@ function AlertDialogOverlay({
     <AlertDialogPrimitive.Overlay
       data-slot="alert-dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[80] bg-[var(--overlay-scrim)] backdrop-blur-sm",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-[80] bg-[var(--overlay-scrim)] [backdrop-filter:var(--backdrop-overlay-glass)] [-webkit-backdrop-filter:var(--backdrop-overlay-glass)]",
         className,
       )}
       {...props}
@@ -56,7 +56,7 @@ function AlertDialogContent({
         <AlertDialogPrimitive.Content
           data-slot="alert-dialog-content"
           className={cn(
-            "pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full max-w-lg gap-4 overflow-y-auto rounded-md bg-[var(--surface-popover-glass)] p-6 shadow-[var(--shadow-modal)] backdrop-blur-md data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+            "pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full max-w-lg gap-4 overflow-y-auto rounded-md bg-[var(--surface-popover-glass)] p-6 shadow-[var(--shadow-modal)] [backdrop-filter:var(--backdrop-popover-glass)] [-webkit-backdrop-filter:var(--backdrop-popover-glass)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
             className,
           )}
           {...props}
