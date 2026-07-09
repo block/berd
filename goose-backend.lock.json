@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/aaif-goose/goose.git",
-  "ref": "main",
-  "commit": "ce53dd5526c6935e538e81e47614a9b30cd2a137",
+  "ref": "fix/provider-safe-agent-names",
+  "commit": "9f57190dd4b118adb1b7aa6508181653db20634c",
   "package": "goose-cli",
   "bin": "goose"
 }
