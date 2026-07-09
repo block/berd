@@ -6,14 +6,8 @@ export interface AgentBuilderProviderSetupReturnTarget {
   providerId: string;
 }
 
-export type OpenConnectionsTab =
-  | "companyManaged"
-  | "custom"
-  | "gooseCapabilities";
-
 export interface OpenSettingsEventDetail {
   section?: string;
-  connectionsTab?: OpenConnectionsTab;
   returnTarget?: AgentBuilderProviderSetupReturnTarget;
 }
 
@@ -29,19 +23,13 @@ export function requestOpenSettings(
   if (section) {
     eventDetail.section = section;
   }
-  if (detail.connectionsTab) {
-    eventDetail.connectionsTab = detail.connectionsTab;
-  }
   if (detail.returnTarget) {
     eventDetail.returnTarget = detail.returnTarget;
   }
 
   window.dispatchEvent(
     new CustomEvent(OPEN_SETTINGS_EVENT, {
-      detail:
-        section || detail.connectionsTab || detail.returnTarget
-          ? eventDetail
-          : undefined,
+      detail: section || detail.returnTarget ? eventDetail : undefined,
     }),
   );
 }

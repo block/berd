@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BackupResult,
+  MarkLegacyExtensionCleanupCompleteRequest,
   MarkMigrationCompleteRequest,
   MigrationStatus,
 } from "../types";
@@ -40,4 +41,16 @@ export async function markMigrationComplete(
  */
 export async function dismissMigrationBanner(): Promise<MigrationStatus> {
   return invoke<MigrationStatus>("dismiss_migration_banner");
+}
+
+/**
+ * Persist that the stale legacy bundled-extension cleanup has run, including
+ * which extensions were removed and the cleanup-specific backup path, if any.
+ */
+export async function markLegacyExtensionCleanupComplete(
+  request: MarkLegacyExtensionCleanupCompleteRequest,
+): Promise<MigrationStatus> {
+  return invoke<MigrationStatus>("mark_legacy_extension_cleanup_complete", {
+    request,
+  });
 }

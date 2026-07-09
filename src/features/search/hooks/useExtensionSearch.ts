@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { listExtensions } from "@/features/extensions/api/extensions";
+import { isNativeCapabilityExtension } from "@/features/extensions/lib/nativeCapabilities";
 import {
   getDisplayName,
   type ExtensionEntry,
@@ -17,8 +18,13 @@ let extensionRequest: Promise<ExtensionEntry[]> | null = null;
 function loadExtensions(): Promise<ExtensionEntry[]> {
   extensionRequest ??= listExtensions()
     .then((extensions) => {
-      extensionCache = extensions;
-      return extensions;
+      // Native capabilities (built-in tools) are not user-facing connections;
+      // keep them out of global search so results match the Connections page.
+      const visibleExtensions = extensions.filter(
+        (extension) => !isNativeCapabilityExtension(extension),
+      );
+      extensionCache = visibleExtensions;
+      return visibleExtensions;
     })
     .finally(() => {
       extensionRequest = null;

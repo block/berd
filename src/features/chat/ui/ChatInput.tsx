@@ -151,8 +151,7 @@ function getAgentToolsTipPresentation({
   t: ReturnType<typeof useTranslation>["t"];
   tool: string | null;
 }): AgentToolsTipPresentation | null {
-  const openCompanyManagedConnections = () =>
-    requestOpenSettings("connections", { connectionsTab: "companyManaged" });
+  const openConnections = () => requestOpenSettings("connections");
 
   if (disconnectedTools.length > 0) {
     return {
@@ -161,7 +160,7 @@ function getAgentToolsTipPresentation({
         tools: formatAgentToolsList(disconnectedTools, locale),
       }),
       actionLabel: t("agentToolsTip.connect"),
-      onAction: openCompanyManagedConnections,
+      onAction: openConnections,
     };
   }
 

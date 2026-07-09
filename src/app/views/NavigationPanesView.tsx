@@ -20,6 +20,7 @@ import {
   FolderOpen,
   GitBranchPlus,
   History,
+  Link2,
   ListFilter,
   Megaphone,
   MoreHorizontal,
@@ -356,6 +357,7 @@ const MAIN_NAV_SCROLL_TARGETS: ReadonlySet<AppView> = new Set([
   "home",
   "agents",
   "skills",
+  "connections",
   "automations",
   "builderbot",
   "session-history",
@@ -4351,6 +4353,15 @@ export function NavigationPanesView({
                         icon={<SidebarNavSkillsIcon />}
                         label={t("navigation.skills")}
                         onClick={() => handlePrototypeNavigate("skills")}
+                      />
+                      <PrototypeNavRow
+                        active={activeView === "connections"}
+                        collapsed={prototypePrimaryCollapsed}
+                        icon={
+                          <Link2 className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+                        }
+                        label={t("navigation.connections")}
+                        onClick={() => handlePrototypeNavigate("connections")}
                       />
                       {showAutomationsSurface ? (
                         <PrototypeNavRow

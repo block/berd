@@ -1,5 +1,10 @@
 import { getClient } from "@/shared/api/acpConnection";
-import type { GooseExtension, GooseExtensionEntry } from "@aaif/goose-sdk";
+import type {
+  GooseExtension,
+  GooseExtensionEntry,
+  McpServer,
+  McpServerAcp,
+} from "@aaif/goose-sdk";
 import type { ExtensionConfig, ExtensionEntry } from "../types";
 
 function envArrayToRecord(
@@ -20,6 +25,10 @@ function recordToArray(
   record?: Record<string, string>,
 ): Array<{ name: string; value: string }> {
   return Object.entries(record ?? {}).map(([name, value]) => ({ name, value }));
+}
+
+function isAcpMcpServer(server: McpServer): server is McpServerAcp {
+  return "id" in server && typeof server.id === "string";
 }
 
 function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
@@ -48,7 +57,7 @@ function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
       };
     }
 
-    if ("id" in extension.server) {
+    if (isAcpMcpServer(extension.server)) {
       return {
         type: "acp",
         name: extension.server.name,
@@ -140,13 +149,14 @@ function toGooseExtension(extensionConfig: ExtensionConfig): GooseExtension {
   }
 
   if (extensionConfig.type === "acp") {
+    const server: McpServerAcp = {
+      name: extensionConfig.name,
+      id: extensionConfig.id,
+    };
     return {
       type: "mcp",
       description: extensionConfig.description,
-      server: {
-        name: extensionConfig.name,
-        id: extensionConfig.id,
-      },
+      server,
       bundled: extensionConfig.bundled,
     };
   }

@@ -180,7 +180,6 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "Figma",
     description: "Access your Figma files and design resources",
     Icon: FigmaIcon,
-    hidden: true,
   },
   {
     provider: "pagerduty",

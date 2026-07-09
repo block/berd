@@ -13,6 +13,12 @@ interface MigrationStoreState {
   disabledExtensions: DisabledExtension[];
   /** Path to the timestamped config backup, if one was made. */
   backupPath?: string;
+  /** True once stale internal-era bundled MCPs have been cleaned from config. */
+  legacyExtensionCleanupDone?: boolean;
+  /** Names + config keys of stale legacy bundled MCPs removed from config. */
+  legacyRemovedExtensions?: DisabledExtension[];
+  /** Path to the cleanup-specific timestamped config backup, if one was made. */
+  legacyExtensionCleanupBackupPath?: string;
   /**
    * ISO timestamp recording when the user dismissed the post-migration banner.
    * Persisted on the Tauri marker so dismissal sticks across launches.
@@ -49,6 +55,9 @@ export const useMigrationStore = create<MigrationStore>((set, get) => ({
       completedAt: status.completedAt,
       disabledExtensions: status.disabledExtensions ?? [],
       backupPath: status.backupPath,
+      legacyExtensionCleanupDone: status.legacyExtensionCleanupDone,
+      legacyRemovedExtensions: status.legacyRemovedExtensions,
+      legacyExtensionCleanupBackupPath: status.legacyExtensionCleanupBackupPath,
       bannerDismissedAt: status.bannerDismissedAt,
     }),
 

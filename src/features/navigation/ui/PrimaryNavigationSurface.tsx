@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconServer } from "@tabler/icons-react";
-import { ArrowUpCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUpCircle, ChevronLeft, ChevronRight, Link2 } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { PaneSurface } from "@/app/layout/panes/paneChrome";
 import {
@@ -119,6 +119,11 @@ export const PrimaryNavigationSurface = forwardRef<
   }[] = [
     { id: "agents", label: t("navigation.agents"), icon: SidebarNavAgentsIcon },
     { id: "skills", label: t("navigation.skills"), icon: SidebarNavSkillsIcon },
+    {
+      id: "connections",
+      label: t("navigation.connections"),
+      icon: Link2,
+    },
     ...(showAutomationsSurface
       ? [
           {

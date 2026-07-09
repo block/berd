@@ -42,11 +42,7 @@ function renderSettingsView() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <SettingsView
-        activeSection="security"
-        activeConnectionsTab="companyManaged"
-        onConnectionsTabChange={vi.fn()}
-      />
+      <SettingsView activeSection="security" />
     </QueryClientProvider>,
   );
 }

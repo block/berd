@@ -29,15 +29,12 @@ import {
   SETTINGS_SECTIONS,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
-import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettings";
 import {
   OPEN_SETTINGS_EVENT,
   type AgentBuilderProviderSetupReturnTarget,
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
-import { isCompanyManagedExtension } from "@/features/connections/lib/managedExtensions";
-import { classifyExtension } from "@/features/extensions/lib/extensionCategories";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
@@ -180,10 +177,7 @@ import {
   type NavigationSecondaryTarget,
 } from "./views/NavigationPanesView";
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
-import {
-  getProfileCapabilitySnapshot,
-  useProfileCapabilities,
-} from "@/shared/profile/capabilities";
+import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import {
   resolveEffectiveNavigationSecondaryTarget,
   resolveNavigationPrototypePrimaryCollapsed,
@@ -308,6 +302,17 @@ function isArchiveShortcutBlockedTarget(target: EventTarget | null) {
 }
 
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
+  // Connections graduated from Settings to a main navigation surface; keep
+  // legacy settings deep links (including the older "extensions" section)
+  // landing on the new top-level view.
+  if (window.location.pathname === "/settings") {
+    const legacySection = new URLSearchParams(window.location.search).get(
+      "section",
+    );
+    if (legacySection === "connections" || legacySection === "extensions") {
+      return "connections";
+    }
+  }
   if (initialSettingsSection) return "settings";
   if (
     isDesignSystemExplorerEnabled() &&
@@ -513,14 +518,6 @@ export function AppShell({
   const [activeSettingsSection, setActiveSettingsSection] = useState<SectionId>(
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
   );
-  const [activeConnectionsTab, setActiveConnectionsTab] =
-    useState<ConnectionsTab>(() =>
-      // Build-time/runtime gate: a build without the kgoose "Company-managed"
-      // tab opens connections on "custom" instead.
-      getProfileCapabilitySnapshot("kgooseConnections")
-        ? "companyManaged"
-        : "custom",
-    );
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
@@ -2860,6 +2857,21 @@ export function AppShell({
     ],
   );
 
+  const openConnections = useCallback(() => {
+    guardAppNavigation(() => {
+      resetGlobalComposerTransition();
+      resetNavigationSecondary();
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("connections");
+    });
+  }, [
+    guardAppNavigation,
+    resetGlobalComposerTransition,
+    resetNavigationSecondary,
+    setActiveSession,
+  ]);
+
   const leaveSecondarySurface = useCallback(() => {
     if (returnToAgentBuilderSettingsTarget()) {
       return;
@@ -2912,8 +2924,12 @@ export function AppShell({
     const handleOpenSettingsEvent = (event: Event) => {
       const detail = (event as CustomEvent<OpenSettingsEventDetail>).detail;
       const section = detail?.section;
-      if (detail?.connectionsTab) {
-        setActiveConnectionsTab(detail.connectionsTab);
+      // Connections is a main navigation surface now; keep legacy
+      // open-settings requests (and the older "extensions" section) working.
+      if (section === "connections" || section === "extensions") {
+        setAgentBuilderSettingsReturnTarget(null);
+        openConnections();
+        return;
       }
       setAgentBuilderSettingsReturnTarget(
         detail?.returnTarget?.type === "agent-builder-provider-setup"
@@ -2933,7 +2949,7 @@ export function AppShell({
         handleOpenSettingsEvent as EventListener,
       );
     };
-  }, [openSettings]);
+  }, [openConnections, openSettings]);
 
   const archiveChatWithCleanup = useCallback(
     async (sessionId: string, options: ArchiveChatWithCleanupOptions = {}) => {
@@ -3174,19 +3190,12 @@ export function AppShell({
   const handleForkChat = useForkSession({ onForked: handleSelectSession });
 
   const handleOpenExtensionFromSearch = useCallback(
-    (entry: ExtensionEntry) => {
-      setActiveConnectionsTab(
-        // The "Company-managed" tab can be gated off at build/runtime; a
-        // company-managed extension then falls back to "custom".
-        isCompanyManagedExtension(entry) && capabilities.kgooseConnections
-          ? "companyManaged"
-          : classifyExtension(entry) === "gooseCapabilities"
-            ? "gooseCapabilities"
-            : "custom",
-      );
-      openSettings("connections");
+    (_entry: ExtensionEntry) => {
+      // Connections is a single page now; company-managed and custom
+      // connections both live on it, so no per-entry tab routing is needed.
+      openConnections();
     },
-    [openSettings, capabilities.kgooseConnections],
+    [openConnections],
   );
 
   const handleOpenAutomationFromSearch = useCallback(
@@ -3738,6 +3747,8 @@ export function AppShell({
             ]
           : [current("settings", "Settings")];
       }
+      case "connections":
+        return [current("connections", "Connections")];
       case "projects":
         return [current("projects", "Projects")];
       case "search":
@@ -4071,7 +4082,6 @@ export function AppShell({
               onDesignSystemSectionChange={selectDesignSystemSection}
               authStatus={authStatus}
               isPreparingContent={isPreparingContent}
-              activeConnectionsTab={activeConnectionsTab}
               automationsEnabled={isAutomationsFeatureEnabled}
               builderbotEnabled={isBuilderbotSurfaceEnabled}
               renderedSession={renderedSession}
@@ -4091,7 +4101,6 @@ export function AppShell({
               onNavigateAgents={navigateAgents}
               onNavigateAutomations={navigateAutomations}
               onNavigateBuilderbot={navigateBuilderbot}
-              onConnectionsTabChange={setActiveConnectionsTab}
               onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
               onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
               onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}

@@ -73,11 +73,18 @@ describe("settingsSections", () => {
     expect(resolveSettingsSection("updates")).toBe("updates");
   });
 
-  it("folds the legacy extensions route into connections", () => {
+  it("no longer hosts connections or the legacy extensions route", () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).not.toContain(
       "extensions",
     );
-    expect(resolveSettingsSection("extensions")).toBe("connections");
+    expect(SETTINGS_SECTIONS.map((section) => section.id)).not.toContain(
+      "connections",
+    );
+    // Connections graduated to main navigation; unknown legacy sections fall
+    // back to the default settings section (AppShell handles routing
+    // connections/extensions deep links to the top-level view).
+    expect(resolveSettingsSection("extensions")).toBe("general");
+    expect(resolveSettingsSection("connections")).toBe("general");
   });
 
   it("filters and redirects capability-gated settings sections", () => {

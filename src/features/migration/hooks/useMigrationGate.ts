@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { reconcileAlwaysOnExtensions } from "@/features/extensions/lib/reconcileAlwaysOn";
-import { getMigrationStatus, markMigrationComplete } from "../api/migration";
+import { cleanupLegacyBundledExtensions } from "../cleanupLegacyBundledExtensions";
+import {
+  getMigrationStatus,
+  markLegacyExtensionCleanupComplete,
+  markMigrationComplete,
+} from "../api/migration";
 import { runMigration } from "../runMigration";
 import { useMigrationStore } from "../stores/migrationStore";
 import type { MigrationGateStatus } from "../types";
@@ -52,6 +57,30 @@ export function useMigrationGate(startupReady: boolean): MigrationGate {
         setStoreStatus(initial);
 
         if (initial.done) {
+          let latestStatus = initial;
+          if (!initial.legacyExtensionCleanupDone) {
+            try {
+              const cleanup = await cleanupLegacyBundledExtensions({
+                excludeConfigKeys: initial.disabledExtensions.map(
+                  (extension) => extension.configKey,
+                ),
+              });
+              latestStatus = await markLegacyExtensionCleanupComplete({
+                removedExtensions: cleanup.removedExtensions,
+                backupPath: cleanup.backupPath,
+              });
+              if (cancelled) return;
+              setStoreStatus(latestStatus);
+            } catch (cleanupError) {
+              // Best-effort: leave the marker unset so the next boot can retry,
+              // but don't block startup on legacy config hygiene.
+              console.warn(
+                "Failed to clean up legacy bundled extensions:",
+                cleanupError,
+              );
+            }
+          }
+
           // Heal extensions whose desired state has changed since the user's
           // migration ran (e.g. a newly-added always-on entry). Best-effort —
           // failures don't block startup.
@@ -64,6 +93,7 @@ export function useMigrationGate(startupReady: boolean): MigrationGate {
             );
           }
           if (cancelled) return;
+          setStoreStatus(latestStatus);
           setStatus("ready");
           return;
         }
@@ -72,10 +102,30 @@ export function useMigrationGate(startupReady: boolean): MigrationGate {
         const result = await runMigration();
         if (cancelled) return;
 
-        const persisted = await markMigrationComplete({
+        let persisted = await markMigrationComplete({
           disabledExtensions: result.disabledExtensions,
           backupPath: result.backupPath,
         });
+        if (cancelled) return;
+
+        try {
+          const cleanup = await cleanupLegacyBundledExtensions({
+            excludeConfigKeys: result.disabledExtensions.map(
+              (extension) => extension.configKey,
+            ),
+          });
+          persisted = await markLegacyExtensionCleanupComplete({
+            removedExtensions: cleanup.removedExtensions,
+            backupPath: cleanup.backupPath,
+          });
+        } catch (cleanupError) {
+          // Best-effort: leave the marker unset so the next boot can retry,
+          // but don't block the rest of startup on legacy config hygiene.
+          console.warn(
+            "Failed to clean up legacy bundled extensions after migration:",
+            cleanupError,
+          );
+        }
         if (cancelled) return;
 
         try {

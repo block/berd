@@ -121,7 +121,6 @@ const buttonStylingBaseline = new Set([
   "src/features/chat/ui/widgets/WorkspaceActionsMenu.tsx",
   "src/features/design-system/ui/ConversationAnatomyPage.tsx",
   "src/features/extensions/ui/ExtensionModal.tsx",
-  "src/features/extensions/ui/ExtensionsSettings.tsx",
   "src/features/home/widgets/ChecklistWidget.tsx",
   "src/features/home/widgets/StickyNoteWidget.tsx",
   "src/features/navigation/ui/PrimaryNavigationSurface.tsx",

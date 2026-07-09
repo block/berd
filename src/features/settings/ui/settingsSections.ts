@@ -4,7 +4,6 @@ import {
   Bell,
   FlaskConical,
   Keyboard,
-  Link2,
   RefreshCw,
   Settings2,
   Shield,
@@ -27,7 +26,6 @@ type SettingsSectionDefinition = {
 export const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: Settings2 },
   { id: "providers", labelKey: "nav.providers", icon: IconPlug },
-  { id: "connections", labelKey: "nav.connections", icon: Link2 },
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
@@ -54,7 +52,6 @@ export type SectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 export const DEFAULT_SETTINGS_SECTION: SectionId = "general";
 
 const LEGACY_SECTION_REDIRECTS: Record<string, SectionId> = {
-  extensions: "connections",
   projects: "archive",
   chats: "archive",
   voice: "general",

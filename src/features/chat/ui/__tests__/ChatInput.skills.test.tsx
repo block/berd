@@ -570,7 +570,6 @@ describe("ChatInput skill mentions", () => {
       expect.objectContaining({
         detail: {
           section: "connections",
-          connectionsTab: "companyManaged",
         },
       }),
     );
@@ -620,7 +619,6 @@ describe("ChatInput skill mentions", () => {
       expect.objectContaining({
         detail: {
           section: "connections",
-          connectionsTab: "companyManaged",
         },
       }),
     );

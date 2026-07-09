@@ -81,9 +81,7 @@
     "title": "Extensions",
     "description": "Connect Berd to apps, services, and built-in capabilities.",
     "search": "Search extensions",
-    "empty": "No extensions configured.",
     "emptyCustom": "No custom extensions configured.",
-    "emptyGooseCapabilities": "No Goose capabilities configured.",
     "noResults": "No extensions match your search.",
     "addExtension": "Add extension",
     "editExtension": "Edit extension",
@@ -121,19 +119,6 @@
       "streamable_http": "HTTP",
       "builtin": "Built-in"
     },
-    "filters": {
-      "all": "All"
-    },
-    "categories": {
-      "appsServices": "Apps and services",
-      "gooseCapabilities": "Goose capabilities"
-    },
-    "sections": {
-      "extensions": "Extensions",
-      "gooseCapabilities": "Built-in Goose capabilities"
-    },
-    "showGooseCapabilities": "Show {{count}} built-in Goose capabilities",
-    "hideGooseCapabilities": "Hide built-in Goose capabilities",
     "errors": {
       "saveFailed": "Couldn't save the extension. Try again.",
       "deleteFailed": "Couldn't delete the extension. Try again.",
@@ -375,18 +360,27 @@
   "connections": {
     "title": "Connections",
     "description": "Sign in to apps and services Berd can use on your behalf.",
-    "tabs": {
-      "companyManaged": "Company-managed",
-      "custom": "Custom",
-      "gooseCapabilities": "Goose capabilities"
+    "search": "Search connections",
+    "noResults": "No connections match your search.",
+    "sections": {
+      "installed": "Installed",
+      "available": "Available"
     },
+    "openDetails": "View {{name}} details",
+    "configure": "Configure",
     "connect": "Connect",
     "reconnect": "Reconnect",
     "extendAccess": "Extend access",
+    "disconnect": "Disconnect",
     "connectError": "Couldn't open the connect flow. Try again.",
+    "disconnectError": "Couldn't disconnect. Try again.",
     "expiresToday": "Expires today",
     "expiresTomorrow": "Expires tomorrow",
     "expiresInDays": "Expires in {{count}} days",
+    "empty": {
+      "title": "No connections yet",
+      "description": "Add an MCP server to connect Berd to the apps and services you use."
+    },
     "status": {
       "active": "Active",
       "expired": "Expired",
@@ -398,7 +392,6 @@
     "appearance": "Appearance",
     "archive": "Archive",
     "compaction": "Compaction",
-    "connections": "Connections",
     "doctor": "Doctor",
     "experiments": "Experiments",
     "extensions": "Extensions",

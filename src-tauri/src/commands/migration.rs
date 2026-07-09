@@ -45,6 +45,14 @@ pub struct MigrationStatus {
     pub backup_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub banner_dismissed_at: Option<String>,
+    #[serde(default)]
+    pub legacy_extension_cleanup_done: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub legacy_extension_cleanup_completed_at: Option<String>,
+    #[serde(default)]
+    pub legacy_removed_extensions: Vec<DisabledExtension>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub legacy_extension_cleanup_backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,6 +69,15 @@ pub struct BackupResult {
 pub struct MarkMigrationCompleteRequest {
     #[serde(default)]
     pub disabled_extensions: Vec<DisabledExtension>,
+    #[serde(default)]
+    pub backup_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkLegacyExtensionCleanupCompleteRequest {
+    #[serde(default)]
+    pub removed_extensions: Vec<DisabledExtension>,
     #[serde(default)]
     pub backup_path: Option<String>,
 }
@@ -201,6 +218,10 @@ pub fn mark_migration_complete(
         disabled_extensions: request.disabled_extensions,
         backup_path: request.backup_path,
         banner_dismissed_at: None,
+        legacy_extension_cleanup_done: false,
+        legacy_extension_cleanup_completed_at: None,
+        legacy_removed_extensions: Vec::new(),
+        legacy_extension_cleanup_backup_path: None,
     };
 
     let marker = marker_path(&app_handle)?;
@@ -217,6 +238,24 @@ fn dismiss_migration_banner_at(path: &Path, now_iso: &str) -> Result<MigrationSt
         status.banner_dismissed_at = Some(now_iso.to_string());
         write_status_to_path(path, &status)?;
     }
+    Ok(status)
+}
+
+/// Stamp that the stale legacy bundled-extension cleanup has run. The cleanup
+/// may run after the original onboarding migration for existing users, so this
+/// updates the existing marker in place instead of overwriting migration data.
+#[tauri::command]
+pub fn mark_legacy_extension_cleanup_complete(
+    app_handle: AppHandle,
+    request: MarkLegacyExtensionCleanupCompleteRequest,
+) -> Result<MigrationStatus, String> {
+    let marker = marker_path(&app_handle)?;
+    let mut status = read_status_from_path(&marker)?;
+    status.legacy_extension_cleanup_done = true;
+    status.legacy_extension_cleanup_completed_at = Some(Utc::now().to_rfc3339());
+    status.legacy_removed_extensions = request.removed_extensions;
+    status.legacy_extension_cleanup_backup_path = request.backup_path;
+    write_status_to_path(&marker, &status)?;
     Ok(status)
 }
 
@@ -260,6 +299,7 @@ mod tests {
             }],
             backup_path: Some("/tmp/config.yaml.backup-2026-05-19T12-00-00Z".to_string()),
             banner_dismissed_at: Some("2026-05-19T13:00:00Z".to_string()),
+            ..Default::default()
         };
 
         write_status_to_path(&marker, &written).unwrap();
@@ -395,6 +435,7 @@ mod tests {
             }],
             backup_path: None,
             banner_dismissed_at: None,
+            ..Default::default()
         };
         write_status_to_path(&marker, &written).unwrap();
 
@@ -423,6 +464,7 @@ mod tests {
                 disabled_extensions: vec![],
                 backup_path: None,
                 banner_dismissed_at: Some("2026-05-19T13:00:00Z".to_string()),
+                ..Default::default()
             },
         )
         .unwrap();

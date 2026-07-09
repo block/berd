@@ -58,3 +58,9 @@ export async function listConnections(): Promise<ListConnectionsResponse> {
   const response = await invoke<unknown>("list_connections");
   return asListConnectionsResponse(response);
 }
+
+// Revokes the stored OAuth token for one provider via kgoose's
+// delete-oauth-extension endpoint. The provider then lists as disconnected.
+export async function disconnectConnection(provider: string): Promise<void> {
+  await invoke("disconnect_connection", { extension: provider });
+}

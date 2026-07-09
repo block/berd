@@ -11,12 +11,21 @@ export interface DisabledExtension {
  * Frontend mirror of the Tauri-side `MigrationStatus` struct. Returned by the
  * `migration_status` command and written via `mark_migration_complete`.
  */
+export interface LegacyRemovedExtension {
+  configKey: string;
+  name: string;
+}
+
 export interface MigrationStatus {
   done: boolean;
   completedAt?: string;
   disabledExtensions: DisabledExtension[];
   backupPath?: string;
   bannerDismissedAt?: string;
+  legacyExtensionCleanupDone?: boolean;
+  legacyExtensionCleanupCompletedAt?: string;
+  legacyRemovedExtensions?: LegacyRemovedExtension[];
+  legacyExtensionCleanupBackupPath?: string;
 }
 
 /**
@@ -31,6 +40,11 @@ export interface BackupResult {
 
 export interface MarkMigrationCompleteRequest {
   disabledExtensions: DisabledExtension[];
+  backupPath?: string;
+}
+
+export interface MarkLegacyExtensionCleanupCompleteRequest {
+  removedExtensions: LegacyRemovedExtension[];
   backupPath?: string;
 }
 

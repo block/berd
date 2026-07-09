@@ -20,7 +20,7 @@ import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { ExtensionEntry } from "@/features/extensions/types";
-import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettings";
+import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
@@ -46,7 +46,6 @@ interface AppShellContentProps {
   authStatus?: AuthStatus;
   onLoggedOut?: (status: AuthStatus) => void;
   isPreparingContent: boolean;
-  activeConnectionsTab: ConnectionsTab;
   automationsEnabled: boolean;
   builderbotEnabled: boolean;
   renderedSession?: ChatSession;
@@ -74,7 +73,6 @@ interface AppShellContentProps {
     route: BuilderbotNavigationRoute,
     options?: AppNavigationUpdateOptions,
   ) => void;
-  onConnectionsTabChange: (tab: ConnectionsTab) => void;
   onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
@@ -125,7 +123,6 @@ export function AppShellContent({
   renderedLocation,
   authStatus,
   isPreparingContent,
-  activeConnectionsTab,
   automationsEnabled,
   builderbotEnabled,
   designSystemInspectorVisible,
@@ -145,7 +142,6 @@ export function AppShellContent({
   onNavigateAgents,
   onNavigateAutomations,
   onNavigateBuilderbot,
-  onConnectionsTabChange,
   onSkillsBreadcrumbLabelChange,
   onAgentsBreadcrumbLabelChange,
   onAutomationsBreadcrumbLabelChange,
@@ -219,7 +215,6 @@ export function AppShellContent({
   );
 
   const routeContent = renderRouteContent({
-    activeConnectionsTab,
     authStatus,
     automationsEnabled,
     builderbotEnabled,
@@ -244,7 +239,6 @@ export function AppShellContent({
     onAutomationsBreadcrumbLabelChange,
     onBuilderbotBreadcrumbLabelChange,
     onChatComposerHandoffTarget,
-    onConnectionsTabChange,
     onCreatePersona,
     onCreateProject,
     onExitSearch,
@@ -286,7 +280,6 @@ export function AppShellContent({
 }
 
 interface RenderRouteContentOptions {
-  activeConnectionsTab: ConnectionsTab;
   authStatus?: AuthStatus;
   automationsEnabled: boolean;
   builderbotEnabled: boolean;
@@ -318,7 +311,6 @@ interface RenderRouteContentOptions {
     route: BuilderbotNavigationRoute,
     options?: AppNavigationUpdateOptions,
   ) => void;
-  onConnectionsTabChange: (tab: ConnectionsTab) => void;
   onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
@@ -362,7 +354,6 @@ interface RenderRouteContentOptions {
 }
 
 function renderRouteContent({
-  activeConnectionsTab,
   automationsEnabled,
   builderbotEnabled,
   chatComposerHandoffActive,
@@ -385,7 +376,6 @@ function renderRouteContent({
   onBuilderbotBreadcrumbLabelChange,
   onChatComposerHandoffTarget,
   onCloseDesignSystem,
-  onConnectionsTabChange,
   onCreatePersona,
   onCreateProject,
   onDesignSystemInspectorVisibleChange,
@@ -428,14 +418,14 @@ function renderRouteContent({
       return (
         <SettingsView
           activeSection={location.settingsSection}
-          activeConnectionsTab={activeConnectionsTab}
           authStatus={authStatus}
-          onConnectionsTabChange={onConnectionsTabChange}
           onLoggedOut={onLoggedOut}
           onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
           onReturnToAgentDraft={onReturnToAgentDraft}
         />
       );
+    case "connections":
+      return <ConnectionsView />;
     case "automations":
       return automationsEnabled ? (
         <AutomationsWorkbench

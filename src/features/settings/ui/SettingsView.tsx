@@ -9,10 +9,6 @@ import { SecuritySettings } from "./SecuritySettings";
 import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
-import {
-  ConnectionsSettings,
-  type ConnectionsTab,
-} from "@/features/connections/ui/ConnectionsSettings";
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { PageShell } from "@/shared/ui/page-shell";
@@ -23,9 +19,7 @@ import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 
 interface SettingsViewProps {
   activeSection: SectionId;
-  activeConnectionsTab: ConnectionsTab;
   authStatus?: AuthStatus;
-  onConnectionsTabChange: (tab: ConnectionsTab) => void;
   onLoggedOut?: (status: AuthStatus) => void;
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
@@ -35,9 +29,7 @@ interface SettingsViewProps {
 
 export function SettingsView({
   activeSection,
-  activeConnectionsTab,
   authStatus,
-  onConnectionsTabChange,
   onLoggedOut,
   onStartTroubleshootingChat,
   onReturnToAgentDraft,
@@ -70,12 +62,6 @@ export function SettingsView({
         <ProvidersSettings
           onStartTroubleshootingChat={onStartTroubleshootingChat}
           onReturnToAgentDraft={onReturnToAgentDraft}
-        />
-      )}
-      {activeSection === "connections" && (
-        <ConnectionsSettings
-          activeTab={activeConnectionsTab}
-          onActiveTabChange={onConnectionsTabChange}
         />
       )}
       {activeSection === "doctor" && doctorEnabled && <DoctorSettings />}

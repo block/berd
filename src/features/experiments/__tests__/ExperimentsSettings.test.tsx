@@ -36,7 +36,7 @@ const uiRegistry = [
     config: {
       enabledConfig: {
         type: "boolean",
-        labelKey: "nav.connections",
+        labelKey: "nav.notifications",
         defaultValue: false,
       },
       mode: {
@@ -472,7 +472,7 @@ describe("ExperimentsSettings", () => {
     await user.click(switchControl);
     expect(switchControl).toBeChecked();
 
-    await user.click(screen.getByRole("switch", { name: "Connections" }));
+    await user.click(screen.getByRole("switch", { name: "Notifications" }));
 
     await user.click(screen.getByRole("combobox", { name: "AI providers" }));
     await user.click(
