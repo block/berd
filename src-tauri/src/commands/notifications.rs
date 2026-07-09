@@ -73,9 +73,10 @@ mod macos_completion {
     use objc2_app_kit::NSApplication;
     use objc2_foundation::{NSDictionary, NSError, NSObject, NSObjectProtocol, NSString};
     use objc2_user_notifications::{
-        UNMutableNotificationContent, UNNotification, UNNotificationDismissActionIdentifier,
-        UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
-        UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotification,
+        UNNotificationDismissActionIdentifier, UNNotificationPresentationOptions,
+        UNNotificationRequest, UNNotificationResponse, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
     };
     use tauri::{AppHandle, Emitter, Manager};
 
@@ -162,6 +163,25 @@ mod macos_completion {
         let delegate_ref: &ProtocolObject<dyn UNUserNotificationCenterDelegate> =
             ProtocolObject::from_ref(&*delegate);
         center.setDelegate(Some(delegate_ref));
+
+        // Request notification authorization for the app's bundle id. Without
+        // this the app never appears in System Settings → Notifications and
+        // scheduled notifications are silently dropped from banners/lists.
+        let authorization_block =
+            RcBlock::new(|granted: objc2::runtime::Bool, error: *mut NSError| {
+                if !error.is_null() {
+                    log::warn!(
+                        "Completion notification authorization request failed: {}",
+                        error_description(error)
+                    );
+                } else if !granted.as_bool() {
+                    log::info!("Completion notification authorization was not granted");
+                }
+            });
+        center.requestAuthorizationWithOptions_completionHandler(
+            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+            &authorization_block,
+        );
 
         app.manage(CompletionNotificationState {
             _delegate: delegate,
