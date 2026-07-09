@@ -242,4 +242,132 @@ describe("useMessageQueue", () => {
       text: "queued",
     });
   });
+
+  it("drains queued message via store subscription when chatState transitions to idle (background-safe path)", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    useChatStore.getState().enqueueMessage("s1", { text: "background msg" });
+
+    // Set up the store with a non-idle chatState so the subscription can
+    // detect the transition.
+    useChatStore.getState().setChatState("s1", "streaming");
+
+    // Mount the hook in a non-idle state so the drain effect doesn't fire
+    // on initial render.
+    renderHook(() => useMessageQueue("s1", "streaming", sendMessage));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    // Simulate the store transitioning to idle directly (as sendCore.ts does).
+    // The store subscription fires synchronously and should call sendMessage
+    // even without a React re-render — this is the background-safe path.
+    act(() => {
+      useChatStore.getState().setChatState("s1", "idle");
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "background msg",
+      undefined,
+      undefined,
+    );
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
+  it("reads live blocked state before draining via store subscription", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    const chatStore = useChatStore.getState();
+    chatStore.enqueueMessage("s1", { text: "background msg" });
+    chatStore.setChatState("s1", "streaming");
+    chatStore.setActiveRunId("s1", "run-1");
+
+    // Mount while the render-derived prop is blocked. In a backgrounded webview,
+    // this prop may not update before the store transitions back to idle.
+    renderHook(() =>
+      useMessageQueue("s1", "streaming", sendMessage, false, true),
+    );
+
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("s1", null);
+      useChatStore.getState().setChatState("s1", "idle");
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      "background msg",
+      undefined,
+      undefined,
+    );
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
+  it("drains when a run clears after chatState is already idle", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    const chatStore = useChatStore.getState();
+    chatStore.enqueueMessage("s1", { text: "background msg" });
+    chatStore.setChatState("s1", "streaming");
+    chatStore.setActiveRunId("s1", "run-1");
+
+    renderHook(() =>
+      useMessageQueue("s1", "streaming", sendMessage, false, true),
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("s1", "idle");
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("s1", null);
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      "background msg",
+      undefined,
+      undefined,
+    );
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
+  it("does not re-drain an async queued send while the first attempt is in flight", async () => {
+    let resolveSend: (accepted: boolean) => void = () => {};
+    const sendMessage = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const chatStore = useChatStore.getState();
+    chatStore.enqueueMessage("s1", { text: "background msg" });
+    chatStore.setChatState("s1", "streaming");
+
+    renderHook(() => useMessageQueue("s1", "streaming", sendMessage));
+
+    act(() => {
+      useChatStore.getState().setChatState("s1", "idle");
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+      text: "background msg",
+    });
+
+    // Auto-compaction can transition compacting -> idle before the original
+    // send promise finalizes. The queue must not send the same prompt again.
+    act(() => {
+      useChatStore.getState().setChatState("s1", "compacting");
+      useChatStore.getState().setChatState("s1", "idle");
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSend(true);
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
 });

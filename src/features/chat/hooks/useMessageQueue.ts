@@ -7,13 +7,15 @@ import type { ChatSendOptions } from "../types";
 
 const MAX_CONSECUTIVE_SEND_FAILURES = 2;
 
+type QueuedMessage = {
+  text: string;
+  personaId?: string;
+  attachments?: ChatAttachmentDraft[];
+  sendOptions?: ChatSendOptions;
+};
+
 function getQueuedMessageKey(
-  queuedMessage: {
-    text: string;
-    personaId?: string;
-    attachments?: ChatAttachmentDraft[];
-    sendOptions?: ChatSendOptions;
-  } | null,
+  queuedMessage: QueuedMessage | null,
 ): string | null {
   if (!queuedMessage) {
     return null;
@@ -34,13 +36,25 @@ function getQueuedMessageKey(
 }
 
 function isBerdctlCrossSessionQueuedMessage(
-  queuedMessage: {
-    sendOptions?: ChatSendOptions;
-  } | null,
+  queuedMessage: Pick<QueuedMessage, "sendOptions"> | null,
 ): boolean {
   return (
     queuedMessage?.sendOptions?.userMessageMetadata?.origin ===
     "berdctl_cross_session"
+  );
+}
+
+function isRuntimeSendBlocked(
+  runtime:
+    | {
+        activeRunId: string | null;
+        isRunCancellationPending: boolean;
+      }
+    | undefined,
+) {
+  return (
+    (runtime?.activeRunId ?? null) !== null ||
+    (runtime?.isRunCancellationPending ?? false)
   );
 }
 
@@ -51,6 +65,12 @@ function isBerdctlCrossSessionQueuedMessage(
  * State lives in the Zustand store (keyed by session) so it survives tab
  * switches — users can queue a follow-up, navigate away, and come back to
  * find it sent.
+ *
+ * A direct Zustand store subscription ensures the drain fires even when the
+ * webview is backgrounded and React defers re-renders (e.g. rAF paused,
+ * visibility-hidden throttling). The subscription detects ready-to-send
+ * transitions synchronously and invokes the drain without waiting for the next
+ * paint frame.
  */
 export function useMessageQueue(
   sessionId: string,
@@ -77,10 +97,141 @@ export function useMessageQueue(
     key: string;
     count: number;
   } | null>(null);
+  const inFlightAttemptKeyRef = useRef<string | null>(null);
+  const suppressNextRenderIdleCycleRef = useRef(false);
   const queuedMessageKey = useMemo(
     () => getQueuedMessageKey(queuedMessage),
     [queuedMessage],
   );
+
+  // --- Background-safe store subscription ---
+  // When the webview is hidden/minimized, React may not schedule re-renders
+  // for Zustand selector updates because requestAnimationFrame is paused.
+  // This direct store subscription fires synchronously on state changes and
+  // triggers the queued message send immediately, bypassing React's render
+  // cycle. Uses a ref to always call the latest sendMessage callback.
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
+  const tryDrainQueuedMessage = useCallback(
+    (queuedMsg: QueuedMessage | null | undefined) => {
+      if (
+        readOnlyRef.current ||
+        !queuedMsg ||
+        isBerdctlCrossSessionQueuedMessage(queuedMsg)
+      ) {
+        return false;
+      }
+
+      const key = getQueuedMessageKey(queuedMsg);
+      if (!key) {
+        return false;
+      }
+
+      const hasReachedRetryLimit =
+        failureStateRef.current?.key === key &&
+        failureStateRef.current.count >= MAX_CONSECUTIVE_SEND_FAILURES;
+      const alreadyAttemptedThisIdleCycle =
+        lastAttemptRef.current?.key === key &&
+        lastAttemptRef.current.idleCycle === idleCycleRef.current;
+      const alreadySending = inFlightAttemptKeyRef.current === key;
+      if (
+        hasReachedRetryLimit ||
+        alreadyAttemptedThisIdleCycle ||
+        alreadySending
+      ) {
+        return false;
+      }
+
+      lastAttemptRef.current = {
+        key,
+        idleCycle: idleCycleRef.current,
+      };
+      inFlightAttemptKeyRef.current = key;
+
+      const { text, personaId, attachments, sendOptions } = queuedMsg;
+      const sendFn = sendMessageRef.current;
+      const sendResult = sendOptions
+        ? sendFn(
+            text,
+            personaId ? { id: personaId } : undefined,
+            attachments,
+            sendOptions,
+          )
+        : sendFn(text, personaId ? { id: personaId } : undefined, attachments);
+
+      const finalize = (accepted: boolean | undefined) => {
+        if (inFlightAttemptKeyRef.current === key) {
+          inFlightAttemptKeyRef.current = null;
+        }
+
+        const latestQueuedMessage =
+          useChatStore.getState().queuedMessageBySession[sessionId] ?? null;
+        if (getQueuedMessageKey(latestQueuedMessage) !== key) {
+          return;
+        }
+
+        if (accepted === false) {
+          const previousFailureCount =
+            failureStateRef.current?.key === key
+              ? failureStateRef.current.count
+              : 0;
+          failureStateRef.current = {
+            key,
+            count: previousFailureCount + 1,
+          };
+          return;
+        }
+
+        failureStateRef.current = null;
+        lastAttemptRef.current = null;
+        useChatStore.getState().dismissQueuedMessage(sessionId);
+      };
+
+      if (isPromiseLike<boolean>(sendResult)) {
+        void sendResult
+          .then((accepted) => finalize(accepted))
+          .catch(() => finalize(false));
+      } else {
+        finalize(sendResult);
+      }
+
+      return true;
+    },
+    [sessionId],
+  );
+
+  useEffect(() => {
+    return useChatStore.subscribe((state, previousState) => {
+      const runtime = state.sessionStateById[sessionId];
+      const previousRuntime = previousState.sessionStateById[sessionId];
+      const currentChatState = runtime?.chatState ?? "idle";
+      const prevChatState = previousRuntime?.chatState ?? "idle";
+      const isLiveSendBlocked = isRuntimeSendBlocked(runtime);
+      const wasSendBlocked = isRuntimeSendBlocked(previousRuntime);
+      const becameIdle =
+        currentChatState === "idle" && prevChatState !== "idle";
+      const becameReadyWhileIdle =
+        currentChatState === "idle" && wasSendBlocked && !isLiveSendBlocked;
+
+      if (becameIdle) {
+        idleCycleRef.current += 1;
+        suppressNextRenderIdleCycleRef.current = true;
+      }
+
+      if (!becameIdle && !becameReadyWhileIdle) {
+        return;
+      }
+
+      if (currentChatState !== "idle" || isLiveSendBlocked) {
+        return;
+      }
+
+      tryDrainQueuedMessage(state.queuedMessageBySession[sessionId]);
+    });
+  }, [sessionId, tryDrainQueuedMessage]);
 
   useEffect(() => {
     if (queuedMessageKey !== lastAttemptRef.current?.key) {
@@ -93,90 +244,27 @@ export function useMessageQueue(
 
   useEffect(() => {
     if (chatState === "idle" && previousChatStateRef.current !== "idle") {
-      idleCycleRef.current += 1;
+      if (suppressNextRenderIdleCycleRef.current) {
+        suppressNextRenderIdleCycleRef.current = false;
+      } else {
+        idleCycleRef.current += 1;
+      }
     }
     previousChatStateRef.current = chatState;
   }, [chatState]);
 
   useEffect(() => {
-    const hasReachedRetryLimit =
-      failureStateRef.current?.key === queuedMessageKey &&
-      failureStateRef.current.count >= MAX_CONSECUTIVE_SEND_FAILURES;
-    const alreadyAttemptedThisIdleCycle =
-      lastAttemptRef.current?.key === queuedMessageKey &&
-      lastAttemptRef.current.idleCycle === idleCycleRef.current;
-
-    if (
-      chatState !== "idle" ||
-      readOnly ||
-      isSendBlocked ||
-      !queuedMessage ||
-      !queuedMessageKey ||
-      isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
-      hasReachedRetryLimit ||
-      alreadyAttemptedThisIdleCycle
-    ) {
+    if (chatState !== "idle" || isSendBlocked || readOnly) {
       return;
     }
 
-    lastAttemptRef.current = {
-      key: queuedMessageKey,
-      idleCycle: idleCycleRef.current,
-    };
-
-    const { text, personaId, attachments, sendOptions } = queuedMessage;
-    const sendResult = sendOptions
-      ? sendMessage(
-          text,
-          personaId ? { id: personaId } : undefined,
-          attachments,
-          sendOptions,
-        )
-      : sendMessage(
-          text,
-          personaId ? { id: personaId } : undefined,
-          attachments,
-        );
-
-    const finalize = (accepted: boolean | undefined) => {
-      const latestQueuedMessage =
-        useChatStore.getState().queuedMessageBySession[sessionId] ?? null;
-      if (getQueuedMessageKey(latestQueuedMessage) !== queuedMessageKey) {
-        return;
-      }
-
-      if (accepted === false) {
-        const previousFailureCount =
-          failureStateRef.current?.key === queuedMessageKey
-            ? failureStateRef.current.count
-            : 0;
-        failureStateRef.current = {
-          key: queuedMessageKey,
-          count: previousFailureCount + 1,
-        };
-        return;
-      }
-
-      failureStateRef.current = null;
-      lastAttemptRef.current = null;
-      useChatStore.getState().dismissQueuedMessage(sessionId);
-    };
-
-    if (isPromiseLike<boolean>(sendResult)) {
-      void sendResult
-        .then((accepted) => finalize(accepted))
-        .catch(() => finalize(false));
-    } else {
-      finalize(sendResult);
-    }
+    tryDrainQueuedMessage(queuedMessage);
   }, [
     chatState,
     isSendBlocked,
     queuedMessage,
-    queuedMessageKey,
     readOnly,
-    sendMessage,
-    sessionId,
+    tryDrainQueuedMessage,
   ]);
 
   const enqueue = useCallback(

@@ -1553,6 +1553,14 @@ export function useChatSessionController({
       stateSessionId,
     ],
   );
+  const isQueuedSendBlockedNow = useCallback(() => {
+    const liveRuntime = useChatStore
+      .getState()
+      .getSessionRuntime(stateSessionId);
+    return (
+      liveRuntime.activeRunId !== null || liveRuntime.isRunCancellationPending
+    );
+  }, [stateSessionId]);
   const sendWithAutoCompact = useCallback(
     (
       text: string,
@@ -1578,7 +1586,7 @@ export function useChatSessionController({
       const shouldPassSendOptions =
         Boolean(sendOptions) || nextSendOptions.assistantPrompt != null;
 
-      if (isQueuedSendBlocked) {
+      if (isQueuedSendBlockedNow()) {
         return false;
       }
 
@@ -1617,7 +1625,7 @@ export function useChatSessionController({
       artifactFolderInstructions,
       canAutoCompactBeforeSend,
       compactConversation,
-      isQueuedSendBlocked,
+      isQueuedSendBlockedNow,
       recordSubmittedDraft,
       sendMessage,
       session,
