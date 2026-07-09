@@ -69,7 +69,13 @@ const loadedPersona: Persona = {
 
 describe("agents API", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockGooseSourcesList.mockReset();
+    mockGooseSourcesCreate.mockReset();
+    mockGooseSourcesUpdate.mockReset();
+    mockGooseSourcesDelete.mockReset();
+    mockGooseSourcesExport.mockReset();
+    mockGooseSourcesImport.mockReset();
+    mockedInvoke.mockReset();
   });
 
   it("lists personas through ACP agent sources", async () => {
@@ -145,6 +151,86 @@ describe("agents API", () => {
     const result = await listPersonas();
 
     expect(result[0].avatar).toBe(appAvatarRef);
+  });
+
+  it("does not hydrate listed personas that already have a display name", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [agentSource],
+    });
+
+    const { listPersonas } = await import("../agents");
+    await listPersonas();
+
+    expect(mockedInvoke).not.toHaveBeenCalled();
+  });
+
+  it("hydrates writable listed personas from markdown frontmatter", async () => {
+    const sourcePath = "/Users/test/.agents/agents/blueprint-boi.md";
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          path: sourcePath,
+          name: "blueprint-boi",
+          description: "Architect.",
+          content: "Fallback prompt.",
+          properties: {
+            avatar: appAvatarRef,
+          },
+        },
+      ],
+    });
+    mockedInvoke.mockResolvedValue({
+      fileName: "blueprint-boi.md",
+      fileContents:
+        "---\nname: blueprint-boi\ndisplay_name: Blueprint Bandit\ndescription: Plans carefully.\nmodel: goose:goose-claude-fable-5\navatar: app-avatar:gloopies-14\n---\n\nPlan before building.\n",
+    });
+
+    const { listPersonas } = await import("../agents");
+    const result = await listPersonas();
+
+    expect(mockedInvoke).toHaveBeenCalledWith("read_agent_source_file", {
+      sourcePath,
+    });
+    expect(result[0]).toMatchObject({
+      id: sourcePath,
+      displayName: "Blueprint Bandit",
+      sourceDescription: "Plans carefully.",
+      systemPrompt: "Plan before building.",
+      provider: "goose",
+      model: "goose-claude-fable-5",
+      avatar: "app-avatar:gloopies-14",
+    });
+  });
+
+  it("keeps listed persona metadata when markdown hydration fails", async () => {
+    const sourcePath = "/Users/test/.agents/agents/blueprint-boi.md";
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          path: sourcePath,
+          name: "blueprint-boi",
+        },
+      ],
+    });
+    mockedInvoke.mockRejectedValue(new Error("read failed"));
+
+    const { listPersonas } = await import("../agents");
+    const result = await listPersonas();
+
+    expect(result[0].displayName).toBe("blueprint-boi");
+  });
+
+  it("does not hydrate read-only listed agent sources", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [{ ...agentSource, writable: false }],
+    });
+
+    const { listPersonas } = await import("../agents");
+    await listPersonas();
+
+    expect(mockedInvoke).not.toHaveBeenCalled();
   });
 
   it("marks read-only agent sources as built in personas", async () => {

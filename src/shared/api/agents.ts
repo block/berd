@@ -573,7 +573,33 @@ async function listAgentSources(): Promise<AgentSourceEntry[]> {
   const response = await client.goose.GooseUnstableSourcesList({
     type: AGENT_SOURCE_TYPE,
   });
-  return response.sources.filter(isAgentSource);
+  const sources = response.sources.filter(isAgentSource);
+  return Promise.all(sources.map(hydrateListedAgentSource));
+}
+
+function canHydrateListedAgentSource(source: AgentSourceEntry): boolean {
+  return (
+    source.writable === true &&
+    source.path.length > 0 &&
+    // Skip built-in/synthetic source paths such as `builtin://...`.
+    !source.path.includes("://") &&
+    source.path.toLowerCase().endsWith(".md") &&
+    source.name === fileStem(source.path)
+  );
+}
+
+async function hydrateListedAgentSource(
+  source: AgentSourceEntry,
+): Promise<AgentSourceEntry> {
+  if (!canHydrateListedAgentSource(source)) {
+    return source;
+  }
+
+  try {
+    return await readAgentSourceFile(source.path, source);
+  } catch {
+    return source;
+  }
 }
 
 function requireAgentSource(source: SourceEntry): AgentSourceEntry {
