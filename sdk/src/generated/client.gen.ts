@@ -10,6 +10,8 @@ export interface ExtMethodProvider {
 import type {
   AddConfigExtensionRequestUnstable,
   AddSessionExtensionRequestUnstable,
+  AppsDeleteRequestUnstable,
+  AppsDeleteResponseUnstable,
   AppsExportRequestUnstable,
   AppsExportResponseUnstable,
   AppsImportRequestUnstable,
@@ -195,6 +197,7 @@ import type {
   UpdateWorkingDirRequestUnstable,
 } from './types.gen.js';
 import {
+  zAppsDeleteResponseUnstable,
   zAppsExportResponseUnstable,
   zAppsImportResponseUnstable,
   zAppsListResponseUnstable,
@@ -353,6 +356,16 @@ export class GooseExtClient {
       params,
     );
     return zAppsImportResponseUnstable.parse(raw) as AppsImportResponseUnstable;
+  }
+
+  async GooseUnstableAppsDelete(
+    params: AppsDeleteRequestUnstable,
+  ): Promise<AppsDeleteResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/apps/delete",
+      params,
+    );
+    return zAppsDeleteResponseUnstable.parse(raw) as AppsDeleteResponseUnstable;
   }
 
   async GooseUnstableSessionWorkingDirUpdate(
