@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::services::path_env;
+use crate::services::{bundled_acp_tools, path_env};
 use doctor::FixType;
 use tauri::{AppHandle, Emitter, State};
 
@@ -134,6 +134,20 @@ pub struct SetupPlan {
     /// failure against the absent doctor check.
     #[serde(default)]
     verify_install: bool,
+    /// Some providers ship an ACP bridge separately from the main harness CLI.
+    /// When Berd bundles that bridge, install verification must still require
+    /// the provider's real CLI (`path`) rather than accepting the bridge
+    /// (`bridge_path`) alone.
+    #[serde(default)]
+    requires_main_cli: bool,
+    /// Whether Berd bundles this provider's ACP bridge. The frontend readiness
+    /// gate (`readinessFromReport`) treats a bundled-bridge provider with no
+    /// resolved `bridgePath` as not installed (the bundle itself is broken), so
+    /// post-fix verification must apply the same gate — otherwise a main-CLI
+    /// install would verify as success and the card would immediately flip back
+    /// to not_installed, an install-succeeds/still-broken loop.
+    #[serde(default)]
+    bundled_bridge: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -308,7 +322,18 @@ fn crate_check_id(provider_id: &str) -> String {
     format!("ai-agent-{name}")
 }
 
-async fn find_check(provider_id: &str) -> Result<doctor::DoctorCheck, String> {
+fn bundled_acp_prepend_dirs(app: &AppHandle) -> Vec<std::path::PathBuf> {
+    bundled_acp_tools::resolve_bundled_acp_tools_dir(app)
+        .into_iter()
+        .collect()
+}
+
+async fn home_env_vars_with_bundled_acp(app: &AppHandle) -> Vec<(String, String)> {
+    let prepend_dirs = bundled_acp_prepend_dirs(app);
+    path_env::home_env_vars_with_extended_path_and_prepended_dirs(&prepend_dirs).await
+}
+
+async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::DoctorCheck, String> {
     let target = crate_check_id(provider_id);
     let report = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
@@ -317,7 +342,7 @@ async fn find_check(provider_id: &str) -> Result<doctor::DoctorCheck, String> {
             offline: false,
             env: None,
         }
-        .with_env_snapshot(path_env::home_env_vars_with_extended_path().await),
+        .with_env_snapshot(home_env_vars_with_bundled_acp(app).await),
     )
     .await;
     report
@@ -330,9 +355,29 @@ async fn find_check(provider_id: &str) -> Result<doctor::DoctorCheck, String> {
 /// Whether the agent's main CLI or ACP bridge resolved on disk. Used as the
 /// post-install / post-auth verification: a clean run that still leaves nothing
 /// on PATH surfaces a clear error instead of a false success.
-async fn agent_is_installed(provider_id: &str) -> Result<bool, String> {
-    let check = find_check(provider_id).await?;
-    Ok(check.path.is_some() || check.bridge_path.is_some())
+async fn agent_is_installed(
+    app: &AppHandle,
+    provider_id: &str,
+    plan: &SetupPlan,
+) -> Result<bool, String> {
+    let check = find_check(app, provider_id).await?;
+    Ok(check_satisfies_plan(&check, plan))
+}
+
+/// The resolved-on-disk gate, mirroring the frontend's `readinessFromReport`:
+/// `requires_main_cli` demands the provider's real CLI (`path`) rather than
+/// accepting the bridge alone, and `bundled_bridge` additionally demands the
+/// Berd-supplied bridge resolved (`bridge_path`) — its bin dir is always on the
+/// doctor PATH, so null means the bundle itself is broken and readiness would
+/// contradict any verification success reported without it.
+fn check_satisfies_plan(check: &doctor::DoctorCheck, plan: &SetupPlan) -> bool {
+    let main_cli_resolved = if plan.requires_main_cli {
+        check.path.is_some()
+    } else {
+        check.path.is_some() || check.bridge_path.is_some()
+    };
+    let bundled_bridge_resolved = !plan.bundled_bridge || check.bridge_path.is_some();
+    main_cli_resolved && bundled_bridge_resolved
 }
 
 /// Post-fix verification, gated by the plan's `verify_install`. When the
@@ -343,11 +388,21 @@ async fn agent_is_installed(provider_id: &str) -> Result<bool, String> {
 /// clean run is taken as success — the old in-card flow short-circuited the same
 /// way (`isBuiltIn || !hasBinary => installed`) rather than failing closed on the
 /// absent doctor check that `agent_is_installed` would surface for it.
-async fn verify_installed(provider_id: &str, verify_install: bool) -> Result<(), String> {
-    if !verify_install {
+async fn verify_installed(
+    app: Option<&AppHandle>,
+    provider_id: &str,
+    plan: &SetupPlan,
+) -> Result<(), String> {
+    if !plan.verify_install {
         return Ok(());
     }
-    if agent_is_installed(provider_id).await.unwrap_or(false) {
+    let Some(app) = app else {
+        return Err("installVerificationFailed".to_string());
+    };
+    if agent_is_installed(app, provider_id, plan)
+        .await
+        .unwrap_or(false)
+    {
         Ok(())
     } else {
         // Sentinel the card localizes via `providers.agents.errors.*`.
@@ -426,7 +481,7 @@ async fn run_setup(
     plan: SetupPlan,
 ) {
     let result = match action {
-        SetupAction::Auth => run_auth(&app, &registry, &provider_id, plan.verify_install).await,
+        SetupAction::Auth => run_auth(&app, &registry, &provider_id, &plan).await,
         SetupAction::Install | SetupAction::Update => {
             run_install(&app, &registry, &provider_id, &plan).await
         }
@@ -469,7 +524,7 @@ async fn run_install(
     while let Some(fix) = next_install_fix(&pending, &ran) {
         ran.push(fix.clone());
         run_fix(app, registry, provider_id, fix, None).await?;
-        let check = find_check(provider_id).await?;
+        let check = find_check(app, provider_id).await?;
         pending = install_fix_for_check(&check);
     }
 
@@ -493,7 +548,7 @@ async fn run_install(
     if plan.verify_install {
         set_phase(app, registry, provider_id, SetupPhase::Checking);
     }
-    verify_installed(provider_id, plan.verify_install).await
+    verify_installed(Some(app), provider_id, plan).await
 }
 
 /// Mirror of the former in-card `runAuth`: run the auth fix, then verify the CLI
@@ -504,15 +559,15 @@ async fn run_auth(
     app: &AppHandle,
     registry: &AgentSetupRegistry,
     provider_id: &str,
-    verify_install: bool,
+    plan: &SetupPlan,
 ) -> Result<(), String> {
     set_phase(app, registry, provider_id, SetupPhase::Authenticating);
     run_fix(app, registry, provider_id, FixType::Auth, None).await?;
 
-    if verify_install {
+    if plan.verify_install {
         set_phase(app, registry, provider_id, SetupPhase::Checking);
     }
-    verify_installed(provider_id, verify_install).await
+    verify_installed(Some(app), provider_id, plan).await
 }
 
 /// Run one doctor fix, appending each streamed line into the registry (which
@@ -543,7 +598,7 @@ async fn run_fix(
             npm_registry: npm_registry().map(str::to_string),
             env: None,
         }
-        .with_env_snapshot(path_env::home_env_vars_with_extended_path().await),
+        .with_env_snapshot(home_env_vars_with_bundled_acp(app).await),
         move |line| {
             log::info!("{log_tag_for_lines} {line}");
             append_output(
@@ -815,6 +870,28 @@ mod tests {
         assert!(map.contains_key("fresh"));
     }
 
+    fn plan_with_requirements(
+        verify_install: bool,
+        requires_main_cli: bool,
+        bundled_bridge: bool,
+    ) -> SetupPlan {
+        SetupPlan {
+            install_fix_type: None,
+            update_commands: Vec::new(),
+            verify_install,
+            requires_main_cli,
+            bundled_bridge,
+        }
+    }
+
+    fn check_with_paths(path: Option<&str>, bridge_path: Option<&str>) -> doctor::DoctorCheck {
+        doctor::DoctorCheck {
+            path: path.map(str::to_string),
+            bridge_path: bridge_path.map(str::to_string),
+            ..check_with_fix(None)
+        }
+    }
+
     #[tokio::test]
     async fn verify_installed_skips_probe_when_not_required() {
         // A built-in / binary-less provider sends `verify_install = false`: it
@@ -824,8 +901,56 @@ mod tests {
         // returns before touching the doctor crate, so this needs no real check
         // on PATH — and a provider id with no check is exactly the case the old
         // path passed and the unconditional probe would have failed.
-        assert!(verify_installed("provider-without-a-check", false)
-            .await
-            .is_ok());
+        assert!(verify_installed(
+            None,
+            "provider-without-a-check",
+            &plan_with_requirements(false, false, false)
+        )
+        .await
+        .is_ok());
+    }
+
+    #[test]
+    fn check_satisfies_plan_accepts_either_binary_by_default() {
+        let plan = plan_with_requirements(true, false, false);
+        assert!(check_satisfies_plan(
+            &check_with_paths(Some("/bin/agent"), None),
+            &plan
+        ));
+        assert!(check_satisfies_plan(
+            &check_with_paths(None, Some("/bin/agent-acp")),
+            &plan
+        ));
+        assert!(!check_satisfies_plan(&check_with_paths(None, None), &plan));
+    }
+
+    #[test]
+    fn check_satisfies_plan_requires_main_cli_rejects_bridge_alone() {
+        let plan = plan_with_requirements(true, true, false);
+        assert!(check_satisfies_plan(
+            &check_with_paths(Some("/bin/codex"), None),
+            &plan
+        ));
+        assert!(!check_satisfies_plan(
+            &check_with_paths(None, Some("/bin/codex-acp")),
+            &plan
+        ));
+    }
+
+    #[test]
+    fn check_satisfies_plan_bundled_bridge_requires_resolved_bridge() {
+        // Mirror of the frontend readiness gate: a bundled-bridge provider whose
+        // bridge did not resolve is a broken bundle, so verification must fail
+        // even with the main CLI on PATH — otherwise the install reports success
+        // and the card immediately flips back to not_installed.
+        let plan = plan_with_requirements(true, true, true);
+        assert!(check_satisfies_plan(
+            &check_with_paths(Some("/bin/codex"), Some("/bundled/codex-acp")),
+            &plan
+        ));
+        assert!(!check_satisfies_plan(
+            &check_with_paths(Some("/bin/codex"), None),
+            &plan
+        ));
     }
 }

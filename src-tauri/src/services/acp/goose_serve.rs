@@ -3,13 +3,13 @@ use tauri_plugin_shell::ShellExt;
 
 use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState};
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::services::bundled_acp_tools;
 use crate::services::diagnostic_log::{
     self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
 };
@@ -26,6 +26,7 @@ use tokio::sync::OnceCell;
 
 const GOOSE_SERVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
+const GOOSE_SEARCH_PATHS_ENV: &str = "GOOSE_SEARCH_PATHS";
 const LOCALHOST: &str = "127.0.0.1";
 const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
 
@@ -147,13 +148,17 @@ impl GooseServeProcess {
                 command.env("GOOSE_DISTRO_DIR", &bundle.root_dir);
             }
         }
+        if let Some(acp_tools_dir) = bundled_acp_tools::resolve_bundled_acp_tools_dir(&app_handle) {
+            prepend_dirs.push(acp_tools_dir);
+        }
 
         #[cfg(feature = "berdctl")]
         let berdctl_paths = resolve_berdctl_spawn_paths(&app_handle, &mut prepend_dirs);
 
         apply_shell_env_with_extended_path(&mut command, &shell_env, &prepend_dirs);
-        // Set after the shell-env copy so a same-named var in the user's
-        // shell cannot clobber the values.
+        // Set after the shell-env copy so same-named vars in the user's
+        // shell cannot clobber Berd-managed values.
+        apply_goose_search_paths_env(&mut command, &shell_env, &prepend_dirs);
         #[cfg(feature = "berdctl")]
         apply_berdctl_env(
             &mut command,
@@ -765,8 +770,9 @@ fn default_serve_working_dir() -> PathBuf {
 }
 
 /// Copy the captured shell environment onto `command`, overriding `PATH`
-/// with `path_env::build_extended_path_from_path` so node-version-manager
-/// shims are visible to the goosed sidecar. Any `prepend_dirs` are placed
+/// with `path_env::build_extended_path_with_prepended_dirs` so
+/// node-version-manager shims are visible to the goosed sidecar. Any
+/// `prepend_dirs` are placed
 /// at the front of the resulting PATH. All PATH manipulation for the
 /// goosed command flows through this sink, so callers must not read
 /// `shell_env["PATH"]` separately or set PATH on `command` directly —
@@ -776,8 +782,10 @@ fn apply_shell_env_with_extended_path(
     shell_env: &HashMap<String, String>,
     prepend_dirs: &[PathBuf],
 ) {
-    let extended_path =
-        path_env::build_extended_path_from_path(shell_env.get("PATH").map(String::as_str));
+    let extended_path = path_env::build_extended_path_with_prepended_dirs(
+        shell_env.get("PATH").map(String::as_str),
+        prepend_dirs,
+    );
 
     for (key, value) in shell_env {
         if key == "PATH" {
@@ -786,14 +794,40 @@ fn apply_shell_env_with_extended_path(
         command.env(key, value);
     }
 
-    let mut paths: Vec<PathBuf> = prepend_dirs.to_vec();
-    paths.extend(std::env::split_paths(&extended_path));
-    set_path_list_env(
-        command,
-        "PATH",
-        paths,
-        prepend_dirs.first().map(|p| p.as_os_str()),
-    );
+    command.env("PATH", extended_path);
+}
+
+fn apply_goose_search_paths_env(
+    command: &mut Command,
+    shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
+) {
+    let mut search_paths: Vec<String> = prepend_dirs
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+
+    if let Some(existing_search_paths) = shell_env.get(GOOSE_SEARCH_PATHS_ENV) {
+        match parse_goose_search_paths_env(existing_search_paths) {
+            Ok(paths) => search_paths.extend(paths),
+            Err(error) => log::warn!("Ignoring invalid {GOOSE_SEARCH_PATHS_ENV}: {error}"),
+        }
+    }
+
+    if search_paths.is_empty() {
+        return;
+    }
+
+    let value = serde_json::to_string(&search_paths)
+        .expect("serializing Goose search path strings should not fail");
+    command.env(GOOSE_SEARCH_PATHS_ENV, value);
+}
+
+fn parse_goose_search_paths_env(value: &str) -> Result<Vec<String>, serde_json::Error> {
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(value)
 }
 
 fn apply_additional_config_files_env(
@@ -867,24 +901,6 @@ fn set_otel_env(command: &mut Command) {
     log::info!("OTLP telemetry configured: endpoint=ai-security-otlp.sqprod.co, service=berd");
 }
 
-fn set_path_list_env(
-    command: &mut Command,
-    key: &str,
-    paths: Vec<PathBuf>,
-    fallback_prefix: Option<&std::ffi::OsStr>,
-) {
-    if let Ok(joined) = std::env::join_paths(&paths) {
-        command.env(key, joined);
-    } else if let Some(prefix) = fallback_prefix {
-        let mut fallback = OsString::from(prefix);
-        for path in paths.iter().skip(1) {
-            fallback.push(if cfg!(windows) { ";" } else { ":" });
-            fallback.push(path.as_os_str());
-        }
-        command.env(key, fallback);
-    }
-}
-
 fn reserve_free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind((LOCALHOST, 0))
         .map_err(|error| format!("Failed to reserve Goose serve port: {error}"))?;
@@ -897,8 +913,8 @@ fn reserve_free_port() -> Result<u16, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        acp_websocket_url, add_release_webview_origin_arg, apply_shell_env_with_extended_path,
-        TAURI_WEBVIEW_ORIGIN,
+        acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
+        apply_shell_env_with_extended_path, TAURI_WEBVIEW_ORIGIN,
     };
     use std::collections::HashMap;
     use std::ffi::OsString;
@@ -986,6 +1002,83 @@ mod tests {
             Some(Path::new("/distro/bin"))
         );
         assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
+    }
+
+    #[test]
+    fn apply_shell_env_prepends_managed_acp_dirs_before_shell_path() {
+        let mut command = Command::new("goose");
+        let mut shell_env = HashMap::new();
+        shell_env.insert("PATH".to_string(), "/shell/bin:/user/bin".to_string());
+
+        apply_shell_env_with_extended_path(
+            &mut command,
+            &shell_env,
+            &[PathBuf::from("/distro/bin"), PathBuf::from("/acp/bin")],
+        );
+
+        let path = env_value(&command, "PATH").expect("PATH should be set");
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(Path::new("/distro/bin"))
+        );
+        assert_eq!(
+            paths.get(1).map(|p| p.as_path()),
+            Some(Path::new("/acp/bin"))
+        );
+        assert_eq!(
+            paths.get(2).map(|p| p.as_path()),
+            Some(Path::new("/shell/bin"))
+        );
+        assert_eq!(
+            paths.get(3).map(|p| p.as_path()),
+            Some(Path::new("/user/bin"))
+        );
+    }
+
+    #[test]
+    fn apply_goose_search_paths_env_sets_managed_dirs_as_json_array() {
+        let mut command = Command::new("goose");
+        let shell_env = HashMap::new();
+
+        apply_shell_env_with_extended_path(&mut command, &shell_env, &[]);
+        apply_goose_search_paths_env(
+            &mut command,
+            &shell_env,
+            &[PathBuf::from("/distro/bin"), PathBuf::from("/acp/bin")],
+        );
+
+        let value =
+            env_value(&command, "GOOSE_SEARCH_PATHS").expect("GOOSE_SEARCH_PATHS should be set");
+        let paths: Vec<String> =
+            serde_json::from_str(&value.to_string_lossy()).expect("valid JSON array");
+        assert_eq!(paths, vec!["/distro/bin", "/acp/bin"]);
+    }
+
+    #[test]
+    fn apply_goose_search_paths_env_appends_existing_goose_dirs_without_shell_path() {
+        let mut command = Command::new("goose");
+        let mut shell_env = HashMap::new();
+        shell_env.insert("PATH".to_string(), "/shell/bin:/user/bin".to_string());
+        shell_env.insert(
+            "GOOSE_SEARCH_PATHS".to_string(),
+            "[\"/custom/goose/bin\"]".to_string(),
+        );
+
+        apply_shell_env_with_extended_path(&mut command, &shell_env, &[]);
+        apply_goose_search_paths_env(
+            &mut command,
+            &shell_env,
+            &[PathBuf::from("/distro/bin"), PathBuf::from("/acp/bin")],
+        );
+
+        let value =
+            env_value(&command, "GOOSE_SEARCH_PATHS").expect("GOOSE_SEARCH_PATHS should be set");
+        let paths: Vec<String> =
+            serde_json::from_str(&value.to_string_lossy()).expect("valid JSON array");
+        assert_eq!(paths, vec!["/distro/bin", "/acp/bin", "/custom/goose/bin"]);
+        assert!(!paths.iter().any(|path| path == "/shell/bin"));
+        assert!(!paths.iter().any(|path| path == "/user/bin"));
     }
 
     // The distro bin dir keeps the PATH-front position; the berdctl shim

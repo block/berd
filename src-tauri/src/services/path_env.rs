@@ -8,8 +8,11 @@ fn push_existing_path(paths: &mut Vec<PathBuf>, path: &str) {
     }));
 }
 
-pub fn build_extended_path_from_path(path: Option<&str>) -> String {
-    let mut paths: Vec<PathBuf> = Vec::new();
+pub fn build_extended_path_with_prepended_dirs(
+    path: Option<&str>,
+    prepend_dirs: &[PathBuf],
+) -> String {
+    let mut paths: Vec<PathBuf> = prepend_dirs.to_vec();
 
     if let Some(path) = path {
         push_existing_path(&mut paths, path);
@@ -76,10 +79,29 @@ pub fn build_extended_path_from_path(path: Option<&str>) -> String {
     let mut seen = std::collections::HashSet::new();
     paths.retain(|p| seen.insert(p.clone()));
 
-    std::env::join_paths(paths)
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string()
+    match std::env::join_paths(&paths) {
+        Ok(joined) => joined.to_string_lossy().to_string(),
+        Err(_) => {
+            // A single dir embedding the separator (legal in macOS paths)
+            // makes join_paths reject the whole list; drop such dirs so one
+            // bad entry cannot empty the sidecar PATH.
+            paths.retain(|path| {
+                let joinable = std::env::join_paths(std::iter::once(path)).is_ok();
+                if !joinable {
+                    log::warn!("Dropping un-joinable PATH entry: {}", path.display());
+                }
+                joinable
+            });
+            std::env::join_paths(paths)
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        }
+    }
+}
+
+pub fn build_extended_path_from_path(path: Option<&str>) -> String {
+    build_extended_path_with_prepended_dirs(path, &[])
 }
 
 /// Build a deterministic environment snapshot with PATH normalized through
@@ -87,14 +109,18 @@ pub fn build_extended_path_from_path(path: Option<&str>) -> String {
 ///
 /// If home env capture failed, fall back to the current process environment so
 /// callers that clear child environments still preserve essential variables.
-pub fn env_vars_with_extended_path(shell_env: &HashMap<String, String>) -> Vec<(String, String)> {
+pub fn env_vars_with_extended_path_and_prepended_dirs(
+    shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
+) -> Vec<(String, String)> {
     let mut env = if shell_env.is_empty() {
         std::env::vars().collect()
     } else {
         shell_env.clone()
     };
     shell_env::sanitize_shell_env(&mut env);
-    let extended_path = build_extended_path_from_path(env.get("PATH").map(String::as_str));
+    let extended_path =
+        build_extended_path_with_prepended_dirs(env.get("PATH").map(String::as_str), prepend_dirs);
     env.insert("PATH".to_string(), extended_path);
 
     let mut vars: Vec<_> = env.into_iter().collect();
@@ -102,15 +128,21 @@ pub fn env_vars_with_extended_path(shell_env: &HashMap<String, String>) -> Vec<(
     vars
 }
 
-pub async fn home_env_vars_with_extended_path() -> Vec<(String, String)> {
+pub async fn home_env_vars_with_extended_path_and_prepended_dirs(
+    prepend_dirs: &[PathBuf],
+) -> Vec<(String, String)> {
     let shell_env = dir_env::capture_home_interactive_env().await;
-    env_vars_with_extended_path(&shell_env)
+    env_vars_with_extended_path_and_prepended_dirs(&shell_env, prepend_dirs)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_extended_path_from_path, env_vars_with_extended_path};
+    use super::{
+        build_extended_path_from_path, build_extended_path_with_prepended_dirs,
+        env_vars_with_extended_path_and_prepended_dirs,
+    };
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     #[test]
     fn extended_path_starts_with_login_shell_path_and_tool_manager_shims() {
@@ -163,6 +195,50 @@ mod tests {
     }
 
     #[test]
+    fn extended_path_keeps_prepended_dirs_in_front() {
+        let path = build_extended_path_with_prepended_dirs(
+            Some("/shell/bin:/acp/bin"),
+            &[PathBuf::from("/acp/bin"), PathBuf::from("/distro/bin")],
+        );
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(std::path::Path::new("/acp/bin"))
+        );
+        assert_eq!(
+            paths.get(1).map(|p| p.as_path()),
+            Some(std::path::Path::new("/distro/bin"))
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|p| p.as_path() == std::path::Path::new("/acp/bin"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn extended_path_drops_unjoinable_prepended_dirs_instead_of_emptying_path() {
+        let path = build_extended_path_with_prepended_dirs(
+            Some("/shell/bin"),
+            &[PathBuf::from("/weird:dir/bin"), PathBuf::from("/acp/bin")],
+        );
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(std::path::Path::new("/acp/bin"))
+        );
+        assert!(paths
+            .iter()
+            .any(|p| p == std::path::Path::new("/shell/bin")));
+        assert!(!paths.iter().any(|p| p.to_string_lossy().contains("weird")));
+    }
+
+    #[test]
     fn env_vars_with_extended_path_sanitizes_and_normalizes_path() {
         let env = HashMap::from([
             (
@@ -173,7 +249,7 @@ mod tests {
             ("LANG".to_string(), "en_US.UTF-8".to_string()),
         ]);
 
-        let vars = env_vars_with_extended_path(&env);
+        let vars = env_vars_with_extended_path_and_prepended_dirs(&env, &[]);
         let map: HashMap<_, _> = vars.into_iter().collect();
         let path = map.get("PATH").expect("PATH");
         let paths: Vec<_> = std::env::split_paths(path).collect();
@@ -187,5 +263,29 @@ mod tests {
             .iter()
             .any(|p| p == std::path::Path::new("/repo/.hermit/bin")));
         assert!(paths.iter().any(|p| p.ends_with(".asdf/shims")));
+    }
+
+    #[test]
+    fn env_vars_with_extended_path_prepends_dirs() {
+        let env = HashMap::from([
+            ("PATH".to_string(), "/shell/bin".to_string()),
+            ("LANG".to_string(), "en_US.UTF-8".to_string()),
+        ]);
+
+        let vars = env_vars_with_extended_path_and_prepended_dirs(
+            &env,
+            &[PathBuf::from("/resources/acp/bin")],
+        );
+        let map: HashMap<_, _> = vars.into_iter().collect();
+        let path = map.get("PATH").expect("PATH");
+        let paths: Vec<_> = std::env::split_paths(path).collect();
+
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(std::path::Path::new("/resources/acp/bin"))
+        );
+        assert!(paths
+            .iter()
+            .any(|p| p == std::path::Path::new("/shell/bin")));
     }
 }

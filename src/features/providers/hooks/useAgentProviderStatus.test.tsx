@@ -410,22 +410,21 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.readyAgentIds.has("claude-acp")).toBe(false);
   });
 
-  it("marks codex-acp not_installed when its ACP bridge is missing", async () => {
-    // Main CLI (Homebrew codex) is installed and even has an update available,
-    // but the codex-acp bridge binary is absent: the crate flags status="warn"
-    // with fixType="bridge", keeps `path` on the main CLI, and leaves
-    // bridge/bridgePath null. The bridge is what makes Codex usable over ACP,
-    // so the agent must read as not_installed (offering the bridge Install),
-    // not ready.
+  it("does not require a user-installed codex-acp bridge when Berd bundles it", async () => {
+    // Main CLI (Homebrew codex) is installed and even has an update available;
+    // the bundled bridge dir is on the doctor PATH, so the crate resolves
+    // bridgePath to the bundled binary and does not flag fixType="bridge".
+    // Readiness is gated on the real Codex CLI and auth state instead of
+    // offering a bridge install.
     runDoctor.mockResolvedValue(
       report([
         check({
           id: "ai-agent-codex",
           status: "warn",
           path: "/opt/homebrew/bin/codex",
-          bridgePath: null,
-          fixType: "bridge",
-          authStatus: null,
+          bridgePath:
+            "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
+          authStatus: "authenticated",
           installSource: "brew",
           installedVersion: "0.137.0",
           latestVersion: "0.139.0",
@@ -440,6 +439,60 @@ describe("useAgentProviderStatus", () => {
             updateFixType: "updateMain",
           },
           bridge: null,
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("codex-acp")).toBe("ready");
+    expect(result.current.readyAgentIds.has("codex-acp")).toBe(true);
+  });
+
+  it("marks a bundled-bridge agent not_installed when the bundled bridge fails to resolve", async () => {
+    // The main CLI is healthy, but the bundled bridge is missing (packaging
+    // regression, wiped resources): the crate leaves bridgePath null and flags
+    // fixType="bridge". Sessions cannot spawn without the bridge, so readiness
+    // must not report "ready" — surface not_installed with its remediation.
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-codex",
+          status: "warn",
+          path: "/opt/homebrew/bin/codex",
+          bridgePath: null,
+          fixType: "bridge",
+          authStatus: "authenticated",
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("codex-acp")).toBe(
+      "not_installed",
+    );
+    expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
+  });
+
+  it("requires the main CLI for bundled-bridge agents", async () => {
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-codex",
+          status: "warn",
+          path: null,
+          bridgePath:
+            "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
+          authStatus: "authenticated",
         }),
       ]),
     );

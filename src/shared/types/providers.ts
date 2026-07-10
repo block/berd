@@ -37,6 +37,8 @@ export type ProviderCatalogEntry = Omit<
   supportsAuth?: ProviderSetupCatalogEntryDto["supportsAuth"];
   supportsAuthStatus?: ProviderSetupCatalogEntryDto["supportsAuthStatus"];
   customProvider?: boolean;
+  bundledBridge?: boolean;
+  requiresMainCli?: boolean;
   supportsModelList?: boolean;
   modelSelectionHint?: string;
 };

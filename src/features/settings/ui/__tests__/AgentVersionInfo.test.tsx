@@ -30,10 +30,10 @@ function check(overrides: Partial<DoctorCheck>): DoctorCheck {
   };
 }
 
-function renderInfo(c: DoctorCheck) {
+function renderInfo(c: DoctorCheck, props: { bundledBridge?: boolean } = {}) {
   return render(
     <I18nProvider>
-      <AgentVersionInfo check={c} />
+      <AgentVersionInfo check={c} {...props} />
     </I18nProvider>,
   );
 }
@@ -147,6 +147,35 @@ describe("AgentVersionInfo", () => {
     );
 
     expect(screen.getByText("Update available → v0.39.0")).toBeInTheDocument();
+  });
+
+  it("hides bridge update markers for bundled bridges", () => {
+    renderInfo(
+      check({
+        main: {
+          installSource: "brew",
+          installedVersion: "1.4.0",
+          latestVersion: null,
+          updateAvailable: null,
+          selfUpdating: null,
+          updateCommand: null,
+          updateFixType: null,
+        },
+        bridge: {
+          installSource: "npm",
+          installedVersion: "0.3.0",
+          latestVersion: "0.4.0",
+          updateAvailable: true,
+          selfUpdating: null,
+          updateCommand: "npm install -g codex-acp@latest",
+          updateFixType: "updateBridge",
+        },
+      }),
+      { bundledBridge: true },
+    );
+
+    expect(screen.getByText("ACP bridge v0.3.0 via npm")).toBeInTheDocument();
+    expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
   });
 
   it("surfaces the main CLI and ACP bridge independently when they differ", () => {

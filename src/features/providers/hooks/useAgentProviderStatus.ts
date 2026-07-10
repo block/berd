@@ -39,20 +39,30 @@ export function readinessFromReport(
     // is still surfaced via `checksByProviderId` for the version readout.
     if (providerId === "goose") continue;
 
+    const provider = CURATED_PROVIDER_CATALOG_BY_ID.get(providerId);
+
     // A two-binary ACP agent whose main CLI is present but whose ACP bridge
     // binary is missing: the doctor crate flags it status="warn" with
     // fixType="bridge", leaves bridge/bridgePath null, and keeps `path`
     // pointed at the main CLI. The bridge is what makes the agent usable over
     // ACP, so surface the bridge Install action instead of treating the agent
-    // as installed/ready.
-    if (check.fixType === "bridge") {
+    // as installed/ready. Bundled bridges are the exception: Berd supplies the
+    // bridge, so readiness is gated on the real harness CLI below.
+    if (check.fixType === "bridge" && !provider?.bundledBridge) {
       readiness.set(providerId, "not_installed");
       continue;
     }
 
+    // For bundled bridges the bundled bin dir is always on the doctor PATH,
+    // so a healthy install resolves bridgePath; null means the bundle itself
+    // is broken (packaging regression, wiped resources) and sessions cannot
+    // spawn — treat that as not installed instead of masking it as ready.
     const installed =
       (check.status === "pass" || check.status === "warn") &&
-      (check.path != null || check.bridgePath != null);
+      (!provider?.bundledBridge || check.bridgePath != null) &&
+      (provider?.requiresMainCli
+        ? check.path != null
+        : check.path != null || check.bridgePath != null);
     if (!installed) {
       readiness.set(providerId, "not_installed");
       continue;
@@ -62,7 +72,6 @@ export function readinessFromReport(
     // than on authStatus alone. authStatus=null is overloaded (not-installed,
     // bridge-missing, genuine no-auth), so leaning on it would flip
     // supportsAuth-without-a-probe agents to "ready" pre-sign-in.
-    const provider = CURATED_PROVIDER_CATALOG_BY_ID.get(providerId);
     if (provider?.supportsAuthStatus) {
       // Case 1: real CLI probe — trust the crate's authStatus.
       readiness.set(

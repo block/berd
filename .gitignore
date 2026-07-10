@@ -35,6 +35,10 @@ project-artifacts-manifest.json
 src/features/projects/artifact/assets/images/*.webp
 src/features/projects/artifact/assets/hdri/studio_soft.exr
 resources/bb
+resources/acp/bin/*
+!resources/acp/bin/.gitkeep
+resources/acp/node/
+resources/acp/node-runtime.json
 
 # Playwright artifacts
 playwright-report/

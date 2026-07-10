@@ -35,6 +35,7 @@ _setup-no-goose: _setup-dev-deps
 # Install dependencies, build workspace packages, build managed Goose, and prepare local development hooks.
 setup: _setup-dev-deps
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
+    ./scripts/ensure-acp-tools.sh
     lefthook install --force
 
 # ── Build & Check ────────────────────────────────────────────
@@ -164,6 +165,7 @@ bundle:
     set -euo pipefail
 
     ./scripts/prepare-goose-sidecar.sh
+    ./scripts/prepare-acp-tools-resource.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
     ./scripts/prepare-catch-sidecar.sh
@@ -218,6 +220,7 @@ bundle-debug:
     set -euo pipefail
 
     ./scripts/prepare-goose-sidecar.sh
+    ./scripts/prepare-acp-tools-resource.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
     ./scripts/prepare-catch-sidecar.sh
@@ -268,6 +271,9 @@ dev:
 
     VITE_PORT={{ vite_port }}
     export VITE_PORT
+    ./scripts/prepare-acp-tools-resource.sh
+    export BERD_ACP_TOOLS_DIR="$(pwd)/resources/acp/bin"
+    echo "Using ACP tools dir: ${BERD_ACP_TOOLS_DIR}"
     export VITE_DESIGN_SYSTEM_EXPLORER=1
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
     export CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}"
@@ -347,6 +353,10 @@ bump-goose ref="main":
     ./scripts/update-goose-backend-lock.sh "{{ ref }}"
     just sync-schema
 
+# Query latest downloadable ACP bridge releases and update acp-tools.lock.json.
+bump-acp-tools *ARGS:
+    node scripts/update-acp-tools-lock.mjs {{ ARGS }}
+
 # Generate release notes from commits since the previous release tag (formatting guidelines: scripts/release-notes-prompt.md).
 release-notes from="" to="HEAD":
     FROM_REF="{{ from }}" TO_REF="{{ to }}" ./scripts/generate-release-notes.sh
@@ -363,6 +373,7 @@ clean:
 
 stage-sidecar:
     ./scripts/prepare-goose-sidecar.sh
+    ./scripts/prepare-acp-tools-resource.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 

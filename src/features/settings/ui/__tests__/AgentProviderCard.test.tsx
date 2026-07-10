@@ -773,6 +773,75 @@ describe("AgentProviderCard", () => {
     });
   });
 
+  it("bundled bridges seed the main-CLI recipe and skip bridge updates", async () => {
+    const user = userEvent.setup();
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "codex-acp",
+          displayName: "Codex",
+          binaryName: "codex-acp",
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+          bundledBridge: true,
+          requiresMainCli: true,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-codex",
+          label: "Codex",
+          status: "warn",
+          path: "/opt/homebrew/bin/codex",
+          bridgePath: null,
+          fixType: "bridge",
+          installSource: "brew",
+          installedVersion: "0.137.0",
+          latestVersion: "0.139.0",
+          updateAvailable: true,
+          main: {
+            installSource: "brew",
+            installedVersion: "0.137.0",
+            latestVersion: "0.139.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "brew upgrade codex",
+            updateFixType: "updateMain",
+          },
+          bridge: {
+            installSource: "npm",
+            installedVersion: "1.0.0",
+            latestVersion: "1.1.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "npm install -g codex-acp@latest",
+            updateFixType: "updateBridge",
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /fix codex/i }));
+
+    await waitFor(() => {
+      expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
+        installFixType: "command",
+        updateCommands: [
+          { fixType: "updateMain", command: "brew upgrade codex" },
+        ],
+        verifyInstall: true,
+        requiresMainCli: true,
+        // The backend's post-install verification mirrors the readiness gate:
+        // a bundled-bridge provider must also resolve its bundled bridge, so a
+        // broken bundle fails with a message instead of a success the card
+        // immediately contradicts.
+        bundledBridge: true,
+      });
+    });
+  });
+
   it("seeds the install plan with the main-CLI recipe for a from-scratch agent", async () => {
     const user = userEvent.setup();
 

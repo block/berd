@@ -24,10 +24,15 @@ function formatVersion(version: string): string {
 
 interface AgentVersionInfoProps {
   check: DoctorCheck;
+  bundledBridge?: boolean;
   className?: string;
 }
 
-export function AgentVersionInfo({ check, className }: AgentVersionInfoProps) {
+export function AgentVersionInfo({
+  check,
+  bundledBridge = false,
+  className,
+}: AgentVersionInfoProps) {
   const { t } = useTranslation(["settings", "common"]);
   const display = describeAgentVersion(check);
   if (!display) return null;
@@ -71,10 +76,13 @@ export function AgentVersionInfo({ check, className }: AgentVersionInfoProps) {
         const latest = readout.latestVersion
           ? formatVersion(readout.latestVersion)
           : null;
+        const showUpdate =
+          readout.updateAvailable &&
+          !(bundledBridge && readout.role === "bridge");
         return (
           <div key={readout.role} className="flex flex-col text-xs break-words">
             <span className="text-muted-foreground">{text}</span>
-            {readout.updateAvailable && latest && (
+            {showUpdate && latest && (
               <span className="text-warning">
                 {t("doctor.version.updateAvailable", { version: latest })}
               </span>

@@ -91,11 +91,13 @@ export function AgentProviderCard({
   const supportsInstall = provider.supportsInstall === true;
   const supportsAuth = provider.supportsAuth === true;
   const hasBinary = !!provider.binaryName;
+  const bundledBridge = provider.bundledBridge === true;
+  const requiresMainCli = provider.requiresMainCli === true;
   // The backend can't see the catalog, so it relies on the plan to decide
   // whether to probe PATH after a fix. A built-in or binary-less provider has
   // nothing to resolve on disk, so verification is skipped and a clean run is
   // success — the same short-circuit the old in-card `refreshInstallStatus` did.
-  const verifyInstall = hasBinary && !isBuiltIn;
+  const verifyInstall = (hasBinary || requiresMainCli) && !isBuiltIn;
   const setupFailureSimulation = getAgentSetupFailureSimulation(provider.id);
   const forceMissingForSimulation = Boolean(setupFailureSimulation);
 
@@ -150,21 +152,28 @@ export function AgentProviderCard({
   // commands the setup plan carries.
   const actionableReadouts =
     versionDisplay?.readouts.filter(
-      (r) => r.updateAvailable && r.updateFixType && r.updateCommand,
+      (r) =>
+        !(bundledBridge && r.role === "bridge") &&
+        r.updateAvailable &&
+        r.updateFixType &&
+        r.updateCommand,
     ) ?? [];
   const hasActionableUpdate = actionableReadouts.length > 0;
   // Required binaries the report says are missing while others are present
   // (e.g. Codex's CLI is on PATH but the codex-acp bridge isn't). Surfaced in
   // danger text so a partial install isn't mistaken for a healthy one.
   const missingComponents = versionCheck
-    ? missingAgentComponents(versionCheck, provider.binaryName)
+    ? missingAgentComponents(
+        versionCheck,
+        bundledBridge ? null : provider.binaryName,
+      )
     : [];
   // Which install recipe the backend's install loop should seed with. The crate
   // flags a missing ACP bridge (main CLI present) with fixType="bridge", so
   // dispatch that recipe instead of the static main-CLI one; anything else (an
   // absent check, or the update/auth fix types) falls back to "command".
   const installFixType: Extract<FixType, "command" | "bridge"> =
-    versionCheck?.fixType === "bridge" ? "bridge" : "command";
+    versionCheck?.fixType === "bridge" && !bundledBridge ? "bridge" : "command";
 
   // Build the per-readout update commands the backend runs after the install
   // loop. Readout *derivation* stays here (it already has the doctor report);
@@ -209,6 +218,8 @@ export function AgentProviderCard({
       installFixType,
       updateCommands: buildUpdateCommands(),
       verifyInstall,
+      ...(requiresMainCli ? { requiresMainCli } : {}),
+      ...(bundledBridge ? { bundledBridge } : {}),
     });
   }
 
@@ -222,6 +233,8 @@ export function AgentProviderCard({
       installFixType: null,
       updateCommands: buildUpdateCommands(),
       verifyInstall,
+      ...(requiresMainCli ? { requiresMainCli } : {}),
+      ...(bundledBridge ? { bundledBridge } : {}),
     });
   }
 
@@ -235,6 +248,8 @@ export function AgentProviderCard({
       installFixType: null,
       updateCommands: [],
       verifyInstall,
+      ...(requiresMainCli ? { requiresMainCli } : {}),
+      ...(bundledBridge ? { bundledBridge } : {}),
     });
   }
 
@@ -594,7 +609,7 @@ export function AgentProviderCard({
   const providerDetails = hasProviderDetails ? (
     <div className="space-y-3">
       {versionCheck && !isActive ? (
-        <AgentVersionInfo check={versionCheck} />
+        <AgentVersionInfo check={versionCheck} bundledBridge={bundledBridge} />
       ) : null}
       {!isActive && missingComponents.length > 0 ? (
         <div className="flex flex-col gap-1">

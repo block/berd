@@ -10,15 +10,15 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::time::timeout;
 
 use crate::services::{
-    dir_env,
+    bundled_acp_tools, dir_env,
     distro_bundle::DistroBundleState,
     goose_config::{self, AdditionalConfigFiles},
     kgoose::{KgooseContext, KgooseProbeResult},
-    path_env::{self, build_extended_path_from_path},
+    path_env::{self, build_extended_path_with_prepended_dirs},
 };
 
 use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState, RuntimeDoctorConfig};
@@ -252,6 +252,16 @@ const KGOOSE_CONNECTIVITY_CHECK: LocalCheckMeta = LocalCheckMeta {
     debug_output: None,
 };
 
+const NODE_RUNTIME_CHECK: LocalCheckMeta = LocalCheckMeta {
+    id: "node-runtime",
+    label: "Node.js Runtime",
+    category: ENVIRONMENT_HEALTH_CATEGORY,
+    category_label: ENVIRONMENT_HEALTH_CATEGORY_LABEL,
+    fix: None,
+    fix_url: Some("https://nodejs.org/en/download"),
+    debug_output: None,
+};
+
 const LOCAL_DOCTOR_REGISTRY: LocalDoctorRegistry<'static> = LocalDoctorRegistry {
     path_checks: &[],
     command_checks: LOCAL_COMMAND_CHECKS,
@@ -298,6 +308,7 @@ async fn run_local_checks(
     registry: &LocalDoctorRegistry<'_>,
     distro_config_path: Option<&Path>,
     captured_shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
 ) -> Vec<DoctorCheck> {
     let check_count =
         registry.path_checks.len() + registry.command_checks.len() + registry.custom_checks.len();
@@ -305,8 +316,10 @@ async fn run_local_checks(
         return Vec::new();
     }
 
-    let extended_path =
-        build_extended_path_from_path(captured_shell_env.get("PATH").map(String::as_str));
+    let extended_path = build_extended_path_with_prepended_dirs(
+        captured_shell_env.get("PATH").map(String::as_str),
+        prepend_dirs,
+    );
     let mut results = Vec::with_capacity(check_count);
 
     for check in registry.path_checks {
@@ -979,6 +992,235 @@ fn classify_kgoose_probe(probe: &KgooseProbeResult) -> &'static str {
     }
 }
 
+/// On-disk shape of `resources/acp/node-runtime.json`, written by
+/// `scripts/prepare-acp-tools-resource.sh` while staging npm-sourced ACP
+/// bridges. Each tool carries its own required Node major so bridges with
+/// different engine ranges are checked independently.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeRuntimeManifest {
+    #[serde(default)]
+    tools: Vec<NodeRuntimeTool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeRuntimeTool {
+    binary: String,
+    #[serde(default)]
+    node_engine: Option<String>,
+    required_node_major: u32,
+}
+
+impl NodeRuntimeTool {
+    fn requirement_label(&self) -> String {
+        self.node_engine
+            .clone()
+            .unwrap_or_else(|| format!(">={}", self.required_node_major))
+    }
+}
+
+enum NodeRuntimeManifestState {
+    /// No manifest next to any bundled tools dir: no npm-sourced bridges are
+    /// bundled (github-only or restricted builds), so the check stays silent.
+    Missing,
+    Invalid {
+        path: PathBuf,
+        error: String,
+    },
+    Loaded {
+        path: PathBuf,
+        manifest: NodeRuntimeManifest,
+    },
+}
+
+fn load_node_runtime_manifest(prepend_dirs: &[PathBuf]) -> NodeRuntimeManifestState {
+    for bin_dir in prepend_dirs {
+        let Some(path) = bundled_acp_tools::node_runtime_manifest_path(bin_dir) else {
+            continue;
+        };
+        let contents = match fs::read(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return NodeRuntimeManifestState::Invalid {
+                    path,
+                    error: format!("failed to read manifest: {error}"),
+                };
+            }
+        };
+        return match serde_json::from_slice::<NodeRuntimeManifest>(&contents) {
+            Ok(manifest) => NodeRuntimeManifestState::Loaded { path, manifest },
+            Err(error) => NodeRuntimeManifestState::Invalid {
+                path,
+                error: format!("failed to parse manifest JSON: {error}"),
+            },
+        };
+    }
+    NodeRuntimeManifestState::Missing
+}
+
+/// Surface the bundled ACP bridges' Node.js runtime requirement at setup
+/// time instead of letting the first session spawn die with a bare exit 127.
+/// Returns `None` when no npm-sourced bridges are bundled.
+async fn run_node_runtime_check(
+    captured_shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
+) -> Option<DoctorCheck> {
+    let (manifest_path, manifest) = match load_node_runtime_manifest(prepend_dirs) {
+        NodeRuntimeManifestState::Missing => return None,
+        NodeRuntimeManifestState::Invalid { path, error } => {
+            return Some(build_local_result(
+                &NODE_RUNTIME_CHECK,
+                CheckStatus::Warn,
+                "Bundled ACP bridge Node.js manifest is unreadable; bridge runtime requirements cannot be verified",
+                Some(path.display().to_string()),
+                Some(format!("error: {error}")),
+            ));
+        }
+        NodeRuntimeManifestState::Loaded { path, manifest } => (path, manifest),
+    };
+    if manifest.tools.is_empty() {
+        return None;
+    }
+
+    let extended_path = build_extended_path_with_prepended_dirs(
+        captured_shell_env.get("PATH").map(String::as_str),
+        prepend_dirs,
+    );
+    let node_path = resolve_binary_path("node", &extended_path).await;
+    let node_version = match node_path.as_deref() {
+        Some(path) => query_node_version(path).await,
+        None => None,
+    };
+
+    Some(build_node_runtime_check(
+        &NODE_RUNTIME_CHECK,
+        &manifest_path,
+        &manifest.tools,
+        node_path,
+        node_version,
+    ))
+}
+
+async fn query_node_version(node_path: &str) -> Option<String> {
+    let mut command = tokio::process::Command::new(node_path);
+    command
+        .args(["-p", "process.versions.node"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = run_timed_command(
+        command,
+        "node -p process.versions.node",
+        LOCAL_DOCTOR_COMMAND_TIMEOUT,
+    )
+    .await
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(String::from)
+}
+
+fn parse_node_major(version: &str) -> Option<u32> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn node_requirement_summary<'a>(tools: impl IntoIterator<Item = &'a NodeRuntimeTool>) -> String {
+    tools
+        .into_iter()
+        .map(|tool| format!("{} needs Node.js {}", tool.binary, tool.requirement_label()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn build_node_runtime_check(
+    check: &LocalCheckMeta,
+    manifest_path: &Path,
+    tools: &[NodeRuntimeTool],
+    node_path: Option<String>,
+    node_version: Option<String>,
+) -> DoctorCheck {
+    let node_major = node_version.as_deref().and_then(parse_node_major);
+    let unmet: Vec<&NodeRuntimeTool> = match node_major {
+        Some(major) => tools
+            .iter()
+            .filter(|tool| major < tool.required_node_major)
+            .collect(),
+        None => Vec::new(),
+    };
+
+    let (status, message) = if node_path.is_none() {
+        (
+            CheckStatus::Warn,
+            format!(
+                "Node.js was not found on PATH; bundled ACP bridges require it ({})",
+                node_requirement_summary(tools)
+            ),
+        )
+    } else if node_major.is_none() {
+        (
+            CheckStatus::Warn,
+            format!(
+                "Could not determine the Node.js version; bundled ACP bridges require it ({})",
+                node_requirement_summary(tools)
+            ),
+        )
+    } else if unmet.is_empty() {
+        (
+            CheckStatus::Pass,
+            format!(
+                "Node.js {} satisfies the bundled ACP bridge requirements",
+                node_version.as_deref().unwrap_or("unknown")
+            ),
+        )
+    } else {
+        (
+            CheckStatus::Warn,
+            format!(
+                "Node.js {} is too old for bundled ACP bridges: {}",
+                node_version.as_deref().unwrap_or("unknown"),
+                node_requirement_summary(unmet.iter().copied())
+            ),
+        )
+    };
+
+    let mut detail = vec![
+        "checked: bundled ACP bridge Node.js runtime requirement".to_string(),
+        format!("manifest: {}", manifest_path.display()),
+        format!(
+            "node: {}",
+            node_path.as_deref().unwrap_or("not found on PATH")
+        ),
+        format!("version: {}", node_version.as_deref().unwrap_or("unknown")),
+        "requirements:".to_string(),
+    ];
+    for tool in tools {
+        let verdict = match node_major {
+            Some(major) if major >= tool.required_node_major => "satisfied",
+            Some(_) => "unmet",
+            None => "unknown",
+        };
+        detail.push(format!(
+            "- {}: requires Node.js {} [{verdict}]",
+            tool.binary,
+            tool.requirement_label()
+        ));
+    }
+
+    build_local_result(check, status, &message, node_path, Some(detail.join("\n")))
+}
+
 fn find_local_fix<'a>(
     registry: &'a LocalDoctorRegistry<'_>,
     check_id: &str,
@@ -998,8 +1240,12 @@ fn find_local_fix<'a>(
 async fn execute_local_fix(
     command: &'static str,
     shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
 ) -> Result<(), String> {
-    let extended_path = build_extended_path_from_path(shell_env.get("PATH").map(String::as_str));
+    let extended_path = build_extended_path_with_prepended_dirs(
+        shell_env.get("PATH").map(String::as_str),
+        prepend_dirs,
+    );
     let (shell, flag) = if cfg!(target_os = "windows") {
         ("cmd", "/C")
     } else {
@@ -1031,13 +1277,15 @@ async fn run_doctor_impl(
     distro_state: &DistroBundleState,
     runtime_config: &RuntimeConfig,
     check_freshness: bool,
+    prepend_dirs: &[PathBuf],
 ) -> DoctorReport {
     if !doctor_enabled(runtime_config) {
         return DoctorReport { checks: Vec::new() };
     }
 
     let captured_shell_env = dir_env::capture_home_interactive_env().await;
-    let doctor_env_vars = path_env::env_vars_with_extended_path(&captured_shell_env);
+    let doctor_env_vars =
+        path_env::env_vars_with_extended_path_and_prepended_dirs(&captured_shell_env, prepend_dirs);
     let upstream = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
             npm_registry: crate::commands::agent_setup::npm_registry().map(str::to_string),
@@ -1056,12 +1304,20 @@ async fn run_doctor_impl(
         .bundle()
         .and_then(|bundle| bundle.config_path.as_deref());
     if doctor_internal_tooling_checks_enabled(runtime_config) {
-        let mut local_checks =
-            run_local_checks(registry, distro_config_path, &captured_shell_env).await;
+        let mut local_checks = run_local_checks(
+            registry,
+            distro_config_path,
+            &captured_shell_env,
+            prepend_dirs,
+        )
+        .await;
         if !doctor_block_checks_enabled() {
             local_checks.retain(|check| check.id != "sq-agent-tools");
         }
         checks.extend(local_checks);
+    }
+    if let Some(check) = run_node_runtime_check(&captured_shell_env, prepend_dirs).await {
+        checks.push(check);
     }
     if doctor_block_checks_enabled() && doctor_kgoose_connectivity_enabled(runtime_config) {
         checks.push(run_kgoose_connectivity_check(distro_state, runtime_config).await);
@@ -1160,18 +1416,21 @@ fn doctor_timeout_report(timeout_duration: Duration) -> DoctorReport {
 /// version-probing or registry lookups happen on the synchronous path.
 #[tauri::command]
 pub async fn run_doctor(
+    app_handle: AppHandle,
     distro_state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<DoctorReport, String> {
     let runtime_config = runtime_config_state
         .ready_config(distro_state.inner())
         .await?;
+    let prepend_dirs = bundled_acp_prepend_dirs(&app_handle);
     Ok(run_doctor_or_timeout(
         run_doctor_impl(
             &LOCAL_DOCTOR_REGISTRY,
             distro_state.inner(),
             &runtime_config,
             false,
+            &prepend_dirs,
         ),
         DOCTOR_REPORT_TIMEOUT,
     )
@@ -1189,18 +1448,21 @@ pub async fn run_doctor(
 /// `<cache_dir>/doctor/freshness.json` keeps repeated calls cheap.
 #[tauri::command]
 pub async fn run_doctor_fresh(
+    app_handle: AppHandle,
     distro_state: State<'_, DistroBundleState>,
     runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<DoctorReport, String> {
     let runtime_config = runtime_config_state
         .ready_config(distro_state.inner())
         .await?;
+    let prepend_dirs = bundled_acp_prepend_dirs(&app_handle);
     run_doctor_fresh_or_timeout(
         run_doctor_impl(
             &LOCAL_DOCTOR_REGISTRY,
             distro_state.inner(),
             &runtime_config,
             true,
+            &prepend_dirs,
         ),
         DOCTOR_FRESH_REPORT_TIMEOUT,
     )
@@ -1215,14 +1477,16 @@ pub async fn run_doctor_fresh(
 /// `lookup_fix_command`. The npm registry override is still applied either way.
 #[tauri::command]
 pub async fn run_doctor_fix(
+    app_handle: AppHandle,
     check_id: String,
     fix_type: FixType,
     command_override: Option<String>,
 ) -> Result<(), String> {
     let captured_shell_env = dir_env::capture_home_interactive_env().await;
+    let prepend_dirs = bundled_acp_prepend_dirs(&app_handle);
     if command_override.is_none() {
         if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
-            return execute_local_fix(fix.command, &captured_shell_env).await;
+            return execute_local_fix(fix.command, &captured_shell_env, &prepend_dirs).await;
         }
     }
     doctor::execute_fix_with_env_options(
@@ -1233,9 +1497,18 @@ pub async fn run_doctor_fix(
             npm_registry: crate::commands::agent_setup::npm_registry().map(str::to_string),
             env: None,
         }
-        .with_env_snapshot(path_env::env_vars_with_extended_path(&captured_shell_env)),
+        .with_env_snapshot(path_env::env_vars_with_extended_path_and_prepended_dirs(
+            &captured_shell_env,
+            &prepend_dirs,
+        )),
     )
     .await
+}
+
+fn bundled_acp_prepend_dirs(app_handle: &AppHandle) -> Vec<PathBuf> {
+    bundled_acp_tools::resolve_bundled_acp_tools_dir(app_handle)
+        .into_iter()
+        .collect()
 }
 
 #[cfg(test)]
@@ -1506,7 +1779,7 @@ mod tests {
         };
 
         let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
-        let results = run_local_checks(&registry, None, &shell_env).await;
+        let results = run_local_checks(&registry, None, &shell_env, &[]).await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "fixture-check");
@@ -1538,7 +1811,7 @@ mod tests {
         };
 
         let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
-        let results = run_local_checks(&registry, None, &shell_env).await;
+        let results = run_local_checks(&registry, None, &shell_env, &[]).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message.trim(), "command-output");
@@ -1595,11 +1868,205 @@ mod tests {
         };
 
         let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
-        let results = run_local_checks(&registry, None, &shell_env).await;
+        let results = run_local_checks(&registry, None, &shell_env, &[]).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message, "path found");
         assert!(results[0].path.is_some());
+    }
+
+    fn node_tool(binary: &str, engine: &str, major: u32) -> NodeRuntimeTool {
+        NodeRuntimeTool {
+            binary: binary.to_string(),
+            node_engine: Some(engine.to_string()),
+            required_node_major: major,
+        }
+    }
+
+    #[test]
+    fn node_runtime_check_passes_when_all_bridges_are_satisfied() {
+        let tools = [
+            node_tool("claude-agent-acp", ">=22", 22),
+            node_tool("codex-acp", ">=20", 20),
+        ];
+
+        let check = build_node_runtime_check(
+            &NODE_RUNTIME_CHECK,
+            Path::new("/resources/acp/node-runtime.json"),
+            &tools,
+            Some("/usr/local/bin/node".to_string()),
+            Some("22.17.0".to_string()),
+        );
+
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert_eq!(
+            check.message,
+            "Node.js 22.17.0 satisfies the bundled ACP bridge requirements"
+        );
+        assert_eq!(check.path.as_deref(), Some("/usr/local/bin/node"));
+        let output = check.raw_output.as_deref().expect("raw output");
+        assert!(output.contains("manifest: /resources/acp/node-runtime.json"));
+        assert!(output.contains("- claude-agent-acp: requires Node.js >=22 [satisfied]"));
+        assert!(output.contains("- codex-acp: requires Node.js >=20 [satisfied]"));
+    }
+
+    #[test]
+    fn node_runtime_check_warns_only_for_bridges_with_unmet_majors() {
+        // Bridges may require different Node majors; a Node 21 runtime
+        // satisfies codex (>=20) but not claude (>=22).
+        let tools = [
+            node_tool("claude-agent-acp", ">=22", 22),
+            node_tool("codex-acp", ">=20", 20),
+        ];
+
+        let check = build_node_runtime_check(
+            &NODE_RUNTIME_CHECK,
+            Path::new("/resources/acp/node-runtime.json"),
+            &tools,
+            Some("/usr/local/bin/node".to_string()),
+            Some("21.7.3".to_string()),
+        );
+
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert_eq!(
+            check.message,
+            "Node.js 21.7.3 is too old for bundled ACP bridges: claude-agent-acp needs Node.js >=22"
+        );
+        assert!(!check.message.contains("codex-acp"));
+        let output = check.raw_output.as_deref().expect("raw output");
+        assert!(output.contains("- claude-agent-acp: requires Node.js >=22 [unmet]"));
+        assert!(output.contains("- codex-acp: requires Node.js >=20 [satisfied]"));
+    }
+
+    #[test]
+    fn node_runtime_check_warns_when_node_is_missing() {
+        let tools = [
+            node_tool("claude-agent-acp", ">=22", 22),
+            node_tool("codex-acp", ">=20", 20),
+        ];
+
+        let check = build_node_runtime_check(
+            &NODE_RUNTIME_CHECK,
+            Path::new("/resources/acp/node-runtime.json"),
+            &tools,
+            None,
+            None,
+        );
+
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert_eq!(
+            check.message,
+            "Node.js was not found on PATH; bundled ACP bridges require it (claude-agent-acp needs Node.js >=22, codex-acp needs Node.js >=20)"
+        );
+        assert!(check.path.is_none());
+        assert_eq!(
+            check.fix_url.as_deref(),
+            Some("https://nodejs.org/en/download")
+        );
+    }
+
+    #[test]
+    fn node_runtime_check_warns_when_version_is_unknown() {
+        let tools = [node_tool("claude-agent-acp", ">=22", 22)];
+
+        let check = build_node_runtime_check(
+            &NODE_RUNTIME_CHECK,
+            Path::new("/resources/acp/node-runtime.json"),
+            &tools,
+            Some("/usr/local/bin/node".to_string()),
+            None,
+        );
+
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check
+            .message
+            .starts_with("Could not determine the Node.js version"));
+        assert!(check
+            .message
+            .contains("claude-agent-acp needs Node.js >=22"));
+    }
+
+    #[test]
+    fn node_runtime_manifest_loads_from_prepend_dir_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir(&bin_dir).unwrap();
+        fs::write(
+            dir.path().join("node-runtime.json"),
+            r#"{"tools":[{"id":"claude-acp","binary":"claude-agent-acp","nodeEngine":">=22","requiredNodeMajor":22},{"id":"codex-acp","binary":"codex-acp","nodeEngine":">=20","requiredNodeMajor":20}]}"#,
+        )
+        .unwrap();
+
+        let NodeRuntimeManifestState::Loaded { path, manifest } =
+            load_node_runtime_manifest(&[bin_dir])
+        else {
+            panic!("expected manifest to load");
+        };
+
+        assert_eq!(path, dir.path().join("node-runtime.json"));
+        assert_eq!(manifest.tools.len(), 2);
+        assert_eq!(manifest.tools[0].binary, "claude-agent-acp");
+        assert_eq!(manifest.tools[0].required_node_major, 22);
+        assert_eq!(manifest.tools[1].required_node_major, 20);
+    }
+
+    #[test]
+    fn node_runtime_manifest_missing_or_invalid() {
+        assert!(matches!(
+            load_node_runtime_manifest(&[]),
+            NodeRuntimeManifestState::Missing
+        ));
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir(&bin_dir).unwrap();
+        assert!(matches!(
+            load_node_runtime_manifest(std::slice::from_ref(&bin_dir)),
+            NodeRuntimeManifestState::Missing
+        ));
+
+        fs::write(dir.path().join("node-runtime.json"), "not json").unwrap();
+        assert!(matches!(
+            load_node_runtime_manifest(&[bin_dir]),
+            NodeRuntimeManifestState::Invalid { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn node_runtime_check_runs_end_to_end_from_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir(&bin_dir).unwrap();
+        fs::write(
+            dir.path().join("node-runtime.json"),
+            r#"{"tools":[{"id":"claude-acp","binary":"claude-agent-acp","nodeEngine":">=0","requiredNodeMajor":0}]}"#,
+        )
+        .unwrap();
+        let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
+
+        let check = run_node_runtime_check(&shell_env, &[bin_dir])
+            .await
+            .expect("check emitted for npm-bundled bridges");
+
+        assert_eq!(check.id, "node-runtime");
+        // With a zero required major any resolvable Node passes; on a host
+        // without Node the check still surfaces as a warning instead of
+        // vanishing.
+        if check.path.is_some() {
+            assert_eq!(check.status, CheckStatus::Pass);
+        } else {
+            assert_eq!(check.status, CheckStatus::Warn);
+        }
+
+        assert!(run_node_runtime_check(&shell_env, &[]).await.is_none());
+    }
+
+    #[test]
+    fn parse_node_major_handles_plain_and_prefixed_versions() {
+        assert_eq!(parse_node_major("22.17.0"), Some(22));
+        assert_eq!(parse_node_major("v20.11.1\n"), Some(20));
+        assert_eq!(parse_node_major("not-a-version"), None);
+        assert_eq!(parse_node_major(""), None);
     }
 
     #[test]

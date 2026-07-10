@@ -2,6 +2,7 @@ pub mod acp;
 pub(crate) mod app_data_migration;
 pub(crate) mod berdctl_discovery;
 pub(crate) mod builderbot;
+pub(crate) mod bundled_acp_tools;
 pub mod bundled_agents;
 pub mod bundled_skills;
 pub(crate) mod diagnostic_log;

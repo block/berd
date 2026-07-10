@@ -50,6 +50,14 @@ export interface AgentSetupPlan {
   // resolve on disk, so the backend skips verification and takes a clean run as
   // success (the readiness derivation that drives this stays here in the card).
   verifyInstall: boolean;
+  // When the ACP bridge is bundled by Berd, a provider is only usable if its
+  // real harness CLI also resolves on PATH.
+  requiresMainCli?: boolean;
+  // Whether Berd bundles this provider's ACP bridge. Post-fix verification then
+  // also requires the bridge to have resolved, matching the readiness gate in
+  // `readinessFromReport` — a broken bundle must fail verification instead of
+  // reporting a success the card immediately contradicts as not_installed.
+  bundledBridge?: boolean;
 }
 
 interface AgentSetupStateEvent {

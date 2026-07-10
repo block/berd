@@ -23,6 +23,8 @@ export const CURATED_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     supportsInstall: true,
     supportsAuth: true,
     supportsAuthStatus: true,
+    bundledBridge: true,
+    requiresMainCli: true,
   },
   {
     id: "codex-acp",
@@ -36,6 +38,8 @@ export const CURATED_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     supportsInstall: true,
     supportsAuth: true,
     supportsAuthStatus: true,
+    bundledBridge: true,
+    requiresMainCli: true,
   },
   {
     id: "copilot-acp",
