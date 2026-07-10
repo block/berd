@@ -384,13 +384,18 @@ export function SidebarChatRow({
     <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
   );
 
-  const flatStatusSlotClass = cn(
-    "flex size-4 shrink-0 items-center justify-center",
-    hasBranchName && "mt-0.5 self-start",
+  const flatProjectIconColumnClass = cn(
+    "flex shrink-0 items-center justify-center",
+    densityClasses.flatProjectIconColumn,
+  );
+  const flatProjectIconSlotClass = cn(
+    flatProjectIconColumnClass,
+    densityClasses.flatProjectIconInset,
+    hasBranchName && "mt-1.5 self-start",
   );
   const flatActivityIndicator = isRunning ? (
     <span
-      className={flatStatusSlotClass}
+      className={flatProjectIconColumnClass}
       role="status"
       aria-label={t("status.chatActive")}
     >
@@ -398,7 +403,7 @@ export function SidebarChatRow({
     </span>
   ) : hasUnread ? (
     <span
-      className={flatStatusSlotClass}
+      className={flatProjectIconColumnClass}
       role="status"
       aria-label={t("status.unreadMessages")}
     >
@@ -406,7 +411,7 @@ export function SidebarChatRow({
     </span>
   ) : isPinned ? (
     <span
-      className={flatStatusSlotClass}
+      className={flatProjectIconColumnClass}
       role="img"
       aria-label={t("status.pinnedChat")}
     >
@@ -877,10 +882,8 @@ export function SidebarChatRow({
                     <button
                       type="button"
                       className={cn(
-                        "flex shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                        densityClasses.flatProjectIconInset,
-                        densityClasses.flatProjectIconColumn,
-                        hasBranchName && "mt-1.5 self-start",
+                        "rounded-sm text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                        flatProjectIconSlotClass,
                       )}
                       aria-label={t("actions.editProject", {
                         name: flatProjectName,
@@ -889,7 +892,7 @@ export function SidebarChatRow({
                       data-sidebar-drag-ignore
                       onClick={handleEditFlatProject}
                     >
-                      {flatProjectGlyph}
+                      {flatActivityIndicator ?? flatProjectGlyph}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right">
@@ -901,16 +904,14 @@ export function SidebarChatRow({
                   <TooltipTrigger asChild>
                     <span
                       className={cn(
-                        "flex shrink-0 items-center justify-center rounded-sm text-muted-foreground/70",
-                        densityClasses.flatProjectIconInset,
-                        densityClasses.flatProjectIconColumn,
-                        hasBranchName && "mt-1.5 self-start",
+                        "rounded-sm text-muted-foreground/70",
+                        flatProjectIconSlotClass,
                       )}
                       role="img"
                       aria-label={flatProjectName}
                       data-sidebar-flat-project-icon
                     >
-                      {flatProjectGlyph}
+                      {flatActivityIndicator ?? flatProjectGlyph}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="right">
@@ -933,9 +934,7 @@ export function SidebarChatRow({
                   activityTimestamp
                     ? densityClasses.timestampReserve
                     : densityClasses.menuReserve,
-                  flatActivityIndicator
-                    ? densityClasses.flatProjectGap
-                    : "gap-0",
+                  "gap-0",
                   hasBranchName
                     ? "h-auto py-1.5"
                     : cn(
@@ -947,7 +946,6 @@ export function SidebarChatRow({
                 )}
                 aria-pressed={selectionEnabled ? selected : undefined}
               >
-                {flatActivityIndicator}
                 {rowTitleContent}
                 {isMultiWindowEnabled && isOpenInWindow ? (
                   <span

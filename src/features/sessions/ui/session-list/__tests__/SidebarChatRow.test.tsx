@@ -212,20 +212,45 @@ describe("SidebarChatRow", () => {
     ).toHaveClass("right-1");
   });
 
-  it("lets flat-row status take space only when visible", () => {
-    render(
+  it("replaces the flat-row project glyph while preserving its interactions", async () => {
+    const user = userEvent.setup();
+    const onEditProject = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(
       <SidebarChatRow
         id="session-1"
-        title="Unread Chat"
+        title="Running Chat"
         isActive={false}
+        isRunning
         density="dense"
         flatProjectName="Project One"
-        hasUnread
+        flatProjectColor="sage"
+        currentProjectId="project-1"
+        onEditProject={onEditProject}
+        onSelect={onSelect}
       />,
     );
 
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass("gap-2");
-    expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
+    const activityStatus = screen.getByLabelText(/chat active/i);
+    const projectButton = screen.getByRole("button", {
+      name: "Edit Project One",
+    });
+    expect(projectButton).toContainElement(activityStatus);
+    expect(
+      container.querySelector('[data-slot="berd-loader"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-project-color-swatch="project-1"]'),
+    ).not.toBeInTheDocument();
+
+    await user.hover(projectButton);
+    expect(await screen.findAllByText("Project One")).not.toHaveLength(0);
+
+    await user.click(projectButton);
+    await waitFor(() =>
+      expect(onEditProject).toHaveBeenCalledWith("project-1"),
+    );
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("opens the flat row project editor without selecting the chat", async () => {
