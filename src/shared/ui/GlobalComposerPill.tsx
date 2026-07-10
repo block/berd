@@ -487,6 +487,39 @@ export function GlobalComposerPill({
     );
   }, []);
 
+  const clearSentContent = useCallback(() => {
+    setText("");
+    clearAttachments();
+    setSelectedSkills([]);
+  }, [clearAttachments]);
+
+  const clearComposerSelections = useCallback(() => {
+    setProviderOverride(null);
+    setModelOverride(null);
+    setSelectedProjectId(null);
+    setSelectedPersonaId(null);
+    personaSelectionSourceRef.current = "none";
+    userTouchedRoutePersonaRef.current = false;
+    personaOverrideActiveRef.current = false;
+    personaOverrideAppliedForRef.current = null;
+    personaOverrideUserOverrideForRef.current = null;
+  }, []);
+
+  // A centered send keeps the toolbar selections (project, persona, model) so
+  // the pill morphing into the chat composer shows the same context the chat
+  // composer will show — instead of flashing "No project" mid-flight. Once the
+  // handoff placement ends, the chat composer owns that state, so reset the
+  // pill for its next use.
+  const previousPlacementRef = useRef(placement);
+  useEffect(() => {
+    const previousPlacement = previousPlacementRef.current;
+    previousPlacementRef.current = placement;
+    if (previousPlacement === "handoff" && placement !== "handoff") {
+      clearSentContent();
+      clearComposerSelections();
+    }
+  }, [placement, clearSentContent, clearComposerSelections]);
+
   const handlePersonaChange = useCallback((personaId: string | null) => {
     setSelectedPersonaId(personaId);
     personaSelectionSourceRef.current = personaId ? "user" : "none";
@@ -768,21 +801,6 @@ export function GlobalComposerPill({
         options.sendOptions = sendOptions;
       }
 
-      const clearComposerDraft = () => {
-        setText("");
-        clearAttachments();
-        setProviderOverride(null);
-        setModelOverride(null);
-        setSelectedProjectId(null);
-        setSelectedPersonaId(null);
-        personaSelectionSourceRef.current = "none";
-        userTouchedRoutePersonaRef.current = false;
-        personaOverrideActiveRef.current = false;
-        personaOverrideAppliedForRef.current = null;
-        personaOverrideUserOverrideForRef.current = null;
-        setSelectedSkills([]);
-      };
-
       if (placement === "centered") {
         const rect = containerRef.current?.getBoundingClientRect();
         if (rect) {
@@ -793,7 +811,9 @@ export function GlobalComposerPill({
             height: rect.height,
           });
         }
-        clearComposerDraft();
+        // Keep toolbar selections during the handoff animation; the
+        // placement-change effect clears them once the handoff completes.
+        clearSentContent();
       }
 
       if (Object.keys(options).length > 0) {
@@ -802,13 +822,15 @@ export function GlobalComposerPill({
         onSend(messageText);
       }
       if (placement !== "centered") {
-        clearComposerDraft();
+        clearSentContent();
+        clearComposerSelections();
       }
       return true;
     },
     [
       attachments,
-      clearAttachments,
+      clearComposerSelections,
+      clearSentContent,
       modelOverride,
       onHandoffStart,
       onSend,

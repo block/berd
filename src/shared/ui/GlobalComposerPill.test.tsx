@@ -749,6 +749,42 @@ describe("GlobalComposerPill", () => {
     expect(textbox).toHaveFocus();
   });
 
+  it("keeps the selected project visible through a centered send handoff", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <GlobalComposerPill onSend={onSend} placement="centered" />,
+    );
+    const textbox = screen.getByRole("textbox");
+
+    await user.click(textbox);
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Project One/i }));
+    await user.type(textbox, "Hello");
+
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      projectId: "project-1",
+    });
+
+    // The pill morphs toward the chat composer; the project label must not
+    // flash back to "No project" mid-animation.
+    rerender(
+      <GlobalComposerPill
+        onSend={onSend}
+        placement="handoff"
+        handoffSourceRect={{ left: 10, top: 20, width: 500, height: 72 }}
+      />,
+    );
+    expect(screen.getByText("Project One")).toBeInTheDocument();
+
+    // Once the handoff completes the pill returns to docked and resets for
+    // its next use.
+    rerender(<GlobalComposerPill onSend={onSend} placement="docked" />);
+    expect(screen.queryByText("Project One")).not.toBeInTheDocument();
+  });
+
   it("disables send until there is sendable content", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer();
