@@ -882,7 +882,7 @@ mod tests {
         clear_auth_env();
         let dir = tempdir().expect("tempdir");
         let server = AuthMeServer::start(
-            r#"{"authenticated":true,"subject":"auth0|user_123","email":"morgan@example.com","name":"Morgan","expiresAt":"2026-06-25T00:00:00Z"}"#,
+            r#"{"subject":"auth0|user_123","email":"morgan@example.com","name":"Morgan","expires_at":"2026-06-25T00:00:00Z","roles":["ROLE_USER"]}"#,
         );
         let storage_path = dir.path().join("sessions.json");
         env::set_var(BB_HOME_ENV_VAR, dir.path());
@@ -897,7 +897,7 @@ mod tests {
 
         assert_eq!(context.session_credential, "verified-session");
         assert_eq!(context.user, "morgan");
-        assert_eq!(request.path, "/cash-app/goose/auth/me");
+        assert_eq!(request.path, "/cash-app/goose/v1/auth/me");
         assert_eq!(
             request.session_credential.as_deref(),
             Some("verified-session")

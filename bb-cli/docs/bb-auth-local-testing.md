@@ -2,7 +2,7 @@
 
 This covers local CLI auth testing for BuilderBot identity.
 
-The important invariant is that the browser must hit `/auth/login` and `/auth/callback`
+The important invariant is that the browser must hit `/v1/auth/login` and `/v1/auth/callback`
 on the same host that Auth0 redirects to. kgoose uses an HttpOnly state cookie between
 those two requests before it redirects back to the CLI with a short-lived exchange code.
 
@@ -10,7 +10,7 @@ While BuilderBot staging is only reachable from a laptop through a Kubernetes
 port-forward, keep the backend Auth0 redirect URI as:
 
 ```text
-http://localhost:5173/cash-app/goose/auth/callback
+http://localhost:5173/cash-app/goose/v1/auth/callback
 ```
 
 Then point the CLI at the same local host.
@@ -56,8 +56,8 @@ KGOOSE_BASE_URL="http://localhost:5173" \
 
 Expected result:
 
-- the browser opens `http://localhost:5173/cash-app/goose/auth/login`
-- kgoose redirects to Auth0 with `redirect_uri=http://localhost:5173/cash-app/goose/auth/callback`
+- the browser opens `http://localhost:5173/cash-app/goose/v1/auth/login`
+- kgoose redirects to Auth0 with `redirect_uri=http://localhost:5173/cash-app/goose/v1/auth/callback`
 - Auth0 redirects the browser back through the same port-forward
 - kgoose validates the state cookie, exchanges the Auth0 code server-side, and redirects to the CLI loopback callback with a one-time exchange code
 - the CLI exchanges that code through kgoose and stores the returned session credential

@@ -237,7 +237,7 @@ pub fn auth_command() -> Command {
                 .about("Print auth status")
                 .long_about(
                     "Print auth status. With a stored CLI auth session, this verifies \
-                     the session with /auth/me and prints the authenticated subject \
+                     the session with /v1/auth/me and prints the authenticated subject \
                      and profile details.",
                 ),
         )
@@ -246,7 +246,7 @@ pub fn auth_command() -> Command {
                 .about("Log in with browser-based CLI auth")
                 .long_about(
                     "Log in with the browser-based CLI auth flow. This first checks \
-                     stored CLI session credentials with /auth/me. If none are present \
+                     stored CLI session credentials with /v1/auth/me. If none are present \
                      or valid, it starts a loopback callback server, opens the backend \
                      Auth0 login flow with type=cli, exchanges the returned one-time \
                      code, and stores the session credential in OS keyring storage.",

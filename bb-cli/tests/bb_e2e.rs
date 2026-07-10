@@ -810,11 +810,11 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
     write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
-        "authenticated": true,
         "subject": "auth0|user_123",
         "email": "test@example.com",
         "name": "Test User",
-        "expiresAt": "2026-06-15T00:00:00Z"
+        "expires_at": "2026-06-15T00:00:00Z",
+        "roles": ["ROLE_USER"]
     }))]);
     let storage_key =
         browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
@@ -848,7 +848,7 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
     assert_eq!(response["email"], json!("test@example.com"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/cash-app/goose/auth/me");
+    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
     assert_eq!(
         requests[0]
             .headers
@@ -866,13 +866,11 @@ fn bb_auth_login_uses_valid_stored_file_session() {
     write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
-        "authenticated": true,
         "subject": "auth0|user_123",
         "email": "test@example.com",
         "name": "Test User",
-        "expiresAt": "2026-06-15T00:00:00Z",
-        "hasAccessToken": true,
-        "hasRefreshToken": true
+        "expires_at": "2026-06-15T00:00:00Z",
+        "roles": ["ROLE_USER"]
     }))]);
     let storage_key =
         browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
@@ -907,7 +905,7 @@ fn bb_auth_login_uses_valid_stored_file_session() {
     assert_eq!(response["credentialPrefix"], Value::Null);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/cash-app/goose/auth/me");
+    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
     assert_eq!(
         requests[0]
             .headers
@@ -925,13 +923,11 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
     write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
-        "authenticated": true,
         "subject": "auth0|user_123",
         "email": "test@example.com",
         "name": "Test User",
-        "expiresAt": "2026-06-15T00:00:00Z",
-        "hasAccessToken": true,
-        "hasRefreshToken": true
+        "expires_at": "2026-06-15T00:00:00Z",
+        "roles": ["ROLE_USER"]
     }))]);
     let storage_key =
         browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
@@ -961,7 +957,7 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
 
     assert!(output.status.success(), "stderr was: {stderr}");
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/cash-app/goose/auth/me");
+    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
     assert_eq!(
         requests[0].headers.get("baggage").map(String::as_str),
         Some("kgoose-builderbot-playpen=baxen")
@@ -1013,7 +1009,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     assert_eq!(response["storage"], json!("file"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path, "/cash-app/goose/auth/logout");
+    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/logout");
     assert_eq!(
         requests[0]
             .headers

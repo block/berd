@@ -14,7 +14,6 @@ use crate::auth_storage::StoredSessionCredential;
 pub const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login";
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct LoginExchangeResponse {
     pub session_credential: String,
     pub subject: Option<String>,
@@ -24,9 +23,7 @@ pub struct LoginExchangeResponse {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AuthMeResponse {
-    pub authenticated: bool,
     pub subject: Option<String>,
     pub email: Option<String>,
     pub name: Option<String>,
@@ -52,7 +49,7 @@ pub fn exchange_login_code(
     server_url: &str,
     code: &str,
 ) -> Result<LoginExchangeResponse> {
-    let url = auth_url(server_url, "/auth/login/exchange")?;
+    let url = auth_url(server_url, "/v1/auth/login/exchange")?;
     let mut request = client
         .post(url)
         .header(USER_AGENT, CLI_USER_AGENT)
@@ -65,7 +62,9 @@ pub fn exchange_login_code(
     let status = response.status();
     let body = response.text().context("read login exchange response")?;
     if !status.is_success() {
-        return Err(anyhow!("/auth/login/exchange failed with {status}: {body}"));
+        return Err(anyhow!(
+            "/v1/auth/login/exchange failed with {status}: {body}"
+        ));
     }
     serde_json::from_str(&body).context("parse login exchange response")
 }
@@ -79,7 +78,7 @@ pub fn verify_session_credential(
     let Some(session_credential) = credential.session_credential_header_value() else {
         return Ok(None);
     };
-    let url = auth_url(server_url, "/auth/me")?;
+    let url = auth_url(server_url, "/v1/auth/me")?;
     let mut request = client
         .get(url)
         .header(USER_AGENT, CLI_USER_AGENT)
@@ -92,19 +91,15 @@ pub fn verify_session_credential(
         .send()
         .context("verify stored BuilderBot CLI auth session")?;
     let status = response.status();
-    let body = response.text().context("read /auth/me response")?;
+    let body = response.text().context("read /v1/auth/me response")?;
     if status == HttpStatusCode::UNAUTHORIZED || status == HttpStatusCode::FORBIDDEN {
         return Ok(None);
     }
     if !status.is_success() {
-        return Err(anyhow!("/auth/me failed with {status}: {body}"));
+        return Err(anyhow!("/v1/auth/me failed with {status}: {body}"));
     }
-    let me: AuthMeResponse = serde_json::from_str(&body).context("parse /auth/me response")?;
-    if me.authenticated {
-        Ok(Some(me))
-    } else {
-        Ok(None)
-    }
+    let me: AuthMeResponse = serde_json::from_str(&body).context("parse /v1/auth/me response")?;
+    Ok(Some(me))
 }
 
 pub fn logout_session_credential(
@@ -116,7 +111,7 @@ pub fn logout_session_credential(
     let Some(session_credential) = credential.session_credential_header_value() else {
         return Ok(false);
     };
-    let url = auth_url(server_url, "/auth/logout")?;
+    let url = auth_url(server_url, "/v1/auth/logout")?;
     let mut request = client
         .post(url)
         .header(USER_AGENT, CLI_USER_AGENT)
@@ -129,18 +124,18 @@ pub fn logout_session_credential(
         .send()
         .context("destroy stored BuilderBot CLI auth session")?;
     let status = response.status();
-    let body = response.text().context("read /auth/logout response")?;
+    let body = response.text().context("read /v1/auth/logout response")?;
     if status == HttpStatusCode::UNAUTHORIZED || status == HttpStatusCode::FORBIDDEN {
         return Ok(false);
     }
     if !status.is_success() {
-        return Err(anyhow!("/auth/logout failed with {status}: {body}"));
+        return Err(anyhow!("/v1/auth/logout failed with {status}: {body}"));
     }
     Ok(true)
 }
 
 pub fn login_url(server_url: &str, callback_url: &str) -> Result<Url> {
-    let mut url = auth_url(server_url, "/auth/login")?;
+    let mut url = auth_url(server_url, "/v1/auth/login")?;
     url.query_pairs_mut()
         .append_pair("type", "cli")
         .append_pair("returnTo", callback_url);
@@ -176,7 +171,7 @@ mod tests {
 
     #[test]
     fn verify_session_credential_treats_unauthorized_as_invalid() {
-        let server = SingleResponseServer::start(401, r#"{"authenticated":false}"#);
+        let server = SingleResponseServer::start(401, r#"{}"#);
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
         let credential = StoredSessionCredential {
             session_credential: "expired-session".to_string(),
@@ -188,7 +183,7 @@ mod tests {
         let request = server.finish();
 
         assert!(verified.is_none());
-        assert_eq!(request.path, "/auth/me");
+        assert_eq!(request.path, "/v1/auth/me");
         assert_eq!(
             request.bb_session_credential.as_deref(),
             Some("expired-session")
@@ -225,7 +220,7 @@ mod tests {
         let request = server.finish();
 
         assert!(logged_out);
-        assert_eq!(request.path, "/auth/logout");
+        assert_eq!(request.path, "/v1/auth/logout");
         assert_eq!(
             request.bb_session_credential.as_deref(),
             Some("valid-session")
@@ -246,7 +241,7 @@ mod tests {
         let request = server.finish();
 
         assert!(!logged_out);
-        assert_eq!(request.path, "/auth/logout");
+        assert_eq!(request.path, "/v1/auth/logout");
         assert_eq!(
             request.bb_session_credential.as_deref(),
             Some("expired-session")
@@ -254,10 +249,10 @@ mod tests {
     }
 
     #[test]
-    fn verify_session_credential_accepts_authenticated_me_response() {
+    fn verify_session_credential_accepts_successful_me_response() {
         let server = SingleResponseServer::start(
             200,
-            r#"{"authenticated":true,"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expiresAt":"2026-06-15T00:00:00Z"}"#,
+            r#"{"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expires_at":"2026-06-15T00:00:00Z","roles":["ROLE_USER"]}"#,
         );
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
         let credential = StoredSessionCredential {
@@ -271,10 +266,41 @@ mod tests {
         let request = server.finish();
 
         assert_eq!(verified.subject.as_deref(), Some("auth0|user_123"));
+        assert_eq!(verified.expires_at.as_deref(), Some("2026-06-15T00:00:00Z"));
         assert_eq!(
             request.bb_session_credential.as_deref(),
             Some("valid-session")
         );
+        assert_eq!(request.path, "/v1/auth/me");
+    }
+
+    #[test]
+    fn login_url_uses_v1_route() {
+        let url = login_url(
+            "https://example.com/cash-app/goose",
+            "http://127.0.0.1:1234/callback",
+        )
+        .expect("login URL");
+
+        assert_eq!(url.path(), "/cash-app/goose/v1/auth/login");
+    }
+
+    #[test]
+    fn exchange_login_code_uses_v1_route() {
+        let server = SingleResponseServer::start(
+            200,
+            r#"{"session_credential":"session","session_credential_header":"X-BB-Session-Credential","subject":"user-123","expires_at":"2026-06-15T00:00:00Z"}"#,
+        );
+        let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
+
+        let exchange = exchange_login_code(&client, None, &server.base_url, "one-time-code")
+            .expect("exchange");
+        let request = server.finish();
+
+        assert_eq!(exchange.session_credential, "session");
+        assert_eq!(exchange.subject.as_deref(), Some("user-123"));
+        assert_eq!(exchange.expires_at, "2026-06-15T00:00:00Z");
+        assert_eq!(request.path, "/v1/auth/login/exchange");
     }
 
     struct RecordedRequest {

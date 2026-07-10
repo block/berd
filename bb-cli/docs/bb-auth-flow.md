@@ -11,19 +11,19 @@ sequenceDiagram
     participant Store as Backend Data Store
 
     CLI->>CLI: Start localhost callback server
-    CLI->>Browser: Open /auth/login?type=cli&returnTo=http://127.0.0.1:<port>/callback
+    CLI->>Browser: Open /v1/auth/login?type=cli&returnTo=http://127.0.0.1:<port>/callback
     Browser->>Backend: Begin CLI login
     Backend->>Store: Store AuthTransaction with type=cli and loopback returnTo
     Backend-->>Browser: Set oauth state cookie, 302 to Auth0 authorize
     Browser->>Auth0: Complete Auth0 login
-    Auth0-->>Browser: 302 to configured /auth/callback with code and state
-    Browser->>Backend: GET /auth/callback with oauth state cookie
+    Auth0-->>Browser: 302 to configured /v1/auth/callback with code and state
+    Browser->>Backend: GET /v1/auth/callback with oauth state cookie
     Backend->>Auth0: Exchange code using stored PKCE verifier
     Auth0-->>Backend: ID/access token response
     Backend->>Store: Create short-lived one-time code for CLI login
     Backend-->>Browser: 302 to localhost callback with code
     Browser->>CLI: GET /callback?code=...
-    CLI->>Backend: POST /auth/login/exchange { code }
+    CLI->>Backend: POST /v1/auth/login/exchange { code }
     Backend->>Store: Verify code is valid, unused, unexpired, and type=cli
     Backend->>Store: Create cli session credential
     Backend-->>CLI: Return cli session credential
