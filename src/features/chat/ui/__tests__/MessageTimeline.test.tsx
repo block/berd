@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
+import { RESPONSE_START_GUTTER_STORAGE_KEY } from "@/features/chat/lib/responseStartGutterPreference";
 import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   setExperimentEnabled,
@@ -41,6 +42,7 @@ function triggerResizeObservers() {
 beforeEach(() => {
   localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
+  localStorage.removeItem(RESPONSE_START_GUTTER_STORAGE_KEY);
   expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
     true,
   );
@@ -613,7 +615,61 @@ describe("MessageTimeline", () => {
     expect(scroller.scrollTop).toBe(424);
   });
 
-  it("shows the floating response-start button when reading a final answer with agent work above", () => {
+  it("hides the floating response-start button by default", () => {
+    const assistantMessage: Message = {
+      id: "assistant-1",
+      role: "assistant",
+      created: Date.UTC(2026, 4, 20, 12, 1, 0),
+      content: [
+        { type: "thinking", text: "Planning\n\nI should inspect first." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "shell · git status",
+          arguments: { command: "git status" },
+          status: "completed",
+        },
+        { type: "text", text: "Done." },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <MessageTimeline
+        messages={[
+          message("user-1", "user", "Please inspect"),
+          assistantMessage,
+        ]}
+      />,
+    );
+
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1200,
+      clientHeight: 400,
+    });
+    setElementRect(scroller, { top: 100, bottom: 500, height: 400 });
+    setElementRect(
+      screen.getByTestId(
+        "virtual-transcript-row-message:assistant-1:agent-work",
+      ),
+      { top: -120, bottom: 80, height: 200 },
+    );
+    setElementRect(
+      screen.getByTestId("virtual-transcript-row-message:assistant-1:answer"),
+      { top: 300, bottom: 700, height: 400 },
+    );
+
+    fireEvent.scroll(scroller);
+
+    expect(
+      screen.queryByRole("button", { name: "Jump to current response start" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the floating response-start button when the setting is enabled", () => {
+    localStorage.setItem(RESPONSE_START_GUTTER_STORAGE_KEY, "true");
     const assistantMessage: Message = {
       id: "assistant-1",
       role: "assistant",

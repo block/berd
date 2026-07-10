@@ -33,6 +33,7 @@ import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
+import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -154,6 +155,7 @@ export function GeneralSettings({
   );
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
+  const responseStartGutterPreference = useResponseStartGutterPreference();
   const sidebarChatGroupingPreference = useSidebarChatGroupingPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
@@ -550,6 +552,17 @@ export function GeneralSettings({
             checked={sessionCostPreference.enabled}
             onCheckedChange={sessionCostPreference.setEnabled}
             aria-label={t("general.sessionCost.label")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.responseStartGutter.label")}
+          description={t("general.responseStartGutter.description")}
+        >
+          <Switch
+            checked={responseStartGutterPreference.enabled}
+            onCheckedChange={responseStartGutterPreference.setEnabled}
+            aria-label={t("general.responseStartGutter.label")}
           />
         </SettingRow>
 

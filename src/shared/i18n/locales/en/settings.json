@@ -302,6 +302,10 @@
     "sessionCost": {
       "label": "Show session cost",
       "description": "Display estimated running cost in chat when available."
+    },
+    "responseStartGutter": {
+      "label": "Show floating response-start button",
+      "description": "Show a floating up-arrow beside long agent responses."
     }
   },
   "runtimeConfig": {

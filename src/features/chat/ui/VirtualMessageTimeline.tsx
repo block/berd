@@ -36,6 +36,7 @@ import {
 } from "../transcript/projection";
 import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import {
   createTranscriptShellBlockAttributes,
   createTranscriptShellMeasurementPlan,
@@ -957,6 +958,7 @@ export function VirtualMessageTimeline({
     AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
   );
   const enableAgentWork = agentWorkExperiment?.enabled === true;
+  const responseStartGutterPreference = useResponseStartGutterPreference();
   const projectionCacheRef = useRef<TranscriptProjectionCache | null>(null);
   const sessionLifecycleRef = useRef({ sessionId, sessionEpoch: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -3057,10 +3059,6 @@ export function VirtualMessageTimeline({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (footerRef.current?.contains(event.target as Node)) {
-      return;
-    }
-
     switch (event.key) {
       case "ArrowDown":
       case "ArrowUp":
@@ -3738,16 +3736,18 @@ export function VirtualMessageTimeline({
             {jumpToLatestButton}
           </div>
         ) : null}
-        <MessageTimelineJumpToResponseStartGutterButton
-          label={jumpToResponseStartLabel}
-          ariaLabel={jumpToFloatingResponseStartLabel}
-          bottomOffsetPx={
-            footer ? footerHeightPx + 8 : (tailPaddingPx ?? 16) + 8
-          }
-          visible={gutterResponseStartMessageId != null}
-          messageId={gutterResponseStartMessageId}
-          onJump={handleJumpToResponseStart}
-        />
+        {responseStartGutterPreference.enabled ? (
+          <MessageTimelineJumpToResponseStartGutterButton
+            label={jumpToResponseStartLabel}
+            ariaLabel={jumpToFloatingResponseStartLabel}
+            bottomOffsetPx={
+              footer ? footerHeightPx + 8 : (tailPaddingPx ?? 16) + 8
+            }
+            visible={gutterResponseStartMessageId != null}
+            messageId={gutterResponseStartMessageId}
+            onJump={handleJumpToResponseStart}
+          />
+        ) : null}
       </div>
     </Profiler>
   );

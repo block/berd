@@ -15,6 +15,7 @@ import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/termi
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
 import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
 import { SESSION_COST_STORAGE_KEY } from "@/features/chat/lib/sessionCostPreference";
+import { RESPONSE_START_GUTTER_STORAGE_KEY } from "@/features/chat/lib/responseStartGutterPreference";
 import {
   INITIAL_RUNTIME_CONFIG_RESULT,
   useRuntimeConfigStore,
@@ -303,6 +304,27 @@ describe("GeneralSettings appearance section", () => {
       expect(localStorage.getItem(SESSION_COST_STORAGE_KEY)).toBe("false");
     });
     expect(switchControl).not.toBeChecked();
+  });
+
+  it("defaults the floating response-start button off and can enable it", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Show floating response-start button",
+    });
+
+    expect(switchControl).not.toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(RESPONSE_START_GUTTER_STORAGE_KEY)).toBe(
+        "true",
+      );
+    });
+    expect(switchControl).toBeChecked();
   });
 
   it("updates sidebar chat grouping", async () => {

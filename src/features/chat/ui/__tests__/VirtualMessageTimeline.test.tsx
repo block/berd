@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
+import { RESPONSE_START_GUTTER_STORAGE_KEY } from "@/features/chat/lib/responseStartGutterPreference";
 import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   setExperimentEnabled,
@@ -130,6 +131,7 @@ vi.mock("../MessageBubble", async () => {
 beforeEach(() => {
   localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
+  localStorage.removeItem(RESPONSE_START_GUTTER_STORAGE_KEY);
   expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
     true,
   );
@@ -454,6 +456,44 @@ describe("VirtualMessageTimeline", () => {
 
     expect(scroller).toHaveClass("scrollbar-subtle", "overscroll-contain");
     expect(scroller).not.toHaveClass("scrollbar-none");
+  });
+
+  it("keeps the floating response-start button hidden by default and shows it when enabled", async () => {
+    mockTranscriptElementMeasurements();
+    const assistant = textMessage(
+      "assistant-1",
+      "assistant",
+      multiParagraphText("Assistant response", 3, 22),
+    );
+
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={[assistant]} />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(scroller, {
+      scrollTop: 200,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    expect(
+      screen.queryByRole("button", { name: "Jump to current response start" }),
+    ).not.toBeInTheDocument();
+
+    localStorage.setItem(RESPONSE_START_GUTTER_STORAGE_KEY, "true");
+    rerender(
+      <VirtualMessageTimeline sessionId="session-1" messages={[assistant]} />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: "Jump to current response start",
+        }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("renders assistant fragment rows and projects mixed content into agent work", async () => {

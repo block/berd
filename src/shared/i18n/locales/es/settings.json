@@ -302,6 +302,10 @@
     "sessionCost": {
       "label": "Mostrar costo de sesión",
       "description": "Muestra el costo estimado acumulado en el chat cuando esté disponible."
+    },
+    "responseStartGutter": {
+      "label": "Mostrar botón flotante de inicio de respuesta",
+      "description": "Muestra una flecha hacia arriba flotante junto a respuestas largas del agente."
     }
   },
   "runtimeConfig": {

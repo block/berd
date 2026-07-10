@@ -23,6 +23,7 @@ import {
 } from "@/features/chat/transcript/projection";
 import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
@@ -139,6 +140,7 @@ export function MessageTimeline({
     AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
   );
   const enableAgentWork = agentWorkExperiment?.enabled === true;
+  const responseStartGutterPreference = useResponseStartGutterPreference();
   const containerRef = useRef<HTMLDivElement>(null);
   // The composer is docked in flow at the bottom of the chat panel; its
   // measured height changes the scrollable viewport while clearance padding
@@ -1487,14 +1489,18 @@ export function MessageTimeline({
           {jumpToLatestButton}
         </div>
       ) : null}
-      <MessageTimelineJumpToResponseStartGutterButton
-        label={jumpToResponseStartLabel}
-        ariaLabel={jumpToFloatingResponseStartLabel}
-        bottomOffsetPx={footer ? footerHeightPx + 8 : (tailPaddingPx ?? 16) + 8}
-        visible={gutterResponseStartMessageId != null}
-        messageId={gutterResponseStartMessageId}
-        onJump={handleJumpToResponseStart}
-      />
+      {responseStartGutterPreference.enabled ? (
+        <MessageTimelineJumpToResponseStartGutterButton
+          label={jumpToResponseStartLabel}
+          ariaLabel={jumpToFloatingResponseStartLabel}
+          bottomOffsetPx={
+            footer ? footerHeightPx + 8 : (tailPaddingPx ?? 16) + 8
+          }
+          visible={gutterResponseStartMessageId != null}
+          messageId={gutterResponseStartMessageId}
+          onJump={handleJumpToResponseStart}
+        />
+      ) : null}
     </div>
   );
 }
