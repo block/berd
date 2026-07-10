@@ -52,6 +52,7 @@ import {
   getRelativeWorkspacePath,
   getWorkspaceDisplayName,
   isSameWorkspacePath,
+  workspaceAttachmentIdForPath,
   workspaceAttachmentUsesCleanupTarget,
 } from "@/features/chat/lib/workspaceAttachments";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
@@ -399,6 +400,93 @@ export function ContextPanel({
       }
     },
     [refetchAll, t],
+  );
+
+  const handleWorkspaceWorktreeSelected = useCallback(
+    (
+      runtime: WorkspaceGitRuntime,
+      worktreePath: string,
+      branch: string | null,
+    ) => {
+      const relativePath = getRelativeWorkspacePath(
+        runtime.workspace.path,
+        runtime.gitContext.worktreePath,
+      );
+      const nextPath =
+        relativePath && relativePath.length > 0
+          ? `${worktreePath.replace(/\/+$/, "")}/${relativePath}`
+          : worktreePath;
+      const classification = runtime.gitState
+        ? classifyWorkspaceAttachment(nextPath, runtime.gitState)
+        : null;
+      const session = useChatSessionStore
+        .getState()
+        .sessions.find((candidate) => candidate.id === sessionId);
+      if (!session) return;
+      const nextWorkspaceId = workspaceAttachmentIdForPath(nextPath);
+      patchSession(sessionId, {
+        workspaceAttachments: getWorkspaceAttachments(session).map(
+          (attachment) =>
+            attachment.id === runtime.workspace.id
+              ? {
+                  ...attachment,
+                  id: nextWorkspaceId,
+                  path: nextPath,
+                  branch,
+                  kind: classification?.kind ?? attachment.kind,
+                  repositoryPath:
+                    classification?.repositoryPath ?? attachment.repositoryPath,
+                  worktreePath: classification?.worktreePath ?? worktreePath,
+                }
+              : attachment,
+        ),
+        activeWorkspaceId:
+          session.activeWorkspaceId === runtime.workspace.id
+            ? nextWorkspaceId
+            : session.activeWorkspaceId,
+      });
+      if (isSameWorkspacePath(activeContext?.path, runtime.workspace.path)) {
+        setActiveWorkspace(sessionId, { path: nextPath, branch });
+      }
+      void refetchAll();
+    },
+    [
+      activeContext?.path,
+      patchSession,
+      refetchAll,
+      sessionId,
+      setActiveWorkspace,
+    ],
+  );
+
+  const handleWorkspaceSwitchBranch = useCallback(
+    async (runtime: WorkspaceGitRuntime, path: string, branch: string) => {
+      await handleSwitchBranch(path, branch);
+      attachWorkspace(sessionId, {
+        path: runtime.workspace.path,
+        branch,
+        kind: runtime.workspace.kind,
+        repositoryPath: runtime.workspace.repositoryPath,
+        worktreePath: runtime.workspace.worktreePath,
+        source: runtime.workspace.source,
+      });
+    },
+    [attachWorkspace, handleSwitchBranch, sessionId],
+  );
+
+  const handleWorkspaceStashAndSwitch = useCallback(
+    async (runtime: WorkspaceGitRuntime, path: string, branch: string) => {
+      await handleStashAndSwitch(path, branch);
+      attachWorkspace(sessionId, {
+        path: runtime.workspace.path,
+        branch,
+        kind: runtime.workspace.kind,
+        repositoryPath: runtime.workspace.repositoryPath,
+        worktreePath: runtime.workspace.worktreePath,
+        source: runtime.workspace.source,
+      });
+    },
+    [attachWorkspace, handleStashAndSwitch, sessionId],
   );
 
   const handleInitRepo = useCallback(
@@ -886,6 +974,9 @@ export function ContextPanel({
                 onCreateBranch={handleCreateBranch}
                 onCreateWorktree={handleCreateWorktree}
                 onWorktreeCreated={handleWorkspaceWorktreeCreated}
+                onSelectWorktree={handleWorkspaceWorktreeSelected}
+                onSwitchBranch={handleWorkspaceSwitchBranch}
+                onStashAndSwitch={handleWorkspaceStashAndSwitch}
                 onAddWorkspace={() => setIsAddWorkspaceOpen(true)}
                 onRemoveWorkspace={handleRemoveWorkspace}
                 getRemovalPlan={getWorkspaceRemovalPlan}

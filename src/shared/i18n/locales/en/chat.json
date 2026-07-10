@@ -86,6 +86,8 @@
       "fetchRemoteStatus": "Fetch remote status",
       "openWorkspaceMenu": "Open project folder actions",
       "openWorkspaceContextFor": "Open workspace context for {{name}}",
+      "expandWorkspaceContextFor": "Expand workspace context for {{name}}",
+      "collapseWorkspaceContextFor": "Collapse workspace context for {{name}}",
       "openWorkspaceActionsFor": "Open actions for {{name}}",
       "refreshLocalStatus": "Refresh local status",
       "refreshGitStatus": "Refresh git status"

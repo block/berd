@@ -85,6 +85,8 @@
       "fetchRemoteStatus": "Actualizar estado remoto",
       "openWorkspaceMenu": "Abrir acciones del espacio de trabajo",
       "openWorkspaceContextFor": "Abrir contexto de espacio de trabajo para {{name}}",
+      "expandWorkspaceContextFor": "Expandir contexto de espacio de trabajo para {{name}}",
+      "collapseWorkspaceContextFor": "Contraer contexto de espacio de trabajo para {{name}}",
       "openWorkspaceActionsFor": "Abrir acciones de {{name}}",
       "refreshLocalStatus": "Actualizar estado local",
       "refreshGitStatus": "Actualizar estado de git"

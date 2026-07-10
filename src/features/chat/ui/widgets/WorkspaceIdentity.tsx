@@ -227,8 +227,7 @@ export function getWorkspaceGitContext(
     isMainCheckoutContext,
     isGitBacked,
     canUseGitActions,
-    canCreateWorktree:
-      canUseGitActions && !isLinkedWorktree && isMainCheckoutContext,
+    canCreateWorktree: canUseGitActions,
   };
 }
 

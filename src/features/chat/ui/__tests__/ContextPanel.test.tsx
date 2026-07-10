@@ -421,6 +421,185 @@ describe("ContextPanel", () => {
     mockUseWorkspaceChangedFilesRuntimes.mockReturnValue([]);
   });
 
+  it("keeps a single workspace expanded and switches branches from its picker", async () => {
+    const user = userEvent.setup();
+    renderContextPanel({
+      sessionId: "test-session-single-workspace-picker",
+      projectName: "Desktop UX",
+    });
+
+    const workspaceHeader = screen.queryByRole("button", {
+      name: /collapse .*goose2/i,
+    });
+    expect(workspaceHeader).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
+    await user.click(screen.getByRole("button", { name: /^dev$/i }));
+    await user.click(screen.getByRole("button", { name: /carry to branch/i }));
+
+    expect(vi.mocked(gitApi.switchBranch)).toHaveBeenCalledWith(
+      "/Users/test/goose2",
+      "dev",
+    );
+  });
+
+  it("keeps active workspace metadata in sync when selecting a worktree", async () => {
+    const user = userEvent.setup();
+    const workspaceId = workspaceAttachmentIdForPath("/Users/test/goose2");
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "test-session-active-worktree-switch",
+          title: "Chat",
+          workingDir: "/Users/test/goose2",
+          workspaceAttachments: [
+            {
+              ...materializedWorkspace("/Users/test/goose2"),
+              id: workspaceId,
+            },
+          ],
+          activeWorkspaceId: workspaceId,
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+      activeWorkspaceBySession: {
+        ...state.activeWorkspaceBySession,
+        "test-session-active-worktree-switch": {
+          path: "/Users/test/goose2",
+          branch: "main",
+        },
+      },
+    }));
+
+    renderContextPanel({
+      sessionId: "test-session-active-worktree-switch",
+      projectName: "Desktop UX",
+    });
+    await user.click(screen.getByRole("button", { name: /select worktree/i }));
+    await user.click(screen.getByRole("button", { name: /goose2-feature/i }));
+
+    const nextWorkspaceId = workspaceAttachmentIdForPath(
+      "/Users/test/goose2-feature",
+    );
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession("test-session-active-worktree-switch"),
+    ).toMatchObject({
+      activeWorkspaceId: nextWorkspaceId,
+      workspaceAttachments: [
+        expect.objectContaining({
+          id: nextWorkspaceId,
+          path: "/Users/test/goose2-feature",
+          branch: "feat/context-panel",
+        }),
+      ],
+    });
+    expect(
+      useChatSessionStore.getState().activeWorkspaceBySession[
+        "test-session-active-worktree-switch"
+      ],
+    ).toEqual({
+      path: "/Users/test/goose2-feature",
+      branch: "feat/context-panel",
+    });
+  });
+
+  it("allows branch switching from a detached workspace", async () => {
+    const user = userEvent.setup();
+    mockUseGitState.mockReturnValue({
+      data: {
+        isGitRepo: true,
+        currentBranch: null,
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [
+          {
+            path: "/Users/test/goose2",
+            branch: null,
+            isMain: true,
+          },
+        ],
+        isWorktree: false,
+        mainWorktreePath: "/Users/test/goose2",
+        localBranches: ["main", "dev"],
+      },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    });
+    renderContextPanel({
+      sessionId: "test-session-detached-workspace-picker",
+      projectName: "Desktop UX",
+    });
+
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
+    await user.click(screen.getByRole("button", { name: /^dev$/i }));
+
+    expect(vi.mocked(gitApi.switchBranch)).toHaveBeenCalledWith(
+      "/Users/test/goose2",
+      "dev",
+    );
+  });
+
+  it("offers branch and worktree creation in the expanded workspace view", async () => {
+    const user = userEvent.setup();
+    renderContextPanel({
+      sessionId: "test-session-expanded-create-actions",
+      projectName: "Desktop UX",
+    });
+
+    const createBranch = screen.getByRole("button", {
+      name: /^create branch$/i,
+    });
+    const createWorktree = screen.getByRole("button", {
+      name: /^create worktree$/i,
+    });
+    expect(createBranch).toBeInTheDocument();
+    expect(createWorktree).toBeInTheDocument();
+
+    await user.click(createBranch);
+    expect(
+      screen.getByRole("dialog", { name: /new branch/i }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    await user.click(createWorktree);
+    expect(
+      screen.getByRole("dialog", { name: /new worktree/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("expands and collapses workspace rows when multiple are attached", async () => {
+    const user = userEvent.setup();
+    renderContextPanel({
+      sessionId: "test-session-multiple-workspace-pickers",
+      projectName: "Desktop UX",
+      projectWorkingDirs: ["/Users/test/goose2", "/Users/test/goose2-feature"],
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /select branch/i }),
+    ).not.toBeInTheDocument();
+    const expand = screen.getAllByRole("button", {
+      name: /expand .*goose2$/i,
+    })[0];
+    if (!expand) throw new Error("Expected an expandable workspace row");
+    await user.click(expand);
+    expect(
+      screen.getByRole("button", { name: /select branch/i }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /collapse .*goose2$/i }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /select branch/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("selects the event-attributed worktree only for the session that just settled", async () => {
     let gitState: GitState = {
       isGitRepo: true,
@@ -810,8 +989,8 @@ describe("ContextPanel", () => {
     await openWorkspaceActionsMenu(user, /repo-b\/\.\.\.\/api/i);
 
     expect(
-      screen.queryByRole("menuitem", { name: /^create worktree$/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("menuitem", { name: /^create worktree$/i }),
+    ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     await openWorkspaceActionsMenu(user, /repo-a\/app/i);
@@ -1097,7 +1276,7 @@ describe("ContextPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not offer create worktree from a linked worktree row", async () => {
+  it("offers create worktree from a linked worktree row", async () => {
     const user = userEvent.setup();
     useChatSessionStore.setState({
       sessions: [
@@ -1134,12 +1313,26 @@ describe("ContextPanel", () => {
     expect(
       screen.getByRole("menuitem", { name: /^create branch$/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("menuitem", { name: /^create worktree$/i }),
-    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("menuitem", { name: /^create worktree$/i }),
+    );
+    await user.type(screen.getByLabelText("Worktree name"), "sibling-worktree");
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: /^create worktree$/i,
+      }),
+    );
+
+    expect(vi.mocked(gitApi.createWorktree)).toHaveBeenCalledWith(
+      "/Users/test/goose2-feature",
+      "sibling-worktree",
+      "sibling-worktree",
+      true,
+      "feat/context-panel",
+    );
   });
 
-  it("does not offer create worktree from a subdirectory in a linked worktree", async () => {
+  it("offers create worktree from a subdirectory in a linked worktree", async () => {
     const user = userEvent.setup();
     useChatSessionStore.setState({
       sessions: [
@@ -1187,8 +1380,8 @@ describe("ContextPanel", () => {
       screen.getByRole("menuitem", { name: /^create branch$/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("menuitem", { name: /^create worktree$/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("menuitem", { name: /^create worktree$/i }),
+    ).toBeInTheDocument();
   });
 
   it("runs linked worktree subdirectory row git actions at that worktree root", async () => {

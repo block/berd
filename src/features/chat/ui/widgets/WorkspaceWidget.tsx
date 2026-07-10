@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ChevronDown,
   Ellipsis,
   Folder,
   FolderOpen,
@@ -23,6 +25,7 @@ import { shortenPath } from "./workspacePath";
 import type { WorkspaceGitRuntime } from "../hooks/useWorkspaceGitRuntimes";
 import { WorkspaceAddTrigger } from "./WorkspaceAddDialog";
 import { WorkspaceIdentity } from "./WorkspaceIdentity";
+import { WorkspaceContextPicker } from "./WorkspaceContextPicker";
 import {
   WorkspaceRowActionsMenu,
   type WorkspaceRemovalPlan,
@@ -65,6 +68,21 @@ interface WorkspaceWidgetProps {
     worktree: CreatedWorktree,
     context: CreatedWorkspaceWorktreeContext,
   ) => void;
+  onSelectWorktree: (
+    runtime: WorkspaceGitRuntime,
+    path: string,
+    branch: string | null,
+  ) => void;
+  onSwitchBranch: (
+    runtime: WorkspaceGitRuntime,
+    path: string,
+    branch: string,
+  ) => Promise<void>;
+  onStashAndSwitch: (
+    runtime: WorkspaceGitRuntime,
+    path: string,
+    branch: string,
+  ) => Promise<void>;
   onAddWorkspace?: () => Promise<void> | void;
   onRemoveWorkspace?: (
     workspace: WorkspaceAttachment,
@@ -83,9 +101,15 @@ function WorkspaceRow({
   onCreateBranch,
   onCreateWorktree,
   onWorktreeCreated,
+  onSelectWorktree,
+  onSwitchBranch,
+  onStashAndSwitch,
   onRemoveWorkspace,
   getRemovalPlan,
   onOpenTerminalAtPath,
+  expanded,
+  collapsible,
+  onToggleExpanded,
 }: {
   runtime: WorkspaceGitRuntime;
   onInitRepo: (path: string) => Promise<void>;
@@ -109,13 +133,32 @@ function WorkspaceRow({
     worktree: CreatedWorktree,
     context: CreatedWorkspaceWorktreeContext,
   ) => void;
+  onSelectWorktree: (
+    runtime: WorkspaceGitRuntime,
+    path: string,
+    branch: string | null,
+  ) => void;
+  onSwitchBranch: (
+    runtime: WorkspaceGitRuntime,
+    path: string,
+    branch: string,
+  ) => Promise<void>;
+  onStashAndSwitch: (
+    runtime: WorkspaceGitRuntime,
+    path: string,
+    branch: string,
+  ) => Promise<void>;
   onRemoveWorkspace?: (
     workspace: WorkspaceAttachment,
     removalPlan: WorkspaceRemovalPlan,
   ) => Promise<void> | void;
   getRemovalPlan?: (workspace: WorkspaceAttachment) => WorkspaceRemovalPlan;
   onOpenTerminalAtPath?: (path: string) => void;
+  expanded: boolean;
+  collapsible: boolean;
+  onToggleExpanded: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const { workspace, gitContext, gitState } = runtime;
   const disabled = runtime.isFetching;
   const canInitRepo = gitState?.isGitRepo === false;
@@ -144,28 +187,92 @@ function WorkspaceRow({
     onOpenTerminalAtPath,
   };
 
+  const canShowPickers = Boolean(gitState?.isGitRepo);
+  const header = (
+    <WorkspaceIdentity
+      workspace={workspace}
+      gitState={gitState}
+      gitContext={gitContext}
+      className="min-w-0 flex-1"
+      iconClassName="mt-px size-3.5"
+      titleClassName="leading-[18px]"
+      metadataClassName="mt-1 text-sm leading-[18px] text-muted-foreground"
+    />
+  );
+
+  const expansionLabel = collapsible
+    ? t(
+        expanded
+          ? "contextPanel.actions.collapseWorkspaceContextFor"
+          : "contextPanel.actions.expandWorkspaceContextFor",
+        { name: gitContext.workspaceTitle },
+      )
+    : undefined;
+
   return (
     <div
       className={cn(
-        "group/workspace-row flex w-full min-w-0 items-start gap-2 rounded-[10px] bg-sidebar-accent px-3 py-2",
+        "group/workspace-row relative w-full min-w-0 rounded-[10px] bg-sidebar-accent px-3 py-2",
         "transition-colors duration-150 focus-within:bg-sidebar-accent/90",
+        collapsible && "hover:bg-sidebar-accent/90",
       )}
     >
-      <WorkspaceIdentity
-        workspace={workspace}
-        gitState={gitState}
-        gitContext={gitContext}
-        className="min-w-0 flex-1"
-        iconClassName="mt-px size-3.5"
-        titleClassName="leading-[18px]"
-        metadataClassName="mt-1 text-sm leading-[18px] text-muted-foreground"
-      />
-      <div className="-mr-1 flex shrink-0 items-center gap-1">
-        {runtime.isFetching ? (
-          <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
-        ) : null}
-        <WorkspaceRowActionsMenu {...sharedMenuProps} />
+      {collapsible ? (
+        <button
+          type="button"
+          className="absolute inset-0 z-0 cursor-pointer rounded-[10px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          aria-expanded={expanded}
+          aria-label={expansionLabel}
+          onClick={onToggleExpanded}
+        />
+      ) : null}
+      <div className="pointer-events-none relative z-[1] flex min-w-0 items-start gap-2">
+        {header}
+        <div className="-mr-1 flex shrink-0 items-center gap-1">
+          {runtime.isFetching ? (
+            <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : null}
+          {collapsible ? (
+            <ChevronDown
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
+                expanded && "rotate-180",
+              )}
+              aria-hidden="true"
+            />
+          ) : null}
+          <div className="pointer-events-auto">
+            <WorkspaceRowActionsMenu {...sharedMenuProps} />
+          </div>
+        </div>
       </div>
+      {expanded && canShowPickers ? (
+        <div className="relative z-[1] mt-3">
+          <WorkspaceContextPicker
+            gitState={gitState as GitState}
+            currentPath={gitContext.actionPath}
+            activeBranch={gitContext.branch}
+            disabled={disabled}
+            onSelectWorktree={(path, branch) =>
+              onSelectWorktree(runtime, path, branch)
+            }
+            onSwitchBranch={(path, branch) =>
+              onSwitchBranch(runtime, path, branch)
+            }
+            onStashAndSwitch={(path, branch) =>
+              onStashAndSwitch(runtime, path, branch)
+            }
+            canCreateWorktree={gitContext.canCreateWorktree}
+            onCreateBranch={(path, name, baseBranch) =>
+              onCreateBranch(runtime, path, name, baseBranch)
+            }
+            onCreateWorktree={onCreateWorktree}
+            onWorktreeCreated={(worktree, context) =>
+              onWorktreeCreated(runtime, worktree, context)
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -259,6 +366,9 @@ export function WorkspaceWidget({
   onCreateBranch,
   onCreateWorktree,
   onWorktreeCreated,
+  onSelectWorktree,
+  onSwitchBranch,
+  onStashAndSwitch,
   onAddWorkspace,
   onRemoveWorkspace,
   getRemovalPlan,
@@ -267,6 +377,40 @@ export function WorkspaceWidget({
 }: WorkspaceWidgetProps) {
   const { t } = useTranslation("chat");
   const orderedWorkspaces = workspaceRuntimes;
+  const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const singleWorkspaceId =
+    orderedWorkspaces.length === 1 ? orderedWorkspaces[0]?.workspace.id : null;
+
+  useEffect(() => {
+    const availableIds = new Set(
+      orderedWorkspaces.map((runtime) => runtime.workspace.id),
+    );
+    setExpandedWorkspaceIds((current) => {
+      const next = new Set(
+        [...current].filter((workspaceId) => availableIds.has(workspaceId)),
+      );
+      if (singleWorkspaceId) next.add(singleWorkspaceId);
+      if (
+        next.size === current.size &&
+        [...next].every((workspaceId) => current.has(workspaceId))
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [orderedWorkspaces, singleWorkspaceId]);
+
+  const toggleWorkspace = (workspaceId: string) => {
+    if (singleWorkspaceId) return;
+    setExpandedWorkspaceIds((current) => {
+      const next = new Set(current);
+      if (next.has(workspaceId)) next.delete(workspaceId);
+      else next.add(workspaceId);
+      return next;
+    });
+  };
   const fallbackWorkspaceRoot =
     primaryWorkspaceRoot ??
     projectWorkingDirs[0] ??
@@ -390,9 +534,20 @@ export function WorkspaceWidget({
                   onCreateBranch={onCreateBranch}
                   onCreateWorktree={onCreateWorktree}
                   onWorktreeCreated={onWorktreeCreated}
+                  onSelectWorktree={onSelectWorktree}
+                  onSwitchBranch={onSwitchBranch}
+                  onStashAndSwitch={onStashAndSwitch}
                   onRemoveWorkspace={onRemoveWorkspace}
                   getRemovalPlan={getRemovalPlan}
                   onOpenTerminalAtPath={onOpenTerminalAtPath}
+                  expanded={
+                    singleWorkspaceId === workspace.workspace.id ||
+                    expandedWorkspaceIds.has(workspace.workspace.id)
+                  }
+                  collapsible={!singleWorkspaceId}
+                  onToggleExpanded={() =>
+                    toggleWorkspace(workspace.workspace.id)
+                  }
                 />
               ))}
             </div>
