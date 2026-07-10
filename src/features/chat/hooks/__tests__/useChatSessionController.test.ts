@@ -354,6 +354,9 @@ describe("useChatSessionController", () => {
       messagesBySession: {},
       sessionStateById: {},
       draftsBySession: {},
+      nonEmptyDraftSessionIds: new Set(),
+      skillDraftsBySession: {},
+      draftAttachmentsBySession: {},
       queuedMessageBySession: {},
       scrollTargetMessageBySession: {},
       activeSessionId: null,
@@ -2267,12 +2270,20 @@ describe("useChatSessionController", () => {
     ).toBeNull();
   });
 
-  it("recovers a session with a failed prompt and carries the text into the new composer", async () => {
+  it("recovers a session with a failed prompt and carries the draft into the new composer", async () => {
     mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
 
     // Chat-first on a dead provider: the optimistic user message and the
     // error bubble live only in the local store; the backend committed
     // nothing. There is also a half-typed draft in the composer.
+    const draftAttachment = {
+      id: "draft-attachment",
+      kind: "file" as const,
+      name: "report.pdf",
+      path: "/tmp/report.pdf",
+      mimeType: "application/pdf",
+    };
+
     useChatStore.setState({
       messagesBySession: {
         "session-1": [
@@ -2297,6 +2308,7 @@ describe("useChatSessionController", () => {
         ],
       },
       draftsBySession: { "session-1": "second attempt" },
+      draftAttachmentsBySession: { "session-1": [draftAttachment] },
     });
 
     const { result } = renderHook(() =>
@@ -2324,10 +2336,13 @@ describe("useChatSessionController", () => {
       );
     });
 
-    // …and the typed-but-unsent text survives the hop into the new composer.
+    // …and the typed-but-unsent draft survives the hop into the new composer.
     expect(useChatStore.getState().draftsBySession["session-recovered"]).toBe(
       "help me fix this bug\n\nsecond attempt",
     );
+    expect(
+      useChatStore.getState().draftAttachmentsBySession["session-recovered"],
+    ).toEqual([draftAttachment]);
 
     await waitFor(() => {
       expect(mockAcpSessionArchive).toHaveBeenCalledWith({

@@ -311,6 +311,83 @@ describe("ChatInput attachments", () => {
     });
   });
 
+  it("restores initial draft attachments and mirrors subsequent changes", async () => {
+    const onDraftAttachmentsChange = vi.fn();
+    const user = userEvent.setup();
+    const initialAttachment = {
+      id: "initial-report",
+      kind: "file" as const,
+      name: "initial-report.pdf",
+      path: "/Users/test/initial-report.pdf",
+      mimeType: "application/pdf",
+    };
+    mockOpenDialog.mockResolvedValue("/Users/test/next-report.pdf");
+    mockInspectAttachmentPaths.mockResolvedValue([
+      {
+        name: "next-report.pdf",
+        path: "/Users/test/next-report.pdf",
+        kind: "file",
+        mimeType: "application/pdf",
+      },
+    ]);
+
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        initialAttachments={[initialAttachment]}
+        onDraftAttachmentsChange={onDraftAttachmentsChange}
+      />,
+    );
+
+    expect(await screen.findByText("initial-report.pdf")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(onDraftAttachmentsChange).toHaveBeenCalledWith([
+        initialAttachment,
+      ]);
+    });
+
+    await user.click(screen.getByRole("button", { name: /^attach$/i }));
+    await user.click(screen.getByRole("menuitem", { name: /^file$/i }));
+
+    await waitFor(() => {
+      expect(onDraftAttachmentsChange).toHaveBeenCalledWith([
+        initialAttachment,
+        expect.objectContaining({
+          kind: "file",
+          name: "next-report.pdf",
+          path: "/Users/test/next-report.pdf",
+        }),
+      ]);
+    });
+  });
+
+  it("clears mirrored draft attachments after a successful send", async () => {
+    const onDraftAttachmentsChange = vi.fn();
+    const user = userEvent.setup();
+    const initialAttachment = {
+      id: "initial-report",
+      kind: "file" as const,
+      name: "initial-report.pdf",
+      path: "/Users/test/initial-report.pdf",
+      mimeType: "application/pdf",
+    };
+
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        initialAttachments={[initialAttachment]}
+        onDraftAttachmentsChange={onDraftAttachmentsChange}
+      />,
+    );
+
+    expect(await screen.findByText("initial-report.pdf")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(onDraftAttachmentsChange).toHaveBeenLastCalledWith([]);
+    });
+  });
+
   it("dedupes path attachments that differ only by case on case-insensitive platforms", async () => {
     const user = userEvent.setup();
     mockOpenDialog.mockResolvedValue("/Users/test/report.pdf");

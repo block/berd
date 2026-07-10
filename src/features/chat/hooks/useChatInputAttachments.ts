@@ -72,8 +72,12 @@ async function createImageAttachmentFromFile(
   }
 }
 
-export function useChatInputAttachments() {
-  const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
+export function useChatInputAttachments(
+  initialAttachments: ChatAttachmentDraft[] = [],
+) {
+  const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>(() => [
+    ...initialAttachments,
+  ]);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
 

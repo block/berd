@@ -16,6 +16,10 @@ import {
   skillDraftSnapshotsMatch,
 } from "../lib/chatInputSnapshots";
 import {
+  draftAttachmentsEqual,
+  makeRemountSafeDraftAttachments,
+} from "../lib/draftAttachments";
+import {
   getChatInputAgentGroupLabel,
   getChatInputPlaceholder,
 } from "../lib/chatInputPlaceholder";
@@ -61,7 +65,7 @@ import {
   getStreamingShortcutAction,
   useStreamingShortcutPreference,
 } from "../lib/streamingShortcutPreference";
-import type { MessageChip } from "@/shared/types/messages";
+import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
 import type { Persona } from "@/shared/types/agents";
 import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 
@@ -179,9 +183,9 @@ export function ChatInput({
   composerActions,
   initialValue = "",
   initialAttachments,
-  onInitialAttachmentsConsumed,
   placeholder,
   onDraftChange,
+  onDraftAttachmentsChange,
   selectedSkills: selectedSkillsProp,
   onSkillsChange,
   skillProjectDirs,
@@ -317,23 +321,7 @@ export function ChatInput({
     removeAttachment,
     replaceAttachments,
     clearAttachments,
-  } = useChatInputAttachments();
-  const consumedInitialAttachmentsRef = useRef<
-    ChatInputProps["initialAttachments"] | null
-  >(null);
-  useEffect(() => {
-    if (
-      !initialAttachments ||
-      initialAttachments.length === 0 ||
-      consumedInitialAttachmentsRef.current === initialAttachments
-    ) {
-      return;
-    }
-
-    consumedInitialAttachmentsRef.current = initialAttachments;
-    replaceAttachments(initialAttachments);
-    onInitialAttachmentsConsumed?.();
-  }, [initialAttachments, onInitialAttachmentsConsumed, replaceAttachments]);
+  } = useChatInputAttachments(initialAttachments ?? []);
   const attachmentWorkPending = attachmentWorkCount > 0;
   const runAttachmentWork = useCallback(async (task: () => Promise<void>) => {
     setAttachmentWorkCount((count) => count + 1);
@@ -349,6 +337,30 @@ export function ChatInput({
   );
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
+  const lastPersistedDraftAttachmentsRef = useRef<ChatAttachmentDraft[] | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!onDraftAttachmentsChange) {
+      return;
+    }
+
+    const nextDraftAttachments = makeRemountSafeDraftAttachments(attachments);
+    if (nextDraftAttachments !== attachments) {
+      attachmentsRef.current = nextDraftAttachments;
+    }
+    if (
+      draftAttachmentsEqual(
+        lastPersistedDraftAttachmentsRef.current ?? undefined,
+        nextDraftAttachments,
+      )
+    ) {
+      return;
+    }
+
+    lastPersistedDraftAttachmentsRef.current = nextDraftAttachments;
+    onDraftAttachmentsChange(nextDraftAttachments);
+  }, [attachments, onDraftAttachmentsChange]);
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
   const handleFileMentionAttachmentSelect = useCallback(
@@ -674,7 +686,7 @@ export function ChatInput({
       const submittedText = text;
       const submittedSkills = visibleSelectedSkills;
       const submittedAttachments = scopedControls.attachments
-        ? attachments
+        ? attachmentsRef.current
         : [];
       const restoredSendOptions =
         restoredQueuedSendOptions && submittedSkills.length === 0
@@ -720,7 +732,6 @@ export function ChatInput({
       }
     },
     [
-      attachments,
       clearAttachments,
       dictation,
       scopedControls.attachments,

@@ -28,6 +28,7 @@ import { ProjectInputSelector } from "@/features/chat/ui/ProjectInputSelector";
 import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import { makeRemountSafeDraftAttachments } from "@/features/chat/lib/draftAttachments";
 import type {
   ChatInputReasoningEffort,
   ChatSendOptions,
@@ -179,25 +180,6 @@ function getPreferredModel(
     models[0];
 
   return model ? modelOptionToSelection(model, fallbackProviderId) : null;
-}
-
-function makeTransferableAttachments(
-  attachments: ChatAttachmentDraft[],
-): ChatAttachmentDraft[] {
-  return attachments.map((attachment) => {
-    if (
-      attachment.kind === "image" &&
-      !attachment.path &&
-      attachment.previewUrl.startsWith("blob:")
-    ) {
-      return {
-        ...attachment,
-        previewUrl: `data:${attachment.mimeType};base64,${attachment.base64}`,
-      };
-    }
-
-    return attachment;
-  });
 }
 
 export function GlobalComposerPill({
@@ -860,9 +842,9 @@ export function GlobalComposerPill({
     }
 
     const options: GlobalComposeOptions = {};
-    const transferableAttachments = makeTransferableAttachments(attachments);
-    if (transferableAttachments.length > 0) {
-      options.attachments = transferableAttachments;
+    const remountSafeAttachments = makeRemountSafeDraftAttachments(attachments);
+    if (remountSafeAttachments.length > 0) {
+      options.attachments = remountSafeAttachments;
     }
     if (providerOverride) {
       options.providerId = providerOverride;

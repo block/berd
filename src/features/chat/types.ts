@@ -146,9 +146,10 @@ export interface ChatInputProps {
   composerActions: ChatInputComposerActions;
   initialValue?: string;
   initialAttachments?: ChatAttachmentDraft[];
-  onInitialAttachmentsConsumed?: () => void;
   placeholder?: string;
   onDraftChange?: (text: string) => void;
+  /** Mirrors the live composer attachments so a remounted chat can restore them. */
+  onDraftAttachmentsChange?: (attachments: ChatAttachmentDraft[]) => void;
   selectedSkills?: ChatSkillDraft[];
   onSkillsChange?: (skills: ChatSkillDraft[]) => void;
   skillProjectDirs?: string[];

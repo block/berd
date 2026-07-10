@@ -28,7 +28,9 @@ describe("chatStore", () => {
       sessionStateById: {},
       queuedMessageBySession: {},
       draftsBySession: {},
+      nonEmptyDraftSessionIds: new Set(),
       skillDraftsBySession: {},
+      draftAttachmentsBySession: {},
       activeSessionId: null,
       recentMessageSessionIds: [],
       isViewingActiveSession: false,
@@ -277,6 +279,14 @@ describe("chatStore", () => {
     store.setChatState("local-session", "thinking");
     store.setDraft("local-session", "draft text");
     store.setSkillDrafts("local-session", [{ id: "skill-1", name: "Skill" }]);
+    store.setDraftAttachments("local-session", [
+      {
+        id: "attachment-1",
+        kind: "file",
+        name: "report.pdf",
+        path: "/tmp/report.pdf",
+      },
+    ]);
     store.enqueueMessage("local-session", { text: "queued text" });
     store.setSessionLoading("local-session", true);
     store.setScrollTargetMessage("local-session", "message-1", "query");
@@ -294,6 +304,15 @@ describe("chatStore", () => {
     expect(state.skillDraftsBySession["acp-session"]).toEqual([
       { id: "skill-1", name: "Skill" },
     ]);
+    expect(state.draftAttachmentsBySession["acp-session"]).toEqual([
+      {
+        id: "attachment-1",
+        kind: "file",
+        name: "report.pdf",
+        path: "/tmp/report.pdf",
+      },
+    ]);
+    expect(state.draftAttachmentsBySession["local-session"]).toBeUndefined();
     expect(state.queuedMessageBySession["acp-session"]).toEqual({
       text: "queued text",
     });
@@ -487,6 +506,30 @@ describe("chatStore", () => {
     expect(useChatStore.getState().skillDraftsBySession.s1).toBeUndefined();
   });
 
+  it("stores and clears draft attachments per session", () => {
+    const store = useChatStore.getState();
+    const attachment = {
+      id: "attachment-1",
+      kind: "file" as const,
+      name: "report.pdf",
+      path: "/tmp/report.pdf",
+      mimeType: "application/pdf",
+    };
+
+    store.setDraftAttachments("s1", [attachment]);
+    expect(useChatStore.getState().draftAttachmentsBySession.s1).toEqual([
+      attachment,
+    ]);
+    expect(
+      useChatStore.getState().draftAttachmentsBySession.s2,
+    ).toBeUndefined();
+
+    store.clearDraftAttachments("s1");
+    expect(
+      useChatStore.getState().draftAttachmentsBySession.s1,
+    ).toBeUndefined();
+  });
+
   it("removes session data during cleanup including queued messages and drafts", () => {
     const store = useChatStore.getState();
 
@@ -495,6 +538,14 @@ describe("chatStore", () => {
     store.enqueueMessage("s1", { text: "queued" });
     store.setDraft("s1", "draft text");
     store.setSkillDrafts("s1", [{ id: "skill-1", name: "code-review" }]);
+    store.setDraftAttachments("s1", [
+      {
+        id: "attachment-1",
+        kind: "file",
+        name: "report.pdf",
+        path: "/tmp/report.pdf",
+      },
+    ]);
     store.markSessionUnread("s1");
     store.markSessionUnread("s2");
     store.setActiveSession("s1");
@@ -505,6 +556,9 @@ describe("chatStore", () => {
     expect(store.queuedMessageBySession.s1).toBeUndefined();
     expect(store.draftsBySession.s1).toBeUndefined();
     expect(useChatStore.getState().skillDraftsBySession.s1).toBeUndefined();
+    expect(
+      useChatStore.getState().draftAttachmentsBySession.s1,
+    ).toBeUndefined();
     expect(store.activeSessionId).toBeNull();
     expect(loadCachedUnreadSessionIds()).toEqual(["s2"]);
   });
@@ -535,7 +589,9 @@ describe("chatStore draft localStorage persistence", () => {
       sessionStateById: {},
       queuedMessageBySession: {},
       draftsBySession: {},
+      nonEmptyDraftSessionIds: new Set(),
       skillDraftsBySession: {},
+      draftAttachmentsBySession: {},
       activeSessionId: null,
       recentMessageSessionIds: [],
       isViewingActiveSession: false,
@@ -605,7 +661,9 @@ describe("chatStore session loading state", () => {
       sessionStateById: {},
       queuedMessageBySession: {},
       draftsBySession: {},
+      nonEmptyDraftSessionIds: new Set(),
       skillDraftsBySession: {},
+      draftAttachmentsBySession: {},
       activeSessionId: null,
       recentMessageSessionIds: [],
       isViewingActiveSession: false,

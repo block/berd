@@ -342,6 +342,13 @@ export function useChatSessionController({
           s.skillDraftsBySession[PENDING_HOME_SESSION_ID] ?? EMPTY_SKILL_DRAFTS
       : () => EMPTY_SKILL_DRAFTS,
   );
+  const pendingDraftAttachments = useChatStore(
+    isHomeSession
+      ? (s) =>
+          s.draftAttachmentsBySession[PENDING_HOME_SESSION_ID] ??
+          EMPTY_ATTACHMENT_DRAFTS
+      : () => EMPTY_ATTACHMENT_DRAFTS,
+  );
   const pendingQueuedMessage = useChatStore(
     isHomeSession
       ? (s) => s.queuedMessageBySession[PENDING_HOME_SESSION_ID] ?? null
@@ -840,6 +847,10 @@ export function useChatSessionController({
       const strandedComposerText = sessionId
         ? collectStrandedComposerText(sessionId)
         : "";
+      const strandedSessionId = current?.id ?? sessionId;
+      const strandedComposerAttachments = strandedSessionId
+        ? useChatStore.getState().draftAttachmentsBySession[strandedSessionId]
+        : undefined;
       const created = await store.createSession({
         title: current?.title,
         projectId: current?.projectId ?? undefined,
@@ -873,11 +884,16 @@ export function useChatSessionController({
         return false;
       }
 
-      // Seed the recovered text into the fresh session's composer before
+      // Seed the recovered draft into the fresh session's composer before
       // navigating so the user lands with their prompt ready to resend on the
       // healthy provider.
       if (strandedComposerText) {
         useChatStore.getState().setDraft(created.id, strandedComposerText);
+      }
+      if (strandedComposerAttachments?.length) {
+        useChatStore
+          .getState()
+          .setDraftAttachments(created.id, strandedComposerAttachments);
       }
 
       activateSession(created.id);
@@ -892,7 +908,6 @@ export function useChatSessionController({
       // a local removal would reappear on the next loadSessions(). Best-effort —
       // recovery already succeeded, so a failed cleanup must not surface as a
       // recovery failure.
-      const strandedSessionId = current?.id ?? sessionId;
       if (strandedSessionId && strandedSessionId !== created.id) {
         try {
           await store.archiveSession(strandedSessionId);
@@ -2118,6 +2133,9 @@ export function useChatSessionController({
       ? (s.draftAttachmentsBySession[sessionId] ?? EMPTY_ATTACHMENT_DRAFTS)
       : EMPTY_ATTACHMENT_DRAFTS,
   );
+  const draftAttachments = sessionId
+    ? sessionDraftAttachments
+    : pendingDraftAttachments;
   const draftValue = sessionId ? sessionDraftValue : pendingDraftValue;
   const storedSelectedSkills = sessionId
     ? sessionSkillDrafts
@@ -2190,9 +2208,12 @@ export function useChatSessionController({
     },
     [session?.intent, stateSessionId],
   );
-  const handleInitialDraftAttachmentsConsumed = useCallback(() => {
-    useChatStore.getState().clearDraftAttachments(stateSessionId);
-  }, [stateSessionId]);
+  const handleDraftAttachmentsChange = useCallback(
+    (attachments: ChatAttachmentDraft[]) => {
+      useChatStore.getState().setDraftAttachments(stateSessionId, attachments);
+    },
+    [stateSessionId],
+  );
 
   useEffect(() => {
     if (
@@ -2249,6 +2270,7 @@ export function useChatSessionController({
     // state mutates.
     void pendingDraftValue;
     void pendingSkillDrafts;
+    void pendingDraftAttachments;
     void pendingQueuedMessage;
 
     const chatStateNow = useChatStore.getState();
@@ -2256,6 +2278,8 @@ export function useChatSessionController({
       chatStateNow.draftsBySession[PENDING_HOME_SESSION_ID] ?? "";
     const pendingSkills =
       chatStateNow.skillDraftsBySession[PENDING_HOME_SESSION_ID] ?? [];
+    const pendingAttachments =
+      chatStateNow.draftAttachmentsBySession[PENDING_HOME_SESSION_ID] ?? [];
 
     if (pendingDraft && !chatStateNow.draftsBySession[sessionId]) {
       chatStateNow.setDraft(sessionId, pendingDraft);
@@ -2265,6 +2289,12 @@ export function useChatSessionController({
       !chatStateNow.skillDraftsBySession[sessionId]?.length
     ) {
       chatStateNow.setSkillDrafts(sessionId, pendingSkills);
+    }
+    if (
+      pendingAttachments.length > 0 &&
+      !chatStateNow.draftAttachmentsBySession[sessionId]?.length
+    ) {
+      chatStateNow.setDraftAttachments(sessionId, pendingAttachments);
     }
 
     const hasPendingProvider = pendingProviderId !== undefined;
@@ -2383,6 +2413,7 @@ export function useChatSessionController({
     movePendingHomeQueuedMessage(sessionId);
     useChatStore.getState().clearDraft(PENDING_HOME_SESSION_ID);
     useChatStore.getState().clearSkillDrafts(PENDING_HOME_SESSION_ID);
+    useChatStore.getState().clearDraftAttachments(PENDING_HOME_SESSION_ID);
     useChatStore.getState().dismissQueuedMessage(PENDING_HOME_SESSION_ID);
     useChatStore.getState().cleanupSession(PENDING_HOME_SESSION_ID);
   }, [
@@ -2392,6 +2423,7 @@ export function useChatSessionController({
     isHomeSession,
     pendingDraftValue,
     pendingSkillDrafts,
+    pendingDraftAttachments,
     pendingModelSelection,
     pendingPersonaId,
     pendingProjectId,
@@ -2449,8 +2481,8 @@ export function useChatSessionController({
     steerQueuedMessage,
     draftValue,
     handleDraftChange,
-    draftAttachments: sessionDraftAttachments,
-    handleInitialDraftAttachmentsConsumed,
+    draftAttachments,
+    handleDraftAttachmentsChange,
     selectedSkills,
     handleSkillsChange,
     skillProjectDirs,

@@ -37,7 +37,9 @@ export function HomeComposer({
           controller.chatState === "thinking",
       }}
       initialValue={controller.draftValue}
+      initialAttachments={controller.draftAttachments}
       onDraftChange={controller.handleDraftChange}
+      onDraftAttachmentsChange={controller.handleDraftAttachmentsChange}
       selectedSkills={controller.selectedSkills}
       onSkillsChange={controller.handleSkillsChange}
       personaPicker={{
