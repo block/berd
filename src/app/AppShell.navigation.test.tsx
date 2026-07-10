@@ -191,8 +191,10 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
     detachableSessionListEnabled,
     onNavigate,
     onNewChat,
+    onNewChatInProject,
     onSettingsClick,
     onSettingsSectionChange,
+    onPrototypeSecondaryTargetChange,
     prototypeSecondaryTarget,
     width,
   }: {
@@ -200,8 +202,12 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
     detachableSessionListEnabled?: boolean;
     onNavigate?: (view: string) => void;
     onNewChat?: () => void;
+    onNewChatInProject?: (projectId: string) => void;
     onSettingsClick?: () => void;
     onSettingsSectionChange?: (section: "providers") => void;
+    onPrototypeSecondaryTargetChange?: (
+      target: { kind: "chats" } | { kind: "project"; projectId: string },
+    ) => void;
     prototypeSecondaryTarget?: unknown;
     width?: number;
   }) => (
@@ -217,6 +223,9 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
       <button type="button" onClick={onNewChat}>
         Sidebar new chat
       </button>
+      <button type="button" onClick={() => onNewChatInProject?.("project-2")}>
+        Sidebar new project 2 chat
+      </button>
       <button type="button" onClick={() => onNavigate?.("skills")}>
         Sidebar skills
       </button>
@@ -228,6 +237,23 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
       </button>
       <button type="button" onClick={() => onNavigate?.("agents")}>
         Sidebar agents
+      </button>
+      <button
+        type="button"
+        onClick={() => onPrototypeSecondaryTargetChange?.({ kind: "chats" })}
+      >
+        Sidebar chats
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onPrototypeSecondaryTargetChange?.({
+            kind: "project",
+            projectId: "project-2",
+          })
+        }
+      >
+        Sidebar project 2
       </button>
       <button type="button" onClick={onSettingsClick}>
         Sidebar settings
@@ -727,6 +753,82 @@ describe("AppShell global navigation", () => {
     expect(
       screen.getByTestId("mock-sidebar-detachable-enabled"),
     ).toHaveTextContent("true");
+  });
+
+  it("opens navigation from an empty chat without carrying it to new chats", async () => {
+    const user = userEvent.setup();
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-2",
+          path: "/tmp/project-2.yaml",
+          name: "Project Two",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "",
+          workingDirs: ["/workspace/project-2"],
+          projectWorkspaces: [],
+          useWorktrees: false,
+          order: 0,
+          archivedAt: null,
+        },
+      ],
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: DEFAULT_CHAT_TITLE,
+          projectId: "project-1",
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent("null");
+
+    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
+
+    await user.click(screen.getByRole("button", { name: "Sidebar project 2" }));
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent(
+      JSON.stringify({ kind: "project", projectId: "project-2" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+      ).toHaveTextContent("null");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+      ).toHaveTextContent("null");
+    });
   });
 
   it("keeps secondary chat target for default-titled chats with messages", async () => {
@@ -1765,6 +1867,10 @@ describe("AppShell global navigation", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Open session 1" }));
       expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+      fireEvent.click(screen.getByRole("button", { name: "Sidebar chats" }));
+      expect(
+        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+      ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
       mockAcpCreateSession.mockClear();
 
       fireEvent.keyDown(window, { key: "n", metaKey: true });
@@ -1798,6 +1904,9 @@ describe("AppShell global navigation", () => {
       expect(useChatSessionStore.getState().activeSessionId).not.toBe(
         "session-1",
       );
+      expect(
+        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+      ).toHaveTextContent("null");
     } finally {
       vi.useRealTimers();
     }

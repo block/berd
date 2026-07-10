@@ -706,17 +706,13 @@ export function AppShell({
       activeNavigationSessionIsEmptyDefaultChat,
       activeView,
     ]);
-  const resolvedNavigationSecondaryTarget =
+  const effectiveNavigationSecondaryTarget =
     resolveEffectiveNavigationSecondaryTarget({
       activeChatNavigationSecondaryTarget,
       activeSessionId,
       navigationSecondarySuppressedSessionId,
       navigationSecondaryTarget,
     });
-  const effectiveNavigationSecondaryTarget =
-    activeNavigationSessionIsEmptyDefaultChat
-      ? null
-      : resolvedNavigationSecondaryTarget;
   const effectiveNavigationSecondaryMatchesActiveChat =
     getNavigationSecondaryTargetKey(effectiveNavigationSecondaryTarget) ===
     getNavigationSecondaryTargetKey(activeChatNavigationSecondaryTarget);
@@ -1970,6 +1966,7 @@ export function AppShell({
 
       if (existingDraft) {
         if (shouldActivate) {
+          resetNavigationSecondary();
           clearSettingsSectionUrl();
           setActiveSession(existingDraft.id);
           setActiveView("chat");
@@ -2004,6 +2001,7 @@ export function AppShell({
         providerId,
         workingDir: optimisticWorkingDir,
       });
+      resetNavigationSecondary();
       clearSettingsSectionUrl();
       setActiveSession(session.id);
       setActiveView("chat");
@@ -2030,6 +2028,7 @@ export function AppShell({
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
+      resetNavigationSecondary,
     ],
   );
 
@@ -2167,6 +2166,7 @@ export function AppShell({
       });
 
       if (existingDraft) {
+        resetNavigationSecondary();
         clearSettingsSectionUrl();
         setActiveSession(existingDraft.id);
         setActiveView("chat");
@@ -2221,6 +2221,7 @@ export function AppShell({
           workingDir: optimisticWorkingDir,
           workspaceAttachments: workspacePlan?.workspaceAttachments,
         });
+        resetNavigationSecondary();
         clearSettingsSectionUrl();
         setActiveSession(session.id);
         setActiveView("chat");
@@ -2254,6 +2255,7 @@ export function AppShell({
       setChatActiveSession,
       startDraftSessionCreation,
       workspaceRepository,
+      resetNavigationSecondary,
     ],
   );
 
@@ -2340,13 +2342,14 @@ export function AppShell({
         return;
       }
 
+      resetNavigationSecondary();
       clearSettingsSectionUrl();
       setChatComposerHandoffSessionId(liveSessionId);
       setActiveSession(liveSessionId);
       setActiveView("chat");
       setChatActiveSession(liveSessionId);
     },
-    [setActiveSession, setChatActiveSession],
+    [resetNavigationSecondary, setActiveSession, setChatActiveSession],
   );
 
   const handleProjectWorkspaceStartupNameCancel = useCallback(() => {
