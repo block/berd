@@ -14,6 +14,7 @@ use crate::auth_storage::StoredSessionCredential;
 pub const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login";
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoginExchangeResponse {
     pub session_credential: String,
     pub subject: Option<String>,
@@ -289,7 +290,7 @@ mod tests {
     fn exchange_login_code_uses_v1_route() {
         let server = SingleResponseServer::start(
             200,
-            r#"{"session_credential":"session","session_credential_header":"X-BB-Session-Credential","subject":"user-123","expires_at":"2026-06-15T00:00:00Z"}"#,
+            r#"{"sessionCredential":"session","sessionCredentialHeader":"X-BB-Session-Credential","subject":"user-123","expiresAt":"2026-06-15T00:00:00Z"}"#,
         );
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
 
