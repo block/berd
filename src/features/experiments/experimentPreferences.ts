@@ -277,6 +277,21 @@ function coerceConfigValue(
   }
 }
 
+/**
+ * Resolve the effective auto-enabled state for an experiment.
+ *
+ * When auto-enable is active (dev builds by default), all experiments are
+ * enabled regardless of their per-definition `defaultEnabled` value. When
+ * auto-enable is off (production), `defaultEnabled` determines the default
+ * state (falling back to off when omitted).
+ */
+export function resolveAutoEnabled(
+  autoEnable: boolean,
+  defaultEnabled: boolean | undefined,
+): boolean {
+  return autoEnable || (defaultEnabled ?? false);
+}
+
 function resolveExperimentState(
   definition: ExperimentDefinition,
   storedPreference: StoredExperimentPreference | undefined,
@@ -294,8 +309,10 @@ function resolveExperimentState(
     typeof storedPreference?.enabled === "boolean"
       ? storedPreference.enabled
       : undefined;
-  const autoEnabled =
-    definition.defaultEnabled ?? getExperimentAutoEnable().enabled;
+  const autoEnabled = resolveAutoEnabled(
+    getExperimentAutoEnable().enabled,
+    definition.defaultEnabled,
+  );
 
   return {
     id: definition.id,

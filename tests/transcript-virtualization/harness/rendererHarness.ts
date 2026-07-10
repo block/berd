@@ -182,6 +182,13 @@ export async function loadTranscriptRenderer(
         JSON.stringify(serializedFixture),
       );
       localStorage.setItem("goose:transcriptVirtualizationRenderer", mode);
+      // The harness runs through Vite's dev server but validates production
+      // renderer defaults. Keep unrelated dev-auto-enabled experiments from
+      // changing the transcript shape and invalidating performance thresholds.
+      localStorage.setItem(
+        "goose:experimental-features",
+        JSON.stringify({ version: 2, autoEnable: false, experiments: {} }),
+      );
     },
     { serializedFixture: fixture, mode: rendererMode },
   );

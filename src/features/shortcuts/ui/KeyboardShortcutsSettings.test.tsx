@@ -67,6 +67,7 @@ describe("KeyboardShortcutsSettings", () => {
   });
 
   it("shows the Global shortcut only while the experiment is enabled", () => {
+    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, false);
     renderWithProviders(<KeyboardShortcutsSettings />);
     expect(screen.queryByText("Global shortcut")).not.toBeInTheDocument();
 

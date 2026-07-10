@@ -9,6 +9,7 @@ import {
   clearExperimentEnabledOverride,
   getExperiment,
   getExperimentAutoEnable,
+  resolveAutoEnabled,
   setExperimentAutoEnable,
   setExperimentConfigValue,
   setExperimentEnabled,
@@ -61,6 +62,15 @@ const defaultEnabledRegistry = [
   },
 ] as const satisfies readonly ExperimentDefinition[];
 
+const defaultDisabledRegistry = [
+  {
+    id: "default-disabled-experiment",
+    titleKey: "experiments.title",
+    descriptionKey: "experiments.description",
+    defaultEnabled: false,
+  },
+] as const satisfies readonly ExperimentDefinition[];
+
 function storedPreferences() {
   return JSON.parse(
     localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "",
@@ -88,6 +98,23 @@ function mockLocalStorage(overrides: Partial<Storage>) {
     value: storage,
   });
 }
+
+describe("resolveAutoEnabled", () => {
+  it("returns true when autoEnable is true regardless of defaultEnabled", () => {
+    expect(resolveAutoEnabled(true, undefined)).toBe(true);
+    expect(resolveAutoEnabled(true, true)).toBe(true);
+    expect(resolveAutoEnabled(true, false)).toBe(true);
+  });
+
+  it("returns defaultEnabled when autoEnable is false", () => {
+    expect(resolveAutoEnabled(false, true)).toBe(true);
+    expect(resolveAutoEnabled(false, false)).toBe(false);
+  });
+
+  it("returns false when autoEnable is false and defaultEnabled is omitted", () => {
+    expect(resolveAutoEnabled(false, undefined)).toBe(false);
+  });
+});
 
 describe("experimentPreferences", () => {
   beforeEach(() => {
@@ -147,6 +174,28 @@ describe("experimentPreferences", () => {
       enabled: true,
       enabledSource: "auto",
       config: {},
+    });
+  });
+
+  it("auto-enables experiments with defaultEnabled: false in dev builds", () => {
+    vi.stubEnv("DEV", true);
+
+    expect(
+      getExperiment("default-disabled-experiment", defaultDisabledRegistry),
+    ).toMatchObject({
+      enabled: true,
+      enabledSource: "auto",
+    });
+  });
+
+  it("keeps experiments with defaultEnabled: false off in production builds", () => {
+    vi.stubEnv("DEV", false);
+
+    expect(
+      getExperiment("default-disabled-experiment", defaultDisabledRegistry),
+    ).toMatchObject({
+      enabled: false,
+      enabledSource: "auto",
     });
   });
 
