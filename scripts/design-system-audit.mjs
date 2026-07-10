@@ -131,8 +131,6 @@ const buttonStylingBaseline = new Set([
   "src/features/sessions/ui/session-list/SidebarFlatChatsSection.tsx",
   "src/features/sessions/ui/session-list/SidebarItemMenu.tsx",
   "src/features/sessions/ui/session-list/SidebarProjectList.tsx",
-  "src/features/sessions/ui/session-list/SidebarProjectSection.tsx",
-  "src/features/sessions/ui/session-list/SidebarProjectsSection.tsx",
   "src/features/sessions/ui/session-list/SidebarRecentsSection.tsx",
   "src/features/settings/ui/AgentProviderCard.tsx",
   "src/features/settings/ui/ModelProviderPanels.tsx",

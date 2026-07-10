@@ -191,10 +191,6 @@
       "shortcutLabel": "Atajo",
       "title": "Atajo global"
     },
-    "sidebarFlatChatList": {
-      "description": "Muestra el ajuste Agrupar chats por proyecto y permite una lista plana de chats en la barra lateral ordenada por actividad reciente.",
-      "title": "Lista plana de chats en barra lateral"
-    },
     "navigationRefresh": {
       "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
       "title": "Navegación renovada"
@@ -286,10 +282,6 @@
       "label": "Comportamiento de seguimiento",
       "queue": "Cola",
       "steer": "Guiar (solo arnés de Goose)"
-    },
-    "sidebarBranchSubtitles": {
-      "description": "Muestra la rama Git actual debajo de los títulos de chat en la barra lateral cuando esté disponible.",
-      "label": "Mostrar ramas Git en la lista de chats"
     },
     "groupChatsByProject": {
       "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
@@ -390,6 +382,9 @@
       "expired": "Caducada",
       "disconnected": "Desconectada"
     }
+  },
+  "navigation": {
+    "title": "Navegación"
   },
   "nav": {
     "about": "Acerca de",

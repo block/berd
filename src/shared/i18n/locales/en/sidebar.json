@@ -12,6 +12,16 @@
     "newChat": "New chat",
     "newChatInProject": "New chat in project",
     "newProject": "New project",
+    "projectDisplayOptions": "Project display options",
+    "chatDisplayOptions": "Chat display options",
+    "viewSessionHistory": "View session history",
+    "showChatIcons": "Show chat icons",
+    "hideChatIcons": "Hide chat icons",
+    "showTimestamp": "Show timestamp",
+    "hideTimestamp": "Hide timestamp",
+    "showGitBranches": "Show git branches",
+    "ungroupChats": "Show chats as one list",
+    "groupChats": "Group chats by project",
     "markRead": "Mark read",
     "markUnread": "Mark unread",
     "openInNewWindow": "Open in new window",
@@ -72,7 +82,7 @@
     "unreadMessages": "Unread messages"
   },
   "showLess": "Show less",
-  "viewMoreChats": "View more chats",
-  "viewAllInHistory": "Show all",
+  "viewMoreChats": "View more",
+  "viewAllInHistory": "View all",
   "olderChatsInHistory": "View older chats in Session History"
 }

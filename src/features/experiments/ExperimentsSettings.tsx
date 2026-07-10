@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -6,22 +6,18 @@ import {
   EXPERIMENT_DEFINITIONS,
   NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   NAVIGATION_REFRESH_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
 import {
   clearExperimentEnabledOverride,
   getVisibleExperimentRegistry,
-  setExperimentConfigValue,
   setExperimentEnabled,
   useExperimentList,
   type ExperimentRegistry,
 } from "./experimentPreferences";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
-import { Label } from "@/shared/ui/label";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Switch } from "@/shared/ui/switch";
 
@@ -34,12 +30,12 @@ interface RenderExperimentControlsOptions {
   showDefaultLabel?: boolean;
   showExperimentToggle?: boolean;
   showResetToAuto?: boolean;
+  toggleDisabled?: boolean;
 }
 
 const NAVIGATION_EXPERIMENT_IDS = new Set([
   NAVIGATION_REFRESH_EXPERIMENT_ID,
   NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
 ]);
 
 function isNavigationExperiment(definition: ExperimentDefinition) {
@@ -59,120 +55,30 @@ export function ExperimentsSettings({
     () => new Map(experiments.map((experiment) => [experiment.id, experiment])),
     [experiments],
   );
-  const navigationExperimentDefinitions = useMemo(
-    () => visibleRegistry.filter(isNavigationExperiment),
+  const navigationRefreshDefinition = useMemo(
+    () =>
+      visibleRegistry.find(
+        (definition) => definition.id === NAVIGATION_REFRESH_EXPERIMENT_ID,
+      ),
+    [visibleRegistry],
+  );
+  const navigationChatsUnderProjectsDefinition = useMemo(
+    () =>
+      visibleRegistry.find(
+        (definition) =>
+          definition.id === NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
+      ),
     [visibleRegistry],
   );
   const isNavigationRefreshEnabled = Boolean(
     experimentsById.get(NAVIGATION_REFRESH_EXPERIMENT_ID)?.enabled,
   );
-  const sidebarFlatChatListExperiment = experimentsById.get(
-    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  );
-
-  useEffect(() => {
-    if (!isNavigationRefreshEnabled || !sidebarFlatChatListExperiment) {
-      return;
-    }
-
-    if (sidebarFlatChatListExperiment.enabled) {
-      setExperimentEnabled(
-        SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-        false,
-        registry,
-      );
-    }
-
-    if (
-      sidebarFlatChatListExperiment.config[
-        SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY
-      ] !== false
-    ) {
-      setExperimentConfigValue(
-        SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-        SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-        false,
-        registry,
-      );
-    }
-  }, [isNavigationRefreshEnabled, registry, sidebarFlatChatListExperiment]);
 
   const handleExperimentEnabledChange = (
     definition: ExperimentDefinition,
     enabled: boolean,
   ) => {
-    const didSave =
-      definition.id === NAVIGATION_REFRESH_EXPERIMENT_ID
-        ? enabled
-          ? [
-              setExperimentEnabled(
-                SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-                false,
-                registry,
-              ),
-              setExperimentConfigValue(
-                SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-                SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-                false,
-                registry,
-              ),
-              setExperimentEnabled(
-                NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-                true,
-                registry,
-              ),
-              setExperimentEnabled(definition.id, true, registry),
-            ].every(Boolean)
-          : [
-              setExperimentEnabled(definition.id, false, registry),
-              setExperimentEnabled(
-                NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-                false,
-                registry,
-              ),
-              setExperimentEnabled(
-                SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-                true,
-                registry,
-              ),
-            ].every(Boolean)
-        : definition.id === SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID &&
-            enabled &&
-            isNavigationRefreshEnabled
-          ? [
-              setExperimentEnabled(
-                NAVIGATION_REFRESH_EXPERIMENT_ID,
-                false,
-                registry,
-              ),
-              setExperimentEnabled(
-                NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-                false,
-                registry,
-              ),
-              setExperimentEnabled(definition.id, enabled, registry),
-            ].every(Boolean)
-          : definition.id === SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID && !enabled
-            ? [
-                setExperimentEnabled(definition.id, false, registry),
-                setExperimentConfigValue(
-                  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-                  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-                  false,
-                  registry,
-                ),
-                setExperimentEnabled(
-                  NAVIGATION_REFRESH_EXPERIMENT_ID,
-                  true,
-                  registry,
-                ),
-                setExperimentEnabled(
-                  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-                  true,
-                  registry,
-                ),
-              ].every(Boolean)
-            : setExperimentEnabled(definition.id, enabled, registry);
+    const didSave = setExperimentEnabled(definition.id, enabled, registry);
 
     if (!didSave) {
       toast.error(t("experiments.saveError"));
@@ -187,6 +93,7 @@ export function ExperimentsSettings({
       showDefaultLabel = false,
       showExperimentToggle = true,
       showResetToAuto = true,
+      toggleDisabled = false,
     }: RenderExperimentControlsOptions = {},
   ) => {
     const experiment = experimentsById.get(definition.id);
@@ -246,6 +153,7 @@ export function ExperimentsSettings({
               {showExperimentToggle ? (
                 <Switch
                   checked={experiment.enabled}
+                  disabled={toggleDisabled}
                   onCheckedChange={(enabled) => {
                     handleExperimentEnabledChange(definition, enabled);
                   }}
@@ -273,64 +181,6 @@ export function ExperimentsSettings({
     >
       {renderExperimentControls(definition)}
     </section>
-  );
-
-  const renderExperimentSubsectionToggle = (
-    definition: ExperimentDefinition,
-    { disabled = false }: { disabled?: boolean } = {},
-  ) => {
-    const experiment = experimentsById.get(definition.id);
-    if (!experiment) return null;
-
-    const titleId = `experiment-${definition.id}-title`;
-    const descriptionId = `experiment-${definition.id}-description`;
-    const controlId = `experiment-${definition.id}-toggle`;
-
-    return (
-      <div key={definition.id} className="bg-muted/20">
-        <div className="relative flex items-center justify-between gap-6 py-3 pl-8 pr-4 before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']">
-          <div className="min-w-0 flex-1">
-            <Label
-              id={titleId}
-              htmlFor={controlId}
-              className="text-xs text-muted-foreground"
-            >
-              {t(definition.titleKey)}
-            </Label>
-            <p
-              id={descriptionId}
-              className="mt-1 text-xs text-muted-foreground"
-            >
-              {t(definition.descriptionKey)}
-            </p>
-          </div>
-          <div className="flex shrink-0 justify-end">
-            <Switch
-              id={controlId}
-              checked={experiment.enabled}
-              disabled={disabled}
-              onCheckedChange={(enabled) => {
-                handleExperimentEnabledChange(definition, enabled);
-              }}
-              aria-labelledby={titleId}
-              aria-describedby={descriptionId}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const navigationRefreshDefinition = navigationExperimentDefinitions.find(
-    (definition) => definition.id === NAVIGATION_REFRESH_EXPERIMENT_ID,
-  );
-  const navigationChatsUnderProjectsDefinition =
-    navigationExperimentDefinitions.find(
-      (definition) =>
-        definition.id === NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-    );
-  const sidebarFlatChatListDefinition = navigationExperimentDefinitions.find(
-    (definition) => definition.id === SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
   );
 
   let didRenderNavigationSection = false;
@@ -361,19 +211,13 @@ export function ExperimentsSettings({
               )
             : null}
           {navigationChatsUnderProjectsDefinition
-            ? renderExperimentSubsectionToggle(
-                navigationChatsUnderProjectsDefinition,
-                { disabled: !isNavigationRefreshEnabled },
-              )
-            : null}
-          {sidebarFlatChatListDefinition
             ? renderExperimentControls(
-                sidebarFlatChatListDefinition,
-                "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']",
+                navigationChatsUnderProjectsDefinition,
+                "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-[''] before:opacity-60 pl-4",
                 {
-                  configDisabled: isNavigationRefreshEnabled ? true : undefined,
-                  showDefaultLabel: true,
+                  configDisabled: !isNavigationRefreshEnabled,
                   showResetToAuto: false,
+                  toggleDisabled: !isNavigationRefreshEnabled,
                 },
               )
             : null}

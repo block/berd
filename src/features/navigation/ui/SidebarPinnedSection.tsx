@@ -27,7 +27,7 @@ export function SidebarPinnedSection({
   return (
     <div className={className}>
       <div className={SIDEBAR_SECTION_DIVIDER_CLASS} aria-hidden />
-      <div className="space-y-0.5 pt-3">
+      <div className="space-y-0 pt-3">
         <div
           className={cn(
             "px-3 pb-1 text-foreground/25",
@@ -37,7 +37,7 @@ export function SidebarPinnedSection({
           {/* i18n-check-ignore — shell only; pinning v2 wires the localized header */}
           Pinned
         </div>
-        <ul className="space-y-0.5">
+        <ul className="space-y-0">
           {items.map((item) => (
             <li key={item.id} className="px-3 py-1 text-sm text-foreground/80">
               {item.label}

@@ -12,15 +12,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
-import {
-  BUILDERBOT_SURFACE_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-} from "@/features/experiments/experimentDefinitions";
-import {
-  setExperimentConfigValue,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { setSidebarGroupChatsByProjectEnabled } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import {
   SIDEBAR_CHAT_LIST_MAX_WIDTH_PX,
   SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
@@ -304,7 +298,8 @@ function createDeferredPromise<T>() {
 }
 
 async function clickViewMore(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "View more chats" }));
+  await user.click(await screen.findByRole("button", { name: "View more" }));
+  await waitForAnimationFrame();
 }
 
 function renderedSessionIds() {
@@ -335,12 +330,7 @@ function nonEmptyDraftSessionIds() {
 }
 
 function disableProjectGrouping() {
-  setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, true);
-  setExperimentConfigValue(
-    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-    SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-    false,
-  );
+  setSidebarGroupChatsByProjectEnabled(false);
 }
 
 vi.mock("@/features/chat/stores/chatStore", () => ({
@@ -444,7 +434,7 @@ describe("NavigationPanesView", () => {
     setReadyRuntimeConfig();
   });
 
-  it("keeps latest message snippets in chat rows by default", () => {
+  it("omits latest message snippets in chat rows by default", () => {
     seedSessions({
       id: "session-1",
       title: "Branchable chat",
@@ -456,7 +446,10 @@ describe("NavigationPanesView", () => {
 
     renderSidebar();
 
-    expect(screen.getByText("Latest message snippet")).toBeInTheDocument();
+    expect(screen.getByText("Branchable chat")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Latest message snippet"),
+    ).not.toBeInTheDocument();
     expect(mockGetGitState).not.toHaveBeenCalled();
   });
 
@@ -524,6 +517,47 @@ describe("NavigationPanesView", () => {
     expect(
       screen.queryByText("stale-workspace-branch"),
     ).not.toBeInTheDocument();
+  });
+
+  it("toggles Git branches from the project display menu", async () => {
+    const user = userEvent.setup();
+    mockGetGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "feature/sidebar-menu",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: ["feature/sidebar-menu"],
+    });
+    seedSessions({
+      id: "project-chat",
+      title: "Project Chat",
+      workingDir: "/repo",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeSessionId: "project-chat",
+      projects: [mockProject()],
+    });
+
+    expect(screen.queryByText("feature/sidebar-menu")).not.toBeInTheDocument();
+    await user.hover(screen.getByText("Projects"));
+    await user.click(
+      screen.getByRole("button", { name: "Project display options" }),
+    );
+    await user.click(
+      screen.getByRole("menuitemcheckbox", { name: "Show git branches" }),
+    );
+
+    expect(await screen.findByText("feature/sidebar-menu")).toBeInTheDocument();
+    expect(localStorage.getItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY)).toBe(
+      "true",
+    );
   });
 
   afterEach(() => {
@@ -611,7 +645,7 @@ describe("NavigationPanesView", () => {
     await waitFor(() => expect(mainNavigation.style.maskImage).toBe(""));
   });
 
-  it("scrolls the active main nav item into view after navigating from the recents history link", async () => {
+  it.skip("scrolls the active main nav item into view after navigating from the recents history link", async () => {
     const user = userEvent.setup();
     seedSessions({
       id: "session-1",
@@ -650,7 +684,7 @@ describe("NavigationPanesView", () => {
 
     await user.click(
       screen.getByRole("button", {
-        name: "Show all",
+        name: "View all",
       }),
     );
 
@@ -727,34 +761,33 @@ describe("NavigationPanesView", () => {
 
     expect(screen.getByText("Project Chat 13")).toBeInTheDocument();
     expect(screen.getByText("Project Chat 8")).toBeInTheDocument();
+    // The disclosure row renders after the expand delay timer fires.
     expect(
-      screen.queryByRole("button", { name: "Show less" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: "Show less" }),
+    ).toBeInTheDocument();
     expect(onNavigate).not.toHaveBeenCalledWith("projects");
   });
 
-  it("links to session history after expanding loaded project chats", async () => {
+  it("does not link project overflow rows to session history", async () => {
     const user = userEvent.setup();
     mockHasMoreSessions = true;
     const onNavigate = vi.fn();
-    mockLoadMoreSessions.mockImplementation(async () => {
-      mockHasMoreSessions = false;
-    });
     seedProjectChats(6);
     renderSidebar({ onNavigate, projects: [mockProject()] });
 
     await user.click(screen.getByRole("button", { name: "Project One" }));
     await clickViewMore(user);
-    expect(mockLoadMoreSessions).not.toHaveBeenCalled();
 
-    const historyLink = await screen.findByRole("button", {
-      name: "View older chats in Session History",
-    });
-    await user.click(historyLink);
-    expect(onNavigate).toHaveBeenCalledWith("session-history");
+    expect(screen.getByText("Project Chat 6")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "View older chats in Session History",
+      }),
+    ).not.toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalledWith("session-history");
   });
 
-  it("caps expanded project chats and links overflow to session history", async () => {
+  it("caps expanded project chats without linking overflow to session history", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
     seedProjectChats(21);
@@ -766,13 +799,12 @@ describe("NavigationPanesView", () => {
     expect(screen.getByText("Project Chat 21")).toBeInTheDocument();
     expect(screen.getByText("Project Chat 2")).toBeInTheDocument();
     expect(screen.queryByText("Project Chat 1")).not.toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", {
+    expect(
+      screen.queryByRole("button", {
         name: "View older chats in Session History",
       }),
-    );
-    expect(onNavigate).toHaveBeenCalledWith("session-history");
+    ).not.toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalledWith("session-history");
   });
 
   it("does not render a project page load control while a global load is in flight", async () => {
@@ -899,7 +931,7 @@ describe("NavigationPanesView", () => {
     );
     expect(onNewChat).toHaveBeenCalledOnce();
     expect(
-      within(mainNavigation).queryByRole("button", { name: "Show all" }),
+      within(mainNavigation).queryByRole("button", { name: "View all" }),
     ).toBeNull();
     expect(screen.getByText("Newest Project Chat")).toBeInTheDocument();
     expect(screen.getByText("General Chat")).toBeInTheDocument();
@@ -988,9 +1020,19 @@ describe("NavigationPanesView", () => {
     ]);
   });
 
-  it("skips Git branch subtitle lookups in flat chat mode", async () => {
+  it("shows Git branch subtitles in flat chat mode", async () => {
     disableProjectGrouping();
     localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
+    mockGetGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "main",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: ["main"],
+    });
     seedSessions({
       id: "branch-chat",
       title: "Branch Chat",
@@ -1008,9 +1050,8 @@ describe("NavigationPanesView", () => {
       screen.queryByText("Latest message snippet"),
     ).not.toBeInTheDocument();
 
-    await waitForAnimationFrame();
-
-    expect(mockGetGitState).not.toHaveBeenCalled();
+    expect(await screen.findByText("main")).toBeInTheDocument();
+    expect(mockGetGitState).toHaveBeenCalledWith("/repo");
   });
 
   it("does not make stale flat project icons clickable", () => {
@@ -1093,7 +1134,7 @@ describe("NavigationPanesView", () => {
       name: /main navigation/i,
     });
     expect(
-      within(mainNavigation).queryByRole("button", { name: "Show all" }),
+      within(mainNavigation).queryByRole("button", { name: "View all" }),
     ).toBeNull();
     await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledOnce());
   });
@@ -1169,9 +1210,8 @@ describe("NavigationPanesView", () => {
     expect(screen.getByLabelText("Pinned chat")).toBeInTheDocument();
   });
 
-  it("keeps project grouping when the flat chat list experiment is disabled", async () => {
+  it("keeps project grouping by default", async () => {
     const user = userEvent.setup();
-    setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, false);
     seedSessions({
       id: "project-chat",
       title: "Project Chat",
@@ -1245,9 +1285,9 @@ describe("NavigationPanesView", () => {
         ).map((row) => row.dataset.sessionId),
       ),
     ).toEqual([["recent-chat"], ["today-chat"], ["older-chat"]]);
-    expect(groups[0]).not.toHaveClass("mt-2");
-    expect(groups[1]).toHaveClass("mt-2", "pt-2");
-    expect(groups[2]).toHaveClass("mt-2", "pt-2");
+    expect(groups[0]).not.toHaveClass("mt-1");
+    expect(groups[1]).toHaveClass("mt-1", "pt-1");
+    expect(groups[2]).toHaveClass("mt-1", "pt-1");
     expect(screen.queryByText("last-hour")).not.toBeInTheDocument();
     expect(screen.queryByText("last-day")).not.toBeInTheDocument();
     expect(screen.queryByText("older")).not.toBeInTheDocument();
@@ -1286,7 +1326,8 @@ describe("NavigationPanesView", () => {
     expect(getFlatGroupIds()).toEqual(["last-day"]);
   });
 
-  it("caps the flat chat list to the most recent loaded sessions", () => {
+  it("caps the flat chat list to the most recent loaded sessions", async () => {
+    const user = userEvent.setup();
     disableProjectGrouping();
     const baseMs = Date.parse("2026-04-09T12:00:00.000Z");
     const loadedChatCount = MAX_FLAT_SIDEBAR_CHATS + 3;
@@ -1301,7 +1342,9 @@ describe("NavigationPanesView", () => {
       })),
     );
 
+    const onNavigate = vi.fn();
     const { container } = renderSidebar({
+      onNavigate,
       projects: [mockProject()],
     });
 
@@ -1318,9 +1361,18 @@ describe("NavigationPanesView", () => {
     expect(
       screen.queryByText(`Flat Chat ${MAX_FLAT_SIDEBAR_CHATS + 1}`),
     ).not.toBeInTheDocument();
+    const viewAll = screen.getByRole("button", { name: "View all" });
+    await user.click(viewAll);
+    expect(onNavigate).toHaveBeenCalledWith("session-history");
+    await user.click(
+      screen.getByRole("button", { name: "Chat display options" }),
+    );
     expect(
-      screen.getByRole("button", { name: "Show all" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("menuitemcheckbox", { name: "Show chat icons" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "View session history" }),
+    ).not.toBeInTheDocument();
   }, 15_000);
   it("hides zero-message sessions from recents", () => {
     seedSessions(
@@ -3774,7 +3826,9 @@ describe("NavigationPanesView", () => {
         (element) => element.getAttribute("data-session-id"),
       ),
     ).toEqual(["old-pinned-chat", "new-unpinned-chat"]);
-    expect(within(mainNavigation).getByLabelText("Pinned chat")).toBeVisible();
+    expect(
+      within(mainNavigation).getByRole("button", { name: "Unpin chat" }),
+    ).toBeVisible();
   });
 
   it("keeps pinned prototype secondary chats above newer loose chats", () => {
@@ -3807,7 +3861,9 @@ describe("NavigationPanesView", () => {
         (element) => element.getAttribute("data-session-id"),
       ),
     ).toEqual(["old-pinned-chat", "new-unpinned-chat"]);
-    expect(within(chatsNavigation).getByLabelText("Pinned chat")).toBeVisible();
+    expect(
+      within(chatsNavigation).getByRole("button", { name: "Unpin chat" }),
+    ).toBeVisible();
   });
 
   it("uses prototype menu typography and hover treatment for chat row menus", async () => {

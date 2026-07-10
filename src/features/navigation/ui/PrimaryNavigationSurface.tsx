@@ -24,6 +24,8 @@ import {
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS,
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
+  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarNavItem } from "./SidebarNavItem";
 import {
@@ -62,6 +64,7 @@ interface PrimaryNavigationSurfaceProps {
   onSettingsSectionChange?: (section: SectionId) => void;
   renderInlineSessionList?: () => ReactNode;
   renderPrimaryNavResizeRail?: () => ReactNode;
+  renderUnifiedResizeRail?: () => ReactNode;
   secondaryNavRef: Ref<HTMLElement>;
   settingsSections: readonly (typeof SETTINGS_SECTIONS)[number][];
   showBottomMask: boolean;
@@ -99,6 +102,7 @@ export const PrimaryNavigationSurface = forwardRef<
     onSettingsSectionChange,
     renderInlineSessionList,
     renderPrimaryNavResizeRail,
+    renderUnifiedResizeRail,
     secondaryNavRef,
     settingsSections,
     showBottomMask,
@@ -210,7 +214,7 @@ export const PrimaryNavigationSurface = forwardRef<
             style={showBottomMask ? bottomMaskStyle : undefined}
             aria-label={t("navigation.main")}
           >
-            <div className="relative z-10 space-y-0.5">
+            <div className="relative z-10 space-y-0">
               <SidebarNavItem
                 testId="nav-home"
                 navId="home"
@@ -257,6 +261,7 @@ export const PrimaryNavigationSurface = forwardRef<
 
             {renderInlineSessionList?.()}
           </nav>
+          {renderUnifiedResizeRail?.()}
         </div>
 
         <div
@@ -273,11 +278,46 @@ export const PrimaryNavigationSurface = forwardRef<
           inert={!isSecondarySurface ? true : undefined}
           aria-hidden={!isSecondarySurface}
         >
+          <div className={cn("flex-shrink-0", "px-2.5 py-1.5")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size={navCollapsed ? "icon-sm" : "default"}
+              onClick={onSettingsBack}
+              className={cn(
+                "h-10 w-full rounded-sm bg-transparent active:bg-[var(--sidebar-row-active)]",
+                SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
+                SIDEBAR_ROW_HOVER_CLASS,
+                SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+                navCollapsed
+                  ? "justify-center p-3"
+                  : cn("h-auto justify-start", SIDEBAR_NAV_ROW_SPACING_CLASS),
+              )}
+              title={t("actions.backToMainNavigation")}
+              aria-label={t("actions.backToMainNavigation")}
+            >
+              <IconArrowLeft className="size-4 flex-shrink-0" />
+              {!navCollapsed && (
+                <span
+                  className={cn(
+                    "whitespace-nowrap",
+                    SIDEBAR_NAV_TEXT_CLASS,
+                    labelTransition,
+                    navLabelVisible
+                      ? "opacity-100 w-auto"
+                      : "opacity-0 w-0 overflow-hidden",
+                  )}
+                >
+                  {t("actions.backToMainNavigation")}
+                </span>
+              )}
+            </Button>
+          </div>
           <nav
             ref={secondaryNavRef}
             onKeyDown={onKeyDown}
             className={cn(
-              "min-h-0 overflow-x-hidden px-2.5 py-1 pb-12 scrollbar-none",
+              "min-h-0 overflow-x-hidden px-2.5 py-1 pb-1 scrollbar-none",
               stackedDetachedLayout && !isSecondarySurface
                 ? "flex-none overflow-y-visible"
                 : "flex-1 overflow-y-auto",
@@ -285,7 +325,7 @@ export const PrimaryNavigationSurface = forwardRef<
             style={showSecondaryBottomMask ? bottomMaskStyle : undefined}
             aria-label={t("settings:navigationLabel")}
           >
-            <div className="space-y-0.5">
+            <div className="space-y-0">
               {settingsSections.map((item) => {
                 const showUpdate =
                   item.id === "providers" && agentUpdatesAvailable;
@@ -317,39 +357,6 @@ export const PrimaryNavigationSurface = forwardRef<
               })}
             </div>
           </nav>
-          <div className={cn("flex-shrink-0", "px-2.5 py-1.5")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size={navCollapsed ? "icon-sm" : "default"}
-              onClick={onSettingsBack}
-              className={cn(
-                "h-10 w-full rounded-sm bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
-                SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-                navCollapsed
-                  ? "justify-center p-3"
-                  : cn("h-auto justify-start", SIDEBAR_NAV_ROW_SPACING_CLASS),
-              )}
-              title={t("actions.backToMainNavigation")}
-              aria-label={t("actions.backToMainNavigation")}
-            >
-              <IconArrowLeft className="size-4 flex-shrink-0" />
-              {!navCollapsed && (
-                <span
-                  className={cn(
-                    "whitespace-nowrap",
-                    SIDEBAR_NAV_TEXT_CLASS,
-                    labelTransition,
-                    navLabelVisible
-                      ? "opacity-100 w-auto"
-                      : "opacity-0 w-0 overflow-hidden",
-                  )}
-                >
-                  {t("actions.backToMainNavigation")}
-                </span>
-              )}
-            </Button>
-          </div>
         </div>
       </div>
       {showPrimaryNavWidthToggle && (

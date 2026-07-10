@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   Archive,
+  Check,
   CopyPlus,
   ExternalLink,
   Mail,
@@ -17,7 +18,7 @@ import {
   MoreHorizontal,
   Pencil,
 } from "lucide-react";
-import { IconPin } from "@tabler/icons-react";
+import { IconGitBranch, IconPin } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   getDisplaySessionTitle,
@@ -25,7 +26,6 @@ import {
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
-import { SidebarNavChatsIcon } from "@/features/navigation/ui/sidebarNavIcons";
 import {
   focusSessionWindow,
   openSessionWindow,
@@ -149,10 +149,11 @@ type RenderMenuItemsOptions = {
 interface SidebarChatRowProps {
   id: string;
   title: string;
-  /** Snippet of the session's latest real text message; hides when absent. */
-  subtitle?: string;
+  /** Current Git branch for this chat; only passed when the sidebar branch setting is enabled. */
+  branchName?: string;
   /** Latest visible chat activity. Rendered as a compact relative timestamp on the row's right edge; hidden on hover when the row menu takes its place. */
   activityAt?: string | null;
+  showTimestamp?: boolean;
   isActive: boolean;
   isRunning?: boolean;
   hasUnread?: boolean;
@@ -199,8 +200,9 @@ interface SidebarChatRowProps {
 export function SidebarChatRow({
   id,
   title,
-  subtitle,
+  branchName,
   activityAt,
+  showTimestamp = true,
   isActive,
   isRunning = false,
   hasUnread = false,
@@ -278,18 +280,36 @@ export function SidebarChatRow({
     t("common:session.defaultTitle"),
   );
   const [draftTitle, setDraftTitle] = useState(editableTitle);
-  // Only render the subtitle line when there's a real snippet — older or
-  // tool-only sessions keep the single-line layout they have today.
-  const trimmedSubtitle = subtitle?.trim() ?? "";
-  const activityTimestamp = formatSidebarChatTimestamp(activityAt);
+  const activityTimestamp = showTimestamp
+    ? formatSidebarChatTimestamp(activityAt)
+    : "";
   const hasFlatProjectColumn = flatProjectName != null;
-  const hasSubtitle = trimmedSubtitle.length > 0 && !hasFlatProjectColumn;
+  const trimmedBranchName = branchName?.trim() ?? "";
+  const hasBranchName = trimmedBranchName.length > 0;
+  const hasLeadingStatus = isRunning || hasUnread || isPinned;
+  // The flat layout's leading column identifies the project, not the chat.
+  // Keep quick pinning on the actual chat-icon slot in grouped/Recents rows.
+  const showQuickPin =
+    showLeadingIcon && !hasFlatProjectColumn && !selectionEnabled;
+  const showGutterStatus =
+    hasLeadingStatus && !showLeadingIcon && !hasFlatProjectColumn && nested;
+  const showInlineLeadingStatus =
+    (isRunning || hasUnread || (isPinned && !showQuickPin)) &&
+    !showGutterStatus;
+  const showLeadingSlot = showLeadingIcon || showInlineLeadingStatus;
   const densityClasses = SIDEBAR_CHAT_ROW_DENSITY_CLASSES[density];
   const rowPaddingClass =
     contentPaddingClassName ??
-    (nested ? "pl-9" : densityClasses.contentPadding);
+    (nested
+      ? showLeadingIcon
+        ? "pl-9"
+        : "pl-[38px]"
+      : densityClasses.contentPadding);
+  const quickPinInsetClass = nested ? "left-9" : "left-3";
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
+  const showSelectionCheck =
+    selectionEnabled && selected && onSelectionChange != null;
   const isOpenInWindow = useSessionWindowStore((s) =>
     isMultiWindowEnabled ? s.isOpenInWindow(id) : false,
   );
@@ -302,11 +322,75 @@ export function SidebarChatRow({
       : INACTIVE_CHAT_ROW_CLASS;
   const leadingIconSlotClass = cn(
     "flex size-4 shrink-0 items-center justify-center",
-    hasSubtitle && "mt-0.5 self-start",
+    hasBranchName && "mt-0.5 self-start",
+  );
+  const gutterStatusSlotClass = cn(
+    "pointer-events-none absolute left-3 flex size-4 shrink-0 items-center justify-center",
+    hasBranchName ? "top-2.5" : "top-1/2 -translate-y-1/2",
+  );
+  const renderStatusIndicator = (className: string, testId?: string) => {
+    if (isRunning) {
+      return (
+        <span
+          className={className}
+          role="status"
+          aria-label={t("status.chatActive")}
+          data-testid={testId}
+        >
+          <ActiveChatBerdIndicator size={16} />
+        </span>
+      );
+    }
+
+    if (hasUnread) {
+      return (
+        <span
+          className={className}
+          role="status"
+          aria-label={t("status.unreadMessages")}
+          data-testid={testId}
+        >
+          <SidebarUnreadDot />
+        </span>
+      );
+    }
+
+    if (isPinned) {
+      return (
+        <span
+          className={className}
+          role="img"
+          aria-label={t("status.pinnedChat")}
+          data-testid={testId}
+        >
+          <IconPin className="size-4" />
+        </span>
+      );
+    }
+
+    return null;
+  };
+  // Title block shared by the flat and grouped row variants: single-line
+  // title, or a two-line title + git branch subtitle when a branch is shown.
+  const rowTitleContent = hasBranchName ? (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+      <span className="truncate leading-snug">{displayTitle}</span>
+      <span className="flex min-w-0 items-center gap-1 truncate text-xs leading-snug text-muted-foreground/70">
+        <IconGitBranch className="size-3 shrink-0" aria-hidden="true" />
+        <span className="truncate">{trimmedBranchName}</span>
+      </span>
+    </span>
+  ) : (
+    <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
+  );
+
+  const flatStatusSlotClass = cn(
+    "flex size-4 shrink-0 items-center justify-center",
+    hasBranchName && "mt-0.5 self-start",
   );
   const flatActivityIndicator = isRunning ? (
     <span
-      className="flex size-4 shrink-0 items-center justify-center"
+      className={flatStatusSlotClass}
       role="status"
       aria-label={t("status.chatActive")}
     >
@@ -314,7 +398,7 @@ export function SidebarChatRow({
     </span>
   ) : hasUnread ? (
     <span
-      className="flex size-4 shrink-0 items-center justify-center"
+      className={flatStatusSlotClass}
       role="status"
       aria-label={t("status.unreadMessages")}
     >
@@ -322,7 +406,7 @@ export function SidebarChatRow({
     </span>
   ) : isPinned ? (
     <span
-      className="flex size-4 shrink-0 items-center justify-center"
+      className={flatStatusSlotClass}
       role="img"
       aria-label={t("status.pinnedChat")}
     >
@@ -340,8 +424,21 @@ export function SidebarChatRow({
       imageClassName="size-[18px] rounded-[4px]"
     />
   ) : (
-    <SidebarNavChatsIcon className="size-4" />
+    <SidebarChatMenuIcon
+      className="size-4"
+      testId="sidebar-flat-chat-project-icon"
+    />
   );
+
+  const toggleQuickPin = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (isPinningToHome) return;
+    if (isPinnedToHome) {
+      unpinFromHome();
+      return;
+    }
+    void pinToHome();
+  };
 
   const handleRowClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (isMultiSelectModifier(event)) {
@@ -569,7 +666,7 @@ export function SidebarChatRow({
               displayCount: selectionCount,
             })}
           </Label>
-          <Separator />
+          <Separator className="mx-2 bg-popover-inverse-muted-foreground/35" />
         </>
       )}
       {!shouldApplyToSelection && (
@@ -766,6 +863,9 @@ export function SidebarChatRow({
           )}
           data-sidebar-chat-density={density}
         >
+          {showGutterStatus
+            ? renderStatusIndicator(gutterStatusSlotClass, leadingIconTestId)
+            : null}
           {hasFlatProjectColumn ? (
             <>
               {hasClickableFlatProject ? (
@@ -780,6 +880,7 @@ export function SidebarChatRow({
                         "flex shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                         densityClasses.flatProjectIconInset,
                         densityClasses.flatProjectIconColumn,
+                        hasBranchName && "mt-1.5 self-start",
                       )}
                       aria-label={t("actions.editProject", {
                         name: flatProjectName,
@@ -803,6 +904,7 @@ export function SidebarChatRow({
                         "flex shrink-0 items-center justify-center rounded-sm text-muted-foreground/70",
                         densityClasses.flatProjectIconInset,
                         densityClasses.flatProjectIconColumn,
+                        hasBranchName && "mt-1.5 self-start",
                       )}
                       role="img"
                       aria-label={flatProjectName}
@@ -834,17 +936,19 @@ export function SidebarChatRow({
                   flatActivityIndicator
                     ? densityClasses.flatProjectGap
                     : "gap-0",
-                  SIDEBAR_ROW_HEIGHT_CLASS,
-                  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+                  hasBranchName
+                    ? "h-auto py-1.5"
+                    : cn(
+                        SIDEBAR_ROW_HEIGHT_CLASS,
+                        SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+                      ),
                   SIDEBAR_NAV_TEXT_CLASS,
                   rowButtonStateClass,
                 )}
                 aria-pressed={selectionEnabled ? selected : undefined}
               >
                 {flatActivityIndicator}
-                <span className="min-w-0 truncate text-left">
-                  {displayTitle}
-                </span>
+                {rowTitleContent}
                 {isMultiWindowEnabled && isOpenInWindow ? (
                   <span
                     className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
@@ -871,69 +975,37 @@ export function SidebarChatRow({
                 activityTimestamp
                   ? densityClasses.timestampReserve
                   : densityClasses.menuReserve,
-                hasSubtitle
+                hasBranchName
                   ? "h-auto py-1.5"
                   : cn(
                       SIDEBAR_ROW_HEIGHT_CLASS,
                       SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
                     ),
-                showLeadingIcon && SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+                showLeadingSlot && SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
                 SIDEBAR_NAV_TEXT_CLASS,
                 rowPaddingClass,
                 rowButtonStateClass,
               )}
               aria-pressed={selectionEnabled ? selected : undefined}
             >
-              {showLeadingIcon ? (
-                isRunning ? (
-                  <span
-                    className={leadingIconSlotClass}
-                    role="status"
-                    aria-label={t("status.chatActive")}
-                    data-testid={leadingIconTestId}
-                  >
-                    <ActiveChatBerdIndicator size={16} />
-                  </span>
-                ) : hasUnread ? (
-                  <span
-                    className={leadingIconSlotClass}
-                    role="status"
-                    aria-label={t("status.unreadMessages")}
-                    data-testid={leadingIconTestId}
-                  >
-                    <SidebarUnreadDot />
-                  </span>
-                ) : isPinned ? (
-                  <span
-                    className={leadingIconSlotClass}
-                    role="img"
-                    aria-label={t("status.pinnedChat")}
-                    data-testid={leadingIconTestId}
-                  >
-                    <IconPin className="size-4" />
-                  </span>
-                ) : (
-                  <span
-                    className={leadingIconSlotClass}
-                    aria-hidden="true"
-                    data-testid={leadingIconTestId}
-                  >
-                    {leadingIcon ?? <SidebarChatMenuIcon />}
-                  </span>
-                )
+              {showInlineLeadingStatus ? (
+                renderStatusIndicator(leadingIconSlotClass, leadingIconTestId)
+              ) : showLeadingIcon ? (
+                <span
+                  className={cn(
+                    leadingIconSlotClass,
+                    "transition-opacity duration-150",
+                    showQuickPin &&
+                      "group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
+                    isPinnedToHome && "opacity-0",
+                  )}
+                  aria-hidden="true"
+                  data-testid={leadingIconTestId}
+                >
+                  {leadingIcon ?? <SidebarChatMenuIcon />}
+                </span>
               ) : null}
-              {hasSubtitle ? (
-                <span className="flex min-w-0 flex-1 flex-col text-left">
-                  <span className="truncate leading-snug">{displayTitle}</span>
-                  <span className="truncate text-xs leading-snug text-muted-foreground">
-                    {trimmedSubtitle}
-                  </span>
-                </span>
-              ) : (
-                <span className="flex-1 min-w-0 truncate text-left">
-                  {displayTitle}
-                </span>
-              )}
+              {rowTitleContent}
               {isMultiWindowEnabled && isOpenInWindow ? (
                 <span
                   className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
@@ -947,19 +1019,70 @@ export function SidebarChatRow({
             </Button>
           )}
 
+          {showQuickPin ? (
+            <Button
+              type="button"
+              variant="ghost"
+              flush
+              size="icon-xs"
+              data-sidebar-drag-ignore
+              aria-label={
+                isPinnedToHome
+                  ? t("common:actions.unpinChat")
+                  : t("common:actions.pinChat")
+              }
+              title={
+                isPinnedToHome
+                  ? t("common:actions.unpinChat")
+                  : t("common:actions.pinChat")
+              }
+              disabled={isPinningToHome}
+              tabIndex={-1}
+              onClick={toggleQuickPin}
+              className={cn(
+                "absolute size-4 rounded-sm text-muted-foreground opacity-0 transition-[color,opacity] duration-150 hover:text-sidebar-foreground focus-visible:opacity-100",
+                hasBranchName ? "top-2" : "top-1/2 -translate-y-1/2",
+                quickPinInsetClass,
+                "group-hover/chat-row:opacity-100 group-focus-within/chat-row:opacity-100",
+                isPinnedToHome &&
+                  "text-sidebar-foreground opacity-100 hover:text-sidebar-foreground",
+              )}
+            >
+              <IconPin className="size-4" />
+            </Button>
+          ) : null}
+
           {activityTimestamp ? (
             <span
               data-sidebar-chat-timestamp
               className={cn(
                 "pointer-events-none absolute text-xs tabular-nums text-muted-foreground/70 transition-opacity duration-75",
+                hasBranchName ? "top-2" : "top-1/2 -translate-y-1/2",
                 densityClasses.menuInset,
-                menuOpen || contextMenuOpen || dragging
+                selectionEnabled || menuOpen || contextMenuOpen || dragging
                   ? "opacity-0"
                   : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
               )}
               aria-hidden="true"
             >
               {activityTimestamp}
+            </span>
+          ) : null}
+
+          {showSelectionCheck ? (
+            <span
+              className={cn(
+                "pointer-events-none absolute flex size-5 items-center justify-center rounded-sm transition-opacity duration-75",
+                densityClasses.menuInset,
+                dragging || menuOpen || contextMenuOpen
+                  ? "opacity-0"
+                  : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
+              )}
+              aria-hidden="true"
+            >
+              <span className="flex size-3.5 items-center justify-center rounded-full border border-sidebar-foreground bg-sidebar-foreground text-sidebar transition-colors">
+                <Check className="size-2.5" strokeWidth={3} />
+              </span>
             </span>
           ) : null}
 
@@ -988,7 +1111,7 @@ export function SidebarChatRow({
                       : "invisible text-muted-foreground opacity-0 group-hover/chat-row:visible group-hover/chat-row:opacity-100 group-focus-within/chat-row:visible group-focus-within/chat-row:opacity-100",
                 )}
               >
-                <MoreHorizontal className="size-3.5" />
+                <MoreHorizontal className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent

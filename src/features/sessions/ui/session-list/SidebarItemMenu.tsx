@@ -5,6 +5,10 @@ import { Pencil, PinIcon, Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
+  SIDEBAR_ACTION_ICON_CLASS,
+  SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
+} from "@/shared/ui/sidebar-tokens";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -51,12 +55,13 @@ export function SidebarItemMenu({
           onClick={(e) => e.stopPropagation()}
           className={cn(
             "size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",
+            SIDEBAR_ACTION_ICON_CLASS,
             open
               ? "visible text-sidebar-foreground opacity-100"
               : "invisible text-muted-foreground opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100",
           )}
         >
-          <IconDots className="size-3.5" />
+          <IconDots className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -64,6 +69,7 @@ export function SidebarItemMenu({
         align="start"
         alignOffset={-4}
         sideOffset={4}
+        className={SIDEBAR_INVERSE_MENU_CONTENT_CLASS}
       >
         {onPinToHome && (
           <DropdownMenuItem onClick={onPinToHome} disabled={pinToHomeDisabled}>

@@ -39,6 +39,8 @@ function renderSidebar(onMoveToProject: MoveHandler) {
         isExpanded
         toggleProject={vi.fn()}
         pinnedHomeChatSessionIds={new Set()}
+        showChatIcons
+        showTimestamps
         onMoveToProject={onMoveToProject}
       />
       <SidebarRecentsSection
@@ -52,6 +54,10 @@ function renderSidebar(onMoveToProject: MoveHandler) {
         onToggleOpen={vi.fn()}
         sectionHeaderTextClass=""
         pinnedHomeChatSessionIds={new Set()}
+        showChatIcons
+        onShowChatIconsChange={vi.fn()}
+        showTimestamps
+        onShowTimestampsChange={vi.fn()}
         onMoveToProject={onMoveToProject}
       />
     </SidebarChatDragProvider>,

@@ -35,6 +35,8 @@ function renderSection(isExpanded: boolean) {
         isExpanded={isExpanded}
         toggleProject={vi.fn()}
         pinnedHomeChatSessionIds={new Set()}
+        showChatIcons
+        showTimestamps
       />
     </SidebarChatDragProvider>,
   );

@@ -12,24 +12,37 @@ import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
+  SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_ROW_SPACING_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatRow } from "./SidebarChatRow";
+import { SidebarSectionHeaderAction } from "./SidebarSectionHeader";
 import { SidebarUnreadDot } from "./SidebarUnreadDot";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { SidebarItemMenu } from "./SidebarItemMenu";
 
 const MAX_VISIBLE_PROJECT_CHATS = 5;
 const MAX_EXPANDED_PROJECT_CHATS = 20;
-const PROJECT_ROW_TEXT_CLASS =
-  "text-sidebar-foreground hover:bg-transparent hover:text-sidebar-foreground";
+const PROJECT_CHAT_LIST_ANIMATION_MS = 300;
+const PROJECT_CHAT_LIST_EXPAND_DELAY_MS = 24;
+const PROJECT_ROW_TEXT_CLASS = cn(
+  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
+  "hover:bg-transparent hover:text-sidebar-foreground",
+);
+/** Layout-only classes for quiet disclosure actions under a project's chats.
+ * Color/hover states come from Button's ghost+flush recipe. */
+const PROJECT_CHAT_DISCLOSURE_CLASS = cn(
+  "h-auto justify-start rounded-sm py-1",
+  SIDEBAR_GROUP_LABEL_TEXT_CLASS,
+);
 
 export interface SidebarSessionItem {
   id: string;
   title: string;
-  subtitle?: string;
+  branchName?: string;
   activityAt?: string | null;
   updatedAt: string;
   lastMessageAt?: string | null;
@@ -68,8 +81,10 @@ export function SidebarProjectSection({
   onMarkSelectedRead,
   onMarkSelectedUnread,
   pinnedHomeChatSessionIds,
+  showChatIcons,
+  showTimestamps,
   onNavigate,
-  hasMoreSessions = false,
+  hasMoreSessions: _hasMoreSessions = false,
 }: {
   project: ProjectInfo;
   projectChats: SidebarSessionItem[];
@@ -97,6 +112,8 @@ export function SidebarProjectSection({
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   pinnedHomeChatSessionIds: ReadonlySet<string>;
+  showChatIcons: boolean;
+  showTimestamps: boolean;
   onNavigate?: (view: AppView) => void;
   hasMoreSessions?: boolean;
 }) {
@@ -105,7 +122,15 @@ export function SidebarProjectSection({
     useSidebarChatDrag();
   const dropTargetRef = useRef<HTMLDivElement>(null);
   const dropTargetKey = `project:${project.id}`;
+  const [renderProjectChats, setRenderProjectChats] = useState(isExpanded);
+  const [showProjectChats, setShowProjectChats] = useState(isExpanded);
   const [showExpandedChats, setShowExpandedChats] = useState(false);
+  const [renderExpandedChats, setRenderExpandedChats] = useState(false);
+  const [collapsingExpandedChats, setCollapsingExpandedChats] = useState(false);
+  const expandProjectChatsTimerRef = useRef<number | null>(null);
+  const collapseProjectChatsTimerRef = useRef<number | null>(null);
+  const expandExpandedChatsTimerRef = useRef<number | null>(null);
+  const collapseExpandedChatsTimerRef = useRef<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
   const projectHasChats = projectChats.length > 0;
@@ -120,23 +145,88 @@ export function SidebarProjectSection({
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "project", id: project.id });
 
-  if (!isExpanded && showExpandedChats) {
+  useEffect(() => {
+    if (isExpanded) {
+      if (collapseProjectChatsTimerRef.current != null) {
+        window.clearTimeout(collapseProjectChatsTimerRef.current);
+        collapseProjectChatsTimerRef.current = null;
+      }
+      if (expandProjectChatsTimerRef.current != null) {
+        window.clearTimeout(expandProjectChatsTimerRef.current);
+      }
+      setRenderProjectChats(true);
+      expandProjectChatsTimerRef.current = window.setTimeout(() => {
+        setShowProjectChats(true);
+        expandProjectChatsTimerRef.current = null;
+      }, PROJECT_CHAT_LIST_EXPAND_DELAY_MS);
+      return;
+    }
+
+    if (expandProjectChatsTimerRef.current != null) {
+      window.clearTimeout(expandProjectChatsTimerRef.current);
+      expandProjectChatsTimerRef.current = null;
+    }
+    if (collapseProjectChatsTimerRef.current != null) {
+      window.clearTimeout(collapseProjectChatsTimerRef.current);
+    }
+    setShowProjectChats(false);
     setShowExpandedChats(false);
-  }
+    setRenderExpandedChats(false);
+    collapseProjectChatsTimerRef.current = window.setTimeout(() => {
+      setRenderProjectChats(false);
+      collapseProjectChatsTimerRef.current = null;
+    }, PROJECT_CHAT_LIST_ANIMATION_MS);
+  }, [isExpanded]);
 
-  const activeChatIndex = activeSessionId
-    ? projectChats.findIndex((session) => session.id === activeSessionId)
-    : -1;
+  useEffect(() => {
+    return () => {
+      if (expandProjectChatsTimerRef.current != null) {
+        window.clearTimeout(expandProjectChatsTimerRef.current);
+      }
+      if (collapseProjectChatsTimerRef.current != null) {
+        window.clearTimeout(collapseProjectChatsTimerRef.current);
+      }
+      if (expandExpandedChatsTimerRef.current != null) {
+        window.clearTimeout(expandExpandedChatsTimerRef.current);
+      }
+      if (collapseExpandedChatsTimerRef.current != null) {
+        window.clearTimeout(collapseExpandedChatsTimerRef.current);
+      }
+    };
+  }, []);
 
-  // Reveal the rest of the project's chats when the active one is ranked beyond
-  // the collapsed top-N cutoff, so its row renders and can be scrolled into view.
-  if (
-    isExpanded &&
-    activeChatIndex >= MAX_VISIBLE_PROJECT_CHATS &&
-    !showExpandedChats
-  ) {
-    setShowExpandedChats(true);
-  }
+  const revealExpandedChats = () => {
+    if (collapseExpandedChatsTimerRef.current != null) {
+      window.clearTimeout(collapseExpandedChatsTimerRef.current);
+      collapseExpandedChatsTimerRef.current = null;
+    }
+    if (expandExpandedChatsTimerRef.current != null) {
+      window.clearTimeout(expandExpandedChatsTimerRef.current);
+    }
+    setRenderExpandedChats(true);
+    setCollapsingExpandedChats(false);
+    expandExpandedChatsTimerRef.current = window.setTimeout(() => {
+      setShowExpandedChats(true);
+      expandExpandedChatsTimerRef.current = null;
+    }, PROJECT_CHAT_LIST_EXPAND_DELAY_MS);
+  };
+
+  const collapseExpandedChats = () => {
+    if (expandExpandedChatsTimerRef.current != null) {
+      window.clearTimeout(expandExpandedChatsTimerRef.current);
+      expandExpandedChatsTimerRef.current = null;
+    }
+    setShowExpandedChats(false);
+    setCollapsingExpandedChats(true);
+    if (collapseExpandedChatsTimerRef.current != null) {
+      window.clearTimeout(collapseExpandedChatsTimerRef.current);
+    }
+    collapseExpandedChatsTimerRef.current = window.setTimeout(() => {
+      setRenderExpandedChats(false);
+      setCollapsingExpandedChats(false);
+      collapseExpandedChatsTimerRef.current = null;
+    }, PROJECT_CHAT_LIST_ANIMATION_MS);
+  };
 
   const handleSessionDrop = useCallback(
     (sessionId: string) => {
@@ -159,15 +249,27 @@ export function SidebarProjectSection({
   }, [dropTargetKey, handleSessionDrop, project.id, registerSessionDropTarget]);
 
   const dragOver = activeSessionDropTargetKey === dropTargetKey;
-  const visibleChatLimit = showExpandedChats
-    ? MAX_EXPANDED_PROJECT_CHATS
-    : MAX_VISIBLE_PROJECT_CHATS;
-  const visibleChats = projectChats.slice(0, visibleChatLimit);
+  const activeChatIndex = activeSessionId
+    ? projectChats.findIndex((session) => session.id === activeSessionId)
+    : -1;
+  const baseVisibleChatLimit = Math.max(
+    MAX_VISIBLE_PROJECT_CHATS,
+    activeChatIndex >= MAX_VISIBLE_PROJECT_CHATS
+      ? Math.min(activeChatIndex + 1, MAX_EXPANDED_PROJECT_CHATS)
+      : MAX_VISIBLE_PROJECT_CHATS,
+  );
+  const baseVisibleChats = projectChats.slice(0, baseVisibleChatLimit);
+  const expandedVisibleChats = projectChats.slice(
+    baseVisibleChatLimit,
+    MAX_EXPANDED_PROJECT_CHATS,
+  );
   const canRevealLoadedChats =
-    !showExpandedChats && projectChats.length > MAX_VISIBLE_PROJECT_CHATS;
-  const showHistoryHint =
+    (!renderExpandedChats || collapsingExpandedChats) &&
+    projectChats.length > baseVisibleChatLimit;
+  const canOpenAllProjectChats =
     showExpandedChats &&
-    (projectChats.length > MAX_EXPANDED_PROJECT_CHATS || hasMoreSessions);
+    projectChats.length > MAX_EXPANDED_PROJECT_CHATS &&
+    onNavigate != null;
 
   return (
     <div
@@ -177,9 +279,9 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-sm pr-3 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+          "relative flex items-center group rounded-sm pr-3 hover:bg-[var(--sidebar-row-hover)] focus-within:bg-[var(--sidebar-row-hover)]",
           SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-          menuOpen && "bg-sidebar-accent",
+          menuOpen && "bg-[var(--sidebar-row-active)]",
         )}
       >
         <Button
@@ -240,7 +342,22 @@ export function SidebarProjectSection({
             {project.name}
           </span>
         </Button>
-        <div data-sidebar-drag-ignore>
+        <span data-sidebar-drag-ignore className="flex flex-shrink-0">
+          <SidebarSectionHeaderAction
+            icon={IconEdit}
+            label={t("actions.newChatInProject")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewChatInProject?.(project.id);
+            }}
+            revealClassName={
+              menuOpen
+                ? "visible"
+                : "invisible group-hover:visible group-focus-within:visible"
+            }
+          />
+        </span>
+        <div className="ml-1 translate-y-px" data-sidebar-drag-ignore>
           <SidebarItemMenu
             label={project.name}
             onOpenChange={setMenuOpen}
@@ -260,93 +377,175 @@ export function SidebarProjectSection({
             onArchive={() => onArchiveProject?.(project.id)}
           />
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          data-sidebar-drag-ignore
-          onClick={(e) => {
-            e.stopPropagation();
-            onNewChatInProject?.(project.id);
-          }}
-          title={t("actions.newChatInProject")}
-          className={cn(
-            "ml-1 size-5 flex-shrink-0 rounded-sm text-muted-foreground hover:text-sidebar-foreground active:text-sidebar-foreground focus-visible:text-sidebar-foreground",
-            menuOpen
-              ? "visible"
-              : "invisible group-hover:visible group-focus-within:visible",
-          )}
-        >
-          <IconEdit className="size-4" />
-        </Button>
 
         {dragOver && (
           <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
         )}
       </div>
 
-      {isExpanded && (
-        <div className="mt-0.5 space-y-0.5">
-          {visibleChats.map((session) => {
-            const isActive = activeSessionId === session.id;
-            return (
-              <SidebarChatRow
-                key={session.id}
-                id={session.id}
-                title={session.title}
-                subtitle={session.subtitle}
-                activityAt={session.activityAt}
-                isActive={isActive}
-                isRunning={session.isRunning ?? false}
-                hasUnread={session.hasUnread ?? false}
-                isPinned={pinnedHomeChatSessionIds.has(session.id)}
-                selected={selectedSessionIds?.has(session.id) ?? false}
-                selectionEnabled={selectionEnabled}
-                selectionActionsDisabled={selectionActionsDisabled}
-                selectedSessionIds={selectedSessionIds}
-                nested
-                currentProjectId={project.id}
-                onSelect={onSelectSession}
-                onSelectionClear={onSelectionClear}
-                onSelectionChange={onSelectionChange}
-                onRename={onRenameChat}
-                onFork={onForkChat}
-                onMarkRead={onMarkChatRead}
-                onMarkUnread={onMarkChatUnread}
-                onArchive={onArchiveChat}
-                onArchiveSelected={onArchiveSelected}
-                onPinSelectedToHome={onPinSelectedToHome}
-                isPinningSelectedToHome={isPinningSelectedToHome}
-                onMarkSelectedRead={onMarkSelectedRead}
-                onMarkSelectedUnread={onMarkSelectedUnread}
-              />
-            );
-          })}
-          {canRevealLoadedChats && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => setShowExpandedChats(true)}
-              className="h-auto w-full justify-start gap-1.5 rounded-sm py-1 pl-8 pr-3 text-sm text-sidebar-foreground hover:text-sidebar-foreground"
-            >
-              <IconChevronRight className="size-3" />
-              {t("viewMoreChats")}
-            </Button>
+      {renderProjectChats ? (
+        <div
+          className={cn(
+            "grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+            showProjectChats
+              ? "grid-rows-[1fr] opacity-100"
+              : "grid-rows-[0fr] opacity-0",
           )}
-          {showHistoryHint && onNavigate && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => onNavigate("session-history")}
-              className="h-auto w-full justify-start rounded-sm py-1 pl-8 pr-3 text-sm text-muted-foreground hover:text-sidebar-foreground"
+          aria-hidden={!showProjectChats}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <div
+              className={cn(
+                "mt-0 space-y-0 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+                showProjectChats ? "translate-y-0" : "-translate-y-1",
+              )}
             >
-              {t("olderChatsInHistory")}
-            </Button>
-          )}
+              {baseVisibleChats.map((session) => {
+                const isActive = activeSessionId === session.id;
+                return (
+                  <SidebarChatRow
+                    key={session.id}
+                    id={session.id}
+                    title={session.title}
+                    branchName={session.branchName}
+                    activityAt={session.activityAt}
+                    isActive={isActive}
+                    isRunning={session.isRunning ?? false}
+                    hasUnread={session.hasUnread ?? false}
+                    isPinned={pinnedHomeChatSessionIds.has(session.id)}
+                    selected={selectedSessionIds?.has(session.id) ?? false}
+                    selectionEnabled={selectionEnabled}
+                    selectionActionsDisabled={selectionActionsDisabled}
+                    selectedSessionIds={selectedSessionIds}
+                    showLeadingIcon={showChatIcons}
+                    showTimestamp={showTimestamps}
+                    nested
+                    currentProjectId={project.id}
+                    onSelect={onSelectSession}
+                    onSelectionClear={onSelectionClear}
+                    onSelectionChange={onSelectionChange}
+                    onRename={onRenameChat}
+                    onFork={onForkChat}
+                    onMarkRead={onMarkChatRead}
+                    onMarkUnread={onMarkChatUnread}
+                    onArchive={onArchiveChat}
+                    onArchiveSelected={onArchiveSelected}
+                    onPinSelectedToHome={onPinSelectedToHome}
+                    isPinningSelectedToHome={isPinningSelectedToHome}
+                    onMarkSelectedRead={onMarkSelectedRead}
+                    onMarkSelectedUnread={onMarkSelectedUnread}
+                  />
+                );
+              })}
+              {renderExpandedChats ? (
+                <div
+                  className={cn(
+                    "grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+                    showExpandedChats
+                      ? "grid-rows-[1fr] opacity-100"
+                      : "grid-rows-[0fr] opacity-0",
+                  )}
+                  aria-hidden={!showExpandedChats}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div
+                      className={cn(
+                        "space-y-0 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+                        showExpandedChats ? "translate-y-0" : "-translate-y-1",
+                      )}
+                    >
+                      {expandedVisibleChats.map((session) => {
+                        const isActive = activeSessionId === session.id;
+                        return (
+                          <SidebarChatRow
+                            key={session.id}
+                            id={session.id}
+                            title={session.title}
+                            branchName={session.branchName}
+                            activityAt={session.activityAt}
+                            isActive={isActive}
+                            isRunning={session.isRunning ?? false}
+                            hasUnread={session.hasUnread ?? false}
+                            isPinned={pinnedHomeChatSessionIds.has(session.id)}
+                            selected={
+                              selectedSessionIds?.has(session.id) ?? false
+                            }
+                            selectionEnabled={selectionEnabled}
+                            selectionActionsDisabled={selectionActionsDisabled}
+                            selectedSessionIds={selectedSessionIds}
+                            showLeadingIcon={showChatIcons}
+                            showTimestamp={showTimestamps}
+                            nested
+                            currentProjectId={project.id}
+                            onSelect={onSelectSession}
+                            onSelectionClear={onSelectionClear}
+                            onSelectionChange={onSelectionChange}
+                            onRename={onRenameChat}
+                            onFork={onForkChat}
+                            onMarkRead={onMarkChatRead}
+                            onMarkUnread={onMarkChatUnread}
+                            onArchive={onArchiveChat}
+                            onArchiveSelected={onArchiveSelected}
+                            onPinSelectedToHome={onPinSelectedToHome}
+                            isPinningSelectedToHome={isPinningSelectedToHome}
+                            onMarkSelectedRead={onMarkSelectedRead}
+                            onMarkSelectedUnread={onMarkSelectedUnread}
+                          />
+                        );
+                      })}
+                      {projectChats.length > MAX_VISIBLE_PROJECT_CHATS ? (
+                        <div className="flex items-center pl-[38px] pr-3">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            flush
+                            size="xs"
+                            onClick={collapseExpandedChats}
+                            className={PROJECT_CHAT_DISCLOSURE_CLASS}
+                          >
+                            {t("showLess")}
+                          </Button>
+                          {canOpenAllProjectChats ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              flush
+                              size="xs"
+                              onClick={() => onNavigate?.("session-history")}
+                              className={cn(
+                                PROJECT_CHAT_DISCLOSURE_CLASS,
+                                "ml-auto",
+                              )}
+                            >
+                              {t("viewAllInHistory")}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {canRevealLoadedChats && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  flush
+                  size="xs"
+                  onClick={revealExpandedChats}
+                  className={cn(
+                    PROJECT_CHAT_DISCLOSURE_CLASS,
+                    "w-full pl-[38px] pr-3",
+                    "animate-in fade-in-0 duration-300",
+                  )}
+                >
+                  {t("viewMoreChats")}
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

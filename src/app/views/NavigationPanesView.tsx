@@ -3422,6 +3422,7 @@ export function NavigationPanesView({
   const labelTransition = "";
   const canDetachSessionList =
     !isPrototype && detachableSessionListEnabled && !collapsed;
+  const useUnifiedDefaultNavigation = !isPrototype && !canDetachSessionList;
   const rawPrimaryNavPanelWidth = canDetachSessionList
     ? (paneSizes?.primaryNav ?? width)
     : width;
@@ -4735,7 +4736,7 @@ export function NavigationPanesView({
         onSettingsClick={onSettingsClick}
         onSettingsSectionChange={onSettingsSectionChange}
         renderInlineSessionList={
-          !collapsed && !canDetachSessionList
+          !collapsed && useUnifiedDefaultNavigation
             ? () => (
                 <SessionListCapability
                   activeSessionId={activeSessionId}

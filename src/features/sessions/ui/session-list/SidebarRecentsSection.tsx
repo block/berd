@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconEdit, IconPlus } from "@tabler/icons-react";
-import { History } from "lucide-react";
+import { IconEdit } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
@@ -9,12 +8,15 @@ import { Button } from "@/shared/ui/button";
 import {
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
-  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-  SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-  SIDEBAR_SECTION_ACTION_PILL_CLASS,
-  SIDEBAR_SECTION_HEADER_ROW_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { SidebarDisplayOptionsMenu } from "./SidebarDisplayOptionsMenu";
+import {
+  SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS,
+  SidebarSectionHeader,
+  SidebarSectionHeaderAction,
+} from "./SidebarSectionHeader";
 import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import { SidebarChatRow } from "./SidebarChatRow";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
@@ -47,9 +49,16 @@ export function SidebarRecentsSection({
   onMarkSelectedRead,
   onMarkSelectedUnread,
   pinnedHomeChatSessionIds,
+  showChatIcons,
+  onShowChatIconsChange,
+  showTimestamps,
+  onShowTimestampsChange,
+  showGitBranches = false,
+  onShowGitBranchesChange,
   isOpen,
   onToggleOpen,
   sectionHeaderTextClass,
+  showHeader = true,
 }: {
   sessions: SidebarSessionItem[];
   collapsed: boolean;
@@ -77,9 +86,16 @@ export function SidebarRecentsSection({
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   pinnedHomeChatSessionIds: ReadonlySet<string>;
+  showChatIcons: boolean;
+  onShowChatIconsChange: (show: boolean) => void;
+  showTimestamps: boolean;
+  onShowTimestampsChange: (show: boolean) => void;
+  showGitBranches?: boolean;
+  onShowGitBranchesChange?: (show: boolean) => void;
   isOpen: boolean;
   onToggleOpen: () => void;
   sectionHeaderTextClass: string;
+  showHeader?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
   const { activeSessionDropTargetKey, registerSessionDropTarget } =
@@ -111,72 +127,51 @@ export function SidebarRecentsSection({
 
   return (
     <div ref={recentsDropTargetRef} data-sidebar-session-drop-target="recents">
-      <div
-        className={cn(
-          SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-          SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-          "border-t border-sidebar-border/80",
-        )}
-        aria-hidden
-      />
-      <div
-        className={cn(
-          "relative group/chats-header flex items-center",
-          collapsed
-            ? "px-0 pt-0 pb-1 justify-center"
-            : SIDEBAR_SECTION_HEADER_ROW_CLASS,
-        )}
-      >
-        {!collapsed && (
-          <button
-            type="button"
-            onClick={onToggleOpen}
-            aria-expanded={isOpen}
-            className={cn(
-              "flex min-w-0 flex-1 items-center gap-0.5 rounded-sm py-1 text-left transition-colors hover:text-sidebar-foreground",
-              labelTransition,
-              labelVisible
-                ? "opacity-100 w-auto"
-                : "opacity-0 w-0 overflow-hidden",
-            )}
-          >
-            <span className={cn("truncate", sectionHeaderTextClass)}>
-              {t("sections.recents")}
-            </span>
-            <IconChevronDown
-              className={cn(
-                "invisible size-3 shrink-0 text-muted-foreground transition-transform duration-150",
-                "group-hover/chats-header:visible",
-                !isOpen && "-rotate-90",
-              )}
-            />
-          </button>
-        )}
-        {!collapsed && onNewChat && !showEmptyState && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={onNewChat}
-            aria-label={t("empty.startChat")}
-            title={t("empty.startChat")}
-            className={cn(
-              SIDEBAR_SECTION_ACTION_PILL_CLASS,
-              "size-5 bg-transparent p-0 text-muted-foreground hover:bg-sidebar-section-action-bg hover:text-sidebar-foreground focus-visible:bg-sidebar-section-action-bg focus-visible:text-sidebar-foreground",
-              "invisible pointer-events-none group-hover/chats-header:visible group-hover/chats-header:pointer-events-auto group-focus-within/chats-header:visible group-focus-within/chats-header:pointer-events-auto focus-visible:visible focus-visible:pointer-events-auto",
-            )}
-          >
-            <IconPlus className="size-4" />
-          </Button>
-        )}
-
-        {recentsDragOver && (
-          <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
-        )}
-      </div>
+      {showHeader ? (
+        <SidebarSectionHeader
+          label={t("sections.recents")}
+          collapsed={collapsed}
+          labelTransition={labelTransition}
+          labelVisible={labelVisible}
+          onToggleOpen={onToggleOpen}
+          isOpen={isOpen}
+          labelClassName={sectionHeaderTextClass}
+          actions={
+            onNavigate || (onNewChat && !showEmptyState) ? (
+              <>
+                {onNewChat && !showEmptyState ? (
+                  <SidebarSectionHeaderAction
+                    icon={IconEdit}
+                    label={t("empty.startChat")}
+                    onClick={onNewChat}
+                  />
+                ) : null}
+                <SidebarDisplayOptionsMenu
+                  labelKey="actions.chatDisplayOptions"
+                  showChatIcons={showChatIcons}
+                  onShowChatIconsChange={onShowChatIconsChange}
+                  showTimestamps={showTimestamps}
+                  onShowTimestampsChange={onShowTimestampsChange}
+                  showGitBranches={showGitBranches}
+                  onShowGitBranchesChange={onShowGitBranchesChange}
+                  className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
+                />
+              </>
+            ) : null
+          }
+        >
+          {recentsDragOver ? (
+            <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
+          ) : null}
+        </SidebarSectionHeader>
+      ) : recentsDragOver ? (
+        <div className="relative h-px">
+          <div className="absolute right-3 left-3 h-px bg-sidebar-foreground" />
+        </div>
+      ) : null}
 
       {showContent && showEmptyState && collapsed ? (
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-0">
           <Button
             type="button"
             variant="ghost"
@@ -191,7 +186,7 @@ export function SidebarRecentsSection({
           </Button>
         </div>
       ) : showContent && showEmptyState ? (
-        <div className="space-y-0.5">
+        <div className="space-y-0">
           <Button
             type="button"
             variant="ghost"
@@ -200,6 +195,7 @@ export function SidebarRecentsSection({
             onClick={onNewChat}
             className={cn(
               SIDEBAR_ROW_HEIGHT_CLASS,
+              SIDEBAR_ROW_HOVER_CLASS,
               "w-full justify-start gap-2 text-sm text-muted-foreground",
               SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
             )}
@@ -209,7 +205,7 @@ export function SidebarRecentsSection({
           </Button>
         </div>
       ) : showContent && sessions.length > 0 && collapsed ? (
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-0">
           {sessions.map((session) => (
             <Button
               type="button"
@@ -224,8 +220,8 @@ export function SidebarRecentsSection({
               className={cn(
                 "relative rounded-lg",
                 activeSessionId === session.id
-                  ? "bg-transparent text-sidebar-foreground hover:bg-transparent"
-                  : "text-sidebar-foreground hover:text-sidebar-foreground",
+                  ? "bg-[var(--sidebar-row-active)] text-sidebar-foreground hover:bg-[var(--sidebar-row-active)]"
+                  : "text-sidebar-foreground hover:bg-[var(--sidebar-row-hover)] hover:text-sidebar-foreground",
               )}
             >
               <SidebarChatMenuIcon />
@@ -240,7 +236,7 @@ export function SidebarRecentsSection({
           ))}
         </div>
       ) : showContent && sessions.length > 0 ? (
-        <div className="space-y-0.5 pb-2">
+        <div className="space-y-0 pb-1">
           {sessions.map((session) => {
             const isActive = activeSessionId === session.id;
             return (
@@ -248,8 +244,10 @@ export function SidebarRecentsSection({
                 key={session.id}
                 id={session.id}
                 title={session.title}
-                subtitle={session.subtitle}
+                branchName={session.branchName}
                 activityAt={session.activityAt}
+                showLeadingIcon={showChatIcons}
+                showTimestamp={showTimestamps}
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}
@@ -275,22 +273,6 @@ export function SidebarRecentsSection({
               />
             );
           })}
-          {onNavigate && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => onNavigate("session-history")}
-              className={cn(
-                "h-auto w-full justify-start gap-2 rounded-sm py-1 text-sm font-normal text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
-                "pl-[14px]",
-              )}
-              leftIcon={<History className="size-3.5" strokeWidth={2} />}
-            >
-              {t("viewAllInHistory")}
-            </Button>
-          )}
         </div>
       ) : null}
     </div>

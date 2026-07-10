@@ -271,7 +271,7 @@ export function AppShellLayout({
                   <div
                     onMouseDown={onResizeStart}
                     onDoubleClick={onResizeDoubleClick}
-                    className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
+                    className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-ew-resize items-center justify-center overflow-hidden"
                     style={{
                       width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
                       opacity: sidebarCollapsed ? 0 : 1,
@@ -286,7 +286,7 @@ export function AppShellLayout({
                   <div
                     onMouseDown={onHeightResizeStart}
                     onDoubleClick={onHeightResizeDoubleClick}
-                    className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-row-resize items-center justify-center overflow-hidden"
+                    className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-ns-resize items-center justify-center overflow-hidden"
                     style={{
                       height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
                       opacity: sidebarCollapsed ? 0 : 1,
@@ -324,7 +324,7 @@ export function AppShellLayout({
             onMouseDown={onResizeStart}
             onDoubleClick={onResizeDoubleClick}
             className={cn(
-              "relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-visible",
+              "relative z-20 flex flex-shrink-0 cursor-ew-resize items-center justify-center overflow-visible",
               contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
             )}
             style={{

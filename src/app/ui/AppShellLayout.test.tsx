@@ -185,7 +185,7 @@ describe("AppShellLayout", () => {
     });
 
     expect(container.querySelector(".sidebar-resize-rail")).toBeNull();
-    expect(container.querySelector(".cursor-row-resize")).toBeNull();
+    expect(container.querySelector(".cursor-ns-resize")).toBeNull();
   });
 
   it("can disable sidebar width resize while keeping height resize available", () => {
@@ -194,7 +194,7 @@ describe("AppShellLayout", () => {
     });
 
     expect(container.querySelector(".sidebar-resize-rail")).toBeNull();
-    expect(container.querySelector(".cursor-row-resize")).toBeInTheDocument();
+    expect(container.querySelector(".cursor-ns-resize")).toBeInTheDocument();
     expect(container.querySelector(".cursor-nwse-resize")).toBeNull();
   });
 });

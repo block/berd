@@ -28,15 +28,18 @@ _setup-dev-deps:
     pnpm install
     cd sdk && pnpm build
 
+_install-lefthook:
+    if [ -d .git ]; then lefthook install --force; else echo "Skipping lefthook install in Git worktree"; fi
+
 # Install dependencies, build workspace packages, and prepare local development hooks.
 _setup-no-goose: _setup-dev-deps
-    lefthook install --force
+    just _install-lefthook
 
 # Install dependencies, build workspace packages, build managed Goose, and prepare local development hooks.
 setup: _setup-dev-deps
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
     ./scripts/ensure-acp-tools.sh
-    lefthook install --force
+    just _install-lefthook
 
 # ── Build & Check ────────────────────────────────────────────
 
@@ -323,11 +326,10 @@ dev:
 
     ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
     mkdir -p "$ICON_DIR"
-    DEV_ICON_LABEL="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    DEV_ICON_LABEL="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")"
     if [[ -z "$DEV_ICON_LABEL" || "$DEV_ICON_LABEL" == "HEAD" ]]; then
         DEV_ICON_LABEL="local"
     fi
-    DEV_ICON_LABEL="${DEV_ICON_LABEL##*/}"
     DEV_ICON_SLUG="$(node -e 'const label = process.argv[1] || "local"; process.stdout.write(label.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "local");' "$DEV_ICON_LABEL")"
     DEV_ICON_CACHE_KEY="$(node -e 'const { createHash } = require("node:crypto"); const { readFileSync } = require("node:fs"); const [label, ...files] = process.argv.slice(1); const hash = createHash("sha256"); hash.update(label); for (const file of files) hash.update(readFileSync(file)); process.stdout.write(hash.digest("hex").slice(0, 12));' "$DEV_ICON_LABEL" scripts/generate-dev-icon.mjs src-tauri/icons/icon.icns)"
     DEV_ICON_PNG="$ICON_DIR/icon-${DEV_ICON_SLUG}-${DEV_ICON_CACHE_KEY}.png"

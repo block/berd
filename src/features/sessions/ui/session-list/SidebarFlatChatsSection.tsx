@@ -1,12 +1,7 @@
-import { IconEdit } from "@tabler/icons-react";
-import { History } from "lucide-react";
+import { IconCubePlus, IconEdit, IconLayoutGrid } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { AppView } from "@/app/AppShell";
-import {
-  SidebarNavChatPlusIcon,
-  SidebarNavChatsIcon,
-  SidebarNavProjectPlusIcon,
-} from "@/features/navigation/ui/sidebarNavIcons";
+import { SidebarNavChatsIcon } from "@/features/navigation/ui/sidebarNavIcons";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
@@ -15,14 +10,17 @@ import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
-  SIDEBAR_SECTION_ACTION_PILL_CLASS,
-  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-  SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-  SIDEBAR_SECTION_HEADER_ROW_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarChatDragProvider } from "./SidebarChatDragContext";
+import { SidebarDisplayOptionsMenu } from "./SidebarDisplayOptionsMenu";
+import {
+  SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS,
+  SidebarSectionHeader,
+  SidebarSectionHeaderAction,
+} from "./SidebarSectionHeader";
 import { SidebarChatRow } from "./SidebarChatRow";
 
 export function SidebarFlatChatsSection({
@@ -52,8 +50,13 @@ export function SidebarFlatChatsSection({
   onMarkSelectedRead,
   onMarkSelectedUnread,
   pinnedHomeChatSessionIds,
+  showTimestamps,
+  onShowTimestampsChange,
+  showGitBranches = false,
+  onShowGitBranchesChange,
+  onGroupChatsByProjectChange,
   showViewAllInHistory = false,
-  showTopDivider = true,
+  showTopDivider: _showTopDivider = true,
 }: {
   groups: FlatChatGroup[];
   collapsed: boolean;
@@ -81,6 +84,11 @@ export function SidebarFlatChatsSection({
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   pinnedHomeChatSessionIds: ReadonlySet<string>;
+  showTimestamps: boolean;
+  onShowTimestampsChange: (show: boolean) => void;
+  showGitBranches?: boolean;
+  onShowGitBranchesChange?: (show: boolean) => void;
+  onGroupChatsByProjectChange?: (grouped: boolean) => void;
   showViewAllInHistory?: boolean;
   showTopDivider?: boolean;
 }) {
@@ -89,7 +97,7 @@ export function SidebarFlatChatsSection({
   const flatSessions = groups.flatMap((group) => group.sessions);
   const sectionHeaderTextClass = cn(
     SIDEBAR_GROUP_LABEL_TEXT_CLASS,
-    "text-muted-foreground",
+    "text-muted-foreground/80",
   );
 
   return (
@@ -105,79 +113,54 @@ export function SidebarFlatChatsSection({
               : "opacity-0 max-h-0 overflow-hidden",
         )}
       >
-        {showTopDivider && (
-          <div
-            className={cn(
-              SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-              SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-              "border-t border-sidebar-border/80",
-            )}
-            aria-hidden
-          />
-        )}
-        <div
-          className={cn(
-            "relative group/chats-header flex items-center",
-            collapsed
-              ? "px-0 pt-0 pb-1 justify-center"
-              : SIDEBAR_SECTION_HEADER_ROW_CLASS,
-          )}
-        >
-          {!collapsed && (
-            <span
-              className={cn(
-                "min-w-0 flex-1 truncate py-1",
-                sectionHeaderTextClass,
-                labelTransition,
-                labelVisible
-                  ? "opacity-100 w-auto"
-                  : "opacity-0 w-0 overflow-hidden",
-              )}
-            >
-              {t("sections.recents")}
-            </span>
-          )}
-          {!collapsed && (onCreateProject || (onNewChat && !showEmptyState)) ? (
-            <div className="ml-1 flex items-center gap-1">
-              {onCreateProject ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={onCreateProject}
-                  aria-label={t("actions.newProject")}
-                  title={t("actions.newProject")}
-                  className={cn(
-                    SIDEBAR_SECTION_ACTION_PILL_CLASS,
-                    "size-5 bg-transparent p-0 text-muted-foreground hover:bg-sidebar-section-action-bg hover:text-sidebar-foreground focus-visible:bg-sidebar-section-action-bg focus-visible:text-sidebar-foreground",
-                  )}
-                >
-                  <SidebarNavProjectPlusIcon className="size-4" />
-                </Button>
-              ) : null}
-              {onNewChat && !showEmptyState ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={onNewChat}
-                  aria-label={t("actions.newChat")}
-                  title={t("actions.newChat")}
-                  className={cn(
-                    SIDEBAR_SECTION_ACTION_PILL_CLASS,
-                    "size-5 bg-transparent p-0 text-muted-foreground hover:bg-sidebar-section-action-bg hover:text-sidebar-foreground focus-visible:bg-sidebar-section-action-bg focus-visible:text-sidebar-foreground",
-                  )}
-                >
-                  <SidebarNavChatPlusIcon className="size-4" />
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <SidebarSectionHeader
+          label={t("sections.recents")}
+          collapsed={collapsed}
+          labelTransition={labelTransition}
+          labelVisible={labelVisible}
+          labelClassName={sectionHeaderTextClass}
+          actions={
+            (onNavigate && showViewAllInHistory) ||
+            onCreateProject ||
+            (onNewChat && !showEmptyState) ? (
+              <>
+                {onNewChat && !showEmptyState ? (
+                  <SidebarSectionHeaderAction
+                    icon={IconEdit}
+                    label={t("actions.newChat")}
+                    onClick={onNewChat}
+                  />
+                ) : null}
+                {onCreateProject ? (
+                  <SidebarSectionHeaderAction
+                    icon={IconCubePlus}
+                    label={t("actions.newProject")}
+                    onClick={onCreateProject}
+                  />
+                ) : null}
+                {onGroupChatsByProjectChange ? (
+                  <SidebarSectionHeaderAction
+                    icon={IconLayoutGrid}
+                    label={t("actions.groupChats")}
+                    onClick={() => onGroupChatsByProjectChange(true)}
+                  />
+                ) : null}
+                <SidebarDisplayOptionsMenu
+                  labelKey="actions.chatDisplayOptions"
+                  showTimestamps={showTimestamps}
+                  onShowTimestampsChange={onShowTimestampsChange}
+                  showGitBranches={showGitBranches}
+                  onShowGitBranchesChange={onShowGitBranchesChange}
+                  className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
+                />
+              </>
+            ) : null
+          }
+        />
 
         {showEmptyState ? (
           collapsed ? (
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-0">
               {onCreateProject ? (
                 <Button
                   type="button"
@@ -189,7 +172,7 @@ export function SidebarFlatChatsSection({
                   title={t("actions.newProject")}
                   className="rounded-lg"
                 >
-                  <SidebarNavProjectPlusIcon className="size-4" />
+                  <IconCubePlus className="size-4" />
                 </Button>
               ) : null}
               <Button
@@ -206,7 +189,7 @@ export function SidebarFlatChatsSection({
               </Button>
             </div>
           ) : (
-            <div className="space-y-0.5">
+            <div className="space-y-0">
               <Button
                 type="button"
                 variant="ghost"
@@ -215,6 +198,7 @@ export function SidebarFlatChatsSection({
                 onClick={onNewChat}
                 className={cn(
                   SIDEBAR_ROW_HEIGHT_CLASS,
+                  SIDEBAR_ROW_HOVER_CLASS,
                   "w-full justify-start gap-2 text-sm text-muted-foreground",
                   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
                 )}
@@ -225,7 +209,7 @@ export function SidebarFlatChatsSection({
             </div>
           )
         ) : collapsed ? (
-          <div className="flex flex-col items-center gap-1 pb-2">
+          <div className="flex flex-col items-center gap-0 pb-1">
             {onCreateProject ? (
               <Button
                 type="button"
@@ -237,7 +221,7 @@ export function SidebarFlatChatsSection({
                 title={t("actions.newProject")}
                 className="rounded-lg"
               >
-                <SidebarNavProjectPlusIcon className="size-4" />
+                <IconCubePlus className="size-4" />
               </Button>
             ) : null}
             {onNewChat ? (
@@ -273,8 +257,8 @@ export function SidebarFlatChatsSection({
                   className={cn(
                     "relative rounded-lg",
                     activeSessionId === session.id
-                      ? "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent"
-                      : "text-sidebar-foreground hover:text-sidebar-foreground",
+                      ? "bg-[var(--sidebar-row-active)] text-sidebar-foreground hover:bg-[var(--sidebar-row-active)]"
+                      : "text-sidebar-foreground hover:bg-[var(--sidebar-row-hover)] hover:text-sidebar-foreground",
                   )}
                 >
                   {hasProject ? (
@@ -300,11 +284,11 @@ export function SidebarFlatChatsSection({
             })}
           </div>
         ) : (
-          <div className="pb-2">
+          <div className="pb-1">
             {groups.map((group, groupIndex) => (
               <div
                 key={group.id}
-                className={cn("space-y-0.5", groupIndex > 0 && "mt-2 pt-2")}
+                className={cn("space-y-0", groupIndex > 0 && "mt-1 pt-1")}
                 data-sidebar-flat-chat-group={group.id}
               >
                 {group.sessions.map((session) => {
@@ -318,7 +302,10 @@ export function SidebarFlatChatsSection({
                       key={session.id}
                       id={session.id}
                       title={session.title}
+                      branchName={session.branchName}
                       activityAt={session.activityAt}
+                      showLeadingIcon={false}
+                      showTimestamp={showTimestamps}
                       isActive={isActive}
                       isRunning={session.isRunning ?? false}
                       hasUnread={session.hasUnread ?? false}
@@ -353,24 +340,21 @@ export function SidebarFlatChatsSection({
                 })}
               </div>
             ))}
-            {onNavigate && showViewAllInHistory && (
-              <div className={cn(groups.length > 0 && "mt-0.5")}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => onNavigate("session-history")}
-                  className={cn(
-                    "h-auto w-full justify-start gap-2 rounded-sm py-1 text-sm font-normal text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
-                    SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
-                    "pl-[14px]",
-                  )}
-                  leftIcon={<History className="size-3.5" strokeWidth={2} />}
-                >
-                  {t("viewAllInHistory")}
-                </Button>
-              </div>
-            )}
+            {showViewAllInHistory && onNavigate ? (
+              <Button
+                type="button"
+                variant="ghost"
+                flush
+                size="xs"
+                onClick={() => onNavigate("session-history")}
+                className={cn(
+                  "mt-1 h-auto w-full justify-start rounded-sm px-3 py-1",
+                  SIDEBAR_GROUP_LABEL_TEXT_CLASS,
+                )}
+              >
+                {t("viewAllInHistory")}
+              </Button>
+            ) : null}
           </div>
         )}
       </div>

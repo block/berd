@@ -57,18 +57,9 @@ import {
   type StreamingShortcutMode,
 } from "@/features/chat/lib/streamingShortcutPreference";
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
-import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { RuntimeConfigSettings } from "./RuntimeConfigSettings";
-import {
-  DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
-  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-} from "@/features/experiments/experimentDefinitions";
-import {
-  setExperimentConfigValue,
-  useExperiment,
-} from "@/features/experiments/experimentPreferences";
+import { useSidebarChatGroupingPreference } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import { useStyleGuidelinesPreference } from "@/shared/preferences/styleGuidelinesPreference";
 import {
   getBbCliStatus,
@@ -163,14 +154,7 @@ export function GeneralSettings({
   );
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
-  const sidebarFlatChatListExperiment = useExperiment(
-    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  );
-  const groupChatsByProject = Boolean(
-    sidebarFlatChatListExperiment?.config[
-      SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY
-    ] ?? DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
-  );
+  const sidebarChatGroupingPreference = useSidebarChatGroupingPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -178,8 +162,6 @@ export function GeneralSettings({
   } = useAtMentionDefaultCategoryPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const homePinLabelsPreference = useHomePinLabelsPreference();
-  const sidebarGitBranchSubtitlePreference =
-    useSidebarGitBranchSubtitlePreference();
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
   const styleGuidelinesPreference = useStyleGuidelinesPreference();
@@ -336,17 +318,6 @@ export function GeneralSettings({
     const didSave = styleGuidelinesPreference.resetPrompt();
     if (!didSave) {
       toast.error(t("general.styleGuidelines.saveError"));
-    }
-  }
-
-  function handleSidebarChatGroupingChange(enabled: boolean) {
-    const didSave = setExperimentConfigValue(
-      SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-      SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-      enabled,
-    );
-    if (!didSave) {
-      toast.error(t("experiments.saveError"));
     }
   }
 
@@ -595,19 +566,6 @@ export function GeneralSettings({
           </SettingRow>
         ) : null}
 
-        {sidebarFlatChatListExperiment?.enabled && (
-          <SettingRow
-            label={t("general.groupChatsByProject.label")}
-            description={t("general.groupChatsByProject.description")}
-          >
-            <Switch
-              checked={groupChatsByProject}
-              onCheckedChange={handleSidebarChatGroupingChange}
-              aria-label={t("general.groupChatsByProject.label")}
-            />
-          </SettingRow>
-        )}
-
         <SettingRow
           label={t("shortcuts:settings.label")}
           description={t("shortcuts:settings.description")}
@@ -694,17 +652,6 @@ export function GeneralSettings({
               {t("general.atMentionDefault.files")}
             </Button>
           </fieldset>
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.sidebarBranchSubtitles.label")}
-          description={t("general.sidebarBranchSubtitles.description")}
-        >
-          <Switch
-            checked={sidebarGitBranchSubtitlePreference.enabled}
-            onCheckedChange={sidebarGitBranchSubtitlePreference.setEnabled}
-            aria-label={t("general.sidebarBranchSubtitles.label")}
-          />
         </SettingRow>
       </SettingsSection>
 
@@ -914,6 +861,23 @@ export function GeneralSettings({
             customColorLabel={t("appearance.primary.custom")}
             swatchSize="sm"
             variant="swatches"
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title={t("navigation.title")}>
+        <SettingRow
+          label={t("general.groupChatsByProject.label")}
+          description={t("general.groupChatsByProject.description")}
+        >
+          {/* Known gap: like the other boolean preference toggles here, a
+              failed localStorage write is silent and the toggle reverts on
+              restart. If we add save feedback, do it for all of them via
+              createBooleanLocalStoragePreference rather than one-off. */}
+          <Switch
+            checked={sidebarChatGroupingPreference.enabled}
+            onCheckedChange={sidebarChatGroupingPreference.setEnabled}
+            aria-label={t("general.groupChatsByProject.label")}
           />
         </SettingRow>
       </SettingsSection>

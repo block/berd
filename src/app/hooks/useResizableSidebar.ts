@@ -8,8 +8,8 @@ import {
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 
 const SIDEBAR_OUTER_GUTTER_WIDTH = 12;
-const SIDEBAR_RESIZE_HANDLE_WIDTH = 12;
-const SIDEBAR_RESIZE_HANDLE_HEIGHT = 12;
+const SIDEBAR_RESIZE_HANDLE_WIDTH = 20;
+const SIDEBAR_RESIZE_HANDLE_HEIGHT = 20;
 const SIDEBAR_LAYOUT_STORAGE_KEY = "goose:sidebar:layout";
 const SIDEBAR_DEFAULT_WIDTH = 200;
 const SIDEBAR_MIN_WIDTH = 200;

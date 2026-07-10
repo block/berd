@@ -170,6 +170,9 @@ describe("SidebarChatRow", () => {
     );
 
     expect(screen.queryByTestId("sidebar-chat-menu-icon")).toBeNull();
+    expect(screen.getByTestId("sidebar-flat-chat-project-icon")).toHaveClass(
+      "text-sidebar-foreground",
+    );
     expect(screen.queryByText("Project One")).not.toBeInTheDocument();
     expect(screen.getByText("Idle Chat")).toBeInTheDocument();
     const projectIcon = container.querySelector(
@@ -200,10 +203,10 @@ describe("SidebarChatRow", () => {
       "dense",
     );
     expect(container.querySelector("[data-sidebar-chat-row]")).toHaveClass(
-      "gap-1.5",
+      "gap-2",
     );
     expect(screen.getByTitle("Double-click to rename")).toHaveClass("pr-6");
-    expect(screen.getByLabelText("Project One")).toHaveClass("ml-1", "size-5");
+    expect(screen.getByLabelText("Project One")).toHaveClass("ml-3", "size-5");
     expect(
       screen.getByRole("button", { name: "Options for Idle Chat" }),
     ).toHaveClass("right-1");
@@ -221,7 +224,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass("gap-1.5");
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass("gap-2");
     expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
   });
 
@@ -453,6 +456,70 @@ describe("SidebarChatRow", () => {
     expect(onFork).toHaveBeenCalledWith("session-1");
   });
 
+  it("reveals a one-click pin action when chat icons are shown", async () => {
+    const user = userEvent.setup();
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+    });
+
+    const { container } = render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) throw new Error("Sidebar chat row was not rendered");
+    await user.hover(row);
+    await user.click(screen.getByRole("button", { name: "Pin chat" }));
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) =>
+            instance.type === "chatPin" &&
+            instance.state?.sessionId === "session-1",
+        ),
+    ).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Unpin chat" }));
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) =>
+            instance.type === "chatPin" &&
+            instance.state?.sessionId === "session-1",
+        ),
+    ).toBe(false);
+  });
+
+  it("does not show a quick pin action when chat icons are hidden", () => {
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        showLeadingIcon={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Pin chat" })).toBeNull();
+  });
+
+  it("keeps the hover-only quick pin action out of the tab order", () => {
+    render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Pin chat" })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+  });
+
   it("shows pin chat in the chat options menu", async () => {
     const user = userEvent.setup();
 
@@ -619,19 +686,19 @@ describe("SidebarChatRow", () => {
     expect(formatSidebarChatTimestamp("not a timestamp")).toBe("");
   });
 
-  it("renders a muted subtitle line beneath the title when a snippet is present", () => {
-    render(
+  it("renders a Git branch when a branch name is provided", () => {
+    const { container } = render(
       <SidebarChatRow
         id="session-1"
         title="Refactor session list"
-        subtitle="Let's refactor the session list query"
+        branchName="feature/sidebar-branch"
         isActive={false}
       />,
     );
 
-    const subtitle = screen.getByText("Let's refactor the session list query");
-    expect(subtitle).toHaveClass("text-muted-foreground");
-    expect(subtitle).toHaveClass("truncate");
+    expect(screen.getByText("Refactor session list")).toBeInTheDocument();
+    expect(screen.getByText("feature/sidebar-branch")).toBeInTheDocument();
+    expect(container.querySelector(".flex-col")).toBeInTheDocument();
   });
 
   it("renders a compact activity timestamp on the right edge of the row", () => {
@@ -641,7 +708,6 @@ describe("SidebarChatRow", () => {
       <SidebarChatRow
         id="session-1"
         title="Refactor session list"
-        subtitle="Let's refactor the session list query"
         activityAt={fiveMinutesAgo.toISOString()}
         isActive={false}
       />,
@@ -653,11 +719,7 @@ describe("SidebarChatRow", () => {
     expect(timestamp).toBeInTheDocument();
     expect(timestamp).toHaveTextContent("5m");
     expect(timestamp).toHaveClass("text-muted-foreground/70");
-    // The row title and snippet stay visible alongside the timestamp.
     expect(screen.getByText("Refactor session list")).toBeInTheDocument();
-    expect(
-      screen.getByText("Let's refactor the session list query"),
-    ).toBeInTheDocument();
   });
 
   it("omits the timestamp when the activity value is missing or invalid", () => {
@@ -702,21 +764,21 @@ describe("SidebarChatRow", () => {
     expect(timestamp).toHaveTextContent("2h");
     expect(screen.getByText("Refactor session list")).toBeInTheDocument();
   });
-  it("stays a single line for sessions without a usable snippet", () => {
+  it("stays a single line for sessions without a usable branch", () => {
     const { container, rerender } = render(
       <SidebarChatRow id="session-1" title="No snippet" isActive={false} />,
     );
 
     expect(screen.getByText("No snippet")).toBeInTheDocument();
-    // The two-line column wrapper only renders when a subtitle is shown.
+    // The two-line column wrapper only renders when a branch is shown.
     expect(container.querySelector(".flex-col")).toBeNull();
 
-    // Whitespace-only snippets are treated as absent.
+    // Whitespace-only branch names are treated as absent.
     rerender(
       <SidebarChatRow
         id="session-1"
         title="No snippet"
-        subtitle="   "
+        branchName="   "
         isActive={false}
       />,
     );

@@ -67,6 +67,8 @@ export function SidebarProjectList({
   onMarkSelectedRead,
   onMarkSelectedUnread,
   pinnedHomeChatSessionIds,
+  showChatIcons,
+  showTimestamps,
   onReorderProject,
   hasMoreSessions = false,
 }: {
@@ -98,6 +100,8 @@ export function SidebarProjectList({
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   pinnedHomeChatSessionIds: ReadonlySet<string>;
+  showChatIcons: boolean;
+  showTimestamps: boolean;
   onReorderProject?: (
     fromId: string,
     toId: string,
@@ -260,7 +264,7 @@ export function SidebarProjectList({
 
   if (collapsed) {
     return (
-      <div className="flex flex-col items-center gap-1">
+      <div className="flex flex-col items-center gap-0">
         {projects.map((project) => (
           <Button
             type="button"
@@ -285,7 +289,7 @@ export function SidebarProjectList({
   }
 
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-0">
       {projects.map((project) => (
         <div
           key={project.id}
@@ -352,6 +356,8 @@ export function SidebarProjectList({
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
             pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
+            showChatIcons={showChatIcons}
+            showTimestamps={showTimestamps}
             hasMoreSessions={hasMoreSessions}
           />
         </div>

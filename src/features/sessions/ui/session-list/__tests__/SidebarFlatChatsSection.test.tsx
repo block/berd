@@ -2,8 +2,25 @@ import type { ComponentProps } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { SidebarFlatChatsSection } from "../SidebarFlatChatsSection";
+import { SidebarProjectsSection } from "../SidebarProjectsSection";
+
+const project: ProjectInfo = {
+  id: "project-1",
+  path: "/tmp/project-one",
+  name: "Project One",
+  description: "",
+  prompt: "",
+  icon: "",
+  color: "",
+  workingDirs: [],
+  projectWorkspaces: [],
+  useWorktrees: false,
+  order: 0,
+  archivedAt: null,
+};
 
 const flatChatGroups = [
   {
@@ -37,6 +54,8 @@ function renderFlatChatsSection(
       collapsed={false}
       labelTransition=""
       labelVisible
+      showTimestamps
+      onShowTimestampsChange={vi.fn()}
       {...props}
     />,
   );
@@ -55,6 +74,79 @@ describe("SidebarFlatChatsSection", () => {
 
     await user.click(screen.getByRole("button", { name: "New chat" }));
     expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer chat icon visibility in the flat chats menu", async () => {
+    const user = userEvent.setup();
+
+    renderFlatChatsSection({ onNewChat: vi.fn() });
+
+    await user.click(
+      screen.getByRole("button", { name: "Chat display options" }),
+    );
+
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Show chat icons" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("switches to grouped chats from the header", async () => {
+    const user = userEvent.setup();
+    const onGroupChatsByProjectChange = vi.fn();
+
+    renderFlatChatsSection({
+      onGroupChatsByProjectChange,
+      onNewChat: vi.fn(),
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Group chats by project" }),
+    );
+
+    expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(true);
+  });
+
+  it("switches to flat chats from the grouped projects header", async () => {
+    const user = userEvent.setup();
+    const onGroupChatsByProjectChange = vi.fn();
+
+    render(
+      <SidebarProjectsSection
+        projects={[project]}
+        projectSessions={{ byProject: {}, standalone: [] }}
+        hasVisibleChats={false}
+        flatChatGroups={flatChatGroups}
+        hasFlatChatOverflow={false}
+        groupChatsByProject
+        onGroupChatsByProjectChange={onGroupChatsByProjectChange}
+        showChatIcons
+        onShowChatIconsChange={vi.fn()}
+        showTimestamps
+        onShowTimestampsChange={vi.fn()}
+        showProjectChatIcons={false}
+        onShowProjectChatIconsChange={vi.fn()}
+        showProjectTimestamps
+        onShowProjectTimestampsChange={vi.fn()}
+        showGitBranches={false}
+        onShowGitBranchesChange={vi.fn()}
+        pinnedHomeChatSessionIds={new Set()}
+        expandedProjects={{}}
+        toggleProject={vi.fn()}
+        collapsed={false}
+        labelTransition=""
+        labelVisible
+        projectsSectionOpen
+        recentsSectionOpen
+        onToggleProjectsSection={vi.fn()}
+        onToggleRecentsSection={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Show chats as one list" }),
+    );
+
+    expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(false);
   });
 
   it("uses icon-only flat chat rows when collapsed", async () => {
@@ -78,11 +170,11 @@ describe("SidebarFlatChatsSection", () => {
       container.querySelector('[data-project-color-swatch="project-1"]'),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Project Chat" })).toHaveClass(
-      "bg-sidebar-accent",
+      "bg-[var(--sidebar-row-active)]",
     );
     expect(
       screen.getByRole("button", { name: "General Chat" }),
-    ).not.toHaveClass("bg-sidebar-accent");
+    ).not.toHaveClass("bg-[var(--sidebar-row-active)]");
 
     await user.click(screen.getByRole("button", { name: "New project" }));
     expect(onCreateProject).toHaveBeenCalledOnce();

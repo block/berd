@@ -40,6 +40,8 @@ function renderProjectList(
       toggleProject={vi.fn()}
       collapsed={false}
       pinnedHomeChatSessionIds={new Set()}
+      showChatIcons
+      showTimestamps
       onReorderProject={onReorderProject}
     />,
   );

@@ -357,7 +357,7 @@ export function PaneResizeRail<SurfaceId extends string>({
     <div
       data-testid={testId}
       onMouseDown={(event) => onResizeStart(surfaceId, event)}
-      className="group/pane-resize absolute top-2 right-0 bottom-2 z-20 flex w-3 translate-x-1/2 cursor-col-resize items-center justify-center"
+      className="group/pane-resize absolute top-2 right-0 bottom-2 z-20 flex w-5 translate-x-1/2 cursor-ew-resize items-center justify-center"
       title={title}
       aria-hidden="true"
     >

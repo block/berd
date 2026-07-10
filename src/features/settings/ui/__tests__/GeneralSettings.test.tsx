@@ -14,7 +14,6 @@ import {
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
 import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
-import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { SESSION_COST_STORAGE_KEY } from "@/features/chat/lib/sessionCostPreference";
 import {
   INITIAL_RUNTIME_CONFIG_RESULT,
@@ -25,15 +24,8 @@ import type {
   RuntimeConfig,
   RuntimeConfigLoadResult,
 } from "@/shared/runtime-config/schema";
-import {
-  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-} from "@/features/experiments/experimentDefinitions";
+import { SIDEBAR_GROUP_CHATS_BY_PROJECT_STORAGE_KEY } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import { STYLE_GUIDELINES_STORAGE_KEY } from "@/shared/preferences/styleGuidelinesPreference";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
 import { trustDomain } from "@/shared/lib/trustedDomains";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
@@ -315,7 +307,6 @@ describe("GeneralSettings appearance section", () => {
 
   it("updates sidebar chat grouping", async () => {
     const user = userEvent.setup();
-    setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, true);
 
     renderGeneralSettings();
 
@@ -328,27 +319,11 @@ describe("GeneralSettings appearance section", () => {
     await user.click(switchControl);
 
     await waitFor(() => {
-      const storedPreferences = JSON.parse(
-        localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "{}",
-      );
       expect(
-        storedPreferences.experiments[SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID]
-          .config[SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY],
-      ).toBe(false);
+        localStorage.getItem(SIDEBAR_GROUP_CHATS_BY_PROJECT_STORAGE_KEY),
+      ).toBe("false");
     });
     expect(switchControl).not.toBeChecked();
-  });
-
-  it("hides sidebar chat grouping when the flat chat list experiment is disabled", () => {
-    setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, false);
-
-    renderGeneralSettings();
-
-    expect(
-      screen.queryByRole("switch", {
-        name: "Group Chats by Project",
-      }),
-    ).toBeNull();
   });
 
   it("updates style guidelines", async () => {
@@ -444,26 +419,6 @@ describe("GeneralSettings appearance section", () => {
       "aria-pressed",
       "true",
     );
-  });
-
-  it("toggles Git branch subtitles in the chat list", async () => {
-    const user = userEvent.setup();
-
-    renderGeneralSettings();
-
-    const switchControl = screen.getByRole("switch", {
-      name: "Show Git branches in chat list",
-    });
-    expect(switchControl).not.toBeChecked();
-
-    await user.click(switchControl);
-
-    await waitFor(() => {
-      expect(
-        localStorage.getItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY),
-      ).toBe("true");
-    });
-    expect(switchControl).toBeChecked();
   });
 
   it("updates the default artifact location", async () => {

@@ -70,13 +70,9 @@ export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
 export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
   "sidebar-detachable-chats";
 
-export const SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID = "sidebar-flat-chat-list";
 export const NAVIGATION_REFRESH_EXPERIMENT_ID = "navigation-refresh";
 export const NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID =
   "navigation-chats-under-projects";
-export const SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY =
-  "groupChatsByProject";
-export const DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT = true;
 
 export const EXPERIMENT_DEFINITIONS = [
   {
@@ -115,6 +111,7 @@ export const EXPERIMENT_DEFINITIONS = [
     id: SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
     titleKey: "experiments.sidebarDetachableChats.title",
     descriptionKey: "experiments.sidebarDetachableChats.description",
+    defaultEnabled: false,
   },
   {
     id: NAVIGATION_REFRESH_EXPERIMENT_ID,
@@ -126,20 +123,6 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.navigationChatsUnderProjects.title",
     descriptionKey: "experiments.navigationChatsUnderProjects.description",
     defaultEnabled: false,
-  },
-  {
-    id: SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-    titleKey: "experiments.sidebarFlatChatList.title",
-    descriptionKey: "experiments.sidebarFlatChatList.description",
-    defaultEnabled: true,
-    config: {
-      [SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY]: {
-        type: "boolean",
-        labelKey: "general.groupChatsByProject.label",
-        descriptionKey: "general.groupChatsByProject.description",
-        defaultValue: DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
-      },
-    },
   },
   {
     id: GLOBAL_SHORTCUT_EXPERIMENT_ID,

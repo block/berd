@@ -5,8 +5,11 @@ import {
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_ROW_SPACING_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_ROW_ACTIVE_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
   SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
@@ -60,8 +63,8 @@ export function SidebarNavItem({
     SIDEBAR_NAV_TEXT_CLASS,
     rowSpacingClass,
     isActive
-      ? "bg-sidebar-accent text-sidebar-foreground"
-      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+      ? SIDEBAR_ROW_ACTIVE_CLASS
+      : cn(SIDEBAR_ROW_TEXT_DEFAULT_CLASS, SIDEBAR_ROW_HOVER_CLASS),
   );
 
   const ariaLabel = trailingLabel ? `${label} — ${trailingLabel}` : label;

@@ -43,12 +43,7 @@ import {
 } from "@/features/sessions/lib/sessionSelection";
 import { useSidebarBranchSubtitles } from "@/features/sidebar/hooks/useSidebarBranchSubtitles";
 import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
-import {
-  DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
-  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
-} from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useSidebarChatGroupingPreference } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import {
   MAX_FLAT_SIDEBAR_CHATS,
   groupFlatChatsByActivityAge,
@@ -68,6 +63,7 @@ import { SessionListSurface } from "./SessionListSurface";
 
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
+const DISPLAY_OPTIONS_STORAGE_KEY = "goose:sidebar:display-options";
 const MAX_RECENTS = 20;
 const FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS = 60 * 1000;
 
@@ -76,9 +72,23 @@ type SessionListSectionVisibility = {
   recents: boolean;
 };
 
+type SessionListDisplayOptions = {
+  showChatIcons: boolean;
+  showTimestamps: boolean;
+  showProjectChatIcons: boolean;
+  showProjectTimestamps: boolean;
+};
+
 const DEFAULT_SECTION_VISIBILITY: SessionListSectionVisibility = {
   projects: true,
   recents: true,
+};
+
+const DEFAULT_DISPLAY_OPTIONS: SessionListDisplayOptions = {
+  showChatIcons: true,
+  showTimestamps: true,
+  showProjectChatIcons: false,
+  showProjectTimestamps: true,
 };
 
 type SessionListGroups = {
@@ -150,7 +160,7 @@ function toSessionListItem(
   return {
     id: session.id,
     title: session.title,
-    subtitle: branchName ?? session.subtitle ?? undefined,
+    branchName,
     activityAt: sessionActivityAt(session),
     projectId: session.projectId ?? undefined,
     updatedAt: session.updatedAt,
@@ -360,6 +370,34 @@ function validateSectionVisibility(
   };
 }
 
+function validateDisplayOptions(
+  value: unknown,
+  defaults: SessionListDisplayOptions,
+): SessionListDisplayOptions {
+  if (!value || typeof value !== "object") return defaults;
+  const parsed = value as Partial<
+    Record<keyof SessionListDisplayOptions, unknown>
+  >;
+  return {
+    showChatIcons:
+      typeof parsed.showChatIcons === "boolean"
+        ? parsed.showChatIcons
+        : defaults.showChatIcons,
+    showTimestamps:
+      typeof parsed.showTimestamps === "boolean"
+        ? parsed.showTimestamps
+        : defaults.showTimestamps,
+    showProjectChatIcons:
+      typeof parsed.showProjectChatIcons === "boolean"
+        ? parsed.showProjectChatIcons
+        : defaults.showProjectChatIcons,
+    showProjectTimestamps:
+      typeof parsed.showProjectTimestamps === "boolean"
+        ? parsed.showProjectTimestamps
+        : defaults.showProjectTimestamps,
+  };
+}
+
 export function SessionListCapability({
   activeSessionId,
   collapsed,
@@ -402,6 +440,11 @@ export function SessionListCapability({
     DEFAULT_SECTION_VISIBILITY,
     validateSectionVisibility,
   );
+  const [displayOptions, setDisplayOptions] = usePersistedState(
+    DISPLAY_OPTIONS_STORAGE_KEY,
+    DEFAULT_DISPLAY_OPTIONS,
+    validateDisplayOptions,
+  );
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -426,16 +469,8 @@ export function SessionListCapability({
   const sessionPageCursor = useChatSessionStore((s) => s.sessionPageCursor);
   const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
   const gitBranchSubtitlePreference = useSidebarGitBranchSubtitlePreference();
-  const sidebarFlatChatListExperiment = useExperiment(
-    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
-  );
-  const groupChatsByProject =
-    !sidebarFlatChatListExperiment?.enabled ||
-    Boolean(
-      sidebarFlatChatListExperiment.config[
-        SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY
-      ] ?? DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
-    );
+  const { enabled: groupChatsByProject, setEnabled: setGroupChatsByProject } =
+    useSidebarChatGroupingPreference();
   const [flatChatGroupNowMs, setFlatChatGroupNowMs] = useState(() =>
     Date.now(),
   );
@@ -476,7 +511,7 @@ export function SessionListCapability({
   const branchNameBySessionId = useSidebarBranchSubtitles({
     sessions: visibleSessions.sessions,
     activeWorkspaceBySession,
-    enabled: gitBranchSubtitlePreference.enabled && groupChatsByProject,
+    enabled: gitBranchSubtitlePreference.enabled,
   });
   const homeWidgetInstances = useHomeWidgetStore((state) => state.instances);
   const pinnedHomeChatSessionIds = useMemo(
@@ -713,6 +748,18 @@ export function SessionListCapability({
   const toggleSection = (section: keyof SessionListSectionVisibility) => {
     setSectionVisibility((prev) => ({ ...prev, [section]: !prev[section] }));
   };
+  const setShowChatIcons = (showChatIcons: boolean) => {
+    setDisplayOptions((prev) => ({ ...prev, showChatIcons }));
+  };
+  const setShowTimestamps = (showTimestamps: boolean) => {
+    setDisplayOptions((prev) => ({ ...prev, showTimestamps }));
+  };
+  const setShowProjectChatIcons = (showProjectChatIcons: boolean) => {
+    setDisplayOptions((prev) => ({ ...prev, showProjectChatIcons }));
+  };
+  const setShowProjectTimestamps = (showProjectTimestamps: boolean) => {
+    setDisplayOptions((prev) => ({ ...prev, showProjectTimestamps }));
+  };
   const toggleSessionSelection = (sessionId: string, selected: boolean) => {
     setSelectedSessionIds((current) =>
       getToggledSessionSelection({
@@ -734,6 +781,17 @@ export function SessionListCapability({
     flatChatGroups,
     hasFlatChatOverflow,
     groupChatsByProject,
+    showChatIcons: displayOptions.showChatIcons,
+    onShowChatIconsChange: setShowChatIcons,
+    showTimestamps: displayOptions.showTimestamps,
+    onShowTimestampsChange: setShowTimestamps,
+    showProjectChatIcons: displayOptions.showProjectChatIcons,
+    onShowProjectChatIconsChange: setShowProjectChatIcons,
+    showProjectTimestamps: displayOptions.showProjectTimestamps,
+    onShowProjectTimestampsChange: setShowProjectTimestamps,
+    showGitBranches: gitBranchSubtitlePreference.enabled,
+    onShowGitBranchesChange: gitBranchSubtitlePreference.setEnabled,
+    onGroupChatsByProjectChange: setGroupChatsByProject,
     pinnedHomeChatSessionIds,
     expandedProjects,
     toggleProject,

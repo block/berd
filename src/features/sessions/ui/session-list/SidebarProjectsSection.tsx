@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import {
   IconChevronDown,
+  IconCubePlus,
   IconEdit,
-  IconFolderPlus,
-  IconPlus,
+  IconLayoutList,
 } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -14,13 +14,17 @@ import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
-  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-  SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-  SIDEBAR_SECTION_ACTION_PILL_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
   SIDEBAR_SECTION_HEADER_ROW_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatDragProvider } from "./SidebarChatDragContext";
+import {
+  SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS,
+  SidebarSectionHeader,
+  SidebarSectionHeaderAction,
+} from "./SidebarSectionHeader";
 import { SidebarFlatChatsSection } from "./SidebarFlatChatsSection";
+import { SidebarDisplayOptionsMenu } from "./SidebarDisplayOptionsMenu";
 import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
@@ -35,6 +39,17 @@ export interface SidebarProjectsSectionProps {
   flatChatGroups: FlatChatGroup[];
   hasFlatChatOverflow: boolean;
   groupChatsByProject: boolean;
+  onGroupChatsByProjectChange?: (grouped: boolean) => void;
+  showChatIcons: boolean;
+  onShowChatIconsChange: (show: boolean) => void;
+  showTimestamps: boolean;
+  onShowTimestampsChange: (show: boolean) => void;
+  showProjectChatIcons: boolean;
+  onShowProjectChatIconsChange: (show: boolean) => void;
+  showProjectTimestamps: boolean;
+  onShowProjectTimestampsChange: (show: boolean) => void;
+  showGitBranches: boolean;
+  onShowGitBranchesChange: (show: boolean) => void;
   pinnedHomeChatSessionIds: ReadonlySet<string>;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
@@ -80,7 +95,7 @@ export interface SidebarProjectsSectionProps {
 
 const SECTION_HEADER_TEXT_CLASS = cn(
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
-  "text-muted-foreground",
+  "text-muted-foreground/80",
 );
 
 export function SidebarProjectsSection({
@@ -90,6 +105,17 @@ export function SidebarProjectsSection({
   flatChatGroups,
   hasFlatChatOverflow,
   groupChatsByProject,
+  onGroupChatsByProjectChange,
+  showChatIcons,
+  onShowChatIconsChange,
+  showTimestamps,
+  onShowTimestampsChange,
+  showProjectChatIcons,
+  onShowProjectChatIconsChange,
+  showProjectTimestamps,
+  onShowProjectTimestampsChange,
+  showGitBranches,
+  onShowGitBranchesChange,
   pinnedHomeChatSessionIds,
   expandedProjects,
   toggleProject,
@@ -126,19 +152,25 @@ export function SidebarProjectsSection({
   recentsSectionOpen,
   onToggleProjectsSection,
   onToggleRecentsSection,
-  showTopDivider = true,
+  showTopDivider: _showTopDivider = true,
 }: SidebarProjectsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const showProjectsEmptyState = projects.length === 0;
   const showChatsEmptyState = projectSessions.standalone.length === 0;
   const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
   const showProjects = collapsed || projectsSectionOpen;
-  const emptyActionClasses = `${SIDEBAR_ROW_HEIGHT_CLASS} w-full justify-start gap-2 ${SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS} text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground`;
+  const emptyActionClasses = cn(
+    SIDEBAR_ROW_HEIGHT_CLASS,
+    SIDEBAR_ROW_HOVER_CLASS,
+    "w-full justify-start gap-2 text-sm text-muted-foreground",
+    SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+  );
 
   if (!groupChatsByProject) {
     return (
       <SidebarFlatChatsSection
         groups={flatChatGroups}
+        onGroupChatsByProjectChange={onGroupChatsByProjectChange}
         collapsed={collapsed}
         labelTransition={labelTransition}
         labelVisible={labelVisible}
@@ -164,8 +196,12 @@ export function SidebarProjectsSection({
         onMarkSelectedRead={onMarkSelectedRead}
         onMarkSelectedUnread={onMarkSelectedUnread}
         pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
+        showTimestamps={showTimestamps}
+        onShowTimestampsChange={onShowTimestampsChange}
+        showGitBranches={showGitBranches}
+        onShowGitBranchesChange={onShowGitBranchesChange}
         showViewAllInHistory={hasFlatChatOverflow}
-        showTopDivider={showTopDivider}
+        showTopDivider={_showTopDivider}
       />
     );
   }
@@ -183,69 +219,44 @@ export function SidebarProjectsSection({
               : "opacity-0 max-h-0 overflow-hidden",
         )}
       >
-        {showTopDivider && (
-          <div
-            className={cn(
-              SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-              SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-              "border-t border-border/80",
-            )}
-            aria-hidden
-          />
-        )}
-        <div
-          className={cn(
-            "group/projects-header flex items-center",
-            collapsed
-              ? "px-0 pt-0 pb-1 justify-center"
-              : SIDEBAR_SECTION_HEADER_ROW_CLASS,
-          )}
-        >
-          {!collapsed && (
-            <button
-              type="button"
-              onClick={onToggleProjectsSection}
-              aria-expanded={projectsSectionOpen}
-              className={cn(
-                "flex min-w-0 flex-1 items-center gap-0.5 rounded-sm py-1 text-left transition-colors hover:text-foreground",
-                labelTransition,
-                labelVisible
-                  ? "opacity-100 w-auto"
-                  : "opacity-0 w-0 overflow-hidden",
-              )}
-            >
-              <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
-                {t("sections.projects")}
-              </span>
-              {!showProjectsEmptyState && (
-                <IconChevronDown
-                  className={cn(
-                    "invisible size-3 shrink-0 text-muted-foreground transition-transform duration-150",
-                    "group-hover/projects-header:visible",
-                    !projectsSectionOpen && "-rotate-90",
-                  )}
+        <SidebarSectionHeader
+          label={t("sections.projects")}
+          collapsed={collapsed}
+          labelTransition={labelTransition}
+          labelVisible={labelVisible}
+          onToggleOpen={onToggleProjectsSection}
+          isOpen={projectsSectionOpen}
+          showChevron={!showProjectsEmptyState}
+          labelClassName={SECTION_HEADER_TEXT_CLASS}
+          actions={
+            !showProjectsEmptyState ? (
+              <>
+                <SidebarSectionHeaderAction
+                  icon={IconCubePlus}
+                  label={t("actions.newProject")}
+                  onClick={onCreateProject}
                 />
-              )}
-            </button>
-          )}
-          {!collapsed && !showProjectsEmptyState && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={onCreateProject}
-              aria-label={t("actions.newProject")}
-              title={t("actions.newProject")}
-              className={cn(
-                SIDEBAR_SECTION_ACTION_PILL_CLASS,
-                "size-5 bg-transparent p-0 text-muted-foreground hover:bg-sidebar-section-action-bg hover:text-sidebar-foreground focus-visible:bg-sidebar-section-action-bg focus-visible:text-sidebar-foreground",
-                "invisible pointer-events-none group-hover/projects-header:visible group-hover/projects-header:pointer-events-auto group-focus-within/projects-header:visible group-focus-within/projects-header:pointer-events-auto focus-visible:visible focus-visible:pointer-events-auto",
-              )}
-            >
-              <IconPlus className="size-4" />
-            </Button>
-          )}
-        </div>
+                {onGroupChatsByProjectChange ? (
+                  <SidebarSectionHeaderAction
+                    icon={IconLayoutList}
+                    label={t("actions.ungroupChats")}
+                    onClick={() => onGroupChatsByProjectChange(false)}
+                  />
+                ) : null}
+                <SidebarDisplayOptionsMenu
+                  labelKey="actions.projectDisplayOptions"
+                  showChatIcons={showProjectChatIcons}
+                  onShowChatIconsChange={onShowProjectChatIconsChange}
+                  showTimestamps={showProjectTimestamps}
+                  onShowTimestampsChange={onShowProjectTimestampsChange}
+                  showGitBranches={showGitBranches}
+                  onShowGitBranchesChange={onShowGitBranchesChange}
+                  className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
+                />
+              </>
+            ) : null
+          }
+        />
 
         {showProjects && (
           <SidebarProjectList
@@ -277,6 +288,8 @@ export function SidebarProjectsSection({
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
             pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
+            showChatIcons={showProjectChatIcons}
+            showTimestamps={showProjectTimestamps}
             onReorderProject={onReorderProject}
             hasMoreSessions={hasMoreSessions}
           />
@@ -284,7 +297,7 @@ export function SidebarProjectsSection({
 
         {showProjectsEmptyState &&
           (collapsed ? (
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-0">
               <Button
                 type="button"
                 variant="ghost"
@@ -295,11 +308,11 @@ export function SidebarProjectsSection({
                 title={t("empty.createProject")}
                 className="rounded-lg"
               >
-                <IconFolderPlus className="size-4" />
+                <IconCubePlus className="size-4" />
               </Button>
             </div>
           ) : (
-            <div className="space-y-0.5">
+            <div className="space-y-0">
               <Button
                 type="button"
                 variant="ghost"
@@ -307,7 +320,7 @@ export function SidebarProjectsSection({
                 size="xs"
                 onClick={onCreateProject}
                 className={emptyActionClasses}
-                leftIcon={<IconFolderPlus className="size-3.5" />}
+                leftIcon={<IconCubePlus className="size-3.5" />}
               >
                 {t("empty.createProject")}
               </Button>
@@ -315,7 +328,7 @@ export function SidebarProjectsSection({
           ))}
 
         {showCombinedEmptyState && collapsed ? (
-          <div className="flex flex-col items-center gap-1">
+          <div className="flex flex-col items-center gap-0">
             <Button
               type="button"
               variant="ghost"
@@ -336,7 +349,7 @@ export function SidebarProjectsSection({
                 "relative flex items-center transition-all duration-300",
                 collapsed
                   ? "px-0 pt-0 pb-1 justify-center"
-                  : "px-3 pt-3 pb-1.5",
+                  : SIDEBAR_SECTION_HEADER_ROW_CLASS,
               )}
             >
               {!collapsed && (
@@ -345,7 +358,7 @@ export function SidebarProjectsSection({
                   onClick={onToggleRecentsSection}
                   aria-expanded={recentsSectionOpen}
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-1.5 rounded-sm py-1 pl-3 text-left transition-colors hover:text-foreground",
+                    "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm pl-3 text-left transition-colors hover:text-foreground",
                     "-ml-3",
                     labelTransition,
                     labelVisible
@@ -365,7 +378,7 @@ export function SidebarProjectsSection({
                 </button>
               )}
             </div>
-            <div className="space-y-0.5">
+            <div className="space-y-0">
               <Button
                 type="button"
                 variant="ghost"
@@ -407,6 +420,12 @@ export function SidebarProjectsSection({
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
             pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
+            showChatIcons={showChatIcons}
+            onShowChatIconsChange={onShowChatIconsChange}
+            showTimestamps={showTimestamps}
+            onShowTimestampsChange={onShowTimestampsChange}
+            showGitBranches={showGitBranches}
+            onShowGitBranchesChange={onShowGitBranchesChange}
             isOpen={recentsSectionOpen}
             onToggleOpen={onToggleRecentsSection}
             sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}

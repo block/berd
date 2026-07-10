@@ -598,9 +598,9 @@ export function AppShell({
   );
   const isNavigationPrototypeEnabled =
     Boolean(navigationRefreshExperiment?.enabled) && !import.meta.env.VITEST;
-  const showNavigationPrototypeChatsUnderProjects = Boolean(
-    navigationChatsUnderProjectsExperiment?.enabled,
-  );
+  const showNavigationPrototypeChatsUnderProjects =
+    isNavigationPrototypeEnabled &&
+    Boolean(navigationChatsUnderProjectsExperiment?.enabled);
   const navigationPrototypeMode = getNavigationPrototypeMode();
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
