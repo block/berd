@@ -34,7 +34,8 @@ import {
   removePersistedChatWorkspaceMetadata,
 } from "./workspaceAttachmentPersistence";
 
-const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
+const RIGHT_RAIL_OPEN_STORAGE_KEY = "goose:right-rail-open";
+const LEGACY_CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
 let sessionLoadEpoch = 0;
 let archiveMutationOperationId = 0;
@@ -153,7 +154,7 @@ interface ChatSessionStoreState {
   hasHydratedSessions: boolean;
   sessionPageCursor: string | null;
   hasMoreSessions: boolean;
-  isContextPanelOpen: boolean;
+  isRightRailOpen: boolean;
   activeWorkspaceBySession: Record<string, ActiveWorkspace>;
   modelSelectionIntentBySession: Record<string, ModelSelectionIntent>;
   archiveMutationBySessionId: ArchiveMutationBySessionId;
@@ -213,7 +214,7 @@ interface ChatSessionStoreActions {
   unarchiveSession: (id: string) => Promise<void>;
 
   setActiveSession: (sessionId: string | null) => void;
-  setContextPanelOpen: (sessionId: string, open: boolean) => void;
+  setRightRailOpen: (open: boolean) => void;
   setActiveWorkspace: (sessionId: string, context: ActiveWorkspace) => void;
   clearActiveWorkspace: (sessionId: string) => void;
   attachWorkspace: (sessionId: string, workspace: AttachWorkspaceOpts) => void;
@@ -340,24 +341,33 @@ function rollbackFailedArchiveMutation(
   };
 }
 
-function loadContextPanelOpenPreference(): boolean {
+function loadRightRailOpenPreference(): boolean {
   if (typeof window === "undefined") return false;
 
   try {
-    return window.localStorage.getItem(CONTEXT_PANEL_OPEN_STORAGE_KEY) === "1";
+    const storedValue = window.localStorage.getItem(
+      RIGHT_RAIL_OPEN_STORAGE_KEY,
+    );
+    if (storedValue !== null) return storedValue === "1";
+
+    const legacyValue = window.localStorage.getItem(
+      LEGACY_CONTEXT_PANEL_OPEN_STORAGE_KEY,
+    );
+    if (legacyValue !== null) {
+      window.localStorage.setItem(RIGHT_RAIL_OPEN_STORAGE_KEY, legacyValue);
+      return legacyValue === "1";
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
-function persistContextPanelOpenPreference(open: boolean): void {
+function persistRightRailOpenPreference(open: boolean): void {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
-      CONTEXT_PANEL_OPEN_STORAGE_KEY,
-      open ? "1" : "0",
-    );
+    window.localStorage.setItem(RIGHT_RAIL_OPEN_STORAGE_KEY, open ? "1" : "0");
   } catch {
     // localStorage may be unavailable
   }
@@ -408,7 +418,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   hasHydratedSessions: false,
   sessionPageCursor: null,
   hasMoreSessions: false,
-  isContextPanelOpen: loadContextPanelOpenPreference(),
+  isRightRailOpen: loadRightRailOpenPreference(),
   activeWorkspaceBySession: {},
   modelSelectionIntentBySession: {},
   archiveMutationBySessionId: {},
@@ -894,9 +904,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     set({ activeSessionId: sessionId });
   },
 
-  setContextPanelOpen: (_sessionId, open) => {
-    persistContextPanelOpenPreference(open);
-    set({ isContextPanelOpen: open });
+  setRightRailOpen: (open) => {
+    persistRightRailOpenPreference(open);
+    set({ isRightRailOpen: open });
   },
 
   setActiveWorkspace: (sessionId, context) => {

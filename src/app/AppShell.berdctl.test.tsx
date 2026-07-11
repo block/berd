@@ -288,7 +288,7 @@ describe("AppShell berdctl integration", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: false,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });

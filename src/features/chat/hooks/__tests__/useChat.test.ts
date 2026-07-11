@@ -95,7 +95,7 @@ describe("useChat", () => {
       sessions: [],
       activeSessionId: null,
       isLoading: false,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
     });
     useAgentStore.setState({

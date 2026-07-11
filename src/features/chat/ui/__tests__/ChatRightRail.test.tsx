@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { CSSProperties } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatRightRail } from "../ChatRightRail";
@@ -9,7 +15,18 @@ const mocks = vi.hoisted(() => ({
   listPersonas: vi.fn(),
   recoverDraftAgent: vi.fn(),
   setAgentBuilderSessionLocalEdits: vi.fn(),
+  rightRailOpen: false,
+  compactViewport: false,
+  reducedMotion: false,
 }));
+
+vi.mock("motion/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("motion/react")>();
+  return {
+    ...actual,
+    useReducedMotion: () => mocks.reducedMotion,
+  };
+});
 
 vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
   AgentBuilderRail: (props: {
@@ -83,24 +100,45 @@ vi.mock("../../hooks/useGitStateAutoRefresh", () => ({
   useGitStateAutoRefreshOnChatSettled: vi.fn(),
 }));
 
+vi.mock("@/features/terminal/capabilities/TerminalCapability", () => ({
+  TerminalCapability: () => <div data-testid="rail-terminal">Terminal</div>,
+}));
+
 vi.mock("../ChatContextPanel", () => ({
   CP_TOTAL_W: 339,
-  ChatContextPanel: () => <div data-testid="chat-context-panel" />,
-  useChatContextPanelCompactViewport: () => false,
+  ChatContextPanel: ({
+    isVisible,
+    elevated,
+  }: {
+    isVisible: boolean;
+    elevated?: boolean;
+  }) =>
+    isVisible ? (
+      <button type="button" data-elevated={elevated ? "true" : "false"}>
+        Context content
+      </button>
+    ) : null,
+  useChatContextPanelCompactViewport: () => mocks.compactViewport,
 }));
 
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (
     selector: (state: {
-      isContextPanelOpen: boolean;
+      isRightRailOpen: boolean;
       patchSession: typeof mocks.patchSession;
     }) => unknown,
   ) =>
-    selector({ isContextPanelOpen: false, patchSession: mocks.patchSession }),
+    selector({
+      isRightRailOpen: mocks.rightRailOpen,
+      patchSession: mocks.patchSession,
+    }),
 }));
 
 describe("ChatRightRail", () => {
   beforeEach(() => {
+    mocks.rightRailOpen = false;
+    mocks.compactViewport = false;
+    mocks.reducedMotion = false;
     mocks.patchSession.mockReset();
     mocks.setPersonas.mockReset();
     mocks.listPersonas.mockReset();
@@ -131,7 +169,9 @@ describe("ChatRightRail", () => {
     expect(screen.getByTestId("agent-builder-target")).toHaveTextContent(
       "/path",
     );
-    expect(screen.queryByTestId("chat-context-panel")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Context content" }),
+    ).toBeNull();
     expect(screen.getByTestId("agent-builder-rail").parentElement).toHaveStyle({
       width: "509px",
     });
@@ -159,7 +199,9 @@ describe("ChatRightRail", () => {
     expect(screen.getByTestId("agent-builder-draft-state")).toHaveTextContent(
       "preparing",
     );
-    expect(screen.queryByTestId("chat-context-panel")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Context content" }),
+    ).toBeNull();
   });
 
   it("applies builder column entrance props to the build-agent rail shell", () => {
@@ -189,7 +231,8 @@ describe("ChatRightRail", () => {
     ).toBe("130ms");
   });
 
-  it("renders ChatContextPanel for normal sessions", () => {
+  it("renders context inside an open rail", () => {
+    mocks.rightRailOpen = true;
     render(
       <ChatRightRail
         session={{ id: "s2", intent: null } as never}
@@ -198,8 +241,181 @@ describe("ChatRightRail", () => {
       />,
     );
 
-    expect(screen.getByTestId("chat-context-panel")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Context content" }),
+    ).toBeTruthy();
     expect(screen.queryByTestId("agent-builder-rail")).toBeNull();
+  });
+
+  it("gives the whole rail a usable overlay width in compact mode", () => {
+    mocks.rightRailOpen = true;
+    mocks.compactViewport = true;
+    const { container } = render(
+      <ChatRightRail session={{ id: "s2", intent: null } as never} />,
+    );
+
+    expect(container.querySelector("[data-chat-right-rail]")).toHaveStyle({
+      width: "0px",
+    });
+    const overlay = container.querySelector("[data-right-rail-surface]");
+    expect(overlay).toHaveStyle({
+      width: "min(339px, calc(100vw - 1.5rem))",
+    });
+    expect(overlay).not.toHaveClass(
+      "overflow-hidden",
+      "rounded-md",
+      "shadow-popover",
+    );
+    expect(
+      screen.getByRole("button", { name: "Context content" }),
+    ).toHaveAttribute("data-elevated", "true");
+  });
+
+  it("keeps context and terminal as separate elevated panels in overlay mode", () => {
+    mocks.rightRailOpen = true;
+    mocks.compactViewport = true;
+    const terminalController = {
+      visible: true,
+      expanded: true,
+      placement: {
+        kind: "docked",
+        region: "rightRail",
+        slot: "belowContext",
+        size: { height: 300 },
+      },
+    } as never;
+    const { container } = render(
+      <ChatRightRail
+        session={{ id: "s2", intent: null } as never}
+        terminalController={terminalController}
+        terminalRootRef={{ current: null }}
+      />,
+    );
+
+    const surface = container.querySelector("[data-right-rail-surface]");
+    const terminalPanel = screen.getByTestId("rail-terminal").parentElement;
+    expect(surface).not.toHaveClass("overflow-hidden", "shadow-popover");
+    expect(
+      screen.getByRole("button", { name: "Context content" }),
+    ).toHaveAttribute("data-elevated", "true");
+    expect(terminalPanel).toHaveClass(
+      "overflow-hidden",
+      "rounded-md",
+      "shadow-popover",
+    );
+  });
+
+  it("previews the full rail as an overlay when docking into a closed rail", () => {
+    mocks.compactViewport = false;
+    const { container } = render(
+      <ChatRightRail
+        session={{ id: "s2", intent: null } as never}
+        terminalDockPreview={{
+          kind: "docked",
+          region: "rightRail",
+          slot: "belowContext",
+          size: { height: 300 },
+        }}
+      />,
+    );
+
+    expect(container.querySelector("[data-chat-right-rail]")).toHaveStyle({
+      width: "0px",
+    });
+    expect(
+      screen.getByRole("button", { name: "Context content" }),
+    ).toBeVisible();
+    expect(
+      container.querySelector("[data-terminal-rail-dock-preview]"),
+    ).toBeInTheDocument();
+    const previewSurface = container.querySelector("[data-right-rail-surface]");
+    expect(container.querySelector("[data-chat-right-rail]")).toHaveClass(
+      "overflow-visible",
+    );
+    expect(previewSurface).toHaveClass("absolute", "right-0");
+    expect(previewSurface).toHaveStyle({
+      width: "min(339px, calc(100vw - 1.5rem))",
+    });
+  });
+
+  it("skips the docking handoff when reduced motion is requested", () => {
+    mocks.rightRailOpen = true;
+    mocks.compactViewport = true;
+    mocks.reducedMotion = true;
+    const { container, rerender } = render(
+      <ChatRightRail session={{ id: "s2", intent: null } as never} />,
+    );
+
+    mocks.compactViewport = false;
+    rerender(<ChatRightRail session={{ id: "s2", intent: null } as never} />);
+
+    expect(container.querySelector("[data-chat-right-rail]")).toHaveStyle({
+      transition: "none",
+    });
+    expect(
+      container.querySelector("[data-right-rail-surface]"),
+    ).not.toHaveClass("absolute");
+  });
+
+  it("keeps the rail surface floating while the chat slides left into docked layout", () => {
+    vi.useFakeTimers();
+    mocks.rightRailOpen = true;
+    mocks.compactViewport = true;
+    const { container, rerender } = render(
+      <ChatRightRail session={{ id: "s2", intent: null } as never} />,
+    );
+
+    mocks.compactViewport = false;
+    rerender(<ChatRightRail session={{ id: "s2", intent: null } as never} />);
+
+    const rail = container.querySelector("[data-chat-right-rail]");
+    const surface = container.querySelector("[data-right-rail-surface]");
+    expect(rail).toHaveStyle({ width: "339px" });
+    expect(rail).toHaveClass("overflow-visible");
+    expect(rail).not.toHaveClass("overflow-hidden");
+    expect(surface).toHaveClass("absolute", "right-0", "top-0");
+    expect(surface).not.toHaveClass("shadow-popover");
+
+    act(() => vi.advanceTimersByTime(200));
+    expect(rail).toHaveClass("overflow-hidden");
+    expect(surface).not.toHaveClass("absolute");
+    vi.useRealTimers();
+  });
+
+  it("hides a rail-docked terminal when the rail closes without changing its controller", () => {
+    const terminalController = {
+      visible: true,
+      expanded: true,
+      placement: {
+        kind: "docked",
+        region: "rightRail",
+        slot: "belowContext",
+        size: { height: 300 },
+      },
+    } as never;
+    const terminalRootRef = { current: null };
+
+    const { rerender } = render(
+      <ChatRightRail
+        session={{ id: "s2", intent: null } as never}
+        terminalController={terminalController}
+        terminalRootRef={terminalRootRef}
+      />,
+    );
+    expect(screen.getByTestId("rail-terminal")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("rail-terminal").closest("[data-chat-right-rail]"),
+    ).toHaveAttribute("aria-hidden", "true");
+
+    mocks.rightRailOpen = true;
+    rerender(
+      <ChatRightRail
+        session={{ id: "s2", intent: null } as never}
+        terminalController={terminalController}
+        terminalRootRef={terminalRootRef}
+      />,
+    );
+    expect(screen.getByTestId("rail-terminal")).toBeVisible();
   });
 
   it("refreshes agents and notifies the app shell when a draft is promoted", async () => {

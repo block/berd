@@ -130,8 +130,8 @@ export function SessionWindowApp({
     currentWindowLabelOverride ?? null,
   );
   const [initialMirrorVersion, setInitialMirrorVersion] = useState(0);
-  const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
-  const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
+  const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
+  const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
 
   const loadOwnedSession = useCallback(
     async (options: { force?: boolean } = {}) => {
@@ -141,12 +141,12 @@ export function SessionWindowApp({
     [sessionId],
   );
   const securityMlEnabled = getBuildFeatureState().securityMl;
-  const contextPanelLabel = isContextPanelOpen
-    ? t("context.closePanel")
-    : t("context.openPanel");
-  const handleToggleContextPanel = useCallback(() => {
-    setContextPanelOpen(sessionId, !isContextPanelOpen);
-  }, [isContextPanelOpen, sessionId, setContextPanelOpen]);
+  const rightRailLabel = isRightRailOpen
+    ? t("rightRail.close")
+    : t("rightRail.open");
+  const handleToggleRightRail = useCallback(() => {
+    setRightRailOpen(!isRightRailOpen);
+  }, [isRightRailOpen, setRightRailOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -343,10 +343,12 @@ export function SessionWindowApp({
       <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
         <SessionWindowTopBar
           title={session?.title ?? "Berd"}
-          contextPanelLabel={contextPanelLabel}
-          contextPanelOpen={isContextPanelOpen}
-          showContextPanelToggle={Boolean(session)}
-          onToggleContextPanel={handleToggleContextPanel}
+          rightRailLabel={rightRailLabel}
+          rightRailOpen={isRightRailOpen}
+          showRightRailToggle={Boolean(
+            session && session.intent !== "build-agent",
+          )}
+          onToggleRightRail={handleToggleRightRail}
         />
         {(phase === "ready" || phase === "mirror") && session ? (
           <div className="min-h-0 flex-1">

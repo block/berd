@@ -9,21 +9,21 @@ import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 interface SessionWindowTopBarProps {
   title: string;
   className?: string;
-  contextPanelLabel?: string;
-  contextPanelOpen?: boolean;
-  showContextPanelToggle?: boolean;
-  onToggleContextPanel?: () => void;
+  rightRailLabel?: string;
+  rightRailOpen?: boolean;
+  showRightRailToggle?: boolean;
+  onToggleRightRail?: () => void;
 }
 
 export function SessionWindowTopBar({
   title,
   className,
-  contextPanelLabel,
-  contextPanelOpen = false,
-  showContextPanelToggle = false,
-  onToggleContextPanel,
+  rightRailLabel,
+  rightRailOpen = false,
+  showRightRailToggle = false,
+  onToggleRightRail,
 }: SessionWindowTopBarProps) {
-  const ContextPanelIcon = contextPanelOpen
+  const RightRailIcon = rightRailOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
 
@@ -54,16 +54,17 @@ export function SessionWindowTopBar({
         className="flex w-[var(--spacing-app-top-bar-leading)] shrink-0 justify-end"
         data-tauri-drag-region
       >
-        {showContextPanelToggle ? (
+        {showRightRailToggle ? (
           <TopBarIconButton
             type="button"
             size="icon-top-bar"
-            onClick={onToggleContextPanel}
-            aria-label={contextPanelLabel}
-            title={contextPanelLabel}
-            data-context-panel-toggle="true"
+            onClick={onToggleRightRail}
+            aria-pressed={rightRailOpen}
+            aria-label={rightRailLabel}
+            title={rightRailLabel}
+            data-right-rail-toggle="true"
           >
-            <ContextPanelIcon aria-hidden="true" />
+            <RightRailIcon aria-hidden="true" />
           </TopBarIconButton>
         ) : null}
       </div>

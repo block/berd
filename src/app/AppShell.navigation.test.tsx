@@ -683,7 +683,7 @@ describe("AppShell global navigation", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: false,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });

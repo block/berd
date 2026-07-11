@@ -92,10 +92,10 @@ describe("TopBar", () => {
     setWindowWidth(900);
 
     renderTopBar({
-      contextPanelLabel: "Details",
+      rightRailLabel: "Details",
       onGoHome: vi.fn(),
       onSearchClick: vi.fn(),
-      showContextPanelToggle: true,
+      showRightRailToggle: true,
     });
 
     expect(
@@ -106,7 +106,7 @@ describe("TopBar", () => {
       screen.getByRole("button", { name: /feedback/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute(
-      "data-context-panel-toggle",
+      "data-right-rail-toggle",
       "true",
     );
   });

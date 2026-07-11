@@ -123,7 +123,7 @@ describe("AppShell startup diagnostics", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: false,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });

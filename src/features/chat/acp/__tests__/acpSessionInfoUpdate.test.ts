@@ -20,7 +20,7 @@ describe("ACP session info updates", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: false,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
     });
   });

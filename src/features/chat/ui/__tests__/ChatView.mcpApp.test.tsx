@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
+  setRightRailOpen: vi.fn(),
   handleSend: vi.fn(() => true),
   handleDraftChange: vi.fn(),
   queueTerminalCommand: vi.fn(),
@@ -39,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   >(),
   t: vi.fn((key: string, _options?: Record<string, unknown>) => key),
   useChatSessionController: vi.fn(),
-  isContextPanelOpen: false,
+  isRightRailOpen: false,
   activeWorkspaceBySession: {} as Record<
     string,
     { path: string; branch: string | null }
@@ -247,8 +248,8 @@ vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
       activeWorkspaceBySession: mocks.activeWorkspaceBySession,
-      isContextPanelOpen: mocks.isContextPanelOpen,
-      setContextPanelOpen: vi.fn(),
+      isRightRailOpen: mocks.isRightRailOpen,
+      setRightRailOpen: mocks.setRightRailOpen,
     }),
 }));
 
@@ -288,6 +289,8 @@ function readPersistedTerminalState(): {
   tabs?: PersistedTerminalTab[];
   placement?: {
     kind?: string;
+    region?: string;
+    slot?: string;
     rect?: { x: number; y: number; width: number; height: number };
     size?: { height?: number };
   };
@@ -361,6 +364,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
+    mocks.setRightRailOpen.mockClear();
     mocks.handleSend.mockClear();
     mocks.handleDraftChange.mockClear();
     mocks.queueTerminalCommand.mockClear();
@@ -369,7 +373,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.runCommandInTerminalSession.mockReturnValue(false);
     mocks.stopTerminalSession.mockClear();
     mocks.terminalStatusListeners.clear();
-    mocks.isContextPanelOpen = false;
+    mocks.isRightRailOpen = false;
     mocks.activeWorkspaceBySession = {};
     mocks.afterNextPaintCallbacks = [];
     mocks.autoFlushAfterNextPaint = true;
@@ -1017,7 +1021,7 @@ describe("ChatView MCP app messaging", () => {
   });
 
   it("uses an inline rail gap while the desktop context panel takes layout space", () => {
-    mocks.isContextPanelOpen = true;
+    mocks.isRightRailOpen = true;
     mockMatchMedia(false);
     const activeSession = {
       id: "session-1",
@@ -1044,7 +1048,7 @@ describe("ChatView MCP app messaging", () => {
   });
 
   it("keeps the context panel mounted without a rail gap in compact overlay mode", () => {
-    mocks.isContextPanelOpen = true;
+    mocks.isRightRailOpen = true;
     mockMatchMedia(true);
     const activeSession = {
       id: "session-1",
@@ -1212,6 +1216,35 @@ describe("ChatView MCP app messaging", () => {
       "data-cwd",
       "/Users/test/repo",
     );
+  });
+
+  it("opens a closed right rail when activating a terminal docked there", async () => {
+    window.localStorage.setItem(
+      terminalStorageKey,
+      JSON.stringify({
+        tabs: [{ id: "tab-1", cwd: "/Users/test/repo" }],
+        activeTabId: "tab-1",
+        expanded: false,
+        placement: {
+          kind: "docked",
+          region: "rightRail",
+          slot: "belowContext",
+          size: { height: 300 },
+        },
+      }),
+    );
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "toggle terminal" }),
+    );
+
+    expect(mocks.setRightRailOpen).toHaveBeenCalledWith(true);
+    expect(readPersistedTerminalState().placement).toMatchObject({
+      kind: "docked",
+      region: "rightRail",
+    });
   });
 
   it("persists terminal tabs for the chat session", async () => {

@@ -932,7 +932,7 @@ export function AppShell({
   );
   const promoteChatSessionId = useChatStore((s) => s.promoteSessionId);
   const cleanupChatSession = useChatStore((s) => s.cleanupSession);
-  const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
+  const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
   const activeProjectTint = useActiveProjectTint();
   const hasHydratedSessions = useChatSessionStore(selectHasHydratedSessions);
   const sessionsLoading = useChatSessionStore(selectSessionsLoading);
@@ -992,7 +992,7 @@ export function AppShell({
       unlisten?.();
     };
   }, []);
-  const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
+  const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
   const { selectedProvider } = useProviderSelection();
   const selectedProviderRef = useRef(selectedProvider);
   selectedProviderRef.current = selectedProvider;
@@ -1331,9 +1331,9 @@ export function AppShell({
     renderedLocation.view === "chat" && renderedLocation.sessionId
       ? sessions.find((session) => session.id === renderedLocation.sessionId)
       : undefined;
-  const contextPanelLabel = isContextPanelOpen
-    ? t("context.closePanel")
-    : t("context.openPanel");
+  const rightRailLabel = isRightRailOpen
+    ? t("rightRail.close")
+    : t("rightRail.open");
 
   useEffect(() => {
     perfLog(
@@ -3793,13 +3793,13 @@ export function AppShell({
     });
   }, [goBack, guardAppNavigation, setActiveSession]);
 
-  const toggleContextPanel = useCallback(() => {
+  const toggleRightRail = useCallback(() => {
     if (!activeSessionId) {
       return;
     }
 
-    setContextPanelOpen(activeSessionId, !isContextPanelOpen);
-  }, [activeSessionId, isContextPanelOpen, setContextPanelOpen]);
+    setRightRailOpen(!isRightRailOpen);
+  }, [activeSessionId, isRightRailOpen, setRightRailOpen]);
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const shortcutsOpen = useShortcutsDialogStore((state) => state.open);
@@ -4202,14 +4202,14 @@ export function AppShell({
           onToggleSidebar: toggleSidebar,
           onGoBack: goBack,
           onGoForward: goForward,
-          showContextPanelToggle:
+          showRightRailToggle:
             activeView === "chat" &&
             Boolean(activeSessionId) &&
             activeSession?.intent !== "build-agent",
           chromeInsets: topBarChromeInsets,
-          contextPanelOpen: isContextPanelOpen,
-          contextPanelLabel,
-          onToggleContextPanel: toggleContextPanel,
+          rightRailOpen: isRightRailOpen,
+          rightRailLabel,
+          onToggleRightRail: toggleRightRail,
           onFeedbackClick: isFeedbackEnabled ? handleFeedbackClick : undefined,
           onSearchClick: () => handleNavigate("search"),
         }}

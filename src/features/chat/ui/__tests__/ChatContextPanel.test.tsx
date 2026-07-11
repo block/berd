@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import { fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { render, renderHook, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CHAT_CONTEXT_PANEL_COMPACT_BASE_WIDTH,
@@ -10,22 +9,13 @@ import {
 } from "../ChatContextPanel";
 
 const mockContextPanelWorktreeTracker = vi.hoisted(() => vi.fn());
-
-vi.mock("motion/react", () => ({
-  AnimatePresence: ({ children }: { children: ReactNode }) => children,
-  motion: {
-    div: ({
-      children,
-      ...props
-    }: React.HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) => (
-      <div {...props}>{children}</div>
-    ),
-  },
-  useReducedMotion: () => false,
-}));
+const mockContextPanel = vi.hoisted(() => vi.fn());
 
 vi.mock("../ContextPanel", () => ({
-  ContextPanel: () => <div data-testid="context-panel-content" />,
+  ContextPanel: (props: unknown) => {
+    mockContextPanel(props);
+    return <div data-testid="context-panel-content" />;
+  },
   ContextPanelWorktreeTracker: (props: unknown) => {
     mockContextPanelWorktreeTracker(props);
     return <div data-testid="context-panel-worktree-tracker" />;
@@ -48,6 +38,7 @@ describe("ChatContextPanel", () => {
   beforeEach(() => {
     mockMatchMedia(false);
     mockContextPanelWorktreeTracker.mockClear();
+    mockContextPanel.mockClear();
   });
 
   it("switches to compact overlay mode at 800px and below", () => {
@@ -92,40 +83,21 @@ describe("ChatContextPanel", () => {
     expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 1012px)");
   });
 
-  it("hugs content height without overlay shadow in inline mode", () => {
+  it("shows the panel at full material opacity without a fade", () => {
     const { container } = render(
-      <ChatContextPanel activeSessionId="session-1" isOpen />,
+      <ChatContextPanel activeSessionId="session-1" isVisible />,
     );
 
-    const frame = container.querySelector("aside")?.parentElement;
-    const panel = container.querySelector("aside");
-
-    expect(frame).toHaveClass("self-start");
-    expect(frame).toHaveClass("max-h-full");
-    expect(frame).not.toHaveClass("h-full");
-    expect(frame).not.toHaveClass(
-      "max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))]",
-    );
-    expect(panel).toHaveClass("h-auto");
-    expect(panel).toHaveClass("max-h-full");
-    expect(panel).toHaveClass("rounded-md");
-    expect(panel).not.toHaveClass("rounded-sm");
-    expect(panel).toHaveClass(
-      "[backdrop-filter:var(--backdrop-chat-context-panel)]",
-    );
-    expect(panel).toHaveClass(
-      "[-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
-    );
-    expect(panel).not.toHaveClass("backdrop-blur-md");
-    expect(panel).not.toHaveClass("h-full");
-    expect(panel).not.toHaveClass("shadow-popover");
+    const panel = container.querySelector(".chat-context-panel-surface");
+    expect(panel?.parentElement).not.toHaveStyle({ opacity: "0" });
+    expect(panel?.parentElement).not.toHaveStyle({ opacity: "0.5" });
   });
 
   it("keeps worktree tracking mounted while the panel is closed", () => {
     render(
       <ChatContextPanel
         activeSessionId="session-1"
-        isOpen={false}
+        isVisible={false}
         project={{ workingDirs: ["/Users/test/project"] }}
         sessionWorkingDir="/Users/test/project"
       />,
@@ -137,70 +109,6 @@ describe("ChatContextPanel", () => {
       projectWorkingDirs: ["/Users/test/project"],
       sessionWorkingDir: "/Users/test/project",
     });
-    expect(screen.queryByTestId("context-panel-content")).toBeNull();
-  });
-
-  it("hugs content and uses a shadow in compact overlay mode", () => {
-    mockMatchMedia(true);
-
-    const { container } = render(
-      <ChatContextPanel activeSessionId="session-1" isOpen />,
-    );
-
-    const frame = container.querySelector("aside")?.parentElement;
-    const panel = container.querySelector("aside");
-
-    expect(frame).toHaveClass("absolute");
-    expect(frame).toHaveClass(
-      "max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))]",
-    );
-    expect(frame).not.toHaveClass("bottom-3");
-    expect(panel).toHaveClass("max-h-full");
-    expect(panel).toHaveClass("shadow-popover");
-    expect(panel).not.toHaveClass("h-full");
-  });
-
-  it("requests close on outside pointer down only", () => {
-    mockMatchMedia(true);
-    const onRequestClose = vi.fn();
-    render(
-      <>
-        <button type="button">Outside</button>
-        <ChatContextPanel
-          activeSessionId="session-1"
-          isOpen
-          onRequestClose={onRequestClose}
-        />
-      </>,
-    );
-
-    fireEvent.pointerDown(screen.getByTestId("context-panel-content"));
-    expect(onRequestClose).not.toHaveBeenCalled();
-
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
-    expect(onRequestClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not request close on the context panel toggle in compact overlay mode", () => {
-    mockMatchMedia(true);
-    const onRequestClose = vi.fn();
-    render(
-      <>
-        <button type="button" data-context-panel-toggle="true">
-          Toggle context
-        </button>
-        <ChatContextPanel
-          activeSessionId="session-1"
-          isOpen
-          onRequestClose={onRequestClose}
-        />
-      </>,
-    );
-
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Toggle context" }),
-    );
-
-    expect(onRequestClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("context-panel-content")).not.toBeVisible();
   });
 });

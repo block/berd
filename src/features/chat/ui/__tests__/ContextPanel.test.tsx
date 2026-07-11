@@ -345,7 +345,7 @@ describe("ContextPanel", () => {
       hasHydratedSessions: true,
       sessionPageCursor: null,
       hasMoreSessions: false,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });

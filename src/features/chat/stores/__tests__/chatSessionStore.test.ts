@@ -49,7 +49,7 @@ function resetStore() {
     hasHydratedSessions: false,
     sessionPageCursor: null,
     hasMoreSessions: false,
-    isContextPanelOpen: false,
+    isRightRailOpen: false,
     activeWorkspaceBySession: {},
     modelSelectionIntentBySession: {},
     archiveMutationBySessionId: {},
@@ -126,6 +126,7 @@ function createDeferredPromise<T>() {
 
 describe("chatSessionStore", () => {
   beforeEach(() => {
+    window.localStorage.removeItem("goose:right-rail-open");
     window.localStorage.removeItem("goose:context-panel-open");
     window.localStorage.removeItem(CHAT_WORKSPACE_METADATA_STORAGE_KEY);
     resetStore();
@@ -1818,17 +1819,28 @@ describe("chatSessionStore", () => {
     });
   });
 
-  describe("context panel preference", () => {
-    it("stores context panel open state as a global preference", () => {
-      useChatSessionStore.getState().setContextPanelOpen("session-1", true);
+  describe("right rail preference", () => {
+    it("migrates the legacy context-panel preference", async () => {
+      window.localStorage.setItem("goose:context-panel-open", "1");
+      vi.resetModules();
+      const { useChatSessionStore: migratedStore } = await import(
+        "../chatSessionStore"
+      );
 
-      expect(useChatSessionStore.getState().isContextPanelOpen).toBe(true);
-      expect(window.localStorage.getItem("goose:context-panel-open")).toBe("1");
+      expect(migratedStore.getState().isRightRailOpen).toBe(true);
+      expect(window.localStorage.getItem("goose:right-rail-open")).toBe("1");
+    });
 
-      useChatSessionStore.getState().setContextPanelOpen("session-2", false);
+    it("stores right rail open state as a global preference", () => {
+      useChatSessionStore.getState().setRightRailOpen(true);
 
-      expect(useChatSessionStore.getState().isContextPanelOpen).toBe(false);
-      expect(window.localStorage.getItem("goose:context-panel-open")).toBe("0");
+      expect(useChatSessionStore.getState().isRightRailOpen).toBe(true);
+      expect(window.localStorage.getItem("goose:right-rail-open")).toBe("1");
+
+      useChatSessionStore.getState().setRightRailOpen(false);
+
+      expect(useChatSessionStore.getState().isRightRailOpen).toBe(false);
+      expect(window.localStorage.getItem("goose:right-rail-open")).toBe("0");
     });
   });
 });

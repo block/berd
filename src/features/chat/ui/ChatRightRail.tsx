@@ -1,9 +1,14 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
   type CSSProperties,
   type RefObject,
 } from "react";
+import { useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { AgentBuilderRail } from "@/features/agents/ui/AgentBuilderRail";
 import {
@@ -13,6 +18,7 @@ import {
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
 import { cn } from "@/shared/lib/cn";
+import { hasOpenKeyboardOwningLayer } from "@/app/focus/FocusRegionProvider";
 import { TerminalCapability } from "@/features/terminal/capabilities/TerminalCapability";
 import { TerminalDockPreview } from "@/features/terminal/ui/TerminalDockPreview";
 import type { TerminalController } from "@/features/terminal/hooks/useTerminalController";
@@ -30,6 +36,7 @@ import {
 } from "./ChatContextPanel";
 
 const AGENT_BUILDER_RAIL_W = Math.round(CP_TOTAL_W * 1.5);
+const RIGHT_RAIL_REFLOW_MS = 200;
 interface ChatRightRailProps {
   session: ChatSession | null | undefined;
   project?: {
@@ -55,8 +62,9 @@ interface ChatRightRailProps {
   onTerminalDockPreviewChange?: (
     placement: TerminalDockedPlacement | null,
   ) => void;
+  onTerminalDockToRegion?: (region: TerminalDockedPlacement["region"]) => void;
   contextPanelLeftViewportOcclusionPx?: number;
-  onRequestCloseContextPanel?: () => void;
+  onRequestCloseRightRail?: () => void;
   onToggleTerminal?: () => void;
   onOpenTerminalAtPath?: (path: string) => void;
 }
@@ -77,27 +85,121 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       terminalRootRef,
       getTerminalDockTargetForPointer,
       onTerminalDockPreviewChange,
+      onTerminalDockToRegion,
       contextPanelLeftViewportOcclusionPx = 0,
-      onRequestCloseContextPanel,
+      onRequestCloseRightRail,
       onToggleTerminal,
       onOpenTerminalAtPath,
     },
     ref,
   ) {
     const { t } = useTranslation("chat");
-    const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
+    const shouldReduceMotion = useReducedMotion();
+    const reflowDuration = shouldReduceMotion ? 0 : RIGHT_RAIL_REFLOW_MS;
+    const internalRailRef = useRef<HTMLDivElement | null>(null);
+    const setRailRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        internalRailRef.current = node;
+        if (typeof ref === "function") ref(node);
+        else if (ref) ref.current = node;
+      },
+      [ref],
+    );
+    const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
     const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
       contextPanelLeftViewportOcclusionPx,
     );
+    const previousCompactViewportRef = useRef(isContextPanelCompactViewport);
+    const dockingTimerRef = useRef<number | null>(null);
+    const [isDockingFromOverlay, setIsDockingFromOverlay] = useState(false);
     const patchSession = useChatSessionStore((s) => s.patchSession);
     const railTerminalDocked =
       terminalController?.visible &&
       terminalController.placement.kind === "docked" &&
       terminalController.placement.region === "rightRail";
     const railPreviewActive = terminalDockPreview?.region === "rightRail";
-    const railVisible =
-      !isContextPanelCompactViewport &&
-      (isContextPanelOpen || railTerminalDocked || railPreviewActive);
+    const railHostVisible = isRightRailOpen || railPreviewActive;
+
+    useEffect(() => {
+      return () => {
+        if (dockingTimerRef.current !== null) {
+          window.clearTimeout(dockingTimerRef.current);
+        }
+      };
+    }, []);
+
+    useLayoutEffect(() => {
+      const wasCompactViewport = previousCompactViewportRef.current;
+      previousCompactViewportRef.current = isContextPanelCompactViewport;
+
+      if (!railHostVisible || isContextPanelCompactViewport) {
+        if (dockingTimerRef.current !== null) {
+          window.clearTimeout(dockingTimerRef.current);
+          dockingTimerRef.current = null;
+        }
+        setIsDockingFromOverlay(false);
+        return;
+      }
+
+      if (!wasCompactViewport || reflowDuration === 0) return;
+
+      setIsDockingFromOverlay(true);
+      dockingTimerRef.current = window.setTimeout(() => {
+        dockingTimerRef.current = null;
+        setIsDockingFromOverlay(false);
+      }, reflowDuration);
+    }, [isContextPanelCompactViewport, railHostVisible, reflowDuration]);
+
+    useEffect(() => {
+      if (
+        !railHostVisible ||
+        !isContextPanelCompactViewport ||
+        !onRequestCloseRightRail
+      ) {
+        return;
+      }
+
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          hasOpenKeyboardOwningLayer()
+        ) {
+          return;
+        }
+        event.preventDefault();
+        onRequestCloseRightRail();
+      };
+      const handlePointerDown = (event: PointerEvent) => {
+        const target = event.target;
+        if (
+          target instanceof Node &&
+          internalRailRef.current?.contains(target)
+        ) {
+          return;
+        }
+        if (
+          target instanceof Element &&
+          target.closest(
+            "[data-right-rail-toggle], [data-radix-popper-content-wrapper], [data-radix-select-content], [data-radix-dropdown-menu-content]",
+          )
+        ) {
+          return;
+        }
+        onRequestCloseRightRail();
+      };
+
+      document.addEventListener("keydown", handleKeyDown);
+      document.addEventListener("pointerdown", handlePointerDown, true);
+      return () => {
+        document.removeEventListener("keydown", handleKeyDown);
+        document.removeEventListener("pointerdown", handlePointerDown, true);
+      };
+    }, [
+      isContextPanelCompactViewport,
+      onRequestCloseRightRail,
+      railHostVisible,
+    ]);
     const { railWidth, isResizingRail, startRailResize } =
       useResizableRightRail();
 
@@ -248,71 +350,101 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       return null;
     }
 
+    const railPresentationVisible =
+      isRightRailOpen && !isContextPanelCompactViewport;
+    const previewingClosedRail = railPreviewActive && !isRightRailOpen;
+    const railSurfaceFloating =
+      railHostVisible &&
+      (isContextPanelCompactViewport ||
+        isDockingFromOverlay ||
+        previewingClosedRail);
+
     return (
       <div
-        ref={ref}
+        ref={setRailRef}
+        data-chat-right-rail
+        aria-hidden={!railHostVisible || undefined}
+        inert={!railHostVisible ? true : undefined}
         className={cn(
           "relative flex h-full min-h-0 shrink-0 flex-col items-stretch",
-          isContextPanelCompactViewport
+          isContextPanelCompactViewport ||
+            isDockingFromOverlay ||
+            previewingClosedRail
             ? "overflow-visible"
             : "overflow-hidden",
+          !railHostVisible && "invisible pointer-events-none",
         )}
         style={{
-          width: railVisible ? railWidth : 0,
-          // Animate the rail's own width so opening/closing the context panel
-          // slides the whole rail in/out from the right edge instead of
-          // snapping the chat column reflow. Skip the transition while the
-          // user is dragging the resize handle so it tracks the pointer.
-          transition: isResizingRail
-            ? "none"
-            : "width 200ms cubic-bezier(0.22, 1, 0.36, 1)",
+          width: railPresentationVisible ? railWidth : 0,
+          transition:
+            isResizingRail || reflowDuration === 0
+              ? "none"
+              : `width ${reflowDuration}ms cubic-bezier(0.22, 1, 0.36, 1)`,
         }}
       >
-        {railVisible ? (
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-label={t("rightRail.resize")}
-            title={t("rightRail.resize")}
-            data-right-rail-resize-edge="left"
-            onPointerDown={startRailResize}
-            className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent outline-none"
-          />
-        ) : null}
-        <ChatContextPanel
-          activeSessionId={session.id}
-          isOpen={isContextPanelOpen}
-          project={project}
-          sessionWorkingDir={sessionWorkingDir}
-          terminalOpen={terminalOpen}
-          panelWidth={railWidth}
-          allowVerticalShrink={railTerminalDocked || railPreviewActive}
-          widthTransitionEnabled={!isResizingRail}
-          leftViewportOcclusionPx={contextPanelLeftViewportOcclusionPx}
-          onRequestClose={onRequestCloseContextPanel}
-          onToggleTerminal={onToggleTerminal}
-          onOpenTerminalAtPath={onOpenTerminalAtPath}
-        />
-        {railPreviewActive ? (
-          <TerminalDockPreview
-            height={terminalDockPreview.size.height}
-            surface="rightRail"
-          />
-        ) : null}
-        {railTerminalDocked && terminalController && terminalRootRef ? (
-          <div
-            ref={terminalRootRef}
-            className="mt-[var(--spacing-app-panel-gutter-inline)] flex min-h-0 shrink flex-col"
-          >
-            <TerminalCapability
-              controller={terminalController}
-              rootRef={terminalRootRef}
-              sessionId={session.id}
-              getDockTargetForPointer={getTerminalDockTargetForPointer}
-              onDockPreviewChange={onTerminalDockPreviewChange}
+        <div
+          data-right-rail-surface
+          className={cn(
+            "flex min-h-0 w-full flex-col items-stretch",
+            railSurfaceFloating &&
+              "absolute z-40 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))]",
+            isContextPanelCompactViewport &&
+              "right-3 top-[var(--spacing-app-panel-gutter-top)]",
+            (isDockingFromOverlay || previewingClosedRail) && "right-0 top-0",
+          )}
+          style={
+            railSurfaceFloating
+              ? { width: `min(${railWidth}px, calc(100vw - 1.5rem))` }
+              : undefined
+          }
+        >
+          {railPresentationVisible ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={t("rightRail.resize")}
+              title={t("rightRail.resize")}
+              data-right-rail-resize-edge="left"
+              onPointerDown={startRailResize}
+              className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent outline-none"
             />
-          </div>
-        ) : null}
+          ) : null}
+          <ChatContextPanel
+            activeSessionId={session.id}
+            isVisible={railHostVisible}
+            project={project}
+            sessionWorkingDir={sessionWorkingDir}
+            terminalOpen={terminalOpen}
+            allowVerticalShrink={railTerminalDocked || railPreviewActive}
+            elevated={isContextPanelCompactViewport}
+            onToggleTerminal={onToggleTerminal}
+            onOpenTerminalAtPath={onOpenTerminalAtPath}
+          />
+          {railPreviewActive && railHostVisible ? (
+            <TerminalDockPreview
+              height={terminalDockPreview.size.height}
+              surface="rightRail"
+            />
+          ) : null}
+          {railTerminalDocked && terminalController && terminalRootRef ? (
+            <div
+              ref={terminalRootRef}
+              className={cn(
+                "mt-[var(--spacing-app-panel-gutter-inline)] flex min-h-0 shrink flex-col overflow-hidden rounded-md",
+                isContextPanelCompactViewport && "shadow-popover",
+              )}
+            >
+              <TerminalCapability
+                controller={terminalController}
+                rootRef={terminalRootRef}
+                sessionId={session.id}
+                getDockTargetForPointer={getTerminalDockTargetForPointer}
+                onDockPreviewChange={onTerminalDockPreviewChange}
+                onDockToRegion={onTerminalDockToRegion}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     );
   },

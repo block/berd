@@ -53,6 +53,7 @@ const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
 const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] [--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]";
+const CLOSED_RIGHT_RAIL_DOCK_TARGET_WIDTH_PX = 48;
 function shouldStageInitialTranscript(
   messages: readonly unknown[],
   isLoadingHistory: boolean,
@@ -171,8 +172,8 @@ export function ChatView({
   const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
     leftViewportOcclusionPx,
   );
-  const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
-  const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
+  const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
+  const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
   const terminalWorkspacePath = useChatSessionStore((s) =>
     effectiveSession?.id
       ? workspaceRepository.chatWorkspaces(effectiveSession, {
@@ -190,9 +191,7 @@ export function ChatView({
   const hasVisibleRightRail =
     isAgentBuilderSession ||
     Boolean(
-      effectiveSession?.id &&
-        isContextPanelOpen &&
-        !isContextPanelCompactViewport,
+      effectiveSession?.id && isRightRailOpen && !isContextPanelCompactViewport,
     );
   const agentBuilderChatColumnStyle = isAgentBuilderSession
     ? ({
@@ -242,24 +241,22 @@ export function ChatView({
   const terminalInRightRail =
     terminal.placement.kind === "docked" &&
     terminal.placement.region === "rightRail";
-  const terminalPreviewInRightRail =
-    terminalDockPreview?.region === "rightRail";
-  const effectiveHasVisibleRightRail =
-    hasVisibleRightRail ||
-    (!isContextPanelCompactViewport &&
-      (terminalInRightRail || terminalPreviewInRightRail));
+  const effectiveHasVisibleRightRail = hasVisibleRightRail;
   const getTerminalDockTargetForPointer = useCallback(
     (clientX: number, clientY: number): TerminalDockedPlacement | null => {
       const rightRailRect = rightRailRef.current?.getBoundingClientRect();
-      if (
-        rightRailRect &&
-        clientX >= rightRailRect.left &&
-        clientX <= rightRailRect.right &&
-        clientY >= rightRailRect.top &&
-        clientY <= rightRailRect.bottom &&
-        effectiveHasVisibleRightRail
-      ) {
-        return getDefaultTerminalDockedPlacement("rightRail");
+      if (rightRailRect) {
+        const dockTargetLeft = effectiveHasVisibleRightRail
+          ? rightRailRect.left
+          : rightRailRect.right - CLOSED_RIGHT_RAIL_DOCK_TARGET_WIDTH_PX;
+        if (
+          clientX >= dockTargetLeft &&
+          clientX <= rightRailRect.right &&
+          clientY >= rightRailRect.top &&
+          clientY <= rightRailRect.bottom
+        ) {
+          return getDefaultTerminalDockedPlacement("rightRail");
+        }
       }
 
       const chatColumnRect = chatColumnRef.current?.getBoundingClientRect();
@@ -296,39 +293,76 @@ export function ChatView({
     closeSearch();
   }, [closeSearch, sessionId]);
 
+  const openRightRailForTerminal = useCallback(() => {
+    if (!effectiveSession?.id || !terminalInRightRail) return;
+    setRightRailOpen(true);
+  }, [effectiveSession?.id, setRightRailOpen, terminalInRightRail]);
+
+  const handleToggleTerminal = useCallback(() => {
+    if (terminalInRightRail && !isRightRailOpen) {
+      openRightRailForTerminal();
+      terminal.expand();
+      return;
+    }
+    terminal.toggle();
+  }, [
+    isRightRailOpen,
+    openRightRailForTerminal,
+    terminal.expand,
+    terminal.toggle,
+    terminalInRightRail,
+  ]);
+
+  const handleRunShellCommand = useCallback(
+    (command: string, options?: { newTerminal?: boolean }) => {
+      openRightRailForTerminal();
+      terminal.runCommand(command, options);
+    },
+    [openRightRailForTerminal, terminal.runCommand],
+  );
+
+  const handleOpenTerminalAtPath = useCallback(
+    (path: string) => {
+      openRightRailForTerminal();
+      terminal.openAtPath(path);
+    },
+    [openRightRailForTerminal, terminal.openAtPath],
+  );
+  const handleTerminalDockToRegion = useCallback(
+    (region: TerminalDockedPlacement["region"]) => {
+      if (region === "rightRail" && effectiveSession?.id) {
+        setRightRailOpen(true);
+      }
+    },
+    [effectiveSession?.id, setRightRailOpen],
+  );
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) {
-        return;
-      }
-
+      if (event.isComposing || event.keyCode === 229) return;
       if (eventMatchesShortcutCommand(event, "view.toggleTerminal")) {
         event.preventDefault();
-        terminal.toggle();
+        handleToggleTerminal();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [terminal.toggle]);
+  }, [handleToggleTerminal]);
 
-  const handleCloseContextPanel = useCallback(() => {
-    if (!effectiveSession?.id) {
-      return;
-    }
-
-    setContextPanelOpen(effectiveSession.id, false);
-  }, [effectiveSession?.id, setContextPanelOpen]);
+  const handleCloseRightRail = useCallback(() => {
+    if (!effectiveSession?.id) return;
+    const focusedInsideRail = rightRailRef.current?.contains(
+      document.activeElement,
+    );
+    setRightRailOpen(false);
+    if (focusedInsideRail) focusChatComposer();
+  }, [effectiveSession?.id, focusChatComposer, setRightRailOpen]);
 
   const handleOpenContextPanel = useCallback(() => {
-    if (!effectiveSession?.id) {
-      return;
-    }
-
-    setContextPanelOpen(effectiveSession.id, true);
-  }, [effectiveSession?.id, setContextPanelOpen]);
-
-  const handleRunShellCommand = terminal.runCommand;
+    if (!effectiveSession?.id) return;
+    setRightRailOpen(true);
+  }, [effectiveSession?.id, setRightRailOpen]);
 
   const showIndicator =
     controller.chatState === "thinking" ||
@@ -770,6 +804,7 @@ export function ChatView({
                 sessionId={sessionId}
                 getDockTargetForPointer={getTerminalDockTargetForPointer}
                 onDockPreviewChange={setTerminalDockPreview}
+                onDockToRegion={handleTerminalDockToRegion}
               />
             </div>
           ) : null}
@@ -791,14 +826,15 @@ export function ChatView({
           builderColumnStyle={agentBuilderRailColumnStyle}
           terminalOpen={terminal.activeWorkspaceHasTerminal}
           contextPanelLeftViewportOcclusionPx={leftViewportOcclusionPx}
-          onRequestCloseContextPanel={handleCloseContextPanel}
-          onToggleTerminal={terminal.toggle}
+          onRequestCloseRightRail={handleCloseRightRail}
+          onToggleTerminal={handleToggleTerminal}
           terminalController={terminal}
           terminalDockPreview={terminalDockPreview}
           terminalRootRef={terminalRootRef}
           getTerminalDockTargetForPointer={getTerminalDockTargetForPointer}
           onTerminalDockPreviewChange={setTerminalDockPreview}
-          onOpenTerminalAtPath={terminal.openAtPath}
+          onTerminalDockToRegion={handleTerminalDockToRegion}
+          onOpenTerminalAtPath={handleOpenTerminalAtPath}
         />
       </div>
     </ArtifactPolicyProvider>

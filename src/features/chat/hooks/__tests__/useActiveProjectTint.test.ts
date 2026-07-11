@@ -46,7 +46,7 @@ describe("useActiveProjectTint", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: true,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });

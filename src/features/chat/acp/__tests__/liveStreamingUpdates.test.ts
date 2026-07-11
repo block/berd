@@ -29,7 +29,7 @@ describe("liveStreamingUpdates", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: true,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });

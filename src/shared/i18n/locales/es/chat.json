@@ -522,6 +522,8 @@
     }
   },
   "rightRail": {
-    "resize": "Redimensionar panel derecho"
+    "resize": "Redimensionar panel derecho",
+    "open": "Abrir panel derecho",
+    "close": "Cerrar panel derecho"
   }
 }

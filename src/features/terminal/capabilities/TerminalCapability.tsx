@@ -71,6 +71,7 @@ interface TerminalCapabilityProps {
     clientY: number,
   ) => TerminalDockedPlacement | null;
   onDockPreviewChange?: (placement: TerminalDockedPlacement | null) => void;
+  onDockToRegion?: (region: TerminalDockedPlacement["region"]) => void;
 }
 
 export function TerminalCapability({
@@ -79,6 +80,7 @@ export function TerminalCapability({
   sessionId,
   getDockTargetForPointer,
   onDockPreviewChange,
+  onDockToRegion,
 }: TerminalCapabilityProps) {
   const { t } = useTranslation("chat");
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
@@ -292,6 +294,7 @@ export function TerminalCapability({
 
         if (dropTarget) {
           controller.dockToRegion(dropTarget.region);
+          onDockToRegion?.(dropTarget.region);
         } else if (hasSeparated) {
           // Settle the floating panel fully back inside the viewport margin
           // box now that the drag is over.
@@ -316,7 +319,13 @@ export function TerminalCapability({
       window.addEventListener("pointerup", handlePointerUp, { once: true });
       window.addEventListener("blur", handleWindowBlur);
     },
-    [controller, getDockTargetForPointer, onDockPreviewChange, rootRef],
+    [
+      controller,
+      getDockTargetForPointer,
+      onDockPreviewChange,
+      onDockToRegion,
+      rootRef,
+    ],
   );
 
   const startFloatingResize = useCallback(

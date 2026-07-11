@@ -31,15 +31,15 @@ interface TopBarProps {
   canGoBack?: boolean;
   canGoForward?: boolean;
   className?: string;
-  contextPanelLabel?: string;
-  contextPanelOpen?: boolean;
+  rightRailLabel?: string;
+  rightRailOpen?: boolean;
   chromeInsets?: TopBarChromeInsets;
-  showContextPanelToggle?: boolean;
+  showRightRailToggle?: boolean;
   sidebarCollapsed?: boolean;
   onGoHome?: () => void;
   onGoBack?: () => void;
   onGoForward?: () => void;
-  onToggleContextPanel?: () => void;
+  onToggleRightRail?: () => void;
   onToggleSidebar?: () => void;
   onFeedbackClick?: () => void;
   onSearchClick?: () => void;
@@ -96,15 +96,15 @@ export function TopBar({
   canGoBack = false,
   canGoForward = false,
   className,
-  contextPanelLabel,
-  contextPanelOpen = false,
+  rightRailLabel,
+  rightRailOpen = false,
   chromeInsets = { leading: "trafficLights" },
-  showContextPanelToggle = false,
+  showRightRailToggle = false,
   sidebarCollapsed = false,
   onGoHome,
   onGoBack,
   onGoForward,
-  onToggleContextPanel,
+  onToggleRightRail,
   onToggleSidebar,
   onFeedbackClick,
   onSearchClick,
@@ -125,7 +125,7 @@ export function TopBar({
   const SidebarIcon = sidebarCollapsed
     ? IconLayoutSidebar
     : IconLayoutSidebarFilled;
-  const ContextPanelIcon = contextPanelOpen
+  const RightRailIcon = rightRailOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
   const leadingSpaceClassName =
@@ -230,17 +230,17 @@ export function TopBar({
             <IconMessageReport aria-hidden="true" />
           </TopBarIconButton>
         ) : null}
-        {showContextPanelToggle && (
+        {showRightRailToggle && (
           <TopBarIconButton
             type="button"
             size="icon-top-bar"
-            onClick={onToggleContextPanel}
-            aria-pressed={contextPanelOpen}
-            aria-label={contextPanelLabel}
-            title={contextPanelLabel}
-            data-context-panel-toggle="true"
+            onClick={onToggleRightRail}
+            aria-pressed={rightRailOpen}
+            aria-label={rightRailLabel}
+            title={rightRailLabel}
+            data-right-rail-toggle="true"
           >
-            <ContextPanelIcon aria-hidden="true" />
+            <RightRailIcon aria-hidden="true" />
           </TopBarIconButton>
         )}
       </div>

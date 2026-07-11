@@ -193,7 +193,7 @@ describe("SessionWindowApp", () => {
       sessions: [],
       activeSessionId: null,
       hasHydratedSessions: true,
-      isContextPanelOpen: false,
+      isRightRailOpen: false,
     });
     mocks.buildFeatures.securityMl = true;
     vi.mocked(loadSessionMessages).mockClear();
@@ -324,9 +324,9 @@ describe("SessionWindowApp", () => {
 
     await screen.findByTestId("chat-view");
 
-    fireEvent.click(screen.getByRole("button", { name: "Open context panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open right rail" }));
 
-    expect(useChatSessionStore.getState().isContextPanelOpen).toBe(true);
+    expect(useChatSessionStore.getState().isRightRailOpen).toBe(true);
   });
 
   it("recovers a missed initial snapshot through join", async () => {

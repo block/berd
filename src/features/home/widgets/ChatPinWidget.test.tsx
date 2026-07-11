@@ -21,7 +21,7 @@ function resetStores(): void {
     hasHydratedSessions: false,
     sessionPageCursor: null,
     hasMoreSessions: false,
-    isContextPanelOpen: false,
+    isRightRailOpen: false,
     activeWorkspaceBySession: {},
     modelSelectionIntentBySession: {},
   });

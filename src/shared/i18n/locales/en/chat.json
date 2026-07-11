@@ -525,6 +525,8 @@
     }
   },
   "rightRail": {
-    "resize": "Resize right rail"
+    "resize": "Resize right rail",
+    "open": "Open right rail",
+    "close": "Close right rail"
   }
 }
