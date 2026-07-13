@@ -237,8 +237,7 @@ pub fn auth_command() -> Command {
                 .about("Print auth status")
                 .long_about(
                     "Print auth status. With a stored CLI auth session, this verifies \
-                     the session with /v1/auth/me and prints the authenticated subject \
-                     and profile details.",
+                     the session with /v1/auth/me and prints the profile details.",
                 ),
         )
         .subcommand(
@@ -658,15 +657,6 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         println!("  kgoose base: {}", config.kgoose_base_url);
         println!("  kgoose service path: {}", config.kgoose_service_path);
         println!("  authenticated: yes");
-        if let Some(subject) = &me.subject {
-            println!("  subject: {subject}");
-        }
-        if let Some(email) = &me.email {
-            println!("  email: {email}");
-        }
-        if let Some(name) = &me.name {
-            println!("  name: {name}");
-        }
         if let Some(expires_at) = &me.expires_at {
             println!("  expires at: {expires_at}");
         }
@@ -677,9 +667,6 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         "kgoose_base_url": config.kgoose_base_url,
         "kgoose_service_path": config.kgoose_service_path,
         "profile": config.profile,
-        "subject": me.subject,
-        "email": me.email,
-        "name": me.name,
         "expires_at": me.expires_at,
     }))
 }
@@ -705,12 +692,6 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
     println!("  storage: {}", summary.storage);
     if let Some(expires_at) = &summary.expires_at {
         println!("  expires at: {expires_at}");
-    }
-    if let Some(subject) = &summary.subject {
-        println!("  subject: {subject}");
-    }
-    if let Some(email) = &summary.email {
-        println!("  email: {email}");
     }
     if let Some(prefix) = &summary.credential_prefix {
         println!("  credential prefix: {prefix}...");

@@ -14,12 +14,8 @@ use crate::auth_storage::StoredSessionCredential;
 pub const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login";
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct LoginExchangeResponse {
     pub session_credential: String,
-    pub subject: Option<String>,
-    pub email: Option<String>,
-    pub name: Option<String>,
     pub expires_at: String,
 }
 
@@ -29,6 +25,12 @@ pub struct AuthMeResponse {
     pub email: Option<String>,
     pub name: Option<String>,
     pub expires_at: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct VerifiedLoginSession {
+    pub credential: StoredSessionCredential,
+    pub me: AuthMeResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,6 +70,24 @@ pub fn exchange_login_code(
         ));
     }
     serde_json::from_str(&body).context("parse login exchange response")
+}
+
+pub fn exchange_login_code_and_verify(
+    client: &Client,
+    playpen: Option<&str>,
+    server_url: &str,
+    code: &str,
+) -> Result<VerifiedLoginSession> {
+    let exchange = exchange_login_code(client, playpen, server_url, code)?;
+    let credential = StoredSessionCredential {
+        session_credential: exchange.session_credential,
+        expires_at: Some(exchange.expires_at),
+    };
+    let me =
+        verify_session_credential(client, playpen, server_url, &credential)?.ok_or_else(|| {
+            anyhow!("exchanged BuilderBot CLI auth session was rejected by /v1/auth/me")
+        })?;
+    Ok(VerifiedLoginSession { credential, me })
 }
 
 pub fn verify_session_credential(
@@ -290,7 +310,7 @@ mod tests {
     fn exchange_login_code_uses_v1_route() {
         let server = SingleResponseServer::start(
             200,
-            r#"{"sessionCredential":"session","sessionCredentialHeader":"X-BB-Session-Credential","subject":"user-123","expiresAt":"2026-06-15T00:00:00Z"}"#,
+            r#"{"session_credential":"session","expires_at":"2026-06-15T00:00:00Z"}"#,
         );
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
 
@@ -299,9 +319,67 @@ mod tests {
         let request = server.finish();
 
         assert_eq!(exchange.session_credential, "session");
-        assert_eq!(exchange.subject.as_deref(), Some("user-123"));
         assert_eq!(exchange.expires_at, "2026-06-15T00:00:00Z");
         assert_eq!(request.path, "/v1/auth/login/exchange");
+    }
+
+    #[test]
+    fn exchange_login_code_and_verify_checks_auth_me() {
+        let server = SequentialResponseServer::start(vec![
+            (
+                200,
+                r#"{"session_credential":"session","expires_at":"2026-06-15T00:00:00Z"}"#,
+            ),
+            (
+                200,
+                r#"{"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expires_at":"2026-06-16T00:00:00Z","roles":["ROLE_USER"]}"#,
+            ),
+        ]);
+        let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
+
+        let verified =
+            exchange_login_code_and_verify(&client, None, &server.base_url, "one-time-code")
+                .expect("verified login");
+        let requests = server.finish();
+
+        assert_eq!(verified.credential.session_credential, "session");
+        assert_eq!(
+            verified.credential.expires_at.as_deref(),
+            Some("2026-06-15T00:00:00Z")
+        );
+        assert_eq!(verified.me.subject.as_deref(), Some("auth0|user_123"));
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, "/v1/auth/login/exchange");
+        assert_eq!(requests[1].path, "/v1/auth/me");
+        assert_eq!(
+            requests[1].bb_session_credential.as_deref(),
+            Some("session")
+        );
+    }
+
+    #[test]
+    fn exchange_login_code_and_verify_requires_auth_me_success() {
+        let server = SequentialResponseServer::start(vec![
+            (
+                200,
+                r#"{"session_credential":"session","expires_at":"2026-06-15T00:00:00Z"}"#,
+            ),
+            (401, r#"{}"#),
+        ]);
+        let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
+
+        let error =
+            exchange_login_code_and_verify(&client, None, &server.base_url, "one-time-code")
+                .expect_err("auth/me rejection fails login");
+        let requests = server.finish();
+
+        assert!(
+            format!("{error:#}").contains("rejected by /v1/auth/me"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, "/v1/auth/login/exchange");
+        assert_eq!(requests[1].path, "/v1/auth/me");
     }
 
     struct RecordedRequest {
@@ -333,6 +411,39 @@ mod tests {
         }
 
         fn finish(self) -> RecordedRequest {
+            self.handle.join().expect("join test server")
+        }
+    }
+
+    struct SequentialResponseServer {
+        base_url: String,
+        handle: thread::JoinHandle<Vec<RecordedRequest>>,
+    }
+
+    impl SequentialResponseServer {
+        fn start(responses: Vec<(u16, &'static str)>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+            let base_url = format!("http://{}", listener.local_addr().expect("local addr"));
+            let handle = thread::spawn(move || {
+                let mut requests = Vec::new();
+                for (status, body) in responses {
+                    let (stream, _) = listener.accept().expect("accept request");
+                    let request = Arc::new(Mutex::new(None));
+                    handle_connection(stream, status, body, &request);
+                    requests.push(
+                        request
+                            .lock()
+                            .expect("request mutex")
+                            .take()
+                            .expect("recorded request"),
+                    );
+                }
+                requests
+            });
+            Self { base_url, handle }
+        }
+
+        fn finish(self) -> Vec<RecordedRequest> {
             self.handle.join().expect("join test server")
         }
     }

@@ -3,7 +3,7 @@ use anyhow::Result;
 pub use builderbot_auth::auth_storage::{
     default_session_storage_for_bb_home, stored_session_credential_header_value,
     stored_session_credential_header_value_for_kgoose_base_url, SessionCredentialStorage,
-    SessionStorageKey, StoredSessionCredential,
+    SessionStorageKey,
 };
 
 use super::skills_config::SkillsConfig;

@@ -844,8 +844,7 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
     assert!(output.status.success(), "stderr was: {stderr}");
     let response = serde_json::from_str::<Value>(&stdout).expect("parse status output");
     assert_eq!(response["authenticated"], json!(true));
-    assert_eq!(response["subject"], json!("auth0|user_123"));
-    assert_eq!(response["email"], json!("test@example.com"));
+    assert_eq!(response["expires_at"], json!("2026-06-15T00:00:00Z"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
     assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
@@ -901,7 +900,6 @@ fn bb_auth_login_uses_valid_stored_file_session() {
     let response = serde_json::from_str::<Value>(&stdout).expect("parse login output");
     assert_eq!(response["source"], json!("stored"));
     assert_eq!(response["storage"], json!("file"));
-    assert_eq!(response["subject"], json!("auth0|user_123"));
     assert_eq!(response["credentialPrefix"], Value::Null);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");

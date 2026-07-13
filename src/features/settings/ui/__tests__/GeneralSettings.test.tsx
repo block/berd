@@ -165,7 +165,7 @@ describe("GeneralSettings appearance section", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows account details and logs out", async () => {
+  it("shows account actions and logs out", async () => {
     const user = userEvent.setup();
     const nextStatus = {
       loggedIn: false,
@@ -190,6 +190,7 @@ describe("GeneralSettings appearance section", () => {
     });
 
     expect(screen.getByText("Account")).toBeInTheDocument();
+    expect(screen.getByText("Signed in as")).toBeInTheDocument();
     expect(screen.getByText("kalvin@example.com")).toBeInTheDocument();
     expect(screen.getByText("test")).toBeInTheDocument();
     expect(

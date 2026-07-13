@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use builderbot_auth::auth_login::{
-    build_auth_http_client, exchange_login_code, login_url, logout_session_credential,
-    verify_session_credential, AuthMeResponse, LoginExchangeResponse,
+    build_auth_http_client, exchange_login_code_and_verify, login_url, logout_session_credential,
+    verify_session_credential, AuthMeResponse,
 };
 use builderbot_auth::auth_storage::{
     default_session_storage_for_bb_home,
@@ -282,7 +282,7 @@ fn login_blocking(app_handle: AppHandle, org: Option<String>) -> Result<AuthStat
         clear_login_attempt_if_current(attempt_id);
         return Err(anyhow!("BuilderBot auth login was canceled"));
     }
-    let exchange = match exchange_login_code(
+    let verified = match exchange_login_code_and_verify(
         &client,
         context.playpen.as_deref(),
         &context.kgoose_service_url,
@@ -297,13 +297,11 @@ fn login_blocking(app_handle: AppHandle, org: Option<String>) -> Result<AuthStat
     if !complete_login_attempt_if_not_canceled(attempt_id) {
         return Err(anyhow!("BuilderBot auth login was canceled"));
     }
-    let stored = StoredSessionCredential {
-        session_credential: exchange.session_credential.clone(),
-        expires_at: Some(exchange.expires_at.clone()),
-    };
+    let stored = verified.credential;
+    let me = verified.me;
     storage.set(&storage_key, &stored)?;
 
-    Ok(AuthStatus::logged_in_from_exchange(&context, exchange))
+    Ok(AuthStatus::logged_in_from_me(&context, &stored, me))
 }
 
 fn logout_blocking() -> Result<AuthStatus> {
@@ -676,26 +674,6 @@ impl AuthStatus {
             user: best_user(me.email.as_ref(), me.name.as_ref(), user_id.as_ref()),
             email: me.email,
             name: me.name,
-            user_id,
-        }
-    }
-
-    fn logged_in_from_exchange(context: &AuthContext, exchange: LoginExchangeResponse) -> Self {
-        let user_id = exchange.subject;
-        Self {
-            logged_in: true,
-            requires_org: false,
-            org: context.org.clone(),
-            profile: context.profile.clone(),
-            kgoose_base_url: context.kgoose_base_url.clone(),
-            expires_at: Some(exchange.expires_at),
-            user: best_user(
-                exchange.email.as_ref(),
-                exchange.name.as_ref(),
-                user_id.as_ref(),
-            ),
-            email: exchange.email,
-            name: exchange.name,
             user_id,
         }
     }

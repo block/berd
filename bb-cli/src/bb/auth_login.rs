@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use builderbot_auth::auth_login::{
-    build_auth_http_client, exchange_login_code, login_url, logout_session_credential,
+    build_auth_http_client, exchange_login_code_and_verify, login_url, logout_session_credential,
     verify_session_credential, AuthMeResponse,
 };
 use serde::Serialize;
@@ -14,9 +14,7 @@ use sha2::{Digest, Sha256};
 use tiny_http::{Header, Response, Server, StatusCode};
 use url::Url;
 
-use super::auth_storage::{
-    session_storage_key_from_config, SessionCredentialStorage, StoredSessionCredential,
-};
+use super::auth_storage::{session_storage_key_from_config, SessionCredentialStorage};
 use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 const CALLBACK_PATH: &str = "/callback";
@@ -27,9 +25,6 @@ pub struct BrowserLoginSummary {
     pub kgoose_service_path: String,
     pub storage: String,
     pub source: BrowserLoginCredentialSource,
-    pub subject: Option<String>,
-    pub email: Option<String>,
-    pub name: Option<String>,
     pub expires_at: Option<String>,
     pub credential_prefix: Option<String>,
     pub credential_sha256_prefix: Option<String>,
@@ -70,9 +65,6 @@ pub fn run_browser_login(
                     kgoose_service_path: config.kgoose_service_path.clone(),
                     storage: storage.kind().to_string(),
                     source: BrowserLoginCredentialSource::Stored,
-                    subject: me.subject,
-                    email: me.email,
-                    name: me.name,
                     expires_at: me.expires_at.or(stored.expires_at),
                     credential_prefix: None,
                     credential_sha256_prefix: None,
@@ -124,11 +116,10 @@ pub fn run_browser_login(
     let code = rx
         .recv()
         .context("loopback auth server stopped before login completed")??;
-    let exchange = exchange_login_code(&client, config.playpen.as_deref(), &service_url, &code)?;
-    let stored = StoredSessionCredential {
-        session_credential: exchange.session_credential.clone(),
-        expires_at: Some(exchange.expires_at.clone()),
-    };
+    let verified =
+        exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
+    let stored = verified.credential;
+    let me = verified.me;
     storage.set(&storage_key, &stored)?;
     auth_info(
         config,
@@ -143,12 +134,9 @@ pub fn run_browser_login(
         kgoose_service_path: config.kgoose_service_path.clone(),
         storage: storage.kind().to_string(),
         source: BrowserLoginCredentialSource::BrowserLogin,
-        subject: exchange.subject,
-        email: exchange.email,
-        name: exchange.name,
-        expires_at: Some(exchange.expires_at),
-        credential_prefix: Some(safe_prefix(&exchange.session_credential)),
-        credential_sha256_prefix: Some(sha256_prefix(&exchange.session_credential)),
+        expires_at: me.expires_at.or_else(|| stored.expires_at.clone()),
+        credential_prefix: Some(safe_prefix(&stored.session_credential)),
+        credential_sha256_prefix: Some(sha256_prefix(&stored.session_credential)),
     })
 }
 

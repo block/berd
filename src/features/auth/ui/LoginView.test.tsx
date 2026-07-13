@@ -49,8 +49,6 @@ function loggedInStatus(org: string): AuthStatus {
     org,
     profile: "default",
     kgooseBaseUrl: `https://${org}.kgoose.sqprod.co`,
-    email: `${org}@example.com`,
-    user: `${org}@example.com`,
   };
 }
 
