@@ -20,6 +20,8 @@ export type KnownShortcutCommandId =
   | "navigation.paneJump"
   | "navigation.globalShortcut"
   | "session.quickSwitch"
+  | "session.next"
+  | "session.previous"
   | "chat.archiveSession"
   | "chat.findInConversation"
   | "chat.sendMessage"
@@ -160,6 +162,24 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     scope: "global",
     defaultBindings: [{ shortcut: "mod+p" }],
     descriptionKey: "actions.quickSwitch",
+    configurable: true,
+    discoverable: true,
+  },
+  {
+    id: "session.next",
+    category: "navigation",
+    scope: "global",
+    defaultBindings: [{ shortcut: "ctrl+tab" }],
+    descriptionKey: "actions.nextSession",
+    configurable: true,
+    discoverable: true,
+  },
+  {
+    id: "session.previous",
+    category: "navigation",
+    scope: "global",
+    defaultBindings: [{ shortcut: "ctrl+shift+tab" }],
+    descriptionKey: "actions.previousSession",
     configurable: true,
     discoverable: true,
   },

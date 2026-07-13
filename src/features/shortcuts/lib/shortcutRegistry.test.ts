@@ -128,6 +128,24 @@ describe("shortcut command definitions", () => {
     ]);
   });
 
+  it("registers session.next and session.previous as ctrl+tab and ctrl+shift+tab", () => {
+    const next = getShortcutCommand("session.next");
+    expect(next).toBeDefined();
+    expect(next?.configurable).toBe(true);
+    expect(next?.discoverable).toBe(true);
+    expect(getShortcutBindings("session.next")).toEqual([
+      { shortcut: "ctrl+tab" },
+    ]);
+
+    const previous = getShortcutCommand("session.previous");
+    expect(previous).toBeDefined();
+    expect(previous?.configurable).toBe(true);
+    expect(previous?.discoverable).toBe(true);
+    expect(getShortcutBindings("session.previous")).toEqual([
+      { shortcut: "ctrl+shift+tab" },
+    ]);
+  });
+
   it("registers chat.archiveSession as configurable, discoverable, mod+e", () => {
     const command = getShortcutCommand("chat.archiveSession");
     expect(command).toBeDefined();

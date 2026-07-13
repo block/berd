@@ -15,6 +15,8 @@
     "closeSession": "Close current session",
     "openSettings": "Open settings",
     "quickSwitch": "Switch sessions",
+    "nextSession": "Next session",
+    "previousSession": "Previous session",
     "globalShortcut": "Global shortcut",
     "paneJump": "Jump between panes",
     "archiveSession": "Archive current session",

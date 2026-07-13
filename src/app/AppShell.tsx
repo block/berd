@@ -50,9 +50,16 @@ import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint
 import {
   type ChatSession,
   type ChatSessionReasoningEffortConfig,
+  getVisibleSessions,
   SessionNotFoundError,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
+import {
+  getSessionCycleProjectScope,
+  resolveSessionCycleTarget,
+  scopeSessionCycleCandidates,
+} from "@/features/sessions/lib/sessionCycle";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import {
   selectActiveSessionId,
@@ -4303,6 +4310,54 @@ export function AppShell({
         setQuickSwitcherOpen((open) => !open);
         return;
       }
+      // Cycle sessions by recency (defaults ctrl+tab / ctrl+shift+tab)
+      const cycleDirection = eventMatchesShortcutCommand(e, "session.next")
+        ? 1
+        : eventMatchesShortcutCommand(e, "session.previous")
+          ? -1
+          : null;
+      if (cycleDirection !== null) {
+        e.preventDefault();
+        const { sessions, activeSessionId } = useChatSessionStore.getState();
+        const sessionWindowStore = useSessionWindowStore.getState();
+        const candidates = getVisibleSessions(
+          sessions,
+          selectLocalMessageCountsBySession(useChatStore.getState()),
+        ).filter(
+          (session) =>
+            !session.archivedAt &&
+            // Sessions open in other windows aren't part of this window's
+            // cycle order.
+            !(
+              isMultiWindowEnabled &&
+              sessionWindowStore.isOpenInWindow(session.id)
+            ),
+        );
+        const currentSessionId =
+          activeView === "chat" && activeSessionId
+            ? resolveLiveSessionId(activeSessionId)
+            : null;
+        const currentSession = currentSessionId
+          ? (sessions.find((session) => session.id === currentSessionId) ??
+            null)
+          : null;
+        const scopedCandidates = scopeSessionCycleCandidates(
+          candidates,
+          getSessionCycleProjectScope(
+            currentSession,
+            isNavigationPrototypeEnabled,
+          ),
+        );
+        const targetId = resolveSessionCycleTarget(
+          scopedCandidates,
+          currentSessionId,
+          cycleDirection,
+        );
+        if (targetId) {
+          handleSelectSession(targetId);
+        }
+        return;
+      }
       // Archive the current chat/session (default mod+e)
       if (eventMatchesShortcutCommand(e, "chat.archiveSession")) {
         if (e.defaultPrevented || isArchiveShortcutBlockedTarget(e.target)) {
@@ -4368,6 +4423,9 @@ export function AppShell({
     guardAppNavigation,
     handleArchiveChat,
     handleNavigate,
+    handleSelectSession,
+    isMultiWindowEnabled,
+    isNavigationPrototypeEnabled,
     leaveSecondarySurface,
     resetGlobalComposerTransition,
     setDesignSystemInspectorVisible,

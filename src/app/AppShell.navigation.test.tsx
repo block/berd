@@ -3940,4 +3940,63 @@ describe("AppShell global navigation", () => {
       await screen.findByPlaceholderText("Jump to session..."),
     ).toBeInTheDocument();
   });
+
+  it("cycles sessions with Ctrl+Tab and Ctrl+Shift+Tab", async () => {
+    const user = userEvent.setup();
+    const sessionBase = {
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    } satisfies Partial<ChatSession>;
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          ...sessionBase,
+          id: "session-1",
+          title: "Newest chat",
+          updatedAt: "2026-06-09T12:00:00.000Z",
+        },
+        {
+          ...sessionBase,
+          id: "session-2",
+          title: "Older chat",
+          updatedAt: "2026-06-09T10:00:00.000Z",
+        },
+      ] as ChatSession[],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    // From home, Ctrl+Tab enters the list at the most recent session.
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-1",
+      );
+    });
+
+    // Forward wraps through the older session.
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-2",
+      );
+    });
+
+    // Backward returns to the newer one.
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-1",
+      );
+    });
+
+    // Plain Tab (no ctrl) never cycles.
+    await user.keyboard("{Tab}");
+    expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+      "session-1",
+    );
+  });
 });
