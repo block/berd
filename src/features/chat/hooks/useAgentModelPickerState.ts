@@ -53,13 +53,15 @@ export function useAgentModelPickerState({
 
   const pickerAgents = useMemo(() => {
     const visible = new Map<string, AgentPickerOption>();
+    const gooseReadiness = agentReadiness.get("goose") ?? "not_ready";
 
     visible.set("goose", {
       id: "goose",
       label:
         getCatalogEntryFromEntries(catalogEntries, "goose")?.displayName ??
         "Goose",
-      readiness: "ready",
+      readiness: gooseReadiness,
+      ...(gooseReadiness === "ready" ? {} : { setupAction: "connect" }),
     });
 
     for (const provider of providers) {

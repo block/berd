@@ -1,7 +1,9 @@
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
-use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState};
+use crate::commands::runtime_config::{
+    local_byo_key_providers_enabled, RuntimeConfig, RuntimeConfigState,
+};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 const GOOSE_SEARCH_PATHS_ENV: &str = "GOOSE_SEARCH_PATHS";
 const LOCALHOST: &str = "127.0.0.1";
 const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
+const DATABRICKS_HOST_ENV: &str = "DATABRICKS_HOST";
 
 // ---------------------------------------------------------------------------
 // GooseServeProcess — singleton that owns the long-lived `goose serve` child
@@ -782,13 +785,34 @@ fn apply_shell_env_with_extended_path(
     shell_env: &HashMap<String, String>,
     prepend_dirs: &[PathBuf],
 ) {
+    apply_shell_env_with_extended_path_inner(
+        command,
+        shell_env,
+        prepend_dirs,
+        local_byo_key_providers_enabled(),
+    );
+}
+
+fn apply_shell_env_with_extended_path_inner(
+    command: &mut Command,
+    shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
+    strip_databricks_host: bool,
+) {
     let extended_path = path_env::build_extended_path_with_prepended_dirs(
         shell_env.get("PATH").map(String::as_str),
         prepend_dirs,
     );
 
+    if strip_databricks_host {
+        command.env_remove(DATABRICKS_HOST_ENV);
+    }
+
     for (key, value) in shell_env {
         if key == "PATH" {
+            continue;
+        }
+        if strip_databricks_host && key == DATABRICKS_HOST_ENV {
             continue;
         }
         command.env(key, value);
@@ -914,7 +938,8 @@ fn reserve_free_port() -> Result<u16, String> {
 mod tests {
     use super::{
         acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
-        apply_shell_env_with_extended_path, TAURI_WEBVIEW_ORIGIN,
+        apply_shell_env_with_extended_path, apply_shell_env_with_extended_path_inner,
+        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
     };
     use std::collections::HashMap;
     use std::ffi::OsString;
@@ -981,6 +1006,27 @@ mod tests {
             env_value(&command, "LANG"),
             Some(OsString::from("en_US.UTF-8"))
         );
+    }
+
+    #[test]
+    fn apply_shell_env_can_strip_databricks_host_for_byo_dev() {
+        let mut command = Command::new("goose");
+        let mut shell_env = HashMap::new();
+        shell_env.insert("PATH".to_string(), "/shell/bin".to_string());
+        shell_env.insert(
+            DATABRICKS_HOST_ENV.to_string(),
+            "https://example.test".to_string(),
+        );
+        shell_env.insert("LANG".to_string(), "en_US.UTF-8".to_string());
+
+        apply_shell_env_with_extended_path_inner(&mut command, &shell_env, &[], true);
+
+        assert_eq!(env_value(&command, DATABRICKS_HOST_ENV), None);
+        assert_eq!(
+            env_value(&command, "LANG"),
+            Some(OsString::from("en_US.UTF-8"))
+        );
+        assert!(env_value(&command, "PATH").is_some());
     }
 
     #[test]

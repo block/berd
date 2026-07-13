@@ -43,6 +43,15 @@ describe("useProviderSelection", () => {
     expect(result.current.selectedProvider).toBe("goose");
   });
 
+  it("falls unready goose back to a ready external agent", () => {
+    mockReadyAgentIds.value = new Set(["codex-acp"]);
+    useAgentStore.setState({ selectedProvider: "goose" });
+
+    const { result } = renderHook(() => useProviderSelection());
+
+    expect(result.current.selectedProvider).toBe("codex-acp");
+  });
+
   it("falls an unknown provider back to goose once the catalog is loaded", () => {
     useAgentStore.setState({ selectedProvider: "ghost-provider" });
 

@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { HomeScreen } from "@/features/home/ui/HomeScreen";
 import { HomeView } from "@/features/home/ui/HomeView";
 import { ChatView } from "@/features/chat/ui/ChatView";
+import { ProviderSetupRequired } from "@/features/providers/ui/ProviderSetupRequired";
 import { AutomationsWorkbench } from "@/features/automations/ui/AutomationsView";
 import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
 import { BuilderbotView } from "@/features/builderbot/ui/BuilderbotView";
@@ -116,6 +117,8 @@ interface AppShellContentProps {
     request: AgentSetupTroubleshootingRequest,
   ) => void;
   onReturnToAgentDraft?: () => void;
+  onOpenProvidersSettings: () => void;
+  homeProviderSetupRequired?: boolean;
 }
 
 export function AppShellContent({
@@ -175,6 +178,8 @@ export function AppShellContent({
   onLoggedOut,
   onStartProviderTroubleshootingChat,
   onReturnToAgentDraft,
+  onOpenProvidersSettings,
+  homeProviderSetupRequired = false,
 }: AppShellContentProps) {
   useNavigationPerfLogging({
     isPreparingContent,
@@ -194,7 +199,12 @@ export function AppShellContent({
   const openHomeAutomations = automationsEnabled
     ? () => onNavigateAutomations({ surface: "overview" })
     : undefined;
-  const homeContent = (
+  const setupRequiredContent = homeProviderSetupRequired ? (
+    <div className="flex h-full w-full items-center justify-center p-6">
+      <ProviderSetupRequired onOpenProviders={onOpenProvidersSettings} />
+    </div>
+  ) : null;
+  const homeContent = setupRequiredContent ?? (
     <HomeView
       onOpenProject={onStartChatFromProjectId}
       onOpenAgent={onOpenAgent}
@@ -263,6 +273,7 @@ export function AppShellContent({
     onStartChatWithSkill,
     onStartProviderTroubleshootingChat,
     renderedSession,
+    setupRequiredContent,
   });
 
   return (
@@ -351,6 +362,7 @@ interface RenderRouteContentOptions {
   ) => void;
   onReturnToAgentDraft?: () => void;
   renderedSession?: ChatSession;
+  setupRequiredContent: ReactNode | null;
 }
 
 function renderRouteContent({
@@ -401,6 +413,7 @@ function renderRouteContent({
   onStartChatFromProject,
   onStartChatWithSkill,
   onStartProviderTroubleshootingChat,
+  setupRequiredContent,
   renderedSession,
 }: RenderRouteContentOptions) {
   switch (location.view) {
@@ -510,12 +523,14 @@ function renderRouteContent({
           onComposerHandoffTarget={onChatComposerHandoffTarget}
         />
       ) : (
-        <HomeScreen
-          sessionId={homeSessionId}
-          onActivateSession={onActivateHomeSession}
-          onCreatePersona={onCreatePersona}
-          onCreateProject={onCreateProject}
-        />
+        (setupRequiredContent ?? (
+          <HomeScreen
+            sessionId={homeSessionId}
+            onActivateSession={onActivateHomeSession}
+            onCreatePersona={onCreatePersona}
+            onCreateProject={onCreateProject}
+          />
+        ))
       );
     case "home":
       return homeContent;

@@ -294,8 +294,13 @@ export async function acpCreateSession(
   workingDir: string,
   options: AcpCreateSessionOptions = {},
 ): Promise<AcpCreateSessionResult> {
+  // Only the "goose" sentinel should rely on backend defaults. Concrete
+  // model providers must be sent even without a model so Goose does not try to
+  // resolve a missing global GOOSE_PROVIDER.
   const deferProviderSetup =
-    options.deferProviderSetup === true && !options.modelId;
+    options.deferProviderSetup === true &&
+    !options.modelId &&
+    providerId === "goose";
   const response = await directAcp.newSession(
     workingDir,
     deferProviderSetup ? undefined : providerId,

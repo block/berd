@@ -34,6 +34,16 @@ const DEFAULT_DATABRICKS_HOST: &str = "https://block-lakehouse-production.cloud.
 const BYO_KEY_PROVIDERS_ENV: &str = "VITE_BYO_KEY_PROVIDERS";
 const ALLOWED_ENDPOINT_ENV_KEYS: &[&str] = &["DATABRICKS_HOST"];
 
+#[cfg(debug_assertions)]
+pub(crate) fn local_byo_key_providers_enabled() -> bool {
+    std::env::var(BYO_KEY_PROVIDERS_ENV).as_deref() == Ok("1")
+}
+
+#[cfg(not(debug_assertions))]
+pub(crate) fn local_byo_key_providers_enabled() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeConfig {
@@ -608,7 +618,7 @@ fn runtime_config_load_result_for_local_byo_dev(
     result: RuntimeConfigLoadResult,
 ) -> RuntimeConfigLoadResult {
     #[cfg(debug_assertions)]
-    if std::env::var(BYO_KEY_PROVIDERS_ENV).as_deref() == Ok("1") {
+    if local_byo_key_providers_enabled() {
         return match result {
             RuntimeConfigLoadResult::Ready { source, config }
                 if matches!(

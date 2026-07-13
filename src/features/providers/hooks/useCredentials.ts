@@ -7,6 +7,8 @@ import {
   checkAllProviderStatus,
 } from "@/features/providers/api/credentials";
 import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
+import { saveDefaultProviderSelection } from "@/features/providers/defaultProviderConfig";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import type { ProviderFieldValue } from "@/shared/types/providers";
@@ -181,12 +183,29 @@ export function useCredentials(): UseCredentialsReturn {
         );
         updateProviderStatus(result.status);
         useProviderModelCacheStore.getState().invalidateProvider(providerId);
-        refreshProviderModels(providerId);
+        if (
+          result.status.isConfigured &&
+          useDefaultProviderReadinessStore.getState().readiness?.status ===
+            "needs_setup"
+        ) {
+          try {
+            await saveDefaultProviderSelection(providerId);
+          } catch (error) {
+            setProviderModelWarning(providerId, formatAcpErrorMessage(error));
+          }
+        } else {
+          refreshProviderModels(providerId);
+        }
       } finally {
         setProviderSaving(providerId, false);
       }
     },
-    [refreshProviderModels, setProviderSaving, updateProviderStatus],
+    [
+      refreshProviderModels,
+      setProviderModelWarning,
+      setProviderSaving,
+      updateProviderStatus,
+    ],
   );
 
   const remove = useCallback(
@@ -197,24 +216,55 @@ export function useCredentials(): UseCredentialsReturn {
         updateProviderStatus(result.status);
         useProviderModelCacheStore.getState().invalidateProvider(providerId);
         cancelProviderModelRefresh(providerId);
+        try {
+          await useDefaultProviderReadinessStore.getState().refresh();
+        } catch (error) {
+          setProviderModelWarning(providerId, formatAcpErrorMessage(error));
+        }
       } finally {
         setProviderSaving(providerId, false);
       }
     },
-    [cancelProviderModelRefresh, setProviderSaving, updateProviderStatus],
+    [
+      cancelProviderModelRefresh,
+      setProviderModelWarning,
+      setProviderSaving,
+      updateProviderStatus,
+    ],
   );
 
   const completeNativeSetup = useCallback(
     async (providerId: string, result?: ProviderConfigChangeResponse) => {
+      const statuses = result ? undefined : await refreshStatuses();
       if (result) {
         updateProviderStatus(result.status);
-      } else {
-        await refreshStatuses();
       }
       useProviderModelCacheStore.getState().invalidateProvider(providerId);
-      refreshProviderModels(providerId);
+      const isConfigured =
+        result?.status.isConfigured ??
+        statuses?.find((status) => status.providerId === providerId)
+          ?.isConfigured ??
+        false;
+      if (
+        isConfigured &&
+        useDefaultProviderReadinessStore.getState().readiness?.status ===
+          "needs_setup"
+      ) {
+        try {
+          await saveDefaultProviderSelection(providerId);
+        } catch (error) {
+          setProviderModelWarning(providerId, formatAcpErrorMessage(error));
+        }
+      } else {
+        refreshProviderModels(providerId);
+      }
     },
-    [refreshProviderModels, refreshStatuses, updateProviderStatus],
+    [
+      refreshProviderModels,
+      refreshStatuses,
+      setProviderModelWarning,
+      updateProviderStatus,
+    ],
   );
 
   return {

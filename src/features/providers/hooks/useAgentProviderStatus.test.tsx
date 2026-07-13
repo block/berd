@@ -3,8 +3,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentProviderStatus } from "./useAgentProviderStatus";
+import { useDefaultProviderReadinessStore } from "../stores/defaultProviderReadinessStore";
 import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
 
+const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
 const runDoctor = vi.fn();
 
 vi.mock("@/shared/api/doctor", async () => {
@@ -16,6 +18,10 @@ vi.mock("@/shared/api/doctor", async () => {
     runDoctor: () => runDoctor(),
   };
 });
+
+vi.mock("@/shared/profile/buildProfile", () => ({
+  getBuildFeatureState: () => mockBuildFeatures,
+}));
 
 function check(overrides: Partial<DoctorCheck>): DoctorCheck {
   return {
@@ -61,6 +67,10 @@ function createWrapper() {
 describe("useAgentProviderStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockBuildFeatures.byoKeyProviders = false;
+    useDefaultProviderReadinessStore.setState({
+      readiness: null,
+    });
   });
 
   it("marks agents installed and authenticated in the doctor report as ready", async () => {
@@ -356,6 +366,50 @@ describe("useAgentProviderStatus", () => {
 
     expect(result.current.agentReadiness.get("goose")).toBe("ready");
     expect(result.current.readyAgentIds.has("goose")).toBe(true);
+  });
+
+  it("keeps goose ready in BYO builds while default provider readiness is unknown", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "unknown", error: "temporarily unavailable" },
+    });
+    runDoctor.mockResolvedValue(report([]));
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("goose")).toBe("ready");
+    expect(result.current.readyAgentIds.has("goose")).toBe(true);
+  });
+
+  it("marks goose not_ready in BYO builds when default provider setup is required", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "needs_setup", reason: "missing_defaults" },
+    });
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-goose",
+          label: "goose CLI",
+          status: "fail",
+          path: null,
+          bridgePath: null,
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("goose")).toBe("not_ready");
+    expect(result.current.readyAgentIds.has("goose")).toBe(false);
   });
 
   it("still surfaces the goose CLI check via agentChecks for the version readout", async () => {

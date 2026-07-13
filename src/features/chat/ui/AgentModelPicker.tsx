@@ -546,9 +546,7 @@ export function AgentModelPicker({
                           <span className="min-w-0 flex-1 truncate">
                             {agent.label}
                           </span>
-                          {isSelected ? (
-                            <IconCheck className="size-4 shrink-0 text-muted-foreground" />
-                          ) : !isReady ? (
+                          {!isReady ? (
                             <Button
                               asChild
                               variant="outline"
@@ -557,6 +555,8 @@ export function AgentModelPicker({
                             >
                               <span>{setupLabel}</span>
                             </Button>
+                          ) : isSelected ? (
+                            <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                           ) : null}
                         </PickerItem>
                       );

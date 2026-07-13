@@ -375,14 +375,34 @@ describe("acpCreateSession", () => {
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
 
-  it("can defer provider setup until a model is selected", async () => {
+  it("sends a concrete provider even when provider setup is deferred", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("openai", "/tmp/project", {
+      deferProviderSetup: true,
+    });
+
+    expect(mockNewSession).toHaveBeenCalledWith(
+      "/tmp/project",
+      "openai",
+      undefined,
+      undefined,
+    );
+    expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
+    expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
+  it("can defer goose provider setup until a model is selected", async () => {
     mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
 
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpCreateSession } = await import("../acp");
 
     await expect(
-      acpCreateSession("anthropic", "/tmp/project", {
+      acpCreateSession("goose", "/tmp/project", {
         deferProviderSetup: true,
       }),
     ).resolves.toEqual({
@@ -437,7 +457,7 @@ describe("acpCreateSession", () => {
       "../acp"
     );
 
-    const { sessionId } = await acpCreateSession("anthropic", "/tmp/project", {
+    const { sessionId } = await acpCreateSession("goose", "/tmp/project", {
       deferProviderSetup: true,
     });
 

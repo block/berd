@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentModelPicker } from "../AgentModelPicker";
+import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 
 class ResizeObserverStub {
   observe() {}
@@ -35,6 +36,83 @@ describe("AgentModelPicker", () => {
     expect(
       screen.getByRole("button", { name: /choose agent and model/i }),
     ).toHaveTextContent("GPT-4o");
+  });
+
+  it("routes not-ready Goose to Providers settings with a connect action", async () => {
+    const user = userEvent.setup();
+    const onAgentChange = vi.fn();
+    const openSettings = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettings);
+
+    render(
+      <AgentModelPicker
+        agents={[
+          {
+            id: "goose",
+            label: "Goose",
+            readiness: "not_ready",
+            setupAction: "connect",
+          },
+          { id: "codex-acp", label: "Codex", readiness: "ready" },
+        ]}
+        selectedAgentId="goose"
+        onAgentChange={onAgentChange}
+        availableModels={[]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    const goose = screen.getByRole("button", { name: /goose/i });
+    expect(goose).toHaveTextContent("Connect");
+    expect(goose).not.toHaveTextContent("Install");
+
+    await user.click(goose);
+
+    expect(onAgentChange).not.toHaveBeenCalled();
+    expect(openSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { section: "providers" } }),
+    );
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
+  });
+
+  it("routes not-ready external agents to Providers settings instead of selecting", async () => {
+    const user = userEvent.setup();
+    const onAgentChange = vi.fn();
+    const openSettings = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettings);
+
+    render(
+      <AgentModelPicker
+        agents={[
+          { id: "goose", label: "Goose", readiness: "ready" },
+          {
+            id: "codex-acp",
+            label: "Codex",
+            readiness: "not_ready",
+            setupAction: "connect",
+          },
+        ]}
+        selectedAgentId="goose"
+        onAgentChange={onAgentChange}
+        availableModels={[]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /codex/i }));
+
+    expect(onAgentChange).not.toHaveBeenCalled();
+    expect(openSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { section: "providers" } }),
+    );
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
   });
 
   it("uses a fallback icon for unknown compact icon-only providers", () => {

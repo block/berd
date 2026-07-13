@@ -687,7 +687,13 @@
     "showFewer": "Mostrar menos",
     "showMore": "Mostrar {{count}} proveedores más",
     "title": "Proveedores",
-    "waitingForSignIn": "Esperando inicio de sesión..."
+    "waitingForSignIn": "Esperando inicio de sesión...",
+    "setupRequired": {
+      "title": "Elige un proveedor de IA para empezar a chatear",
+      "body": "Esta versión no incluye un proveedor de modelos preconfigurado. Configura uno antes de iniciar un chat de Goose.",
+      "openProviders": "Abrir proveedores de IA",
+      "toast": "Elige un proveedor de IA antes de iniciar un chat."
+    }
   },
   "title": "Configuración"
 }

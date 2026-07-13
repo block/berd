@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
   acpListSessionsPage: vi.fn(),
   archiveSession: vi.fn(),
+  checkAllProviderStatus: vi.fn(),
   releaseSession: vi.fn(),
   unarchiveSession: vi.fn(),
 }));
@@ -27,6 +28,26 @@ vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
   acpListSessionsPage: (...args: unknown[]) =>
     mocks.acpListSessionsPage(...args),
+}));
+
+vi.mock("@/features/providers/api/credentials", () => ({
+  checkAllProviderStatus: (...args: unknown[]) =>
+    mocks.checkAllProviderStatus(...args),
+}));
+
+vi.mock("@/shared/profile/buildProfile", () => ({
+  getBuildFeatureState: () => ({
+    authGate: false,
+    agentToolsTip: true,
+    automations: true,
+    builderbot: true,
+    byoKeyProviders: false,
+    telemetry: true,
+    voiceDictation: true,
+    kgooseConnections: true,
+    securityMl: true,
+    updater: true,
+  }),
 }));
 
 vi.mock("@/shared/api/acpApi", () => ({
@@ -133,6 +154,7 @@ describe("chatSessionStore", () => {
     useSessionWindowStore.getState().setSnapshot([]);
     vi.clearAllMocks();
     mocks.archiveSession.mockResolvedValue(undefined);
+    mocks.checkAllProviderStatus.mockResolvedValue([]);
     mocks.releaseSession.mockResolvedValue(undefined);
     mocks.unarchiveSession.mockResolvedValue(undefined);
   });

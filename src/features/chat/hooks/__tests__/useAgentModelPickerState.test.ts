@@ -300,4 +300,34 @@ describe("useAgentModelPickerState", () => {
       { id: "cursor-agent", label: "Cursor Agent", readiness: "ready" },
     ]);
   });
+
+  it("shows Goose with a connect action when default provider setup is required", () => {
+    mockUseAgentProviderStatus.mockReturnValue({
+      readyAgentIds: new Set(["codex-acp"]),
+      agentReadiness: new Map([
+        ["goose", "not_ready"],
+        ["codex-acp", "ready"],
+      ]),
+      loading: false,
+      refresh: mockRefreshAgentProviderStatus,
+    });
+
+    const { result } = renderHook(() =>
+      useAgentModelPickerState({
+        providers: [{ id: "codex-acp", label: "Codex" }],
+        selectedProvider: "goose",
+        onProviderSelected: vi.fn(),
+      }),
+    );
+
+    expect(result.current.pickerAgents).toEqual([
+      {
+        id: "goose",
+        label: "Goose",
+        readiness: "not_ready",
+        setupAction: "connect",
+      },
+      { id: "codex-acp", label: "Codex", readiness: "ready" },
+    ]);
+  });
 });

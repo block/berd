@@ -4,16 +4,28 @@ import {
   type SessionModelPreference,
 } from "@/features/chat/lib/sessionModelPreference";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 
 export async function resolveSupportedSessionModelPreference(
   providerId: string,
   _unusedInventoryEntries: unknown,
   preferredModel?: string,
 ): Promise<SessionModelPreference> {
-  const sessionModelPreference = resolveSessionModelPreference({
+  let sessionModelPreference = resolveSessionModelPreference({
     providerId,
     preferredModel,
   });
+
+  if (providerId === "goose" && !sessionModelPreference.modelId) {
+    const readiness = useDefaultProviderReadinessStore.getState().readiness;
+    if (readiness?.status === "ready" && readiness.modelId) {
+      sessionModelPreference = {
+        providerId: readiness.providerId,
+        modelId: readiness.modelId,
+        modelName: readiness.modelId,
+      };
+    }
+  }
 
   if (!sessionModelPreference.modelId) {
     return sessionModelPreference;

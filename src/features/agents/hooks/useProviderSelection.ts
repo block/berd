@@ -2,7 +2,10 @@ import { useCallback, useMemo } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { selectSelectedProvider } from "../stores/agentSelectors";
 import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
-import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/providers/providerCatalog";
+import {
+  getAgentProvidersFromEntries,
+  resolveAgentProviderCatalogIdStrictFromEntries,
+} from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 
 export function useProviderSelection() {
@@ -18,6 +21,18 @@ export function useProviderSelection() {
   const providers = allProviders;
 
   const selectedProvider = useMemo(() => {
+    const fallbackReadyAgentId = () => {
+      if (readyAgentIds.has("goose")) {
+        return "goose";
+      }
+
+      return (
+        getAgentProvidersFromEntries(catalogEntries).find(
+          (provider) =>
+            provider.id !== "goose" && readyAgentIds.has(provider.id),
+        )?.id ?? "goose"
+      );
+    };
     const selectedAgentId = resolveAgentProviderCatalogIdStrictFromEntries(
       catalogEntries,
       storedSelectedProvider,
@@ -25,13 +40,13 @@ export function useProviderSelection() {
     if (!selectedAgentId) {
       // Stored id isn't a known agent provider. The live provider list is
       // sourced from the curated catalog, so an unresolved id is stale/unknown
-      // and can't be served — fall back to goose instead of leaking it to the
-      // backend ("Provider not set"). Keep the stored value until the catalog
-      // is loaded so we don't downgrade prematurely.
-      return catalogLoaded ? "goose" : storedSelectedProvider;
+      // and can't be served — fall back instead of leaking it to the backend
+      // ("Provider not set"). Keep the stored value until the catalog is
+      // loaded so we don't downgrade prematurely.
+      return catalogLoaded ? fallbackReadyAgentId() : storedSelectedProvider;
     }
     if (!readyAgentIds.has(selectedAgentId)) {
-      return "goose";
+      return fallbackReadyAgentId();
     }
     return storedSelectedProvider;
   }, [catalogEntries, catalogLoaded, readyAgentIds, storedSelectedProvider]);

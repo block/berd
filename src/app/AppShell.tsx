@@ -31,6 +31,7 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import {
   OPEN_SETTINGS_EVENT,
+  requestOpenSettings,
   type AgentBuilderProviderSetupReturnTarget,
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
@@ -132,6 +133,9 @@ import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
+import { checkAllProviderStatus } from "@/features/providers/api/credentials";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
+import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
@@ -151,6 +155,7 @@ import {
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
+import { isExternalAgentReady } from "@/features/chat/lib/externalAgentReadiness";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { findMissingProjectDirs } from "@/features/projects/lib/missingProjectDirs";
 import {
@@ -186,11 +191,13 @@ import {
 } from "./views/NavigationPanesView";
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import {
   resolveEffectiveNavigationSecondaryTarget,
   resolveNavigationPrototypePrimaryCollapsed,
 } from "./navigationPrototypeState";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
+import { isExternalAgentProvider } from "@/shared/api/acpPersonaHandoff";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
   DESIGN_SYSTEM_SECTIONS,
@@ -300,6 +307,67 @@ const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
   label,
 });
+
+function openProviderSetupRequiredSettings(message: string): void {
+  toast.info(message);
+  requestOpenSettings("providers");
+}
+
+async function getProviderConfiguredStatus(
+  providerId: string,
+): Promise<boolean | null> {
+  const statuses = await checkAllProviderStatus();
+  return (
+    statuses.find((status) => status.providerId === providerId)?.isConfigured ??
+    null
+  );
+}
+
+function requiresProviderSetupBeforeSession(providerId: string): boolean {
+  if (!getBuildFeatureState().byoKeyProviders) return false;
+  if (providerId !== "goose" && isExternalAgentProvider(providerId)) {
+    return false;
+  }
+
+  if (providerId !== "goose") return false;
+
+  const readiness = useDefaultProviderReadinessStore.getState().readiness;
+  return readiness?.status === "needs_setup";
+}
+
+async function requiresProviderSetupBeforeSessionAsync(
+  providerId: string,
+): Promise<boolean> {
+  if (requiresProviderSetupBeforeSession(providerId)) return true;
+
+  if (providerId === "goose") {
+    return false;
+  }
+
+  const readiness = useDefaultProviderReadinessStore.getState().readiness;
+  if (readiness?.status === "ready" && readiness.providerId === providerId) {
+    try {
+      const configured = await getProviderConfiguredStatus(providerId);
+      return configured === false;
+    } catch {
+      return true;
+    }
+  }
+
+  if (isExternalAgentProvider(providerId)) {
+    try {
+      return !(await isExternalAgentReady(providerId));
+    } catch {
+      return true;
+    }
+  }
+
+  try {
+    return (await getProviderConfiguredStatus(providerId)) !== true;
+  } catch {
+    return true;
+  }
+}
 const parent = (
   id: string,
   label: string,
@@ -994,6 +1062,7 @@ export function AppShell({
   }, []);
   const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
   const { selectedProvider } = useProviderSelection();
+  const { readyAgentIds } = useAgentProviderStatus();
   const selectedProviderRef = useRef(selectedProvider);
   selectedProviderRef.current = selectedProvider;
   const projects = useProjectStore(selectProjects);
@@ -1424,9 +1493,27 @@ export function AppShell({
     setHomeSessionId,
   });
 
+  // Mirrors the ProviderSetupRequired gate in AppShellContent: while the
+  // setup-required screen replaces Home, skip creating the home session, and
+  // create it as soon as readiness clears (no navigation required).
+  const defaultProviderReadinessStatus = useDefaultProviderReadinessStore(
+    (state) => state.readiness?.status,
+  );
+  const providerSetupRequiredForHome =
+    getBuildFeatureState().byoKeyProviders &&
+    defaultProviderReadinessStatus === "needs_setup" &&
+    ![...readyAgentIds].some(
+      (providerId) =>
+        providerId !== "goose" && isExternalAgentProvider(providerId),
+    );
+
   const ensureHomeSession = useCallback(async () => {
     if (!hasHydratedSessions || sessionsLoading) {
-      return null;
+      return undefined;
+    }
+
+    if (providerSetupRequiredForHome) {
+      return undefined;
     }
 
     if (homeSessionRequestRef.current) {
@@ -1482,6 +1569,13 @@ export function AppShell({
         // Once a provider+model is set, don't let stored preferences re-seed
         // on model refreshes — that would clobber explicit user picks.
         if (liveHomeSession.providerId && liveHomeSession.modelId) {
+          if (
+            await requiresProviderSetupBeforeSessionAsync(
+              liveHomeSession.providerId,
+            )
+          ) {
+            return liveHomeSession;
+          }
           const result = await applyLatestSessionConfig({
             sessionId: homeSession.id,
             providerId: liveHomeSession.providerId,
@@ -1507,6 +1601,9 @@ export function AppShell({
           liveHomeSession.workingDir === workingDir &&
           modelIdToApply == null
         ) {
+          return liveHomeSession;
+        }
+        if (await requiresProviderSetupBeforeSessionAsync(resolvedProviderId)) {
           return liveHomeSession;
         }
         const result = await applyLatestSessionConfig({
@@ -1557,6 +1654,9 @@ export function AppShell({
         providerAtStart,
         sessionModelPreference,
       );
+      if (await requiresProviderSetupBeforeSessionAsync(resolvedProviderId)) {
+        return null;
+      }
       const session = await createSession({
         title: DEFAULT_CHAT_TITLE,
         providerId: resolvedProviderId,
@@ -1586,19 +1686,29 @@ export function AppShell({
     createSession,
     hasHydratedSessions,
     homeSession,
-    projects,
-    sessionsLoading,
     patchSession,
+    projects,
+    providerSetupRequiredForHome,
+    sessionsLoading,
   ]);
 
   useEffect(() => {
-    if (activeView !== "home" || !migrationSettled) {
+    if (
+      activeView !== "home" ||
+      !migrationSettled ||
+      providerSetupRequiredForHome
+    ) {
       return;
     }
     void ensureHomeSession().catch((error) => {
       console.error("Failed to ensure Home session:", error);
     });
-  }, [activeView, ensureHomeSession, migrationSettled]);
+  }, [
+    activeView,
+    ensureHomeSession,
+    migrationSettled,
+    providerSetupRequiredForHome,
+  ]);
 
   const startDraftSessionCreation = useCallback(
     ({
@@ -1652,8 +1762,19 @@ export function AppShell({
         Promise.resolve(sessionModelPreference),
         Promise.resolve(workingDir),
       ])
-        .then(([resolvedSessionModelPreference, resolvedWorkingDir]) =>
-          acpCreateSession(
+        .then(async ([resolvedSessionModelPreference, resolvedWorkingDir]) => {
+          if (
+            await requiresProviderSetupBeforeSessionAsync(
+              resolvedSessionModelPreference.providerId,
+            )
+          ) {
+            openProviderSetupRequiredSettings(
+              t("settings:providers.setupRequired.toast"),
+            );
+            throw new Error(t("settings:providers.setupRequired.toast"));
+          }
+
+          return acpCreateSession(
             resolvedSessionModelPreference.providerId,
             resolvedWorkingDir,
             {
@@ -1667,8 +1788,8 @@ export function AppShell({
             configOptionsSnapshot,
             sessionModelPreference: resolvedSessionModelPreference,
             workingDir: resolvedWorkingDir,
-          })),
-        )
+          }));
+        })
         .then(
           async ({
             sessionId,
@@ -1937,6 +2058,16 @@ export function AppShell({
           undefined,
           options.modelId ?? undefined,
         );
+      if (
+        await requiresProviderSetupBeforeSessionAsync(
+          resolvedSessionModelPreference.providerId,
+        )
+      ) {
+        openProviderSetupRequiredSettings(
+          t("settings:providers.setupRequired.toast"),
+        );
+        return undefined;
+      }
       const sessionModelPreference =
         options.modelName &&
         resolvedSessionModelPreference.modelId === options.modelId
@@ -1998,8 +2129,10 @@ export function AppShell({
       const session = createDraftSession({
         title,
         projectId: project?.id,
-        providerId,
+        providerId: sessionModelPreference.providerId,
         workingDir: optimisticWorkingDir,
+        modelId: sessionModelPreference.modelId,
+        modelName: sessionModelPreference.modelName,
       });
       resetNavigationSecondary();
       clearSettingsSectionUrl();
@@ -2029,12 +2162,19 @@ export function AppShell({
       setChatActiveSession,
       startDraftSessionCreation,
       resetNavigationSecondary,
+      t,
     ],
   );
 
   const agentBuilder = useAgentBuilderCoordinator({
     startupReady: startup.ready,
-    createNewTab: (title, options) => createNewTab(title, undefined, options),
+    createNewTab: async (title, options) => {
+      const session = await createNewTab(title, undefined, options);
+      if (!session) {
+        throw new Error(t("settings:providers.setupRequired.toast"));
+      }
+      return session;
+    },
     closeSession: (sessionId) => closeAgentBuilderSessionRef.current(sessionId),
     navigateChat: (sessionId) => navigateAgentBuilderChatRef.current(sessionId),
     navigateAgents: (personaId, options) =>
@@ -2134,6 +2274,30 @@ export function AppShell({
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
       const providerId = options.providerId ?? selectedProvider ?? "goose";
+      const resolvedSessionModelPreference =
+        await resolveSupportedSessionModelPreference(
+          providerId,
+          undefined,
+          options.modelId ?? undefined,
+        );
+      const sessionModelPreference =
+        options.modelName &&
+        resolvedSessionModelPreference.modelId === options.modelId
+          ? {
+              ...resolvedSessionModelPreference,
+              modelName: options.modelName,
+            }
+          : resolvedSessionModelPreference;
+      if (
+        await requiresProviderSetupBeforeSessionAsync(
+          sessionModelPreference.providerId,
+        )
+      ) {
+        openProviderSetupRequiredSettings(
+          t("settings:providers.setupRequired.toast"),
+        );
+        return undefined;
+      }
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const isMultiWorkspaceMode = workspaceRepository.mode === "multi";
@@ -2156,8 +2320,8 @@ export function AppShell({
         request: {
           title,
           projectId: project.id,
-          providerId,
-          modelId: options.modelId,
+          providerId: sessionModelPreference.providerId,
+          modelId: sessionModelPreference.modelId,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
         allowDraftReuse:
@@ -2197,15 +2361,6 @@ export function AppShell({
         });
       }
 
-      const sessionModelPreference = resolveSupportedSessionModelPreference(
-        providerId,
-        undefined,
-        options.modelId ?? undefined,
-      ).then((preference) =>
-        options.modelName && preference.modelId === options.modelId
-          ? { ...preference, modelName: options.modelName }
-          : preference,
-      );
       const workspacePlan = shouldCreateExplicitProjectWorkspacePlan
         ? shouldApplyProjectWorkspaceStartup
           ? await planProjectChatWorkspaces(project, startupWorkspaceName)
@@ -2217,8 +2372,10 @@ export function AppShell({
         const session = createDraftSession({
           title,
           projectId: project.id,
-          providerId,
+          providerId: sessionModelPreference.providerId,
           workingDir: optimisticWorkingDir,
+          modelId: sessionModelPreference.modelId,
+          modelName: sessionModelPreference.modelName,
           workspaceAttachments: workspacePlan?.workspaceAttachments,
         });
         resetNavigationSecondary();
@@ -2254,13 +2411,14 @@ export function AppShell({
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
+      t,
       workspaceRepository,
       resetNavigationSecondary,
     ],
   );
 
   const createBackgroundDraftChat = useCallback(
-    (
+    async (
       title = DEFAULT_CHAT_TITLE,
       project?: ProjectInfo,
       options: {
@@ -2275,6 +2433,30 @@ export function AppShell({
         `[perf:newtab] createBackgroundDraftChat start (project=${project?.id ?? "none"})`,
       );
       const providerId = options.providerId ?? selectedProvider ?? "goose";
+      const resolvedSessionModelPreference =
+        await resolveSupportedSessionModelPreference(
+          providerId,
+          undefined,
+          options.modelId ?? undefined,
+        );
+      const sessionModelPreference =
+        options.modelName &&
+        resolvedSessionModelPreference.modelId === options.modelId
+          ? {
+              ...resolvedSessionModelPreference,
+              modelName: options.modelName,
+            }
+          : resolvedSessionModelPreference;
+      if (
+        await requiresProviderSetupBeforeSessionAsync(
+          sessionModelPreference.providerId,
+        )
+      ) {
+        openProviderSetupRequiredSettings(
+          t("settings:providers.setupRequired.toast"),
+        );
+        return undefined;
+      }
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const existingDraft = findExistingDraft({
@@ -2286,8 +2468,8 @@ export function AppShell({
         request: {
           title,
           projectId: project?.id,
-          providerId,
-          modelId: options.modelId,
+          providerId: sessionModelPreference.providerId,
+          modelId: sessionModelPreference.modelId,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
       });
@@ -2299,23 +2481,14 @@ export function AppShell({
         return existingDraft;
       }
 
-      const sessionModelPreference = resolveSupportedSessionModelPreference(
-        providerId,
-        undefined,
-        options.modelId ?? undefined,
-      ).then((preference) =>
-        options.modelName && preference.modelId === options.modelId
-          ? { ...preference, modelName: options.modelName }
-          : preference,
-      );
       const optimisticWorkingDir = getOptimisticSessionCwd(project);
       const session = createDraftSession({
         title,
         projectId: project?.id,
-        providerId,
+        providerId: sessionModelPreference.providerId,
         workingDir: optimisticWorkingDir,
-        modelId: options.modelId,
-        modelName: options.modelName,
+        modelId: sessionModelPreference.modelId,
+        modelName: sessionModelPreference.modelName,
       });
       perfLog(
         `[perf:newtab] ${session.id.slice(0, 8)} created background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
@@ -2332,7 +2505,7 @@ export function AppShell({
       });
       return session;
     },
-    [selectedProvider, createDraftSession, startDraftSessionCreation],
+    [selectedProvider, createDraftSession, startDraftSessionCreation, t],
   );
 
   const activateDeferredChatSession = useCallback(
@@ -2374,7 +2547,15 @@ export function AppShell({
         ...request.options,
         startupWorkspaceName,
       })
-        .then(request.resolve, request.reject)
+        .then((session) => {
+          if (session) {
+            request.resolve(session);
+          } else {
+            request.reject(
+              new Error(t("settings:providers.setupRequired.toast")),
+            );
+          }
+        }, request.reject)
         .finally(() => {
           setProjectWorkspaceStartupCreating(false);
           setPendingProjectChatDraftRequest((current) => {
@@ -2388,6 +2569,7 @@ export function AppShell({
       createNewProjectDraft,
       pendingProjectChatDraftRequest,
       projectWorkspaceStartupCreating,
+      t,
     ],
   );
 
@@ -2402,7 +2584,15 @@ export function AppShell({
       ...request.options,
       skipProjectWorkspaceStartup: true,
     })
-      .then(request.resolve, request.reject)
+      .then((session) => {
+        if (session) {
+          request.resolve(session);
+        } else {
+          request.reject(
+            new Error(t("settings:providers.setupRequired.toast")),
+          );
+        }
+      }, request.reject)
       .finally(() => {
         setProjectWorkspaceStartupCreating(false);
         setPendingProjectChatDraftRequest((current) => {
@@ -2415,6 +2605,7 @@ export function AppShell({
     createNewProjectDraft,
     pendingProjectChatDraftRequest,
     projectWorkspaceStartupCreating,
+    t,
   ]);
 
   const handleStartChatFromProject = useCallback(
@@ -2461,9 +2652,11 @@ export function AppShell({
 
         void createChat
           .then((session) => {
-            useChatStore
-              .getState()
-              .setSkillDrafts(session.id, [toChatSkillDraft(skill)]);
+            if (session) {
+              useChatStore
+                .getState()
+                .setSkillDrafts(session.id, [toChatSkillDraft(skill)]);
+            }
           })
           .catch((error) => {
             logProjectChatStartError("Failed to start chat with skill:", error);
@@ -2555,6 +2748,7 @@ export function AppShell({
           modelName: modelId,
         })
           .then((session) => {
+            if (!session) return;
             patchSession(session.id, {
               ...(providerId ? { providerId } : {}),
               ...(modelId ? { modelId, modelName: modelId } : {}),
@@ -2759,40 +2953,51 @@ export function AppShell({
           ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
           : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
 
-        void createChat.then(enqueueMessage).catch((error) => {
-          logProjectChatStartError(
-            "Failed to start chat from global composer:",
-            error,
-          );
-        });
+        void createChat
+          .then((session) => {
+            if (session) {
+              return enqueueMessage(session);
+            }
+          })
+          .catch((error) => {
+            logProjectChatStartError(
+              "Failed to start chat from global composer:",
+              error,
+            );
+            resetGlobalComposerTransition();
+          });
       };
 
       const startBackgroundChat = () => {
-        try {
-          const session = createBackgroundDraftChat(
-            DEFAULT_CHAT_TITLE,
-            project,
-            chatOptions,
-          );
-          setChatComposerHandoffSessionId(session.id);
-          void enqueueMessage(session);
-          clearGlobalComposerRouteSwapTimer();
-          if (prefersReducedMotion()) {
-            activateDeferredChatSession(session.id);
+        void createBackgroundDraftChat(DEFAULT_CHAT_TITLE, project, chatOptions)
+          .then((session) => {
+            if (!session) {
+              resetGlobalComposerTransition();
+              return;
+            }
+            setChatComposerHandoffSessionId(session.id);
+            void enqueueMessage(session);
+            clearGlobalComposerRouteSwapTimer();
+            if (prefersReducedMotion()) {
+              activateDeferredChatSession(session.id);
+              resetGlobalComposerTransition();
+              return;
+            }
+            globalComposerRouteSwapTimeoutRef.current = window.setTimeout(
+              () => {
+                globalComposerRouteSwapTimeoutRef.current = null;
+                activateDeferredChatSession(session.id);
+              },
+              GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS,
+            );
+          })
+          .catch((error) => {
+            logProjectChatStartError(
+              "Failed to start chat from global composer:",
+              error,
+            );
             resetGlobalComposerTransition();
-            return;
-          }
-          globalComposerRouteSwapTimeoutRef.current = window.setTimeout(() => {
-            globalComposerRouteSwapTimeoutRef.current = null;
-            activateDeferredChatSession(session.id);
-          }, GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS);
-        } catch (error) {
-          logProjectChatStartError(
-            "Failed to start chat from global composer:",
-            error,
-          );
-          resetGlobalComposerTransition();
-        }
+          });
       };
 
       if (shouldRunComposerHandoff) {
@@ -2844,6 +3049,9 @@ export function AppShell({
               chatOptions,
             )
           : await createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
+        if (!session) {
+          return false;
+        }
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
 
         if (options?.providerId || options?.modelId || options?.personaId) {
@@ -2881,14 +3089,15 @@ export function AppShell({
         if (shouldDismissCenteredComposer) {
           resetGlobalComposerTransition();
         }
+        return true;
       };
 
       return new Promise<boolean>((resolve) => {
         guardAppNavigation(
           () => {
             void openExpandedDraft()
-              .then(() => {
-                resolve(true);
+              .then((expanded) => {
+                resolve(expanded);
               })
               .catch((error) => {
                 console.error("Failed to expand global composer:", error);
@@ -2917,6 +3126,7 @@ export function AppShell({
       guardAppNavigation(() => {
         void createNewTab(request.title, undefined, { providerId: "goose" })
           .then((session) => {
+            if (!session) return;
             useChatStore.getState().enqueueMessage(session.id, {
               text: request.prompt,
             });
@@ -4330,6 +4540,7 @@ export function AppShell({
               builderbotEnabled={isBuilderbotSurfaceEnabled}
               renderedSession={renderedSession}
               homeSessionId={homeSessionId}
+              homeProviderSetupRequired={providerSetupRequiredForHome}
               chatComposerHandoffRequest={chatComposerHandoffRequest}
               chatComposerHandoffSessionId={chatComposerHandoffSessionId}
               chatComposerHandoffActive={isGlobalComposerHandoff}
@@ -4386,6 +4597,7 @@ export function AppShell({
                   ? returnToAgentBuilderSettingsTarget
                   : undefined
               }
+              onOpenProvidersSettings={() => openSettings("providers")}
             />
             {showGlobalComposerShim ? (
               <div

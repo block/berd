@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
+import { useDefaultProviderReadinessStore } from "../stores/defaultProviderReadinessStore";
+import { saveDefaultProviderSelection } from "../defaultProviderConfig";
 import { useCredentials } from "./useCredentials";
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   saveProviderConfig: vi.fn(),
   refreshProviderModels: vi.fn(),
   invalidateProvider: vi.fn(),
+  refreshDefaultProviderReadiness: vi.fn(),
 }));
 
 vi.mock("@/features/providers/api/credentials", () => ({
@@ -17,6 +20,14 @@ vi.mock("@/features/providers/api/credentials", () => ({
   deleteProviderConfig: mocks.deleteProviderConfig,
   getProviderConfig: mocks.getProviderConfig,
   saveProviderConfig: mocks.saveProviderConfig,
+}));
+
+vi.mock("../defaultProviderConfig", () => ({
+  saveDefaultProviderSelection: vi.fn().mockResolvedValue({
+    providerId: "anthropic",
+    modelId: "claude-sonnet-4",
+    modelName: "Claude Sonnet 4",
+  }),
 }));
 
 describe("useCredentials", () => {
@@ -50,6 +61,19 @@ describe("useCredentials", () => {
     mocks.saveProviderConfig.mockResolvedValue(saveResponse);
     mocks.deleteProviderConfig.mockResolvedValue(deleteResponse);
     mocks.refreshProviderModels.mockResolvedValue(undefined);
+    vi.mocked(saveDefaultProviderSelection).mockResolvedValue({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+    mocks.refreshDefaultProviderReadiness.mockResolvedValue({
+      status: "ready",
+      providerId: "anthropic",
+    });
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "anthropic" },
+      refresh: mocks.refreshDefaultProviderReadiness,
+    });
   });
 
   it("saves secret fields through the credential API and refreshes provider models without requiring restart", async () => {
@@ -108,6 +132,45 @@ describe("useCredentials", () => {
         "model list failed with provider detail",
       ),
     );
+  });
+
+  it("uses a provider setup warning when model defaults cannot be saved", async () => {
+    vi.mocked(saveDefaultProviderSelection).mockRejectedValueOnce(
+      new Error("model list unavailable"),
+    );
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "needs_setup", reason: "missing_defaults" },
+    });
+    const { result } = renderHook(() => useCredentials());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.save("anthropic", [
+        {
+          key: "ANTHROPIC_API_KEY",
+          value: "sk-ant-test",
+          isSecret: true,
+        },
+      ]);
+    });
+
+    expect(mocks.saveProviderConfig).toHaveBeenCalled();
+    expect(result.current.modelWarnings.get("anthropic")).toContain(
+      "model list unavailable",
+    );
+  });
+
+  it("refreshes default provider readiness after deleting provider config", async () => {
+    const { result } = renderHook(() => useCredentials());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.remove("anthropic");
+    });
+
+    expect(mocks.deleteProviderConfig).toHaveBeenCalledWith("anthropic");
+    expect(mocks.invalidateProvider).toHaveBeenCalledWith("anthropic");
+    expect(mocks.refreshDefaultProviderReadiness).toHaveBeenCalledTimes(1);
   });
 
   it("suppresses stale refresh errors after deleting provider config", async () => {

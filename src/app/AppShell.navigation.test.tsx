@@ -31,6 +31,7 @@ import {
   EXPERIMENT_PREFERENCES_STORAGE_VERSION,
 } from "@/features/experiments/experimentPreferences";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -43,17 +44,23 @@ import {
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockAcpGetSessionInfo = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockPathExists = vi.hoisted(() => vi.fn());
+const mockCheckAllProviderStatus = vi.hoisted(() => vi.fn());
 const gitMocks = vi.hoisted(() => ({
   createBranch: vi.fn(),
   createWorktree: vi.fn(),
   deleteBranch: vi.fn(),
   getGitState: vi.fn(),
   removeWorktree: vi.fn(),
+}));
+const mockIsExternalAgentReady = vi.hoisted(() => vi.fn());
+const mockAgentStatus = vi.hoisted(() => ({
+  readyAgentIds: new Set<string>(["goose"]),
 }));
 const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
 const mockListPersonaSources = vi.hoisted(() => vi.fn());
@@ -157,6 +164,40 @@ function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
     config,
   });
 }
+
+function requireByoDefaultProviderSetup() {
+  mockBuildFeatures.byoKeyProviders = true;
+  useDefaultProviderReadinessStore.setState({
+    readiness: { status: "needs_setup", reason: "missing_defaults" },
+  });
+}
+
+function selectCodexProvider() {
+  useAgentStore.setState({
+    providers: [
+      { id: "goose", label: "Goose" },
+      { id: "codex-acp", label: "Codex" },
+    ],
+    selectedProvider: "codex-acp",
+  });
+}
+
+vi.mock("@/shared/profile/buildProfile", () => ({
+  filterExperimentRegistryForBuildProfile: <T,>(registry: readonly T[]) =>
+    registry,
+  getBuildFeatureState: () => ({
+    authGate: false,
+    agentToolsTip: true,
+    automations: true,
+    builderbot: true,
+    telemetry: true,
+    voiceDictation: true,
+    kgooseConnections: true,
+    securityMl: true,
+    updater: true,
+    ...mockBuildFeatures,
+  }),
+}));
 
 const mockGetPlatform = vi.hoisted(() => vi.fn(() => "mac"));
 vi.mock("@/shared/lib/platform", () => ({
@@ -271,6 +312,16 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
   ),
 }));
 
+vi.mock("@/features/providers/api/credentials", () => ({
+  checkAllProviderStatus: (...args: unknown[]) =>
+    mockCheckAllProviderStatus(...args),
+}));
+
+vi.mock("@/features/chat/lib/externalAgentReadiness", () => ({
+  isExternalAgentReady: (...args: unknown[]) =>
+    mockIsExternalAgentReady(...args),
+}));
+
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
   acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
@@ -296,6 +347,7 @@ vi.mock("@/shared/api/git", () => ({
 vi.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),
+    info: vi.fn(),
   },
 }));
 
@@ -331,8 +383,8 @@ vi.mock("@/features/updates/ui/UpdateButton", () => ({
 
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
-    readyAgentIds: new Set(["goose"]),
-    agentReadiness: new Map([["goose", "ready"]]),
+    readyAgentIds: mockAgentStatus.readyAgentIds,
+    agentReadiness: new Map(),
     agentChecks: new Map(),
     loading: false,
     refresh: vi.fn().mockResolvedValue(undefined),
@@ -605,6 +657,7 @@ describe("AppShell global navigation", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
+    mockBuildFeatures.byoKeyProviders = false;
     mockGetPlatform.mockReturnValue("mac");
     mockDesignSystemExplorerEnabled.mockReturnValue(false);
     mockAfterNextPaint.callbacks = [];
@@ -648,6 +701,11 @@ describe("AppShell global navigation", () => {
     mockPathExists.mockResolvedValue(false);
     mockCheckDirectoriesExist.mockReset();
     mockCheckDirectoriesExist.mockResolvedValue([]);
+    mockCheckAllProviderStatus.mockReset();
+    mockCheckAllProviderStatus.mockResolvedValue([]);
+    mockIsExternalAgentReady.mockReset();
+    mockIsExternalAgentReady.mockResolvedValue(false);
+    mockAgentStatus.readyAgentIds = new Set(["goose"]);
     mockCreatePersonaSource.mockReset();
     mockCreatePersonaSource.mockResolvedValue({
       type: "agent",
@@ -694,6 +752,9 @@ describe("AppShell global navigation", () => {
       projects: [],
       loading: false,
       activeProjectId: null,
+    });
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "goose" },
     });
     setReadyRuntimeConfig();
   });
@@ -859,6 +920,84 @@ describe("AppShell global navigation", () => {
     ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
   });
 
+  it("does not create a chat when BYO default provider setup is required", async () => {
+    requireByoDefaultProviderSetup();
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "providers",
+    );
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("allows chat creation when BYO default provider is ready", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "openai", isConfigured: true },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalled();
+  });
+
+  it("allows a configured concrete provider when the BYO default is missing", async () => {
+    requireByoDefaultProviderSetup();
+    useAgentStore.setState({
+      selectedProvider: "goose",
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "databricks_v2", label: "Databricks AI Gateway" },
+      ],
+      personas: [
+        {
+          id: "persona-resolves",
+          displayName: "Reviewer",
+          systemPrompt: "Review code.",
+          provider: "databricks_v2",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "databricks_v2", isConfigured: true },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with resolving agent" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "databricks_v2",
+      "~/goose artifacts",
+      {
+        deferProviderSetup: true,
+        modelId: undefined,
+        projectId: undefined,
+      },
+    );
+  });
+
   it("starts general chats with the resolved provider when a stored agent is unavailable", async () => {
     useAgentStore.setState({
       providers: [
@@ -884,6 +1023,49 @@ describe("AppShell global navigation", () => {
         projectId: undefined,
       },
     );
+  });
+
+  it("allows a ready external ACP agent when the BYO default is missing", async () => {
+    requireByoDefaultProviderSetup();
+    selectCodexProvider();
+    mockIsExternalAgentReady.mockResolvedValue(true);
+    mockAgentStatus.readyAgentIds = new Set(["goose", "codex-acp"]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "codex-acp",
+      "~/goose artifacts",
+      {
+        deferProviderSetup: true,
+        modelId: undefined,
+        projectId: undefined,
+      },
+    );
+  });
+
+  it("routes an auth-failed external ACP agent to Providers settings", async () => {
+    requireByoDefaultProviderSetup();
+    selectCodexProvider();
+    mockIsExternalAgentReady.mockResolvedValue(false);
+    mockAgentStatus.readyAgentIds = new Set(["goose", "codex-acp"]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "providers",
+    );
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
   it("starts general chats with goose when the stored provider is unknown", async () => {
@@ -1879,6 +2061,10 @@ describe("AppShell global navigation", () => {
         target: { value: "send behind the animation" },
       });
       fireEvent.keyDown(textbox, { key: "Enter" });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
 
       const queuedMessages = useChatStore.getState().queuedMessageBySession;
       const [draftSessionId] = Object.keys(queuedMessages);
@@ -2163,6 +2349,11 @@ describe("AppShell global navigation", () => {
         target: { value: "send without animation" },
       });
       fireEvent.keyDown(textbox, { key: "Enter" });
+      await waitFor(() => {
+        expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+          "session-1",
+        );
+      });
 
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
       expect(useChatSessionStore.getState().activeSessionId).not.toBe(
@@ -2201,6 +2392,10 @@ describe("AppShell global navigation", () => {
         target: { value: "send then navigate quickly" },
       });
       fireEvent.keyDown(textbox, { key: "Enter" });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
 
       const [draftSessionId] = Object.keys(
         useChatStore.getState().queuedMessageBySession,

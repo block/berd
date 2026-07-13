@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { resolveSupportedSessionModelPreference } from "./resolveSupportedSessionModelPreference";
 
 function setCachedModels(providerId: string, models: string[]) {
@@ -24,6 +25,25 @@ describe("resolveSupportedSessionModelPreference", () => {
     useProviderModelCacheStore.setState({
       providers: new Map(),
       refreshingProviderIds: new Set(),
+    });
+    useDefaultProviderReadinessStore.setState({ readiness: null });
+  });
+
+  it("resolves a ready backend Goose default when local preference is missing", async () => {
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "openai",
+        modelId: "gpt-5.4",
+      },
+    });
+
+    await expect(
+      resolveSupportedSessionModelPreference("goose", new Map()),
+    ).resolves.toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "gpt-5.4",
     });
   });
 

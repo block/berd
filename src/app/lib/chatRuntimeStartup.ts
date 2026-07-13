@@ -19,6 +19,8 @@ import {
 import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { saveDefaultProviderSelectionFromConfiguredProvider } from "@/features/providers/defaultProviderConfig";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AcpProvider } from "@/shared/api/acp";
@@ -210,6 +212,24 @@ export async function runChatRuntimeStartup(): Promise<void> {
 
   await loadRuntimeConfig();
   await loadSetupCatalog();
+  const readiness = await useDefaultProviderReadinessStore.getState().refresh();
+  if (
+    readiness.status === "needs_setup" &&
+    getBuildFeatureState().byoKeyProviders
+  ) {
+    // Recovery: a BYO key provider is configured but backend defaults are
+    // missing (e.g. defaults lost while credentials survived). Persist it as
+    // the default so the readiness gate clears; no-op when nothing is
+    // configured.
+    try {
+      await saveDefaultProviderSelectionFromConfiguredProvider();
+    } catch (error) {
+      console.warn(
+        "Failed to save default provider from configured provider:",
+        error,
+      );
+    }
+  }
   await loadDistroBundle();
   applyCuratedProviders(true);
 

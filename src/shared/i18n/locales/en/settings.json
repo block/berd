@@ -688,7 +688,13 @@
     "showFewer": "Show fewer",
     "showMore": "Show {{count}} more providers",
     "title": "Providers",
-    "waitingForSignIn": "Waiting for sign-in..."
+    "waitingForSignIn": "Waiting for sign-in...",
+    "setupRequired": {
+      "title": "Choose an AI provider to start chatting",
+      "body": "This build does not include a preconfigured model provider. Configure one before starting a Goose chat.",
+      "openProviders": "Open AI Providers",
+      "toast": "Choose an AI provider before starting a chat."
+    }
   },
   "title": "Settings",
   "security": {
