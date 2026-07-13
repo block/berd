@@ -3,7 +3,7 @@
   "protocolVersion": 1,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, clear project, fork, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, clear project, set worktree, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Only check on it later (action \"get\") if the user asks.",
@@ -321,6 +321,41 @@
             "additionalProperties": false
           }
         },
+        "set_worktree": {
+          "description": "Point a chat session at a different worktree or folder; the session's active worktree updates immediately in the app and the agent works there from the next prompt. Files and git state are not moved.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to re-point."
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Path of the worktree (or plain folder) the session should work in; must already exist on disk. `~` is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to re-point.",
+                "type": "string"
+              },
+              "path": {
+                "description": "Path of the worktree (or plain folder) the session should work in; must already exist on disk. `~` is expanded.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
         "fork": {
           "description": "Duplicate an existing chat session, copying its full conversation history into a new session the user can continue down an independent path. The fork appears in the app's session list; the user's current view does not change.",
           "fields": [
@@ -382,7 +417,7 @@
       }
     },
     "projects": {
-      "description": "Manage the user's projects: create, list, get, archive.",
+      "description": "Manage the user's projects: create, list, get, set worktree, archive.",
       "actions": {
         "create": {
           "description": "Create a new project; it appears immediately in the app's project list.",
@@ -459,6 +494,41 @@
               }
             },
             "required": ["project_id"],
+            "additionalProperties": false
+          }
+        },
+        "set_worktree": {
+          "description": "Set a project's default worktree: the folder new chats in the project start in. Takes effect for the next new chat; existing chats keep their current folder. The project's other configured folders are kept as secondary folders.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the project to update."
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Path of the worktree (or plain folder) new chats in the project should start in; must already exist on disk. `~` is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "description": "Id of the project to update.",
+                "type": "string"
+              },
+              "path": {
+                "description": "Path of the worktree (or plain folder) new chats in the project should start in; must already exist on disk. `~` is expanded.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["project_id", "path"],
             "additionalProperties": false
           }
         },

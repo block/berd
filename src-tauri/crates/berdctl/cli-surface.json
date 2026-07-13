@@ -3,7 +3,7 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, send, open, list, get, rename, move, clear project, fork, archive",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, clear project, set worktree, fork, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -45,6 +45,11 @@
           "about": "Move a chat session out of any project",
           "afterHelp": "Example:\n  berdctl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
         },
+        "set-worktree": {
+          "action": "set_worktree",
+          "about": "Point a chat session at a different worktree or folder",
+          "afterHelp": "Worktree paths come from the repo (`git worktree list`); any existing\nfolder works. The session's current folder is in `berdctl session get`'s\nworking_dir.\n\nExample:\n  berdctl session set-worktree --session-id <session-id> \\\n    --path ~/src/repo-worktrees/my-feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"branch\": \"...\"|null}\n  \"branch\" is the branch checked out in that folder, or null for a\n  non-git folder."
+        },
         "fork": {
           "action": "fork",
           "about": "Fork a chat session into an independent copy with its history",
@@ -59,7 +64,7 @@
     },
     "project": {
       "group": "projects",
-      "about": "Manage projects: create, list, get, archive",
+      "about": "Manage projects: create, list, get, set worktree, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -75,6 +80,11 @@
           "action": "get",
           "about": "Read one project's details",
           "afterHelp": "Example:\n  berdctl project get --project-id <project-id> --json\n\nResult:\n  {\"project_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"instructions\": \"...\", \"working_dirs\": [\"...\"], \"archived\": false,\n   \"session_count\": 4}"
+        },
+        "set-worktree": {
+          "action": "set_worktree",
+          "about": "Set a project's default worktree for new chats",
+          "afterHelp": "Only the default (first) project folder is swapped; secondary project\nfolders are preserved. The current value is working_dirs[0] in\n`berdctl project get`.\n\nExample:\n  berdctl project set-worktree --project-id <project-id> \\\n    --path ~/src/repo-worktrees/my-feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"working_dirs\": [\"...\", ...]}"
         },
         "archive": {
           "action": "archive",

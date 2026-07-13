@@ -22,6 +22,8 @@ import { moveSessionCommand } from "./impl/moveSession";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
+import { setProjectWorktreeCommand } from "./impl/setProjectWorktree";
+import { setSessionWorktreeCommand } from "./impl/setSessionWorktree";
 import { commandBridgeTimeoutMs } from "./timeouts";
 import { CommandError, type CommandContext, type ToolGroup } from "./types";
 
@@ -45,11 +47,12 @@ export const TOOL_GROUPS = {
   sessions: {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
-      "installed agent harness), send, open, list, get, rename, move, clear project, fork, archive.",
+      "installed agent harness), send, open, list, get, rename, move, " +
+      "clear project, set worktree, fork, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, send, open, list, get, rename, move, clear project, fork, archive",
+        "Manage chat sessions: create, send, open, list, get, rename, move, clear project, set worktree, fork, archive",
       verbs: {
         create: "create",
         send: "send",
@@ -59,6 +62,7 @@ export const TOOL_GROUPS = {
         rename: "rename",
         move: "move",
         "clear-project": "clear_project",
+        "set-worktree": "set_worktree",
         fork: "fork",
         archive: "archive",
       },
@@ -72,20 +76,30 @@ export const TOOL_GROUPS = {
       rename: renameSessionCommand,
       move: moveSessionCommand,
       clear_project: clearSessionProjectCommand,
+      set_worktree: setSessionWorktreeCommand,
       fork: forkSessionCommand,
       archive: archiveSessionCommand,
     },
   },
   projects: {
-    description: "Manage the user's projects: create, list, get, archive.",
+    description:
+      "Manage the user's projects: create, list, get, set worktree, archive.",
     cli: {
       noun: "project",
-      about: "Manage projects: create, list, get, archive",
+      about: "Manage projects: create, list, get, set worktree, archive",
+      verbs: {
+        create: "create",
+        list: "list",
+        get: "get",
+        "set-worktree": "set_worktree",
+        archive: "archive",
+      },
     },
     actions: {
       create: createProjectCommand,
       list: listProjectsCommand,
       get: getProjectCommand,
+      set_worktree: setProjectWorktreeCommand,
       archive: archiveProjectCommand,
     },
   },

@@ -275,11 +275,13 @@ mod tests {
             ("session", "rename") => vec!["--session-id", "s", "--title", "t"],
             ("session", "move") => vec!["--session-id", "s", "--project-id", "p"],
             ("session", "clear-project") => vec!["--session-id", "s"],
+            ("session", "set-worktree") => vec!["--session-id", "s", "--path", "/w"],
             ("session", "fork") => vec!["--session-id", "s"],
             ("session", "archive") => vec!["--session-id", "s"],
             ("project", "create") => vec!["--name", "n"],
             ("project", "list") => vec![],
             ("project", "get") => vec!["--project-id", "p"],
+            ("project", "set-worktree") => vec!["--project-id", "p", "--path", "/w"],
             ("project", "archive") => vec!["--project-id", "p"],
             ("agent", "create") => vec!["--name", "n", "--system-prompt", "sp"],
             ("agent", "list") => vec![],
@@ -536,8 +538,9 @@ berdctl talks to the running Berd desktop app and acts on what the user
 sees there:
 
   session   chat sessions        create, open, list, get, rename, move,
-                                  send, clear-project, fork, archive
-  project   projects             create, list, get, archive
+                                  send, clear-project, set-worktree, fork,
+                                  archive
+  project   projects             create, list, get, set-worktree, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
   info      read-only lookups    harnesses, models, context
@@ -550,8 +553,8 @@ Usage: berdctl [OPTIONS] <COMMAND>
 
 Commands:
   session  Manage chat sessions: create, send, open, list, get, rename, move,
-           clear project, fork, archive
-  project  Manage projects: create, list, get, archive
+           clear project, set worktree, fork, archive
+  project  Manage projects: create, list, get, set worktree, archive
   agent    Manage agents (personas): create, list
   skill    Manage skills: create, list, get
   info     Look up installed harnesses, available models, and the app context
