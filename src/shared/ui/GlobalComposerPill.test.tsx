@@ -296,6 +296,23 @@ describe("GlobalComposerPill", () => {
     );
   });
 
+  it("pressing Tab accepts the highlighted persona suggestion", async () => {
+    const user = userEvent.setup();
+    setPersonas();
+    renderGlobalComposer(vi.fn());
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@Res");
+    expect(
+      await screen.findByRole("option", { name: /research scout/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Tab}");
+
+    expect(input).toHaveValue("@Research Scout ");
+    expect(input).toHaveFocus();
+  });
+
   it("applies the suggested persona's provider and model to the send payload", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({

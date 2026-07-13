@@ -38,7 +38,7 @@
     "mentionNext": "Next mention suggestion",
     "mentionPrevious": "Previous mention suggestion",
     "mentionConfirm": "Insert selected mention",
-    "mentionCompleteDirectory": "Complete mention directory",
+    "mentionAcceptSuggestion": "Accept selected suggestion",
     "searchClose": "Close conversation search",
     "searchNext": "Next search result",
     "searchPrevious": "Previous search result"

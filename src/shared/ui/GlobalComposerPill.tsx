@@ -1240,7 +1240,7 @@ export function GlobalComposerPill({
                       !event.altKey
                     ) {
                       const item = confirmMention();
-                      if (item?.type === "file") {
+                      if (item) {
                         event.preventDefault();
                         handleMentionConfirm(item, {
                           completeDirectories: true,

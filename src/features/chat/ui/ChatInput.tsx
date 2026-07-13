@@ -849,13 +849,14 @@ export function ChatInput({
       if (
         eventMatchesShortcutCommand(
           event.nativeEvent,
-          "chat.mention.completeDirectory",
+          "chat.mention.acceptSuggestion",
         )
       ) {
-        // Tab only completes when a mention confirms; otherwise it falls
+        // Tab accepts the highlighted suggestion (completing folder paths
+        // in place instead of attaching); with nothing to accept it falls
         // through for native focus navigation.
         const item = confirmMention();
-        if (item?.type === "file") {
+        if (item) {
           event.preventDefault();
           handleMentionConfirm(item, { completeDirectories: true });
           return;

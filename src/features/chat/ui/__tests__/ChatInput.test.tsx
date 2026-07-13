@@ -790,6 +790,23 @@ describe("ChatInput", () => {
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
+  it("pressing Tab accepts the highlighted persona suggestion", async () => {
+    const user = userEvent.setup();
+    render(<StatefulChatInput />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@Rev");
+    expect(
+      await screen.findByRole("option", { name: /reviewer/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Tab}");
+
+    expect(input).toHaveValue("@Reviewer ");
+    expect(input).toHaveFocus();
+    expect(screen.getByText("Reviewer")).toBeInTheDocument();
+  });
+
   it("sends the selected sticky persona as one visible agent chip", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();

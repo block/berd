@@ -169,6 +169,30 @@ describe("ChatInput skill mentions", () => {
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
+  it("pressing Tab accepts the highlighted skill suggestion", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "/code");
+
+    expect(
+      await screen.findByRole("option", { name: /code-review/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Tab}");
+
+    expect(input).toHaveValue("/code-review ");
+    expect(input).toHaveFocus();
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+  });
+
   it("preserves slash command text when selecting a skill later in the prompt", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);

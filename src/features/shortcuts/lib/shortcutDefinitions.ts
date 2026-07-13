@@ -398,11 +398,11 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     allowUnmodified: true,
   },
   {
-    id: "chat.mention.completeDirectory",
+    id: "chat.mention.acceptSuggestion",
     category: "chat",
     scope: "component",
     defaultBindings: [{ shortcut: "tab" }],
-    descriptionKey: "actions.mentionCompleteDirectory",
+    descriptionKey: "actions.mentionAcceptSuggestion",
     configurable: false,
     discoverable: false,
     allowUnmodified: true,
