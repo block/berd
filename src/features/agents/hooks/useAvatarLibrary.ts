@@ -28,7 +28,7 @@ export interface AvatarLibraryState {
   cacheChecking: boolean;
   error: boolean;
   errorCode: AvatarLibraryErrorCode | null;
-  downloadingCollectionId: string | null;
+  downloadingCollectionIds: Set<string>;
   failedCollectionIds: Set<string>;
   retryCatalog: () => void;
   openCollection: (collection: AvatarCollection) => Promise<void>;
@@ -87,9 +87,9 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [errorCode, setErrorCode] = useState<AvatarLibraryErrorCode | null>(
     null,
   );
-  const [downloadingCollectionId, setDownloadingCollectionId] = useState<
-    string | null
-  >(null);
+  const [downloadingCollectionIds, setDownloadingCollectionIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [failedCollectionIds, setFailedCollectionIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -219,7 +219,13 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         return;
       }
 
-      setDownloadingCollectionId(collection.id);
+      if (downloadingCollectionIds.has(collection.id)) {
+        return;
+      }
+
+      setDownloadingCollectionIds((current) =>
+        new Set(current).add(collection.id),
+      );
 
       try {
         const cachedCollection = await ensureAvatarCollection({
@@ -263,12 +269,22 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
           new Set(current).add(collection.id),
         );
       } finally {
-        setDownloadingCollectionId((current) =>
-          current === collection.id ? null : current,
-        );
+        setDownloadingCollectionIds((current) => {
+          if (!current.has(collection.id)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.delete(collection.id);
+          return next;
+        });
       }
     },
-    [cachedAvatarMediaById, catalog, isCollectionCached],
+    [
+      cachedAvatarMediaById,
+      catalog,
+      downloadingCollectionIds,
+      isCollectionCached,
+    ],
   );
 
   const retryCatalog = useCallback(() => {
@@ -284,7 +300,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     cacheChecking,
     error,
     errorCode,
-    downloadingCollectionId,
+    downloadingCollectionIds,
     failedCollectionIds,
     retryCatalog,
     openCollection,

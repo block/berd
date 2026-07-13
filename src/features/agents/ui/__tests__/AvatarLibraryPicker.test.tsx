@@ -14,7 +14,7 @@ function libraryWithError(
     cacheChecking: false,
     error: true,
     errorCode,
-    downloadingCollectionId: null,
+    downloadingCollectionIds: new Set<string>(),
     failedCollectionIds: new Set<string>(),
     retryCatalog: vi.fn(),
     openCollection: vi.fn(),

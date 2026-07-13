@@ -53,7 +53,7 @@ vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
     cacheChecking: false,
     error: false,
     errorCode: null,
-    downloadingCollectionId: null,
+    downloadingCollectionIds: new Set(),
     failedCollectionIds: new Set(),
     retryCatalog: () => {},
     openCollection: async () => {},

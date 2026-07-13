@@ -83,7 +83,7 @@ export function AvatarLibraryPicker({
       ? t("editor.avatarCollectionNetworkAccess")
       : t("avatar.loadFailed");
   const catalogVersion = library.catalog?.catalogVersion;
-  const { cachedAvatarMediaById, downloadingCollectionId } = library;
+  const { cachedAvatarMediaById, downloadingCollectionIds } = library;
 
   const renderAvatarTile = useCallback(
     (entry: AvatarCatalogEntry) => {
@@ -98,8 +98,9 @@ export function AvatarLibraryPicker({
       const fallbackMediaType = fallbackVariant
         ? mediaTypeFromMimeType(fallbackVariant.mimeType)
         : "image";
-      const collectionDownloading =
-        downloadingCollectionId === entry.collectionId;
+      const collectionDownloading = downloadingCollectionIds.has(
+        entry.collectionId,
+      );
       const selectable = Boolean(cachedMedia) && !disabled;
 
       return (
@@ -155,7 +156,7 @@ export function AvatarLibraryPicker({
     [
       cachedAvatarMediaById,
       catalogVersion,
-      downloadingCollectionId,
+      downloadingCollectionIds,
       disabled,
       onPreviewError,
       onSelectAvatar,
@@ -179,8 +180,9 @@ export function AvatarLibraryPicker({
         cover.id,
       );
       const collectionCached = library.isCollectionCached(collection);
-      const collectionDownloading =
-        library.downloadingCollectionId === collection.id;
+      const collectionDownloading = library.downloadingCollectionIds.has(
+        collection.id,
+      );
       const collectionFailed = library.failedCollectionIds.has(collection.id);
       const statusText = collectionDownloading
         ? t("editor.avatarDownloading")
