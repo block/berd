@@ -1184,6 +1184,10 @@ export function GlobalComposerPill({
             >
               {mentionStatusText}
             </div>
+            {/* No data-chat-composer marker here on purpose: this pill
+                drafts a new conversation, so the archive-session shortcut
+                (default mod+e) stays blocked while it has focus instead of
+                archiving the session behind the centered overlay. */}
             <PopoverAnchor asChild>
               <textarea
                 ref={textareaRef}

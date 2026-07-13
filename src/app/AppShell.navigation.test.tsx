@@ -1857,6 +1857,83 @@ describe("AppShell global navigation", () => {
     ).toEqual(expect.any(String));
   });
 
+  it("archives the active session with Cmd+E while the chat composer is focused", async () => {
+    const user = userEvent.setup();
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Active chat",
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    // The real composer textarea (ChatInput) carries data-chat-composer.
+    const composer = document.createElement("textarea");
+    composer.setAttribute("data-chat-composer", "");
+    document.body.appendChild(composer);
+
+    composer.focus();
+    fireEvent.keyDown(composer, { key: "e", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toEqual(expect.any(String));
+  });
+
+  it("does not archive with Cmd+E from editable fields outside the composer", async () => {
+    const user = userEvent.setup();
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Active chat",
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const renameInput = document.createElement("input");
+    renameInput.type = "text";
+    document.body.appendChild(renameInput);
+
+    renameInput.focus();
+    fireEvent.keyDown(renameInput, { key: "e", metaKey: true });
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBeUndefined();
+  });
+
   it("does not archive from Ctrl+E inside the terminal on non-mac platforms", async () => {
     mockGetPlatform.mockReturnValue("windows");
     const user = userEvent.setup();

@@ -399,10 +399,19 @@ function getNavigationPrototypeMode(): NavigationPrototypeMode {
 }
 
 function isArchiveShortcutBlockedTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  // The chat composer opts back in (data-chat-composer): it holds focus for
+  // most of a session's life, so treating it like other editable fields would
+  // make the archive shortcut effectively dead in chat view.
+  if (target.closest("[data-chat-composer]")) {
+    return false;
+  }
   if (isEditableTarget(target)) {
     return true;
   }
-  return target instanceof Element && Boolean(target.closest(".xterm"));
+  return Boolean(target.closest(".xterm"));
 }
 
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {

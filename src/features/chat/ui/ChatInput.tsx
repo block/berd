@@ -1461,6 +1461,10 @@ export function ChatInput({
                   aria-label={t("input.ariaLabel")}
                   aria-controls={mentionOpen ? mentionListboxId : undefined}
                   aria-describedby={mentionOpen ? mentionStatusId : undefined}
+                  // Lets the global archive-session shortcut (default mod+e)
+                  // fire while the composer is focused; other editable fields
+                  // keep blocking it (see isArchiveShortcutBlockedTarget).
+                  data-chat-composer=""
                   data-testid="chat-composer"
                 />
               </PopoverAnchor>
