@@ -5,6 +5,12 @@ export interface OpenArtifact {
   resolvedPath: string;
   /** Basename shown in the viewer header. */
   filename: string;
+  /**
+   * Bumped when the same path is re-opened (agent re-edits the open file,
+   * auto-open fires again). The viewer keys its file read on this so the
+   * contents refresh instead of staying stale until close/reopen.
+   */
+  revision: number;
 }
 
 interface ArtifactViewerState {
@@ -15,7 +21,7 @@ interface ArtifactViewerState {
    * to avoid re-popping the same file the user just dismissed.
    */
   lastClosedPathBySession: Record<string, string | null>;
-  open: (sessionId: string, artifact: OpenArtifact) => void;
+  open: (sessionId: string, artifact: Omit<OpenArtifact, "revision">) => void;
   close: (sessionId: string) => void;
 }
 
@@ -23,14 +29,24 @@ export const useArtifactViewerStore = create<ArtifactViewerState>((set) => ({
   openBySession: {},
   lastClosedPathBySession: {},
   open: (sessionId, artifact) =>
-    set((state) => ({
-      openBySession: { ...state.openBySession, [sessionId]: artifact },
-      // Opening clears the suppression for that path.
-      lastClosedPathBySession: {
-        ...state.lastClosedPathBySession,
-        [sessionId]: null,
-      },
-    })),
+    set((state) => {
+      const previous = state.openBySession[sessionId] ?? null;
+      const revision =
+        previous && previous.resolvedPath === artifact.resolvedPath
+          ? previous.revision + 1
+          : 0;
+      return {
+        openBySession: {
+          ...state.openBySession,
+          [sessionId]: { ...artifact, revision },
+        },
+        // Opening clears the suppression for that path.
+        lastClosedPathBySession: {
+          ...state.lastClosedPathBySession,
+          [sessionId]: null,
+        },
+      };
+    }),
   close: (sessionId) =>
     set((state) => ({
       openBySession: { ...state.openBySession, [sessionId]: null },

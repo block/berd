@@ -74,7 +74,10 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [artifact.resolvedPath, viewMode]);
+    // Depend on the artifact object, not just the path: the store creates a
+    // fresh object (with a bumped revision) when the same path is re-opened
+    // after the agent re-edits it, and the contents must be re-read then.
+  }, [artifact, viewMode]);
 
   return (
     <Artifact className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none">
@@ -147,10 +150,14 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
 
 function ImageBody({ artifact }: { artifact: OpenArtifact }) {
   const { t } = useTranslation("chat");
-  const src = useMemo(
-    () => convertFileSrc(artifact.resolvedPath, "asset"),
-    [artifact.resolvedPath],
-  );
+  const src = useMemo(() => {
+    const assetSrc = convertFileSrc(artifact.resolvedPath, "asset");
+    // Re-opening the same path (agent re-edited the open image) must bypass
+    // the webview's cache for the unchanged asset URL.
+    return artifact.revision > 0
+      ? `${assetSrc}?rev=${artifact.revision}`
+      : assetSrc;
+  }, [artifact.resolvedPath, artifact.revision]);
   return (
     <div className="flex items-center justify-center p-4">
       <img

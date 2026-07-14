@@ -24,4 +24,24 @@ describe("artifactViewerStore", () => {
       "/p/a.md",
     );
   });
+
+  it("re-opening the same path bumps revision so the viewer re-reads", () => {
+    const { open } = useArtifactViewerStore.getState();
+    open("s1", { resolvedPath: "/p/a.md", filename: "a.md" });
+    expect(useArtifactViewerStore.getState().openBySession.s1?.revision).toBe(
+      0,
+    );
+
+    // Agent re-edits the open file: auto-open fires again with the same path.
+    open("s1", { resolvedPath: "/p/a.md", filename: "a.md" });
+    expect(useArtifactViewerStore.getState().openBySession.s1?.revision).toBe(
+      1,
+    );
+
+    // A different path resets the revision.
+    open("s1", { resolvedPath: "/p/b.md", filename: "b.md" });
+    expect(useArtifactViewerStore.getState().openBySession.s1?.revision).toBe(
+      0,
+    );
+  });
 });
