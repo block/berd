@@ -9,12 +9,15 @@ const mockResolveMarkdownHref =
   vi.fn<(href: string) => ArtifactLinkCandidate | null>();
 const mockPathExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
+const mockOpenInApp =
+  vi.fn<(path: string, filename?: string) => Promise<void>>();
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
     resolveMarkdownHref: mockResolveMarkdownHref,
     pathExists: mockPathExists,
     openResolvedPath: mockOpenResolvedPath,
+    openInApp: mockOpenInApp,
   }),
 }));
 
@@ -41,24 +44,34 @@ function renderAdapter(
 }
 
 describe("ToolCallAdapter — ArtifactActions", () => {
-  it('renders "Open file" button when a location is provided', () => {
+  it('renders a "View" button for a viewable (markdown) location', () => {
     const locations: ToolCallLocation[] = [
       { path: "/Users/test/project/output.md" },
     ];
 
     renderAdapter({ locations });
 
-    expect(screen.getByRole("button", { name: /open file/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /view/i })).toBeEnabled();
     expect(
       screen.getByText("/Users/test/project/output.md"),
     ).toBeInTheDocument();
+  });
+
+  it('renders an "Open file" button for a non-viewable location', () => {
+    const locations: ToolCallLocation[] = [
+      { path: "/Users/test/project/main.rs" },
+    ];
+
+    renderAdapter({ arguments: { path: "/project/main.rs" }, locations });
+
+    expect(screen.getByRole("button", { name: /open file/i })).toBeEnabled();
   });
 
   it("does NOT render artifact actions when no locations are provided", () => {
     renderAdapter();
 
     expect(
-      screen.queryByRole("button", { name: /open file/i }),
+      screen.queryByRole("button", { name: /view|open file/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -85,20 +98,18 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     ).toBeInTheDocument();
   });
 
-  it("invokes openResolvedPath when an artifact button is clicked", async () => {
+  it("invokes openInApp when an artifact button is clicked", async () => {
     const user = userEvent.setup();
-    mockOpenResolvedPath.mockResolvedValue(undefined);
+    mockOpenInApp.mockResolvedValue(undefined);
     const locations: ToolCallLocation[] = [
       { path: "/Users/test/project/output.md" },
     ];
 
     renderAdapter({ locations });
 
-    await user.click(screen.getByRole("button", { name: /open file/i }));
+    await user.click(screen.getByRole("button", { name: /view/i }));
 
-    expect(mockOpenResolvedPath).toHaveBeenCalledWith(
-      "/Users/test/project/output.md",
-    );
+    expect(mockOpenInApp).toHaveBeenCalledWith("/Users/test/project/output.md");
   });
 });
 

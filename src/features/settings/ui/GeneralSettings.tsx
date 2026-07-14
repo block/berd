@@ -36,6 +36,7 @@ import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPrefere
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
+import { useArtifactAutoOpenPreference } from "@/features/chat/lib/artifactAutoOpenPreference";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import {
   Dialog,
@@ -164,6 +165,7 @@ export function GeneralSettings({
   } = useAtMentionDefaultCategoryPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const homePinLabelsPreference = useHomePinLabelsPreference();
+  const artifactAutoOpenPreference = useArtifactAutoOpenPreference();
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
   const styleGuidelinesPreference = useStyleGuidelinesPreference();
@@ -630,6 +632,17 @@ export function GeneralSettings({
               {t("general.followUpBehavior.steer")}
             </Button>
           </fieldset>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.artifactAutoOpen.label")}
+          description={t("general.artifactAutoOpen.description")}
+        >
+          <Switch
+            checked={artifactAutoOpenPreference.enabled}
+            onCheckedChange={artifactAutoOpenPreference.setEnabled}
+            aria-label={t("general.artifactAutoOpen.label")}
+          />
         </SettingRow>
 
         <SettingRow

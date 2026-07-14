@@ -57,6 +57,7 @@ vi.mock("motion/react", () => {
 
   return {
     AnimatePresence: ({ children }: { children: ReactNode }) => children,
+    useReducedMotion: () => false,
     motion: new Proxy(
       {},
       {
@@ -238,6 +239,7 @@ vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
   ArtifactPolicyProvider: ({ children }: { children: ReactNode }) => children,
+  useSessionArtifacts: () => [],
 }));
 
 vi.mock("../../hooks/useChatSessionController", () => ({

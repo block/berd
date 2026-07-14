@@ -140,6 +140,8 @@
   "labels": {
     "assistant": "Assistant",
     "copyPath": "Copy path",
+    "openInEditor": "Open in editor",
+    "openInViewer": "Open in viewer",
     "revealInFileManager_mac": "Reveal in Finder",
     "revealInFileManager_windows": "Reveal in Explorer",
     "revealInFileManager_linux": "Reveal in File Manager",

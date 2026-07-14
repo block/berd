@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronRight, CircleIcon, ClockIcon } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CircleIcon,
+  ClockIcon,
+  PanelRight,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
+import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import { singleViewableArtifact } from "@/features/chat/lib/artifactViewerTypes";
 import {
   createVirtualLayoutStabilityAttributes,
   useVirtualLayoutPendingForChange,
@@ -195,6 +203,11 @@ export function ToolChainCards({
   externalChainExpanded?: boolean;
 }) {
   const { t } = useTranslation("chat");
+  const { openInApp } = useArtifactActionsContext();
+  const viewableArtifact = useMemo(
+    () => singleViewableArtifact(toolItems.map((item) => item.request)),
+    [toolItems],
+  );
   const { rowState, updateRowState, markRowInteracted } =
     useTranscriptRowStateAdapter();
   const durableToolChainStateId =
@@ -529,32 +542,54 @@ export function ToolChainCards({
       data-status={aggregateStatus}
       {...layoutPendingAttributes}
     >
-      <button
-        type="button"
-        onClick={() => {
-          markUserInteracted();
-          if (chainExpanded) {
-            setExpandedKeys(new Set());
-            setShowInternalSteps(false);
-          }
-          setChainExpanded((prev) => !prev);
-        }}
-        aria-expanded={chainExpanded}
-        className="flex w-full max-w-full items-center gap-2.5 pb-1 text-left text-sm font-medium text-foreground"
-      >
-        <span
-          aria-hidden="true"
-          className="flex size-4 shrink-0 items-center justify-center"
+      <div className="flex w-full max-w-full items-center gap-1.5 pb-1">
+        <button
+          type="button"
+          onClick={() => {
+            markUserInteracted();
+            if (chainExpanded) {
+              setExpandedKeys(new Set());
+              setShowInternalSteps(false);
+            }
+            setChainExpanded((prev) => !prev);
+          }}
+          aria-expanded={chainExpanded}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-sm font-medium text-foreground"
         >
-          <ChevronRight
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              chainExpanded && "rotate-90",
-            )}
-          />
-        </span>
-        <span className="min-w-0 flex-1 truncate">{headerText}</span>
-      </button>
+          <span
+            aria-hidden="true"
+            className="flex size-4 shrink-0 items-center justify-center"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                chainExpanded && "rotate-90",
+              )}
+            />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{headerText}</span>
+        </button>
+        {viewableArtifact ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              void openInApp(
+                viewableArtifact.path,
+                viewableArtifact.filename,
+              ).catch(() => {});
+            }}
+            title={viewableArtifact.path}
+            aria-label={t("tools.viewFile")}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-accent/55 hover:text-foreground"
+          >
+            <PanelRight className="size-3.5 shrink-0" />
+            <span className="max-w-[10rem] truncate">
+              {t("tools.viewFile")}
+            </span>
+          </button>
+        ) : null}
+      </div>
 
       {chainExpanded && !hasDetailRow && (
         <div className="relative flex flex-col gap-1 pt-1.5">

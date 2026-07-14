@@ -13,6 +13,11 @@ import type {
   ToolKind,
 } from "@/shared/types/messages";
 import { pathExists } from "@/shared/api/system";
+import { useArtifactViewerStore } from "@/features/chat/stores/artifactViewerStore";
+import {
+  artifactBasename,
+  isViewableArtifact,
+} from "@/features/chat/lib/artifactViewerTypes";
 
 export interface ArtifactLinkCandidate {
   resolvedPath: string;
@@ -46,12 +51,19 @@ export interface ArtifactPolicyContextValue {
   resolveMarkdownHref: (href: string) => ArtifactLinkCandidate | null;
   pathExists: (path: string) => Promise<boolean>;
   openResolvedPath: (path: string) => Promise<void>;
+  /**
+   * Primary "open this file" action for UI surfaces: viewable files
+   * (markdown, images) open in the in-app viewer; everything else opens
+   * externally. Resolves the path against the session cwd first.
+   */
+  openInApp: (path: string, filename?: string) => Promise<void>;
 }
 
 const DEFAULT_ACTIONS_CONTEXT_VALUE: ArtifactPolicyContextValue = {
   resolveMarkdownHref: () => null,
   pathExists: async () => false,
   openResolvedPath: async () => {},
+  openInApp: async () => {},
 };
 
 const EMPTY_SESSION_ARTIFACTS: readonly SessionArtifact[] = [];
@@ -275,12 +287,15 @@ function getArtifactSignature(
 export function ArtifactPolicyProvider({
   messages,
   sessionCwd,
+  sessionId,
   children,
 }: {
   messages: Message[];
   sessionCwd: string | null;
+  sessionId?: string | null;
   children: ReactNode;
 }) {
+  const openInViewer = useArtifactViewerStore((s) => s.open);
   const normalizedSessionCwd = useMemo(
     () => sessionCwd?.trim() || null,
     [sessionCwd],
@@ -368,13 +383,31 @@ export function ArtifactPolicyProvider({
     [resolveOpenTarget, normalizedSessionCwd],
   );
 
+  const openInApp = useCallback(
+    async (path: string, filename?: string) => {
+      const resolvedTarget = await resolveOpenTarget(path);
+      // Viewable + resolvable + we know the session: open in the viewer.
+      if (resolvedTarget && sessionId && isViewableArtifact(resolvedTarget)) {
+        openInViewer(sessionId, {
+          resolvedPath: resolvedTarget,
+          filename: filename ?? artifactBasename(resolvedTarget),
+        });
+        return;
+      }
+      // Otherwise fall back to opening externally (also handles not-found).
+      await openResolvedPath(path);
+    },
+    [resolveOpenTarget, sessionId, openInViewer, openResolvedPath],
+  );
+
   const actionsValue = useMemo<ArtifactPolicyContextValue>(
     () => ({
       resolveMarkdownHref,
       pathExists: checkPathExists,
       openResolvedPath,
+      openInApp,
     }),
-    [checkPathExists, openResolvedPath, resolveMarkdownHref],
+    [checkPathExists, openResolvedPath, openInApp, resolveMarkdownHref],
   );
 
   return (

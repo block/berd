@@ -474,6 +474,7 @@ pub fn run() {
             commands::system::inspect_attachment_paths,
             commands::system::search_file_mentions,
             commands::system::read_image_attachment,
+            commands::system::read_text_file,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,

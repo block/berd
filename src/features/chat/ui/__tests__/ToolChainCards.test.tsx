@@ -9,6 +9,8 @@ import {
   createTranscriptRowStateRegistry,
 } from "@/features/chat/transcript/row-state";
 
+const mockOpenInApp = vi.fn().mockResolvedValue(undefined);
+
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
     resolveToolCardDisplay: () => ({
@@ -19,6 +21,7 @@ vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
     resolveMarkdownHref: () => null,
     pathExists: vi.fn().mockResolvedValue(false),
     openResolvedPath: vi.fn().mockResolvedValue(undefined),
+    openInApp: mockOpenInApp,
   }),
 }));
 
@@ -59,6 +62,16 @@ function pair(
   };
 }
 
+function pairWithLocation(name: string, path: string): ToolChainItem {
+  const item = pair(name);
+  return {
+    ...item,
+    request: item.request
+      ? { ...item.request, locations: [{ path }] }
+      : item.request,
+  };
+}
+
 function completeItem(item: ToolChainItem): ToolChainItem {
   return {
     ...item,
@@ -84,6 +97,53 @@ describe("ToolChainCards", () => {
     render(<ToolChainCards toolItems={[pair("Read · src/a.ts")]} />);
     expect(
       screen.queryByRole("button", { name: /reviewing files|step/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a header View action when the chain has exactly one viewable artifact", async () => {
+    mockOpenInApp.mockClear();
+    const user = userEvent.setup();
+    render(
+      <ToolChainCards
+        toolItems={[
+          pair("Listing notes markdown files"),
+          pairWithLocation("Writing notes markdown file", "/p/notes-2.md"),
+        ]}
+      />,
+    );
+
+    const viewButton = screen.getByRole("button", { name: /^view$/i });
+    expect(viewButton).toBeInTheDocument();
+
+    await user.click(viewButton);
+    expect(mockOpenInApp).toHaveBeenCalledWith("/p/notes-2.md", "notes-2.md");
+  });
+
+  it("does NOT show a header View action when multiple viewable artifacts exist", () => {
+    render(
+      <ToolChainCards
+        toolItems={[
+          pairWithLocation("Writing a", "/p/a.md"),
+          pairWithLocation("Writing b", "/p/b.md"),
+        ]}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /^view$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT show a header View action for a non-viewable artifact", () => {
+    render(
+      <ToolChainCards
+        toolItems={[
+          pair("Reading config"),
+          pairWithLocation("Writing code", "/p/main.rs"),
+        ]}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /^view$/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -458,7 +518,7 @@ describe("ToolChainCards", () => {
       />,
     );
     const chainHeader = container.querySelector<HTMLButtonElement>(
-      '[data-role="tool-chain-card"] > button[aria-expanded]',
+      '[data-role="tool-chain-card"] button[aria-expanded]',
     );
     if (!chainHeader) throw new Error("expected tool-chain-card header");
 

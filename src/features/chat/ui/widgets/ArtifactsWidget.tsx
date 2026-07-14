@@ -14,6 +14,7 @@ import {
   useSessionArtifacts,
   type SessionArtifact,
 } from "../../hooks/ArtifactPolicyContext";
+import { isViewableArtifact } from "../../lib/artifactViewerTypes";
 import { Widget } from "./Widget";
 
 const CODE_EXTENSIONS = new Set([
@@ -70,7 +71,11 @@ export function ArtifactsWidget({
 }: ArtifactsWidgetProps) {
   const { t } = useTranslation("chat");
   const artifacts = useSessionArtifacts();
-  const { openResolvedPath } = useArtifactActionsContext();
+  const { openInApp, openResolvedPath } = useArtifactActionsContext();
+
+  const handleOpen = (artifact: SessionArtifact) => {
+    void openInApp(artifact.resolvedPath, artifact.filename);
+  };
 
   if (artifacts.length === 0) {
     return null;
@@ -95,11 +100,25 @@ export function ArtifactsWidget({
           <FileContextMenu
             key={artifact.resolvedPath}
             path={artifact.resolvedPath}
+            onOpenInViewer={
+              isViewableArtifact(artifact.resolvedPath)
+                ? () => void openInApp(artifact.resolvedPath, artifact.filename)
+                : undefined
+            }
+            onOpenExternally={
+              // For viewable files the row's primary click opens the in-app
+              // viewer, so external open stays one right-click away. For
+              // everything else the primary click already opens externally.
+              isViewableArtifact(artifact.resolvedPath)
+                ? () =>
+                    void openResolvedPath(artifact.resolvedPath).catch(() => {})
+                : undefined
+            }
           >
             <button
               type="button"
               className="relative flex w-full select-none items-center gap-2 rounded-sm px-4 py-1.5 text-left before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/70 before:content-['']"
-              onClick={() => void openResolvedPath(artifact.resolvedPath)}
+              onClick={() => handleOpen(artifact)}
             >
               <Icon className="size-4 shrink-0 text-muted-foreground" />
               <span className="truncate text-sm text-foreground">

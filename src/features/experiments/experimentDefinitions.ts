@@ -103,8 +103,10 @@ export const EXPERIMENT_DEFINITIONS = [
     descriptionKey: "experiments.localMarkdownImages.description",
     // Renders Markdown image links that point at local files in the session
     // working directory inline (via the asset: scheme), instead of showing a
-    // broken image. Off by default until the path-scoping behavior is reviewed;
-    // remote http(s) images stay blocked regardless of this switch.
+    // broken image. Deliberately off by default — rendering local files is
+    // opt-in. When off, MarkdownImage shows an inline enable hint where the
+    // image would render, so the toggle is discoverable in context. Remote
+    // http(s) images stay blocked regardless of this switch.
     defaultEnabled: false,
   },
   {

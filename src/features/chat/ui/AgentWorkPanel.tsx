@@ -6,7 +6,10 @@ import {
   IconMessageCircle,
   IconTool,
 } from "@tabler/icons-react";
+import { PanelRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import { singleViewableArtifact } from "@/features/chat/lib/artifactViewerTypes";
 import { cn } from "@/shared/lib/cn";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
@@ -354,6 +357,17 @@ export function AgentWorkPanel({
     () => buildAgentWorkTimeline(payload.content),
     [payload.content],
   );
+  const { openInApp } = useArtifactActionsContext();
+  // Single viewable artifact (markdown/image) across this work's tool calls:
+  // surfaces a header "View" action that stays reachable while the steps are
+  // collapsed, mirroring the ToolChainCards chain header.
+  const viewableArtifact = useMemo(
+    () =>
+      singleViewableArtifact(
+        items.map((item) => (item.kind === "tool" ? item.request : undefined)),
+      ),
+    [items],
+  );
   const shouldOpenActiveWork = payload.isActiveWork;
   const [open, setOpen] = useState(shouldOpenActiveWork || settleOnMount);
   const [previousStepsOpen, setPreviousStepsOpen] = useState(false);
@@ -414,7 +428,7 @@ export function AgentWorkPanel({
       className="mt-3 w-full min-w-0 max-w-full"
     >
       <div>
-        <div>
+        <div className="flex min-w-0 items-center gap-2">
           {showTrigger ? (
             <CollapsibleTrigger asChild>
               <Button
@@ -422,7 +436,7 @@ export function AgentWorkPanel({
                 variant="ghost"
                 flush
                 size="sm"
-                className="flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
+                className="flex h-auto w-full min-w-0 flex-1 justify-start rounded-md px-0 py-2 text-left"
                 rightIcon={
                   <IconChevronRight
                     aria-hidden
@@ -443,6 +457,26 @@ export function AgentWorkPanel({
                 </span>
               </Button>
             </CollapsibleTrigger>
+          ) : null}
+          {showTrigger && viewableArtifact ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void openInApp(
+                  viewableArtifact.path,
+                  viewableArtifact.filename,
+                ).catch(() => {});
+              }}
+              title={viewableArtifact.path}
+              aria-label={t("tools.viewFile")}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-accent/55 hover:text-foreground"
+            >
+              <PanelRight className="size-3.5 shrink-0" />
+              <span className="max-w-[10rem] truncate">
+                {t("tools.viewFile")}
+              </span>
+            </button>
           ) : null}
         </div>
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">

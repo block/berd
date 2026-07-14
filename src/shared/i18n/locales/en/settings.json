@@ -237,6 +237,10 @@
       "files": "Files",
       "label": "@ mention default"
     },
+    "artifactAutoOpen": {
+      "description": "When the agent creates or opens a viewable file (like markdown or an image), show it in the viewer automatically.",
+      "label": "Auto-open files in viewer"
+    },
     "artifacts": {
       "change": "Change",
       "chooseDialogTitle": "Choose artifact folder",

@@ -17,6 +17,13 @@ import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
+import {
+  ARTIFACT_VIEWER_RAIL_ALLOWANCE_PX,
+  ArtifactViewerPanel,
+  CONVERSATION_MIN_WIDTH_WITH_VIEWER,
+} from "./ArtifactViewerPanel";
+import { useOpenArtifact } from "../stores/artifactViewerStore";
+import { ArtifactAutoOpenMount } from "./ArtifactAutoOpenMount";
 import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -99,6 +106,7 @@ export function ChatView({
   onComposerHandoffTarget,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
+  const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const chatColumnRef = useRef<HTMLDivElement | null>(null);
@@ -169,9 +177,16 @@ export function ChatView({
   ]);
   const workspaceRepository = useWorkspaceRepository();
   const effectiveSession = controller.session ?? activeSession ?? null;
-  const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
-    leftViewportOcclusionPx,
-  );
+  // While the viewer panel is open it occupies row width much like the
+  // sidebar occludes the viewport: include its floor allowance in the
+  // compact-mode query so the right rail only docks when rail + viewer +
+  // conversation genuinely fit side by side. Below that, the rail uses its
+  // own compact overlay behavior instead of overflowing the row.
+  const chatRowOcclusionPx =
+    leftViewportOcclusionPx +
+    (isArtifactViewerOpen ? ARTIFACT_VIEWER_RAIL_ALLOWANCE_PX : 0);
+  const isContextPanelCompactViewport =
+    useChatContextPanelCompactViewport(chatRowOcclusionPx);
   const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
   const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
   const terminalWorkspacePath = useChatSessionStore((s) =>
@@ -731,12 +746,21 @@ export function ChatView({
     <ArtifactPolicyProvider
       messages={timelineMessages}
       sessionCwd={controller.sessionArtifactCwd}
+      sessionId={sessionId}
     >
+      <ArtifactAutoOpenMount
+        sessionId={sessionId}
+        isHistoryLoading={controller.isLoadingHistory}
+      />
       <div
         className={cn(
-          "flex h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
+          // @container: the chat row is a size container so the viewer/
+          // conversation min-width floors (cqw units) resolve against the
+          // row's actual width — sidebar occlusion included — not the
+          // viewport.
+          "@container flex h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
           !composerHandoffActive && "page-transition",
-          effectiveHasVisibleRightRail &&
+          (effectiveHasVisibleRightRail || isArtifactViewerOpen) &&
             "gap-[var(--spacing-app-panel-gutter-inline)]",
         )}
       >
@@ -747,7 +771,15 @@ export function ChatView({
             "relative flex min-w-0 flex-1 flex-col",
             isAgentBuilderSession && "agent-builder-column-enter",
           )}
-          style={agentBuilderChatColumnStyle}
+          style={{
+            ...agentBuilderChatColumnStyle,
+            // While the viewer is open, the conversation keeps a readable
+            // floor; the viewer panel is the flex child that yields (down to
+            // its own floor) when the row tightens.
+            ...(isArtifactViewerOpen
+              ? { minWidth: CONVERSATION_MIN_WIDTH_WITH_VIEWER }
+              : null),
+          }}
         >
           <div
             ref={conversationDropTargetRef}
@@ -810,6 +842,8 @@ export function ChatView({
           ) : null}
         </div>
 
+        {sessionId ? <ArtifactViewerPanel sessionId={sessionId} /> : null}
+
         <ChatRightRail
           ref={rightRailRef}
           session={effectiveSession}
@@ -825,7 +859,7 @@ export function ChatView({
           }
           builderColumnStyle={agentBuilderRailColumnStyle}
           terminalOpen={terminal.activeWorkspaceHasTerminal}
-          contextPanelLeftViewportOcclusionPx={leftViewportOcclusionPx}
+          contextPanelLeftViewportOcclusionPx={chatRowOcclusionPx}
           onRequestCloseRightRail={handleCloseRightRail}
           onToggleTerminal={handleToggleTerminal}
           terminalController={terminal}

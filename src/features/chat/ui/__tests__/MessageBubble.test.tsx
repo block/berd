@@ -1279,7 +1279,7 @@ describe("MessageBubble", () => {
 
     // Completed-on-mount chains render collapsed; expand the parent card first.
     const chainHeader = container.querySelector<HTMLButtonElement>(
-      '[data-role="tool-chain-card"] > button[aria-expanded]',
+      '[data-role="tool-chain-card"] button[aria-expanded]',
     );
     if (!chainHeader) throw new Error("expected tool-chain-card header");
     await user.click(chainHeader);

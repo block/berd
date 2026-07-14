@@ -26,6 +26,12 @@ const MIN_FILE_MENTION_FUZZY_QUERY_CHARS: usize = 3;
 /// anything materially larger before scanning the index.
 const MAX_FILE_MENTION_QUERY_BYTES: usize = 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
+/// Cap for in-app text/markdown viewing. Larger files fall back to
+/// "open externally" in the renderer rather than being read into memory.
+const MAX_TEXT_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// Number of leading bytes inspected for a NUL byte to classify a file as
+/// binary (and therefore not safe to render as text).
+const TEXT_FILE_BINARY_SNIFF_BYTES: usize = 8192;
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -591,6 +597,70 @@ pub fn read_image_attachment(path: String) -> Result<ImageAttachmentPayload, Str
 
     Ok(ImageAttachmentPayload {
         base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        mime_type,
+    })
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextFilePayload {
+    pub contents: String,
+    pub byte_size: u64,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .take(TEXT_FILE_BINARY_SNIFF_BYTES)
+        .any(|&byte| byte == 0)
+}
+
+/// Read a UTF-8 text file for in-app viewing. Rejects directories, binary
+/// files, and files that exceed `MAX_TEXT_FILE_BYTES` so the renderer can
+/// fall back to opening them externally.
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<TextFilePayload, String> {
+    let target = Path::new(&path);
+    if !target.exists() {
+        return Err(format!("File does not exist: {}", target.display()));
+    }
+
+    let metadata = fs::metadata(target)
+        .map_err(|error| format!("Failed to inspect '{}': {}", target.display(), error))?;
+    if metadata.is_dir() {
+        return Err(format!("Path is a directory: {}", target.display()));
+    }
+
+    let byte_size = metadata.len();
+    if byte_size > MAX_TEXT_FILE_BYTES {
+        return Err(format!(
+            "File '{}' exceeds the {} byte text-viewing limit",
+            target.display(),
+            MAX_TEXT_FILE_BYTES
+        ));
+    }
+
+    let bytes = fs::read(target)
+        .map_err(|error| format!("Failed to read '{}': {}", target.display(), error))?;
+
+    if looks_binary(&bytes) {
+        return Err(format!("File appears to be binary: {}", target.display()));
+    }
+
+    let contents = String::from_utf8(bytes)
+        .map_err(|_| format!("File is not valid UTF-8 text: {}", target.display()))?;
+
+    let mime_type = mime_guess::from_path(target)
+        .first_raw()
+        .map(std::borrow::ToOwned::to_owned);
+
+    Ok(TextFilePayload {
+        contents,
+        byte_size,
+        truncated: false,
         mime_type,
     })
 }
@@ -1692,8 +1762,9 @@ mod tests {
         build_file_mention_index, build_file_tree_entry, ensure_directory_path,
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
-        read_directory_entries, read_image_attachment, search_file_mentions_blocking,
-        validate_external_url, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
+        read_directory_entries, read_image_attachment, read_text_file,
+        search_file_mentions_blocking, validate_external_url, FileMentionIndexCache,
+        MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2500,6 +2571,48 @@ mod tests {
 
         assert_eq!(payload.mime_type, "image/png");
         assert!(!payload.base64.is_empty());
+    }
+
+    #[test]
+    fn read_text_file_returns_utf8_contents() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("notes.md");
+        fs::write(&path, "# Title\n\nhello").expect("write");
+
+        let payload = read_text_file(path.to_string_lossy().into_owned()).expect("read text file");
+        assert_eq!(payload.contents, "# Title\n\nhello");
+        assert!(!payload.truncated);
+        assert_eq!(payload.byte_size, "# Title\n\nhello".len() as u64);
+    }
+
+    #[test]
+    fn read_text_file_rejects_binary_files() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("blob.md");
+        fs::write(&path, [b'o', b'k', 0u8, b'!']).expect("write");
+
+        let error =
+            read_text_file(path.to_string_lossy().into_owned()).expect_err("binary should error");
+        assert!(error.contains("binary"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn read_text_file_rejects_directories() {
+        let dir = tempdir().expect("tempdir");
+        let error = read_text_file(dir.path().to_string_lossy().into_owned())
+            .expect_err("directory should error");
+        assert!(error.contains("directory"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn read_text_file_rejects_files_over_limit() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("big.md");
+        fs::write(&path, vec![b'a'; (MAX_TEXT_FILE_BYTES as usize) + 1]).expect("write");
+
+        let error = read_text_file(path.to_string_lossy().into_owned())
+            .expect_err("oversized should error");
+        assert!(error.contains("limit"), "unexpected error: {error}");
     }
 
     #[test]

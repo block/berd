@@ -107,3 +107,14 @@ export async function readImageAttachment(
 ): Promise<ImageAttachmentPayload> {
   return invoke("read_image_attachment", { path });
 }
+
+export interface TextFilePayload {
+  contents: string;
+  byteSize: number;
+  truncated: boolean;
+  mimeType?: string | null;
+}
+
+export async function readTextFile(path: string): Promise<TextFilePayload> {
+  return invoke("read_text_file", { path });
+}

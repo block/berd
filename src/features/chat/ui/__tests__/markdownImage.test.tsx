@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
   enabled: false,
   resolveMarkdownHref: vi.fn(),
   pathExists: vi.fn<(path: string) => Promise<boolean>>(),
+  setExperimentEnabled: vi.fn(),
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -15,6 +20,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: mocks.enabled }),
+  setExperimentEnabled: mocks.setExperimentEnabled,
 }));
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
@@ -35,9 +41,10 @@ describe("MarkdownImage", () => {
     mocks.enabled = false;
     mocks.resolveMarkdownHref.mockReset();
     mocks.pathExists.mockReset();
+    mocks.setExperimentEnabled.mockReset();
   });
 
-  it("renders a plain <img> (no asset rescue) when the experiment is OFF", async () => {
+  it("shows an enable hint (no asset rescue) when the experiment is OFF", async () => {
     mocks.enabled = false;
     mocks.resolveMarkdownHref.mockReturnValue({
       rawPath: "./puppy.jpg",
@@ -48,11 +55,66 @@ describe("MarkdownImage", () => {
 
     render(<MarkdownImage src="./puppy.jpg" alt="puppy" />);
 
-    // Falls through to the default broken-image behavior; never resolves.
+    // Never resolves or renders the image; offers the enable affordance
+    // where the broken image would have been.
     expect(screen.queryByTestId("clickable-image")).toBeNull();
-    const img = screen.getByAltText("puppy");
-    expect(img.getAttribute("src")).toBe("./puppy.jpg");
+    expect(screen.getByText("markdownImages.disabledHint")).toBeTruthy();
     expect(mocks.resolveMarkdownHref).not.toHaveBeenCalled();
+  });
+
+  it("enable hint click flips the experiment preference on", async () => {
+    mocks.enabled = false;
+
+    render(<MarkdownImage src="./puppy.jpg" alt="puppy" />);
+
+    screen.getByRole("button", { name: "markdownImages.enable" }).click();
+    expect(mocks.setExperimentEnabled).toHaveBeenCalledWith(
+      "local-markdown-images",
+      true,
+    );
+  });
+
+  it("enable hint click does not bubble into a wrapping markdown link", async () => {
+    // [![alt](./preview.png)](target.md) renders the image inside an <a>;
+    // enabling previews must not also open/navigate the wrapping anchor.
+    mocks.enabled = false;
+    const onLinkClick = vi.fn();
+
+    render(
+      // biome-ignore lint/a11y/useValidAnchor: mirrors the markdown-rendered anchor wrapper under test
+      <a href="./target.md" onClick={onLinkClick}>
+        <MarkdownImage src="./preview.png" alt="preview" />
+      </a>,
+    );
+
+    screen.getByRole("button", { name: "markdownImages.enable" }).click();
+    expect(mocks.setExperimentEnabled).toHaveBeenCalledWith(
+      "local-markdown-images",
+      true,
+    );
+    expect(onLinkClick).not.toHaveBeenCalled();
+  });
+
+  it("does not show the hint for non-image local paths when OFF", async () => {
+    mocks.enabled = false;
+
+    render(<MarkdownImage src="./notes.txt" alt="notes" />);
+
+    expect(screen.queryByText("markdownImages.disabledHint")).toBeNull();
+    expect(screen.getByAltText("notes").getAttribute("src")).toBe(
+      "./notes.txt",
+    );
+  });
+
+  it("does not show the hint for remote images when OFF", async () => {
+    mocks.enabled = false;
+
+    render(<MarkdownImage src="https://example.com/p.jpg" alt="remote" />);
+
+    expect(screen.queryByText("markdownImages.disabledHint")).toBeNull();
+    expect(screen.getByAltText("remote").getAttribute("src")).toBe(
+      "https://example.com/p.jpg",
+    );
   });
 
   it("renders a local image via the asset: scheme when ON and the file exists", async () => {

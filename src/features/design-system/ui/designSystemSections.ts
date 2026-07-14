@@ -133,6 +133,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-spinner", label: "Spinner" },
   { id: "component-switch", label: "Switch" },
   { id: "component-textarea", label: "Textarea" },
+  { id: "component-toggle-group", label: "Toggle Group" },
   { id: "component-tooltip", label: "Tooltip" },
 ];
 
@@ -166,7 +167,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-split-button", label: "Split Button" },
   { id: "component-table", label: "Table" },
   { id: "component-toggle", label: "Toggle" },
-  { id: "component-toggle-group", label: "Toggle Group" },
 ];
 
 export const DESIGN_SYSTEM_ALL_COMPONENT_SECTIONS = [

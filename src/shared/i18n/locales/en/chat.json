@@ -489,6 +489,7 @@
     "openFolder": "Open folder",
     "openNamed": "Open {{name}}",
     "openPath": "Open path",
+    "viewFile": "View",
     "pathOutsideRoots": "Path is outside allowed roots",
     "structuredContent": "Structured content",
     "structuredOutput": "Structured output",
@@ -528,5 +529,19 @@
     "resize": "Resize right rail",
     "open": "Open right rail",
     "close": "Close right rail"
+  },
+  "artifactViewer": {
+    "close": "Close viewer",
+    "resize": "Resize viewer",
+    "openExternally": "Open in editor",
+    "viewPreview": "Preview",
+    "viewCode": "Code",
+    "loading": "Loading file…",
+    "loadError": "Couldn't load this file.",
+    "imageAlt": "Preview of {{filename}}"
+  },
+  "markdownImages": {
+    "disabledHint": "Local image previews are off.",
+    "enable": "Show local images"
   }
 }

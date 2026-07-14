@@ -1053,6 +1053,7 @@ export function AppShell({
   );
 
   useCompletionNotifications(handleNavigateToSession);
+
   useEffect(() => {
     let didCancel = false;
     let unlisten: (() => void) | null = null;
