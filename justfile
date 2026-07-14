@@ -327,6 +327,7 @@ dev:
     ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
     mkdir -p "$ICON_DIR"
     DEV_ICON_LABEL="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")"
+    DEV_ICON_LABEL="$(node -e 'const raw = process.argv[1] || ""; const strip = /^(?:(?:squareup|berd)(?=$|[^a-zA-Z0-9])|[^a-zA-Z0-9]+)/i; let label = raw, prev; do { prev = label; label = label.replace(strip, ""); } while (label !== prev); process.stdout.write(label || raw);' "$DEV_ICON_LABEL")"
     if [[ -z "$DEV_ICON_LABEL" || "$DEV_ICON_LABEL" == "HEAD" ]]; then
         DEV_ICON_LABEL="local"
     fi
