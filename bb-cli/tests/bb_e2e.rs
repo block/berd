@@ -123,6 +123,19 @@ fn capabilities_response(agents_dir: &Path) -> MockResponse {
     }))
 }
 
+fn capabilities_response_for_target(target: &str, target_dir: &Path) -> MockResponse {
+    MockResponse::json(json!({
+        "target_registry": {
+            target: {
+                "enabled": true,
+                "global_paths": [format!("{}", target_dir.display())],
+                "project_paths": ["./.agents/skills"],
+                "link_strategies": ["symlink"]
+            }
+        }
+    }))
+}
+
 fn marketplace_install_plan(zip_bytes: &[u8], artifact_sha: &str, artifact_size: usize) -> Value {
     json!({
         "plan_id": "plan_phase1_builderbot_tools",
@@ -1349,6 +1362,64 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
+#[test]
+fn bb_skills_install_and_update_restore_package_when_target_linking_fails() {
+    for action in ["install", "update"] {
+        let zip_bytes = skill_zip(&[("SKILL.md", "# New BuilderBot Tools\n")]);
+        let artifact_sha = sha256_hex(&zip_bytes);
+        let temp = temp_test_dir(&format!("bb-skills-{action}-target-recovery"));
+        let bb_home = temp.join("bb-home");
+        let skills_home = temp.join("skills-home");
+        let invalid_target = temp.join("target-is-a-file");
+        write_bb_org_config(&bb_home, "test");
+        write_installed_package(&skills_home, "builderbot-tools", "old-content", &["claude"]);
+        fs::write(&invalid_target, "not a directory").expect("create invalid target");
+
+        let mut plan = marketplace_install_plan(&zip_bytes, &artifact_sha, zip_bytes.len());
+        plan["operations"][0]["action"] = json!(action);
+        let server = MockServer::start(vec![
+            capabilities_response_for_target("claude", &invalid_target),
+            MockResponse::json(plan),
+            skill_detail_response(),
+            artifact_response(zip_bytes, &artifact_sha),
+        ]);
+
+        let output = bb_command()
+            .env("BB_HOME", &bb_home)
+            .env("BB_SKILLS_HOME", &skills_home)
+            .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
+            .env("KGOOSE_BASE_URL", &server.base_url)
+            .args([
+                "skills",
+                "install",
+                "builderbot-tools",
+                "--target",
+                "claude",
+                "--yes",
+                "--json",
+            ])
+            .output()
+            .expect("run bb skills install");
+        let _requests = server.finish();
+        let (stdout, stderr) = output_text(&output);
+
+        assert!(
+            !output.status.success(),
+            "stdout: {stdout}; stderr: {stderr}"
+        );
+        assert!(
+            format!("{stdout}\n{stderr}").contains("restored the previous package"),
+            "stdout: {stdout}; stderr: {stderr}"
+        );
+        assert_eq!(
+            fs::read_to_string(skills_home.join("packages/builderbot-tools/SKILL.md"))
+                .expect("read restored package"),
+            "# BuilderBot Tools\n"
+        );
+        fs::remove_dir_all(temp).expect("remove temp dir");
+    }
+}
+
 /// The default layout: the canonical packages dir IS the agents target dir,
 /// so the agents entry is the real package (no self-link) and other flows
 /// (remove) treat it as the package, not a link.
@@ -1639,7 +1710,7 @@ fn bb_skills_install_refuses_unsafe_zip_paths() {
 }
 
 #[test]
-fn bb_skills_install_refuses_unmanaged_package_overwrite() {
+fn bb_skills_install_backs_up_unmanaged_package_before_replacing_it() {
     let zip_bytes = skill_zip(&[("SKILL.md", "# BuilderBot Tools\n")]);
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-unmanaged");
@@ -1653,6 +1724,8 @@ fn bb_skills_install_refuses_unmanaged_package_overwrite() {
             &artifact_sha,
             zip_bytes.len(),
         )),
+        skill_detail_response(),
+        artifact_response(zip_bytes, &artifact_sha),
     ]);
     let unmanaged = temp.join("skills-home/packages/builderbot-tools");
     fs::create_dir_all(&unmanaged).expect("create unmanaged package");
@@ -1677,24 +1750,107 @@ fn bb_skills_install_refuses_unmanaged_package_overwrite() {
     let requests = server.finish();
     let (stdout, stderr) = output_text(&output);
 
-    assert!(!output.status.success());
-    assert!(stdout.is_empty(), "stdout was: {stdout}");
-    let payload = parse_stderr_error(&stderr);
-    assert_eq!(payload["error"]["code"], json!("unmanaged_package_dir"));
-    assert_eq!(payload["error"]["exit_code"], json!(7));
-    assert!(
-        payload["error"]["message"]
-            .as_str()
-            .expect("error message string")
-            .contains("refusing to overwrite"),
-        "stderr was: {stderr}"
-    );
-    assert_eq!(output.status.code(), Some(7));
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse install output");
+    assert_eq!(response["installed"][0]["slug"], json!("builderbot-tools"));
     assert_eq!(
         fs::read_to_string(unmanaged.join("SKILL.md")).expect("read unmanaged skill"),
+        "# BuilderBot Tools\n"
+    );
+    assert!(unmanaged.join(".bb-skills-meta.json").is_file());
+    let backup_root = unmanaged
+        .parent()
+        .expect("packages directory")
+        .join(".backups");
+    let backups = fs::read_dir(&backup_root)
+        .expect("read backup directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("builderbot-tools-"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(
+        fs::read_to_string(backups[0].join("SKILL.md")).expect("read backup skill"),
         "user file"
     );
-    assert_eq!(requests.len(), 2, "should fail before artifact download");
+    let backup_output = &response["installed"][0]["backups"][0];
+    assert_eq!(backup_output["source_path"], json!(unmanaged));
+    assert_eq!(backup_output["backup_path"], json!(backups[0]));
+    assert!(backup_output["created_at"]
+        .as_str()
+        .is_some_and(|created_at| created_at.ends_with('Z')
+            && created_at.contains('T')
+            && created_at.matches(':').count() == 1));
+    assert_eq!(requests.len(), 4);
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_skills_install_human_output_reports_real_folder_backup() {
+    let temp = temp_test_dir("bb-skills-backup-output");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
+    let skills_home = temp.join("skills-home");
+    let packages_dir = skills_home.join("packages");
+    let agents_dir = temp.join("agents-skills");
+    let source = temp.join("source/builderbot-tools");
+    fs::create_dir_all(&source).expect("create local skill source");
+    fs::write(source.join("SKILL.md"), "# Marketplace replacement\n")
+        .expect("write local skill source");
+    let existing = packages_dir.join("builderbot-tools");
+    fs::create_dir_all(&existing).expect("create conflicting skill");
+    fs::write(existing.join("SKILL.md"), "# User-owned skill\n").expect("write conflicting skill");
+    let server = MockServer::start(vec![capabilities_response(&agents_dir)]);
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_SKILLS_HOME", &skills_home)
+        .env("BB_SKILLS_PACKAGES_DIR", &packages_dir)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "skills",
+            "install",
+            source.to_str().expect("UTF-8 source path"),
+            "--target",
+            "agents",
+            "--yes",
+        ])
+        .output()
+        .expect("run bb skills install");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let backups = fs::read_dir(packages_dir.join(".backups"))
+        .expect("read backup directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1);
+    assert!(
+        stdout.contains(&format!(
+            "conflicting skill at {} was replaced. Backup created on ",
+            existing.display()
+        )),
+        "stdout was: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("Z at {}", backups[0].display())),
+        "stdout was: {stdout}"
+    );
+    assert_eq!(
+        fs::read_to_string(backups[0].join("SKILL.md")).expect("read backup skill"),
+        "# User-owned skill\n"
+    );
+    assert_eq!(
+        fs::read_to_string(existing.join("SKILL.md")).expect("read installed skill"),
+        "# Marketplace replacement\n"
+    );
+    assert_eq!(requests.len(), 1);
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 

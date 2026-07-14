@@ -184,6 +184,19 @@ pub struct LinkOutcome {
     pub path: PathBuf,
     /// `symlink`, `copy`, or `existing` (already resolves to the package).
     pub strategy: &'static str,
+    /// An unmanaged skill displaced while creating this link. Reported with
+    /// the enclosing install/update result rather than nested under `links`.
+    #[serde(skip)]
+    pub backup: Option<BackupOutcome>,
+    #[serde(skip)]
+    rollback: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BackupOutcome {
+    pub source_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub created_at: String,
 }
 
 /// Links `package_dir` into `<base_dir>/<slug>` using the target's preferred
@@ -207,12 +220,14 @@ pub fn link_into_target(
             return Ok(LinkOutcome {
                 path: link_path,
                 strategy: "existing",
+                backup: None,
+                rollback: None,
             });
         }
     }
 
     fs::create_dir_all(base_dir).with_context(|| format!("create {}", base_dir.display()))?;
-    remove_link_or_managed_dir(&link_path)?;
+    let (backup, rollback) = prepare_target_path(&link_path, package_dir)?;
 
     if prefer_symlink {
         #[cfg(unix)]
@@ -222,6 +237,8 @@ pub fn link_into_target(
                     return Ok(LinkOutcome {
                         path: link_path,
                         strategy: "symlink",
+                        backup,
+                        rollback,
                     })
                 }
                 Err(err) => {
@@ -233,46 +250,183 @@ pub fn link_into_target(
         }
     }
 
-    copy_dir_recursive(package_dir, &link_path)?;
+    if let Err(error) = copy_dir_recursive(package_dir, &link_path) {
+        restore_target_path(&link_path, &backup, &rollback)?;
+        return Err(error).with_context(|| {
+            format!(
+                "link {} into {}",
+                package_dir.display(),
+                link_path.display()
+            )
+        });
+    }
     Ok(LinkOutcome {
         path: link_path,
         strategy: "copy",
+        backup,
+        rollback,
     })
 }
 
-/// Removes an existing symlink, or a managed directory that replaced one
+/// Removes an existing symlink, or a bb-owned directory that replaced one,
+/// returning any unmanaged skill backup created while clearing the path
 /// (some tools like Cursor materialize symlinks into real directories).
-/// Refuses to delete unmanaged real directories.
-pub fn remove_link_or_managed_dir(path: &Path) -> Result<()> {
+/// Unmanaged paths are moved under the skills directory's `.backups` folder
+/// before the target link is installed.
+fn prepare_target_path(
+    path: &Path,
+    package_dir: &Path,
+) -> Result<(Option<BackupOutcome>, Option<PathBuf>)> {
     let Ok(metadata) = fs::symlink_metadata(path) else {
-        return Ok(());
+        return Ok((None, None));
     };
     if metadata.file_type().is_symlink() {
-        fs::remove_file(path).with_context(|| format!("remove symlink {}", path.display()))?;
-        return Ok(());
+        // A metadata file alone is not proof of ownership: a user may link
+        // their own package which happens to contain one. Only replace a link
+        // when both paths resolve to the canonical package we are installing.
+        if matches!(
+            (fs::canonicalize(path), fs::canonicalize(package_dir)),
+            (Ok(target), Ok(package)) if target == package
+        ) {
+            fs::remove_file(path).with_context(|| format!("remove symlink {}", path.display()))?;
+            return Ok((None, None));
+        }
+        return backup_unmanaged_path(path).map(|backup| (Some(backup), None));
     }
     if metadata.is_dir() {
         if path.join(META_FILE_NAME).is_file() {
-            fs::remove_dir_all(path).with_context(|| format!("remove {}", path.display()))?;
-            return Ok(());
+            let rollback = target_rollback_path(path);
+            fs::rename(path, &rollback)
+                .with_context(|| format!("prepare to replace {}", path.display()))?;
+            return Ok((None, Some(rollback)));
         }
-        return Err(failure(
-            exit_codes::FS_CONFLICT,
-            "unmanaged_target_dir",
-            format!(
-                "{} already exists and is not managed by bb skills; refusing to overwrite (pass --include-unmanaged --force to override on remove)",
-                path.display()
-            ),
-        ));
+        return backup_unmanaged_path(path).map(|backup| (Some(backup), None));
     }
-    Err(failure(
-        exit_codes::FS_CONFLICT,
-        "unmanaged_target_file",
+    backup_unmanaged_path(path).map(|backup| (Some(backup), None))
+}
+
+fn target_rollback_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skill");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    path.with_file_name(format!(".{name}.previous-{}-{nanos}", std::process::id()))
+}
+
+fn restore_target_path(
+    path: &Path,
+    backup: &Option<BackupOutcome>,
+    rollback: &Option<PathBuf>,
+) -> Result<()> {
+    remove_any(path).with_context(|| format!("remove failed target {}", path.display()))?;
+    if let Some(backup) = backup {
+        fs::rename(&backup.backup_path, &backup.source_path).with_context(|| {
+            format!(
+                "restore target backup {} to {} after link failure",
+                backup.backup_path.display(),
+                backup.source_path.display()
+            )
+        })?;
+    } else if let Some(rollback) = rollback {
+        fs::rename(rollback, path).with_context(|| {
+            format!(
+                "restore previous target {} to {} after link failure",
+                rollback.display(),
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+pub fn rollback_link(outcome: &LinkOutcome) -> Result<()> {
+    if outcome.strategy == "existing" {
+        return Ok(());
+    }
+    restore_target_path(&outcome.path, &outcome.backup, &outcome.rollback)
+}
+
+pub fn finish_link(outcome: &LinkOutcome) {
+    if let Some(rollback) = &outcome.rollback {
+        let _ = remove_any(rollback);
+    }
+}
+
+pub fn backup_unmanaged_path(path: &Path) -> Result<BackupOutcome> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("skill");
+    let parent = path.parent().context("skill path has no parent")?;
+    let backup_root = parent.join(".backups");
+    fs::create_dir_all(&backup_root)
+        .with_context(|| format!("create backup directory {}", backup_root.display()))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before UNIX epoch")?;
+    let created_at = iso8601_utc(now.as_secs());
+    let created_at = format!("{}Z", &created_at[..16]);
+    let timestamp = created_at.trim_end_matches('Z').replace(['-', ':'], "");
+    let backup = available_backup_path(&backup_root, name, &format!("{timestamp}Z"))?;
+    fs::rename(path, &backup).with_context(|| {
         format!(
-            "{} already exists and is not a directory or symlink; refusing to overwrite",
-            path.display()
-        ),
-    ))
+            "backup unmanaged skill {} to {}",
+            path.display(),
+            backup.display()
+        )
+    })?;
+    Ok(BackupOutcome {
+        source_path: path.to_path_buf(),
+        backup_path: backup,
+        created_at,
+    })
+}
+
+fn available_backup_path(root: &Path, name: &str, timestamp: &str) -> Result<PathBuf> {
+    for sequence in 1_u64.. {
+        let suffix = if sequence == 1 {
+            String::new()
+        } else {
+            format!("-{sequence}")
+        };
+        let candidate = root.join(format!("{name}-{timestamp}{suffix}"));
+        match fs::symlink_metadata(&candidate) {
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(candidate),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("inspect backup path {}", candidate.display()))
+            }
+        }
+    }
+    unreachable!("backup sequence is unbounded")
+}
+
+/// Formats a UNIX timestamp as ISO-8601 UTC (`2026-06-10T12:34:56Z`) without
+/// pulling in a date dependency. Uses Howard Hinnant's civil-date algorithm.
+pub fn iso8601_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let secs_of_day = secs % 86_400;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60
+    )
 }
 
 /// Forcefully removes whatever is at `path` (used by `remove
@@ -403,7 +557,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn link_into_target_refuses_unmanaged_directories() {
+    fn link_into_target_backs_up_unmanaged_directories() {
         let temp = std::env::temp_dir().join(format!(
             "bb-link-unmanaged-{}-{}",
             std::process::id(),
@@ -418,11 +572,105 @@ mod tests {
         fs::create_dir_all(base.join("demo")).expect("create unmanaged dir");
         fs::write(base.join("demo/user.md"), "mine").expect("write user file");
 
-        let error = link_into_target(&package, &base, "demo", true)
-            .expect_err("unmanaged dir should refuse");
-        assert!(error.to_string().contains("refusing to overwrite"));
-        assert!(base.join("demo/user.md").is_file());
+        let outcome =
+            link_into_target(&package, &base, "demo", true).expect("link should replace conflict");
+        assert_eq!(outcome.strategy, "symlink");
+        assert!(base.join("demo").is_symlink());
+        let backup = outcome.backup.expect("backup outcome");
+        assert_eq!(backup.source_path, base.join("demo"));
+        assert_eq!(
+            backup.backup_path.parent(),
+            Some(base.join(".backups").as_path())
+        );
+        assert!(backup
+            .backup_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("demo-")));
+        assert!(backup.created_at.ends_with('Z'));
+        assert!(backup.created_at.contains('T'));
+        assert_eq!(backup.created_at.matches(':').count(), 1);
+        let backups = fs::read_dir(base.join(".backups"))
+            .expect("read backup directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            fs::read_to_string(backups[0].join("user.md")).expect("read backup"),
+            "mine"
+        );
 
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_into_target_preserves_unmanaged_and_broken_symlinks() {
+        let temp = std::env::temp_dir().join(format!(
+            "bb-link-symlink-conflicts-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let package = temp.join("packages/demo");
+        let foreign = temp.join("packages/foreign");
+        fs::create_dir_all(&package).expect("create package");
+        fs::create_dir_all(&foreign).expect("create foreign package");
+        fs::write(foreign.join(META_FILE_NAME), "{}").expect("write foreign marker");
+        let base = temp.join("agent/skills");
+        fs::create_dir_all(&base).expect("create target directory");
+
+        for (slug, target) in [
+            ("manual", foreign.as_path()),
+            ("broken", Path::new("missing-package")),
+        ] {
+            let link = base.join(slug);
+            std::os::unix::fs::symlink(target, &link).expect("create conflict link");
+            let original = fs::read_link(&link).expect("read original link");
+
+            let outcome = link_into_target(&package, &base, slug, true).expect("replace conflict");
+            let backup = outcome.backup.expect("backup outcome");
+            assert_eq!(
+                fs::read_link(&backup.backup_path).expect("read backed up link"),
+                original
+            );
+            assert!(base.join(slug).is_symlink());
+        }
+
+        let relative = base.join("relative");
+        std::os::unix::fs::symlink("../../packages/foreign", &relative)
+            .expect("create relative link");
+        let outcome =
+            link_into_target(&package, &base, "relative", true).expect("replace relative link");
+        let backup = outcome.backup.expect("relative link backup");
+        assert_eq!(
+            fs::read_link(&backup.backup_path).expect("read relative backup"),
+            PathBuf::from("../../packages/foreign")
+        );
+
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[test]
+    fn available_backup_path_adds_sequence_for_same_minute() {
+        let temp = std::env::temp_dir().join(format!(
+            "bb-backup-sequence-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp.join("demo-20260713T2248Z")).expect("create first backup");
+        fs::create_dir_all(temp.join("demo-20260713T2248Z-2")).expect("create second backup");
+
+        let available = available_backup_path(&temp, "demo", "20260713T2248Z")
+            .expect("find available backup path");
+
+        assert_eq!(available, temp.join("demo-20260713T2248Z-3"));
         fs::remove_dir_all(temp).expect("cleanup");
     }
 }

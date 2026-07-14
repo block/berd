@@ -18,7 +18,8 @@ use super::skills_models::{
     SkillDetail, Warning,
 };
 use super::skills_targets::{
-    copy_dir_recursive, link_into_target, LinkOutcome, ResolvedTarget, Scope,
+    backup_unmanaged_path, copy_dir_recursive, finish_link, iso8601_utc, link_into_target,
+    remove_any, rollback_link, BackupOutcome, LinkOutcome, ResolvedTarget, Scope,
 };
 
 const LOCK_FILE_NAME: &str = "skills.lock";
@@ -173,26 +174,53 @@ pub fn ensure_base_dirs(config: &SkillsConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn ensure_managed_or_absent(path: &Path) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    if path.is_dir() && path.join(META_FILE_NAME).is_file() {
-        return Ok(());
-    }
-    Err(failure(
-        exit_codes::FS_CONFLICT,
-        "unmanaged_package_dir",
-        format!(
-            "{} already exists and is not managed by bb skills; refusing to overwrite",
-            path.display()
-        ),
-    ))
+#[derive(Debug)]
+pub struct PackageReplacement {
+    persistent_backup: Option<BackupOutcome>,
+    rollback: Option<PathBuf>,
 }
 
-pub fn replace_managed_dir(staging: &Path, final_dir: &Path) -> Result<()> {
-    ensure_managed_or_absent(final_dir)?;
-    let backup = final_dir.with_file_name(format!(
+impl PackageReplacement {
+    fn finish(self) -> Result<Option<BackupOutcome>> {
+        if let Some(rollback) = self.rollback {
+            remove_any(&rollback).with_context(|| format!("remove {}", rollback.display()))?;
+        }
+        Ok(self.persistent_backup)
+    }
+
+    fn restore(self, final_dir: &Path) -> Result<Option<BackupOutcome>> {
+        if let Some(rollback) = self.rollback {
+            remove_any(final_dir)
+                .with_context(|| format!("remove failed replacement {}", final_dir.display()))?;
+            fs::rename(&rollback, final_dir).with_context(|| {
+                format!(
+                    "restore previous package {} to {}",
+                    rollback.display(),
+                    final_dir.display()
+                )
+            })?;
+        } else if let Some(backup) = &self.persistent_backup {
+            remove_any(final_dir)
+                .with_context(|| format!("remove failed replacement {}", final_dir.display()))?;
+            fs::rename(&backup.backup_path, final_dir).with_context(|| {
+                format!(
+                    "restore previous package {} to {}",
+                    backup.backup_path.display(),
+                    final_dir.display()
+                )
+            })?;
+            return Ok(None);
+        }
+        Ok(self.persistent_backup)
+    }
+}
+
+pub fn replace_managed_dir(staging: &Path, final_dir: &Path) -> Result<PackageReplacement> {
+    let final_metadata = fs::symlink_metadata(final_dir).ok();
+    let final_exists = final_metadata.is_some();
+    let is_bb_owned = final_metadata.is_some_and(|metadata| metadata.is_dir())
+        && final_dir.join(META_FILE_NAME).is_file();
+    let rollback = final_dir.with_file_name(format!(
         ".{}.previous-{}",
         final_dir
             .file_name()
@@ -200,24 +228,42 @@ pub fn replace_managed_dir(staging: &Path, final_dir: &Path) -> Result<()> {
             .unwrap_or("package"),
         unique_suffix()
     ));
-    if final_dir.exists() {
-        fs::rename(final_dir, &backup)
-            .with_context(|| format!("backup {}", final_dir.display()))?;
-    }
-    match fs::rename(staging, final_dir) {
-        Ok(()) => {
-            if backup.exists() {
-                fs::remove_dir_all(&backup)
-                    .with_context(|| format!("remove {}", backup.display()))?;
-            }
-            Ok(())
+    let persistent_backup = if final_exists && !is_bb_owned {
+        Some(backup_unmanaged_path(final_dir)?)
+    } else {
+        if final_exists {
+            fs::rename(final_dir, &rollback)
+                .with_context(|| format!("prepare to replace {}", final_dir.display()))?;
         }
+        None
+    };
+    match fs::rename(staging, final_dir) {
+        Ok(()) => Ok(PackageReplacement {
+            persistent_backup,
+            rollback: fs::symlink_metadata(&rollback).ok().map(|_| rollback),
+        }),
         Err(err) => {
-            if backup.exists() {
-                let _ = fs::rename(&backup, final_dir);
+            if let Some(backup) = &persistent_backup {
+                let _ = fs::rename(&backup.backup_path, final_dir);
+            } else if fs::symlink_metadata(&rollback).is_ok() {
+                let _ = fs::rename(&rollback, final_dir);
             }
             Err(err).with_context(|| format!("install {}", final_dir.display()))
         }
+    }
+}
+
+fn recovery_message(final_dir: &Path, backup: Option<&BackupOutcome>) -> String {
+    match backup {
+        Some(backup) => format!(
+            "target linking failed; restored the previous package at {} (unmanaged backup retained at {})",
+            final_dir.display(),
+            backup.backup_path.display()
+        ),
+        None => format!(
+            "target linking failed; restored the previous package at {}",
+            final_dir.display()
+        ),
     }
 }
 
@@ -230,6 +276,7 @@ pub struct InstalledChange {
     pub installed_via: String,
     pub targets: Vec<String>,
     pub links: Vec<LinkOutcome>,
+    pub backups: Vec<BackupOutcome>,
     pub setup: Option<SetupSummary>,
 }
 
@@ -259,6 +306,7 @@ impl PlanExecution {
                         "installed_via": change.installed_via,
                         "targets": change.targets,
                         "links": change.links,
+                        "backups": change.backups,
                         "setup": change.setup.as_ref().map(|setup| json!({
                             "path": setup.path,
                             "title": setup.title,
@@ -348,7 +396,6 @@ fn execute_install_operation(
         .context("install operation did not include artifact metadata")?;
 
     let final_dir = canonical_dir(config, options.scope, slug);
-    ensure_managed_or_absent(&final_dir).with_context(|| format!("prepare package {slug}"))?;
 
     // Source provenance comes from the catalog detail; failures downgrade to
     // missing provenance rather than blocking the install.
@@ -384,8 +431,19 @@ fn execute_install_operation(
         pinned: options.pinned_slugs.contains(slug),
     };
 
-    write_package(config, &final_dir, &download.bytes, &metadata)?;
-    let links = link_targets(&final_dir, options.targets, slug)?;
+    let package_replacement = write_package(config, &final_dir, &download.bytes, &metadata)?;
+    let links = match link_targets(&final_dir, options.targets, slug) {
+        Ok(links) => links,
+        Err(error) => {
+            let recovered = package_replacement.restore(&final_dir)?;
+            return Err(error).with_context(|| recovery_message(&final_dir, recovered.as_ref()));
+        }
+    };
+    let package_backup = package_replacement.finish()?;
+    let backups = package_backup
+        .into_iter()
+        .chain(links.iter().filter_map(|link| link.backup.clone()))
+        .collect();
     let setup = setup_summary(&final_dir);
 
     Ok(InstalledChange {
@@ -396,6 +454,7 @@ fn execute_install_operation(
         installed_via: operation.installed_via.clone(),
         targets: metadata.targets,
         links,
+        backups,
         setup,
     })
 }
@@ -415,7 +474,7 @@ fn write_package(
     final_dir: &Path,
     zip_bytes: &[u8],
     metadata: &InstalledSkillMetadata,
-) -> Result<()> {
+) -> Result<PackageReplacement> {
     let parent = final_dir
         .parent()
         .context("package directory has no parent")?;
@@ -427,7 +486,7 @@ fn write_package(
     }
     fs::create_dir_all(&staging).context("create staging package directory")?;
 
-    let result = (|| -> Result<()> {
+    let result = (|| -> Result<PackageReplacement> {
         extract_zip_safely(zip_bytes, &staging).context("extract artifact")?;
         if !staging.join("SKILL.md").is_file() {
             anyhow::bail!(
@@ -457,13 +516,24 @@ pub fn link_targets(
     let mut links = Vec::new();
     for target in targets {
         for base_dir in &target.base_dirs {
-            links.push(link_into_target(
-                package_dir,
-                base_dir,
-                slug,
-                target.prefer_symlink,
-            )?);
+            match link_into_target(package_dir, base_dir, slug, target.prefer_symlink) {
+                Ok(link) => links.push(link),
+                Err(error) => {
+                    for link in links.iter().rev() {
+                        rollback_link(link).with_context(|| {
+                            format!(
+                                "roll back target {} after link failure",
+                                link.path.display()
+                            )
+                        })?;
+                    }
+                    return Err(error);
+                }
+            }
         }
+    }
+    for link in &links {
+        finish_link(link);
     }
     Ok(links)
 }
@@ -580,8 +650,6 @@ pub fn install_local_path(
             ));
         }
     }
-    ensure_managed_or_absent(&final_dir)?;
-
     let parent = final_dir
         .parent()
         .context("package directory has no parent")?;
@@ -617,9 +685,19 @@ pub fn install_local_path(
         serde_json::to_vec_pretty(&metadata).context("serialize install metadata")?,
     )
     .context("write install metadata")?;
-    replace_managed_dir(&staging, &final_dir)?;
-
-    let links = link_targets(&final_dir, targets, &slug)?;
+    let package_replacement = replace_managed_dir(&staging, &final_dir)?;
+    let links = match link_targets(&final_dir, targets, &slug) {
+        Ok(links) => links,
+        Err(error) => {
+            let recovered = package_replacement.restore(&final_dir)?;
+            return Err(error).with_context(|| recovery_message(&final_dir, recovered.as_ref()));
+        }
+    };
+    let package_backup = package_replacement.finish()?;
+    let backups = package_backup
+        .into_iter()
+        .chain(links.iter().filter_map(|link| link.backup.clone()))
+        .collect();
     let setup = setup_summary(&final_dir);
 
     Ok(PlanExecution {
@@ -632,6 +710,7 @@ pub fn install_local_path(
             installed_via: "local-path".to_string(),
             targets: metadata.targets,
             links,
+            backups,
             setup,
         }],
         ..Default::default()
@@ -864,29 +943,6 @@ pub fn unique_suffix() -> String {
     format!("{}-{nanos}", std::process::id())
 }
 
-/// Formats a UNIX timestamp as ISO-8601 UTC (`2026-06-10T12:34:56Z`) without
-/// pulling in a date dependency. Uses Howard Hinnant's civil-date algorithm.
-pub fn iso8601_utc(secs: u64) -> String {
-    let days = (secs / 86_400) as i64;
-    let secs_of_day = secs % 86_400;
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { year + 1 } else { year };
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        secs_of_day / 3600,
-        (secs_of_day % 3600) / 60,
-        secs_of_day % 60
-    )
-}
-
 /// Detects orphaned staging/backup directories left behind by crashes.
 pub fn find_orphaned_work_dirs(root: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(root) else {
@@ -929,6 +985,164 @@ mod tests {
         let summary = setup_summary(&temp).expect("summary");
         assert_eq!(summary.title, "Slack Setup");
         assert_eq!(summary.sections, vec!["Create a token", "Configure env"]);
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[test]
+    fn replace_managed_dir_does_not_keep_backup_for_bb_owned_skill() {
+        let temp = std::env::temp_dir().join(format!("bb-owned-replace-{}", unique_suffix()));
+        let final_dir = temp.join("demo");
+        let staging = temp.join(".demo.tmp-test");
+        fs::create_dir_all(&final_dir).expect("create existing skill");
+        fs::write(final_dir.join("SKILL.md"), "old").expect("write old skill");
+        fs::write(final_dir.join(META_FILE_NAME), "{}").expect("write ownership marker");
+        fs::create_dir_all(&staging).expect("create staging skill");
+        fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
+
+        let backup = replace_managed_dir(&staging, &final_dir)
+            .expect("replace managed skill")
+            .finish()
+            .expect("finish replacement");
+
+        assert!(backup.is_none());
+        assert_eq!(
+            fs::read_to_string(final_dir.join("SKILL.md")).expect("read installed skill"),
+            "new"
+        );
+        let leftovers = fs::read_dir(&temp)
+            .expect("read temp directory")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name() != "demo")
+            .collect::<Vec<_>>();
+        assert!(leftovers.is_empty(), "leftovers: {leftovers:?}");
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[test]
+    fn replacement_restores_previous_package_when_target_linking_fails() {
+        let temp = std::env::temp_dir().join(format!("bb-owned-restore-{}", unique_suffix()));
+        let final_dir = temp.join("demo");
+        let staging = temp.join(".demo.tmp-test");
+        fs::create_dir_all(&final_dir).expect("create existing skill");
+        fs::write(final_dir.join("SKILL.md"), "old").expect("write old skill");
+        fs::write(final_dir.join(META_FILE_NAME), "{}").expect("write ownership marker");
+        fs::create_dir_all(&staging).expect("create staging skill");
+        fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
+
+        let recovery = replace_managed_dir(&staging, &final_dir)
+            .expect("replace managed skill")
+            .restore(&final_dir)
+            .expect("restore previous package");
+
+        assert!(recovery.is_none());
+        assert_eq!(
+            fs::read_to_string(final_dir.join("SKILL.md")).expect("read restored skill"),
+            "old"
+        );
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[test]
+    fn replacement_restores_unmanaged_package_when_target_linking_fails() {
+        let temp = std::env::temp_dir().join(format!("bb-unmanaged-restore-{}", unique_suffix()));
+        let final_dir = temp.join("demo");
+        let staging = temp.join(".demo.tmp-test");
+        fs::create_dir_all(&final_dir).expect("create unmanaged skill");
+        fs::write(final_dir.join("SKILL.md"), "user-owned").expect("write unmanaged skill");
+        fs::create_dir_all(&staging).expect("create staging skill");
+        fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
+
+        let recovery = replace_managed_dir(&staging, &final_dir)
+            .expect("replace unmanaged skill")
+            .restore(&final_dir)
+            .expect("restore unmanaged skill");
+
+        assert!(recovery.is_none());
+        assert_eq!(
+            fs::read_to_string(final_dir.join("SKILL.md")).expect("read restored skill"),
+            "user-owned"
+        );
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_restores_manual_package_symlink_when_target_linking_fails() {
+        let temp = std::env::temp_dir().join(format!("bb-symlink-restore-{}", unique_suffix()));
+        let source = temp.join("manual-source");
+        let final_dir = temp.join("demo");
+        let staging = temp.join(".demo.tmp-test");
+        fs::create_dir_all(&source).expect("create manual source");
+        fs::write(source.join("SKILL.md"), "user-owned").expect("write manual skill");
+        fs::write(source.join(META_FILE_NAME), "{}").expect("write incidental metadata");
+        std::os::unix::fs::symlink(&source, &final_dir).expect("create manual package symlink");
+        fs::create_dir_all(&staging).expect("create staging skill");
+        fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
+
+        replace_managed_dir(&staging, &final_dir)
+            .expect("replace manual symlink")
+            .restore(&final_dir)
+            .expect("restore manual symlink");
+
+        assert!(fs::symlink_metadata(&final_dir)
+            .expect("restored symlink metadata")
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_link(&final_dir).expect("read restored symlink"),
+            source
+        );
+        fs::remove_dir_all(temp).expect("cleanup");
+    }
+
+    #[test]
+    fn link_targets_rolls_back_earlier_copy_targets_after_later_failure() {
+        let temp = std::env::temp_dir().join(format!("bb-target-transaction-{}", unique_suffix()));
+        let package = temp.join("package");
+        let managed_base = temp.join("managed-target");
+        let unmanaged_base = temp.join("unmanaged-target");
+        let invalid_base = temp.join("invalid-target");
+        fs::create_dir_all(&package).expect("create package");
+        fs::write(package.join("SKILL.md"), "new").expect("write new package");
+
+        let managed = managed_base.join("demo");
+        fs::create_dir_all(&managed).expect("create managed target");
+        fs::write(managed.join("SKILL.md"), "old-copy").expect("write old copy");
+        fs::write(managed.join(META_FILE_NAME), "{}").expect("write ownership marker");
+
+        let unmanaged = unmanaged_base.join("demo");
+        fs::create_dir_all(&unmanaged).expect("create unmanaged target");
+        fs::write(unmanaged.join("SKILL.md"), "user-owned").expect("write unmanaged target");
+        fs::write(&invalid_base, "not a directory").expect("create invalid target");
+
+        let targets = vec![
+            ResolvedTarget {
+                name: "managed".to_string(),
+                base_dirs: vec![managed_base],
+                prefer_symlink: false,
+            },
+            ResolvedTarget {
+                name: "unmanaged".to_string(),
+                base_dirs: vec![unmanaged_base],
+                prefer_symlink: false,
+            },
+            ResolvedTarget {
+                name: "invalid".to_string(),
+                base_dirs: vec![invalid_base],
+                prefer_symlink: false,
+            },
+        ];
+
+        link_targets(&package, &targets, "demo").expect_err("later target should fail");
+
+        assert_eq!(
+            fs::read_to_string(managed.join("SKILL.md")).expect("read restored managed target"),
+            "old-copy"
+        );
+        assert_eq!(
+            fs::read_to_string(unmanaged.join("SKILL.md")).expect("read restored unmanaged target"),
+            "user-owned"
+        );
         fs::remove_dir_all(temp).expect("cleanup");
     }
 

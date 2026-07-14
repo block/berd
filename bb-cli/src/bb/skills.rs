@@ -1833,6 +1833,14 @@ fn report_execution(config: &SkillsConfig, execution: PlanExecution) -> Result<(
             change.version_id,
             provenance_suffix(&change.installed_via),
         ));
+        for backup in &change.backups {
+            println!(
+                "    conflicting skill at {} was replaced. Backup created on {} at {}",
+                backup.source_path.display(),
+                backup.created_at,
+                backup.backup_path.display()
+            );
+        }
         for link in &change.links {
             println!("    {} -> {}", link.strategy, link.path.display());
         }
