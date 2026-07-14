@@ -344,22 +344,7 @@ export function SidebarProjectSection({
             {project.name}
           </span>
         </Button>
-        <span data-sidebar-drag-ignore className="flex flex-shrink-0">
-          <SidebarSectionHeaderAction
-            icon={IconEdit}
-            label={t("actions.newChatInProject")}
-            onClick={(e) => {
-              e.stopPropagation();
-              onNewChatInProject?.(project.id);
-            }}
-            revealClassName={
-              menuOpen
-                ? "visible"
-                : "invisible group-hover:visible group-focus-within:visible"
-            }
-          />
-        </span>
-        <div className="ml-1 translate-y-px" data-sidebar-drag-ignore>
+        <div className="translate-y-px" data-sidebar-drag-ignore>
           <SidebarItemMenu
             label={project.name}
             onOpenChange={setMenuOpen}
@@ -379,6 +364,21 @@ export function SidebarProjectSection({
             onArchive={() => onArchiveProject?.(project.id)}
           />
         </div>
+        <span data-sidebar-drag-ignore className="ml-1 flex flex-shrink-0">
+          <SidebarSectionHeaderAction
+            icon={IconEdit}
+            label={t("actions.newChatInProject")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewChatInProject?.(project.id);
+            }}
+            revealClassName={
+              menuOpen
+                ? "visible"
+                : "invisible group-hover:visible group-focus-within:visible"
+            }
+          />
+        </span>
 
         {dragOver && (
           <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />

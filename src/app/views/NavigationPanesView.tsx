@@ -977,12 +977,6 @@ function PrototypeProjectNavRow({
       onClick={onClick}
       trailing={
         <>
-          <PrototypeBareActionIcon
-            label={`New chat in ${project.name}`}
-            onClick={onNewChat ?? (() => {})}
-          >
-            <SquarePen className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
-          </PrototypeBareActionIcon>
           <PrototypeNavMoreMenu
             alignOffset={-4}
             label={t("menu.optionsFor", {
@@ -1021,6 +1015,12 @@ function PrototypeProjectNavRow({
               </PrototypeNavMenuItem>
             ) : null}
           </PrototypeNavMoreMenu>
+          <PrototypeBareActionIcon
+            label={`New chat in ${project.name}`}
+            onClick={onNewChat ?? (() => {})}
+          >
+            <SquarePen className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+          </PrototypeBareActionIcon>
         </>
       }
     />

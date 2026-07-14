@@ -1873,6 +1873,33 @@ describe("NavigationPanesView", () => {
     });
   });
 
+  it("places the prototype project new chat action to the right of its menu", async () => {
+    const user = userEvent.setup();
+
+    renderSidebar({
+      projects: [mockProject()],
+      prototypeMode: "hybrid-push-overlay",
+    });
+
+    const projectButton = screen.getByRole("button", { name: "Project One" });
+    const projectRow = projectButton.parentElement;
+    if (!projectRow) throw new Error("Project row was not rendered");
+
+    await user.hover(projectButton);
+
+    const projectMenu = within(projectRow).getByRole("button", {
+      name: "Options for Project One",
+    });
+    const newChat = within(projectRow).getByRole("button", {
+      name: "New chat in Project One",
+    });
+
+    expect(
+      projectMenu.compareDocumentPosition(newChat) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("starts a project chat from the prototype project row action", async () => {
     const user = userEvent.setup();
     const onNewChatInProject = vi.fn();

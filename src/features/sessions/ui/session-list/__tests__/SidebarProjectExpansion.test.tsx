@@ -30,6 +30,34 @@ afterEach(() => {
 });
 
 describe("project chat expansion", () => {
+  it("places the new chat action to the right of the project menu", () => {
+    render(
+      <SidebarChatDragProvider>
+        <SidebarProjectSection
+          project={PROJECT}
+          projectChats={CHATS}
+          isExpanded
+          toggleProject={vi.fn()}
+          onNewChatInProject={vi.fn()}
+          showChatIcons
+          showTimestamps
+        />
+      </SidebarChatDragProvider>,
+    );
+
+    const projectMenu = screen.getByRole("button", {
+      name: "Options for Alpha",
+    });
+    const newChat = screen.getByRole("button", {
+      name: "New chat in project",
+    });
+
+    expect(
+      projectMenu.compareDocumentPosition(newChat) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("keeps View more visible until extra chats begin revealing", () => {
     vi.useFakeTimers();
     render(
