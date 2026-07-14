@@ -38,7 +38,6 @@ function renderSidebar(onMoveToProject: MoveHandler) {
         ]}
         isExpanded
         toggleProject={vi.fn()}
-        pinnedHomeChatSessionIds={new Set()}
         showChatIcons
         showTimestamps
         onMoveToProject={onMoveToProject}
@@ -53,7 +52,6 @@ function renderSidebar(onMoveToProject: MoveHandler) {
         isOpen
         onToggleOpen={vi.fn()}
         sectionHeaderTextClass=""
-        pinnedHomeChatSessionIds={new Set()}
         showChatIcons
         onShowChatIconsChange={vi.fn()}
         showTimestamps
@@ -156,6 +154,55 @@ describe("sidebar chat drag-to-move", () => {
     pointerDragRowTo("Recent Chat", 40);
 
     expect(onMoveToProject).toHaveBeenCalledWith("r1", "alpha");
+  });
+
+  it("does not drop chats onto projects while project drop targets are disabled", () => {
+    const onMoveToProject = vi.fn<MoveHandler>();
+    render(
+      <SidebarChatDragProvider>
+        <SidebarProjectSection
+          project={PROJECT}
+          projectChats={[
+            {
+              id: "p1",
+              title: "Project Chat",
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          ]}
+          isExpanded
+          toggleProject={vi.fn()}
+          showChatIcons
+          showTimestamps
+          onMoveToProject={onMoveToProject}
+          dropTargetEnabled={false}
+        />
+        <SidebarRecentsSection
+          sessions={[
+            {
+              id: "r1",
+              title: "Recent Chat",
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          ]}
+          collapsed={false}
+          labelTransition=""
+          labelVisible
+          isOpen
+          onToggleOpen={vi.fn()}
+          sectionHeaderTextClass=""
+          showChatIcons
+          onShowChatIconsChange={vi.fn()}
+          showTimestamps
+          onShowTimestampsChange={vi.fn()}
+          onMoveToProject={onMoveToProject}
+        />
+      </SidebarChatDragProvider>,
+    );
+
+    mockRect(dropTarget("project"), { top: 0, bottom: 80 });
+    pointerDragRowTo("Recent Chat", 40);
+
+    expect(onMoveToProject).not.toHaveBeenCalled();
   });
 
   it("ignores a drop back into Recents for a chat already there (no-op)", () => {

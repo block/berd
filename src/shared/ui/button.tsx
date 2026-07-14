@@ -79,7 +79,7 @@ const buttonVariants = cva(
         variant: "ghost",
         flush: true,
         className:
-          "bg-transparent px-0 text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
+          "bg-transparent px-0 text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent",
       },
       {
         variant: "link",

@@ -143,7 +143,7 @@ function ContextMenuItem({
       className={cn(
         "relative flex cursor-pointer items-center gap-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         isInverse
-          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-white/10 rounded-[4px] px-1 py-1 text-xs leading-tight"
+          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-popover-inverse-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
           : "focus:bg-accent focus:text-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive [&_svg:not([class*='text-'])]:text-muted-foreground rounded-sm px-2 py-1.5 text-sm",
         className,
       )}

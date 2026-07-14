@@ -1384,7 +1384,6 @@ function PrototypeSidebarChatRow({
       isActive={active}
       isRunning={isSessionRunning(runtime.chatState)}
       hasUnread={runtime.hasUnread}
-      isPinned={behavior.pinnedHomeChatSessionIds.has(session.id)}
       selected={behavior.selectedSessionIds.has(session.id)}
       selectionEnabled={behavior.selectionEnabled}
       selectionActionsDisabled={behavior.selectionActionsDisabled}

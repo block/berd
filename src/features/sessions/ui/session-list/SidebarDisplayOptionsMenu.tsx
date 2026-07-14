@@ -8,11 +8,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
-import {
-  SIDEBAR_ACTION_ICON_CLASS,
-  SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
-  SIDEBAR_SECTION_ACTION_PILL_CLASS,
-} from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 
 interface SidebarDisplayOptionsMenuProps {
   /** Sidebar-namespace translation key for the trigger's aria-label/title
@@ -25,6 +21,8 @@ interface SidebarDisplayOptionsMenuProps {
   onShowTimestampsChange: (show: boolean) => void;
   showGitBranches?: boolean;
   onShowGitBranchesChange?: (show: boolean) => void;
+  groupChatsByProject?: boolean;
+  onGroupChatsByProjectChange?: (grouped: boolean) => void;
   className?: string;
 }
 
@@ -41,11 +39,7 @@ function CheckableMenuItem({
     <DropdownMenuCheckboxItem
       checked={checked}
       onCheckedChange={onCheckedChange}
-      className={cn(
-        "justify-between gap-3 py-1.5 pr-2 pl-2 text-popover-inverse-foreground opacity-[0.85] focus:!bg-transparent focus:!text-popover-inverse-foreground focus:opacity-100",
-        "[&>span:first-child]:right-2 [&>span:first-child]:left-auto",
-        "[&>span:first-child_svg]:size-3.5",
-      )}
+      indicatorSide="end"
     >
       <span className="min-w-0 flex-1 text-left">{children}</span>
     </DropdownMenuCheckboxItem>
@@ -65,6 +59,8 @@ export function SidebarDisplayOptionsMenu({
   onShowTimestampsChange,
   showGitBranches = false,
   onShowGitBranchesChange,
+  groupChatsByProject = false,
+  onGroupChatsByProjectChange,
   className,
 }: SidebarDisplayOptionsMenuProps) {
   const { t } = useTranslation("sidebar");
@@ -75,15 +71,11 @@ export function SidebarDisplayOptionsMenu({
         <Button
           type="button"
           variant="ghost"
+          flush
           size="icon-xs"
           aria-label={t(labelKey)}
           title={t(labelKey)}
-          className={cn(
-            SIDEBAR_SECTION_ACTION_PILL_CLASS,
-            SIDEBAR_ACTION_ICON_CLASS,
-            "size-5 bg-transparent p-0",
-            className,
-          )}
+          className={cn("size-5", className)}
         >
           <IconDots className="size-4" />
         </Button>
@@ -93,7 +85,7 @@ export function SidebarDisplayOptionsMenu({
         side="bottom"
         sideOffset={4}
         variant="inverse"
-        className={cn("w-48", SIDEBAR_INVERSE_MENU_CONTENT_CLASS)}
+        className={cn(SIDEBAR_INVERSE_MENU_CONTENT_CLASS, "w-auto min-w-48")}
       >
         {onShowChatIconsChange ? (
           <CheckableMenuItem
@@ -115,6 +107,14 @@ export function SidebarDisplayOptionsMenu({
             onCheckedChange={onShowGitBranchesChange}
           >
             {t("actions.showGitBranches")}
+          </CheckableMenuItem>
+        ) : null}
+        {onGroupChatsByProjectChange ? (
+          <CheckableMenuItem
+            checked={groupChatsByProject}
+            onCheckedChange={onGroupChatsByProjectChange}
+          >
+            {t("actions.groupChats")}
           </CheckableMenuItem>
         ) : null}
       </DropdownMenuContent>

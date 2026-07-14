@@ -5,6 +5,7 @@ import type { AppView } from "@/app/AppShell";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { CollapseReveal } from "@/shared/ui/collapse-reveal";
 import {
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
@@ -48,7 +49,6 @@ export function SidebarRecentsSection({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
-  pinnedHomeChatSessionIds,
   showChatIcons,
   onShowChatIconsChange,
   showTimestamps,
@@ -85,7 +85,6 @@ export function SidebarRecentsSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
-  pinnedHomeChatSessionIds: ReadonlySet<string>;
   showChatIcons: boolean;
   onShowChatIconsChange: (show: boolean) => void;
   showTimestamps: boolean;
@@ -139,13 +138,6 @@ export function SidebarRecentsSection({
           actions={
             onNavigate || (onNewChat && !showEmptyState) ? (
               <>
-                {onNewChat && !showEmptyState ? (
-                  <SidebarSectionHeaderAction
-                    icon={IconEdit}
-                    label={t("empty.startChat")}
-                    onClick={onNewChat}
-                  />
-                ) : null}
                 <SidebarDisplayOptionsMenu
                   labelKey="actions.chatDisplayOptions"
                   showChatIcons={showChatIcons}
@@ -156,6 +148,13 @@ export function SidebarRecentsSection({
                   onShowGitBranchesChange={onShowGitBranchesChange}
                   className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
                 />
+                {onNewChat && !showEmptyState ? (
+                  <SidebarSectionHeaderAction
+                    icon={IconEdit}
+                    label={t("empty.startChat")}
+                    onClick={onNewChat}
+                  />
+                ) : null}
               </>
             ) : null
           }
@@ -235,8 +234,8 @@ export function SidebarRecentsSection({
             </Button>
           ))}
         </div>
-      ) : showContent && sessions.length > 0 ? (
-        <div className="space-y-0 pb-1">
+      ) : !collapsed && sessions.length > 0 ? (
+        <CollapseReveal open={isOpen} className="pb-1">
           {sessions.map((session) => {
             const isActive = activeSessionId === session.id;
             return (
@@ -247,11 +246,11 @@ export function SidebarRecentsSection({
                 branchName={session.branchName}
                 activityAt={session.activityAt}
                 showLeadingIcon={showChatIcons}
+                quickPinMode="pinned-only"
                 showTimestamp={showTimestamps}
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}
-                isPinned={pinnedHomeChatSessionIds.has(session.id)}
                 selected={selectedSessionIds?.has(session.id) ?? false}
                 selectionEnabled={selectionEnabled}
                 selectionActionsDisabled={selectionActionsDisabled}
@@ -273,7 +272,7 @@ export function SidebarRecentsSection({
               />
             );
           })}
-        </div>
+        </CollapseReveal>
       ) : null}
     </div>
   );

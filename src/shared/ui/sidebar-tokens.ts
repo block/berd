@@ -37,13 +37,9 @@ export const SIDEBAR_ROW_HOVER_CLASS =
 export const SIDEBAR_ROW_ACTIVE_CLASS =
   "bg-[var(--sidebar-row-active)] text-sidebar-foreground hover:bg-[var(--sidebar-row-active)] hover:text-sidebar-foreground";
 
-/** Quiet icon actions nested inside sidebar rows and section headers. */
-export const SIDEBAR_ACTION_ICON_CLASS =
-  "text-muted-foreground opacity-80 transition-[color,opacity] duration-150 ease-out hover:bg-[var(--sidebar-row-hover)] hover:text-sidebar-foreground hover:opacity-100 focus-visible:bg-[var(--sidebar-row-hover)] focus-visible:text-sidebar-foreground focus-visible:opacity-100 data-[state=open]:text-sidebar-foreground data-[state=open]:opacity-100 aria-expanded:text-sidebar-foreground aria-expanded:opacity-100";
-
 /** Inverse popovers used by sidebar row menus. */
 export const SIDEBAR_INVERSE_MENU_CONTENT_CLASS =
-  "w-44 px-1 py-1 text-sm font-normal leading-normal [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:rounded-[6px] [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1.5 [&_[data-slot=context-menu-item]]:text-sm [&_[data-slot=context-menu-item]]:font-normal [&_[data-slot=context-menu-item]]:leading-normal [&_[data-slot=context-menu-item]]:opacity-[0.85] [&_[data-slot=context-menu-item]:focus]:!bg-transparent [&_[data-slot=context-menu-item]:focus]:!text-popover-inverse-foreground [&_[data-slot=context-menu-item]:focus]:opacity-100 [&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:rounded-[6px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-1.5 [&_[data-slot=dropdown-menu-item]]:text-sm [&_[data-slot=dropdown-menu-item]]:font-normal [&_[data-slot=dropdown-menu-item]]:leading-normal [&_[data-slot=dropdown-menu-item]]:opacity-[0.85] [&_[data-slot=dropdown-menu-item]:focus]:!bg-transparent [&_[data-slot=dropdown-menu-item]:focus]:!text-popover-inverse-foreground [&_[data-slot=dropdown-menu-item]:focus]:opacity-100 [&_[data-slot=dropdown-menu-checkbox-item]]:text-sm [&_[data-slot=dropdown-menu-checkbox-item]]:font-normal [&_[data-slot=dropdown-menu-checkbox-item]]:leading-normal [&_[data-slot=context-menu-label]]:px-2 [&_[data-slot=context-menu-label]]:py-1 [&_[data-slot=context-menu-label]]:text-sm [&_[data-slot=context-menu-label]]:font-normal [&_[data-slot=context-menu-label]]:leading-normal [&_[data-slot=dropdown-menu-label]]:px-2 [&_[data-slot=dropdown-menu-label]]:py-1 [&_[data-slot=dropdown-menu-label]]:text-sm [&_[data-slot=dropdown-menu-label]]:font-normal [&_[data-slot=dropdown-menu-label]]:leading-normal";
+  "w-44 px-1 py-1 text-sm font-normal leading-normal [&_[data-slot=context-menu-item]]:gap-2 [&_[data-slot=context-menu-item]]:rounded-[6px] [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1.5 [&_[data-slot=context-menu-item]]:text-sm [&_[data-slot=context-menu-item]]:font-normal [&_[data-slot=context-menu-item]]:leading-normal [&_[data-slot=context-menu-item]]:opacity-[0.85] [&_[data-slot=context-menu-item]:focus]:!bg-transparent [&_[data-slot=context-menu-item]:focus]:!text-popover-inverse-foreground [&_[data-slot=context-menu-item]:focus]:opacity-100 [&_[data-slot=dropdown-menu-item]]:gap-2 [&_[data-slot=dropdown-menu-item]]:rounded-[6px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-1.5 [&_[data-slot=dropdown-menu-item]]:text-sm [&_[data-slot=dropdown-menu-item]]:font-normal [&_[data-slot=dropdown-menu-item]]:leading-normal [&_[data-slot=dropdown-menu-item]]:opacity-[0.85] [&_[data-slot=dropdown-menu-item]:focus]:!bg-transparent [&_[data-slot=dropdown-menu-item]:focus]:!text-popover-inverse-foreground [&_[data-slot=dropdown-menu-item]:focus]:opacity-100 [&_[data-slot=dropdown-menu-checkbox-item]]:gap-2 [&_[data-slot=dropdown-menu-checkbox-item]]:rounded-[6px] [&_[data-slot=dropdown-menu-checkbox-item]]:px-2 [&_[data-slot=dropdown-menu-checkbox-item]]:py-1.5 [&_[data-slot=dropdown-menu-checkbox-item]]:text-sm [&_[data-slot=dropdown-menu-checkbox-item]]:font-normal [&_[data-slot=dropdown-menu-checkbox-item]]:leading-normal [&_[data-slot=dropdown-menu-checkbox-item]]:opacity-[0.85] [&_[data-slot=dropdown-menu-checkbox-item]:focus]:!bg-transparent [&_[data-slot=dropdown-menu-checkbox-item]:focus]:!text-popover-inverse-foreground [&_[data-slot=dropdown-menu-checkbox-item]:focus]:opacity-100 [&_[data-slot=context-menu-label]]:px-2 [&_[data-slot=context-menu-label]]:py-1 [&_[data-slot=context-menu-label]]:text-sm [&_[data-slot=context-menu-label]]:font-normal [&_[data-slot=context-menu-label]]:leading-normal [&_[data-slot=dropdown-menu-label]]:px-2 [&_[data-slot=dropdown-menu-label]]:py-1 [&_[data-slot=dropdown-menu-label]]:text-sm [&_[data-slot=dropdown-menu-label]]:font-normal [&_[data-slot=dropdown-menu-label]]:leading-normal";
 
 /** Sidebar panel slide in/out when toggling collapse (AppShell). */
 export const SIDEBAR_COLLAPSE_TRANSITION_MS = 320;
@@ -89,9 +85,11 @@ export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
   },
   dense: {
     contentPadding: "pl-1",
-    menuReserve: "pr-6",
-    timestampReserve: "pr-10",
-    menuInset: "right-1",
+    // Dense only tightens the left side; the right edge keeps the same
+    // inset as default so flat and grouped views align at the panel edge.
+    menuReserve: "pr-8",
+    timestampReserve: "pr-12",
+    menuInset: "right-3",
     flatProjectGap: SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
     // Align the flat project icon with main-nav icons (px-3 row inset).
     flatProjectIconInset: "ml-3",
@@ -113,9 +111,6 @@ export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
 /** Bare unread dot; the parent owns positioning (e.g. a row's icon slot). */
 export const SIDEBAR_UNREAD_DOT_CLASS =
   "pointer-events-none h-[7px] w-[7px] rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0";
-
-/** Projects / Chats header action pill; colors are scoped sidebar tokens. */
-export const SIDEBAR_SECTION_ACTION_PILL_CLASS = `h-5 flex-shrink-0 rounded-sm px-0 text-sm font-normal ${SIDEBAR_ACTION_ICON_CLASS}`;
 
 /** Vertical offset above sidebar section divider lines (24px). */
 export const SIDEBAR_SECTION_DIVIDER_TOP_CLASS = "mt-6";

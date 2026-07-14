@@ -50,7 +50,6 @@ function renderFlatChatsSection(
   return render(
     <SidebarFlatChatsSection
       groups={flatChatGroups}
-      pinnedHomeChatSessionIds={new Set()}
       collapsed={false}
       labelTransition=""
       labelVisible
@@ -90,7 +89,7 @@ describe("SidebarFlatChatsSection", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("switches to grouped chats from the header", async () => {
+  it("switches to grouped chats from the display options menu", async () => {
     const user = userEvent.setup();
     const onGroupChatsByProjectChange = vi.fn();
 
@@ -100,13 +99,18 @@ describe("SidebarFlatChatsSection", () => {
     });
 
     await user.click(
-      screen.getByRole("button", { name: "Group chats by project" }),
+      screen.getByRole("button", { name: "Chat display options" }),
+    );
+    await user.click(
+      screen.getByRole("menuitemcheckbox", {
+        name: "Group chats by project",
+      }),
     );
 
     expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(true);
   });
 
-  it("switches to flat chats from the grouped projects header", async () => {
+  it("switches to flat chats from the grouped projects display options menu", async () => {
     const user = userEvent.setup();
     const onGroupChatsByProjectChange = vi.fn();
 
@@ -129,7 +133,6 @@ describe("SidebarFlatChatsSection", () => {
         onShowProjectTimestampsChange={vi.fn()}
         showGitBranches={false}
         onShowGitBranchesChange={vi.fn()}
-        pinnedHomeChatSessionIds={new Set()}
         expandedProjects={{}}
         toggleProject={vi.fn()}
         collapsed={false}
@@ -143,7 +146,12 @@ describe("SidebarFlatChatsSection", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "Show chats as one list" }),
+      screen.getByRole("button", { name: "Project display options" }),
+    );
+    await user.click(
+      screen.getByRole("menuitemcheckbox", {
+        name: "Group chats by project",
+      }),
     );
 
     expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(false);

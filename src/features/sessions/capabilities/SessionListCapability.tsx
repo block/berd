@@ -792,7 +792,6 @@ export function SessionListCapability({
     showGitBranches: gitBranchSubtitlePreference.enabled,
     onShowGitBranchesChange: gitBranchSubtitlePreference.setEnabled,
     onGroupChatsByProjectChange: setGroupChatsByProject,
-    pinnedHomeChatSessionIds,
     expandedProjects,
     toggleProject,
     collapsed,

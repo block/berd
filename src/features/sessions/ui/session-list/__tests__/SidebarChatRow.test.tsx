@@ -158,8 +158,7 @@ describe("SidebarChatRow", () => {
     expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();
   });
 
-  it("does not show the idle chat icon in flat project rows", async () => {
-    const user = userEvent.setup();
+  it("uses the project identity icon in flat project rows", () => {
     const { container } = render(
       <SidebarChatRow
         id="session-1"
@@ -183,8 +182,6 @@ describe("SidebarChatRow", () => {
     if (!projectIcon) {
       throw new Error("Flat project icon was not rendered");
     }
-    await user.hover(projectIcon);
-    expect(await screen.findAllByText("Project One")).not.toHaveLength(0);
   });
 
   it("uses dense flat-row spacing when requested", () => {
@@ -205,14 +202,17 @@ describe("SidebarChatRow", () => {
     expect(container.querySelector("[data-sidebar-chat-row]")).toHaveClass(
       "gap-2",
     );
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass("pr-6");
-    expect(screen.getByLabelText("Project One")).toHaveClass("ml-3", "size-5");
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass("pr-8");
+    expect(
+      container.querySelector("[data-sidebar-flat-project-icon]")?.parentElement
+        ?.parentElement,
+    ).toHaveClass("ml-3", "size-5");
     expect(
       screen.getByRole("button", { name: "Options for Idle Chat" }),
-    ).toHaveClass("right-1");
+    ).toHaveClass("right-3");
   });
 
-  it("replaces the flat-row project glyph while preserving its interactions", async () => {
+  it("puts flat-row project editing in the chat menu", async () => {
     const user = userEvent.setup();
     const onEditProject = vi.fn();
     const onSelect = vi.fn();
@@ -231,56 +231,24 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    const activityStatus = screen.getByLabelText(/chat active/i);
-    const projectButton = screen.getByRole("button", {
-      name: "Edit Project One",
-    });
-    expect(projectButton).toContainElement(activityStatus);
+    expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
       container.querySelector('[data-slot="berd-loader"]'),
     ).toBeInTheDocument();
     expect(
       container.querySelector('[data-project-color-swatch="project-1"]'),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit project/i })).toBeNull();
 
-    await user.hover(projectButton);
-    expect(await screen.findAllByText("Project One")).not.toHaveLength(0);
-
-    await user.click(projectButton);
-    await waitFor(() =>
-      expect(onEditProject).toHaveBeenCalledWith("project-1"),
+    await user.click(
+      screen.getByRole("button", { name: "Options for Running Chat" }),
     );
+    await user.click(
+      screen.getByRole("menuitem", { name: "Edit Project One Project" }),
+    );
+
+    expect(onEditProject).toHaveBeenCalledWith("project-1");
     expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it("opens the flat row project editor without selecting the chat", async () => {
-    const user = userEvent.setup();
-    const onEditProject = vi.fn();
-    const onSelect = vi.fn();
-
-    render(
-      <SidebarChatRow
-        id="session-1"
-        title="Project Chat"
-        isActive={false}
-        density="dense"
-        flatProjectName="Project One"
-        flatProjectColor="sage"
-        currentProjectId="project-1"
-        onEditProject={onEditProject}
-        onSelect={onSelect}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Edit Project One" }));
-
-    await waitFor(() =>
-      expect(onEditProject).toHaveBeenCalledWith("project-1"),
-    );
-    expect(onSelect).not.toHaveBeenCalled();
-    expect(
-      document.querySelector('[data-project-color-swatch="project-1"]'),
-    ).toBeInTheDocument();
   });
 
   it("does not use native HTML draggable affordances", () => {
@@ -419,9 +387,9 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    const slot = screen.getByLabelText(/unread messages/i);
-    const dot = slot.querySelector("span");
-    expect(dot).toHaveClass("bg-success");
+    expect(
+      screen.getByLabelText(/unread messages/i).firstElementChild,
+    ).toHaveClass("bg-success");
   });
 
   it("hides the unread dot while the chat is running", () => {
@@ -481,6 +449,80 @@ describe("SidebarChatRow", () => {
     expect(onFork).toHaveBeenCalledWith("session-1");
   });
 
+  it("reveals a quick pin in the flat project icon slot", async () => {
+    const user = userEvent.setup();
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+    });
+
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        flatProjectName="Project One"
+      />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) throw new Error("Sidebar chat row was not rendered");
+    await user.hover(row);
+
+    const pin = screen.getByRole("button", { name: "Pin chat" });
+    expect(pin).toHaveClass("size-full");
+    expect(
+      screen.getByTestId("sidebar-flat-chat-project-icon"),
+    ).toBeInTheDocument();
+
+    await user.click(pin);
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) =>
+            instance.type === "chatPin" &&
+            instance.state?.sessionId === "session-1",
+        ),
+    ).toBe(true);
+  });
+
+  it("keeps nested chat titles aligned when chat icons are shown", () => {
+    const { rerender } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        nested
+        showLeadingIcon={false}
+      />,
+    );
+
+    const titleButton = screen.getByTitle("Double-click to rename");
+    expect(titleButton).toHaveClass("pl-[38px]");
+    expect(screen.queryByTestId("sidebar-chat-icon")).toBeNull();
+
+    rerender(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        nested
+        showLeadingIcon
+        leadingIconTestId="sidebar-chat-icon"
+      />,
+    );
+
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+      "pl-[38px]",
+    );
+    expect(screen.getByTestId("sidebar-chat-icon")).toHaveClass(
+      "absolute",
+      "left-3",
+    );
+  });
+
   it("reveals a one-click pin action when chat icons are shown", async () => {
     const user = userEvent.setup();
     useHomeWidgetStore.setState({
@@ -496,7 +538,11 @@ describe("SidebarChatRow", () => {
     const row = container.querySelector("[data-sidebar-chat-row]");
     if (!row) throw new Error("Sidebar chat row was not rendered");
     await user.hover(row);
-    await user.click(screen.getByRole("button", { name: "Pin chat" }));
+    const pinButton = screen.getByRole("button", { name: "Pin chat" });
+    expect(screen.getByTitle("Double-click to rename")).not.toContainElement(
+      pinButton,
+    );
+    await user.click(pinButton);
 
     expect(
       useHomeWidgetStore
@@ -521,17 +567,50 @@ describe("SidebarChatRow", () => {
     ).toBe(false);
   });
 
-  it("does not show a quick pin action when chat icons are hidden", () => {
+  it("shows a pinned compact chat as a one-click unpin control", async () => {
+    const user = userEvent.setup();
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "session-1" },
+        },
+      ],
+    });
+
     render(
       <SidebarChatRow
         id="session-1"
         title="Idle Chat"
         isActive={false}
         showLeadingIcon={false}
+        quickPinMode="pinned-only"
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Pin chat" })).toBeNull();
+    const unpin = screen.getByRole("button", { name: "Unpin chat" });
+    expect(unpin).toHaveClass("size-full");
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+      "pl-[38px]",
+    );
+
+    await user.click(unpin);
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) =>
+            instance.type === "chatPin" &&
+            instance.state?.sessionId === "session-1",
+        ),
+    ).toBe(false);
   });
 
   it("keeps the hover-only quick pin action out of the tab order", () => {

@@ -1,4 +1,4 @@
-import { IconCubePlus, IconEdit, IconLayoutGrid } from "@tabler/icons-react";
+import { IconCubePlus, IconEdit } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { AppView } from "@/app/AppShell";
 import { SidebarNavChatsIcon } from "@/features/navigation/ui/sidebarNavIcons";
@@ -49,7 +49,6 @@ export function SidebarFlatChatsSection({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
-  pinnedHomeChatSessionIds,
   showTimestamps,
   onShowTimestampsChange,
   showGitBranches = false,
@@ -83,7 +82,6 @@ export function SidebarFlatChatsSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
-  pinnedHomeChatSessionIds: ReadonlySet<string>;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
   showGitBranches?: boolean;
@@ -95,10 +93,9 @@ export function SidebarFlatChatsSection({
   const { t } = useTranslation(["sidebar", "common"]);
   const showEmptyState = groups.length === 0;
   const flatSessions = groups.flatMap((group) => group.sessions);
-  const sectionHeaderTextClass = cn(
-    SIDEBAR_GROUP_LABEL_TEXT_CLASS,
-    "text-muted-foreground/80",
-  );
+  /** Typography only — color comes from the ghost+flush toggle Button so the
+   * label and chevron always match at rest and on hover. */
+  const sectionHeaderTextClass = SIDEBAR_GROUP_LABEL_TEXT_CLASS;
 
   return (
     <SidebarChatDragProvider>
@@ -124,13 +121,16 @@ export function SidebarFlatChatsSection({
             onCreateProject ||
             (onNewChat && !showEmptyState) ? (
               <>
-                {onNewChat && !showEmptyState ? (
-                  <SidebarSectionHeaderAction
-                    icon={IconEdit}
-                    label={t("actions.newChat")}
-                    onClick={onNewChat}
-                  />
-                ) : null}
+                <SidebarDisplayOptionsMenu
+                  labelKey="actions.chatDisplayOptions"
+                  showTimestamps={showTimestamps}
+                  onShowTimestampsChange={onShowTimestampsChange}
+                  showGitBranches={showGitBranches}
+                  onShowGitBranchesChange={onShowGitBranchesChange}
+                  groupChatsByProject={false}
+                  onGroupChatsByProjectChange={onGroupChatsByProjectChange}
+                  className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
+                />
                 {onCreateProject ? (
                   <SidebarSectionHeaderAction
                     icon={IconCubePlus}
@@ -138,21 +138,13 @@ export function SidebarFlatChatsSection({
                     onClick={onCreateProject}
                   />
                 ) : null}
-                {onGroupChatsByProjectChange ? (
+                {onNewChat && !showEmptyState ? (
                   <SidebarSectionHeaderAction
-                    icon={IconLayoutGrid}
-                    label={t("actions.groupChats")}
-                    onClick={() => onGroupChatsByProjectChange(true)}
+                    icon={IconEdit}
+                    label={t("actions.newChat")}
+                    onClick={onNewChat}
                   />
                 ) : null}
-                <SidebarDisplayOptionsMenu
-                  labelKey="actions.chatDisplayOptions"
-                  showTimestamps={showTimestamps}
-                  onShowTimestampsChange={onShowTimestampsChange}
-                  showGitBranches={showGitBranches}
-                  onShowGitBranchesChange={onShowGitBranchesChange}
-                  className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
-                />
               </>
             ) : null
           }
@@ -309,7 +301,6 @@ export function SidebarFlatChatsSection({
                       isActive={isActive}
                       isRunning={session.isRunning ?? false}
                       hasUnread={session.hasUnread ?? false}
-                      isPinned={pinnedHomeChatSessionIds.has(session.id)}
                       selected={selectedSessionIds?.has(session.id) ?? false}
                       selectionEnabled={selectionEnabled}
                       selectionActionsDisabled={selectionActionsDisabled}

@@ -1,15 +1,11 @@
 import { useTranslation } from "react-i18next";
-import {
-  IconChevronDown,
-  IconCubePlus,
-  IconEdit,
-  IconLayoutList,
-} from "@tabler/icons-react";
+import { IconChevronDown, IconCubePlus, IconEdit } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { CollapseReveal } from "@/shared/ui/collapse-reveal";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
@@ -50,7 +46,6 @@ export interface SidebarProjectsSectionProps {
   onShowProjectTimestampsChange: (show: boolean) => void;
   showGitBranches: boolean;
   onShowGitBranchesChange: (show: boolean) => void;
-  pinnedHomeChatSessionIds: ReadonlySet<string>;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
   collapsed: boolean;
@@ -93,10 +88,9 @@ export interface SidebarProjectsSectionProps {
   showTopDivider?: boolean;
 }
 
-const SECTION_HEADER_TEXT_CLASS = cn(
-  SIDEBAR_GROUP_LABEL_TEXT_CLASS,
-  "text-muted-foreground/80",
-);
+/** Typography only — color comes from the ghost+flush toggle Button so the
+ * label and chevron always match at rest and on hover. */
+const SECTION_HEADER_TEXT_CLASS = SIDEBAR_GROUP_LABEL_TEXT_CLASS;
 
 export function SidebarProjectsSection({
   projects,
@@ -116,7 +110,6 @@ export function SidebarProjectsSection({
   onShowProjectTimestampsChange,
   showGitBranches,
   onShowGitBranchesChange,
-  pinnedHomeChatSessionIds,
   expandedProjects,
   toggleProject,
   collapsed,
@@ -195,7 +188,6 @@ export function SidebarProjectsSection({
         isPinningSelectedToHome={isPinningSelectedToHome}
         onMarkSelectedRead={onMarkSelectedRead}
         onMarkSelectedUnread={onMarkSelectedUnread}
-        pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
         showTimestamps={showTimestamps}
         onShowTimestampsChange={onShowTimestampsChange}
         showGitBranches={showGitBranches}
@@ -231,18 +223,6 @@ export function SidebarProjectsSection({
           actions={
             !showProjectsEmptyState ? (
               <>
-                <SidebarSectionHeaderAction
-                  icon={IconCubePlus}
-                  label={t("actions.newProject")}
-                  onClick={onCreateProject}
-                />
-                {onGroupChatsByProjectChange ? (
-                  <SidebarSectionHeaderAction
-                    icon={IconLayoutList}
-                    label={t("actions.ungroupChats")}
-                    onClick={() => onGroupChatsByProjectChange(false)}
-                  />
-                ) : null}
                 <SidebarDisplayOptionsMenu
                   labelKey="actions.projectDisplayOptions"
                   showChatIcons={showProjectChatIcons}
@@ -251,14 +231,21 @@ export function SidebarProjectsSection({
                   onShowTimestampsChange={onShowProjectTimestampsChange}
                   showGitBranches={showGitBranches}
                   onShowGitBranchesChange={onShowGitBranchesChange}
+                  groupChatsByProject
+                  onGroupChatsByProjectChange={onGroupChatsByProjectChange}
                   className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
+                />
+                <SidebarSectionHeaderAction
+                  icon={IconCubePlus}
+                  label={t("actions.newProject")}
+                  onClick={onCreateProject}
                 />
               </>
             ) : null
           }
         />
 
-        {showProjects && (
+        <CollapseReveal open={showProjects}>
           <SidebarProjectList
             projects={projects}
             projectSessionsByProject={projectSessions.byProject}
@@ -287,13 +274,13 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
-            pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
             showChatIcons={showProjectChatIcons}
             showTimestamps={showProjectTimestamps}
             onReorderProject={onReorderProject}
             hasMoreSessions={hasMoreSessions}
+            dropTargetsEnabled={showProjects}
           />
-        )}
+        </CollapseReveal>
 
         {showProjectsEmptyState &&
           (collapsed ? (
@@ -353,13 +340,15 @@ export function SidebarProjectsSection({
               )}
             >
               {!collapsed && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  flush
+                  size="xs"
                   onClick={onToggleRecentsSection}
                   aria-expanded={recentsSectionOpen}
                   className={cn(
-                    "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm pl-3 text-left transition-colors hover:text-foreground",
-                    "-ml-3",
+                    "h-7 min-w-0 flex-1 justify-start gap-1.5",
                     labelTransition,
                     labelVisible
                       ? "opacity-100 w-auto"
@@ -368,14 +357,14 @@ export function SidebarProjectsSection({
                 >
                   <IconChevronDown
                     className={cn(
-                      "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                      "size-3 shrink-0 transition-transform duration-150",
                       !recentsSectionOpen && "-rotate-90",
                     )}
                   />
                   <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
                     {t("sections.recents")}
                   </span>
-                </button>
+                </Button>
               )}
             </div>
             <div className="space-y-0">
@@ -419,7 +408,6 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
-            pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
             showChatIcons={showChatIcons}
             onShowChatIconsChange={onShowChatIconsChange}
             showTimestamps={showTimestamps}

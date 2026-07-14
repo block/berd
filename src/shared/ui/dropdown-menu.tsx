@@ -128,7 +128,7 @@ function DropdownMenuItem({
       className={cn(
         "relative flex cursor-pointer items-center gap-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         isInverse
-          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-white/10 rounded-[4px] px-1 py-1 text-xs leading-tight"
+          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-popover-inverse-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
           : "text-foreground focus:bg-accent focus:text-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive [&_svg:not([class*='text-'])]:text-muted-foreground rounded-sm px-2 py-1.5 text-sm",
         className,
       )}
@@ -141,8 +141,16 @@ function DropdownMenuCheckboxItem({
   className,
   children,
   checked,
+  indicatorSide = "start",
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem> & {
+  /** Where the check indicator renders. `start` reserves a left gutter
+   * (default); `end` places the check in-flow after the label so long
+   * labels can never overlap it. */
+  indicatorSide?: "start" | "end";
+}) {
+  const menuVariant = React.useContext(DropdownMenuVariantContext);
+  const isInverse = menuVariant === "inverse";
   return (
     <DropdownMenuPrimitive.CheckboxItem
       {...getDesignSystemMetadata({
@@ -152,23 +160,38 @@ function DropdownMenuCheckboxItem({
         props: {
           checked: checked === "indeterminate" ? "indeterminate" : checked,
           disabled: props.disabled,
+          indicatorSide,
+          menuVariant,
         },
         customClassName: typeof className === "string" ? className : undefined,
       })}
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
-        "text-foreground focus:bg-accent focus:text-foreground relative flex cursor-pointer items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-pointer items-center gap-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        isInverse
+          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-popover-inverse-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
+          : "text-foreground focus:bg-accent focus:text-foreground rounded-sm px-2 py-1.5 text-sm",
+        indicatorSide === "start" && "pl-8",
         className,
       )}
       checked={checked}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon className="size-4" />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
+      {indicatorSide === "start" ? (
+        <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CheckIcon className="size-4" />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      ) : null}
       {children}
+      {indicatorSide === "end" ? (
+        <span className="pointer-events-none ml-auto flex size-3.5 shrink-0 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CheckIcon className="size-4" />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      ) : null}
     </DropdownMenuPrimitive.CheckboxItem>
   );
 }

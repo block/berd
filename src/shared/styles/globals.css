@@ -591,6 +591,7 @@
   --popover-inverse: var(--color-gray-900);
   --popover-inverse-foreground: var(--color-white);
   --popover-inverse-muted-foreground: rgba(255, 255, 255, 0.4);
+  --popover-inverse-focus: rgba(255, 255, 255, 0.1);
 
   /* Charts */
   --chart-1: #f6b44a;
@@ -985,6 +986,7 @@
   --popover-inverse: var(--color-gray-50);
   --popover-inverse-foreground: var(--color-gray-900);
   --popover-inverse-muted-foreground: rgba(26, 26, 26, 0.4);
+  --popover-inverse-focus: rgba(26, 26, 26, 0.1);
 
   --status-added: var(--color-green-400);
   --status-deleted: var(--color-red-400);
@@ -1110,6 +1112,7 @@
   --color-popover-inverse-muted-foreground: var(
     --popover-inverse-muted-foreground
   );
+  --color-popover-inverse-focus: var(--popover-inverse-focus);
 
   /* Skill pills — primitives in @theme generate bg-pill-* utilities directly,
      no bridge layer needed (would be a self-reference tautology). */

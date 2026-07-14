@@ -4,10 +4,7 @@ import { Pencil, PinIcon, Trash2 } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import {
-  SIDEBAR_ACTION_ICON_CLASS,
-  SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
-} from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,15 +47,15 @@ export function SidebarItemMenu({
         <Button
           type="button"
           variant="ghost"
+          flush
           size="icon-xs"
           aria-label={t("menu.optionsFor", { label })}
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            "size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",
-            SIDEBAR_ACTION_ICON_CLASS,
+            "size-5",
             open
-              ? "visible text-sidebar-foreground opacity-100"
-              : "invisible text-muted-foreground opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100",
+              ? "visible opacity-100"
+              : "invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100",
           )}
         >
           <IconDots className="size-4" />

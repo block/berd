@@ -2,11 +2,7 @@ import type { ComponentType, MouseEvent, ReactNode } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import {
-  SIDEBAR_ACTION_ICON_CLASS,
-  SIDEBAR_SECTION_ACTION_PILL_CLASS,
-  SIDEBAR_SECTION_HEADER_ROW_CLASS,
-} from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_SECTION_HEADER_ROW_CLASS } from "@/shared/ui/sidebar-tokens";
 
 /**
  * Reveal-on-hover treatment for header actions. Actions stay hidden until the
@@ -38,16 +34,12 @@ export function SidebarSectionHeaderAction({
     <Button
       type="button"
       variant="ghost"
+      flush
       size="icon-xs"
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={cn(
-        SIDEBAR_SECTION_ACTION_PILL_CLASS,
-        SIDEBAR_ACTION_ICON_CLASS,
-        "size-5 bg-transparent p-0",
-        revealClassName,
-      )}
+      className={cn("size-5", revealClassName)}
     >
       <Icon className="size-4" />
     </Button>
@@ -110,12 +102,15 @@ export function SidebarSectionHeader({
     >
       {!collapsed &&
         (onToggleOpen ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            flush
+            size="xs"
             onClick={onToggleOpen}
             aria-expanded={isOpen}
             className={cn(
-              "flex h-7 min-w-0 flex-1 items-center gap-0.5 rounded-sm text-left transition-colors hover:text-sidebar-foreground",
+              "h-7 min-w-0 flex-1 justify-start gap-0.5",
               labelTransition,
               labelVisibilityClass,
             )}
@@ -124,17 +119,17 @@ export function SidebarSectionHeader({
             {showChevron && (
               <IconChevronDown
                 className={cn(
-                  "invisible size-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                  "invisible size-3 shrink-0 transition-transform duration-150",
                   "group-hover/section-header:visible",
                   !isOpen && "-rotate-90",
                 )}
               />
             )}
-          </button>
+          </Button>
         ) : (
           <span
             className={cn(
-              "flex h-7 min-w-0 flex-1 items-center truncate",
+              "flex h-7 min-w-0 flex-1 items-center truncate text-muted-foreground",
               labelClassName,
               labelTransition,
               labelVisibilityClass,

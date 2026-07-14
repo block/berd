@@ -66,11 +66,11 @@ export function SidebarProjectList({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
-  pinnedHomeChatSessionIds,
   showChatIcons,
   showTimestamps,
   onReorderProject,
   hasMoreSessions = false,
+  dropTargetsEnabled = true,
 }: {
   projects: ProjectInfo[];
   projectSessionsByProject: Record<string, SidebarSessionItem[]>;
@@ -99,7 +99,6 @@ export function SidebarProjectList({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
-  pinnedHomeChatSessionIds: ReadonlySet<string>;
   showChatIcons: boolean;
   showTimestamps: boolean;
   onReorderProject?: (
@@ -108,6 +107,7 @@ export function SidebarProjectList({
     placement?: "before" | "after",
   ) => void;
   hasMoreSessions?: boolean;
+  dropTargetsEnabled?: boolean;
 }) {
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTargetProject, setDropTargetProject] =
@@ -355,10 +355,10 @@ export function SidebarProjectList({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
-            pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
             showChatIcons={showChatIcons}
             showTimestamps={showTimestamps}
             hasMoreSessions={hasMoreSessions}
+            dropTargetEnabled={dropTargetsEnabled}
           />
         </div>
       ))}

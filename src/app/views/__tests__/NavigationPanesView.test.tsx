@@ -969,11 +969,15 @@ describe("NavigationPanesView", () => {
     if (!projectIcons[2]) {
       throw new Error("Long-name project icon was not rendered");
     }
-    await user.hover(projectIcons[2]);
-    expect(await screen.findAllByText(longProjectName)).not.toHaveLength(0);
+    expect(screen.queryByText(longProjectName)).not.toBeInTheDocument();
 
     await user.click(
-      within(rows[0]).getByRole("button", { name: "Edit Project Two" }),
+      within(rows[0]).getByRole("button", {
+        name: "Options for Newest Project Chat",
+      }),
+    );
+    await user.click(
+      screen.getByRole("menuitem", { name: "Edit Project Two Project" }),
     );
     await waitFor(() =>
       expect(onEditProject).toHaveBeenCalledWith("project-2"),
@@ -1009,7 +1013,9 @@ describe("NavigationPanesView", () => {
       "old-pinned-chat",
       "new-unpinned-chat",
     ]);
-    expect(screen.getByLabelText("Pinned chat")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Unpin chat" }),
+    ).toBeInTheDocument();
 
     const groups = Array.from(
       container.querySelectorAll<HTMLElement>("[data-sidebar-flat-chat-group]"),
@@ -1102,14 +1108,16 @@ describe("NavigationPanesView", () => {
     const row = container.querySelector<HTMLElement>(
       "[data-session-id='unnamed-project-chat']",
     );
-    const projectIcon = row?.querySelector<HTMLButtonElement>(
-      "[data-sidebar-flat-project-icon]",
-    );
-    if (!projectIcon) {
-      throw new Error("Flat project icon was not rendered as editable");
+    if (!row?.querySelector("[data-sidebar-flat-project-icon]")) {
+      throw new Error("Flat project icon was not rendered");
     }
 
-    await user.click(projectIcon);
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Options for Unnamed Project Chat",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Edit Project" }));
 
     await waitFor(() =>
       expect(onEditProject).toHaveBeenCalledWith("project-1"),
@@ -1207,7 +1215,6 @@ describe("NavigationPanesView", () => {
       "old-pinned-project-chat",
       "new-project-chat",
     ]);
-    expect(screen.getByLabelText("Pinned chat")).toBeInTheDocument();
   });
 
   it("keeps project grouping by default", async () => {
@@ -2138,10 +2145,14 @@ describe("NavigationPanesView", () => {
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
 
     await user.click(recentsHeader);
-    expect(screen.queryByText("Recovered Session")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Recovered Session").closest('[aria-hidden="true"]'),
+    ).toBeInTheDocument();
 
     await user.click(recentsHeader);
-    expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+    expect(
+      screen.getByText("Recovered Session").closest('[aria-hidden="true"]'),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the session list stacked when detachable chats are disabled", () => {
@@ -3708,7 +3719,12 @@ describe("NavigationPanesView", () => {
     }
     expect(projectIcon.getAttribute("style")).toContain("--color-pill-sage");
     await user.click(
-      within(projectChatRow).getByRole("button", { name: "Edit Project One" }),
+      within(projectChatRow).getByRole("button", {
+        name: "Options for Project Chat",
+      }),
+    );
+    await user.click(
+      screen.getByRole("menuitem", { name: "Edit Project One Project" }),
     );
     await waitFor(() =>
       expect(onEditProject).toHaveBeenCalledWith("project-1"),
