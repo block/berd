@@ -10,7 +10,10 @@ import {
 } from "react";
 import { useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import { AgentBuilderRail } from "@/features/agents/ui/AgentBuilderRail";
+import {
+  AgentBuilderRail,
+  AGENT_BUILDER_RAIL_WIDTH,
+} from "@/features/agents/ui/AgentBuilderRail";
 import {
   recoverPendingDraftAgent,
   setAgentBuilderSessionLocalEdits,
@@ -31,11 +34,9 @@ import {
 } from "../stores/chatSessionStore";
 import {
   ChatContextPanel,
-  CP_TOTAL_W,
   useChatContextPanelCompactViewport,
 } from "./ChatContextPanel";
 
-const AGENT_BUILDER_RAIL_W = Math.round(CP_TOTAL_W * 1.5);
 const RIGHT_RAIL_REFLOW_MS = 200;
 interface ChatRightRailProps {
   session: ChatSession | null | undefined;
@@ -325,7 +326,11 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
           )}
           style={
             {
-              width: AGENT_BUILDER_RAIL_W,
+              // Cap the column at half the main content width (viewport minus
+              // the docked sidebar occlusion) so narrow windows keep a usable
+              // chat column; on wide layouts this resolves to the rail's full
+              // design width, mirroring the old lg: breakpoint behavior.
+              width: `min(${AGENT_BUILDER_RAIL_WIDTH}px, calc((100vw - ${contextPanelLeftViewportOcclusionPx}px) / 2))`,
               ...builderColumnStyle,
             } as CSSProperties
           }

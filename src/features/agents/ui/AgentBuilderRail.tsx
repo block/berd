@@ -46,6 +46,12 @@ import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 const FIELD_CLASS = FORM_FIELD_CLASS;
 const FIELD_LABEL_CLASS = "mb-2 block text-xs text-muted-foreground";
 
+/**
+ * Design width of the builder rail. Containers that host the rail should size
+ * their column from this constant so the rail is never clipped.
+ */
+export const AGENT_BUILDER_RAIL_WIDTH = 506;
+
 export interface AgentBuilderRailProps {
   sessionId: string;
   targetAgentPath: string | null;
@@ -402,7 +408,7 @@ export function AgentBuilderRail({
   ) => (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-md bg-card px-5 pb-5 pt-3 lg:w-[506px]",
+        "flex min-h-0 w-full flex-col rounded-md bg-card px-5 pb-5 pt-3",
         className,
       )}
       aria-label={t("builderRail.ariaLabel")}

@@ -29,6 +29,7 @@ vi.mock("motion/react", async (importOriginal) => {
 });
 
 vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
+  AGENT_BUILDER_RAIL_WIDTH: 506,
   AgentBuilderRail: (props: {
     targetAgentPath?: string | null;
     targetAgentSlug?: string | null;
@@ -173,7 +174,7 @@ describe("ChatRightRail", () => {
       screen.queryByRole("button", { name: "Context content" }),
     ).toBeNull();
     expect(screen.getByTestId("agent-builder-rail").parentElement).toHaveStyle({
-      width: "509px",
+      width: "min(506px, calc((100vw - 0px) / 2))",
     });
   });
 
