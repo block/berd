@@ -69,6 +69,11 @@ pub struct AgentVersionInfo {
     /// `FixType::UpdateMain` or `FixType::UpdateBridge`, matching the slot this
     /// readout occupies. Always paired with `update_command`.
     pub update_fix_type: Option<FixType>,
+    /// Whether this binary ships inside Berd's app bundle (resolved from the
+    /// bundled ACP tools dir rather than a user install). Stamped by the doctor
+    /// crate alongside `install_source == Bundled` when the caller supplies
+    /// `RunChecksOptions::bundled_tools_dir`.
+    pub bundled: Option<bool>,
 }
 
 impl From<doctor::types::AgentVersionInfo> for AgentVersionInfo {
@@ -81,6 +86,7 @@ impl From<doctor::types::AgentVersionInfo> for AgentVersionInfo {
             self_updating: info.self_updating,
             update_command: info.update_command,
             update_fix_type: info.update_fix_type,
+            bundled: info.bundled,
         }
     }
 }
@@ -1278,6 +1284,7 @@ async fn run_doctor_impl(
     runtime_config: &RuntimeConfig,
     check_freshness: bool,
     prepend_dirs: &[PathBuf],
+    bundled_tools_dir: Option<PathBuf>,
 ) -> DoctorReport {
     if !doctor_enabled(runtime_config) {
         return DoctorReport { checks: Vec::new() };
@@ -1295,6 +1302,11 @@ async fn run_doctor_impl(
             // want here.
             offline: false,
             env: None,
+            // The crate labels binaries resolving from this dir as bundled
+            // (install source + readout flag) and suppresses registry
+            // install/update fixes for them — versions are pinned by
+            // acp-tools.lock.json and ship with Berd updates.
+            bundled_tools_dir,
         }
         .with_env_snapshot(doctor_env_vars),
     )
@@ -1431,6 +1443,7 @@ pub async fn run_doctor(
             &runtime_config,
             false,
             &prepend_dirs,
+            bundled_acp_tools::resolve_bundled_acp_tools_dir(&app_handle),
         ),
         DOCTOR_REPORT_TIMEOUT,
     )
@@ -1463,6 +1476,7 @@ pub async fn run_doctor_fresh(
             &runtime_config,
             true,
             &prepend_dirs,
+            bundled_acp_tools::resolve_bundled_acp_tools_dir(&app_handle),
         ),
         DOCTOR_FRESH_REPORT_TIMEOUT,
     )

@@ -134,17 +134,13 @@ pub struct SetupPlan {
     /// failure against the absent doctor check.
     #[serde(default)]
     verify_install: bool,
-    /// Some providers ship an ACP bridge separately from the main harness CLI.
-    /// When Berd bundles that bridge, install verification must still require
-    /// the provider's real CLI (`path`) rather than accepting the bridge
-    /// (`bridge_path`) alone.
-    #[serde(default)]
-    requires_main_cli: bool,
-    /// Whether Berd bundles this provider's ACP bridge. The frontend readiness
-    /// gate (`readinessFromReport`) treats a bundled-bridge provider with no
-    /// resolved `bridgePath` as not installed (the bundle itself is broken), so
-    /// post-fix verification must apply the same gate — otherwise a main-CLI
-    /// install would verify as success and the card would immediately flip back
+    /// Whether Berd bundles this provider's ACP bridge. The bridge vendors the
+    /// full harness CLI, so it is the provider's only binary and the doctor
+    /// crate reports it under `path`. The frontend readiness gate
+    /// (`readinessFromReport`) treats a bundled-bridge provider with no
+    /// resolved `path` as not installed (the bundle itself is broken), so
+    /// post-fix verification must apply the same gate — otherwise a clean fix
+    /// run would verify as success and the card would immediately flip back
     /// to not_installed, an install-succeeds/still-broken loop.
     #[serde(default)]
     bundled_bridge: bool,
@@ -341,6 +337,10 @@ async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::Doctor
             check_freshness: false,
             offline: false,
             env: None,
+            // The crate labels binaries resolving from this dir as bundled and
+            // offers no registry install/update fix for them — their versions
+            // are pinned by acp-tools.lock.json and ship with Berd updates.
+            bundled_tools_dir: bundled_acp_tools::resolve_bundled_acp_tools_dir(app),
         }
         .with_env_snapshot(home_env_vars_with_bundled_acp(app).await),
     )
@@ -364,20 +364,17 @@ async fn agent_is_installed(
     Ok(check_satisfies_plan(&check, plan))
 }
 
-/// The resolved-on-disk gate, mirroring the frontend's `readinessFromReport`:
-/// `requires_main_cli` demands the provider's real CLI (`path`) rather than
-/// accepting the bridge alone, and `bundled_bridge` additionally demands the
-/// Berd-supplied bridge resolved (`bridge_path`) — its bin dir is always on the
-/// doctor PATH, so null means the bundle itself is broken and readiness would
-/// contradict any verification success reported without it.
+/// The resolved-on-disk gate, mirroring the frontend's `readinessFromReport`.
+/// A bundled bridge is the provider's only binary and reports under `path`;
+/// its bin dir is always on the doctor PATH, so `None` means the bundle itself
+/// is broken and readiness would contradict any verification success reported
+/// without it. Everything else accepts either binary of a two-binary agent.
 fn check_satisfies_plan(check: &doctor::DoctorCheck, plan: &SetupPlan) -> bool {
-    let main_cli_resolved = if plan.requires_main_cli {
+    if plan.bundled_bridge {
         check.path.is_some()
     } else {
         check.path.is_some() || check.bridge_path.is_some()
-    };
-    let bundled_bridge_resolved = !plan.bundled_bridge || check.bridge_path.is_some();
-    main_cli_resolved && bundled_bridge_resolved
+    }
 }
 
 /// Post-fix verification, gated by the plan's `verify_install`. When the
@@ -870,16 +867,11 @@ mod tests {
         assert!(map.contains_key("fresh"));
     }
 
-    fn plan_with_requirements(
-        verify_install: bool,
-        requires_main_cli: bool,
-        bundled_bridge: bool,
-    ) -> SetupPlan {
+    fn plan_with_requirements(verify_install: bool, bundled_bridge: bool) -> SetupPlan {
         SetupPlan {
             install_fix_type: None,
             update_commands: Vec::new(),
             verify_install,
-            requires_main_cli,
             bundled_bridge,
         }
     }
@@ -904,7 +896,7 @@ mod tests {
         assert!(verify_installed(
             None,
             "provider-without-a-check",
-            &plan_with_requirements(false, false, false)
+            &plan_with_requirements(false, false)
         )
         .await
         .is_ok());
@@ -912,7 +904,7 @@ mod tests {
 
     #[test]
     fn check_satisfies_plan_accepts_either_binary_by_default() {
-        let plan = plan_with_requirements(true, false, false);
+        let plan = plan_with_requirements(true, false);
         assert!(check_satisfies_plan(
             &check_with_paths(Some("/bin/agent"), None),
             &plan
@@ -925,32 +917,22 @@ mod tests {
     }
 
     #[test]
-    fn check_satisfies_plan_requires_main_cli_rejects_bridge_alone() {
-        let plan = plan_with_requirements(true, true, false);
+    fn check_satisfies_plan_bundled_bridge_gates_on_path() {
+        // Mirror of the frontend readiness gate: the bundled bridge is the
+        // provider's only binary and reports under `path`. A bundled-bridge
+        // check with no resolved `path` is a broken bundle, so verification
+        // must fail even if a stray `bridge_path` were reported — otherwise
+        // the fix reports success and the card immediately flips back to
+        // not_installed.
+        let plan = plan_with_requirements(true, true);
         assert!(check_satisfies_plan(
-            &check_with_paths(Some("/bin/codex"), None),
+            &check_with_paths(Some("/bundled/codex-acp"), None),
             &plan
         ));
         assert!(!check_satisfies_plan(
-            &check_with_paths(None, Some("/bin/codex-acp")),
+            &check_with_paths(None, Some("/bundled/codex-acp")),
             &plan
         ));
-    }
-
-    #[test]
-    fn check_satisfies_plan_bundled_bridge_requires_resolved_bridge() {
-        // Mirror of the frontend readiness gate: a bundled-bridge provider whose
-        // bridge did not resolve is a broken bundle, so verification must fail
-        // even with the main CLI on PATH — otherwise the install reports success
-        // and the card immediately flips back to not_installed.
-        let plan = plan_with_requirements(true, true, true);
-        assert!(check_satisfies_plan(
-            &check_with_paths(Some("/bin/codex"), Some("/bundled/codex-acp")),
-            &plan
-        ));
-        assert!(!check_satisfies_plan(
-            &check_with_paths(Some("/bin/codex"), None),
-            &plan
-        ));
+        assert!(!check_satisfies_plan(&check_with_paths(None, None), &plan));
     }
 }

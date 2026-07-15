@@ -27,7 +27,7 @@ builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-cl
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
-doctor = { git = "https://github.com/block/builderbot", rev = "7a6d3d717c881cfe842fc75fe3ffe343c4614159" }
+doctor = { git = "https://github.com/block/builderbot", rev = "f049fa2b559c860ebc1e7b83771023961930099e" }
 etcetera = "0.11.0"
 ignore = "0.4.25"
 infer = "0.19.0"

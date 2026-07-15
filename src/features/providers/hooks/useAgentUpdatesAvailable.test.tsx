@@ -30,7 +30,7 @@ function check(overrides: Partial<DoctorCheck>): DoctorCheck {
     fixUrl: null,
     fixCommand: null,
     fixType: null,
-    path: "/usr/local/bin/claude",
+    path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
     bridgePath: null,
     rawOutput: null,
     authStatus: "authenticated",
@@ -95,7 +95,8 @@ describe("useAgentUpdatesAvailable", () => {
     runDoctor.mockResolvedValue(
       report([
         check({
-          id: "ai-agent-claude",
+          id: "ai-agent-cursor",
+          path: "/usr/local/bin/cursor-agent",
           installedVersion: "1.0.0",
           latestVersion: "1.1.0",
           updateAvailable: true,
@@ -142,11 +143,13 @@ describe("useAgentUpdatesAvailable", () => {
   });
 
   it("returns true when only the ACP bridge has an update", async () => {
+    // Amp still ships its CLI and ACP bridge as separate binaries.
     runDoctor.mockResolvedValue(
       report([
         check({
-          id: "ai-agent-claude",
-          bridgePath: "/usr/local/bin/claude-agent-acp",
+          id: "ai-agent-amp",
+          path: "/usr/local/bin/amp",
+          bridgePath: "/usr/local/bin/amp-acp",
           main: info({
             installSource: "curlPipe",
             installedVersion: "1.0.0",
@@ -157,7 +160,7 @@ describe("useAgentUpdatesAvailable", () => {
             installedVersion: "0.34.0",
             latestVersion: "0.39.0",
             updateAvailable: true,
-            updateCommand: "npm install -g claude-agent-acp@latest",
+            updateCommand: "npm install -g amp-acp@latest",
             updateFixType: "updateBridge",
           }),
         }),

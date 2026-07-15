@@ -14,6 +14,7 @@ const SOURCE_LABEL_KEYS: Record<InstallSource, string> = {
   asdf: "doctor.version.source.asdf",
   curlPipe: "doctor.version.source.curlPipe",
   system: "doctor.version.source.system",
+  bundled: "doctor.version.source.bundled",
   unknown: "doctor.version.source.unknown",
 };
 
@@ -24,15 +25,10 @@ function formatVersion(version: string): string {
 
 interface AgentVersionInfoProps {
   check: DoctorCheck;
-  bundledBridge?: boolean;
   className?: string;
 }
 
-export function AgentVersionInfo({
-  check,
-  bundledBridge = false,
-  className,
-}: AgentVersionInfoProps) {
+export function AgentVersionInfo({ check, className }: AgentVersionInfoProps) {
   const { t } = useTranslation(["settings", "common"]);
   const display = describeAgentVersion(check);
   if (!display) return null;
@@ -76,9 +72,9 @@ export function AgentVersionInfo({
         const latest = readout.latestVersion
           ? formatVersion(readout.latestVersion)
           : null;
-        const showUpdate =
-          readout.updateAvailable &&
-          !(bundledBridge && readout.role === "bridge");
+        // Bundled readouts never carry an update nag: the crate stamps them
+        // and suppresses `updateAvailable` — they update with Berd itself.
+        const showUpdate = readout.updateAvailable;
         return (
           <div key={readout.role} className="flex flex-col text-xs break-words">
             <span className="text-muted-foreground">{text}</span>

@@ -30,10 +30,10 @@ function check(overrides: Partial<DoctorCheck>): DoctorCheck {
   };
 }
 
-function renderInfo(c: DoctorCheck, props: { bundledBridge?: boolean } = {}) {
+function renderInfo(c: DoctorCheck) {
   return render(
     <I18nProvider>
-      <AgentVersionInfo check={c} {...props} />
+      <AgentVersionInfo check={c} />
     </I18nProvider>,
   );
 }
@@ -149,32 +149,34 @@ describe("AgentVersionInfo", () => {
     expect(screen.getByText("Update available → v0.39.0")).toBeInTheDocument();
   });
 
-  it("hides bridge update markers for bundled bridges", () => {
+  it("labels bundled readouts and renders no update marker for them", () => {
+    // The crate stamps a binary resolved from Berd's bundled ACP tools dir as
+    // installSource "bundled", suppresses `updateAvailable`, and derives no
+    // update command — the bundled copy updates with Berd itself, so no nag
+    // renders even when a newer npm release exists.
     renderInfo(
       check({
+        path: "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
+        installSource: "bundled",
+        installedVersion: "0.142.5",
+        latestVersion: "0.143.0",
+        updateAvailable: null,
         main: {
-          installSource: "brew",
-          installedVersion: "1.4.0",
-          latestVersion: null,
+          installSource: "bundled",
+          installedVersion: "0.142.5",
+          latestVersion: "0.143.0",
           updateAvailable: null,
           selfUpdating: null,
           updateCommand: null,
           updateFixType: null,
-        },
-        bridge: {
-          installSource: "npm",
-          installedVersion: "0.3.0",
-          latestVersion: "0.4.0",
-          updateAvailable: true,
-          selfUpdating: null,
-          updateCommand: "npm install -g codex-acp@latest",
-          updateFixType: "updateBridge",
+          bundled: true,
         },
       }),
-      { bundledBridge: true },
     );
 
-    expect(screen.getByText("ACP bridge v0.3.0 via npm")).toBeInTheDocument();
+    expect(
+      screen.getByText("Installed via app bundle · v0.142.5"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/update available/i)).not.toBeInTheDocument();
   });
 

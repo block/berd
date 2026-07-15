@@ -74,12 +74,14 @@ describe("useAgentProviderStatus", () => {
   });
 
   it("marks agents installed and authenticated in the doctor report as ready", async () => {
+    // The claude/codex bridges vendor the full harness CLI, so their checks
+    // are single-binary: the bundled bridge reports under `path` and
+    // `bridgePath` stays null.
     runDoctor.mockResolvedValue(
       report([
         check({
           id: "ai-agent-claude",
-          path: "/usr/local/bin/claude",
-          bridgePath: "/usr/local/bin/claude-agent-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
           authStatus: "authenticated",
         }),
         check({
@@ -108,8 +110,7 @@ describe("useAgentProviderStatus", () => {
         check({
           id: "ai-agent-claude",
           status: "warn",
-          path: "/usr/local/bin/claude",
-          bridgePath: "/usr/local/bin/claude-agent-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
           authStatus: "notAuthenticated",
         }),
       ]),
@@ -151,8 +152,7 @@ describe("useAgentProviderStatus", () => {
       report([
         check({
           id: "ai-agent-claude",
-          path: "/usr/local/bin/claude",
-          bridgePath: "/usr/local/bin/claude-agent-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
           authStatus: "authenticated",
         }),
       ]),
@@ -170,8 +170,7 @@ describe("useAgentProviderStatus", () => {
         check({
           id: "ai-agent-claude",
           status: "warn",
-          path: "/usr/local/bin/claude",
-          bridgePath: "/usr/local/bin/claude-agent-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
           authStatus: "notAuthenticated",
         }),
       ]),
@@ -192,8 +191,7 @@ describe("useAgentProviderStatus", () => {
       report([
         check({
           id: "ai-agent-claude",
-          path: "/usr/local/bin/claude",
-          bridgePath: "/usr/local/bin/claude-agent-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
           authStatus: "authenticated",
         }),
         check({
@@ -277,8 +275,7 @@ describe("useAgentProviderStatus", () => {
         check({
           id: "ai-agent-codex",
           status: "pass",
-          path: "/usr/local/bin/codex",
-          bridgePath: "/usr/local/bin/codex-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
           authStatus: "authenticated",
         }),
       ]),
@@ -300,8 +297,7 @@ describe("useAgentProviderStatus", () => {
         check({
           id: "ai-agent-codex",
           status: "warn",
-          path: "/usr/local/bin/codex",
-          bridgePath: "/usr/local/bin/codex-acp",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
           authStatus: "notAuthenticated",
         }),
       ]),
@@ -464,33 +460,29 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.readyAgentIds.has("claude-acp")).toBe(false);
   });
 
-  it("does not require a user-installed codex-acp bridge when Berd bundles it", async () => {
-    // Main CLI (Homebrew codex) is installed and even has an update available;
-    // the bundled bridge dir is on the doctor PATH, so the crate resolves
-    // bridgePath to the bundled binary and does not flag fixType="bridge".
-    // Readiness is gated on the real Codex CLI and auth state instead of
-    // offering a bridge install.
+  it("marks a bundled agent ready from the crate-stamped bundled readout", async () => {
+    // The bundled bridge vendors the harness CLI and is the check's only
+    // binary: it resolves under `path` from Berd's bundled tools dir, the
+    // crate stamps the readout bundled, and `bridgePath` stays null.
     runDoctor.mockResolvedValue(
       report([
         check({
           id: "ai-agent-codex",
-          status: "warn",
-          path: "/opt/homebrew/bin/codex",
-          bridgePath:
-            "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
+          status: "pass",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
+          bridgePath: null,
           authStatus: "authenticated",
-          installSource: "brew",
-          installedVersion: "0.137.0",
-          latestVersion: "0.139.0",
-          updateAvailable: true,
+          installSource: "bundled",
+          installedVersion: "0.142.5",
           main: {
-            installSource: "brew",
-            installedVersion: "0.137.0",
-            latestVersion: "0.139.0",
-            updateAvailable: true,
+            installSource: "bundled",
+            installedVersion: "0.142.5",
+            latestVersion: null,
+            updateAvailable: null,
             selfUpdating: null,
-            updateCommand: "brew upgrade codex",
-            updateFixType: "updateMain",
+            updateCommand: null,
+            updateFixType: null,
+            bundled: true,
           },
           bridge: null,
         }),
@@ -507,20 +499,20 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.readyAgentIds.has("codex-acp")).toBe(true);
   });
 
-  it("marks a bundled-bridge agent not_installed when the bundled bridge fails to resolve", async () => {
-    // The main CLI is healthy, but the bundled bridge is missing (packaging
-    // regression, wiped resources): the crate leaves bridgePath null and flags
-    // fixType="bridge". Sessions cannot spawn without the bridge, so readiness
-    // must not report "ready" — surface not_installed with its remediation.
+  it("marks a bundled-bridge agent not_installed when its binary fails to resolve", async () => {
+    // The bundle is broken (packaging regression, wiped resources) and no
+    // global fallback is installed: the check resolves nothing and offers the
+    // bridge npm package as the install fix. Sessions cannot spawn without
+    // the bridge, so readiness must surface not_installed with remediation.
     runDoctor.mockResolvedValue(
       report([
         check({
           id: "ai-agent-codex",
-          status: "warn",
-          path: "/opt/homebrew/bin/codex",
+          status: "fail",
+          path: null,
           bridgePath: null,
-          fixType: "bridge",
-          authStatus: "authenticated",
+          fixType: "command",
+          fixCommand: "npm install -g @agentclientprotocol/codex-acp",
         }),
       ]),
     );
@@ -537,7 +529,10 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
   });
 
-  it("requires the main CLI for bundled-bridge agents", async () => {
+  it("ignores a stray bridgePath for bundled-bridge agents", async () => {
+    // Bundled providers gate on `path` alone — the bridge *is* the binary. A
+    // report with only `bridgePath` set means the provider's binary did not
+    // resolve, so it must not read as installed.
     runDoctor.mockResolvedValue(
       report([
         check({
@@ -561,5 +556,32 @@ describe("useAgentProviderStatus", () => {
       "not_installed",
     );
     expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
+  });
+
+  it("marks a two-binary agent not_installed when its ACP bridge is missing", async () => {
+    // Amp still ships its CLI and ACP bridge separately: a present `amp` CLI
+    // with a missing bridge reports fixType="bridge" and must surface the
+    // bridge Install action instead of reading as installed.
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-amp",
+          status: "warn",
+          path: "/usr/local/bin/amp",
+          bridgePath: null,
+          fixType: "bridge",
+          authStatus: "authenticated",
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("amp-acp")).toBe("not_installed");
+    expect(result.current.readyAgentIds.has("amp-acp")).toBe(false);
   });
 });

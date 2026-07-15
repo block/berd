@@ -139,6 +139,7 @@
   },
   "doctor": {
     "agents": "Agentes",
+    "bundledPath": "Integrado en Berd",
     "copied": "Copiado",
     "copyDetails": "Copiar detalles",
     "empty": "Todavía no hay comprobaciones disponibles.",
@@ -163,6 +164,7 @@
       "source": {
         "asdf": "asdf",
         "brew": "Homebrew",
+        "bundled": "el paquete de la aplicación",
         "cargo": "Cargo",
         "curlPipe": "instalador nativo",
         "mise": "mise",

@@ -102,12 +102,14 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
           </span>
           {check.path && (
             <span className="break-words font-mono text-[10px] text-muted-foreground">
-              {check.path}
+              {check.main?.bundled ? t("doctor.bundledPath") : check.path}
             </span>
           )}
           {check.bridgePath && (
             <span className="break-words font-mono text-[10px] text-muted-foreground">
-              {check.bridgePath}
+              {check.bridge?.bundled
+                ? t("doctor.bundledPath")
+                : check.bridgePath}
             </span>
           )}
           <AgentVersionInfo check={check} className="mt-0.5" />

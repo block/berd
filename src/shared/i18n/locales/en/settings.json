@@ -139,6 +139,7 @@
   },
   "doctor": {
     "agents": "Agents",
+    "bundledPath": "Bundled with Berd",
     "copied": "Copied",
     "copyDetails": "Copy report",
     "empty": "Couldn't load checks. Try again.",
@@ -163,6 +164,7 @@
       "source": {
         "asdf": "asdf",
         "brew": "Homebrew",
+        "bundled": "app bundle",
         "cargo": "Cargo",
         "curlPipe": "native installer",
         "mise": "mise",

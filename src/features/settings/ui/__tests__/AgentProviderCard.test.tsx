@@ -773,9 +773,12 @@ describe("AgentProviderCard", () => {
     });
   });
 
-  it("bundled bridges seed the main-CLI recipe and skip bridge updates", async () => {
+  it("bundled bridges install with the bridge npm recipe and carry the bundled gate", async () => {
     const user = userEvent.setup();
 
+    // The bundled bridge vendors the full harness CLI, so the check is
+    // single-binary: a broken/absent bundle reports fixType="command", whose
+    // crate recipe installs the bridge npm package (a global fallback copy).
     renderCard(
       <AgentProviderCard
         provider={createProvider({
@@ -786,60 +789,89 @@ describe("AgentProviderCard", () => {
           supportsAuth: true,
           supportsAuthStatus: true,
           bundledBridge: true,
-          requiresMainCli: true,
         })}
         statusLoading={false}
         readiness={"not_installed" satisfies AgentProviderReadiness}
         versionCheck={createVersionCheck({
           id: "ai-agent-codex",
           label: "Codex",
-          status: "warn",
-          path: "/opt/homebrew/bin/codex",
+          status: "fail",
+          path: null,
           bridgePath: null,
-          fixType: "bridge",
-          installSource: "brew",
-          installedVersion: "0.137.0",
-          latestVersion: "0.139.0",
-          updateAvailable: true,
-          main: {
-            installSource: "brew",
-            installedVersion: "0.137.0",
-            latestVersion: "0.139.0",
-            updateAvailable: true,
-            selfUpdating: null,
-            updateCommand: "brew upgrade codex",
-            updateFixType: "updateMain",
-          },
-          bridge: {
-            installSource: "npm",
-            installedVersion: "1.0.0",
-            latestVersion: "1.1.0",
-            updateAvailable: true,
-            selfUpdating: null,
-            updateCommand: "npm install -g codex-acp@latest",
-            updateFixType: "updateBridge",
-          },
+          fixType: "command",
+          main: null,
+          bridge: null,
         })}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /fix codex/i }));
+    await user.click(screen.getByRole("button", { name: /install codex/i }));
 
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
         installFixType: "command",
-        updateCommands: [
-          { fixType: "updateMain", command: "brew upgrade codex" },
-        ],
+        updateCommands: [],
         verifyInstall: true,
-        requiresMainCli: true,
         // The backend's post-install verification mirrors the readiness gate:
-        // a bundled-bridge provider must also resolve its bundled bridge, so a
-        // broken bundle fails with a message instead of a success the card
-        // immediately contradicts.
+        // a bundled-bridge provider must resolve its only binary under `path`,
+        // so a still-broken bundle fails with a message instead of a success
+        // the card immediately contradicts.
         bundledBridge: true,
       });
     });
+  });
+
+  it("shows a bundled bridge as ready with no update affordance", async () => {
+    const user = userEvent.setup();
+
+    // The crate stamps bundled readouts (installSource "bundled") and derives
+    // no update command for them — the bundled copy updates with Berd itself,
+    // so a newer npm release must not surface an Update button that a global
+    // `npm install -g` could never make effective.
+    const { container } = renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          binaryName: "claude-agent-acp",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+          bundledBridge: true,
+        })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          status: "pass",
+          path: "/Applications/Berd.app/Contents/Resources/acp/bin/claude-agent-acp",
+          bridgePath: null,
+          installSource: "bundled",
+          installedVersion: "2.1.202",
+          latestVersion: "2.1.210",
+          updateAvailable: null,
+          main: {
+            installSource: "bundled",
+            installedVersion: "2.1.202",
+            latestVersion: "2.1.210",
+            updateAvailable: null,
+            selfUpdating: null,
+            updateCommand: null,
+            updateFixType: null,
+            bundled: true,
+          },
+          bridge: null,
+        })}
+      />,
+    );
+
+    // Ready tick, no Update button.
+    expect(container.querySelector(".text-success")).not.toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /update claude/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /claude provider/i }));
+    expect(
+      screen.getByText("Installed via app bundle · v2.1.202"),
+    ).toBeInTheDocument();
   });
 
   it("seeds the install plan with the main-CLI recipe for a from-scratch agent", async () => {

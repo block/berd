@@ -62,26 +62,27 @@ export function readinessFromReport(
 
     const provider = CURATED_PROVIDER_CATALOG_BY_ID.get(providerId);
 
-    // A two-binary ACP agent whose main CLI is present but whose ACP bridge
-    // binary is missing: the doctor crate flags it status="warn" with
-    // fixType="bridge", leaves bridge/bridgePath null, and keeps `path`
+    // A two-binary ACP agent (e.g. Amp) whose main CLI is present but whose
+    // ACP bridge binary is missing: the doctor crate flags it status="warn"
+    // with fixType="bridge", leaves bridge/bridgePath null, and keeps `path`
     // pointed at the main CLI. The bridge is what makes the agent usable over
     // ACP, so surface the bridge Install action instead of treating the agent
-    // as installed/ready. Bundled bridges are the exception: Berd supplies the
-    // bridge, so readiness is gated on the real harness CLI below.
-    if (check.fixType === "bridge" && !provider?.bundledBridge) {
+    // as installed/ready.
+    if (check.fixType === "bridge") {
       readiness.set(providerId, "not_installed");
       continue;
     }
 
-    // For bundled bridges the bundled bin dir is always on the doctor PATH,
-    // so a healthy install resolves bridgePath; null means the bundle itself
-    // is broken (packaging regression, wiped resources) and sessions cannot
-    // spawn — treat that as not installed instead of masking it as ready.
+    // A bundled bridge vendors the full harness CLI, so it is the provider's
+    // only binary and reports under `path`. Its bin dir is always on the
+    // doctor PATH, so a healthy install resolves `path`; null means the
+    // bundle itself is broken (packaging regression, wiped resources) and
+    // sessions cannot spawn — treat that as not installed instead of masking
+    // it as ready. Everything else accepts either binary of a two-binary
+    // agent.
     const installed =
       (check.status === "pass" || check.status === "warn") &&
-      (!provider?.bundledBridge || check.bridgePath != null) &&
-      (provider?.requiresMainCli
+      (provider?.bundledBridge
         ? check.path != null
         : check.path != null || check.bridgePath != null);
     if (!installed) {

@@ -240,11 +240,13 @@ describe("formatDebugReport", () => {
   });
 
   it("includes install source, versions, and update availability", () => {
+    // Amp still ships its CLI and ACP bridge as separate binaries, so it
+    // exercises both readout slots.
     const output = formatDebugReport(
       report([
         check({
-          id: "ai-agent-claude",
-          label: "Claude Code",
+          id: "ai-agent-amp",
+          label: "Amp",
           category: "agents",
           categoryLabel: "Agents",
           authStatus: "notAuthenticated",
@@ -261,7 +263,7 @@ describe("formatDebugReport", () => {
             latestVersion: "0.39.0",
             updateAvailable: true,
             selfUpdating: false,
-            updateCommand: "npm install -g claude-agent-acp@latest",
+            updateCommand: "npm install -g amp-acp@latest",
             updateFixType: "updateBridge",
           },
         }),

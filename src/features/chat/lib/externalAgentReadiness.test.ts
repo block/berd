@@ -14,14 +14,16 @@ vi.mock("@/shared/api/doctor", async () => {
 });
 
 function codexReport(authStatus: "authenticated" | "notAuthenticated") {
+  // The bundled codex-acp bridge vendors the full codex CLI, so the check is
+  // single-binary: the bridge reports under `path` and `bridgePath` is null.
   return {
     checks: [
       {
         id: "ai-agent-codex",
         status: authStatus === "authenticated" ? "pass" : "warn",
         fixType: null,
-        path: "/usr/local/bin/codex",
-        bridgePath: "/usr/local/bin/codex-acp",
+        path: "/Applications/Berd.app/Contents/Resources/acp/bin/codex-acp",
+        bridgePath: null,
         authStatus,
       },
     ],

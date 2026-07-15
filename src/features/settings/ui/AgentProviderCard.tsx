@@ -92,12 +92,11 @@ export function AgentProviderCard({
   const supportsAuth = provider.supportsAuth === true;
   const hasBinary = !!provider.binaryName;
   const bundledBridge = provider.bundledBridge === true;
-  const requiresMainCli = provider.requiresMainCli === true;
   // The backend can't see the catalog, so it relies on the plan to decide
   // whether to probe PATH after a fix. A built-in or binary-less provider has
   // nothing to resolve on disk, so verification is skipped and a clean run is
   // success — the same short-circuit the old in-card `refreshInstallStatus` did.
-  const verifyInstall = (hasBinary || requiresMainCli) && !isBuiltIn;
+  const verifyInstall = hasBinary && !isBuiltIn;
   const setupFailureSimulation = getAgentSetupFailureSimulation(provider.id);
   const forceMissingForSimulation = Boolean(setupFailureSimulation);
 
@@ -149,31 +148,26 @@ export function AgentProviderCard({
     : null;
   // Per-readout updates the crate can actually run (a newer version *and* a
   // runnable source-aware command). Drives both the Update/Fix label and the
-  // commands the setup plan carries.
+  // commands the setup plan carries. Bundled readouts never qualify: the
+  // crate stamps them (install source "bundled") and derives no update
+  // command for them — they update with Berd itself.
   const actionableReadouts =
     versionDisplay?.readouts.filter(
-      (r) =>
-        !(bundledBridge && r.role === "bridge") &&
-        r.updateAvailable &&
-        r.updateFixType &&
-        r.updateCommand,
+      (r) => r.updateAvailable && r.updateFixType && r.updateCommand,
     ) ?? [];
   const hasActionableUpdate = actionableReadouts.length > 0;
   // Required binaries the report says are missing while others are present
-  // (e.g. Codex's CLI is on PATH but the codex-acp bridge isn't). Surfaced in
+  // (e.g. Amp's CLI is on PATH but the amp-acp bridge isn't). Surfaced in
   // danger text so a partial install isn't mistaken for a healthy one.
   const missingComponents = versionCheck
-    ? missingAgentComponents(
-        versionCheck,
-        bundledBridge ? null : provider.binaryName,
-      )
+    ? missingAgentComponents(versionCheck, provider.binaryName)
     : [];
   // Which install recipe the backend's install loop should seed with. The crate
   // flags a missing ACP bridge (main CLI present) with fixType="bridge", so
   // dispatch that recipe instead of the static main-CLI one; anything else (an
   // absent check, or the update/auth fix types) falls back to "command".
   const installFixType: Extract<FixType, "command" | "bridge"> =
-    versionCheck?.fixType === "bridge" && !bundledBridge ? "bridge" : "command";
+    versionCheck?.fixType === "bridge" ? "bridge" : "command";
 
   // Build the per-readout update commands the backend runs after the install
   // loop. Readout *derivation* stays here (it already has the doctor report);
@@ -218,7 +212,6 @@ export function AgentProviderCard({
       installFixType,
       updateCommands: buildUpdateCommands(),
       verifyInstall,
-      ...(requiresMainCli ? { requiresMainCli } : {}),
       ...(bundledBridge ? { bundledBridge } : {}),
     });
   }
@@ -233,7 +226,6 @@ export function AgentProviderCard({
       installFixType: null,
       updateCommands: buildUpdateCommands(),
       verifyInstall,
-      ...(requiresMainCli ? { requiresMainCli } : {}),
       ...(bundledBridge ? { bundledBridge } : {}),
     });
   }
@@ -248,7 +240,6 @@ export function AgentProviderCard({
       installFixType: null,
       updateCommands: [],
       verifyInstall,
-      ...(requiresMainCli ? { requiresMainCli } : {}),
       ...(bundledBridge ? { bundledBridge } : {}),
     });
   }
@@ -609,7 +600,7 @@ export function AgentProviderCard({
   const providerDetails = hasProviderDetails ? (
     <div className="space-y-3">
       {versionCheck && !isActive ? (
-        <AgentVersionInfo check={versionCheck} bundledBridge={bundledBridge} />
+        <AgentVersionInfo check={versionCheck} />
       ) : null}
       {!isActive && missingComponents.length > 0 ? (
         <div className="flex flex-col gap-1">

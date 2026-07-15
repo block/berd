@@ -17,6 +17,7 @@ export type InstallSource =
   | "asdf"
   | "curlPipe"
   | "system"
+  | "bundled"
   | "unknown";
 
 // Version + install-source readout for one binary behind an agent check. An
@@ -37,6 +38,10 @@ export interface AgentVersionInfo {
   // `'updateMain'` for the main CLI readout, `'updateBridge'` for the ACP
   // bridge readout. Always paired with `updateCommand`.
   updateFixType?: FixType | null;
+  // True when this binary ships inside Berd's app bundle (resolved from the
+  // bundled ACP tools dir rather than a user install). Stamped by the doctor
+  // crate alongside `installSource === "bundled"`.
+  bundled?: boolean | null;
 }
 
 export interface DoctorCheck {
