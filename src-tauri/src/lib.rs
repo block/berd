@@ -479,6 +479,7 @@ pub fn run() {
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,
             commands::terminal::stop_terminal,
+            commands::updates::finalize_update_relaunch,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,
             commands::window_session::release_session,

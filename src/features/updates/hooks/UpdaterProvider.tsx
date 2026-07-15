@@ -14,6 +14,7 @@ import type {
   DownloadEvent,
   Update as TauriUpdate,
 } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 
 export type UpdateStatus =
@@ -136,6 +137,21 @@ export function UpdaterProvider({
     }
 
     try {
+      // The updater installs into the bundle's existing path, so an install
+      // still carrying a legacy name (e.g. "Goose 2.app") would keep that
+      // name after every update. The backend renames such bundles to Berd.app
+      // in place and relaunches from the renamed path itself; it reports
+      // false when no rename applies (canonical or user-customized names),
+      // in which case the standard restart below is used.
+      try {
+        if (await invoke<boolean>("finalize_update_relaunch")) {
+          return;
+        }
+      } catch (error) {
+        console.warn(
+          `[updater] legacy bundle rename skipped: ${getErrorMessage(error)}`,
+        );
+      }
       const { relaunch: restartApp } = await import(
         "@tauri-apps/plugin-process"
       );

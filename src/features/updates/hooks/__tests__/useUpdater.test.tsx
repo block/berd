@@ -7,6 +7,7 @@ import type {
 } from "@tauri-apps/plugin-updater";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 import { I18nProvider } from "@/shared/i18n";
@@ -18,6 +19,10 @@ vi.mock("@tauri-apps/plugin-updater", () => ({
 
 vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
 }));
 
 vi.mock("@/shared/api/connectivity", () => ({
@@ -266,6 +271,7 @@ describe("UpdaterProvider", () => {
   it("records relaunch failures as errors", async () => {
     enableUpdaterRuntime();
     vi.mocked(check).mockResolvedValue(createUpdate());
+    vi.mocked(invoke).mockResolvedValue(false);
     vi.mocked(tauriRelaunch).mockRejectedValue(new Error("restart failed"));
 
     const { result } = renderHook(() => useUpdaterContext(), { wrapper });
@@ -280,6 +286,39 @@ describe("UpdaterProvider", () => {
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("Update failed. Try again.");
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it("skips the standard restart when the backend relaunches a renamed bundle", async () => {
+    enableUpdaterRuntime();
+    // The backend renamed a legacy-named bundle (e.g. "Goose 2.app" →
+    // "Berd.app"), scheduled its own relaunch, and is exiting.
+    vi.mocked(invoke).mockResolvedValue(true);
+
+    const { result } = renderHook(() => useUpdaterContext(), { wrapper });
+
+    await act(async () => {
+      await result.current.relaunch();
+    });
+
+    expect(invoke).toHaveBeenCalledWith("finalize_update_relaunch");
+    expect(tauriRelaunch).not.toHaveBeenCalled();
+    expect(result.current.status).not.toBe("error");
+  });
+
+  it("falls back to the standard restart when the rename command fails", async () => {
+    enableUpdaterRuntime();
+    vi.mocked(invoke).mockRejectedValue(new Error("command failed"));
+    vi.mocked(tauriRelaunch).mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useUpdaterContext(), { wrapper });
+
+    await act(async () => {
+      await result.current.relaunch();
+    });
+
+    expect(tauriRelaunch).toHaveBeenCalledTimes(1);
+    expect(result.current.status).not.toBe("error");
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("does not let background checks interrupt an active update state", async () => {

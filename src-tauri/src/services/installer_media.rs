@@ -49,7 +49,7 @@ pub struct VolumeInfo {
 }
 
 const CANONICAL_APP_NAME: &str = "Berd.app";
-const LEGACY_APP_NAMES: [&str; 1] = ["Goose.app"];
+const LEGACY_APP_NAMES: [&str; 2] = ["Goose.app", "Goose 2.app"];
 const LEGACY_BUNDLE_IDENTIFIER: &str = "com.squareup.goose-internal";
 const BERD_BUNDLE_IDENTIFIER: &str = "xyz.block.berd";
 
@@ -126,6 +126,23 @@ fn is_legacy_installed_app_path(bundle_path: &Path) -> bool {
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| LEGACY_APP_NAMES.contains(&name))
+}
+
+/// Where an updated bundle that still carries a legacy name should be renamed
+/// to. The in-app updater installs into the running bundle's existing path, so
+/// an install still named after the old brand (e.g. a Managed Software Center
+/// "Goose 2.app") would keep that name after every update. Only the final path
+/// component is replaced — the user's chosen install location is preserved —
+/// and a user-customized bundle name never matches, so it is left alone.
+fn legacy_bundle_rename_target(bundle_path: &Path) -> Option<PathBuf> {
+    let is_legacy_name = bundle_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| LEGACY_APP_NAMES.contains(&name));
+    if !is_legacy_name {
+        return None;
+    }
+    Some(bundle_path.parent()?.join(CANONICAL_APP_NAME))
 }
 
 /// Version identity read from a bundle's `Contents/Info.plist`.
@@ -521,6 +538,57 @@ mod macos {
             .map(ToString::to_string)
     }
 
+    /// Post-update relaunch step: when the just-updated bundle still lives
+    /// under a legacy name (e.g. "Goose 2.app"), rename it in place to
+    /// `Berd.app` and schedule a relaunch from the renamed path. Part of the
+    /// update flow rather than startup logic: the updater installs the new
+    /// version into the bundle's existing path, so this is the moment the
+    /// stale name can be fixed without touching user-customized names or
+    /// locations. Returns `true` when a relaunch has been scheduled and the
+    /// caller must exit this process instead of using the standard restart
+    /// (which would respawn the now-gone executable path).
+    pub fn relaunch_into_renamed_bundle() -> std::io::Result<bool> {
+        let Some(bundle_path) = running_app_bundle_path() else {
+            return Ok(false);
+        };
+        let Some(target) = legacy_bundle_rename_target(&bundle_path) else {
+            return Ok(false);
+        };
+        // Only claim the canonical name when the freshly installed contents
+        // are actually this app.
+        if !read_bundle_identifier(&bundle_path)
+            .as_deref()
+            .is_some_and(is_legacy_migration_source_identifier)
+        {
+            return Ok(false);
+        }
+        if let Err(error) = rename_exclusive(&bundle_path, &target) {
+            // A bundle already sitting at the canonical name (or any other
+            // rename failure) falls back to the standard restart; the startup
+            // legacy migration owns resolving that conflict via version
+            // comparison.
+            log::warn!(
+                "Leaving updated bundle at {}; could not rename to {}: {error}",
+                bundle_path.display(),
+                target.display()
+            );
+            return Ok(false);
+        }
+        if let Err(error) = relaunch_after_exit(&target, None) {
+            log::warn!("Failed to schedule relaunch of renamed bundle: {error}");
+            // Undo the rename so the standard restart still points at a real
+            // executable path.
+            std::fs::rename(&target, &bundle_path)?;
+            return Ok(false);
+        }
+        log::info!(
+            "Renamed updated app bundle from {} to {}; relaunching",
+            bundle_path.display(),
+            target.display()
+        );
+        Ok(true)
+    }
+
     fn maybe_migrate_legacy_installed_bundle(bundle_path: &Path) -> std::io::Result<()> {
         if !is_legacy_installed_app_path(bundle_path)
             || !read_bundle_identifier(bundle_path)
@@ -805,7 +873,7 @@ mod macos {
 }
 
 #[cfg(target_os = "macos")]
-pub use macos::maybe_prompt_move_to_applications;
+pub use macos::{maybe_prompt_move_to_applications, relaunch_into_renamed_bundle};
 
 #[cfg(test)]
 mod tests {
@@ -858,6 +926,9 @@ mod tests {
         assert!(is_legacy_installed_app_path(Path::new(
             "/Applications/Goose.app"
         )));
+        assert!(is_legacy_installed_app_path(Path::new(
+            "/Applications/Goose 2.app"
+        )));
         assert!(!is_legacy_installed_app_path(Path::new(
             "/Applications/Berd.app"
         )));
@@ -867,6 +938,32 @@ mod tests {
         assert!(!is_legacy_installed_app_path(Path::new(
             "/ApplicationsOther/Goose.app"
         )));
+    }
+
+    #[test]
+    fn legacy_bundle_rename_target_replaces_only_a_legacy_final_component() {
+        assert_eq!(
+            legacy_bundle_rename_target(Path::new("/Applications/Goose 2.app")),
+            Some(PathBuf::from("/Applications/Berd.app"))
+        );
+        assert_eq!(
+            legacy_bundle_rename_target(Path::new("/Applications/Goose.app")),
+            Some(PathBuf::from("/Applications/Berd.app"))
+        );
+        // A user-chosen install location is preserved; only the name changes.
+        assert_eq!(
+            legacy_bundle_rename_target(Path::new("/Users/someone/Applications/Goose 2.app")),
+            Some(PathBuf::from("/Users/someone/Applications/Berd.app"))
+        );
+        // Custom names and the canonical name are left untouched.
+        assert_eq!(
+            legacy_bundle_rename_target(Path::new("/Applications/My Berd.app")),
+            None
+        );
+        assert_eq!(
+            legacy_bundle_rename_target(Path::new("/Applications/Berd.app")),
+            None
+        );
     }
 
     #[cfg(target_os = "macos")]

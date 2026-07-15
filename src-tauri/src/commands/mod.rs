@@ -30,6 +30,7 @@ pub mod security_threshold;
 pub mod system;
 pub mod telemetry;
 pub mod terminal;
+pub mod updates;
 pub mod whoami;
 pub mod window_session;
 pub mod workspace_context;
