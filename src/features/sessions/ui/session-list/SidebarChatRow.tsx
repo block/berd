@@ -295,8 +295,7 @@ export function SidebarChatRow({
     showLeadingIcon ||
     hasFlatProjectColumn ||
     (quickPinMode === "pinned-only" && isPinnedToHome);
-  const showAbsoluteLeadingSlot =
-    !hasFlatProjectColumn && (nested || (showQuickPin && needsLeadingSlot));
+  const showAbsoluteLeadingSlot = !hasFlatProjectColumn && needsLeadingSlot;
   const showInlineLeadingSlot =
     !showAbsoluteLeadingSlot &&
     !hasFlatProjectColumn &&

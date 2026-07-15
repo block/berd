@@ -40,10 +40,6 @@ export interface SidebarProjectsSectionProps {
   onShowChatIconsChange: (show: boolean) => void;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
-  showProjectChatIcons: boolean;
-  onShowProjectChatIconsChange: (show: boolean) => void;
-  showProjectTimestamps: boolean;
-  onShowProjectTimestampsChange: (show: boolean) => void;
   showGitBranches: boolean;
   onShowGitBranchesChange: (show: boolean) => void;
   expandedProjects: Record<string, boolean>;
@@ -104,10 +100,6 @@ export function SidebarProjectsSection({
   onShowChatIconsChange,
   showTimestamps,
   onShowTimestampsChange,
-  showProjectChatIcons,
-  onShowProjectChatIconsChange,
-  showProjectTimestamps,
-  onShowProjectTimestampsChange,
   showGitBranches,
   onShowGitBranchesChange,
   expandedProjects,
@@ -225,10 +217,10 @@ export function SidebarProjectsSection({
               <>
                 <SidebarDisplayOptionsMenu
                   labelKey="actions.projectDisplayOptions"
-                  showChatIcons={showProjectChatIcons}
-                  onShowChatIconsChange={onShowProjectChatIconsChange}
-                  showTimestamps={showProjectTimestamps}
-                  onShowTimestampsChange={onShowProjectTimestampsChange}
+                  showChatIcons={showChatIcons}
+                  onShowChatIconsChange={onShowChatIconsChange}
+                  showTimestamps={showTimestamps}
+                  onShowTimestampsChange={onShowTimestampsChange}
                   showGitBranches={showGitBranches}
                   onShowGitBranchesChange={onShowGitBranchesChange}
                   groupChatsByProject
@@ -274,8 +266,8 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
-            showChatIcons={showProjectChatIcons}
-            showTimestamps={showProjectTimestamps}
+            showChatIcons={showChatIcons}
+            showTimestamps={showTimestamps}
             onReorderProject={onReorderProject}
             hasMoreSessions={hasMoreSessions}
             dropTargetsEnabled={showProjects}

@@ -75,8 +75,6 @@ type SessionListSectionVisibility = {
 type SessionListDisplayOptions = {
   showChatIcons: boolean;
   showTimestamps: boolean;
-  showProjectChatIcons: boolean;
-  showProjectTimestamps: boolean;
 };
 
 const DEFAULT_SECTION_VISIBILITY: SessionListSectionVisibility = {
@@ -85,10 +83,8 @@ const DEFAULT_SECTION_VISIBILITY: SessionListSectionVisibility = {
 };
 
 const DEFAULT_DISPLAY_OPTIONS: SessionListDisplayOptions = {
-  showChatIcons: true,
+  showChatIcons: false,
   showTimestamps: true,
-  showProjectChatIcons: false,
-  showProjectTimestamps: true,
 };
 
 type SessionListGroups = {
@@ -370,31 +366,30 @@ function validateSectionVisibility(
   };
 }
 
-function validateDisplayOptions(
+export function validateDisplayOptions(
   value: unknown,
   defaults: SessionListDisplayOptions,
 ): SessionListDisplayOptions {
   if (!value || typeof value !== "object") return defaults;
   const parsed = value as Partial<
     Record<keyof SessionListDisplayOptions, unknown>
-  >;
+  > & {
+    showProjectChatIcons?: unknown;
+    showProjectTimestamps?: unknown;
+  };
   return {
     showChatIcons:
-      typeof parsed.showChatIcons === "boolean"
-        ? parsed.showChatIcons
-        : defaults.showChatIcons,
-    showTimestamps:
-      typeof parsed.showTimestamps === "boolean"
-        ? parsed.showTimestamps
-        : defaults.showTimestamps,
-    showProjectChatIcons:
       typeof parsed.showProjectChatIcons === "boolean"
         ? parsed.showProjectChatIcons
-        : defaults.showProjectChatIcons,
-    showProjectTimestamps:
+        : typeof parsed.showChatIcons === "boolean"
+          ? parsed.showChatIcons
+          : defaults.showChatIcons,
+    showTimestamps:
       typeof parsed.showProjectTimestamps === "boolean"
         ? parsed.showProjectTimestamps
-        : defaults.showProjectTimestamps,
+        : typeof parsed.showTimestamps === "boolean"
+          ? parsed.showTimestamps
+          : defaults.showTimestamps,
   };
 }
 
@@ -754,12 +749,6 @@ export function SessionListCapability({
   const setShowTimestamps = (showTimestamps: boolean) => {
     setDisplayOptions((prev) => ({ ...prev, showTimestamps }));
   };
-  const setShowProjectChatIcons = (showProjectChatIcons: boolean) => {
-    setDisplayOptions((prev) => ({ ...prev, showProjectChatIcons }));
-  };
-  const setShowProjectTimestamps = (showProjectTimestamps: boolean) => {
-    setDisplayOptions((prev) => ({ ...prev, showProjectTimestamps }));
-  };
   const toggleSessionSelection = (sessionId: string, selected: boolean) => {
     setSelectedSessionIds((current) =>
       getToggledSessionSelection({
@@ -785,10 +774,6 @@ export function SessionListCapability({
     onShowChatIconsChange: setShowChatIcons,
     showTimestamps: displayOptions.showTimestamps,
     onShowTimestampsChange: setShowTimestamps,
-    showProjectChatIcons: displayOptions.showProjectChatIcons,
-    onShowProjectChatIconsChange: setShowProjectChatIcons,
-    showProjectTimestamps: displayOptions.showProjectTimestamps,
-    onShowProjectTimestampsChange: setShowProjectTimestamps,
     showGitBranches: gitBranchSubtitlePreference.enabled,
     onShowGitBranchesChange: gitBranchSubtitlePreference.setEnabled,
     onGroupChatsByProjectChange: setGroupChatsByProject,

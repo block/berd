@@ -202,11 +202,18 @@ describe("SidebarChatRow", () => {
     expect(container.querySelector("[data-sidebar-chat-row]")).toHaveClass(
       "gap-2",
     );
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass("pr-8");
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+      "pl-0",
+      "pr-8",
+    );
     expect(
       container.querySelector("[data-sidebar-flat-project-icon]")?.parentElement
         ?.parentElement,
     ).toHaveClass("ml-3", "size-5");
+    expect(
+      container.querySelector("[data-sidebar-flat-project-icon]")?.parentElement
+        ?.parentElement,
+    ).not.toHaveClass("absolute");
     expect(
       screen.getByRole("button", { name: "Options for Idle Chat" }),
     ).toHaveClass("right-3");
@@ -488,6 +495,117 @@ describe("SidebarChatRow", () => {
     ).toBe(true);
   });
 
+  it("aligns grouped general chat icons and titles across pin states", () => {
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "pinned-chat" },
+        },
+      ],
+    });
+
+    render(
+      <>
+        <SidebarChatRow
+          id="pinned-chat"
+          title="Pinned Chat"
+          isActive={false}
+          showLeadingIcon
+          quickPinMode="always"
+          leadingIconTestId="pinned-chat-leading"
+        />
+        <SidebarChatRow
+          id="regular-chat"
+          title="Regular Chat"
+          isActive={false}
+          showLeadingIcon
+          quickPinMode="always"
+          leadingIconTestId="regular-chat-leading"
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Pinned Chat" })).toHaveClass(
+      "pl-[38px]",
+    );
+    expect(screen.getByRole("button", { name: "Regular Chat" })).toHaveClass(
+      "pl-[38px]",
+    );
+    expect(screen.getByTestId("pinned-chat-leading")).toHaveClass(
+      "absolute",
+      "left-3",
+    );
+    expect(screen.getByTestId("regular-chat-leading")).toHaveClass(
+      "absolute",
+      "left-3",
+    );
+    expect(screen.getByRole("button", { name: "Pin chat" })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+  });
+
+  it("aligns a grouped general chat pin with titles when chat icons are hidden", () => {
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "pinned-chat" },
+        },
+      ],
+    });
+
+    render(
+      <>
+        <SidebarChatRow
+          id="pinned-chat"
+          title="Pinned Chat"
+          isActive={false}
+          showLeadingIcon={false}
+          quickPinMode="pinned-only"
+          leadingIconTestId="pinned-chat-leading"
+        />
+        <SidebarChatRow
+          id="regular-chat"
+          title="Regular Chat"
+          isActive={false}
+          showLeadingIcon={false}
+          quickPinMode="pinned-only"
+          leadingIconTestId="regular-chat-leading"
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Pinned Chat" })).toHaveClass(
+      "pl-[38px]",
+    );
+    expect(screen.getByRole("button", { name: "Regular Chat" })).toHaveClass(
+      "pl-3",
+    );
+    expect(screen.getByTestId("pinned-chat-leading")).toHaveClass(
+      "absolute",
+      "left-3",
+    );
+    expect(screen.getByRole("button", { name: "Unpin chat" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Pin chat" })).toBeNull();
+    expect(screen.queryByTestId("regular-chat-leading")).toBeNull();
+  });
+
   it("keeps nested chat titles aligned when chat icons are shown", () => {
     const { rerender } = render(
       <SidebarChatRow
@@ -521,6 +639,28 @@ describe("SidebarChatRow", () => {
       "absolute",
       "left-3",
     );
+  });
+
+  it("keeps nested project chats aligned when chat icons are hidden", () => {
+    render(
+      <SidebarChatRow
+        id="project-chat"
+        title="Project Chat"
+        isActive={false}
+        nested
+        showLeadingIcon={false}
+        leadingIconTestId="project-chat-leading"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Project Chat" })).toHaveClass(
+      "pl-[38px]",
+    );
+    expect(screen.getByTestId("project-chat-leading")).toHaveClass(
+      "absolute",
+      "left-3",
+    );
+    expect(screen.queryByTestId("sidebar-chat-menu-icon")).toBeNull();
   });
 
   it("reveals a one-click pin action when chat icons are shown", async () => {

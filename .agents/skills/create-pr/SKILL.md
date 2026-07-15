@@ -100,16 +100,25 @@ Once the PR is created, do not stop. Own the loop from "PR is open" to "PR is in
 
 Keep track of the latest head SHA. Any new push changes the CI/review baseline and restarts this loop.
 
-### Watch CI and review feedback together
+### Poll feedback first, then CI
 
-Poll GitHub until both CI and review state have settled. Use whatever is available, such as:
+Use a non-blocking polling loop until both review feedback and CI have settled. **Never use `gh pr checks --watch` or any other command that blocks until checks finish** because review feedback commonly arrives while CI is still running.
+
+Each polling cycle must run in this order:
+
+1. Fetch all new top-level comments, review summaries, inline comments, and unresolved review threads.
+2. If actionable feedback exists, evaluate and address it immediately. Do not wait for pending checks; any fix will restart CI anyway.
+3. Only when no actionable feedback remains, fetch the current check states and handle failures or pending checks.
+4. If checks are still pending and no feedback needs action, sleep for a fixed interval, then begin a new cycle from step 1.
+
+Use whatever non-blocking commands are available, such as:
 
 - `gh pr view` for PR state, reviews, comments, and mergeability.
-- `gh pr checks --watch` or repeated `gh pr checks` for check status.
+- Repeated `gh pr checks` without `--watch` for current check status.
 - `gh run list`, `gh run view`, and `gh run rerun` for workflow failures and reruns.
-- GitHub API/GraphQL when needed to inspect review threads and unresolved conversations.
+- GitHub API/GraphQL to inspect review threads and unresolved conversations.
 
-Do not only watch checks. Review comments can arrive while CI is running, so keep sweeping for new comments and reviews as checks run.
+After every code push, comment reply, or thread resolution, restart from the latest head SHA and begin with a fresh feedback sweep.
 
 ### Handle failing or stuck checks
 

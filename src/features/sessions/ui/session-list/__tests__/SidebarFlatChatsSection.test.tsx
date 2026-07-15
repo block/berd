@@ -110,30 +110,45 @@ describe("SidebarFlatChatsSection", () => {
     expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(true);
   });
 
-  it("switches to flat chats from the grouped projects display options menu", async () => {
+  it("uses shared display settings across grouped project and general chats", async () => {
     const user = userEvent.setup();
     const onGroupChatsByProjectChange = vi.fn();
+    const onShowChatIconsChange = vi.fn();
+    const onShowTimestampsChange = vi.fn();
 
     render(
       <SidebarProjectsSection
         projects={[project]}
-        projectSessions={{ byProject: {}, standalone: [] }}
-        hasVisibleChats={false}
+        projectSessions={{
+          byProject: {
+            "project-1": [
+              {
+                id: "project-chat",
+                title: "Project Chat",
+                updatedAt: "2026-04-09T12:00:00.000Z",
+              },
+            ],
+          },
+          standalone: [
+            {
+              id: "general-chat",
+              title: "General Chat",
+              updatedAt: "2026-04-09T11:00:00.000Z",
+            },
+          ],
+        }}
+        hasVisibleChats
         flatChatGroups={flatChatGroups}
         hasFlatChatOverflow={false}
         groupChatsByProject
         onGroupChatsByProjectChange={onGroupChatsByProjectChange}
-        showChatIcons
-        onShowChatIconsChange={vi.fn()}
-        showTimestamps
-        onShowTimestampsChange={vi.fn()}
-        showProjectChatIcons={false}
-        onShowProjectChatIconsChange={vi.fn()}
-        showProjectTimestamps
-        onShowProjectTimestampsChange={vi.fn()}
+        showChatIcons={false}
+        onShowChatIconsChange={onShowChatIconsChange}
+        showTimestamps={false}
+        onShowTimestampsChange={onShowTimestampsChange}
         showGitBranches={false}
         onShowGitBranchesChange={vi.fn()}
-        expandedProjects={{}}
+        expandedProjects={{ "project-1": true }}
         toggleProject={vi.fn()}
         collapsed={false}
         labelTransition=""
@@ -144,6 +159,28 @@ describe("SidebarFlatChatsSection", () => {
         onToggleRecentsSection={vi.fn()}
       />,
     );
+
+    expect(screen.queryAllByTestId("sidebar-chat-menu-icon")).toHaveLength(0);
+    expect(screen.queryAllByTestId("sidebar-chat-timestamp")).toHaveLength(0);
+
+    await user.click(
+      screen.getByRole("button", { name: "Project display options" }),
+    );
+    const showChatIcons = screen.getByRole("menuitemcheckbox", {
+      name: "Show chat icons",
+    });
+    expect(showChatIcons).not.toBeChecked();
+    await user.click(showChatIcons);
+    expect(onShowChatIconsChange).toHaveBeenCalledWith(true);
+    await user.click(
+      screen.getByRole("button", { name: "Project display options" }),
+    );
+    const showTimestamps = screen.getByRole("menuitemcheckbox", {
+      name: "Show timestamp",
+    });
+    expect(showTimestamps).not.toBeChecked();
+    await user.click(showTimestamps);
+    expect(onShowTimestampsChange).toHaveBeenCalledWith(true);
 
     await user.click(
       screen.getByRole("button", { name: "Project display options" }),

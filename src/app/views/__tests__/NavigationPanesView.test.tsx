@@ -3656,6 +3656,15 @@ describe("NavigationPanesView", () => {
     expect(
       within(mainNavigation).getAllByTestId("prototype-primary-chat-row-icon"),
     ).toHaveLength(5);
+    const secondaryChatWithIcon = chatsNavigation.querySelector<HTMLElement>(
+      '[data-session-id="loose-chat-5"]',
+    );
+    if (!secondaryChatWithIcon) {
+      throw new Error("Prototype secondary chat row was not rendered");
+    }
+    expect(
+      within(secondaryChatWithIcon).getByRole("button", { name: "Pin chat" }),
+    ).toBeInTheDocument();
 
     await user.click(
       within(chatsNavigation).getByRole("button", {
@@ -3672,10 +3681,12 @@ describe("NavigationPanesView", () => {
     expect(chatIconsItem.className).toContain("focus:!bg-transparent");
     await user.click(chatIconsItem);
 
-    const rowWithoutChatIcon = chatsNavigation.querySelector(
+    const rowWithoutChatIcon = chatsNavigation.querySelector<HTMLElement>(
       '[data-session-id="loose-chat-5"]',
     );
-    expect(rowWithoutChatIcon).toBeInTheDocument();
+    if (!rowWithoutChatIcon) {
+      throw new Error("Prototype secondary chat row was not rendered");
+    }
     expect(
       within(chatsNavigation).queryAllByTestId("prototype-session-row-icon"),
     ).toHaveLength(0);
@@ -3684,6 +3695,9 @@ describe("NavigationPanesView", () => {
         "prototype-primary-chat-row-icon",
       ),
     ).toHaveLength(0);
+    expect(
+      within(rowWithoutChatIcon).queryByRole("button", { name: "Pin chat" }),
+    ).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Chat icons" })).toBeVisible();
 
     await user.click(screen.getByRole("menuitem", { name: "Chat icons" }));

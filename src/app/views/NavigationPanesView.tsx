@@ -1346,6 +1346,7 @@ function PrototypeSidebarChatRow({
   onMenuOpenChange,
   onSelect,
   project,
+  quickPinMode,
   renderExtraMenuItems,
   session,
   showIcon = true,
@@ -1364,6 +1365,7 @@ function PrototypeSidebarChatRow({
   onMenuOpenChange?: (open: boolean) => void;
   onSelect?: (sessionId: string) => void;
   project?: ProjectInfo | null;
+  quickPinMode?: ComponentProps<typeof SidebarChatRow>["quickPinMode"];
   renderExtraMenuItems?: ComponentProps<
     typeof SidebarChatRow
   >["renderExtraMenuItems"];
@@ -1391,6 +1393,7 @@ function PrototypeSidebarChatRow({
       className={className}
       contentPaddingClassName={contentPaddingClassName}
       nested={nested}
+      quickPinMode={quickPinMode}
       density={density}
       leadingIcon={
         leadingIcon ??
@@ -2558,6 +2561,9 @@ function PrototypeSecondaryPanel({
                                 ? (projectsById.get(session.projectId) ?? null)
                                 : null
                             }
+                            quickPinMode={
+                              showChatIcons ? "always" : "pinned-only"
+                            }
                             session={session}
                             showIcon={showChatIcons}
                             showTimestamp={showChatTimestamps}
@@ -2583,6 +2589,7 @@ function PrototypeSecondaryPanel({
                             ? (projectsById.get(session.projectId) ?? null)
                             : null
                         }
+                        quickPinMode={showChatIcons ? "always" : "pinned-only"}
                         session={session}
                         showIcon={showChatIcons}
                         showTimestamp={showChatTimestamps}
@@ -4594,14 +4601,16 @@ export function NavigationPanesView({
                                   key={session.id}
                                   active={activeSessionId === session.id}
                                   behavior={prototypeChatRowBehavior}
-                                  contentPaddingClassName={
-                                    NAV_PROTOTYPE_EXPANDED_ROW_START_CLASS
-                                  }
                                   currentProjectId={null}
                                   leadingIconTestId="prototype-primary-chat-row-icon"
                                   onMenuOpenChange={(open) => {
                                     prototypeNavMenuOpenRef.current = open;
                                   }}
+                                  quickPinMode={
+                                    showPrototypeChatIcons
+                                      ? "always"
+                                      : "pinned-only"
+                                  }
                                   onSelect={(sessionId) => {
                                     commitPrototypePreview();
                                     onSelectSession?.(sessionId, {
