@@ -27,6 +27,8 @@
   about: Convert event leads to Marketo-compliant CSV via AI-guided pipeline.
 - name: contentful
   about: Read and write Contentful CMS content.
+- name: crow
+  about: Search Crow knowledge and query published world models.
 - name: datadog
   about: Query Datadog metrics, logs, monitors, and dashboards.
 - name: datadog-tidal
