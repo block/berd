@@ -526,6 +526,31 @@ describe("SidebarChatRow", () => {
     ).toBe(true);
   });
 
+  it("keeps refreshed-primary pin controls outside the row button", () => {
+    render(
+      <SidebarChatRow
+        id="refreshed-chat"
+        title="Refreshed Chat"
+        isActive={false}
+        showLeadingIcon
+        quickPinMode="always"
+        geometry="refreshed-primary"
+        leadingIconTestId="refreshed-chat-leading"
+      />,
+    );
+
+    const rowButton = screen.getByRole("button", { name: "Refreshed Chat" });
+    expect(rowButton).toHaveClass("pl-8");
+    expect(screen.getByTestId("refreshed-chat-leading")).toHaveClass(
+      "absolute",
+      "left-2",
+    );
+    expect(screen.getByRole("button", { name: "Pin chat" })).not.toBe(
+      rowButton,
+    );
+    expect(rowButton.querySelector("button")).toBeNull();
+  });
+
   it("aligns grouped general chat icons and titles across pin states", () => {
     useHomeWidgetStore.setState({
       loadStatus: "ready",

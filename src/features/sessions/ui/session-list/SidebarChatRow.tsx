@@ -49,7 +49,6 @@ import {
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
-  SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
   SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
   type SidebarChatRowDensity,
 } from "@/shared/ui/sidebar-tokens";
@@ -60,6 +59,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import {
@@ -68,6 +70,9 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/shared/ui/context-menu";
 import { Input } from "@/shared/ui/input";
@@ -124,6 +129,7 @@ type MenuItemComponent = ComponentType<{
   className?: string;
   disabled?: boolean;
   onClick?: () => void;
+  onSelect?: () => void;
   style?: CSSProperties;
 }>;
 
@@ -137,10 +143,35 @@ type MenuSeparatorComponent = ComponentType<{
   className?: string;
 }>;
 
+type MenuSubComponent = ComponentType<{
+  children?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}>;
+
+type MenuSubTriggerComponent = ComponentType<{
+  children?: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+  onClick?: () => void;
+  onPointerMove?: (event: PointerEvent) => void;
+  onPointerLeave?: (event: PointerEvent) => void;
+}>;
+
+type MenuSubContentComponent = ComponentType<{
+  children?: ReactNode;
+  className?: string;
+  onPointerMove?: (event: PointerEvent) => void;
+}>;
+
 type RenderMenuItemsOptions = {
   Item: MenuItemComponent;
   Label: MenuLabelComponent;
   Separator: MenuSeparatorComponent;
+  /** Radix Sub primitives matching the surface (dropdown vs. context menu). */
+  Sub: MenuSubComponent;
+  SubTrigger: MenuSubTriggerComponent;
+  SubContent: MenuSubContentComponent;
   itemClassName?: string;
   itemStyle?: CSSProperties;
 };
@@ -169,6 +200,9 @@ interface SidebarChatRowProps {
   showLeadingIcon?: boolean;
   leadingIconTestId?: string;
   leadingIcon?: ReactNode;
+  /** Semantic row geometry for surfaces with a compact 8px leading rail. */
+  geometry?: "default" | "refreshed-primary" | "project-secondary";
+  titleTone?: "default" | "muted";
   menuContentClassName?: string;
   menuItemClassName?: string;
   menuItemStyle?: CSSProperties;
@@ -218,6 +252,8 @@ export function SidebarChatRow({
   showLeadingIcon = true,
   leadingIconTestId,
   leadingIcon,
+  geometry = "default",
+  titleTone = "default",
   menuContentClassName,
   menuItemClassName,
   menuItemStyle,
@@ -284,7 +320,6 @@ export function SidebarChatRow({
   const hasFlatProjectColumn = flatProjectName != null;
   const trimmedBranchName = branchName?.trim() ?? "";
   const hasBranchName = trimmedBranchName.length > 0;
-  const hasActivity = isRunning || hasUnread;
   // Pin presentation is surface-specific: some lists expose it on hover,
   // while compact Chat lists show only an already-pinned chat as an unpin
   // control. Both occupy the same leading slot when it exists.
@@ -298,18 +333,25 @@ export function SidebarChatRow({
     hasFlatProjectColumn ||
     (quickPinMode === "pinned-only" && isPinnedToHome);
   const showAbsoluteLeadingSlot = !hasFlatProjectColumn && needsLeadingSlot;
-  const showInlineLeadingSlot =
-    !showAbsoluteLeadingSlot &&
-    !hasFlatProjectColumn &&
-    (showLeadingIcon || hasActivity);
-  const showLeadingSlot = showInlineLeadingSlot;
   const densityClasses = SIDEBAR_CHAT_ROW_DENSITY_CLASSES[density];
   const rowPaddingClass =
-    contentPaddingClassName ??
-    (needsLeadingSlot ? "pl-[38px]" : densityClasses.contentPadding);
+    geometry === "project-secondary"
+      ? nested
+        ? "pl-9"
+        : needsLeadingSlot
+          ? "pl-8"
+          : "pl-[10px]"
+      : (contentPaddingClassName ??
+        (geometry === "refreshed-primary"
+          ? needsLeadingSlot
+            ? "pl-8"
+            : "pl-2"
+          : needsLeadingSlot
+            ? "pl-[38px]"
+            : densityClasses.contentPadding));
   // The chat icon and quick-pin action deliberately share the left gutter:
   // pinning replaces the icon rather than creating a second position.
-  const leadingControlInsetClass = "left-3";
+  const leadingControlInsetClass = geometry === "default" ? "left-3" : "left-2";
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
   const showSelectionCheck =
@@ -327,10 +369,6 @@ export function SidebarChatRow({
     : isActive
       ? ACTIVE_CHAT_ROW_CLASS
       : INACTIVE_CHAT_ROW_CLASS;
-  const leadingIconSlotClass = cn(
-    "flex size-4 shrink-0 items-center justify-center",
-    hasBranchName && "mt-0.5 self-start",
-  );
   const absoluteLeadingSlotClass = cn(
     "absolute flex size-4 shrink-0 items-center justify-center",
     hasBranchName ? "top-2" : "top-1/2 -translate-y-1/2",
@@ -340,14 +378,28 @@ export function SidebarChatRow({
   // title, or a two-line title + git branch subtitle when a branch is shown.
   const rowTitleContent = hasBranchName ? (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
-      <span className="truncate leading-snug">{displayTitle}</span>
+      <span
+        className={cn(
+          "truncate leading-snug",
+          titleTone === "muted" && "text-muted-foreground",
+        )}
+      >
+        {displayTitle}
+      </span>
       <span className="flex min-w-0 items-center gap-1 truncate text-xs leading-snug text-muted-foreground/70">
         <IconGitBranch className="size-3 shrink-0" aria-hidden="true" />
         <span className="truncate">{trimmedBranchName}</span>
       </span>
     </span>
   ) : (
-    <span className="min-w-0 flex-1 truncate text-left">{displayTitle}</span>
+    <span
+      className={cn(
+        "min-w-0 flex-1 truncate text-left",
+        titleTone === "muted" && "text-muted-foreground",
+      )}
+    >
+      {displayTitle}
+    </span>
   );
 
   const flatProjectIconColumnClass = cn(
@@ -589,6 +641,9 @@ export function SidebarChatRow({
     Item,
     Label,
     Separator,
+    Sub,
+    SubTrigger,
+    SubContent,
   }: RenderMenuItemsOptions) => (
     <>
       {shouldApplyToSelection && (
@@ -660,6 +715,9 @@ export function SidebarChatRow({
             Item,
             Label,
             Separator,
+            Sub,
+            SubTrigger,
+            SubContent,
             itemClassName: menuItemClassName,
             itemStyle: menuItemStyle,
           })}
@@ -937,38 +995,12 @@ export function SidebarChatRow({
                       SIDEBAR_ROW_HEIGHT_CLASS,
                       SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
                     ),
-                showLeadingSlot && SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
                 SIDEBAR_NAV_TEXT_CLASS,
                 rowPaddingClass,
                 rowButtonStateClass,
               )}
               aria-pressed={selectionEnabled ? selected : undefined}
             >
-              {showInlineLeadingSlot ? (
-                <SidebarLeadingIcon
-                  className={leadingIconSlotClass}
-                  isRunning={isRunning}
-                  hasUnread={hasUnread}
-                  activeLabel={t("status.chatActive")}
-                  unreadLabel={t("status.unreadMessages")}
-                  quickPin={
-                    showQuickPin
-                      ? {
-                          pinned: isPinnedToHome,
-                          disabled: isPinningToHome,
-                          pinLabel: t("common:actions.pinChat"),
-                          unpinLabel: t("common:actions.unpinChat"),
-                          onClick: toggleQuickPin,
-                        }
-                      : undefined
-                  }
-                  testId={leadingIconTestId}
-                >
-                  {showLeadingIcon
-                    ? (leadingIcon ?? <SidebarChatMenuIcon />)
-                    : null}
-                </SidebarLeadingIcon>
-              ) : null}
               {rowTitleContent}
               {isMultiWindowEnabled && isOpenInWindow ? (
                 <span
@@ -1057,6 +1089,9 @@ export function SidebarChatRow({
                 Item: DropdownMenuItem as MenuItemComponent,
                 Label: DropdownMenuLabel as MenuLabelComponent,
                 Separator: DropdownMenuSeparator as MenuSeparatorComponent,
+                Sub: DropdownMenuSub as MenuSubComponent,
+                SubTrigger: DropdownMenuSubTrigger as MenuSubTriggerComponent,
+                SubContent: DropdownMenuSubContent as MenuSubContentComponent,
               })}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1067,6 +1102,9 @@ export function SidebarChatRow({
           Item: ContextMenuItem as MenuItemComponent,
           Label: ContextMenuLabel as MenuLabelComponent,
           Separator: ContextMenuSeparator as MenuSeparatorComponent,
+          Sub: ContextMenuSub as MenuSubComponent,
+          SubTrigger: ContextMenuSubTrigger as MenuSubTriggerComponent,
+          SubContent: ContextMenuSubContent as MenuSubContentComponent,
         })}
       </ContextMenuContent>
     </ContextMenu>

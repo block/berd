@@ -3300,6 +3300,7 @@ export function AppShell({
         ) {
           void fetchProjects();
         }
+        throw error;
       }
     },
     [fetchProjects],
@@ -3688,7 +3689,8 @@ export function AppShell({
           preserveNavigationSecondary:
             isNavigationPrototypeEnabled &&
             !suppressPrototypeSecondary &&
-            effectiveNavigationSecondaryTarget?.kind === "chats",
+            (options.preservePrototypeSecondary ||
+              effectiveNavigationSecondaryTarget?.kind === "chats"),
           suppressNavigationSecondary: suppressPrototypeSecondary,
         });
       });

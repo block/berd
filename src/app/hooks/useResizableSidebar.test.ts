@@ -73,7 +73,7 @@ describe("useResizableSidebar", () => {
     expect(result.current.sidebarOuterWidth).toBeGreaterThan(
       result.current.sidebarWidth,
     );
-    expect(result.current.sidebarHeight).toBeGreaterThan(0);
+    expect(result.current.sidebarHeight).toBe(528);
     expect(result.current.sidebarOuterHeight).toBe(
       result.current.sidebarHeight,
     );

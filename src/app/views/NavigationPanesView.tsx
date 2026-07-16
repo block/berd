@@ -1,5 +1,6 @@
 import {
   type ComponentProps,
+  type ComponentType,
   type CSSProperties,
   type FormEvent,
   type RefObject,
@@ -18,11 +19,11 @@ import {
   Check,
   Folder,
   FolderOpen,
+  FolderX,
   GitBranchPlus,
   History,
   Link2,
   ListFilter,
-  Megaphone,
   MoreHorizontal,
   Pencil,
   PinIcon,
@@ -96,8 +97,12 @@ import {
 } from "@/shared/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import {
@@ -155,6 +160,7 @@ export type NavigationSecondaryTarget =
   | null;
 
 export type NavigationSelectSessionOptions = {
+  preservePrototypeSecondary?: boolean;
   suppressPrototypeSecondary?: boolean;
 };
 
@@ -213,8 +219,6 @@ const NAV_PROTOTYPE_CHAT_ROW_MENU_CONTENT_CLASS = cn(
 const NAV_PROTOTYPE_MENU_ITEM_CLASS =
   "gap-2 whitespace-nowrap rounded-[6px] px-2 py-1.5 text-[14px] leading-[18px] opacity-[0.85] hover:!bg-transparent hover:opacity-100 focus:!bg-transparent focus:!text-popover-inverse-foreground focus:opacity-100 data-[highlighted]:!bg-transparent data-[highlighted]:!text-popover-inverse-foreground data-[highlighted]:opacity-100";
 const NAV_PROTOTYPE_MENU_LABEL_CLASS = "px-2 py-1 text-[14px] leading-[18px]";
-const NAV_PROTOTYPE_ANNOUNCEMENT_DISMISSED_STORAGE_KEY =
-  "goose:prototype-navigation-announcement-dismissed";
 const NAV_PROTOTYPE_ROW_ACTION_RAIL_CLASS =
   "absolute right-1.5 z-10 flex items-center";
 const PROTOTYPE_CHAT_LIST_BOTTOM_MASK =
@@ -623,31 +627,6 @@ function runPrototypeAction(
   });
 }
 
-function readPrototypeNavigationAnnouncementDismissed() {
-  if (typeof window === "undefined") return false;
-  try {
-    return (
-      window.localStorage.getItem(
-        NAV_PROTOTYPE_ANNOUNCEMENT_DISMISSED_STORAGE_KEY,
-      ) === "1"
-    );
-  } catch {
-    return false;
-  }
-}
-
-function writePrototypeNavigationAnnouncementDismissed() {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      NAV_PROTOTYPE_ANNOUNCEMENT_DISMISSED_STORAGE_KEY,
-      "1",
-    );
-  } catch {
-    // localStorage can be unavailable in restricted contexts.
-  }
-}
-
 function getPrototypeChatMessages({
   chat,
   groupName,
@@ -1043,6 +1022,7 @@ function PrototypeBareActionIcon({
       type="button"
       aria-label={label}
       title={label}
+      data-sidebar-drag-ignore
       onClick={(event) => {
         event.stopPropagation();
         runPrototypeAction(onClick, `Failed to run ${label}`);
@@ -1058,39 +1038,116 @@ function PrototypeBareActionIcon({
   );
 }
 
-function PrototypeNavigationAnnouncement({
-  onDismiss,
+type PrototypeMenuSurface = {
+  Item: ComponentType<{
+    children?: ReactNode;
+    className?: string;
+    style?: CSSProperties;
+    onSelect?: () => void;
+    onClick?: () => void;
+  }>;
+  Sub: ComponentType<{
+    children?: ReactNode;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+  }>;
+  SubTrigger: ComponentType<{
+    children?: ReactNode;
+    className?: string;
+    style?: CSSProperties;
+    onClick?: () => void;
+    onPointerMove?: (event: ReactPointerEvent) => void;
+    onPointerLeave?: (event: ReactPointerEvent) => void;
+  }>;
+  SubContent: ComponentType<{
+    children?: ReactNode;
+    className?: string;
+    onPointerMove?: (event: ReactPointerEvent) => void;
+  }>;
+};
+
+const PROTOTYPE_DROPDOWN_MENU_SURFACE: PrototypeMenuSurface = {
+  Item: DropdownMenuItem,
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+};
+
+/**
+ * A single "Add to group" / "Move to group" entry that expands into a nested
+ * popover listing the available groups. Rendered inside both the real-session
+ * chat row menu (dropdown or right-click context menu) and the placeholder
+ * chat row menu, so it takes the Radix Sub primitives for whichever surface it
+ * lives in plus the item class/style overrides those surfaces use.
+ */
+function PrototypeAddToGroupSubMenu({
+  groups,
+  isInGroup,
+  itemClassName,
+  itemStyle,
+  onAddToGroup,
+  surface = PROTOTYPE_DROPDOWN_MENU_SURFACE,
 }: {
-  onDismiss: () => void;
+  groups: PrototypeProjectGroup[];
+  isInGroup: boolean;
+  itemClassName?: string;
+  itemStyle?: CSSProperties;
+  onAddToGroup: (groupId: string) => void;
+  surface?: PrototypeMenuSurface;
 }) {
+  const [open, setOpen] = useState(false);
+  if (groups.length === 0) return null;
+  const { Item, Sub, SubTrigger, SubContent } = surface;
+  const label = isInGroup ? "Move to group" : "Add to group";
+  const selectGroup = (groupId: string) => {
+    // Commit before closing the controlled submenu. Closing first can unmount
+    // the item before Radix dispatches its selection callback.
+    onAddToGroup(groupId);
+    setOpen(false);
+  };
   return (
-    <aside
-      aria-label="Updated navigation announcement"
-      className="mx-2 mb-3 rounded-[14px] bg-background/95 px-3 py-3 text-foreground shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur-md dark:bg-[var(--color-gray-800)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.42)]"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <Megaphone className="mt-0.5 size-3.5 shrink-0 text-foreground" />
-        <button
-          type="button"
-          aria-label="Dismiss updated navigation announcement"
-          title="Dismiss updated navigation announcement"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDismiss();
-          }}
-          className="flex size-4 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-none"
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
-      <p className="mt-2 text-sm font-normal leading-[18px] text-foreground">
-        Try the updated navigation
-      </p>
-      <p className="mt-1 text-sm leading-[18px] text-muted-foreground">
-        Open Chats or a project to browse chats in the side panel. Group project
-        chats to keep work organized.
-      </p>
-    </aside>
+    <Sub open={open} onOpenChange={setOpen}>
+      <SubTrigger
+        className={cn(
+          "text-popover-inverse-foreground data-[state=open]:text-popover-inverse-foreground data-[state=open]:bg-white/10",
+          NAV_PROTOTYPE_MENU_ITEM_CLASS,
+          itemClassName,
+        )}
+        style={{ ...NAV_PROTOTYPE_MENU_ITEM_STYLE, ...itemStyle }}
+        // Radix opens sub-menus on hover by default; suppress that so the
+        // group list only appears on an explicit click of the trigger.
+        onPointerMove={(event) => event.preventDefault()}
+        onPointerLeave={(event) => event.preventDefault()}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Folder className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+        {label}
+      </SubTrigger>
+      <SubContent
+        // Keep the list open on hover; only pointer moves on the *trigger* are
+        // suppressed, so moving into and clicking these items works normally.
+        onPointerMove={(event) => event.stopPropagation()}
+        className={cn(
+          "bg-popover-inverse text-popover-inverse-foreground shadow-popover-inverse min-w-40 rounded-[10px] px-2 py-1.5",
+          NAV_PROTOTYPE_MENU_CONTENT_CLASS,
+        )}
+      >
+        {groups.map((group) => (
+          <Item
+            key={group.id}
+            className={cn(
+              "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-white/10",
+              NAV_PROTOTYPE_MENU_ITEM_CLASS,
+              itemClassName,
+            )}
+            style={{ ...NAV_PROTOTYPE_MENU_ITEM_STYLE, ...itemStyle }}
+            onSelect={() => selectGroup(group.id)}
+          >
+            <span className="truncate">{group.name}</span>
+          </Item>
+        ))}
+      </SubContent>
+    </Sub>
   );
 }
 
@@ -1202,6 +1259,73 @@ function PrototypeNavMoreMenu({
         className={cn("w-40 rounded-[10px]", NAV_PROTOTYPE_MENU_CONTENT_CLASS)}
       >
         {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function PrototypePrimaryDisplayOptionsMenu({
+  label,
+  onOpenChange,
+  onShowChatIconsChange,
+  onShowChatTimestampsChange,
+  showChatIcons,
+  showChatTimestamps,
+}: {
+  label: string;
+  onOpenChange?: (open: boolean) => void;
+  onShowChatIconsChange?: (show: boolean) => void;
+  onShowChatTimestampsChange: (show: boolean) => void;
+  showChatIcons?: boolean;
+  showChatTimestamps: boolean;
+}) {
+  return (
+    <DropdownMenu onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          data-sidebar-drag-ignore
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          className={cn(
+            "flex size-5 items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-[color,opacity] duration-75 focus-visible:outline-none",
+            NAV_PROTOTYPE_SECTION_ACTION_ICON_CLASS,
+          )}
+        >
+          <MoreHorizontal className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        side="bottom"
+        sideOffset={4}
+        variant="inverse"
+        className={cn("w-44 rounded-[10px]", NAV_PROTOTYPE_MENU_CONTENT_CLASS)}
+      >
+        {onShowChatIconsChange ? (
+          <DropdownMenuCheckboxItem
+            checked={showChatIcons ?? false}
+            data-sidebar-drag-ignore
+            indicatorSide="end"
+            onCheckedChange={onShowChatIconsChange}
+            className={NAV_PROTOTYPE_MENU_ITEM_CLASS}
+            style={NAV_PROTOTYPE_MENU_ITEM_STYLE}
+          >
+            <span className="min-w-0 flex-1">Show chat icons</span>
+          </DropdownMenuCheckboxItem>
+        ) : null}
+        <DropdownMenuCheckboxItem
+          checked={showChatTimestamps}
+          data-sidebar-drag-ignore
+          indicatorSide="end"
+          onCheckedChange={onShowChatTimestampsChange}
+          className={NAV_PROTOTYPE_MENU_ITEM_CLASS}
+          style={NAV_PROTOTYPE_MENU_ITEM_STYLE}
+        >
+          <span className="min-w-0 flex-1">Show timestamps</span>
+        </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1341,6 +1465,7 @@ function PrototypeSidebarChatRow({
   density = "dense",
   leadingIcon,
   leadingIconTestId,
+  geometry,
   nested = false,
   onEditProject,
   onMenuOpenChange,
@@ -1351,6 +1476,7 @@ function PrototypeSidebarChatRow({
   session,
   showIcon = true,
   showTimestamp = true,
+  titleTone,
 }: {
   active: boolean;
   behavior: PrototypeChatRowBehaviorProps;
@@ -1360,6 +1486,7 @@ function PrototypeSidebarChatRow({
   density?: ComponentProps<typeof SidebarChatRow>["density"];
   leadingIcon?: ReactNode;
   leadingIconTestId?: string;
+  geometry?: ComponentProps<typeof SidebarChatRow>["geometry"];
   nested?: boolean;
   onEditProject?: (projectId: string) => void;
   onMenuOpenChange?: (open: boolean) => void;
@@ -1372,6 +1499,7 @@ function PrototypeSidebarChatRow({
   session: ChatSession;
   showIcon?: boolean;
   showTimestamp?: boolean;
+  titleTone?: ComponentProps<typeof SidebarChatRow>["titleTone"];
 }) {
   const runtime = useChatStore(
     (state) =>
@@ -1395,6 +1523,7 @@ function PrototypeSidebarChatRow({
       nested={nested}
       quickPinMode={quickPinMode}
       density={density}
+      geometry={geometry}
       leadingIcon={
         leadingIcon ??
         (project ? (
@@ -1408,6 +1537,7 @@ function PrototypeSidebarChatRow({
         ) : undefined)
       }
       showLeadingIcon={showIcon}
+      titleTone={titleTone}
       leadingIconTestId={leadingIconTestId}
       flatProjectName={showIcon && project ? project.name : undefined}
       flatProjectIcon={showIcon && project ? project.icon : undefined}
@@ -1447,28 +1577,38 @@ function PrototypeSidebarChatRow({
 
 function PrototypeProjectChatRow({
   active,
+  availableGroups = [],
   behavior,
   chat,
+  currentGroupId = null,
   currentProjectId,
   nested = false,
+  onAddToGroup,
   onCreateGroup,
   onDelete,
   onMenuOpenChange,
   onPrototypeSelect,
+  onRemoveFromGroup,
   onSelect,
+  showIcon = true,
   showPlaceholderIcon = false,
   showTimestamp = true,
 }: {
   active: boolean;
+  availableGroups?: PrototypeProjectGroup[];
   behavior: PrototypeChatRowBehaviorProps;
   chat: PrototypeProjectChatItem;
+  currentGroupId?: string | null;
   currentProjectId: string | null;
   nested?: boolean;
+  onAddToGroup?: (chat: PrototypeProjectChatItem, groupId: string) => void;
   onCreateGroup?: (chat: PrototypeProjectChatItem) => void;
   onDelete?: (chat: PrototypeProjectChatItem) => void;
   onMenuOpenChange?: (open: boolean) => void;
   onPrototypeSelect?: (chat: PrototypeProjectChatItem) => void;
+  onRemoveFromGroup?: (chat: PrototypeProjectChatItem) => void;
   onSelect?: (sessionId: string) => void;
+  showIcon?: boolean;
   showPlaceholderIcon?: boolean;
   showTimestamp?: boolean;
 }) {
@@ -1482,6 +1622,10 @@ function PrototypeProjectChatRow({
   const showRealDraftNewChatIcon = isUnsavedDefaultChat && !nested;
   const showNewChatIcon = showPlaceholderIcon;
   const showActions = !chat.placeholder && !isUnsavedDefaultChat;
+  const isInGroup = currentGroupId != null;
+  const otherGroups = availableGroups.filter(
+    (group) => group.id !== currentGroupId,
+  );
 
   const selectChat = () => {
     if (chat.session) {
@@ -1497,6 +1641,7 @@ function PrototypeProjectChatRow({
         active={active}
         behavior={behavior}
         currentProjectId={currentProjectId}
+        geometry="project-secondary"
         leadingIcon={
           showRealDraftNewChatIcon ? (
             <Plus className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
@@ -1511,22 +1656,52 @@ function PrototypeProjectChatRow({
         onMenuOpenChange={onMenuOpenChange}
         onSelect={onSelect}
         session={chat.session}
+        showIcon={showIcon}
         showTimestamp={showTimestamp}
+        titleTone={isUnsavedDefaultChat ? "muted" : "default"}
         renderExtraMenuItems={
           showActions
-            ? ({ Item, Separator, itemClassName, itemStyle }) => (
+            ? ({
+                Item,
+                Separator,
+                Sub,
+                SubTrigger,
+                SubContent,
+                itemClassName,
+                itemStyle,
+              }) => (
                 <>
                   <Separator className="mx-2 opacity-40" />
-                  <Item
-                    className={itemClassName}
-                    onClick={() => onCreateGroup?.(chat)}
-                    style={itemStyle}
-                  >
-                    <GitBranchPlus
-                      className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS}
-                    />
-                    Create group
-                  </Item>
+                  {!isInGroup ? (
+                    <Item
+                      className={itemClassName}
+                      onClick={() => onCreateGroup?.(chat)}
+                      style={itemStyle}
+                    >
+                      <GitBranchPlus
+                        className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS}
+                      />
+                      Create group
+                    </Item>
+                  ) : null}
+                  <PrototypeAddToGroupSubMenu
+                    groups={otherGroups}
+                    isInGroup={isInGroup}
+                    itemClassName={itemClassName}
+                    itemStyle={itemStyle}
+                    onAddToGroup={(groupId) => onAddToGroup?.(chat, groupId)}
+                    surface={{ Item, Sub, SubTrigger, SubContent }}
+                  />
+                  {isInGroup ? (
+                    <Item
+                      className={itemClassName}
+                      onSelect={() => onRemoveFromGroup?.(chat)}
+                      style={itemStyle}
+                    >
+                      <X className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+                      Remove from group
+                    </Item>
+                  ) : null}
                   <Item
                     className={itemClassName}
                     onClick={() => onDelete?.(chat)}
@@ -1551,7 +1726,7 @@ function PrototypeProjectChatRow({
         onClick={selectChat}
         className={cn(
           "flex h-7 w-full items-center rounded-sm pr-8 text-left text-sm font-normal leading-normal transition-[background-color,color] duration-150",
-          nested ? "pl-10" : "pl-3",
+          nested ? "pl-9" : "pl-[10px]",
           showNewChatIcon && "gap-2",
           active
             ? NAV_PROTOTYPE_ROW_ACTIVE_CLASS
@@ -1592,10 +1767,23 @@ function PrototypeProjectChatRow({
             label={`Open actions for ${title}`}
             onOpenChange={onMenuOpenChange}
           >
-            <PrototypeNavMenuItem onSelect={() => onCreateGroup?.(chat)}>
-              <GitBranchPlus className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
-              Create group
-            </PrototypeNavMenuItem>
+            {!isInGroup ? (
+              <PrototypeNavMenuItem onSelect={() => onCreateGroup?.(chat)}>
+                <GitBranchPlus className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+                Create group
+              </PrototypeNavMenuItem>
+            ) : null}
+            <PrototypeAddToGroupSubMenu
+              groups={otherGroups}
+              isInGroup={isInGroup}
+              onAddToGroup={(groupId) => onAddToGroup?.(chat, groupId)}
+            />
+            {isInGroup ? (
+              <PrototypeNavMenuItem onSelect={() => onRemoveFromGroup?.(chat)}>
+                <X className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+                Remove from group
+              </PrototypeNavMenuItem>
+            ) : null}
             <PrototypeNavMenuItem onSelect={() => onDelete?.(chat)}>
               <Trash2 className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
               Delete
@@ -1610,7 +1798,7 @@ function PrototypeProjectChatRow({
 function PrototypeProjectGroupRow({
   group,
   expanded,
-  onDeleteGroup,
+  onRemoveGroup,
   onMenuOpenChange,
   onNewChat,
   onRenameGroup,
@@ -1618,7 +1806,7 @@ function PrototypeProjectGroupRow({
 }: {
   group: PrototypeProjectGroup;
   expanded: boolean;
-  onDeleteGroup?: () => void;
+  onRemoveGroup?: () => void;
   onMenuOpenChange?: (open: boolean) => void;
   onNewChat?: PrototypeActionHandler;
   onRenameGroup?: () => void;
@@ -1672,9 +1860,9 @@ function PrototypeProjectGroupRow({
             <Pencil className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
             Rename group
           </PrototypeNavMenuItem>
-          <PrototypeNavMenuItem onSelect={() => onDeleteGroup?.()}>
-            <Trash2 className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
-            Delete group
+          <PrototypeNavMenuItem onSelect={() => onRemoveGroup?.()}>
+            <FolderX className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+            Remove group
           </PrototypeNavMenuItem>
         </PrototypeNavMoreMenu>
       </div>
@@ -2007,43 +2195,17 @@ function PrototypeSecondaryPanel({
   const hasRealProjectChats =
     projectGroups.some((group) => group.chats.length > 0) ||
     ungroupedChats.some((chat) => !isUnsavedDefaultProjectChat(chat));
-  const hasAnyProjectListContent =
-    projectGroups.length > 0 || ungroupedChats.length > 0;
   const visibleTopLevelProjectDraftChat =
     activeTopLevelProjectDraftChat ??
     (!hasRealProjectChats ? (topLevelProjectDraftChats[0] ?? null) : null);
-  const projectNewChatRow: PrototypeProjectChatItem | null = project
-    ? (visibleTopLevelProjectDraftChat ??
-      (!hasAnyProjectListContent
-        ? {
-            id: `${project.id}:interim-new-chat`,
-            placeholder: true,
-            session: null,
-            title: defaultSessionTitle,
-          }
-        : null))
-    : null;
   const hiddenTopLevelProjectDraftIds = new Set(
     topLevelProjectDraftChats
       .filter((chat) => chat.id !== visibleTopLevelProjectDraftChat?.id)
       .map((chat) => chat.id),
   );
-  const visibleUngroupedChats = projectNewChatRow
-    ? [
-        projectNewChatRow,
-        ...ungroupedChats.filter(
-          (chat) =>
-            chat.id !== projectNewChatRow.id &&
-            !hiddenTopLevelProjectDraftIds.has(chat.id),
-        ),
-      ]
-    : ungroupedChats.filter(
-        (chat) => !hiddenTopLevelProjectDraftIds.has(chat.id),
-      );
-  const projectNewChatRowIsOnlyVisibleRow =
-    Boolean(projectNewChatRow) &&
-    projectGroups.length === 0 &&
-    visibleUngroupedChats.length === 1;
+  const visibleUngroupedChats = ungroupedChats.filter(
+    (chat) => !hiddenTopLevelProjectDraftIds.has(chat.id),
+  );
   const currentPersistedProjectGroups = project?.chatGroups?.groups ?? [];
   const getProjectChatMetadataId = (chat: PrototypeProjectChatItem) =>
     chat.session?.id ?? chat.id;
@@ -2057,6 +2219,8 @@ function PrototypeSecondaryPanel({
     projectId: string,
     groups: ProjectChatGroupMetadata[],
     fallback: () => void,
+    onFailure?: () => void,
+    onSuccess?: () => void,
   ) => {
     if (!onUpdateProjectChatGroups) {
       fallback();
@@ -2064,12 +2228,22 @@ function PrototypeSecondaryPanel({
     }
 
     const chatGroups = groups.length > 0 ? { groups } : null;
-    void Promise.resolve(
-      onUpdateProjectChatGroups(projectId, chatGroups),
-    ).catch((error) => {
-      console.error("Failed to update project chat groups:", error);
-    });
+    void Promise.resolve(onUpdateProjectChatGroups(projectId, chatGroups)).then(
+      onSuccess,
+      (error) => {
+        onFailure?.();
+        console.error("Failed to update project chat groups:", error);
+      },
+    );
   };
+  /**
+   * Strip a chat from every group it currently belongs to, preserving empty
+   * groups. Used when moving/adding a chat elsewhere, where the destination
+   * `.map` still needs to see (and possibly refill) a group that momentarily
+   * has no chats. Callers that intend to *dissolve* emptied groups (the
+   * explicit "remove from group" action) should use
+   * `dropEmptyPersistedGroups` afterwards.
+   */
   const removeChatFromPersistedGroups = (
     groups: ProjectChatGroupMetadata[],
     chat: PrototypeProjectChatItem,
@@ -2080,7 +2254,138 @@ function PrototypeSecondaryPanel({
       chatIds: group.chatIds.filter((chatId) => !chatIds.has(chatId)),
     }));
   };
+  const dropEmptyPersistedGroups = (groups: ProjectChatGroupMetadata[]) =>
+    groups.filter((group) => group.chatIds.length > 0);
+  const addChatToProjectGroup = (
+    chat: PrototypeProjectChatItem,
+    groupId: string,
+  ) => {
+    if (!project || chat.placeholder || isUnsavedDefaultProjectChat(chat)) {
+      return;
+    }
+    onCommitPreview?.();
 
+    const previousPlacement = projectChatPlacementsForProject[chat.id];
+    const placeChatInGroup = () => {
+      setProjectChatPlacements((current) => {
+        return {
+          ...current,
+          [project.id]: {
+            ...(current[project.id] ?? {}),
+            [chat.id]: { chat, groupId },
+          },
+        };
+      });
+    };
+    const rollbackPlacement = () => {
+      setProjectChatPlacements((current) => {
+        const currentPlacement = current[project.id]?.[chat.id];
+        if (currentPlacement?.groupId !== groupId) return current;
+        const projectPlacements = { ...(current[project.id] ?? {}) };
+        if (previousPlacement) {
+          projectPlacements[chat.id] = previousPlacement;
+        } else {
+          delete projectPlacements[chat.id];
+        }
+        return { ...current, [project.id]: projectPlacements };
+      });
+    };
+    const clearPersistedPlacement = () => {
+      setProjectChatPlacements((current) => {
+        const currentPlacement = current[project.id]?.[chat.id];
+        if (currentPlacement?.groupId !== groupId) return current;
+        const projectPlacements = { ...(current[project.id] ?? {}) };
+        delete projectPlacements[chat.id];
+        return { ...current, [project.id]: projectPlacements };
+      });
+    };
+
+    if (!currentPersistedProjectGroups.some((group) => group.id === groupId)) {
+      // Prototype-only groups aren't persisted; fall back to local placement.
+      placeChatInGroup();
+    } else {
+      // Keep the row responsive immediately; persistence then makes the
+      // placement durable and reconciles the project metadata.
+      placeChatInGroup();
+      persistProjectChatGroups(
+        project.id,
+        // Add the chat to the destination group, then dissolve any group left
+        // empty because the chat moved out of it. The destination group is
+        // refilled before this drop runs, so it is never removed.
+        dropEmptyPersistedGroups(
+          removeChatFromPersistedGroups(
+            currentPersistedProjectGroups,
+            chat,
+          ).map((group) =>
+            group.id === groupId
+              ? {
+                  ...group,
+                  chatIds: Array.from(
+                    new Set([...group.chatIds, getProjectChatMetadataId(chat)]),
+                  ),
+                }
+              : group,
+          ),
+        ),
+        placeChatInGroup,
+        rollbackPlacement,
+        clearPersistedPlacement,
+      );
+    }
+    setExpandedProjectGroupIds((current) => ({
+      ...current,
+      [groupId]: true,
+    }));
+  };
+  const removeChatFromProjectGroup = (chat: PrototypeProjectChatItem) => {
+    if (!project || chat.placeholder) return;
+    onCommitPreview?.();
+    const previousPlacement = projectChatPlacementsForProject[chat.id];
+    const placeChatUngrouped = () => {
+      setProjectChatPlacements((current) => ({
+        ...current,
+        [project.id]: {
+          ...(current[project.id] ?? {}),
+          [chat.id]: { chat, groupId: null },
+        },
+      }));
+    };
+    const rollbackPlacement = () => {
+      setProjectChatPlacements((current) => {
+        const currentPlacement = current[project.id]?.[chat.id];
+        if (currentPlacement?.groupId !== null) return current;
+        const projectPlacements = { ...(current[project.id] ?? {}) };
+        if (previousPlacement) {
+          projectPlacements[chat.id] = previousPlacement;
+        } else {
+          delete projectPlacements[chat.id];
+        }
+        return { ...current, [project.id]: projectPlacements };
+      });
+    };
+    const clearPersistedPlacement = () => {
+      setProjectChatPlacements((current) => {
+        const currentPlacement = current[project.id]?.[chat.id];
+        if (currentPlacement?.groupId !== null) return current;
+        const projectPlacements = { ...(current[project.id] ?? {}) };
+        delete projectPlacements[chat.id];
+        return { ...current, [project.id]: projectPlacements };
+      });
+    };
+    // Local placement also covers chats living in prototype-only groups and
+    // gives persisted groups immediate feedback while the save is pending.
+    placeChatUngrouped();
+    persistProjectChatGroups(
+      project.id,
+      // Removing the last chat dissolves the now-empty group.
+      dropEmptyPersistedGroups(
+        removeChatFromPersistedGroups(currentPersistedProjectGroups, chat),
+      ),
+      placeChatUngrouped,
+      rollbackPlacement,
+      clearPersistedPlacement,
+    );
+  };
   const toggleProjectGroup = (groupId: string) => {
     onCommitPreview?.();
     setExpandedProjectGroupIds((current) => ({
@@ -2096,11 +2401,6 @@ function PrototypeSecondaryPanel({
     onSecondarySelect?.();
     onCommitPreview?.();
     if (chat.placeholder) {
-      if (chat.id === projectNewChatRow?.id) {
-        setSelectedPrototypeChatId(null);
-        onNewChatInProject?.(project.id, { reuseExistingDraft: true });
-        return;
-      }
       setSelectedPrototypeChatId(chat.id);
       return;
     }
@@ -2126,10 +2426,10 @@ function PrototypeSecondaryPanel({
     onSelectSession?.(chat.id);
   };
   const selectRealSession = (sessionId: string) => {
+    setSelectedPrototypeChatId(null);
+    onSelectSession?.(sessionId, { preservePrototypeSecondary: true });
     onSecondarySelect?.();
     onCommitPreview?.();
-    setSelectedPrototypeChatId(null);
-    onSelectSession?.(sessionId);
   };
   const startNewChatInProjectGroup = async (group: PrototypeProjectGroup) => {
     if (!project || !onNewChatInProject) return;
@@ -2234,10 +2534,54 @@ function PrototypeSecondaryPanel({
     closeRenameGroupDialog();
     return;
   };
-  const deleteProjectGroup = (group: PrototypeProjectGroup) => {
+  // Removing a group only dissolves the grouping — every chat is kept and
+  // falls back to the ungrouped list.
+  const removeProjectGroup = (group: PrototypeProjectGroup) => {
     if (!project) return;
 
     onCommitPreview?.();
+    const previousPlacements = new Map(
+      group.chats.map((chat) => [
+        chat.id,
+        projectChatPlacementsForProject[chat.id],
+      ]),
+    );
+    const placeGroupChatsUngrouped = () => {
+      setProjectChatPlacements((current) => {
+        const nextProjectPlacements = { ...(current[project.id] ?? {}) };
+        for (const chat of group.chats) {
+          nextProjectPlacements[chat.id] = { chat, groupId: null };
+        }
+        return { ...current, [project.id]: nextProjectPlacements };
+      });
+    };
+    const restoreGroupPlacements = () => {
+      setProjectChatPlacements((current) => {
+        const nextProjectPlacements = { ...(current[project.id] ?? {}) };
+        for (const chat of group.chats) {
+          if (nextProjectPlacements[chat.id]?.groupId !== null) continue;
+          const previousPlacement = previousPlacements.get(chat.id);
+          if (previousPlacement) {
+            nextProjectPlacements[chat.id] = previousPlacement;
+          } else {
+            delete nextProjectPlacements[chat.id];
+          }
+        }
+        return { ...current, [project.id]: nextProjectPlacements };
+      });
+    };
+    const clearPersistedGroupPlacements = () => {
+      setProjectChatPlacements((current) => {
+        const nextProjectPlacements = { ...(current[project.id] ?? {}) };
+        for (const chat of group.chats) {
+          if (nextProjectPlacements[chat.id]?.groupId === null) {
+            delete nextProjectPlacements[chat.id];
+          }
+        }
+        return { ...current, [project.id]: nextProjectPlacements };
+      });
+    };
+    placeGroupChatsUngrouped();
     persistProjectChatGroups(
       project.id,
       currentPersistedProjectGroups.filter(
@@ -2248,25 +2592,9 @@ function PrototypeSecondaryPanel({
           ...current,
           [group.id]: true,
         }));
-        setProjectChatPlacements((current) => {
-          const currentProjectPlacements = current[project.id] ?? {};
-          return {
-            ...current,
-            [project.id]: {
-              ...currentProjectPlacements,
-              ...Object.fromEntries(
-                group.chats.map((chat) => [
-                  chat.id,
-                  {
-                    chat,
-                    groupId: null,
-                  },
-                ]),
-              ),
-            },
-          };
-        });
       },
+      restoreGroupPlacements,
+      clearPersistedGroupPlacements,
     );
     setExpandedProjectGroupIds((current) => {
       const { [group.id]: _removedGroup, ...next } = current;
@@ -2290,6 +2618,37 @@ function PrototypeSecondaryPanel({
         ? `${projectId}:chat-group:${crypto.randomUUID()}`
         : `${projectId}:chat-group:${chat.id}:${Date.now()}`;
 
+    const previousPlacement = projectChatPlacementsForProject[chat.id];
+    const placeChatInCreatedGroup = () => {
+      setProjectChatPlacements((current) => ({
+        ...current,
+        [projectId]: {
+          ...(current[projectId] ?? {}),
+          [chat.id]: { chat, groupId },
+        },
+      }));
+    };
+    const rollbackCreatedGroupPlacement = () => {
+      setProjectChatPlacements((current) => {
+        if (current[projectId]?.[chat.id]?.groupId !== groupId) return current;
+        const projectPlacements = { ...(current[projectId] ?? {}) };
+        if (previousPlacement) {
+          projectPlacements[chat.id] = previousPlacement;
+        } else {
+          delete projectPlacements[chat.id];
+        }
+        return { ...current, [projectId]: projectPlacements };
+      });
+    };
+    const clearCreatedGroupPlacement = () => {
+      setProjectChatPlacements((current) => {
+        if (current[projectId]?.[chat.id]?.groupId !== groupId) return current;
+        const projectPlacements = { ...(current[projectId] ?? {}) };
+        delete projectPlacements[chat.id];
+        return { ...current, [projectId]: projectPlacements };
+      });
+    };
+    placeChatInCreatedGroup();
     persistProjectChatGroups(
       projectId,
       [
@@ -2324,17 +2683,9 @@ function PrototypeSecondaryPanel({
             ],
           };
         });
-        setProjectChatPlacements((current) => ({
-          ...current,
-          [projectId]: {
-            ...(current[projectId] ?? {}),
-            [chat.id]: {
-              chat,
-              groupId,
-            },
-          },
-        }));
       },
+      rollbackCreatedGroupPlacement,
+      clearCreatedGroupPlacement,
     );
     setExpandedProjectGroupIds((current) => ({
       ...current,
@@ -2348,7 +2699,10 @@ function PrototypeSecondaryPanel({
       if (project) {
         persistProjectChatGroups(
           project.id,
-          removeChatFromPersistedGroups(currentPersistedProjectGroups, chat),
+          // Deleting the last chat in a group dissolves that group.
+          dropEmptyPersistedGroups(
+            removeChatFromPersistedGroups(currentPersistedProjectGroups, chat),
+          ),
           () => {},
         );
       }
@@ -2655,113 +3009,160 @@ function PrototypeSecondaryPanel({
             className={NAV_PROTOTYPE_PANEL_CONTENT_CLASS}
           >
             {project ? (
-              <div className="relative min-h-0 flex-1">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <div
-                  className="h-full overflow-y-auto pb-10 scrollbar-none"
-                  style={PROTOTYPE_CHAT_LIST_BOTTOM_MASK_STYLE}
+                  data-testid="prototype-project-secondary-header"
+                  className={cn(
+                    "group/project-secondary-header flex h-7 shrink-0 items-center pl-[10px] pr-3 text-sm font-normal leading-normal",
+                    NAV_PROTOTYPE_SECTION_LABEL_CLASS,
+                  )}
                 >
-                  <div className="flex min-h-full flex-col gap-px">
-                    {projectGroups.map((group) => {
-                      const expanded =
-                        expandedProjectGroupIds[group.id] ?? true;
-                      return (
-                        <div key={group.id} className="space-y-px">
-                          <PrototypeProjectGroupRow
-                            group={group}
-                            expanded={expanded}
-                            onDeleteGroup={() => deleteProjectGroup(group)}
-                            onMenuOpenChange={(open) => {
-                              onNavigationMenuOpenChange?.(open);
-                              if (open) {
-                                onCommitPreview?.();
+                  <span className="min-w-0 flex-1 truncate">
+                    {project.name} chats
+                  </span>
+                  <div className="flex items-center gap-0.5">
+                    <PrototypePrimaryDisplayOptionsMenu
+                      label={`${project.name} chat display options`}
+                      onOpenChange={onNavigationMenuOpenChange}
+                      onShowChatIconsChange={onShowChatIconsChange}
+                      onShowChatTimestampsChange={onShowChatTimestampsChange}
+                      showChatIcons={showChatIcons}
+                      showChatTimestamps={showChatTimestamps}
+                    />
+                    <PrototypeBareActionIcon
+                      className={NAV_PROTOTYPE_SECTION_ACTION_ICON_CLASS}
+                      label={`Start new chat in ${project.name}`}
+                      onClick={() => {
+                        onNewChatInProject?.(project.id, {
+                          reuseExistingDraft: true,
+                        });
+                        onSecondarySelect?.();
+                        onCommitPreview?.();
+                      }}
+                    >
+                      <Plus className={NAV_PROTOTYPE_LUCIDE_ICON_CLASS} />
+                    </PrototypeBareActionIcon>
+                  </div>
+                </div>
+                <div className="relative min-h-0 flex-1">
+                  <div
+                    className="h-full overflow-y-auto pb-10 scrollbar-none"
+                    style={PROTOTYPE_CHAT_LIST_BOTTOM_MASK_STYLE}
+                  >
+                    <div className="flex min-h-full flex-col gap-px">
+                      {projectGroups.map((group) => {
+                        const expanded =
+                          expandedProjectGroupIds[group.id] ?? true;
+                        return (
+                          <div key={group.id} className="space-y-px">
+                            <PrototypeProjectGroupRow
+                              group={group}
+                              expanded={expanded}
+                              onRemoveGroup={() => removeProjectGroup(group)}
+                              onMenuOpenChange={(open) => {
+                                onNavigationMenuOpenChange?.(open);
+                                if (open) {
+                                  onCommitPreview?.();
+                                }
+                              }}
+                              onNewChat={() =>
+                                startNewChatInProjectGroup(group)
                               }
-                            }}
-                            onNewChat={() => startNewChatInProjectGroup(group)}
-                            onRenameGroup={() => openRenameGroupDialog(group)}
-                            onToggle={() => toggleProjectGroup(group.id)}
-                          />
-                          <div
-                            className={cn(
-                              "overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out",
-                              expanded
-                                ? "translate-y-0 opacity-100"
-                                : "pointer-events-none -translate-y-1 opacity-0",
-                            )}
-                            style={{
-                              maxHeight: expanded
-                                ? getPrototypeRowsMaxHeight(group.chats.length)
-                                : 0,
-                            }}
-                            aria-hidden={expanded ? undefined : true}
-                            inert={expanded ? undefined : true}
-                          >
-                            <div className="space-y-px">
-                              {group.chats.map((chat) => (
-                                <PrototypeProjectChatRow
-                                  key={chat.id}
-                                  active={
-                                    chat.session
-                                      ? chat.session.id === activeSessionId
-                                      : chat.id === selectedPrototypeChatId ||
-                                        chat.id === activeSessionId
-                                  }
-                                  behavior={chatRowBehavior}
-                                  chat={chat}
-                                  currentProjectId={project.id}
-                                  nested
-                                  onCreateGroup={openCreateGroupDialog}
-                                  onDelete={deleteProjectChat}
-                                  onMenuOpenChange={(open) => {
-                                    onNavigationMenuOpenChange?.(open);
-                                  }}
-                                  onPrototypeSelect={(prototypeChat) =>
-                                    selectPrototypeChat(
-                                      prototypeChat,
-                                      group.name,
+                              onRenameGroup={() => openRenameGroupDialog(group)}
+                              onToggle={() => toggleProjectGroup(group.id)}
+                            />
+                            <div
+                              className={cn(
+                                "overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-out",
+                                expanded
+                                  ? "translate-y-0 opacity-100"
+                                  : "pointer-events-none -translate-y-1 opacity-0",
+                              )}
+                              style={{
+                                maxHeight: expanded
+                                  ? getPrototypeRowsMaxHeight(
+                                      group.chats.length,
                                     )
-                                  }
-                                  onSelect={selectRealSession}
-                                  showTimestamp={showChatTimestamps}
-                                />
-                              ))}
+                                  : 0,
+                              }}
+                              aria-hidden={expanded ? undefined : true}
+                              inert={expanded ? undefined : true}
+                            >
+                              <div className="space-y-px">
+                                {group.chats.map((chat) => (
+                                  <PrototypeProjectChatRow
+                                    key={chat.id}
+                                    active={
+                                      chat.session
+                                        ? chat.session.id === activeSessionId
+                                        : chat.id === selectedPrototypeChatId ||
+                                          chat.id === activeSessionId
+                                    }
+                                    availableGroups={projectGroups}
+                                    behavior={chatRowBehavior}
+                                    chat={chat}
+                                    currentGroupId={group.id}
+                                    currentProjectId={project.id}
+                                    nested
+                                    onAddToGroup={addChatToProjectGroup}
+                                    onCreateGroup={openCreateGroupDialog}
+                                    onDelete={deleteProjectChat}
+                                    onMenuOpenChange={(open) => {
+                                      onNavigationMenuOpenChange?.(open);
+                                    }}
+                                    onPrototypeSelect={(prototypeChat) =>
+                                      selectPrototypeChat(
+                                        prototypeChat,
+                                        group.name,
+                                      )
+                                    }
+                                    onRemoveFromGroup={
+                                      removeChatFromProjectGroup
+                                    }
+                                    onSelect={selectRealSession}
+                                    showIcon={showChatIcons}
+                                    showTimestamp={showChatTimestamps}
+                                  />
+                                ))}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                    <fieldset
-                      aria-label="Ungrouped project chats"
-                      className="m-0 min-w-0 flex-1 space-y-px rounded-sm border-0 p-0"
-                    >
-                      {visibleUngroupedChats.map((chat) => (
-                        <PrototypeProjectChatRow
-                          key={chat.id}
-                          active={
-                            chat.session
-                              ? activeSessionId === chat.session.id
-                              : chat.id === selectedPrototypeChatId ||
-                                chat.id === activeSessionId
-                          }
-                          behavior={chatRowBehavior}
-                          chat={chat}
-                          currentProjectId={project.id}
-                          onCreateGroup={openCreateGroupDialog}
-                          onDelete={deleteProjectChat}
-                          onMenuOpenChange={(open) => {
-                            onNavigationMenuOpenChange?.(open);
-                          }}
-                          onPrototypeSelect={(prototypeChat) =>
-                            selectPrototypeChat(prototypeChat, "Ungrouped")
-                          }
-                          onSelect={selectRealSession}
-                          showTimestamp={showChatTimestamps}
-                          showPlaceholderIcon={
-                            chat.id === projectNewChatRow?.id &&
-                            projectNewChatRowIsOnlyVisibleRow
-                          }
-                        />
-                      ))}
-                    </fieldset>
+                        );
+                      })}
+                      <fieldset
+                        aria-label="Ungrouped project chats"
+                        className="m-0 min-w-0 space-y-px rounded-sm border-0 p-0"
+                      >
+                        {visibleUngroupedChats.map((chat) => (
+                          <PrototypeProjectChatRow
+                            key={chat.id}
+                            active={
+                              chat.session
+                                ? activeSessionId === chat.session.id
+                                : chat.id === selectedPrototypeChatId ||
+                                  chat.id === activeSessionId
+                            }
+                            availableGroups={projectGroups}
+                            behavior={chatRowBehavior}
+                            chat={chat}
+                            currentProjectId={project.id}
+                            onAddToGroup={addChatToProjectGroup}
+                            onCreateGroup={openCreateGroupDialog}
+                            onDelete={deleteProjectChat}
+                            onMenuOpenChange={(open) => {
+                              onNavigationMenuOpenChange?.(open);
+                            }}
+                            onPrototypeSelect={(prototypeChat) =>
+                              selectPrototypeChat(prototypeChat, "Ungrouped")
+                            }
+                            onRemoveFromGroup={removeChatFromProjectGroup}
+                            onSelect={selectRealSession}
+                            showIcon={showChatIcons}
+                            showTimestamp={showChatTimestamps}
+                          />
+                        ))}
+                      </fieldset>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2952,6 +3353,12 @@ export function NavigationPanesView({
   const [showPrototypeChatIcons, setShowPrototypeChatIcons] = useState(true);
   const [showPrototypeChatTimestamps, setShowPrototypeChatTimestamps] =
     useState(true);
+  const [showPrototypeProjectChatIcons, setShowPrototypeProjectChatIcons] =
+    useState(true);
+  const [
+    showPrototypeProjectChatTimestamps,
+    setShowPrototypeProjectChatTimestamps,
+  ] = useState(true);
   const [prototypePreviewTarget, setPrototypePreviewTarget] =
     useState<NavigationSecondaryTarget>(null);
   const [
@@ -2960,8 +3367,6 @@ export function NavigationPanesView({
   ] = useState<NavigationSecondaryTarget>(prototypeSecondaryTarget);
   const [prototypeSecondaryClosing, setPrototypeSecondaryClosing] =
     useState(false);
-  const [prototypeAnnouncementDismissed, setPrototypeAnnouncementDismissed] =
-    useState(readPrototypeNavigationAnnouncementDismissed);
   const [
     prototypePrimaryChatPreviewLimit,
     setPrototypePrimaryChatPreviewLimit,
@@ -2972,10 +3377,6 @@ export function NavigationPanesView({
   const prototypeResizeActiveRef = useRef(false);
   const prototypeNavMenuOpenRef = useRef(false);
   const prototypeSecondaryInteractedRef = useRef(false);
-  const dismissPrototypeAnnouncement = useCallback(() => {
-    setPrototypeAnnouncementDismissed(true);
-    writePrototypeNavigationAnnouncementDismissed();
-  }, []);
   const collapsePrototypePrimary = useCallback(() => {
     if (prototypeNavMenuOpenRef.current) return;
 
@@ -3341,15 +3742,17 @@ export function NavigationPanesView({
           projectsGroupHeight -
           NAV_PROTOTYPE_CHAT_SECTION_TOP_MARGIN_PX;
     const availableRowsHeight = chatSectionHeight - reservedChatSectionHeight;
+    const availableRowCount = Math.floor(
+      (availableRowsHeight + NAV_PROTOTYPE_ROW_GAP_PX) /
+        (NAV_PROTOTYPE_ROW_HEIGHT_PX + NAV_PROTOTYPE_ROW_GAP_PX),
+    );
+    const minPreviewLimit = Math.min(
+      2,
+      looseVisiblePrototypeChatSessions.length,
+    );
     const nextLimit = Math.max(
-      0,
-      Math.min(
-        looseVisiblePrototypeChatSessions.length,
-        Math.floor(
-          (availableRowsHeight + NAV_PROTOTYPE_ROW_GAP_PX) /
-            (NAV_PROTOTYPE_ROW_HEIGHT_PX + NAV_PROTOTYPE_ROW_GAP_PX),
-        ),
-      ),
+      minPreviewLimit,
+      Math.min(looseVisiblePrototypeChatSessions.length, availableRowCount),
     );
 
     setPrototypePrimaryChatPreviewLimit((currentLimit) =>
@@ -3551,9 +3954,11 @@ export function NavigationPanesView({
         : { kind: "chats" }
       : null;
   const activePrototypeProjectId =
-    activeView !== "chat" && prototypeSecondaryTarget?.kind === "project"
+    prototypeSecondaryTarget?.kind === "project"
       ? prototypeSecondaryTarget.projectId
-      : null;
+      : activeView === "chat" && activePrototypeSession?.projectId
+        ? activePrototypeSession.projectId
+        : null;
 
   const clearPrototypePreviewCloseTimeout = useCallback(() => {
     if (prototypePreviewCloseTimeoutRef.current === null) return;
@@ -4132,8 +4537,16 @@ export function NavigationPanesView({
             onOpenSettingsSection={onOpenSettingsSection}
             onSecondarySelect={handlePrototypeSecondarySelect}
             onSelectSession={onSelectSession}
-            onShowChatIconsChange={setShowPrototypeChatIcons}
-            onShowChatTimestampsChange={setShowPrototypeChatTimestamps}
+            onShowChatIconsChange={
+              renderedPrototypeSecondaryTarget.kind === "project"
+                ? setShowPrototypeProjectChatIcons
+                : setShowPrototypeChatIcons
+            }
+            onShowChatTimestampsChange={
+              renderedPrototypeSecondaryTarget.kind === "project"
+                ? setShowPrototypeProjectChatTimestamps
+                : setShowPrototypeChatTimestamps
+            }
             onUpdateProjectChatGroups={onUpdateProjectChatGroups}
             omittedChatSessionIds={omittedSecondaryChatSessionIds}
             prototypeChatsUnderProjects={prototypeChatsUnderProjects}
@@ -4143,8 +4556,16 @@ export function NavigationPanesView({
             sessions={sessions}
             settingsSections={visibleSettingsSections}
             setSearch={setPrototypeChatSearch}
-            showChatIcons={showPrototypeChatIcons}
-            showChatTimestamps={showPrototypeChatTimestamps}
+            showChatIcons={
+              renderedPrototypeSecondaryTarget.kind === "project"
+                ? showPrototypeProjectChatIcons
+                : showPrototypeChatIcons
+            }
+            showChatTimestamps={
+              renderedPrototypeSecondaryTarget.kind === "project"
+                ? showPrototypeProjectChatTimestamps
+                : showPrototypeChatTimestamps
+            }
             resizeRail={
               onPrototypeSecondaryWidthResize
                 ? renderPrototypeResizeRail("secondary", "Resize panel")
@@ -4309,6 +4730,7 @@ export function NavigationPanesView({
                 glass={false}
                 width={prototypePrimaryWidth}
                 className={cn(
+                  "overflow-visible",
                   NAV_PROTOTYPE_TRANSITION_CLASS,
                   prototypeSecondaryRendered &&
                     !prototypeSecondaryClosing &&
@@ -4318,9 +4740,7 @@ export function NavigationPanesView({
                 <nav
                   ref={navRef}
                   onKeyDown={handleSidebarNavKeyDown}
-                  className={cn(
-                    "relative flex min-h-0 flex-1 flex-col overflow-hidden px-2 pt-2.5 scrollbar-none",
-                  )}
+                  className="relative flex min-h-0 flex-1 flex-col overflow-visible px-2 pt-2.5 scrollbar-none"
                   aria-label={t("navigation.main")}
                 >
                   <div
@@ -4518,9 +4938,25 @@ export function NavigationPanesView({
                                 collapsed={prototypePrimaryCollapsed}
                                 onArchiveProject={onArchiveProject}
                                 onClick={() => {
-                                  openPrototypeProjectSecondary(project.id, {
-                                    preview: true,
-                                  });
+                                  const opened = openPrototypeProjectSecondary(
+                                    project.id,
+                                    { preview: true },
+                                  );
+                                  // On the home/agents/etc. canvas the panel
+                                  // previews on hover and toggles on click. In
+                                  // a chat that has no secondary target of its
+                                  // own (e.g. a blank new chat), there is no
+                                  // docked context to keep the preview pinned,
+                                  // so an explicit click must commit or the
+                                  // panel closes the moment the pointer leaves.
+                                  if (
+                                    opened &&
+                                    activeView === "chat" &&
+                                    activePrototypeSecondaryTarget === null
+                                  ) {
+                                    handlePrototypeSecondarySelect();
+                                    commitPrototypePreview();
+                                  }
                                 }}
                                 onEditProject={onEditProject}
                                 onMoveToProject={onMoveToProject}
@@ -4565,6 +5001,22 @@ export function NavigationPanesView({
                             testId="sidebar-prototype-chats-section-header"
                             actions={
                               <>
+                                <PrototypePrimaryDisplayOptionsMenu
+                                  label="Chat display options"
+                                  onOpenChange={(open) => {
+                                    prototypeNavMenuOpenRef.current = open;
+                                  }}
+                                  onShowChatIconsChange={
+                                    setShowPrototypeChatIcons
+                                  }
+                                  onShowChatTimestampsChange={
+                                    setShowPrototypeChatTimestamps
+                                  }
+                                  showChatIcons={showPrototypeChatIcons}
+                                  showChatTimestamps={
+                                    showPrototypeChatTimestamps
+                                  }
+                                />
                                 <PrototypeBareActionIcon
                                   className={
                                     NAV_PROTOTYPE_SECTION_ACTION_ICON_CLASS
@@ -4602,6 +5054,7 @@ export function NavigationPanesView({
                                   active={activeSessionId === session.id}
                                   behavior={prototypeChatRowBehavior}
                                   currentProjectId={null}
+                                  geometry="refreshed-primary"
                                   leadingIconTestId="prototype-primary-chat-row-icon"
                                   onMenuOpenChange={(open) => {
                                     prototypeNavMenuOpenRef.current = open;
@@ -4652,12 +5105,6 @@ export function NavigationPanesView({
 
                   <div className="-mx-2 shrink-0 px-2 pb-2 pt-3">
                     <div className="relative">
-                      {!prototypePrimaryCollapsed &&
-                      !prototypeAnnouncementDismissed ? (
-                        <PrototypeNavigationAnnouncement
-                          onDismiss={dismissPrototypeAnnouncement}
-                        />
-                      ) : null}
                       <div
                         aria-hidden="true"
                         className="mx-3 mb-2 h-px bg-border/70"
