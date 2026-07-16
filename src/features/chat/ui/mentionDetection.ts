@@ -374,9 +374,20 @@ function rankSkillMentions(
     seenSkillIds.add(skill.id);
   };
 
-  for (const result of fzf
-    .find(trimmedQuery)
-    .sort((a, b) => b.score - a.score || a.item.index - b.item.index)) {
+  for (const result of fzf.find(trimmedQuery).sort((a, b) => {
+    const aName = a.item.skill.name.toLowerCase();
+    const bName = b.item.skill.name.toLowerCase();
+    const aIsExact = aName === q;
+    const bIsExact = bName === q;
+    const aIsPrefix = aName.startsWith(q);
+    const bIsPrefix = bName.startsWith(q);
+    return (
+      Number(bIsExact) - Number(aIsExact) ||
+      Number(bIsPrefix) - Number(aIsPrefix) ||
+      b.score - a.score ||
+      a.item.index - b.item.index
+    );
+  })) {
     appendSkill(result.item.skill);
   }
 

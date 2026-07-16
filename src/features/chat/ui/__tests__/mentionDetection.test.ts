@@ -91,6 +91,63 @@ describe("useMentionDetection file ordering", () => {
     ]);
   });
 
+  it("ranks skill name prefix matches before earlier substring matches", () => {
+    const substringMatch = skillItem({
+      id: "global:/skills/pr-comments-for-copied-code",
+      name: "pr-comments-for-copied-code",
+    });
+    const prefixMatch = skillItem({
+      id: "global:/skills/code-review",
+      name: "code-review",
+    });
+    const { result } = renderHook(() =>
+      useMentionDetection([], [substringMatch, prefixMatch], []),
+    );
+
+    act(() => {
+      result.current.detectMention("/code", 5);
+    });
+
+    expect(result.current.filteredSkills).toEqual([
+      prefixMatch,
+      substringMatch,
+    ]);
+  });
+
+  it.each([
+    "first",
+    "last",
+  ] as const)("ranks a case-insensitive exact skill name match first when it appears %s", (exactPosition) => {
+    const exactMatch = skillItem({
+      id: "global:/skills/code",
+      name: "CODE",
+    });
+    const prefixMatches = [
+      skillItem({
+        id: "global:/skills/code-review",
+        name: "code-review",
+      }),
+      skillItem({
+        id: "global:/skills/codesearch",
+        name: "codesearch",
+      }),
+    ];
+    const skills =
+      exactPosition === "first"
+        ? [exactMatch, ...prefixMatches]
+        : [...prefixMatches, exactMatch];
+    const { result } = renderHook(() => useMentionDetection([], skills, []));
+
+    act(() => {
+      result.current.detectMention("/code", 5);
+    });
+
+    expect(result.current.filteredSkills).toEqual([
+      exactMatch,
+      ...prefixMatches,
+    ]);
+  });
+
   it("keeps description-only skill matches when no title matches", () => {
     const descriptionMatch = skillItem({
       id: "global:/skills/release-notes",
