@@ -202,6 +202,7 @@ import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import {
   resolveEffectiveNavigationSecondaryTarget,
   resolveNavigationPrototypePrimaryCollapsed,
+  resolveNewConversationShortcutProjectId,
 } from "./navigationPrototypeState";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import { isExternalAgentProvider } from "@/shared/api/acpPersonaHandoff";
@@ -1102,6 +1103,28 @@ export function AppShell({
   const retryFailedSessionsForProjectRef = useRef<
     (project: ProjectInfo) => void
   >(() => {});
+  const newConversationShortcutProject = useMemo(() => {
+    const projectId = resolveNewConversationShortcutProjectId({
+      activeSessionProjectId: activeNavigationSession?.projectId ?? null,
+      activeView,
+      navigationRefreshEnabled: Boolean(navigationRefreshExperiment?.enabled),
+      secondaryCommitted: effectiveNavigationSecondaryCommitted,
+      secondaryPreview: effectiveNavigationSecondaryPreview,
+      secondaryTarget: effectiveNavigationSecondaryTarget,
+    });
+
+    return projectId
+      ? (projects.find((project) => project.id === projectId) ?? null)
+      : null;
+  }, [
+    activeNavigationSession?.projectId,
+    activeView,
+    effectiveNavigationSecondaryCommitted,
+    effectiveNavigationSecondaryPreview,
+    effectiveNavigationSecondaryTarget,
+    navigationRefreshExperiment?.enabled,
+    projects,
+  ]);
   const startEmptyChatForSelectedProjectRef = useRef<
     (project: ProjectInfo) => void
   >(() => {});
@@ -4452,10 +4475,23 @@ export function AppShell({
         }
         return;
       }
-      // Floating new conversation composer (default mod+n)
+      // New project session in refreshed navigation, otherwise the floating
+      // new conversation composer (default mod+n).
       if (eventMatchesShortcutCommand(e, "navigation.newConversation")) {
         e.preventDefault();
         if (!canUseGlobalComposerShortcut) {
+          return;
+        }
+        if (newConversationShortcutProject) {
+          guardAppNavigation(() => {
+            void createNewProjectDraft(
+              DEFAULT_CHAT_TITLE,
+              newConversationShortcutProject,
+              { reuseExistingDraft: false },
+            ).catch((error) => {
+              console.error("Failed to start project chat:", error);
+            });
+          });
           return;
         }
         guardAppNavigation(() => {
@@ -4482,6 +4518,7 @@ export function AppShell({
     clearActiveSession,
     clearGlobalComposerHandoffTimer,
     closeDesignSystem,
+    createNewProjectDraft,
     globalComposerPlacement,
     goBack,
     goForward,
@@ -4492,6 +4529,7 @@ export function AppShell({
     isMultiWindowEnabled,
     isNavigationPrototypeEnabled,
     leaveSecondarySurface,
+    newConversationShortcutProject,
     resetGlobalComposerTransition,
     setDesignSystemInspectorVisible,
     setActiveSession,

@@ -2,7 +2,51 @@ import { describe, expect, it } from "vitest";
 import {
   resolveEffectiveNavigationSecondaryTarget,
   resolveNavigationPrototypePrimaryCollapsed,
+  resolveNewConversationShortcutProjectId,
 } from "./navigationPrototypeState";
+
+describe("resolveNewConversationShortcutProjectId", () => {
+  const baseInput = {
+    activeSessionProjectId: null,
+    activeView: "home" as const,
+    navigationRefreshEnabled: true,
+    secondaryCommitted: false,
+    secondaryPreview: false,
+    secondaryTarget: null,
+  };
+
+  it("prefers the active project chat over a previewed project", () => {
+    expect(
+      resolveNewConversationShortcutProjectId({
+        ...baseInput,
+        activeSessionProjectId: "project-a",
+        activeView: "chat",
+        secondaryPreview: true,
+        secondaryTarget: { kind: "project", projectId: "project-b" },
+      }),
+    ).toBe("project-a");
+  });
+
+  it("ignores a previewed project without an active project chat", () => {
+    expect(
+      resolveNewConversationShortcutProjectId({
+        ...baseInput,
+        secondaryPreview: true,
+        secondaryTarget: { kind: "project", projectId: "project-b" },
+      }),
+    ).toBeNull();
+  });
+
+  it("uses a committed project selection", () => {
+    expect(
+      resolveNewConversationShortcutProjectId({
+        ...baseInput,
+        secondaryCommitted: true,
+        secondaryTarget: { kind: "project", projectId: "project-b" },
+      }),
+    ).toBe("project-b");
+  });
+});
 
 describe("resolveEffectiveNavigationSecondaryTarget", () => {
   it("uses the active chat target when no secondary panel is explicitly selected", () => {

@@ -1,5 +1,38 @@
+import type { AppView } from "@/app/types/appNavigation";
 import type { NavigationPrototypeMode } from "@/app/views/NavigationPanesView";
 import type { NavigationSecondaryTarget } from "@/app/views/NavigationPanesView";
+
+export function resolveNewConversationShortcutProjectId({
+  activeSessionProjectId,
+  activeView,
+  navigationRefreshEnabled,
+  secondaryCommitted,
+  secondaryPreview,
+  secondaryTarget,
+}: {
+  activeSessionProjectId: string | null;
+  activeView: AppView;
+  navigationRefreshEnabled: boolean;
+  secondaryCommitted: boolean;
+  secondaryPreview: boolean;
+  secondaryTarget: NavigationSecondaryTarget;
+}): string | null {
+  if (!navigationRefreshEnabled) return null;
+
+  if (activeView === "chat" && activeSessionProjectId) {
+    return activeSessionProjectId;
+  }
+
+  if (
+    secondaryTarget?.kind === "project" &&
+    secondaryCommitted &&
+    !secondaryPreview
+  ) {
+    return secondaryTarget.projectId;
+  }
+
+  return null;
+}
 
 export function resolveEffectiveNavigationSecondaryTarget({
   activeChatNavigationSecondaryTarget,

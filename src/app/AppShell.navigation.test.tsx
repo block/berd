@@ -2102,6 +2102,75 @@ describe("AppShell global navigation", () => {
     expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
+  it("starts a new session in the active project with Cmd+N in refreshed navigation", async () => {
+    const project: ProjectInfo = {
+      id: "project-1",
+      path: "/tmp/project.yaml",
+      name: "Project One",
+      description: "",
+      prompt: "",
+      icon: "",
+      color: "",
+      projectWorkspaces: [],
+      workingDirs: ["/workspace/project"],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+    };
+    useProjectStore.setState({
+      projects: [project],
+      loading: false,
+      activeProjectId: null,
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Project chat",
+          projectId: project.id,
+          providerId: "goose",
+          workingDir: "/workspace/project",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+      activeSessionId: null,
+    });
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    mockAcpCreateSession.mockClear();
+
+    await user.keyboard("{Meta>}n{/Meta}");
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "goose",
+        "/workspace/project",
+        {
+          deferProviderSetup: true,
+          modelId: undefined,
+          projectId: "project-1",
+        },
+      );
+    });
+    expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+      "session-1",
+    );
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      projectId: "project-1",
+    });
+    expect(
+      screen.queryByPlaceholderText("Start a conversation"),
+    ).not.toBeInTheDocument();
+  });
+
   it("dismisses the centered global composer from the backdrop and global Escape", async () => {
     for (const dismiss of ["backdrop", "escape"] as const) {
       const { container, unmount } = renderAppShell();
