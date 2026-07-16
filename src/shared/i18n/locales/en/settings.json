@@ -30,6 +30,10 @@
       "description": "Loop video avatars in chats, agent lists, and previews.",
       "label": "Animated avatars"
     },
+    "workingIndicatorAnimation": {
+      "description": "Animate the activity indicator for chats that are currently working.",
+      "label": "Animate working indicators"
+    },
     "homePinLabels": {
       "description": "Always show names on pinned agents and projects, not just on hover.",
       "label": "Always show pin labels"

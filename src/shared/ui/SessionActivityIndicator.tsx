@@ -1,6 +1,7 @@
 import { useReducedMotion } from "motion/react";
 
 import { cn } from "@/shared/lib/cn";
+import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { BerdLoader } from "@/shared/ui/berd-loader";
 
 const ACTIVE_CHAT_BERD_SIZE_PX = 14;
@@ -20,10 +21,14 @@ export function ActiveChatBerdIndicator({
   size?: number;
 }) {
   const shouldReduceMotion = useReducedMotion();
+  const workingIndicatorAnimationPreference =
+    useWorkingIndicatorAnimationPreference();
 
   return (
     <BerdLoader
-      animated={!shouldReduceMotion}
+      animated={
+        workingIndicatorAnimationPreference.enabled && !shouldReduceMotion
+      }
       className={className}
       decorative
       size={size}

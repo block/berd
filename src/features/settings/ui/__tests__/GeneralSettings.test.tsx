@@ -524,6 +524,27 @@ describe("GeneralSettings appearance section", () => {
     expect(switchControl).toBeChecked();
   });
 
+  it("disables working indicator animation", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Animate working indicators",
+    });
+
+    expect(switchControl).toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(
+        localStorage.getItem("goose:working-indicator-animation-enabled"),
+      ).toBe("false");
+    });
+    expect(switchControl).not.toBeChecked();
+  });
+
   it("opens trusted link domains in a dialog and removes domains", async () => {
     const user = userEvent.setup();
     trustDomain("github.com");

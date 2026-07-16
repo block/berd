@@ -30,6 +30,10 @@
       "description": "Reproduce avatares de video en bucle en chats, listas de agentes y vistas previas.",
       "label": "Avatares animados"
     },
+    "workingIndicatorAnimation": {
+      "description": "Anima el indicador de actividad de los chats que están trabajando actualmente.",
+      "label": "Animar indicadores de trabajo"
+    },
     "homePinLabels": {
       "description": "Muestra siempre los nombres de los agentes y proyectos fijados, no solo al pasar el cursor.",
       "label": "Mostrar siempre las etiquetas de los pines"

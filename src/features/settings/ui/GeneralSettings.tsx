@@ -35,6 +35,7 @@ import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPr
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
+import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { useArtifactAutoOpenPreference } from "@/features/chat/lib/artifactAutoOpenPreference";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -164,6 +165,8 @@ export function GeneralSettings({
     setCategory: setAtMentionDefaultCategory,
   } = useAtMentionDefaultCategoryPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
+  const workingIndicatorAnimationPreference =
+    useWorkingIndicatorAnimationPreference();
   const homePinLabelsPreference = useHomePinLabelsPreference();
   const artifactAutoOpenPreference = useArtifactAutoOpenPreference();
   const artifactRootPreference = useArtifactRootPreference();
@@ -857,6 +860,17 @@ export function GeneralSettings({
             checked={animatedAvatarsPreference.enabled}
             onCheckedChange={animatedAvatarsPreference.setEnabled}
             aria-label={t("appearance.animatedAvatars.label")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("appearance.workingIndicatorAnimation.label")}
+          description={t("appearance.workingIndicatorAnimation.description")}
+        >
+          <Switch
+            checked={workingIndicatorAnimationPreference.enabled}
+            onCheckedChange={workingIndicatorAnimationPreference.setEnabled}
+            aria-label={t("appearance.workingIndicatorAnimation.label")}
           />
         </SettingRow>
 
