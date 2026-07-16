@@ -11,6 +11,7 @@ import {
 import {
   Archive,
   Check,
+  Copy,
   CopyPlus,
   ExternalLink,
   Mail,
@@ -31,6 +32,7 @@ import {
 } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { createSessionDeepLink } from "@/features/sessions/lib/sessionDeepLink";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
@@ -463,6 +465,23 @@ export function SidebarChatRow({
     });
   };
 
+  const handleCopyLink = () => {
+    closeMenus();
+    void (async () => {
+      try {
+        const clipboard = navigator.clipboard;
+        if (!clipboard?.writeText) {
+          throw new Error("Clipboard API is unavailable");
+        }
+        await clipboard.writeText(createSessionDeepLink(id));
+        toast.success(t("actions.linkCopied"));
+      } catch (error) {
+        console.error("Failed to copy session link:", error);
+        toast.error(t("actions.copyLinkFailed"));
+      }
+    })();
+  };
+
   const clearPointerDragListeners = () => {
     pointerDragCleanupRef.current?.();
     pointerDragCleanupRef.current = null;
@@ -675,6 +694,16 @@ export function SidebarChatRow({
               ? t("common:actions.pinningChat")
               : t("common:actions.pinChat")}
       </Item>
+      {!shouldApplyToSelection ? (
+        <Item
+          className={menuItemClassName}
+          onClick={handleCopyLink}
+          style={menuItemStyle}
+        >
+          <Copy className="size-3.5" />
+          {t("actions.copyLink")}
+        </Item>
+      ) : null}
       {hasUnread ? (
         <Item
           className={menuItemClassName}

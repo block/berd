@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import {
   resetHomeWidgetStoreForTests,
@@ -13,6 +13,18 @@ import {
   getSessionWindowSupport,
 } from "@/features/chat/lib/sessionWindowCommands";
 
+const mocks = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mocks.toastError(...args),
+    success: (...args: unknown[]) => mocks.toastSuccess(...args),
+  },
+}));
+
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
   focusSessionWindow: vi.fn().mockResolvedValue(undefined),
   getSessionWindowSupport: vi
@@ -23,7 +35,14 @@ vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
 }));
 
 describe("SidebarChatRow", () => {
+  const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "clipboard",
+  );
+
   beforeEach(() => {
+    mocks.toastError.mockReset();
+    mocks.toastSuccess.mockReset();
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -34,6 +53,18 @@ describe("SidebarChatRow", () => {
       supported: true,
       reason: undefined,
     });
+  });
+
+  afterEach(() => {
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(
+        navigator,
+        "clipboard",
+        originalClipboardDescriptor,
+      );
+      return;
+    }
+    Reflect.deleteProperty(navigator, "clipboard");
   });
 
   it("starts inline rename on double-click and commits on Enter", async () => {
@@ -801,6 +832,109 @@ describe("SidebarChatRow", () => {
     expect(
       document.querySelector('[data-slot="dropdown-menu-content"]'),
     ).not.toBeInTheDocument();
+  });
+
+  it("copies an encoded chat link from the right-click menu", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const { container } = render(
+      <SidebarChatRow
+        id="id/with spaces?#"
+        title="Idle Chat"
+        isActive={false}
+      />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) {
+      throw new Error("Sidebar chat row was not rendered");
+    }
+
+    fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
+    await user.click(
+      await screen.findByRole("menuitem", { name: /copy local link/i }),
+    );
+
+    expect(writeText).toHaveBeenCalledWith(
+      "berd://session/id%2Fwith%20spaces%3F%23",
+    );
+    await waitFor(() =>
+      expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        "Local chat link copied. It only works on this device.",
+      ),
+    );
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("shows an error when the chat link cannot be copied", async () => {
+    const user = userEvent.setup();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const { container } = render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) {
+      throw new Error("Sidebar chat row was not rendered");
+    }
+
+    fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
+    await user.click(
+      await screen.findByRole("menuitem", { name: /copy local link/i }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Couldn't copy the local chat link.",
+      ),
+    );
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("shows an error when the Clipboard API is unavailable", async () => {
+    const user = userEvent.setup();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const { container } = render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) {
+      throw new Error("Sidebar chat row was not rendered");
+    }
+
+    fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
+    await user.click(
+      await screen.findByRole("menuitem", { name: /copy local link/i }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Couldn't copy the local chat link.",
+      ),
+    );
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
   it("does not show selection actions in the chat options menu", async () => {
