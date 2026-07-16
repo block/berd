@@ -5826,7 +5826,7 @@ describe("NavigationPanesView", () => {
     ).toBeInTheDocument();
   });
 
-  it("archives real prototype project chats from the chat row delete action", async () => {
+  it("keeps the project pane actionable after archiving its last chat", async () => {
     const user = userEvent.setup();
     const onArchiveChat = vi.fn().mockResolvedValue(undefined);
 
@@ -5870,6 +5870,14 @@ describe("NavigationPanesView", () => {
         }),
       ).not.toBeInTheDocument();
     });
+    expect(
+      screen.getByRole("navigation", {
+        name: "Project One project chats",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(projectNavigation).getByRole("button", { name: "New chat" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps real prototype project chats visible when delete archive fails", async () => {
