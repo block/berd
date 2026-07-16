@@ -17,6 +17,7 @@ import type { Message } from "@/shared/types/messages";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import {
   MULTI_WORKSPACE_EXPERIMENT_ID,
+  NAVIGATION_REFRESH_EXPERIMENT_ID,
   SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
@@ -1820,6 +1821,81 @@ describe("AppShell global navigation", () => {
       ).toBeUndefined();
     });
     expect(mockToastError).toHaveBeenCalledWith("backend down");
+  });
+
+  it("keeps the active project open after archiving its session in refreshed navigation", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Project chat",
+          projectId: "project-1",
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent(
+      JSON.stringify({ kind: "project", projectId: "project-1" }),
+    );
+  });
+
+  it("keeps an explicitly selected chats panel after archiving a project session", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Project chat",
+          projectId: "project-1",
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
+
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
   });
 
   it("archives the active session with Cmd+E", async () => {

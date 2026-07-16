@@ -3459,6 +3459,20 @@ export function AppShell({
         }
         if (wasActiveSession) {
           setActiveSession(null);
+          if (
+            session.projectId &&
+            navigationRefreshExperiment?.enabled &&
+            effectiveNavigationSecondaryTarget?.kind === "project" &&
+            effectiveNavigationSecondaryTarget.projectId === session.projectId
+          ) {
+            setNavigationSecondaryTarget({
+              kind: "project",
+              projectId: session.projectId,
+            });
+            setNavigationSecondaryPreview(false);
+            setNavigationSecondarySuppressedSessionId(null);
+            setNavigationSecondarySelectionCommitted(true);
+          }
           setActiveView("home");
         }
       };
@@ -3496,7 +3510,13 @@ export function AppShell({
       cleanup();
       return { ok: true as const };
     },
-    [cleanupChatSession, setActiveSession, t],
+    [
+      cleanupChatSession,
+      effectiveNavigationSecondaryTarget,
+      navigationRefreshExperiment?.enabled,
+      setActiveSession,
+      t,
+    ],
   );
 
   const handleArchiveChat = useCallback(
