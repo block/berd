@@ -54,7 +54,7 @@ Result:
       { updateWorkingDir },
       { getGitState },
       { useChatSessionStore },
-      { loadSessionForBerdctl, requireSession },
+      { loadSessionForBerdctl, requireSession, refuseRunningTarget },
     ] = await Promise.all([
       import("../runtime/deadline"),
       import("../runtime/paths"),
@@ -79,9 +79,17 @@ Result:
     // outlive the broker deadline; past it the caller was already told this
     // call failed, so it must not re-point the session afterwards.
     refusePastDeadline(ctx, "the session's worktree was not changed");
+    // The precheck's running guard ran before those same awaits; a turn or
+    // pop-out window can have started since, so recheck at the mutation.
+    refuseRunningTarget(args.session_id, "change the worktree for");
     // Mirror the context panel's change-folder flow: persist the backend
     // session cwd, then update the store so the open chat re-points live.
-    await updateWorkingDir(args.session_id, path);
+    // updateWorkingDir runs this guard after its async client lookup and
+    // synchronously before dispatching the backend mutation, closing the
+    // remaining turn/pop-out race at the renderer mutation boundary.
+    await updateWorkingDir(args.session_id, path, () => {
+      refuseRunningTarget(args.session_id, "change the worktree for");
+    });
     const store = useChatSessionStore.getState();
     store.patchSession(args.session_id, { workingDir: path });
     store.setActiveWorkspace(args.session_id, { path, branch });

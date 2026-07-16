@@ -1,5 +1,8 @@
 import { z } from "zod/v4";
 
+import { formatIncludedWorkspacesPrompt } from "@/features/chat/lib/workspaceAttachments";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+
 import { CommandError, defineCommand } from "../types";
 
 const createSessionSchema = z
@@ -30,6 +33,14 @@ const createSessionSchema = z
       .string()
       .optional()
       .describe("Id of the project to create the session in."),
+    startup_name: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
+      ),
   })
   .strict();
 
@@ -55,9 +66,11 @@ export const createSessionCommand = defineCommand({
     "Fire-and-forget: returns the session id immediately and the session runs in the " +
     "background without changing what the user sees; the user can open it themselves. " +
     'Only check on it later (action "get") if the user asks.',
-  helpFooter: `Example:
+  helpFooter: `Examples:
   berdctl session create --prompt "Triage the failing nightly build" \\
     --harness-id claude-acp --json
+  berdctl session create --prompt "Implement the fix" \\
+    --project-id <project-id> --startup-name my-feature
 
 Result:
   {"session_id": "...", "title": "...", "harness_id": "...",
@@ -73,6 +86,12 @@ Result:
       { sendPromptInBackground },
       { useChatSessionStore },
       { resolveSessionCwd },
+      {
+        planProjectChatWorkspaces,
+        planProjectChatWorkspacesAsIs,
+        projectRequiresStartupWorkspaceName,
+        rollbackProjectChatWorkspacePlan,
+      },
       { GOOSE_PROVIDER_ID },
       { findPersonaOrThrow },
       { findProjectOrThrow },
@@ -81,6 +100,7 @@ Result:
       import("@/features/chat/lib/backgroundSend"),
       import("@/features/chat/stores/chatSessionStore"),
       import("@/features/projects/lib/sessionCwdSelection"),
+      import("@/features/projects/lib/projectChatWorkspaces"),
       import("@/shared/api/acpPersonaHandoff"),
       import("../runtime/agents"),
       import("../runtime/projects"),
@@ -115,26 +135,58 @@ Result:
         );
       }
     }
-    const workingDir = await resolveSessionCwd(project);
-    // Past the broker deadline the agent was already told this call failed;
-    // do not create a session it cannot see.
-    if (
-      ctx.deadlineMs != null &&
-      Date.now() > ctx.deadlineMs - CREATE_DEADLINE_MARGIN_MS
-    ) {
+    const requiresStartupName = Boolean(
+      project && projectRequiresStartupWorkspaceName(project),
+    );
+    const startupName = args.startup_name?.trim();
+    let workspacePlan = project ? planProjectChatWorkspacesAsIs(project) : null;
+    if (requiresStartupName) {
+      if (!project || !startupName) {
+        throw new CommandError(
+          "invalid_args",
+          `Project "${project?.id}" creates a branch or worktree for each new chat; pass --startup-name <name>.`,
+        );
+      }
+      workspacePlan = await planProjectChatWorkspaces(project, startupName);
+    } else if (startupName) {
       throw new CommandError(
-        "timed_out",
-        "Validation took too long; no session was created. Retry once.",
+        "invalid_args",
+        "--startup-name only applies when the selected project's startup mode is branch or worktree.",
       );
     }
-    const session = await useChatSessionStore.getState().createSession({
-      workingDir,
-      projectId: args.project_id,
-      providerId,
-      personaId: persona?.id,
-      modelId: args.model_id,
-      deferProviderSetup: false,
-    });
+    // Even an as-is plan may contain a home-relative or relative project
+    // folder. Keep its full attachment set, but resolve the primary cwd
+    // through the same path resolver used before workspace planning existed.
+    const workingDir = requiresStartupName
+      ? (workspacePlan?.workingDir ?? (await resolveSessionCwd(project)))
+      : await resolveSessionCwd(project);
+    let session: ChatSession;
+    try {
+      // Past the broker deadline the agent was already told this call failed;
+      // do not create a session it cannot see. The workspace plan may already
+      // have created a branch/worktree, so the catch below rolls it back.
+      if (
+        ctx.deadlineMs != null &&
+        Date.now() > ctx.deadlineMs - CREATE_DEADLINE_MARGIN_MS
+      ) {
+        throw new CommandError(
+          "timed_out",
+          "Validation took too long; no session was created. Retry once.",
+        );
+      }
+      session = await useChatSessionStore.getState().createSession({
+        workingDir,
+        projectId: args.project_id,
+        providerId,
+        personaId: persona?.id,
+        modelId: args.model_id,
+        workspaceAttachments: workspacePlan?.workspaceAttachments,
+        deferProviderSetup: false,
+      });
+    } catch (error) {
+      await rollbackProjectChatWorkspacePlan(workspacePlan);
+      throw error;
+    }
     sendPromptInBackground(
       session.id,
       args.prompt,
@@ -142,6 +194,11 @@ Result:
       // fallback only narrows the optional type and mirrors the store default.
       session.providerId ?? GOOSE_PROVIDER_ID,
       persona ?? undefined,
+      {
+        systemPrompt: workspacePlan
+          ? formatIncludedWorkspacesPrompt(session)
+          : undefined,
+      },
     );
     return {
       session_id: session.id,

@@ -1,4 +1,5 @@
 import { dispatchPrompt } from "@/features/chat/lib/sendCore";
+import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
 import type { Persona } from "@/shared/types/agents";
 import type { ChatSendOptions } from "../types";
 
@@ -21,6 +22,10 @@ export function sendPromptInBackground(
   persona?: Pick<Persona, "id" | "displayName" | "systemPrompt">,
   sendOptions: ChatSendOptions = {},
 ): void {
+  const systemPrompt = composeSystemPrompt(
+    persona?.systemPrompt,
+    sendOptions.systemPrompt,
+  );
   void dispatchPrompt(sessionId, prompt, {
     persona: persona
       ? { id: persona.id, name: persona.displayName }
@@ -30,9 +35,9 @@ export function sendPromptInBackground(
     chips: sendOptions.chips,
     userMessageMetadata: sendOptions.userMessageMetadata,
     acpGooseMetadata: sendOptions.acpGooseMetadata,
-    // Exactly the persona's prompt (or none) — a background send must not
-    // pick up whatever agent happens to be active in the foreground UI.
-    systemPrompt: persona?.systemPrompt,
+    // Compose only caller-provided target-session context and the requested
+    // persona, never foreground UI state.
+    systemPrompt,
     // Same isolation rule: the target session's provider, never the
     // foreground active agent's (dispatchPrompt's default).
     providerId,

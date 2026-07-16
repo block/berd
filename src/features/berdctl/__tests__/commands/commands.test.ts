@@ -49,6 +49,10 @@ const mocks = vi.hoisted(() => ({
   archiveProject: vi.fn(),
   updateProject: vi.fn(),
   resolveSessionCwd: vi.fn(),
+  planProjectChatWorkspaces: vi.fn(),
+  planProjectChatWorkspacesAsIs: vi.fn(),
+  projectRequiresStartupWorkspaceName: vi.fn(),
+  rollbackProjectChatWorkspacePlan: vi.fn(),
   resolvePath: vi.fn(),
   checkDirectoriesExist: vi.fn(),
   getGitState: vi.fn(),
@@ -119,9 +123,6 @@ vi.mock("@/features/projects/api/projects", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/projects/api/projects")>();
   return {
-    // Real workspace helpers: setProjectWorktree's metadata-preservation
-    // behavior is exactly what these encode, so stubbing them would make the
-    // preservation tests tautological.
     normalizeProjectWorkspaces: actual.normalizeProjectWorkspaces,
     projectWorkspaceFromDirectory: actual.projectWorkspaceFromDirectory,
     listProjects: (...args: unknown[]) => mocks.listProjects(...args),
@@ -135,6 +136,17 @@ vi.mock("@/features/projects/api/projects", async (importOriginal) => {
 
 vi.mock("@/features/projects/lib/sessionCwdSelection", () => ({
   resolveSessionCwd: (...args: unknown[]) => mocks.resolveSessionCwd(...args),
+}));
+
+vi.mock("@/features/projects/lib/projectChatWorkspaces", () => ({
+  planProjectChatWorkspaces: (...args: unknown[]) =>
+    mocks.planProjectChatWorkspaces(...args),
+  planProjectChatWorkspacesAsIs: (...args: unknown[]) =>
+    mocks.planProjectChatWorkspacesAsIs(...args),
+  projectRequiresStartupWorkspaceName: (...args: unknown[]) =>
+    mocks.projectRequiresStartupWorkspaceName(...args),
+  rollbackProjectChatWorkspacePlan: (...args: unknown[]) =>
+    mocks.rollbackProjectChatWorkspacePlan(...args),
 }));
 
 vi.mock("@/shared/api/agents", () => ({
@@ -316,6 +328,10 @@ beforeEach(() => {
 
   vi.clearAllMocks();
   mocks.resolveSessionCwd.mockResolvedValue("/resolved/cwd");
+  mocks.projectRequiresStartupWorkspaceName.mockReturnValue(false);
+  mocks.planProjectChatWorkspaces.mockResolvedValue(null);
+  mocks.planProjectChatWorkspacesAsIs.mockReturnValue(null);
+  mocks.rollbackProjectChatWorkspacePlan.mockResolvedValue(undefined);
   mocks.acpCreateSession.mockResolvedValue({ sessionId: "session-new" });
   mocks.acpPrepareSession.mockResolvedValue(undefined);
   mocks.acpSendMessage.mockResolvedValue(undefined);
@@ -364,7 +380,15 @@ beforeEach(() => {
     mainWorktreePath: null,
     localBranches: ["main"],
   });
-  mocks.updateWorkingDir.mockResolvedValue(undefined);
+  mocks.updateWorkingDir.mockImplementation(
+    async (
+      _sessionId: string,
+      _workingDir: string,
+      beforeUpdate?: () => void,
+    ) => {
+      beforeUpdate?.();
+    },
+  );
 
   controller.openSession.mockResolvedValue({ ok: true });
   controller.archiveSessionWithCleanup.mockResolvedValue({ ok: true });
@@ -494,7 +518,7 @@ describe("action schemas", () => {
       "projects.create": { name: "Project" },
       "projects.list": {},
       "projects.get": { project_id: "p1" },
-      "projects.set_worktree": { project_id: "p1", path: "/tmp/wt" },
+      "projects.set_startup_mode": { project_id: "p1", mode: "worktree" },
       "projects.archive": { project_id: "p1" },
       "agents.create": { name: "Agent", system_prompt: "Be helpful" },
       "agents.list": {},
@@ -783,6 +807,198 @@ describe("sessions.create", () => {
       "/resolved/cwd",
       expect.objectContaining({ projectId: "project-1" }),
     );
+  });
+
+  it("attaches every project workspace when startup mode is none", async () => {
+    const project = makeProject({
+      id: "project-1",
+      workingDirs: ["~/projects/one", "/projects/two"],
+    });
+    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
+    mocks.listProjects.mockResolvedValue([project]);
+    const attachments = [
+      {
+        id: "ws-one",
+        path: "~/projects/one",
+        kind: "non-git-directory" as const,
+        source: "inferred" as const,
+        branch: null,
+        usedByAgent: true,
+      },
+      {
+        id: "ws-two",
+        path: "/projects/two",
+        kind: "non-git-directory" as const,
+        source: "inferred" as const,
+        branch: null,
+        usedByAgent: true,
+      },
+    ];
+    mocks.planProjectChatWorkspacesAsIs.mockReturnValue({
+      workingDir: "~/projects/one",
+      workspaceAttachments: attachments,
+    });
+
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", project_id: "project-1" },
+      ctx,
+    );
+
+    expect(mocks.planProjectChatWorkspacesAsIs).toHaveBeenCalledWith(project);
+    expect(mocks.resolveSessionCwd).toHaveBeenCalledWith(project);
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "/resolved/cwd",
+      expect.objectContaining({ projectId: "project-1" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new")
+        ?.workspaceAttachments,
+    ).toEqual(attachments);
+    await vi.waitFor(() => {
+      expect(mocks.acpSendMessage).toHaveBeenCalledWith(
+        "session-new",
+        "hi",
+        expect.objectContaining({
+          systemPrompt: expect.stringContaining(
+            "<included-workspaces>\n- path: ~/projects/one",
+          ),
+        }),
+      );
+    });
+  });
+
+  it("creates the session in the project's startup worktree", async () => {
+    const project = makeProject({
+      id: "project-1",
+      projectWorkspaces: [
+        {
+          id: "ws-main",
+          path: "/projects/repo",
+          kind: "git-main-worktree",
+          source: "selected",
+          branch: "main",
+          usedByAgent: false,
+          startupMode: "worktree",
+          repositoryPath: "/projects/repo",
+          worktreePath: "/projects/repo",
+        },
+      ],
+      workingDirs: ["/projects/repo"],
+      useWorktrees: true,
+    });
+    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
+    mocks.listProjects.mockResolvedValue([project]);
+    mocks.projectRequiresStartupWorkspaceName.mockReturnValue(true);
+    const attachments = [
+      {
+        id: "ws-created",
+        path: "/projects/repo-worktrees/my-feature",
+        kind: "git-linked-worktree" as const,
+        source: "created" as const,
+        branch: "my-feature",
+        usedByAgent: true,
+      },
+    ];
+    mocks.planProjectChatWorkspaces.mockResolvedValue({
+      workingDir: "/projects/repo-worktrees/my-feature",
+      workspaceAttachments: attachments,
+    });
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        project_id: "project-1",
+        startup_name: "my-feature",
+      },
+      ctx,
+    );
+
+    expect(mocks.planProjectChatWorkspaces).toHaveBeenCalledWith(
+      project,
+      "my-feature",
+    );
+    expect(mocks.resolveSessionCwd).not.toHaveBeenCalled();
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "/projects/repo-worktrees/my-feature",
+      expect.objectContaining({ projectId: "project-1" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new")
+        ?.workspaceAttachments,
+    ).toEqual(attachments);
+  });
+
+  it("rolls back the startup worktree when session creation fails", async () => {
+    const project = makeProject({ id: "project-1" });
+    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
+    mocks.listProjects.mockResolvedValue([project]);
+    mocks.projectRequiresStartupWorkspaceName.mockReturnValue(true);
+    const workspacePlan = {
+      workingDir: "/projects/repo-worktrees/my-feature",
+      workspaceAttachments: [{ id: "ws-created", path: "/tmp/wt" }],
+    };
+    mocks.planProjectChatWorkspaces.mockResolvedValue(workspacePlan);
+    mocks.acpCreateSession.mockRejectedValueOnce(new Error("backend down"));
+
+    await expect(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          project_id: "project-1",
+          startup_name: "my-feature",
+        },
+        ctx,
+      ),
+    ).rejects.toThrow("backend down");
+    expect(mocks.rollbackProjectChatWorkspacePlan).toHaveBeenCalledWith(
+      workspacePlan,
+    );
+  });
+
+  it("requires startup_name for a project with branch/worktree startup", async () => {
+    const project = makeProject({ id: "project-1" });
+    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
+    mocks.listProjects.mockResolvedValue([project]);
+    mocks.projectRequiresStartupWorkspaceName.mockReturnValue(true);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", project_id: "project-1" },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(mocks.planProjectChatWorkspaces).not.toHaveBeenCalled();
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects startup_name when the project's startup mode is none", async () => {
+    const project = makeProject({ id: "project-1" });
+    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
+    mocks.listProjects.mockResolvedValue([project]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          project_id: "project-1",
+          startup_name: "unused",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
   });
 
   it("fetches projects when the store is empty and throws project_not_found for unknown ids", async () => {
@@ -1687,6 +1903,7 @@ describe("sessions.set_worktree", () => {
     expect(mocks.updateWorkingDir).toHaveBeenCalledWith(
       "session-1",
       "/Users/me/repo-worktrees/feature",
+      expect.any(Function),
     );
     const store = useChatSessionStore.getState();
     expect(store.getSession("session-1")?.workingDir).toBe(
@@ -1769,6 +1986,83 @@ describe("sessions.set_worktree", () => {
     expect(
       useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
     ).toBeUndefined();
+  });
+
+  it("refuses when the session starts running during path validation", async () => {
+    // The precheck's running guard passes (idle), then a turn starts while
+    // the directory probe is in flight; the mutation-time recheck must
+    // refuse instead of re-pointing a now-running session.
+    mockSessionFound();
+    mocks.resolvePath.mockImplementationOnce(async () => {
+      useChatStore.getState().setChatState("session-1", "streaming");
+      return { path: "/tmp/wt" };
+    });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
+        ctx,
+      ),
+      "target_session_running",
+    );
+    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
+    ).toBeUndefined();
+  });
+
+  it("refuses when the session opens in a pop-out window during path validation", async () => {
+    mockSessionFound();
+    mocks.resolvePath.mockImplementationOnce(async () => {
+      useSessionWindowStore
+        .getState()
+        .setSnapshot([
+          { sessionId: "session-1", windowLabel: "session-win-1" },
+        ]);
+      return { path: "/tmp/wt" };
+    });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
+        ctx,
+      ),
+      "target_session_running",
+    );
+    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the session starts running at the backend mutation boundary", async () => {
+    mockSessionFound();
+    mocks.updateWorkingDir.mockImplementationOnce(
+      async (
+        _sessionId: string,
+        _workingDir: string,
+        beforeUpdate?: () => void,
+      ) => {
+        // Simulate getClient() completing after a turn starts, immediately
+        // before the API wrapper dispatches the working-directory mutation.
+        useChatStore.getState().setChatState("session-1", "streaming");
+        beforeUpdate?.();
+      },
+    );
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
+        ctx,
+      ),
+      "target_session_running",
+    );
+    expect(
+      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
+    ).toBeUndefined();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.workingDir,
+    ).not.toBe("/tmp/wt");
   });
 
   it("refuses a running session", async () => {
@@ -1911,6 +2205,7 @@ describe("projects", () => {
       description: "A test project",
       instructions: "Use feature branches only",
       working_dirs: ["/projects/one"],
+      workspaces: [],
       archived: false,
       session_count: 2,
     });
@@ -1979,257 +2274,267 @@ describe("projects", () => {
     expect(error.message).toContain("berdctl project list");
   });
 
-  it("set_worktree swaps the default folder and keeps secondary folders", async () => {
-    const project = makeProject({
-      id: "p-1",
-      workingDirs: ["/projects/one", "/projects/docs"],
-    });
-    useProjectStore.setState({
-      projects: [project],
-      hasFetchedProjects: true,
-    });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.resolvePath.mockResolvedValue({
-      path: "/Users/me/repo-worktrees/feature",
-    });
-
-    const result = await dispatchCommand(
-      "projects",
-      {
-        action: "set_worktree",
-        project_id: "p-1",
-        path: "~/repo-worktrees/feature",
-      },
-      ctx,
-    );
-
-    expect(mocks.updateProject).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "p-1" }),
-      expect.objectContaining({
-        workingDirs: ["/Users/me/repo-worktrees/feature", "/projects/docs"],
-        useWorktrees: false,
-      }),
-    );
-    expect(result).toEqual({
-      ok: true,
-      path: "/Users/me/repo-worktrees/feature",
-      working_dirs: ["/Users/me/repo-worktrees/feature", "/projects/docs"],
-    });
-    expect(useProjectStore.getState().projects[0]?.workingDirs).toEqual([
-      "/Users/me/repo-worktrees/feature",
-      "/projects/docs",
-    ]);
-  });
-
-  it("set_worktree drops a duplicate of the new path from secondary folders", async () => {
-    const project = makeProject({
-      id: "p-1",
-      workingDirs: ["/projects/one", "/projects/feature"],
-    });
-    useProjectStore.setState({
-      projects: [project],
-      hasFetchedProjects: true,
-    });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.resolvePath.mockResolvedValue({ path: "/projects/feature" });
-
-    const result = await dispatchCommand(
-      "projects",
-      { action: "set_worktree", project_id: "p-1", path: "/projects/feature" },
-      ctx,
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      path: "/projects/feature",
-      working_dirs: ["/projects/feature"],
-    });
-  });
-
-  it("set_worktree rejects a missing directory before saving", async () => {
-    const project = makeProject({ id: "p-1" });
-    useProjectStore.setState({
-      projects: [project],
-      hasFetchedProjects: true,
-    });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.checkDirectoriesExist.mockResolvedValue(["/nope"]);
-
-    await expectCommandError(
-      dispatchCommand(
-        "projects",
-        { action: "set_worktree", project_id: "p-1", path: "/nope" },
-        ctx,
-      ),
-      "invalid_args",
-    );
-    expect(mocks.updateProject).not.toHaveBeenCalled();
-  });
-
-  it("set_worktree rejects an inconclusive directory probe without saving", async () => {
-    const project = makeProject({ id: "p-1" });
-    useProjectStore.setState({
-      projects: [project],
-      hasFetchedProjects: true,
-    });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.checkDirectoriesExist.mockRejectedValue(new Error("probe failed"));
-
-    const error = await expectCommandError(
-      dispatchCommand(
-        "projects",
-        { action: "set_worktree", project_id: "p-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "internal_error",
-    );
-    expect(error.message).toContain("nothing was changed");
-    expect(mocks.updateProject).not.toHaveBeenCalled();
-  });
-
-  it("set_worktree refuses past the broker deadline without saving", async () => {
-    const project = makeProject({ id: "p-1" });
-    useProjectStore.setState({
-      projects: [project],
-      hasFetchedProjects: true,
-    });
-    mocks.listProjects.mockResolvedValue([project]);
-
-    await expectCommandError(
-      dispatchCommand(
-        "projects",
-        { action: "set_worktree", project_id: "p-1", path: "/tmp/wt" },
-        { deadlineMs: Date.now() + 1_000 },
-      ),
-      "timed_out",
-    );
-    expect(mocks.updateProject).not.toHaveBeenCalled();
-  });
-
-  it("set_worktree preserves secondary workspace metadata and carries the primary startup mode", async () => {
-    const secondaryWorkspace = {
+  describe("set_startup_mode", () => {
+    const mainWorkspace = {
+      id: "ws-main",
+      path: "/projects/repo",
+      kind: "git-main-worktree" as const,
+      source: "selected" as const,
+      branch: "main",
+      usedByAgent: false,
+      startupMode: "none" as const,
+      repositoryPath: "/projects/repo",
+      worktreePath: "/projects/repo",
+    };
+    const docsWorkspace = {
       id: "ws-docs",
       path: "/projects/docs",
-      kind: "git-linked-worktree" as const,
-      source: "created" as const,
-      branch: "docs-branch",
+      kind: "non-git-directory" as const,
+      source: "selected" as const,
+      branch: null,
       usedByAgent: false,
-      startupMode: "branch" as const,
-      repositoryPath: "/projects/repo",
-      worktreePath: "/projects/docs",
+      startupMode: "none" as const,
     };
-    const project = makeProject({
-      id: "p-1",
-      workingDirs: ["/projects/one", "/projects/docs"],
-      projectWorkspaces: [
-        {
-          id: "ws-one",
-          path: "/projects/one",
-          kind: "git-main-worktree",
-          source: "selected",
-          branch: "main",
-          usedByAgent: false,
-          startupMode: "worktree",
-          repositoryPath: "/projects/one",
-        },
-        secondaryWorkspace,
-      ],
-    });
-    useProjectStore.setState({
-      projects: [project],
-      hasFetchedProjects: true,
-    });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.resolvePath.mockResolvedValue({ path: "/projects/feature" });
 
-    await dispatchCommand(
-      "projects",
-      { action: "set_worktree", project_id: "p-1", path: "/projects/feature" },
-      ctx,
-    );
+    it("enables isolated worktrees for Git workspaces without changing project folders", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [mainWorkspace.path, docsWorkspace.path],
+        projectWorkspaces: [mainWorkspace, docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+      mocks.getGitState
+        .mockResolvedValueOnce({
+          isGitRepo: true,
+          currentBranch: "main",
+          dirtyFileCount: 0,
+          incomingCommitCount: 0,
+          worktrees: [{ path: "/projects/repo", branch: "main", isMain: true }],
+          isWorktree: false,
+          mainWorktreePath: "/projects/repo",
+          localBranches: ["main"],
+        })
+        .mockResolvedValueOnce({
+          isGitRepo: false,
+          currentBranch: null,
+          dirtyFileCount: 0,
+          incomingCommitCount: 0,
+          worktrees: [],
+          isWorktree: false,
+          mainWorktreePath: null,
+          localBranches: [],
+        });
 
-    const updates = mocks.updateProject.mock
-      .calls[0][1] as Partial<ProjectInfo>;
-    expect(updates.projectWorkspaces).toEqual([
-      expect.objectContaining({
-        path: "/projects/feature",
-        source: "selected",
-        // The old primary's startup mode is project behavior, not folder
-        // metadata; it must carry to the new default folder.
-        startupMode: "worktree",
-      }),
-      // The secondary workspace keeps its metadata verbatim instead of being
-      // rebuilt from a bare path.
-      secondaryWorkspace,
-    ]);
-    expect(updates.workingDirs).toEqual([
-      "/projects/feature",
-      "/projects/docs",
-    ]);
-  });
-
-  it("set_worktree rejects an unknown project before checking the path", async () => {
-    await expectCommandError(
-      dispatchCommand(
+      const result = await dispatchCommand(
         "projects",
-        { action: "set_worktree", project_id: "missing", path: "/tmp/wt" },
+        { action: "set_startup_mode", project_id: "p-1", mode: "worktree" },
         ctx,
-      ),
-      "project_not_found",
-    );
-    expect(mocks.updateProject).not.toHaveBeenCalled();
-  });
+      );
 
-  it("set_worktree changes the folder the next new chat in the project starts in", async () => {
-    // One mutable fixture stands in for the backend: updateProject persists
-    // into it and listProjects reads from it, so the second dispatch only
-    // sees the new folder if set_worktree actually persisted it.
-    const backendProjects = [
-      makeProject({ id: "p-1", workingDirs: ["/projects/one"] }),
-    ];
-    mocks.listProjects.mockImplementation(async () => [...backendProjects]);
-    mocks.updateProject.mockImplementation(
-      async (existing: ProjectInfo, updates: Partial<ProjectInfo>) => {
-        const updated = { ...existing, ...updates };
-        const index = backendProjects.findIndex(
-          (candidate) => candidate.id === existing.id,
-        );
-        if (index >= 0) backendProjects[index] = updated;
-        return updated;
-      },
-    );
-    mocks.resolvePath.mockResolvedValue({
-      path: "/Users/me/repo-worktrees/feature",
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "p-1" }),
+        expect.objectContaining({
+          workingDirs: ["/projects/repo", "/projects/docs"],
+          useWorktrees: true,
+          projectWorkspaces: [
+            expect.objectContaining({
+              id: "ws-main",
+              path: "/projects/repo",
+              startupMode: "worktree",
+            }),
+            expect.objectContaining({
+              id: "ws-docs",
+              path: "/projects/docs",
+              startupMode: "none",
+            }),
+          ],
+        }),
+      );
+      expect(result).toEqual({
+        ok: true,
+        mode: "worktree",
+        workspaces: [
+          { path: "/projects/repo", startup_mode: "worktree" },
+          { path: "/projects/docs", startup_mode: "none" },
+        ],
+      });
     });
-    // The real workingDirs[0] precedence is pinned by resolveSessionCwd's own
-    // unit tests (sessionCwdSelection.test.ts); reflecting the project input
-    // here pins that sessions.create consumes the project set_worktree saved.
-    mocks.resolveSessionCwd.mockImplementation(
-      async (project: ProjectInfo | null) =>
-        project?.workingDirs[0] ?? "/fallback",
-    );
 
-    await dispatchCommand(
-      "projects",
-      {
-        action: "set_worktree",
-        project_id: "p-1",
-        path: "/Users/me/repo-worktrees/feature",
-      },
-      ctx,
-    );
+    it("disables startup behavior without probing Git", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [mainWorkspace.path],
+        projectWorkspaces: [{ ...mainWorkspace, startupMode: "worktree" }],
+        useWorktrees: true,
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
 
-    await dispatchCommand(
-      "sessions",
-      { action: "create", prompt: "hi", project_id: "p-1" },
-      ctx,
-    );
+      await dispatchCommand(
+        "projects",
+        { action: "set_startup_mode", project_id: "p-1", mode: "none" },
+        ctx,
+      );
 
-    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
-      "goose",
-      "/Users/me/repo-worktrees/feature",
-      expect.objectContaining({ projectId: "p-1" }),
-    );
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          useWorktrees: false,
+          projectWorkspaces: [expect.objectContaining({ startupMode: "none" })],
+        }),
+      );
+    });
+
+    it("rejects branch mode across different checkouts of the same repository", async () => {
+      const linkedWorkspace = {
+        ...mainWorkspace,
+        id: "ws-linked",
+        path: "/projects/repo-linked",
+        kind: "git-linked-worktree" as const,
+        branch: "feature",
+        worktreePath: "/projects/repo-linked",
+      };
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [mainWorkspace.path, linkedWorkspace.path],
+        projectWorkspaces: [mainWorkspace, linkedWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+      mocks.getGitState.mockImplementation(async (path: string) => ({
+        isGitRepo: true,
+        currentBranch: path.includes("linked") ? "feature" : "main",
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [
+          { path: "/projects/repo", branch: "main", isMain: true },
+          {
+            path: "/projects/repo-linked",
+            branch: "feature",
+            isMain: false,
+          },
+        ],
+        isWorktree: path.includes("linked"),
+        mainWorktreePath: "/projects/repo",
+        localBranches: ["main", "feature"],
+      }));
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "set_startup_mode", project_id: "p-1", mode: "branch" },
+          ctx,
+        ),
+        "invalid_args",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("rejects branch/worktree mode when the project has no Git workspaces", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [docsWorkspace.path],
+        projectWorkspaces: [docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+      mocks.getGitState.mockResolvedValue({
+        isGitRepo: false,
+        currentBranch: null,
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [],
+        isWorktree: false,
+        mainWorktreePath: null,
+        localBranches: [],
+      });
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "set_startup_mode", project_id: "p-1", mode: "worktree" },
+          ctx,
+        ),
+        "invalid_args",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("does not overwrite a project whose folders change during Git inspection", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [mainWorkspace.path],
+        projectWorkspaces: [mainWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+      mocks.getGitState.mockImplementationOnce(async () => {
+        useProjectStore.setState({
+          projects: [
+            makeProject({
+              id: "p-1",
+              workingDirs: [mainWorkspace.path, docsWorkspace.path],
+              projectWorkspaces: [mainWorkspace, docsWorkspace],
+            }),
+          ],
+        });
+        return {
+          isGitRepo: true,
+          currentBranch: "main",
+          dirtyFileCount: 0,
+          incomingCommitCount: 0,
+          worktrees: [],
+          isWorktree: false,
+          mainWorktreePath: mainWorkspace.path,
+          localBranches: ["main"],
+        };
+      });
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "set_startup_mode", project_id: "p-1", mode: "worktree" },
+          ctx,
+        ),
+        "internal_error",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown project", async () => {
+      mocks.listProjects.mockResolvedValue([]);
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          {
+            action: "set_startup_mode",
+            project_id: "missing",
+            mode: "worktree",
+          },
+          ctx,
+        ),
+        "project_not_found",
+      );
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
   });
 });
 

@@ -8,7 +8,7 @@
         "create": {
           "action": "create",
           "about": "Create a new chat session and send a prompt in it (fire-and-forget)",
-          "afterHelp": "Example:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
+          "afterHelp": "Examples:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --json\n  berdctl session create --prompt \"Implement the fix\" \\\n    --project-id <project-id> --startup-name my-feature\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
         },
         "send": {
           "action": "send",
@@ -64,7 +64,7 @@
     },
     "project": {
       "group": "projects",
-      "about": "Manage projects: create, list, get, set worktree, archive",
+      "about": "Manage projects: create, list, get, set startup mode, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -79,12 +79,12 @@
         "get": {
           "action": "get",
           "about": "Read one project's details",
-          "afterHelp": "Example:\n  berdctl project get --project-id <project-id> --json\n\nResult:\n  {\"project_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"instructions\": \"...\", \"working_dirs\": [\"...\"], \"archived\": false,\n   \"session_count\": 4}"
+          "afterHelp": "Example:\n  berdctl project get --project-id <project-id> --json\n\nResult:\n  {\"project_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"instructions\": \"...\", \"working_dirs\": [\"...\"], \"workspaces\": [\n     {\"path\": \"...\", \"startup_mode\": \"worktree\"}\n   ], \"archived\": false, \"session_count\": 4}"
         },
-        "set-worktree": {
-          "action": "set_worktree",
-          "about": "Set a project's default worktree for new chats",
-          "afterHelp": "Only the default (first) project folder is swapped; secondary project\nfolders are preserved. The current value is working_dirs[0] in\n`berdctl project get`.\n\nExample:\n  berdctl project set-worktree --project-id <project-id> \\\n    --path ~/src/repo-worktrees/my-feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"working_dirs\": [\"...\", ...]}"
+        "set-startup-mode": {
+          "action": "set_startup_mode",
+          "about": "Set how a project's new chats start from its Git workspaces",
+          "afterHelp": "The mode applies to every Git workspace configured on the project. Non-Git\nfolders remain in the project but use mode \"none\". Branch and worktree modes\nprompt for a startup name when the next chat is created.\n\nExamples:\n  berdctl project set-startup-mode --project-id <project-id> --mode worktree\n  berdctl project set-startup-mode --project-id <project-id> --mode none\n\nResult:\n  {\"ok\": true, \"mode\": \"worktree\", \"workspaces\": [\n    {\"path\": \"...\", \"startup_mode\": \"worktree\"}\n  ]}"
         },
         "archive": {
           "action": "archive",

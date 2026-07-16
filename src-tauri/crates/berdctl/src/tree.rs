@@ -25,7 +25,7 @@ sees there:
   session   chat sessions        create, open, list, get, rename, move,
                                   send, clear-project, set-worktree, fork,
                                   archive
-  project   projects             create, list, get, set-worktree, archive
+  project   projects             create, list, get, set-startup-mode, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
   info      read-only lookups    harnesses, models, context

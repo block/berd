@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 /// (src-tauri/crates/berdctl); the CLI does not depend on this crate —
 /// bump both together.
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Directory under the app data dir holding the per-instance discovery files.
 pub const DISCOVERY_DIR_NAME: &str = "berdctl";

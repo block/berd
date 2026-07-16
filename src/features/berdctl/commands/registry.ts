@@ -22,7 +22,7 @@ import { moveSessionCommand } from "./impl/moveSession";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
-import { setProjectWorktreeCommand } from "./impl/setProjectWorktree";
+import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
 import { setSessionWorktreeCommand } from "./impl/setSessionWorktree";
 import { commandBridgeTimeoutMs } from "./timeouts";
 import { CommandError, type CommandContext, type ToolGroup } from "./types";
@@ -83,15 +83,15 @@ export const TOOL_GROUPS = {
   },
   projects: {
     description:
-      "Manage the user's projects: create, list, get, set worktree, archive.",
+      "Manage the user's projects: create, list, get, set startup mode, archive.",
     cli: {
       noun: "project",
-      about: "Manage projects: create, list, get, set worktree, archive",
+      about: "Manage projects: create, list, get, set startup mode, archive",
       verbs: {
         create: "create",
         list: "list",
         get: "get",
-        "set-worktree": "set_worktree",
+        "set-startup-mode": "set_startup_mode",
         archive: "archive",
       },
     },
@@ -99,7 +99,7 @@ export const TOOL_GROUPS = {
       create: createProjectCommand,
       list: listProjectsCommand,
       get: getProjectCommand,
-      set_worktree: setProjectWorktreeCommand,
+      set_startup_mode: setProjectStartupModeCommand,
       archive: archiveProjectCommand,
     },
   },

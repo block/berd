@@ -14,6 +14,10 @@ interface GetProjectResult {
   description: string;
   instructions: string;
   working_dirs: string[];
+  workspaces: Array<{
+    path: string;
+    startup_mode: "none" | "branch" | "worktree";
+  }>;
   archived: boolean;
   session_count: number;
 }
@@ -24,15 +28,16 @@ export const getProjectCommand = defineCommand({
   destructive: false,
   summary: "Read one project's details",
   description:
-    "Read one project's details (instructions, working directories, session count); " +
+    "Read one project's details (instructions, working directories, per-workspace startup modes, session count); " +
     "does not change anything on screen.",
   helpFooter: `Example:
   berdctl project get --project-id <project-id> --json
 
 Result:
   {"project_id": "...", "name": "...", "description": "...",
-   "instructions": "...", "working_dirs": ["..."], "archived": false,
-   "session_count": 4}`,
+   "instructions": "...", "working_dirs": ["..."], "workspaces": [
+     {"path": "...", "startup_mode": "worktree"}
+   ], "archived": false, "session_count": 4}`,
   schema: getProjectSchema,
   execute: async (args): Promise<GetProjectResult> => {
     const [
@@ -59,6 +64,10 @@ Result:
       description: project.description,
       instructions: project.prompt,
       working_dirs: project.workingDirs,
+      workspaces: project.projectWorkspaces.map((workspace) => ({
+        path: workspace.path,
+        startup_mode: workspace.startupMode,
+      })),
       archived: project.archivedAt != null,
       session_count: sessionCount,
     };

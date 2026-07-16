@@ -1,6 +1,6 @@
 {
   "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. Client-neutral wire surface of the Berd desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the berdctl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (berdctl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/berdctl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/berdctl/__tests__/apiSurface.test.ts).",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "groups": {
     "sessions": {
       "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, clear project, set worktree, fork, archive.",
@@ -39,6 +39,14 @@
               "required": false,
               "kind": "string",
               "description": "Id of the project to create the session in."
+            },
+            {
+              "name": "startup_name",
+              "required": false,
+              "kind": "string",
+              "description": "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
+              "min": 1,
+              "max": 200
             }
           ],
           "schema": {
@@ -66,6 +74,12 @@
               "project_id": {
                 "description": "Id of the project to create the session in.",
                 "type": "string"
+              },
+              "startup_name": {
+                "description": "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
               }
             },
             "required": ["prompt"],
@@ -417,7 +431,7 @@
       }
     },
     "projects": {
-      "description": "Manage the user's projects: create, list, get, set worktree, archive.",
+      "description": "Manage the user's projects: create, list, get, set startup mode, archive.",
       "actions": {
         "create": {
           "description": "Create a new project; it appears immediately in the app's project list.",
@@ -475,7 +489,7 @@
           }
         },
         "get": {
-          "description": "Read one project's details (instructions, working directories, session count); does not change anything on screen.",
+          "description": "Read one project's details (instructions, working directories, per-workspace startup modes, session count); does not change anything on screen.",
           "fields": [
             {
               "name": "project_id",
@@ -497,8 +511,8 @@
             "additionalProperties": false
           }
         },
-        "set_worktree": {
-          "description": "Set a project's default worktree: the folder new chats in the project start in. Takes effect for the next new chat; existing chats keep their current folder. The project's other configured folders are kept as secondary folders.",
+        "set_startup_mode": {
+          "description": "Set the startup behavior for new chats in a project. `worktree` creates an isolated Git worktree per chat, `branch` creates a branch, and `none` uses the configured folders as-is. Existing chats and project folder paths are not changed.",
           "fields": [
             {
               "name": "project_id",
@@ -507,11 +521,11 @@
               "description": "Id of the project to update."
             },
             {
-              "name": "path",
+              "name": "mode",
               "required": true,
               "kind": "string",
-              "description": "Path of the worktree (or plain folder) new chats in the project should start in; must already exist on disk. `~` is expanded.",
-              "min": 1
+              "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree.",
+              "values": ["none", "branch", "worktree"]
             }
           ],
           "schema": {
@@ -522,13 +536,13 @@
                 "description": "Id of the project to update.",
                 "type": "string"
               },
-              "path": {
-                "description": "Path of the worktree (or plain folder) new chats in the project should start in; must already exist on disk. `~` is expanded.",
+              "mode": {
+                "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree.",
                 "type": "string",
-                "minLength": 1
+                "enum": ["none", "branch", "worktree"]
               }
             },
-            "required": ["project_id", "path"],
+            "required": ["project_id", "mode"],
             "additionalProperties": false
           }
         },

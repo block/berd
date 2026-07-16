@@ -140,7 +140,7 @@ export async function rollbackProjectChatWorkspacePlan(
       const worktreePath =
         target.worktreePath ?? attachment.worktreePath ?? attachment.path;
       try {
-        await removeWorktree(repositoryPath, worktreePath, true);
+        await removeWorktree(repositoryPath, worktreePath, false);
       } catch (error) {
         errors.push(`remove worktree ${worktreePath}: ${errorMessage(error)}`);
       }
@@ -150,7 +150,7 @@ export async function rollbackProjectChatWorkspacePlan(
           await deleteBranch(
             repositoryPath,
             target.branch,
-            true,
+            false,
             target.baseBranch ?? undefined,
           );
         } catch (error) {
@@ -170,7 +170,7 @@ export async function rollbackProjectChatWorkspacePlan(
         await deleteBranch(
           checkoutPath,
           target.branch,
-          true,
+          false,
           target.baseBranch ?? undefined,
         );
       } catch (error) {
@@ -613,13 +613,13 @@ export async function planProjectChatWorkspaces(
               deleteBranch(
                 repositoryPath,
                 newWorktree.branch,
-                true,
+                false,
                 baseBranch,
               ),
           });
           rollbackActions.push({
             description: `remove worktree ${newWorktree.path}`,
-            run: () => removeWorktree(repositoryPath, newWorktree.path, true),
+            run: () => removeWorktree(repositoryPath, newWorktree.path, false),
           });
         }
         attachments.push(
@@ -646,7 +646,7 @@ export async function planProjectChatWorkspaces(
             deleteBranch(
               gitContext.operationPath,
               trimmedStartupName,
-              true,
+              false,
               baseBranch,
             ),
         });

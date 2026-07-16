@@ -281,7 +281,9 @@ mod tests {
             ("project", "create") => vec!["--name", "n"],
             ("project", "list") => vec![],
             ("project", "get") => vec!["--project-id", "p"],
-            ("project", "set-worktree") => vec!["--project-id", "p", "--path", "/w"],
+            ("project", "set-startup-mode") => {
+                vec!["--project-id", "p", "--mode", "worktree"]
+            }
             ("project", "archive") => vec!["--project-id", "p"],
             ("agent", "create") => vec!["--name", "n", "--system-prompt", "sp"],
             ("agent", "list") => vec![],
@@ -540,7 +542,7 @@ sees there:
   session   chat sessions        create, open, list, get, rename, move,
                                   send, clear-project, set-worktree, fork,
                                   archive
-  project   projects             create, list, get, set-worktree, archive
+  project   projects             create, list, get, set-startup-mode, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
   info      read-only lookups    harnesses, models, context
@@ -554,7 +556,7 @@ Usage: berdctl [OPTIONS] <COMMAND>
 Commands:
   session  Manage chat sessions: create, send, open, list, get, rename, move,
            clear project, set worktree, fork, archive
-  project  Manage projects: create, list, get, set worktree, archive
+  project  Manage projects: create, list, get, set startup mode, archive
   agent    Manage agents (personas): create, list
   skill    Manage skills: create, list, get
   info     Look up installed harnesses, available models, and the app context
@@ -619,6 +621,10 @@ Options:
       --project-id <PROJECT_ID>
           Id of the project to create the session in.
 
+      --startup-name <STARTUP_NAME>
+          Branch/worktree name when the project's startup mode is branch or
+          worktree; required for those modes.
+
       --json
           Print the raw JSON result on a single line (default: pretty-printed
           JSON)
@@ -630,9 +636,11 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-Example:
+Examples:
   berdctl session create --prompt "Triage the failing nightly build" \
     --harness-id claude-acp --json
+  berdctl session create --prompt "Implement the fix" \
+    --project-id <project-id> --startup-name my-feature
 
 Result:
   {"session_id": "...", "title": "...", "harness_id": "...",

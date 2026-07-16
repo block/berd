@@ -43,6 +43,7 @@ export interface ChatSkillDraft {
 }
 
 export interface ChatSendOptions {
+  systemPrompt?: string;
   displayText?: string;
   assistantPrompt?: string;
   chips?: MessageChip[];

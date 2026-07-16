@@ -1340,13 +1340,13 @@ describe("AppShell global navigation", () => {
       expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
         "/repo",
         "/repo-worktrees/chat-123",
-        true,
+        false,
       );
     });
     expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
       "/repo",
       "chat-123",
-      true,
+      false,
       "main",
     );
     expect(useChatSessionStore.getState().sessions[0]).toEqual(

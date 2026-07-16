@@ -753,7 +753,7 @@ describe("project chat workspaces", () => {
     expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
       "/repo",
       "chat-123",
-      true,
+      false,
       "main",
     );
     expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
@@ -804,12 +804,12 @@ describe("project chat workspaces", () => {
     expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
       "/repo",
       "/repo-worktrees/chat-123",
-      true,
+      false,
     );
     expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
       "/repo",
       "chat-123",
-      true,
+      false,
       "main",
     );
   });
@@ -834,13 +834,13 @@ describe("project chat workspaces", () => {
     expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
       "/repo",
       "/repo-worktrees/chat-123",
-      true,
+      false,
     );
     expect(gitMocks.deleteBranch).toHaveBeenCalledOnce();
     expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
       "/repo",
       "chat-123",
-      true,
+      false,
       "main",
     );
   });
@@ -862,8 +862,30 @@ describe("project chat workspaces", () => {
     expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
       "/repo",
       "chat-123",
-      true,
+      false,
       "main",
+    );
+  });
+
+  it("reports non-forceful rollback failures instead of deleting concurrent edits", async () => {
+    const plan = await planProjectChatWorkspaces(
+      project({
+        projectWorkspaces: [workspace("/repo/builderbot", "worktree")],
+        workingDirs: ["/repo/builderbot"],
+      }),
+      "chat-123",
+    );
+    gitMocks.removeWorktree.mockRejectedValueOnce(
+      new Error("worktree contains modified or untracked files"),
+    );
+
+    await expect(rollbackProjectChatWorkspacePlan(plan)).rejects.toThrow(
+      "Workspace startup rollback failed: remove worktree /repo-worktrees/chat-123: worktree contains modified or untracked files",
+    );
+    expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
+      "/repo",
+      "/repo-worktrees/chat-123",
+      false,
     );
   });
 

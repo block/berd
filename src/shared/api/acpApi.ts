@@ -302,8 +302,13 @@ export async function setProvider(
 export async function updateWorkingDir(
   sessionId: string,
   workingDir: string,
+  beforeUpdate?: () => void,
 ): Promise<void> {
   const client = await getClient();
+  // Run guards after the asynchronous client lookup and synchronously before
+  // dispatching the mutation. This lets callers close local state races
+  // without exposing the ACP client or duplicating the wire operation.
+  beforeUpdate?.();
   await client.goose.GooseUnstableSessionWorkingDirUpdate({
     sessionId,
     workingDir,
