@@ -40,6 +40,12 @@ import {
 } from "@/features/home/hooks/usePinToHomeWidget";
 import { getPinnedHomeChatSessionIds } from "@/features/home/lib/pinnedHomeChats";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import {
+  buildRefreshedNavigationRows,
+  groupRefreshedNavigationProjectSessions,
+  orderRefreshedNavigationSessions,
+  type RefreshedNavigationCycleRow,
+} from "@/features/navigation/lib/refreshedNavigationSessionOrder";
 import { cn } from "@/shared/lib/cn";
 import type { AppView } from "@/app/AppShell";
 import type {
@@ -330,6 +336,10 @@ export interface NavigationPanesViewProps {
     target: NavigationSecondaryTarget,
   ) => void;
   onPrototypeSecondarySelect?: () => void;
+  onPrototypeCycleRowsChange?: (
+    target: NavigationSecondaryTarget,
+    rows: readonly RefreshedNavigationCycleRow[],
+  ) => void;
   prototypeSecondaryPreview?: boolean;
   onPrototypeSecondaryPreviewChange?: (preview: boolean) => void;
   prototypePrimaryWidth?: number;
@@ -450,24 +460,6 @@ function eventTargetIsInsideElement(
   return target instanceof Node && element !== null && element.contains(target);
 }
 
-function compareSessionsByUpdatedAtDesc(a: ChatSession, b: ChatSession) {
-  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-}
-
-function comparePrototypeSessions(
-  pinnedSessionIds: ReadonlySet<string>,
-  a: ChatSession,
-  b: ChatSession,
-) {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
-  if (aPinned !== bPinned) {
-    return aPinned ? -1 : 1;
-  }
-
-  return compareSessionsByUpdatedAtDesc(a, b);
-}
-
 function compareSessionsByArchivedAtDesc(a: ChatSession, b: ChatSession) {
   return (
     new Date(b.archivedAt ?? b.updatedAt).getTime() -
@@ -488,9 +480,10 @@ function getVisiblePrototypeChatSessions(
   sessions: ChatSession[],
   pinnedSessionIds: ReadonlySet<string>,
 ) {
-  return sessions
-    .filter((session) => !session.archivedAt)
-    .sort((a, b) => comparePrototypeSessions(pinnedSessionIds, a, b));
+  return orderRefreshedNavigationSessions(
+    sessions.filter((session) => !session.archivedAt),
+    pinnedSessionIds,
+  );
 }
 
 function getLoosePrototypeChatSessions(sessions: ChatSession[]) {
@@ -671,54 +664,23 @@ function groupPrototypeProjectSessions(
   sessions: ChatSession[],
 ): { groups: PrototypeProjectGroup[]; ungroupedSessions: ChatSession[] } {
   if (!project) return { groups: [], ungroupedSessions: sessions };
-  const persistedGroups = project.chatGroups?.groups ?? [];
-  if (persistedGroups.length === 0) {
-    return { groups: [], ungroupedSessions: sessions };
-  }
-
-  const sessionsById = new Map(
-    sessions.map((session) => [session.id, session]),
+  const grouped = groupRefreshedNavigationProjectSessions(
+    sessions,
+    project.chatGroups?.groups ?? [],
   );
-  const sessionsByClientId = new Map(
-    sessions
-      .filter((session) => session.clientSessionId)
-      .map((session) => [session.clientSessionId as string, session]),
-  );
-  const groupedSessionIds = new Set<string>();
-  const groups = persistedGroups.map((group) => {
-    const chats = group.chatIds
-      .map(
-        (chatId) => sessionsById.get(chatId) ?? sessionsByClientId.get(chatId),
-      )
-      .filter((session): session is ChatSession => Boolean(session))
-      .map((session): PrototypeProjectChatItem => {
-        groupedSessionIds.add(session.id);
-        if (session.clientSessionId) {
-          groupedSessionIds.add(session.clientSessionId);
-        }
-
-        return {
+  return {
+    groups: grouped.groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      chats: group.sessions.map(
+        (session): PrototypeProjectChatItem => ({
           id: session.id,
           session,
           title: session.title,
-        };
-      });
-
-    return {
-      id: group.id,
-      name: group.name,
-      chats,
-    };
-  });
-
-  return {
-    groups,
-    ungroupedSessions: sessions.filter(
-      (session) =>
-        !groupedSessionIds.has(session.id) &&
-        (!session.clientSessionId ||
-          !groupedSessionIds.has(session.clientSessionId)),
-    ),
+        }),
+      ),
+    })),
+    ungroupedSessions: grouped.ungroupedSessions,
   };
 }
 
@@ -1885,6 +1847,7 @@ function PrototypeSecondaryPanel({
   onOpenSettingsSection,
   onSecondarySelect,
   onSelectSession,
+  onCycleRowsChange,
   onShowChatIconsChange,
   onShowChatTimestampsChange,
   onUpdateProjectChatGroups,
@@ -1922,6 +1885,10 @@ function PrototypeSecondaryPanel({
   onSelectSession?: (
     sessionId: string,
     options?: NavigationSelectSessionOptions,
+  ) => void;
+  onCycleRowsChange?: (
+    target: NavigationSecondaryTarget,
+    rows: readonly RefreshedNavigationCycleRow[],
   ) => void;
   onShowChatIconsChange: (showChatIcons: boolean) => void;
   onShowChatTimestampsChange: (showChatTimestamps: boolean) => void;
@@ -2206,6 +2173,37 @@ function PrototypeSecondaryPanel({
   const visibleUngroupedChats = ungroupedChats.filter(
     (chat) => !hiddenTopLevelProjectDraftIds.has(chat.id),
   );
+  const projectCycleRows = buildRefreshedNavigationRows({
+    groups: projectGroups.map((group) => ({
+      id: group.id,
+      expanded: expandedProjectGroupIds[group.id] ?? true,
+      items: group.chats,
+    })),
+    ungroupedItems: visibleUngroupedChats,
+    getId: (chat) => chat.session?.id ?? chat.id,
+    isSelectable: (chat) => chat.session !== null && !chat.placeholder,
+  });
+  const renderedChatSessions =
+    chatViewMode === "week"
+      ? chatWeekGroups.flatMap((group) => group.sessions)
+      : chatSessions;
+  const chatCycleRows = buildRefreshedNavigationRows({
+    ungroupedItems: renderedChatSessions,
+    getId: (session) => session.id,
+    isSelectable: () => true,
+  });
+
+  useEffect(() => {
+    if (!onCycleRowsChange || !secondaryTarget) return;
+    if (secondaryTarget.kind === "project") {
+      onCycleRowsChange(secondaryTarget, projectCycleRows);
+      return;
+    }
+    if (secondaryTarget.kind === "chats") {
+      onCycleRowsChange(secondaryTarget, chatCycleRows);
+    }
+  }, [chatCycleRows, onCycleRowsChange, projectCycleRows, secondaryTarget]);
+
   const currentPersistedProjectGroups = project?.chatGroups?.groups ?? [];
   const getProjectChatMetadataId = (chat: PrototypeProjectChatItem) =>
     chat.session?.id ?? chat.id;
@@ -3317,6 +3315,7 @@ export function NavigationPanesView({
   prototypeSecondaryTarget = null,
   onPrototypeSecondaryTargetChange,
   onPrototypeSecondarySelect,
+  onPrototypeCycleRowsChange,
   onPrototypeSecondaryPreviewChange,
   prototypePrimaryWidth = width,
   prototypeSecondaryWidth = NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
@@ -4537,6 +4536,7 @@ export function NavigationPanesView({
             onOpenSettingsSection={onOpenSettingsSection}
             onSecondarySelect={handlePrototypeSecondarySelect}
             onSelectSession={onSelectSession}
+            onCycleRowsChange={onPrototypeCycleRowsChange}
             onShowChatIconsChange={
               renderedPrototypeSecondaryTarget.kind === "project"
                 ? setShowPrototypeProjectChatIcons

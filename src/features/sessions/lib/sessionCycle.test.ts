@@ -108,4 +108,13 @@ describe("resolveSessionCycleTarget", () => {
   it("returns the single candidate when it is not active", () => {
     expect(resolveSessionCycleTarget([sessions[0]], null, 1)).toBe("b");
   });
+
+  it("preserves an explicit sidebar order", () => {
+    expect(
+      resolveSessionCycleTarget(sessions, "b", 1, { preserveOrder: true }),
+    ).toBe("a");
+    expect(
+      resolveSessionCycleTarget(sessions, "b", -1, { preserveOrder: true }),
+    ).toBe("c");
+  });
 });

@@ -4359,6 +4359,7 @@ describe("NavigationPanesView", () => {
 
   it("switches the prototype chats secondary panel between latest, week, unread, and archived", async () => {
     const user = userEvent.setup();
+    const onPrototypeCycleRowsChange = vi.fn();
     const now = new Date();
     const currentWeekStart = new Date(
       now.getFullYear(),
@@ -4377,6 +4378,7 @@ describe("NavigationPanesView", () => {
     mockSessionStateById = {
       "unread-chat": { hasUnread: true },
     };
+    seedPinnedHomeChats("older-chat");
     seedSessions(
       {
         id: "latest-chat",
@@ -4407,6 +4409,7 @@ describe("NavigationPanesView", () => {
 
     renderSidebar({
       activeView: "home",
+      onPrototypeCycleRowsChange,
       prototypeMode: "hybrid-push-overlay",
       prototypeSecondaryPush: true,
       prototypeSecondaryTarget: { kind: "chats" },
@@ -4436,6 +4439,14 @@ describe("NavigationPanesView", () => {
     expect(
       within(chatsNavigation).getByRole("button", { name: "Latest Chat" }),
     ).toBeInTheDocument();
+    await waitFor(() => {
+      const latestRows = onPrototypeCycleRowsChange.mock.calls.at(-1)?.[1];
+      expect(latestRows?.map((row: { id: string }) => row.id)).toEqual([
+        "latest-chat",
+        "unread-chat",
+        "older-chat",
+      ]);
+    });
 
     await user.click(
       within(chatsNavigation).getByRole("button", {

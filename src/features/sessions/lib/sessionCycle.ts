@@ -41,10 +41,11 @@ export function scopeSessionCycleCandidates<T extends CycleSession>(
 /**
  * Resolve the session Ctrl+Tab-style cycling should activate next.
  *
- * Sessions cycle in most-recently-active order (the sidebar/quick-switcher
- * ordering), wrapping at both ends. Selecting a session doesn't change its
- * activity timestamp, so repeated presses walk the list predictably instead
- * of ping-ponging between the two newest sessions.
+ * Sessions default to most-recently-active order and wrap at both ends.
+ * Callers can pass an already ordered sidebar list with `preserveOrder` so the
+ * keyboard sequence exactly follows the rows users see. Selecting a session
+ * doesn't change its activity timestamp, so repeated presses walk the list
+ * predictably instead of ping-ponging between the two newest sessions.
  *
  * When no candidate is active (home view, or a draft/archived/other-window
  * session), both directions enter the list at the most recent session —
@@ -57,11 +58,14 @@ export function resolveSessionCycleTarget(
   sessions: readonly CycleSession[],
   activeSessionId: string | null,
   direction: SessionCycleDirection,
+  options: { preserveOrder?: boolean } = {},
 ): string | null {
   if (sessions.length === 0) {
     return null;
   }
-  const ordered = [...sessions].sort(compareSessionsByActivityDesc);
+  const ordered = options.preserveOrder
+    ? [...sessions]
+    : [...sessions].sort(compareSessionsByActivityDesc);
   const currentIndex =
     activeSessionId === null
       ? -1

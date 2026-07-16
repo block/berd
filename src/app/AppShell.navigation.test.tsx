@@ -236,6 +236,7 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
     onNewChatInProject,
     onSettingsClick,
     onSettingsSectionChange,
+    onPrototypeCycleRowsChange,
     onPrototypeSecondaryTargetChange,
     prototypeSecondaryTarget,
     width,
@@ -247,6 +248,16 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
     onNewChatInProject?: (projectId: string) => void;
     onSettingsClick?: () => void;
     onSettingsSectionChange?: (section: "providers") => void;
+    onPrototypeCycleRowsChange?: (
+      target: { kind: "chats" } | { kind: "project"; projectId: string },
+      rows: Array<{
+        id: string;
+        groupId: string | null;
+        item: ChatSession;
+        selectable: boolean;
+        visible: boolean;
+      }>,
+    ) => void;
     onPrototypeSecondaryTargetChange?: (
       target: { kind: "chats" } | { kind: "project"; projectId: string },
     ) => void;
@@ -264,6 +275,53 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
       </div>
       <button type="button" onClick={onNewChat}>
         Sidebar new chat
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onPrototypeCycleRowsChange?.(
+            { kind: "project", projectId: "berd" },
+            useChatSessionStore
+              .getState()
+              .sessions.filter((session) => session.projectId === "berd")
+              .sort(
+                (a, b) =>
+                  ["oldest", "session-2", "newest-message"].indexOf(a.id) -
+                  ["oldest", "session-2", "newest-message"].indexOf(b.id),
+              )
+              .map((session) => ({
+                id: session.id,
+                groupId: session.id === "newest-message" ? null : "priority",
+                item: session,
+                selectable: true,
+                visible: session.id !== "oldest",
+              })),
+          )
+        }
+      >
+        Seed Berd cycle rows
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onPrototypeCycleRowsChange?.(
+            { kind: "chats" },
+            useChatSessionStore
+              .getState()
+              .sessions.filter((session) =>
+                ["session-2", "loose"].includes(session.id),
+              )
+              .map((session) => ({
+                id: session.id,
+                groupId: null,
+                item: session,
+                selectable: true,
+                visible: true,
+              })),
+          )
+        }
+      >
+        Seed chats cycle rows
       </button>
       <button type="button" onClick={() => onNewChatInProject?.("project-2")}>
         Sidebar new project 2 chat
@@ -4239,6 +4297,147 @@ describe("AppShell global navigation", () => {
     expect(
       await screen.findByPlaceholderText("Jump to session..."),
     ).toBeInTheDocument();
+  });
+
+  it("matches the refreshed navigation's updatedAt order when cycling", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    const sessionBase = {
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+      projectId: "berd",
+    } satisfies Partial<ChatSession>;
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          ...sessionBase,
+          id: "newest-message",
+          title: "Newest message",
+          updatedAt: "2026-06-09T10:00:00.000Z",
+          lastMessageAt: "2026-06-09T15:00:00.000Z",
+        },
+        {
+          ...sessionBase,
+          id: "session-2",
+          title: "Newest update",
+          updatedAt: "2026-06-09T14:00:00.000Z",
+          lastMessageAt: "2026-06-09T09:00:00.000Z",
+        },
+        {
+          ...sessionBase,
+          id: "oldest",
+          title: "Oldest",
+          updatedAt: "2026-06-09T08:00:00.000Z",
+          lastMessageAt: "2026-06-09T08:00:00.000Z",
+        },
+      ] as ChatSession[],
+      activeSessionId: null,
+    });
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "berd",
+          name: "Berd",
+          path: "/tmp/berd.md",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "blue",
+          workingDirs: ["/repo"],
+          projectWorkspaces: [],
+          useWorktrees: true,
+          order: 0,
+          archivedAt: null,
+          chatGroups: {
+            groups: [
+              {
+                id: "priority",
+                name: "Priority",
+                chatIds: ["oldest", "session-2"],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    renderAppShell();
+    await user.click(
+      screen.getByRole("button", { name: "Seed Berd cycle rows" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Open session 2" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-2",
+      );
+    });
+
+    // Forward follows persisted group/chat order, not activity order.
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "newest-message",
+      );
+    });
+
+    // Backward skips the collapsed row and wraps to the previous visible row.
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-2",
+      );
+    });
+
+    // A collapsed active row enters the cycle at the next visible row.
+    await user.click(screen.getByRole("button", { name: "Open session 2" }));
+    useChatSessionStore.setState({ activeSessionId: "oldest" });
+    useChatStore.setState({ activeSessionId: "oldest" });
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-2",
+      );
+    });
+  });
+
+  it("uses the explicitly selected Chats context for refreshed cycling", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    const sessionBase = {
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T12:00:00.000Z",
+      messageCount: 1,
+    } satisfies Partial<ChatSession>;
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          ...sessionBase,
+          id: "session-2",
+          title: "Project chat",
+          projectId: "berd",
+        },
+        { ...sessionBase, id: "loose", title: "Loose chat" },
+      ] as ChatSession[],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+    await user.click(screen.getByRole("button", { name: "Open session 2" }));
+    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
+    await user.click(
+      screen.getByRole("button", { name: "Seed chats cycle rows" }),
+    );
+
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "loose",
+      );
+    });
   });
 
   it("cycles sessions with Ctrl+Tab and Ctrl+Shift+Tab", async () => {

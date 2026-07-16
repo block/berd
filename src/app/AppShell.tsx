@@ -81,6 +81,10 @@ import { useAppStartup } from "./hooks/useAppStartup";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import {
+  resolveRefreshedNavigationCycleTarget,
+  type RefreshedNavigationCycleRow,
+} from "@/features/navigation/lib/refreshedNavigationSessionOrder";
 import { useProjectDialog } from "./hooks/useProjectDialog";
 import {
   getResponsiveSidebarWidth,
@@ -695,8 +699,11 @@ export function AppShell({
   const navigationChatsUnderProjectsExperiment = useExperiment(
     NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   );
+  const isNavigationRefreshEnabled = Boolean(
+    navigationRefreshExperiment?.enabled,
+  );
   const isNavigationPrototypeEnabled =
-    Boolean(navigationRefreshExperiment?.enabled) && !import.meta.env.VITEST;
+    isNavigationRefreshEnabled && !import.meta.env.VITEST;
   const showNavigationPrototypeChatsUnderProjects =
     isNavigationPrototypeEnabled &&
     Boolean(navigationChatsUnderProjectsExperiment?.enabled);
@@ -707,6 +714,19 @@ export function AppShell({
     useState<NavigationSecondaryTarget>(null);
   const [navigationSecondaryPreview, setNavigationSecondaryPreview] =
     useState(false);
+  const navigationCycleRowsRef = useRef<{
+    target: NavigationSecondaryTarget;
+    rows: readonly RefreshedNavigationCycleRow[];
+  } | null>(null);
+  const handleNavigationCycleRowsChange = useCallback(
+    (
+      target: NavigationSecondaryTarget,
+      rows: readonly RefreshedNavigationCycleRow[],
+    ) => {
+      navigationCycleRowsRef.current = { target, rows };
+    },
+    [],
+  );
   const [
     navigationSecondarySuppressedSessionId,
     setNavigationSecondarySuppressedSessionId,
@@ -4429,18 +4449,38 @@ export function AppShell({
           ? (sessions.find((session) => session.id === currentSessionId) ??
             null)
           : null;
-        const scopedCandidates = scopeSessionCycleCandidates(
-          candidates,
-          getSessionCycleProjectScope(
-            currentSession,
-            isNavigationPrototypeEnabled,
-          ),
-        );
-        const targetId = resolveSessionCycleTarget(
-          scopedCandidates,
-          currentSessionId,
-          cycleDirection,
-        );
+        const renderedCycleRows = navigationCycleRowsRef.current;
+        const renderedTargetMatches =
+          isNavigationRefreshEnabled &&
+          renderedCycleRows &&
+          getNavigationSecondaryTargetKey(renderedCycleRows.target) ===
+            getNavigationSecondaryTargetKey(effectiveNavigationSecondaryTarget);
+        const targetId = renderedTargetMatches
+          ? resolveRefreshedNavigationCycleTarget(
+              renderedCycleRows.rows.map((row) => ({
+                ...row,
+                selectable:
+                  row.selectable &&
+                  sessions.some((session) => session.id === row.id) &&
+                  !(
+                    isMultiWindowEnabled &&
+                    sessionWindowStore.isOpenInWindow(row.id)
+                  ),
+              })),
+              currentSessionId,
+              cycleDirection,
+            )
+          : resolveSessionCycleTarget(
+              scopeSessionCycleCandidates(
+                candidates,
+                getSessionCycleProjectScope(
+                  currentSession,
+                  isNavigationRefreshEnabled,
+                ),
+              ),
+              currentSessionId,
+              cycleDirection,
+            );
         if (targetId) {
           handleSelectSession(targetId);
         }
@@ -4521,6 +4561,7 @@ export function AppShell({
     clearGlobalComposerHandoffTimer,
     closeDesignSystem,
     createNewProjectDraft,
+    effectiveNavigationSecondaryTarget,
     globalComposerPlacement,
     goBack,
     goForward,
@@ -4529,7 +4570,7 @@ export function AppShell({
     handleNavigate,
     handleSelectSession,
     isMultiWindowEnabled,
-    isNavigationPrototypeEnabled,
+    isNavigationRefreshEnabled,
     leaveSecondarySurface,
     newConversationShortcutProject,
     resetGlobalComposerTransition,
@@ -4636,6 +4677,7 @@ export function AppShell({
           onPrototypeSecondaryTargetChange:
             handleNavigationSecondaryTargetChange,
           onPrototypeSecondarySelect: handleNavigationSecondarySelect,
+          onPrototypeCycleRowsChange: handleNavigationCycleRowsChange,
           prototypeSecondaryPreview: effectiveNavigationSecondaryPreview,
           onPrototypeSecondaryPreviewChange: setNavigationSecondaryPreview,
           prototypePrimaryWidth,
