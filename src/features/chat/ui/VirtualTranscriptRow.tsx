@@ -25,10 +25,7 @@ import {
   MessageDateSeparator,
   type MessageBubbleCallbacks,
 } from "./messageTimelineShared";
-import {
-  ToolChainSummaryMessageBubble,
-  ToolChainDetailMessage,
-} from "./ToolChainVirtualRows";
+import { ToolChainSummaryMessageBubble } from "./ToolChainVirtualRows";
 import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowSpacing";
 
 const STREAMING_ROW_ACTION_GUTTER = "0.75rem";
@@ -379,6 +376,8 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       </div>
     );
   } else if (row.kind === "tool-chain-detail" && row.toolChainDetail) {
+    // Expanded content stays in the summary row so it remains adjacent to the
+    // tool that owns it. Keep this zero-height row for projection compatibility.
     rowContent = (
       <div
         ref={registerElement}
@@ -386,9 +385,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         {...rowDiagnostics}
         style={rowStyle}
         className={cn(spacingClassName, flowContainmentClassName)}
-      >
-        <ToolChainDetailMessage payload={row.toolChainDetail} />
-      </div>
+      />
     );
   } else if (row.kind !== "message" || !message) {
     rowContent = (

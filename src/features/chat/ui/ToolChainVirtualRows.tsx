@@ -1,10 +1,5 @@
-import { useCallback, useSyncExternalStore } from "react";
 import type { MessageContent } from "@/shared/types/messages";
-import type {
-  TranscriptToolChainDetailPayload,
-  TranscriptToolChainPayload,
-} from "@/features/chat/transcript/projection/transcriptItemTypes";
-import { useOptionalTranscriptRowStateContext } from "@/features/chat/transcript/row-state";
+import type { TranscriptToolChainPayload } from "@/features/chat/transcript/projection/transcriptItemTypes";
 import { ToolChainCards, type ToolChainItem } from "./ToolChainCards";
 
 // Groups adjacent toolRequest/toolResponse blocks into ToolChainItem arrays,
@@ -64,52 +59,6 @@ function groupMessageToolChains(
   return chains;
 }
 
-function useChainExpandState(chainStateId: string): boolean {
-  const context = useOptionalTranscriptRowStateContext();
-
-  const subscribe = useCallback(
-    (callback: () => void) => {
-      if (!context) {
-        return () => {};
-      }
-      return context.registry.subscribeToStateChanges(callback);
-    },
-    [context],
-  );
-
-  const getSnapshot = useCallback(() => {
-    if (!context) {
-      return false;
-    }
-    const state = context.registry.getRowState({
-      sessionId: context.sessionId,
-      rowId: context.rowId,
-    });
-    return state?.toolChains?.[chainStateId]?.chainExpanded ?? false;
-  }, [context, chainStateId]);
-
-  return useSyncExternalStore(subscribe, getSnapshot);
-}
-
-function ToolChainDetailItem({
-  chainId,
-  toolItems,
-}: {
-  chainId: string;
-  toolItems: ToolChainItem[];
-}) {
-  const isExpanded = useChainExpandState(chainId);
-
-  return (
-    <ToolChainCards
-      chainId={chainId}
-      toolItems={toolItems}
-      detailOnly
-      externalChainExpanded={isExpanded}
-    />
-  );
-}
-
 export function ToolChainSummaryMessageBubble({
   payload,
 }: {
@@ -119,31 +68,7 @@ export function ToolChainSummaryMessageBubble({
   return (
     <>
       {chains.map(({ chainId, toolItems }) => (
-        <ToolChainCards
-          key={chainId}
-          chainId={chainId}
-          toolItems={toolItems}
-          hasDetailRow
-        />
-      ))}
-    </>
-  );
-}
-
-export function ToolChainDetailMessage({
-  payload,
-}: {
-  payload: TranscriptToolChainDetailPayload;
-}) {
-  const chains = groupMessageToolChains(payload.message.content);
-  return (
-    <>
-      {chains.map(({ chainId, toolItems }) => (
-        <ToolChainDetailItem
-          key={chainId}
-          chainId={chainId}
-          toolItems={toolItems}
-        />
+        <ToolChainCards key={chainId} chainId={chainId} toolItems={toolItems} />
       ))}
     </>
   );
