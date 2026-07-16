@@ -414,6 +414,20 @@ function isArchiveShortcutBlockedTarget(target: EventTarget | null) {
   return Boolean(target.closest(".xterm"));
 }
 
+function isTerminalOwnedHistoryShortcut(event: KeyboardEvent) {
+  if (!(event.target instanceof Element) || !event.target.closest(".xterm")) {
+    return false;
+  }
+
+  return (
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    (event.key === "ArrowLeft" || event.key === "ArrowRight")
+  );
+}
+
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
   // Connections graduated from Settings to a main navigation surface; keep
   // legacy settings deep links (including the older "extensions" section)
@@ -4292,6 +4306,25 @@ export function AppShell({
         resetGlobalComposerTransition();
         return;
       }
+      // Navigation history (defaults mod+[ / mod+])
+      if (
+        eventMatchesShortcutCommand(e, "navigation.back") &&
+        !e.defaultPrevented &&
+        !isTerminalOwnedHistoryShortcut(e)
+      ) {
+        e.preventDefault();
+        goBack();
+        return;
+      }
+      if (
+        eventMatchesShortcutCommand(e, "navigation.forward") &&
+        !e.defaultPrevented &&
+        !isTerminalOwnedHistoryShortcut(e)
+      ) {
+        e.preventDefault();
+        goForward();
+        return;
+      }
       // Settings (default mod+,)
       if (eventMatchesShortcutCommand(e, "navigation.openSettings")) {
         e.preventDefault();
@@ -4430,6 +4463,8 @@ export function AppShell({
     clearGlobalComposerHandoffTimer,
     closeDesignSystem,
     globalComposerPlacement,
+    goBack,
+    goForward,
     guardAppNavigation,
     handleArchiveChat,
     handleNavigate,

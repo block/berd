@@ -118,6 +118,40 @@ describe("shortcut command definitions", () => {
     }
   });
 
+  it("registers native navigation history shortcuts as configurable and discoverable", () => {
+    const back = getShortcutCommand("navigation.back");
+    expect(back).toBeDefined();
+    expect(back?.configurable).toBe(true);
+    expect(back?.discoverable).toBe(true);
+    expect(getShortcutBindings("navigation.back")).toEqual([
+      { shortcut: "meta+[" },
+    ]);
+
+    const forward = getShortcutCommand("navigation.forward");
+    expect(forward).toBeDefined();
+    expect(forward?.configurable).toBe(true);
+    expect(forward?.discoverable).toBe(true);
+    expect(getShortcutBindings("navigation.forward")).toEqual([
+      { shortcut: "meta+]" },
+    ]);
+
+    getPlatformMock.mockReturnValue("windows");
+    expect(getShortcutBindings("navigation.back")).toEqual([
+      { shortcut: "alt+arrowleft" },
+    ]);
+    expect(getShortcutBindings("navigation.forward")).toEqual([
+      { shortcut: "alt+arrowright" },
+    ]);
+
+    getPlatformMock.mockReturnValue("linux");
+    expect(getShortcutBindings("navigation.back")).toEqual([
+      { shortcut: "alt+arrowleft" },
+    ]);
+    expect(getShortcutBindings("navigation.forward")).toEqual([
+      { shortcut: "alt+arrowright" },
+    ]);
+  });
+
   it("registers session.quickSwitch as configurable, discoverable, mod+p", () => {
     const command = getShortcutCommand("session.quickSwitch");
     expect(command).toBeDefined();

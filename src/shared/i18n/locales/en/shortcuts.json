@@ -12,6 +12,8 @@
   "actions": {
     "search": "Open search",
     "newConversation": "New conversation",
+    "back": "Go back",
+    "forward": "Go forward",
     "closeSession": "Close current session",
     "openSettings": "Open settings",
     "quickSwitch": "Switch sessions",

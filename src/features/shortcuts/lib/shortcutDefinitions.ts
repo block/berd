@@ -2,6 +2,7 @@ import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experiment
 import { getExperiment } from "@/features/experiments/experimentPreferences";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import type { ShortcutBinding } from "@/shared/keyboard/keyboardShortcut";
+import { getPlatform } from "@/shared/lib/platform";
 
 export const SHORTCUT_CATEGORIES = [
   "navigation",
@@ -15,6 +16,8 @@ export type ShortcutCategory = (typeof SHORTCUT_CATEGORIES)[number];
 export type KnownShortcutCommandId =
   | "navigation.search"
   | "navigation.newConversation"
+  | "navigation.back"
+  | "navigation.forward"
   | "navigation.closeSession"
   | "navigation.openSettings"
   | "navigation.paneJump"
@@ -92,9 +95,11 @@ export interface ShortcutCommandDefinition {
    * accelerator: meta (Cmd) on macOS, ctrl elsewhere.
    */
   defaultBindings: readonly ShortcutBinding[];
-  /** Dynamic defaults take precedence over `defaultBindings` when present
-   *  (pane jump falls back to the experiment's configured shortcut). */
+  /** Dynamic defaults take precedence over `defaultBindings` when present. */
   resolveDefaultBindings?: () => readonly ShortcutBinding[];
+  /** Fall back to static defaults if a dynamic binding collides with an
+   *  override. Use only when the dynamic binding comes from user input. */
+  fallbackToStaticDefaultsOnConflict?: boolean;
   /** Key in the "shortcuts" i18n namespace describing the action. */
   descriptionKey: string;
   /** Editable from Keyboard Shortcuts settings. */
@@ -135,6 +140,32 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     scope: "global",
     defaultBindings: [{ shortcut: "mod+n" }],
     descriptionKey: "actions.newConversation",
+    configurable: true,
+    discoverable: true,
+  },
+  {
+    id: "navigation.back",
+    category: "navigation",
+    scope: "global",
+    defaultBindings: [{ shortcut: "meta+[" }],
+    resolveDefaultBindings: () =>
+      getPlatform() === "mac"
+        ? [{ shortcut: "meta+[" }]
+        : [{ shortcut: "alt+arrowleft" }],
+    descriptionKey: "actions.back",
+    configurable: true,
+    discoverable: true,
+  },
+  {
+    id: "navigation.forward",
+    category: "navigation",
+    scope: "global",
+    defaultBindings: [{ shortcut: "meta+]" }],
+    resolveDefaultBindings: () =>
+      getPlatform() === "mac"
+        ? [{ shortcut: "meta+]" }]
+        : [{ shortcut: "alt+arrowright" }],
+    descriptionKey: "actions.forward",
     configurable: true,
     discoverable: true,
   },

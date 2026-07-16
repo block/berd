@@ -215,14 +215,13 @@ function effectiveBindings(
   }
   const defaults = defaultBindingsOf(definition);
   if (
-    definition.resolveDefaultBindings &&
+    definition.fallbackToStaticDefaultsOnConflict &&
     defaults.some((binding) =>
       findConflictAgainst(definition, binding.shortcut, overrides),
     )
   ) {
-    // Dynamic defaults carry user input (the pane-jump experiment's legacy
-    // configured combo) that was never conflict-checked at write time; fall
-    // back to the curated static defaults rather than double-binding.
+    // Dynamic defaults carrying user input can bypass conflict checks. Fall
+    // back to static defaults rather than double-binding.
     return normalizeDefaultBindings(definition.defaultBindings);
   }
   return defaults;

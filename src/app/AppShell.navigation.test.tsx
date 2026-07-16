@@ -2647,6 +2647,84 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("goes back and forward with the navigation history shortcuts", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(screen.getByRole("button", { name: "Open skill detail" }));
+
+    expect(screen.getByTestId("skill-route")).toHaveTextContent("skill-1");
+
+    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-route")).toHaveTextContent("list");
+    });
+
+    fireEvent.keyDown(window, { key: "]", metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-route")).toHaveTextContent("skill-1");
+    });
+  });
+
+  it("uses Alt+Left and Alt+Right for navigation history on Windows", async () => {
+    mockGetPlatform.mockReturnValue("windows");
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(screen.getByRole("button", { name: "Open skill detail" }));
+
+    fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-route")).toHaveTextContent("list");
+    });
+
+    fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-route")).toHaveTextContent("skill-1");
+    });
+  });
+
+  it("does not navigate history while an embedded terminal has focus", async () => {
+    mockGetPlatform.mockReturnValue("windows");
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(screen.getByRole("button", { name: "Open skill detail" }));
+
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    document.body.append(terminal);
+    try {
+      fireEvent.keyDown(terminal, { key: "ArrowLeft", altKey: true });
+      expect(screen.getByTestId("skill-route")).toHaveTextContent("skill-1");
+    } finally {
+      terminal.remove();
+    }
+  });
+
+  it("allows Cmd+[ to navigate history while an embedded terminal has focus", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(screen.getByRole("button", { name: "Open skill detail" }));
+
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    document.body.append(terminal);
+    try {
+      fireEvent.keyDown(terminal, { key: "[", metaKey: true });
+      await waitFor(() => {
+        expect(screen.getByTestId("skill-route")).toHaveTextContent("list");
+      });
+    } finally {
+      terminal.remove();
+    }
+  });
+
   it("goes back and forward through Automations tabs", async () => {
     const user = userEvent.setup();
     renderAppShell();
