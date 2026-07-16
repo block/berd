@@ -38,6 +38,7 @@ import {
 import {
   type Components as StreamdownComponents,
   type CustomRenderer,
+  defaultRehypePlugins,
   Streamdown,
 } from "streamdown";
 import { useTranslation } from "react-i18next";
@@ -463,6 +464,94 @@ function buildStreamdownComponents(imageRenderer?: MarkdownImageRenderer) {
   return { a: MarkdownLink, img: imageRenderer ?? DefaultMarkdownImage };
 }
 
+/**
+ * `rehype-harden` treats only `/`, `./`, and `../` as relative URLs. Bare
+ * filesystem paths such as `wiki/report.md` are therefore replaced with a
+ * `[blocked]` indicator before Berd's artifact click handler can resolve them
+ * against the session working directory. Prefix only bare path-like link and
+ * image destinations for the sanitizer, then remove the prefix afterwards so
+ * the renderer and artifact policy receive the original href.
+ */
+const BERD_LOCAL_PATH_PREFIX = "/__berd_local_path__/";
+const MARKDOWN_DESTINATION_PROPERTY = new Set(["href", "src"]);
+
+type MarkdownHastNode = {
+  children?: MarkdownHastNode[];
+  properties?: Record<string, unknown>;
+};
+
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
+}
+
+function isBareLocalMarkdownPath(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.length > 0 &&
+    !trimmed.startsWith("#") &&
+    !trimmed.startsWith("/") &&
+    !trimmed.startsWith("./") &&
+    !trimmed.startsWith("../") &&
+    !hasControlCharacter(trimmed) &&
+    !/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)
+  );
+}
+
+function visitMarkdownDestinations(
+  node: MarkdownHastNode,
+  transform: (value: string) => string,
+) {
+  if (node.properties) {
+    for (const property of MARKDOWN_DESTINATION_PROPERTY) {
+      const value = node.properties[property];
+      if (typeof value === "string") {
+        node.properties[property] = transform(value);
+      }
+    }
+  }
+  for (const child of node.children ?? []) {
+    visitMarkdownDestinations(child, transform);
+  }
+}
+
+function prefixBareLocalMarkdownPaths() {
+  return (tree: MarkdownHastNode) => {
+    visitMarkdownDestinations(tree, (value) =>
+      isBareLocalMarkdownPath(value)
+        ? `${BERD_LOCAL_PATH_PREFIX}${encodeURIComponent(value)}`
+        : value,
+    );
+  };
+}
+
+function restoreBareLocalMarkdownPaths() {
+  return (tree: MarkdownHastNode) => {
+    visitMarkdownDestinations(tree, (value) => {
+      if (!value.startsWith(BERD_LOCAL_PATH_PREFIX)) return value;
+      const encodedPath = value.slice(BERD_LOCAL_PATH_PREFIX.length);
+      try {
+        const decodedPath = decodeURIComponent(encodedPath);
+        return isBareLocalMarkdownPath(decodedPath) ? decodedPath : value;
+      } catch {
+        return value;
+      }
+    });
+  };
+}
+
+const berdRehypePlugins: NonNullable<
+  ComponentProps<typeof Streamdown>["rehypePlugins"]
+> = [
+  defaultRehypePlugins.raw,
+  prefixBareLocalMarkdownPaths,
+  defaultRehypePlugins.sanitize,
+  defaultRehypePlugins.harden,
+  restoreBareLocalMarkdownPaths,
+];
+
 const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
   enabled: false,
 };
@@ -552,6 +641,7 @@ export const MessageResponse = memo(
             mode={mode}
             onAnimationEnd={streamdownLayoutPending.onAnimationEnd}
             onAnimationStart={streamdownLayoutPending.onAnimationStart}
+            rehypePlugins={berdRehypePlugins}
             plugins={
               codeRenderers
                 ? { ...streamdownPlugins, renderers: codeRenderers }

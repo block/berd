@@ -14,6 +14,11 @@ const streamdownMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("streamdown", () => ({
+  defaultRehypePlugins: {
+    raw: vi.fn(),
+    sanitize: vi.fn(),
+    harden: vi.fn(),
+  },
   Streamdown: (props: Record<string, unknown>) => {
     streamdownMocks.latestProps = props;
 
