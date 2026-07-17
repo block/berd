@@ -1,11 +1,20 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setWorkingIndicatorAnimationEnabled } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
+
+const motionMocks = vi.hoisted(() => ({
+  shouldReduceMotion: false,
+}));
+
+vi.mock("motion/react", () => ({
+  useReducedMotion: () => motionMocks.shouldReduceMotion,
+}));
 
 describe("SessionActivityIndicator", () => {
   beforeEach(() => {
     localStorage.clear();
+    motionMocks.shouldReduceMotion = false;
   });
 
   it("renders the Berd loader for running sessions", () => {
@@ -16,14 +25,32 @@ describe("SessionActivityIndicator", () => {
       container.querySelector('[data-slot="berd-loader"]'),
     ).toBeInTheDocument();
     expect(container.querySelector("animate")).toBeInTheDocument();
+    expect(screen.getByLabelText(/chat active/i)).toHaveClass(
+      "animate-in",
+      "fade-in-0",
+    );
   });
 
-  it("renders a static Berd loader when animation is disabled", () => {
+  it("renders a static Berd loader without an entrance fade when animation is disabled", () => {
     setWorkingIndicatorAnimationEnabled(false);
 
     const { container } = render(<SessionActivityIndicator isRunning />);
+    const status = screen.getByLabelText(/chat active/i);
 
     expect(container.querySelector("animate")).not.toBeInTheDocument();
+    expect(status).not.toHaveClass("animate-in", "fade-in-0");
+  });
+
+  it("renders a static Berd loader without an entrance fade when reduced motion is requested", () => {
+    motionMocks.shouldReduceMotion = true;
+
+    const { container } = render(
+      <SessionActivityIndicator isRunning variant="overlay" />,
+    );
+    const status = screen.getByLabelText(/chat active/i);
+
+    expect(container.querySelector("animate")).not.toBeInTheDocument();
+    expect(status).not.toHaveClass("animate-in", "fade-in-0");
   });
 
   it("renders an inline dot for unread sessions", () => {

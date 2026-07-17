@@ -530,7 +530,7 @@ describe("GeneralSettings appearance section", () => {
     renderGeneralSettings();
 
     const switchControl = screen.getByRole("switch", {
-      name: "Animate working indicators",
+      name: "Animate sidebar working indicators",
     });
 
     expect(switchControl).toBeChecked();

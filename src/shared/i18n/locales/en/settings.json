@@ -31,8 +31,8 @@
       "label": "Animated avatars"
     },
     "workingIndicatorAnimation": {
-      "description": "Animate the activity indicator for chats that are currently working.",
-      "label": "Animate working indicators"
+      "description": "Animate the activity indicator for chats that are currently working in the sidebar.",
+      "label": "Animate sidebar working indicators"
     },
     "homePinLabels": {
       "description": "Always show names on pinned agents and projects, not just on hover.",

@@ -31,8 +31,8 @@
       "label": "Avatares animados"
     },
     "workingIndicatorAnimation": {
-      "description": "Anima el indicador de actividad de los chats que están trabajando actualmente.",
-      "label": "Animar indicadores de trabajo"
+      "description": "Anima el indicador de actividad de los chats que están trabajando actualmente en la barra lateral.",
+      "label": "Animar indicadores de trabajo de la barra lateral"
     },
     "homePinLabels": {
       "description": "Muestra siempre los nombres de los agentes y proyectos fijados, no solo al pasar el cursor.",

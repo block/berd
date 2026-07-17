@@ -56,7 +56,7 @@ export function SidebarLeadingIcon({
           aria-label={activeLabel}
           className="flex size-full items-center justify-center text-sidebar-foreground"
         >
-          <ActiveChatBerdIndicator size={16} />
+          <ActiveChatBerdIndicator respectAnimationPreference size={16} />
         </span>
       ) : hasUnread ? (
         <span

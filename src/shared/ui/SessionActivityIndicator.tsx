@@ -5,6 +5,8 @@ import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/wor
 import { BerdLoader } from "@/shared/ui/berd-loader";
 
 const ACTIVE_CHAT_BERD_SIZE_PX = 14;
+const WORKING_INDICATOR_ENTRANCE_CLASSES =
+  "transition-opacity duration-200 ease-out animate-in fade-in-0";
 
 interface SessionActivityIndicatorProps {
   isRunning?: boolean;
@@ -15,20 +17,24 @@ interface SessionActivityIndicatorProps {
 
 export function ActiveChatBerdIndicator({
   className,
+  respectAnimationPreference = false,
   size = ACTIVE_CHAT_BERD_SIZE_PX,
 }: {
   className?: string;
+  respectAnimationPreference?: boolean;
   size?: number;
 }) {
   const shouldReduceMotion = useReducedMotion();
   const workingIndicatorAnimationPreference =
     useWorkingIndicatorAnimationPreference();
+  const motionEnabled =
+    !shouldReduceMotion &&
+    (!respectAnimationPreference ||
+      workingIndicatorAnimationPreference.enabled);
 
   return (
     <BerdLoader
-      animated={
-        workingIndicatorAnimationPreference.enabled && !shouldReduceMotion
-      }
+      animated={motionEnabled}
       className={className}
       decorative
       size={size}
@@ -42,6 +48,12 @@ export function SessionActivityIndicator({
   variant = "inline",
   className,
 }: SessionActivityIndicatorProps) {
+  const shouldReduceMotion = useReducedMotion();
+  const workingIndicatorAnimationPreference =
+    useWorkingIndicatorAnimationPreference();
+  const motionEnabled =
+    workingIndicatorAnimationPreference.enabled && !shouldReduceMotion;
+
   if (isRunning) {
     if (variant === "overlay") {
       return (
@@ -49,11 +61,16 @@ export function SessionActivityIndicator({
           role="status"
           aria-label="Chat active"
           className={cn(
-            "absolute -right-1 -top-1 flex items-center justify-center transition-opacity duration-200 ease-out animate-in fade-in-0",
+            "absolute -right-1 -top-1 flex items-center justify-center",
+            motionEnabled && WORKING_INDICATOR_ENTRANCE_CLASSES,
             className,
           )}
         >
-          <ActiveChatBerdIndicator size={ACTIVE_CHAT_BERD_SIZE_PX} />
+          <BerdLoader
+            animated={motionEnabled}
+            decorative
+            size={ACTIVE_CHAT_BERD_SIZE_PX}
+          />
         </span>
       );
     }
@@ -63,11 +80,16 @@ export function SessionActivityIndicator({
         role="status"
         aria-label="Chat active"
         className={cn(
-          "inline-flex shrink-0 items-center justify-center animate-in fade-in-0 duration-200 ease-out",
+          "inline-flex shrink-0 items-center justify-center",
+          motionEnabled && WORKING_INDICATOR_ENTRANCE_CLASSES,
           className,
         )}
       >
-        <ActiveChatBerdIndicator size={ACTIVE_CHAT_BERD_SIZE_PX} />
+        <BerdLoader
+          animated={motionEnabled}
+          decorative
+          size={ACTIVE_CHAT_BERD_SIZE_PX}
+        />
       </span>
     );
   }

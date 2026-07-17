@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import { setWorkingIndicatorAnimationEnabled } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
@@ -48,6 +49,7 @@ describe("SidebarChatRow", () => {
       value: {},
     });
     resetHomeWidgetStoreForTests();
+    localStorage.clear();
     useSessionWindowStore.getState().setSnapshot([]);
     vi.mocked(getSessionWindowSupport).mockResolvedValue({
       supported: true,
@@ -161,6 +163,21 @@ describe("SidebarChatRow", () => {
     expect(
       screen.queryByTestId("sidebar-chat-menu-icon"),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders a static Berd loader when sidebar working animation is disabled", () => {
+    setWorkingIndicatorAnimationEnabled(false);
+
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Busy Chat"
+        isActive={false}
+        isRunning
+      />,
+    );
+
+    expect(container.querySelector("animate")).not.toBeInTheDocument();
   });
 
   it("shows an unread dot when the chat has unread output", () => {
