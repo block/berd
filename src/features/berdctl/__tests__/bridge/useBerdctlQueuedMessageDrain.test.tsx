@@ -84,6 +84,61 @@ describe("useBerdctlQueuedMessageDrain", () => {
     ).toBeUndefined();
   });
 
+  it("waits for pending cancellation to clear before draining an idle session", async () => {
+    const chatStore = useChatStore.getState();
+    chatStore.setChatState("session-1", "streaming");
+    chatStore.setRunCancellationPending("session-1", true);
+    chatStore.enqueueMessage("session-1", {
+      text: "queued prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" },
+        acpGooseMetadata: { origin: "berdctl_cross_session" },
+      },
+    });
+    render(<DrainHarness />);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+    });
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith("session-1", "queued prompt");
+    });
+  });
+
+  it("does not drain a queued prompt when a running session enters error", async () => {
+    const chatStore = useChatStore.getState();
+    chatStore.setChatState("session-1", "streaming");
+    chatStore.enqueueMessage("session-1", {
+      text: "queued prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" },
+        acpGooseMetadata: { origin: "berdctl_cross_session" },
+      },
+    });
+    render(<DrainHarness />);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "error");
+    });
+
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeDefined();
+  });
+
   it("keeps berdctl-origin queued messages when the background send fails", async () => {
     const sendError = new Error("prepare failed");
     const consoleErrorSpy = vi

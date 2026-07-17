@@ -80,7 +80,10 @@ Result:
 
     const chatStore = useChatStore.getState();
     const runtime = chatStore.getSessionRuntime(args.session_id);
-    if (isSessionRunning(runtime.chatState)) {
+    if (
+      isSessionRunning(runtime.chatState) ||
+      runtime.isRunCancellationPending
+    ) {
       switch (args.if_running) {
         case "refuse":
           throw new CommandError(
@@ -89,6 +92,12 @@ Result:
           );
 
         case "steer":
+          if (runtime.isRunCancellationPending) {
+            throw new CommandError(
+              "target_session_running",
+              `Refusing to steer session "${args.session_id}" while cancellation is pending; use --if-running queue or wait for cancellation to finish.`,
+            );
+          }
           await steerPromptInSession(
             args.session_id,
             args.prompt,

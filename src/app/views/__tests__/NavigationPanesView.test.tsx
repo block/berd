@@ -5876,7 +5876,9 @@ describe("NavigationPanesView", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      within(projectNavigation).getByRole("button", { name: "New chat" }),
+      within(projectNavigation).getByRole("button", {
+        name: "Start new chat in Project One",
+      }),
     ).toBeInTheDocument();
   });
 

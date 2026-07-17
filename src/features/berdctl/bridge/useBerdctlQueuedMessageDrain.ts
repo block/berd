@@ -19,7 +19,8 @@ function drainQueuedMessage(sessionId: string): void {
   const runtime = chatStore.getSessionRuntime(sessionId);
   if (
     !isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
-    isSessionRunning(runtime.chatState)
+    isSessionRunning(runtime.chatState) ||
+    runtime.isRunCancellationPending
   ) {
     return;
   }
@@ -62,12 +63,21 @@ export function useBerdctlQueuedMessageDrain(): void {
           continue;
         }
 
-        const currentChatState = state.sessionStateById[sessionId]?.chatState;
-        const previousChatState =
-          previousState.sessionStateById[sessionId]?.chatState;
-        // Match the composer queue: a failed run leaves the queued prompt
-        // parked until a later idle transition or bridge remount catch-up.
-        if (currentChatState === "idle" && previousChatState !== "idle") {
+        const currentRuntime = state.sessionStateById[sessionId];
+        const previousRuntime = previousState.sessionStateById[sessionId];
+        const currentBlocked =
+          isSessionRunning(currentRuntime?.chatState ?? "idle") ||
+          (currentRuntime?.isRunCancellationPending ?? false);
+        const previousBlocked =
+          isSessionRunning(previousRuntime?.chatState ?? "idle") ||
+          (previousRuntime?.isRunCancellationPending ?? false);
+        // Match the composer queue: failed/cancelling runs leave the prompt
+        // parked until every blocking runtime signal clears.
+        if (
+          currentRuntime?.chatState === "idle" &&
+          !currentBlocked &&
+          previousBlocked
+        ) {
           drainQueuedMessage(sessionId);
         }
       }

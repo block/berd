@@ -28,7 +28,7 @@
         "get": {
           "action": "get",
           "about": "Read one session's metadata and optionally its latest messages",
-          "afterHelp": "Example:\n  berdctl session get --session-id <session-id> --messages 5 --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"model_id\": \"...\"|null, \"agent_id\": \"...\"|null,\n   \"project_id\": \"...\"|null, \"working_dir\": \"...\"|null,\n   \"created_at\": \"...\", \"updated_at\": \"...\", \"archived\": false,\n   \"message_count\": 12,\n   \"messages\": [{\"role\": \"user\"|\"assistant\"|null, \"text\": \"...\"}, ...]}\n  \"messages\" is present only when --messages > 0; each message text is\n  truncated to 2000 chars."
+          "afterHelp": "Example:\n  berdctl session get --session-id <session-id> --messages 5 --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"model_id\": \"...\"|null, \"agent_id\": \"...\"|null,\n   \"project_id\": \"...\"|null, \"working_dir\": \"...\"|null,\n   \"created_at\": \"...\", \"updated_at\": \"...\", \"archived\": false,\n   \"is_running\": false, \"is_open_in_window\": false,\n   \"chat_state\": \"idle\", \"message_count\": 12,\n   \"messages\": [{\"role\": \"user\"|\"assistant\"|null, \"text\": \"...\"}, ...]}\n  \"messages\" is present only when --messages > 0; each message text is\n  truncated to 2000 chars."
         },
         "rename": {
           "action": "rename",

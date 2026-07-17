@@ -1154,9 +1154,18 @@ describe("sessions.send", () => {
     });
   });
 
-  it("refuses a running target by default", async () => {
+  it.each([
+    { chatState: "streaming" as const, cancellationPending: false },
+    { chatState: "idle" as const, cancellationPending: true },
+  ])("refuses a target with chat=$chatState cancellation=$cancellationPending by default", async ({
+    chatState,
+    cancellationPending,
+  }) => {
     mockSessionFound();
-    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setChatState("session-1", chatState);
+    useChatStore
+      .getState()
+      .setRunCancellationPending("session-1", cancellationPending);
 
     await expectCommandError(
       dispatchCommand(
@@ -1197,6 +1206,48 @@ describe("sessions.send", () => {
       );
       useSessionWindowStore.getState().setSnapshot([]);
     }
+  });
+
+  it("refuses to steer a cancellation-pending target", async () => {
+    mockSessionFound();
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().setRunCancellationPending("session-1", true);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "make it shorter",
+          if_running: "steer",
+        },
+        ctx,
+      ),
+      "target_session_running",
+    );
+    expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("queues a prompt while cancellation is pending", async () => {
+    mockSessionFound();
+    useChatStore.getState().setRunCancellationPending("session-1", true);
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "after cancellation",
+        if_running: "queue",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.text,
+    ).toBe("after cancellation");
   });
 
   it("steers a running target with provenance metadata", async () => {
@@ -1508,9 +1559,82 @@ describe("sessions.get", () => {
       created_at: "2026-04-01T00:00:00.000Z",
       updated_at: "2026-04-01T00:00:00.000Z",
       archived: false,
+      is_running: false,
+      is_open_in_window: false,
+      chat_state: "idle",
       message_count: 2,
     });
     expect(mocks.lastSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("reports whether the session chat is running", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const result = (await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    )) as { is_running: boolean };
+
+    expect(result.is_running).toBe(true);
+  });
+
+  it("does not treat a stale active run id as a running session", async () => {
+    mockSessionFound();
+    useChatStore.getState().setActiveRunId("session-1", "stale-run");
+
+    const result = (await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    )) as { is_running: boolean };
+
+    expect(result.is_running).toBe(false);
+  });
+
+  it("reports a cancellation-pending idle session as running", async () => {
+    mockSessionFound();
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().setRunCancellationPending("session-1", true);
+
+    const result = (await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    )) as { is_running: boolean };
+
+    expect(result.is_running).toBe(true);
+  });
+
+  it.each([
+    { chatState: "idle" as const, isOpenInWindow: false, isRunning: false },
+    { chatState: "streaming" as const, isOpenInWindow: false, isRunning: true },
+    { chatState: "idle" as const, isOpenInWindow: true, isRunning: false },
+    { chatState: "streaming" as const, isOpenInWindow: true, isRunning: true },
+  ])("reports chat=$chatState and open-window=$isOpenInWindow independently", async ({
+    chatState,
+    isOpenInWindow,
+    isRunning,
+  }) => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", chatState);
+    if (isOpenInWindow) {
+      useSessionWindowStore
+        .getState()
+        .setSnapshot([{ sessionId: "session-1", windowLabel: "session" }]);
+    }
+
+    const result = (await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    )) as { is_running: boolean; is_open_in_window: boolean };
+
+    expect(result).toMatchObject({
+      is_running: isRunning,
+      is_open_in_window: isOpenInWindow,
+    });
   });
 
   it("finds sessions beyond the first backend page", async () => {
@@ -2068,6 +2192,21 @@ describe("sessions.set_worktree", () => {
   it("refuses a running session", async () => {
     seedSessions(makeSession({ id: "session-1" }));
     useChatStore.getState().setChatState("session-1", "streaming");
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
+        ctx,
+      ),
+      "target_session_running",
+    );
+    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cancellation-pending idle session", async () => {
+    seedSessions(makeSession({ id: "session-1" }));
+    useChatStore.getState().setRunCancellationPending("session-1", true);
 
     await expectCommandError(
       dispatchCommand(

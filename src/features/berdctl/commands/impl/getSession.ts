@@ -33,6 +33,15 @@ interface SessionMetadataResult {
   created_at: string;
   updated_at: string;
   archived: boolean;
+  is_running: boolean;
+  is_open_in_window: boolean;
+  chat_state:
+    | "idle"
+    | "thinking"
+    | "streaming"
+    | "waiting"
+    | "compacting"
+    | "error";
   message_count: number;
 }
 
@@ -57,7 +66,8 @@ Result:
    "model_id": "..."|null, "agent_id": "..."|null,
    "project_id": "..."|null, "working_dir": "..."|null,
    "created_at": "...", "updated_at": "...", "archived": false,
-   "message_count": 12,
+   "is_running": false, "is_open_in_window": false,
+   "chat_state": "idle", "message_count": 12,
    "messages": [{"role": "user"|"assistant"|null, "text": "..."}, ...]}
   "messages" is present only when --messages > 0; each message text is
   truncated to 2000 chars.`,

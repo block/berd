@@ -100,16 +100,20 @@ export function refuseRunningTarget(sessionId: string, verb: string): void {
     );
   }
   const runtime = useChatStore.getState().getSessionRuntime(sessionId);
-  if (isSessionRunning(runtime.chatState)) {
+  if (isSessionRunning(runtime.chatState) || runtime.isRunCancellationPending) {
     throw new CommandError(
       "target_session_running",
-      `Refusing to ${verb} session "${sessionId}" while its agent is running; wait for the turn to finish or ask the user.`,
+      `Refusing to ${verb} session "${sessionId}" while its agent is running or cancellation is pending; wait for the turn to finish or ask the user.`,
     );
   }
 }
 
 export function sessionMetadata(session: ChatSession) {
   const providerId = session.providerId;
+  const runtime = useChatStore.getState().getSessionRuntime(session.id);
+  const isOpenInWindow = useSessionWindowStore
+    .getState()
+    .isOpenInWindow(session.id);
   return {
     session_id: session.id,
     title: session.title,
@@ -124,6 +128,10 @@ export function sessionMetadata(session: ChatSession) {
     created_at: session.createdAt,
     updated_at: session.updatedAt,
     archived: session.archivedAt != null,
+    is_running:
+      isSessionRunning(runtime.chatState) || runtime.isRunCancellationPending,
+    is_open_in_window: isOpenInWindow,
+    chat_state: runtime.chatState,
     message_count: session.messageCount,
   };
 }
