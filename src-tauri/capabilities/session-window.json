@@ -24,6 +24,14 @@
         }
       ]
     },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$DOWNLOAD"
+        }
+      ]
+    },
     "dialog:allow-open",
     "dialog:allow-save"
   ]

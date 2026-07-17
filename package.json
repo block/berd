@@ -116,7 +116,7 @@
     "nanoid": "^5.1.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-hook-form": "^7.72.0",
+    "react-hook-form": "^7.81.0",
     "react-i18next": "^17.0.2",
     "react-jsx-parser": "^2.4.1",
     "react-markdown": "^10.1.0",

@@ -298,7 +298,12 @@
     "rootLoadError": "Couldn't load this folder. Try again."
   },
   "image": {
-    "view": "View {{label}}"
+    "view": "View {{label}}",
+    "download": "Download image",
+    "downloadStarted": "Download started: {{filename}}",
+    "downloadError": "Couldn't download image.",
+    "openDownloads": "Open Downloads",
+    "openDownloadsError": "Couldn't open Downloads."
   },
   "input": {
     "ariaLabel": "Chat message input",

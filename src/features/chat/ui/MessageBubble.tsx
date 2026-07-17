@@ -291,6 +291,7 @@ function MessageAttachmentGrid({
       </fieldset>
       <ImageLightbox
         src={currentLightboxItem?.imageSrc ?? ""}
+        downloadFilename={currentLightboxItem?.attachment.name}
         alt={
           currentLightboxItem
             ? t("attachments.previewAlt", {

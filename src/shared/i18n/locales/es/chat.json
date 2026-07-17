@@ -297,7 +297,12 @@
     "rootLoadError": "No se pudo cargar esta carpeta. Inténtalo de nuevo."
   },
   "image": {
-    "view": "Ver {{label}}"
+    "view": "Ver {{label}}",
+    "download": "Descargar imagen",
+    "downloadStarted": "Descarga iniciada: {{filename}}",
+    "downloadError": "No se pudo descargar la imagen.",
+    "openDownloads": "Abrir Descargas",
+    "openDownloadsError": "No se pudo abrir Descargas."
   },
   "input": {
     "ariaLabel": "Entrada de mensaje del chat",

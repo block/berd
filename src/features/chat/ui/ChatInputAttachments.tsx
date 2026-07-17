@@ -135,6 +135,7 @@ export function ChatInputAttachments({
       </div>
       <ImageLightbox
         src={currentLightboxImage?.attachment.previewUrl ?? ""}
+        downloadFilename={currentLightboxImage?.attachment.name}
         alt={
           currentLightboxImage
             ? t("attachments.alt", {
