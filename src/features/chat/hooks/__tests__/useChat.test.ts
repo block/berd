@@ -9,6 +9,10 @@ import {
 import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { Message } from "@/shared/types/messages";
 import { clearReplayBuffer } from "../replayBuffer";
+import {
+  enqueueStreamingTextUpdate,
+  flushAllBufferedStreamingUpdates,
+} from "../../acp/liveStreamingUpdates";
 
 const mockAcpSendMessage = vi.fn();
 const mockAcpSteerMessage = vi.fn();
@@ -210,6 +214,294 @@ describe("useChat", () => {
     ).toBe(true);
   });
 
+  it("clears stopped-run metadata when the foreground ACP prompt settles", async () => {
+    const promptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage.mockReturnValue(promptDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("keep working");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      result.current.stopGeneration();
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+
+    await act(async () => {
+      promptDeferred.resolve();
+      await sendPromise;
+    });
+
+    const runtime = useChatStore.getState().getSessionRuntime("session-1");
+    expect(runtime.activeRunId).toBeNull();
+    expect(runtime.isRunCancellationPending).toBe(false);
+  });
+
+  it("does not mark a newer follow-up idle when the stopped prompt settles", async () => {
+    const firstPromptDeferred = createDeferredPromise<void>();
+    const secondPromptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage
+      .mockReturnValueOnce(firstPromptDeferred.promise)
+      .mockReturnValueOnce(secondPromptDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSendPromise!: Promise<void>;
+    await act(async () => {
+      firstSendPromise = result.current.sendMessage("first prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      result.current.stopGeneration();
+      useChatStore.getState().setActiveRunId("session-1", null);
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+
+    let secondSendPromise!: Promise<void>;
+    await act(async () => {
+      secondSendPromise = result.current.sendMessage("second prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-2",
+        "persona-a",
+        "Persona A",
+      );
+      useChatStore.getState().setActiveRunId("session-1", "run-2");
+    });
+
+    await act(async () => {
+      firstPromptDeferred.resolve();
+      await firstSendPromise;
+    });
+
+    const runtime = useChatStore.getState().getSessionRuntime("session-1");
+    expect(runtime.chatState).toBe("streaming");
+    expect(runtime.streamingMessageId).toBe("assistant-2");
+    expect(runtime.activeRunId).toBe("run-2");
+
+    await act(async () => {
+      secondPromptDeferred.resolve();
+      await secondSendPromise;
+    });
+  });
+
+  it("drops buffered chunks owned by a superseded stopped prompt", async () => {
+    const scheduledFrames: FrameRequestCallback[] = [];
+    const requestAnimationFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        scheduledFrames.push(callback);
+        return scheduledFrames.length;
+      });
+    const cancelAnimationFrame = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+    const firstPromptDeferred = createDeferredPromise<void>();
+    const secondPromptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage
+      .mockReturnValueOnce(firstPromptDeferred.promise)
+      .mockReturnValueOnce(secondPromptDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSendPromise!: Promise<void>;
+    await act(async () => {
+      firstSendPromise = result.current.sendMessage("first prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      enqueueStreamingTextUpdate(
+        "session-1",
+        "assistant-1",
+        "text before stop",
+      );
+      result.current.stopGeneration();
+      useChatStore.getState().setActiveRunId("session-1", null);
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+
+    let secondSendPromise!: Promise<void>;
+    await act(async () => {
+      secondSendPromise = result.current.sendMessage("second prompt");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-2",
+        "persona-a",
+        "Persona A",
+      );
+      enqueueStreamingTextUpdate(
+        "session-1",
+        "assistant-1",
+        "late stale buffered text",
+      );
+    });
+
+    await act(async () => {
+      firstPromptDeferred.resolve();
+      await firstSendPromise;
+      flushAllBufferedStreamingUpdates();
+    });
+
+    const runtime = useChatStore.getState().getSessionRuntime("session-1");
+    expect(runtime.streamingMessageId).toBe("assistant-2");
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-1"].find(
+          (message) => message.id === "assistant-1",
+        )?.content,
+    ).toEqual([{ type: "text", text: "text before stop" }]);
+
+    await act(async () => {
+      secondPromptDeferred.resolve();
+      await secondSendPromise;
+    });
+    requestAnimationFrame.mockRestore();
+    cancelAnimationFrame.mockRestore();
+  });
+
+  it("preserves follow-up state across a ChatView remount", async () => {
+    const firstPromptDeferred = createDeferredPromise<void>();
+    const secondPromptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage
+      .mockReturnValueOnce(firstPromptDeferred.promise)
+      .mockReturnValueOnce(secondPromptDeferred.promise);
+
+    const firstHook = renderHook(() => useChat("session-1"));
+
+    let firstSendPromise!: Promise<void>;
+    await act(async () => {
+      firstSendPromise = firstHook.result.current.sendMessage("first prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      firstHook.result.current.stopGeneration();
+      useChatStore.getState().setActiveRunId("session-1", null);
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+    firstHook.unmount();
+
+    const secondHook = renderHook(() => useChat("session-1"));
+    let secondSendPromise!: Promise<void>;
+    await act(async () => {
+      secondSendPromise =
+        secondHook.result.current.sendMessage("second prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-2",
+        "persona-a",
+        "Persona A",
+      );
+      useChatStore.getState().setActiveRunId("session-1", "run-2");
+    });
+
+    await act(async () => {
+      firstPromptDeferred.resolve();
+      await firstSendPromise;
+    });
+
+    const runtime = useChatStore.getState().getSessionRuntime("session-1");
+    expect(runtime.chatState).toBe("streaming");
+    expect(runtime.streamingMessageId).toBe("assistant-2");
+    expect(runtime.activeRunId).toBe("run-2");
+
+    await act(async () => {
+      secondPromptDeferred.resolve();
+      await secondSendPromise;
+    });
+  });
+
+  it("does not clear cancellation state owned by a newer prompt", async () => {
+    const firstPromptDeferred = createDeferredPromise<void>();
+    const secondPromptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage
+      .mockReturnValueOnce(firstPromptDeferred.promise)
+      .mockReturnValueOnce(secondPromptDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSendPromise!: Promise<void>;
+    await act(async () => {
+      firstSendPromise = result.current.sendMessage("first prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      result.current.stopGeneration();
+      useChatStore.getState().setActiveRunId("session-1", null);
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+
+    let secondSendPromise!: Promise<void>;
+    await act(async () => {
+      secondSendPromise = result.current.sendMessage("second prompt");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-2",
+        "persona-a",
+        "Persona A",
+      );
+      useChatStore.getState().setActiveRunId("session-1", "run-2");
+      result.current.stopGeneration();
+    });
+
+    await act(async () => {
+      firstPromptDeferred.resolve();
+      await firstSendPromise;
+    });
+
+    let runtime = useChatStore.getState().getSessionRuntime("session-1");
+    expect(runtime.chatState).toBe("idle");
+    expect(runtime.streamingMessageId).toBeNull();
+    expect(runtime.activeRunId).toBe("run-2");
+    expect(runtime.isRunCancellationPending).toBe(true);
+
+    await act(async () => {
+      secondPromptDeferred.resolve();
+      await secondSendPromise;
+    });
+
+    runtime = useChatStore.getState().getSessionRuntime("session-1");
+    expect(runtime.activeRunId).toBeNull();
+    expect(runtime.isRunCancellationPending).toBe(false);
+  });
+
   it("keeps cancellation pending after stopping a streaming run without active run metadata", async () => {
     const cancelDeferred = createDeferredPromise<boolean>();
     mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
@@ -377,9 +669,206 @@ describe("useChat", () => {
     ]);
 
     await act(async () => {
-      steerDeferred.resolve("run-2");
+      steerDeferred.resolve("run-1");
       await steerPromise;
     });
+  });
+
+  it("preserves the active run across overlapping steer acknowledgements", async () => {
+    const firstSteerDeferred = createDeferredPromise<string>();
+    const secondSteerDeferred = createDeferredPromise<string>();
+    mockAcpSteerMessage
+      .mockReturnValueOnce(firstSteerDeferred.promise)
+      .mockReturnValueOnce(secondSteerDeferred.promise);
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSteerPromise!: Promise<boolean>;
+    let secondSteerPromise!: Promise<boolean>;
+    await act(async () => {
+      firstSteerPromise = result.current.steerMessage("first steer");
+      secondSteerPromise = result.current.steerMessage("second steer");
+      await Promise.resolve();
+    });
+
+    expect(mockAcpSteerMessage).toHaveBeenNthCalledWith(
+      1,
+      "session-1",
+      "run-1",
+      "first steer",
+      { images: undefined },
+    );
+    expect(mockAcpSteerMessage).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      "run-1",
+      "second steer",
+      { images: undefined },
+    );
+
+    await act(async () => {
+      firstSteerDeferred.resolve("run-1");
+      secondSteerDeferred.resolve("run-1");
+      await Promise.all([firstSteerPromise, secondSteerPromise]);
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBe("run-1");
+  });
+
+  it("accepts an overlapping steer acknowledgement for the live backend run", async () => {
+    const firstSteerDeferred = createDeferredPromise<string>();
+    const secondSteerDeferred = createDeferredPromise<string>();
+    mockAcpSteerMessage
+      .mockReturnValueOnce(firstSteerDeferred.promise)
+      .mockReturnValueOnce(secondSteerDeferred.promise);
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSteerPromise!: Promise<boolean>;
+    let secondSteerPromise!: Promise<boolean>;
+    await act(async () => {
+      firstSteerPromise = result.current.steerMessage("first steer");
+      secondSteerPromise = result.current.steerMessage("second steer");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      firstSteerDeferred.resolve("run-2");
+      await firstSteerPromise;
+    });
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBe("run-2");
+
+    await act(async () => {
+      secondSteerDeferred.resolve("run-2");
+      await secondSteerPromise;
+    });
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBe("run-2");
+  });
+
+  it("recovers a steer run when active run metadata arrives late", async () => {
+    const sendDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage.mockReturnValue(sendDeferred.promise);
+    mockAcpSteerMessage.mockResolvedValue("recovered-run");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("first prompt");
+      await Promise.resolve();
+      await result.current.steerMessage("make it shorter");
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBe("recovered-run");
+
+    await act(async () => {
+      sendDeferred.resolve();
+      await sendPromise;
+    });
+  });
+
+  it("does not recover a null-id steer after a newer prompt takes ownership", async () => {
+    const firstSendDeferred = createDeferredPromise<void>();
+    const secondSendDeferred = createDeferredPromise<void>();
+    const steerDeferred = createDeferredPromise<string>();
+    mockAcpSendMessage
+      .mockReturnValueOnce(firstSendDeferred.promise)
+      .mockReturnValueOnce(secondSendDeferred.promise);
+    mockAcpSteerMessage.mockReturnValue(steerDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSendPromise!: Promise<void>;
+    let steerPromise!: Promise<boolean>;
+    await act(async () => {
+      firstSendPromise = result.current.sendMessage("first prompt");
+      await Promise.resolve();
+      steerPromise = result.current.steerMessage("make it shorter");
+      await Promise.resolve();
+    });
+
+    act(() => {
+      result.current.stopGeneration();
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+
+    let secondSendPromise!: Promise<void>;
+    await act(async () => {
+      secondSendPromise = result.current.sendMessage("second prompt");
+      await Promise.resolve();
+      steerDeferred.resolve("stale-run");
+      await steerPromise;
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBeNull();
+
+    await act(async () => {
+      firstSendDeferred.resolve();
+      secondSendDeferred.resolve();
+      await Promise.all([firstSendPromise, secondSendPromise]);
+    });
+  });
+
+  it("does not restore a stale active run when stop wins a race with steer acknowledgement", async () => {
+    const steerDeferred = createDeferredPromise<string>();
+    mockAcpSteerMessage.mockReturnValue(steerDeferred.promise);
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let steerPromise!: Promise<boolean>;
+    await act(async () => {
+      steerPromise = result.current.steerMessage("make it shorter");
+      await Promise.resolve();
+    });
+
+    let cancellation!: Promise<boolean>;
+    act(() => {
+      cancellation = result.current.stopGeneration();
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+
+    act(() => {
+      // Mirror the backend's active-run-cleared notification after it accepts
+      // cancellation, but before the steer request returns to the caller.
+      useChatStore.getState().setActiveRunId("session-1", null);
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+    });
+
+    await act(async () => {
+      steerDeferred.resolve("run-1");
+      await Promise.all([steerPromise, cancellation]);
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("idle");
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBeNull();
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(false);
   });
 
   it("starts a new visible assistant stream when the structured intervention boundary arrives", async () => {

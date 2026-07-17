@@ -2,6 +2,7 @@ import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { isTextContent } from "@/shared/types/messages";
+import { getSessionPromptOwner } from "@/features/chat/lib/sessionPromptOwnership";
 
 const LIVE_SUBTITLE_THROTTLE_MS = 1_000;
 const FRAME_FALLBACK_MS = 16;
@@ -12,6 +13,7 @@ interface BufferedTextUpdate {
   kind: "text";
   sessionId: string;
   messageId: string;
+  owner: symbol | null;
   text: string;
 }
 
@@ -19,6 +21,7 @@ interface BufferedThinkingUpdate {
   kind: "thinking";
   sessionId: string;
   messageId: string;
+  owner: symbol | null;
   chunks: string[];
 }
 
@@ -31,6 +34,7 @@ interface PendingSubtitleUpdate {
 }
 
 const bufferedStreamingUpdates: BufferedStreamingUpdate[] = [];
+const streamOwnerByMessage = new Map<string, symbol | null>();
 const pendingSubtitleUpdates = new Map<string, PendingSubtitleUpdate>();
 let scheduledFrameId: number | null = null;
 let scheduledTimeoutId: TimerId | null = null;
@@ -71,6 +75,45 @@ function cancelScheduledFrame(): void {
     clearTimeout(scheduledTimeoutId);
   }
   scheduledTimeoutId = null;
+}
+
+function streamingMessageKey(sessionId: string, messageId: string): string {
+  return `${sessionId}\0${messageId}`;
+}
+
+export function clearStreamingMessageOwners(): void {
+  streamOwnerByMessage.clear();
+}
+
+export function registerStreamingMessageOwner(
+  sessionId: string,
+  messageId: string,
+): void {
+  const key = streamingMessageKey(sessionId, messageId);
+  if (!streamOwnerByMessage.has(key)) {
+    streamOwnerByMessage.set(key, getSessionPromptOwner(sessionId));
+  }
+}
+
+function resolveStreamOwner(sessionId: string, messageId: string) {
+  const key = streamingMessageKey(sessionId, messageId);
+  if (streamOwnerByMessage.has(key)) {
+    return streamOwnerByMessage.get(key) ?? null;
+  }
+
+  const owner = getSessionPromptOwner(sessionId);
+  streamOwnerByMessage.set(key, owner);
+  return owner;
+}
+
+export function isStreamingMessageOwnedByCurrentPrompt(
+  sessionId: string,
+  messageId: string,
+): boolean {
+  return (
+    resolveStreamOwner(sessionId, messageId) ===
+    getSessionPromptOwner(sessionId)
+  );
 }
 
 function scheduleBufferedFlush(): void {
@@ -194,11 +237,13 @@ export function enqueueStreamingTextUpdate(
     return;
   }
 
+  const owner = resolveStreamOwner(sessionId, messageId);
   const latest = bufferedStreamingUpdates.at(-1);
   if (
     latest?.kind === "text" &&
     latest.sessionId === sessionId &&
-    latest.messageId === messageId
+    latest.messageId === messageId &&
+    latest.owner === owner
   ) {
     latest.text += text;
   } else {
@@ -206,6 +251,7 @@ export function enqueueStreamingTextUpdate(
       kind: "text",
       sessionId,
       messageId,
+      owner,
       text,
     });
   }
@@ -221,11 +267,13 @@ export function enqueueStreamingThinkingUpdate(
     return;
   }
 
+  const owner = resolveStreamOwner(sessionId, messageId);
   const latest = bufferedStreamingUpdates.at(-1);
   if (
     latest?.kind === "thinking" &&
     latest.sessionId === sessionId &&
-    latest.messageId === messageId
+    latest.messageId === messageId &&
+    latest.owner === owner
   ) {
     latest.chunks.push(text);
   } else {
@@ -233,6 +281,7 @@ export function enqueueStreamingThinkingUpdate(
       kind: "thinking",
       sessionId,
       messageId,
+      owner,
       chunks: [text],
     });
   }
@@ -240,6 +289,10 @@ export function enqueueStreamingThinkingUpdate(
 }
 
 function applyBufferedUpdate(update: BufferedStreamingUpdate): void {
+  if (update.owner !== getSessionPromptOwner(update.sessionId)) {
+    return;
+  }
+
   const store = useChatStore.getState();
   if (update.kind === "text") {
     store.appendStreamingText(update.sessionId, update.messageId, update.text);
@@ -274,13 +327,18 @@ export function flushAllBufferedStreamingUpdates(): void {
 
 export function flushBufferedStreamingUpdatesForSession(
   sessionId: string,
-  options: { flushSubtitle?: boolean } = {},
+  options: { flushSubtitle?: boolean; owner?: symbol | null } = {},
 ): void {
-  const sessionUpdates = bufferedStreamingUpdates.filter(
-    (update) => update.sessionId === sessionId,
-  );
+  const matches = (update: BufferedStreamingUpdate) =>
+    update.sessionId === sessionId &&
+    (!("owner" in options) || update.owner === options.owner);
+  const sessionUpdates = bufferedStreamingUpdates.filter(matches);
   if (sessionUpdates.length === 0) {
-    if (options.flushSubtitle) {
+    if (
+      options.flushSubtitle &&
+      (!("owner" in options) ||
+        options.owner === getSessionPromptOwner(sessionId))
+    ) {
       flushLiveSubtitleUpdate(sessionId);
     }
     return;
@@ -291,7 +349,8 @@ export function flushBufferedStreamingUpdatesForSession(
     index >= 0;
     index -= 1
   ) {
-    if (bufferedStreamingUpdates[index]?.sessionId === sessionId) {
+    const update = bufferedStreamingUpdates[index];
+    if (update && matches(update)) {
       bufferedStreamingUpdates.splice(index, 1);
     }
   }
@@ -304,25 +363,39 @@ export function flushBufferedStreamingUpdatesForSession(
     applyBufferedUpdate(update);
   }
 
-  if (options.flushSubtitle) {
+  if (
+    options.flushSubtitle &&
+    (!("owner" in options) ||
+      options.owner === getSessionPromptOwner(sessionId))
+  ) {
     flushLiveSubtitleUpdate(sessionId);
   }
 }
 
 export function clearBufferedStreamingUpdatesForSession(
   sessionId: string,
+  options: { owner?: symbol | null } = {},
 ): void {
+  const matches = (update: BufferedStreamingUpdate) =>
+    update.sessionId === sessionId &&
+    (!("owner" in options) || update.owner === options.owner);
   for (
     let index = bufferedStreamingUpdates.length - 1;
     index >= 0;
     index -= 1
   ) {
-    if (bufferedStreamingUpdates[index]?.sessionId === sessionId) {
+    const update = bufferedStreamingUpdates[index];
+    if (update && matches(update)) {
       bufferedStreamingUpdates.splice(index, 1);
     }
   }
   if (bufferedStreamingUpdates.length === 0) {
     cancelScheduledFrame();
   }
-  clearLiveSubtitleUpdate(sessionId);
+  if (
+    !("owner" in options) ||
+    options.owner === getSessionPromptOwner(sessionId)
+  ) {
+    clearLiveSubtitleUpdate(sessionId);
+  }
 }

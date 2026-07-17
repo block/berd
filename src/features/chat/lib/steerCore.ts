@@ -13,6 +13,8 @@ import {
   buildAcpImages,
   buildMessageAttachments,
 } from "./attachments";
+import { isSessionRunning } from "./sessionActivity";
+import { getSessionPromptOwner } from "./sessionPromptOwnership";
 import { i18n } from "@/shared/i18n";
 
 function formatSteerErrorMessage(error: unknown): string {
@@ -34,6 +36,7 @@ export async function steerPromptInSession(
   const activeRunId = useChatStore
     .getState()
     .getSessionRuntime(sessionId).activeRunId;
+  const promptOwner = getSessionPromptOwner(sessionId);
 
   if (!text.trim() && !hasAttachments) {
     return false;
@@ -83,7 +86,21 @@ export async function steerPromptInSession(
         ),
       },
     );
-    useChatStore.getState().setActiveRunId(sessionId, steeredRunId);
+    const liveStore = useChatStore.getState();
+    const liveRuntime = liveStore.getSessionRuntime(sessionId);
+    const promptStillOwnsSession =
+      promptOwner !== null && getSessionPromptOwner(sessionId) === promptOwner;
+    const runIsStillActive =
+      (liveRuntime.activeRunId === steeredRunId ||
+        liveRuntime.activeRunId === activeRunId) &&
+      (activeRunId !== null || promptStillOwnsSession) &&
+      !liveRuntime.isRunCancellationPending &&
+      isSessionRunning(liveRuntime.chatState);
+    // A stop or natural completion can finish the run while steer is awaiting
+    // its acknowledgement. Do not restore that stale run after it has ended.
+    if (runIsStillActive) {
+      liveStore.setActiveRunId(sessionId, steeredRunId);
+    }
     useChatSessionStore.getState().patchSession(sessionId, {
       updatedAt: new Date().toISOString(),
     });

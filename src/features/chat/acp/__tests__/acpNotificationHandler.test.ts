@@ -22,6 +22,7 @@ import {
 import { flushBufferedStreamingUpdatesForSession } from "../liveStreamingUpdates";
 import { setActiveMessageId } from "@/shared/api/acpActiveMessageTracking";
 import { registerPreparedSession } from "@/shared/api/acpSessionRegistry";
+import { claimSessionPrompt } from "@/features/chat/lib/sessionPromptOwnership";
 
 function createMcpAppPayload(): McpAppPayload {
   return {
@@ -1052,6 +1053,135 @@ describe("acpNotificationHandler", () => {
     expect(currentMessage?.content).toEqual([
       { type: "text", text: "Continuing with the answer." },
     ]);
+  });
+
+  it("does not redirect a late chunk with its original message id into the current stream", async () => {
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    claimSessionPrompt("acp-session");
+    setActiveMessageId("acp-session", "assistant-1");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: { type: "text", text: "first response" },
+      },
+    } as never);
+    flushBufferedStreamingUpdatesForSession("acp-session");
+
+    const firstMessages =
+      useChatStore.getState().messagesBySession["acp-session"] ?? [];
+    useChatStore.setState((state) => ({
+      ...state,
+      messagesBySession: {
+        ...state.messagesBySession,
+        "acp-session": [
+          ...firstMessages,
+          {
+            id: "assistant-2",
+            role: "assistant",
+            created: Date.now(),
+            content: [],
+            metadata: {
+              userVisible: true,
+              agentVisible: true,
+              completionStatus: "inProgress",
+            },
+          },
+        ],
+      },
+    }));
+    useChatStore.getState().setStreamingMessageId("acp-session", "assistant-2");
+    claimSessionPrompt("acp-session");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: { type: "text", text: " late stale text" },
+      },
+    } as never);
+    flushBufferedStreamingUpdatesForSession("acp-session");
+
+    const messages = useChatStore.getState().messagesBySession["acp-session"];
+    expect(
+      messages.find((message) => message.id === "assistant-1")?.content,
+    ).toEqual([{ type: "text", text: "first response" }]);
+    expect(
+      messages.find((message) => message.id === "assistant-2")?.content,
+    ).toEqual([]);
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .streamingMessageId,
+    ).toBe("assistant-2");
+  });
+
+  it("does not apply a late image chunk from a superseded assistant stream", async () => {
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    claimSessionPrompt("acp-session");
+    setActiveMessageId("acp-session", "assistant-1");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: { type: "text", text: "first response" },
+      },
+    } as never);
+    flushBufferedStreamingUpdatesForSession("acp-session");
+
+    const firstMessages =
+      useChatStore.getState().messagesBySession["acp-session"] ?? [];
+    useChatStore.setState((state) => ({
+      ...state,
+      messagesBySession: {
+        ...state.messagesBySession,
+        "acp-session": [
+          ...firstMessages,
+          {
+            id: "assistant-2",
+            role: "assistant",
+            created: Date.now(),
+            content: [],
+            metadata: {
+              userVisible: true,
+              agentVisible: true,
+              completionStatus: "inProgress",
+            },
+          },
+        ],
+      },
+    }));
+    useChatStore.getState().setStreamingMessageId("acp-session", "assistant-2");
+    claimSessionPrompt("acp-session");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: {
+          type: "image",
+          data: "iVBORw0KGgo=",
+          mimeType: "image/png",
+        },
+      },
+    } as never);
+
+    const messages = useChatStore.getState().messagesBySession["acp-session"];
+    expect(
+      messages.find((message) => message.id === "assistant-1")?.content,
+    ).toEqual([{ type: "text", text: "first response" }]);
+    expect(
+      messages.find((message) => message.id === "assistant-2")?.content,
+    ).toEqual([]);
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .streamingMessageId,
+    ).toBe("assistant-2");
   });
 
   it("preserves structured tool output when ACP provides rawOutput", async () => {

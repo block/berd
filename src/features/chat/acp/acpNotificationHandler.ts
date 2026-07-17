@@ -55,6 +55,9 @@ import {
   enqueueStreamingTextUpdate,
   enqueueStreamingThinkingUpdate,
   flushBufferedStreamingUpdatesForSession,
+  clearStreamingMessageOwners,
+  isStreamingMessageOwnedByCurrentPrompt,
+  registerStreamingMessageOwner,
 } from "./liveStreamingUpdates";
 
 // Per-session perf counters for replay streaming.
@@ -403,6 +406,9 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       if (update.content.type === "text" && "text" in update.content) {
         enqueueStreamingTextUpdate(sessionId, messageId, update.content.text);
       } else if (update.content.type === "image") {
+        if (!isStreamingMessageOwnedByCurrentPrompt(sessionId, messageId)) {
+          break;
+        }
         // Live counterpart to the replay path (see the replay
         // agent_message_chunk handler above): append an image content block to
         // the streaming assistant message so agent-emitted images render inline
@@ -665,6 +671,15 @@ function ensureLiveAssistantMessage(
   const activePreset = getActiveMessagePreset(sessionId);
 
   if (
+    preferredMessageId &&
+    preferredMessageId !== existingStreamingMessageId &&
+    messages.some((message) => message.id === preferredMessageId)
+  ) {
+    registerStreamingMessageOwner(sessionId, preferredMessageId);
+    return preferredMessageId;
+  }
+
+  if (
     existingStreamingMessageId &&
     messages.some((message) => message.id === existingStreamingMessageId)
   ) {
@@ -701,6 +716,7 @@ function ensureLiveAssistantMessage(
     });
   }
 
+  registerStreamingMessageOwner(sessionId, messageId);
   store.setPendingAssistantProvider(sessionId, null);
   store.setStreamingMessageId(sessionId, messageId);
   clearActiveMessageId(sessionId);
@@ -709,6 +725,7 @@ function ensureLiveAssistantMessage(
 }
 
 export function clearMessageTracking(): void {
+  clearStreamingMessageOwners();
   clearActiveMessageTracking();
   clearReplayAssistantTracking();
   clearSkillReplayChips();

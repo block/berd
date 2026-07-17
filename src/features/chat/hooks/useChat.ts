@@ -207,7 +207,9 @@ export function useChat(
         // an AbortError it only returns the session to idle. sendMessage's
         // contract is to never reject.
       } finally {
-        abortRef.current = null;
+        if (abortRef.current === abort) {
+          abortRef.current = null;
+        }
       }
     },
     [

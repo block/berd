@@ -11,11 +11,17 @@ import {
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
+  clearBufferedStreamingUpdatesForSession,
   clearLiveSubtitleUpdate,
   flushBufferedStreamingUpdatesForSession,
 } from "@/features/chat/acp/liveStreamingUpdates";
 import { acpSendMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import {
+  claimSessionPrompt,
+  ownsSessionPrompt,
+  releaseSessionPrompt,
+} from "@/features/chat/lib/sessionPromptOwnership";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   type ChatAttachmentDraft,
@@ -112,6 +118,8 @@ export async function dispatchPrompt(
     userMessageMetadata,
   } = opts;
   const images = buildAcpImages(attachments);
+  const promptOwner = claimSessionPrompt(sessionId);
+  const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
 
   const {
     addMessage,
@@ -218,18 +226,32 @@ export async function dispatchPrompt(
       );
     }
 
-    flushBufferedStreamingUpdatesForSession(sessionId, { flushSubtitle: true });
-    setChatState(sessionId, "idle");
-    setStreamingMessageId(sessionId, null);
+    if (isCurrent()) {
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+        owner: promptOwner,
+      });
+      setStreamingMessageId(sessionId, null);
+      if (isCurrent()) {
+        setChatState(sessionId, "idle");
+      }
+    }
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
+      if (isCurrent()) {
+        flushBufferedStreamingUpdatesForSession(sessionId, {
+          flushSubtitle: true,
+          owner: promptOwner,
+        });
+        setStreamingMessageId(sessionId, null);
+        if (isCurrent()) {
+          setChatState(sessionId, "idle");
+        }
+      }
+    } else if (isCurrent()) {
       flushBufferedStreamingUpdatesForSession(sessionId, {
         flushSubtitle: true,
-      });
-      setChatState(sessionId, "idle");
-    } else {
-      flushBufferedStreamingUpdatesForSession(sessionId, {
-        flushSubtitle: true,
+        owner: promptOwner,
       });
       const errorMessage = formatAcpErrorMessage(err);
       const liveStore = useChatStore.getState();
@@ -249,10 +271,28 @@ export async function dispatchPrompt(
         createSystemNotificationMessage(errorMessage, "error"),
       );
       setError(sessionId, errorMessage);
-      setChatState(sessionId, "idle");
       setStreamingMessageId(sessionId, null);
+      if (isCurrent()) {
+        setChatState(sessionId, "idle");
+      }
     }
-    setPendingAssistantProvider(sessionId, null);
+    if (isCurrent()) {
+      setPendingAssistantProvider(sessionId, null);
+    }
     throw err;
+  } finally {
+    if (!isCurrent()) {
+      clearBufferedStreamingUpdatesForSession(sessionId, {
+        owner: promptOwner,
+      });
+    }
+    if (releaseSessionPrompt(sessionId, promptOwner)) {
+      const liveStore = useChatStore.getState();
+      const liveRuntime = liveStore.getSessionRuntime(sessionId);
+      if (liveRuntime.isRunCancellationPending) {
+        liveStore.setActiveRunId(sessionId, null);
+        liveStore.setRunCancellationPending(sessionId, false);
+      }
+    }
   }
 }
