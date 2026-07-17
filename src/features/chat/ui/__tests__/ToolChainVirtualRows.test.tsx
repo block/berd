@@ -16,6 +16,14 @@ vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   }),
 }));
 
+function getToolStep(name: RegExp): HTMLElement {
+  const step = screen
+    .getByRole("button", { name })
+    .closest<HTMLElement>('[data-role="tool-chain-step"]');
+  if (!step) throw new Error(`Expected tool-chain step matching ${name}`);
+  return step;
+}
+
 function toolChainMessage(): Message {
   return {
     id: "assistant-tools",
@@ -65,12 +73,7 @@ describe("ToolChainVirtualRows", () => {
       isActiveChain: false,
     };
 
-    render(
-      <>
-        <ToolChainSummaryMessageBubble payload={payload} />
-        <div data-testid="following-content">Following content</div>
-      </>,
-    );
+    render(<ToolChainSummaryMessageBubble payload={payload} />);
 
     fireEvent.click(
       screen.getByRole("button", { name: /updating files.*2 steps/i }),
@@ -80,14 +83,54 @@ describe("ToolChainVirtualRows", () => {
     );
 
     const oldResult = screen.getByText("old result");
-    const oldTool = screen
-      .getByRole("button", { name: /edit.*src\/old\.ts/i })
-      .closest('[data-role="tool-chain-step"]');
-    const followingContent = screen.getByTestId("following-content");
+    const oldTool = getToolStep(/edit.*src\/old\.ts/i);
+    const newTool = getToolStep(/edit.*src\/new\.ts/i);
 
     expect(oldTool).toContainElement(oldResult);
     expect(
-      oldResult.compareDocumentPosition(followingContent) &
+      oldResult.compareDocumentPosition(newTool) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
+  it("keeps request-only step details before the next tool step", () => {
+    const message = toolChainMessage();
+    message.content = [
+      {
+        type: "toolRequest",
+        id: "tool-pending",
+        name: "Shell · npm test",
+        arguments: { command: "npm test" },
+        status: "in_progress",
+      },
+      {
+        type: "toolRequest",
+        id: "tool-next",
+        name: "Read · src/next.ts",
+        arguments: {},
+        status: "pending",
+      },
+    ];
+    const payload = {
+      chainId: message.id,
+      message,
+      detailRowId: "message:assistant-tools:tool-chain-detail",
+      isActiveChain: true,
+    };
+
+    render(<ToolChainSummaryMessageBubble payload={payload} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /running command.*npm test/i }),
+    );
+
+    const pendingDetails = screen.getByText("npm test");
+    const pendingTool = getToolStep(/running command.*npm test/i);
+    const nextTool = getToolStep(/read.*src\/next\.ts/i);
+
+    expect(pendingTool).toContainElement(pendingDetails);
+    expect(
+      pendingDetails.compareDocumentPosition(nextTool) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
   });
