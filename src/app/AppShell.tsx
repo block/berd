@@ -3506,8 +3506,11 @@ export function AppShell({
           if (
             session.projectId &&
             navigationRefreshExperiment?.enabled &&
-            effectiveNavigationSecondaryTarget?.kind === "project" &&
-            effectiveNavigationSecondaryTarget.projectId === session.projectId
+            ((effectiveNavigationSecondaryTarget?.kind === "project" &&
+              effectiveNavigationSecondaryTarget.projectId ===
+                session.projectId) ||
+              (effectiveNavigationSecondaryTarget === null &&
+                activeNavigationSessionIsEmptyDefaultChat))
           ) {
             setNavigationSecondaryTarget({
               kind: "project",
@@ -3555,6 +3558,7 @@ export function AppShell({
       return { ok: true as const };
     },
     [
+      activeNavigationSessionIsEmptyDefaultChat,
       cleanupChatSession,
       effectiveNavigationSecondaryTarget,
       navigationRefreshExperiment?.enabled,

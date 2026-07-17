@@ -1919,6 +1919,60 @@ describe("AppShell global navigation", () => {
     );
   });
 
+  it("keeps the active project open after archiving a newly started empty session", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-2",
+          path: "/tmp/project-2.yaml",
+          name: "Project Two",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "",
+          workingDirs: ["/workspace/project-2"],
+          projectWorkspaces: [],
+          useWorktrees: false,
+          order: 0,
+          archivedAt: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar project 2" }));
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+        id: "created-session",
+        projectId: "project-2",
+        messageCount: 0,
+      });
+    });
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent("null");
+
+    await user.keyboard("{Meta>}e{/Meta}");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    expect(
+      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
+    ).toHaveTextContent(
+      JSON.stringify({ kind: "project", projectId: "project-2" }),
+    );
+  });
+
   it("keeps an explicitly selected chats panel after archiving a project session", async () => {
     const user = userEvent.setup();
     setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
