@@ -2234,6 +2234,121 @@ describe("ChatInput", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("clears a steering draft without waiting for acknowledgement", async () => {
+    const steerDeferred = deferred<boolean>();
+    const onSteerMessage = vi.fn(() => steerDeferred.promise);
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+      />,
+    );
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "follow up");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerMessage).toHaveBeenCalledOnce();
+    expect(input).toHaveValue("");
+
+    await user.keyboard("{Enter}{Enter}");
+    expect(onSteerMessage).toHaveBeenCalledOnce();
+
+    steerDeferred.resolve(false);
+    await waitFor(() => expect(input).toHaveValue(""));
+  });
+
+  it("preserves restored queued options when steering an edited message", async () => {
+    const onSteerMessage = vi.fn();
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+
+    function EditableQueuedSteerInput() {
+      const [queuedMessage, setQueuedMessage] = useState<
+        ChatInputComposerActions["queuedMessage"]
+      >({
+        text: "check this diff",
+        sendOptions: {
+          assistantPrompt: "Use these skills for this request: code-review.",
+          chips: [{ label: "code-review", type: "skill" as const }],
+          displayText: "check this diff",
+        },
+      });
+      return (
+        <ChatInput
+          onSend={vi.fn()}
+          onSteerMessage={onSteerMessage}
+          canSteerMessage
+          isStreaming
+          onDismissQueue={() => setQueuedMessage(null)}
+          queuedMessage={queuedMessage}
+        />
+      );
+    }
+
+    render(<EditableQueuedSteerInput />);
+    const input = screen.getByRole("textbox");
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(input);
+    await user.type(input, "check this diff carefully");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerMessage).toHaveBeenCalledWith(
+      "check this diff carefully",
+      undefined,
+      undefined,
+      {
+        assistantPrompt: "Use these skills for this request: code-review.",
+        chips: [{ label: "code-review", type: "skill" }],
+        displayText: "check this diff carefully",
+      },
+    );
+    expect(input).toHaveValue("");
+  });
+
+  it("clears steering skills and attachments immediately", async () => {
+    const steerDeferred = deferred<boolean>();
+    const onSteerMessage = vi.fn(() => steerDeferred.promise);
+    const onSkillsChange = vi.fn();
+    const onDraftAttachmentsChange = vi.fn();
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+        selectedSkills={[{ id: "code-review", name: "code-review" }]}
+        onSkillsChange={onSkillsChange}
+        initialAttachments={[
+          {
+            id: "file-1",
+            kind: "file",
+            name: "notes.txt",
+          },
+        ]}
+        onDraftAttachmentsChange={onDraftAttachmentsChange}
+      />,
+    );
+
+    await user.keyboard("{Enter}");
+
+    expect(onSteerMessage).toHaveBeenCalledOnce();
+    expect(onSkillsChange).toHaveBeenCalledWith([]);
+    expect(onDraftAttachmentsChange).toHaveBeenLastCalledWith([]);
+    expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
+
+    steerDeferred.resolve(false);
+    await waitFor(() => expect(onSteerMessage).toHaveBeenCalledOnce());
+  });
+
   it("does not send or clear the draft when queue is full", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();

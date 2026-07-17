@@ -750,13 +750,68 @@ export function ChatInput({
     await submitCurrentMessage(onSend, canQueueMessage);
   }, [canQueueMessage, onSend, submitCurrentMessage]);
 
-  const handleSteerCurrentMessage = useCallback(async () => {
-    if (!onSteerMessage) {
+  const handleSteerCurrentMessage = useCallback(() => {
+    if (!onSteerMessage || !canSteerCurrentMessage) {
       return;
     }
 
-    await submitCurrentMessage(onSteerMessage, canSteerCurrentMessage);
-  }, [canSteerCurrentMessage, onSteerMessage, submitCurrentMessage]);
+    const submittedText = text;
+    const submittedSkills = visibleSelectedSkills;
+    const submittedAttachments = scopedControls.attachments
+      ? attachmentsRef.current
+      : [];
+    const restoredSendOptions =
+      restoredQueuedSendOptions && submittedSkills.length === 0
+        ? restoredQueuedSendOptions
+        : null;
+
+    if (
+      scopedControls.voice &&
+      (dictation.isRecording ||
+        dictation.isTranscribing ||
+        dictation.isStarting())
+    ) {
+      dictation.stopRecording();
+    }
+
+    if (restoredSendOptions) {
+      void submitRestoredQueuedMessage(
+        submittedText,
+        submittedAttachments,
+        restoredSendOptions,
+        onSteerMessage,
+      );
+    } else {
+      void submitChatInputMessage(
+        submittedText,
+        submittedAttachments,
+        submittedSkills,
+        onSteerMessage,
+      );
+    }
+
+    setRestoredQueuedSendOptions(null);
+    setText("");
+    setSelectedSkills([]);
+    clearAttachments();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  }, [
+    canSteerCurrentMessage,
+    clearAttachments,
+    dictation,
+    onSteerMessage,
+    restoredQueuedSendOptions,
+    scopedControls.attachments,
+    scopedControls.voice,
+    setSelectedSkills,
+    setText,
+    submitChatInputMessage,
+    submitRestoredQueuedMessage,
+    text,
+    visibleSelectedSkills,
+  ]);
 
   const handleSteerQueuedMessage = useCallback(() => {
     if (!onSteerQueuedMessage || !canSteerQueuedMessage) {
