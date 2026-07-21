@@ -1944,6 +1944,95 @@ describe("ChatInput", () => {
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
   });
 
+  it("keeps tagged agents, skill send options, and attachments when editing a queued message", async () => {
+    const onSend = vi.fn(() => true);
+    const user = userEvent.setup();
+
+    function EditableQueuedMessageInput() {
+      const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(
+        null,
+      );
+      const [queuedMessage, setQueuedMessage] = useState<
+        ChatInputComposerActions["queuedMessage"]
+      >({
+        text: "@Reviewer check this diff",
+        personaId: "reviewer",
+        attachments: [
+          {
+            id: "file-1",
+            kind: "file" as const,
+            name: "notes.txt",
+            path: "/tmp/notes.txt",
+          },
+        ],
+        sendOptions: {
+          assistantPrompt: "Use these skills for this request: code-review.",
+          displayText: "@Reviewer check this diff",
+          chips: [
+            {
+              id: "reviewer",
+              label: "Reviewer",
+              agentRole: "active" as const,
+              type: "agent" as const,
+            },
+            { label: "code-review", type: "skill" as const },
+          ],
+        },
+      });
+
+      return (
+        <ChatInput
+          onSend={onSend}
+          personas={TEST_PERSONAS}
+          selectedPersonaId={selectedPersonaId}
+          onPersonaChange={setSelectedPersonaId}
+          onDismissQueue={() => setQueuedMessage(null)}
+          queuedMessage={queuedMessage}
+        />
+      );
+    }
+
+    render(<EditableQueuedMessageInput />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+
+    expect(screen.getByRole("textbox")).toHaveValue(
+      "@Reviewer check this diff",
+    );
+    expect(screen.getByText("Reviewer")).toBeInTheDocument();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith(
+      "@Reviewer check this diff",
+      "reviewer",
+      [
+        {
+          id: "file-1",
+          kind: "file",
+          name: "notes.txt",
+          path: "/tmp/notes.txt",
+        },
+      ],
+      {
+        assistantPrompt: "Use these skills for this request: code-review.",
+        chips: [
+          {
+            id: "reviewer",
+            label: "Reviewer",
+            agentRole: "active",
+            type: "agent",
+          },
+          { label: "code-review", type: "skill" },
+        ],
+        displayText: "@Reviewer check this diff",
+      },
+    );
+  });
+
   it("preserves queued send options when resending an edited message", async () => {
     const onSend = vi.fn(() => true);
     const onDismissQueue = vi.fn();

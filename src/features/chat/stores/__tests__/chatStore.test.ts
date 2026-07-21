@@ -279,6 +279,25 @@ describe("chatStore", () => {
     store.setChatState("local-session", "thinking");
     store.setDraft("local-session", "draft text");
     store.setSkillDrafts("local-session", [{ id: "skill-1", name: "Skill" }]);
+    const queuedAttachment = {
+      id: "queued-attachment-1",
+      kind: "file" as const,
+      name: "queued-notes.txt",
+      path: "/tmp/queued-notes.txt",
+    };
+    const queuedSendOptions = {
+      assistantPrompt: "Use these skills for this request: code-review.",
+      displayText: "@Reviewer queued text",
+      chips: [
+        {
+          id: "reviewer",
+          label: "Reviewer",
+          agentRole: "active" as const,
+          type: "agent" as const,
+        },
+        { label: "code-review", type: "skill" as const },
+      ],
+    };
     store.setDraftAttachments("local-session", [
       {
         id: "attachment-1",
@@ -287,7 +306,12 @@ describe("chatStore", () => {
         path: "/tmp/report.pdf",
       },
     ]);
-    store.enqueueMessage("local-session", { text: "queued text" });
+    store.enqueueMessage("local-session", {
+      text: "@Reviewer queued text",
+      personaId: "reviewer",
+      attachments: [queuedAttachment],
+      sendOptions: queuedSendOptions,
+    });
     store.setSessionLoading("local-session", true);
     store.setScrollTargetMessage("local-session", "message-1", "query");
 
@@ -314,7 +338,10 @@ describe("chatStore", () => {
     ]);
     expect(state.draftAttachmentsBySession["local-session"]).toBeUndefined();
     expect(state.queuedMessageBySession["acp-session"]).toEqual({
-      text: "queued text",
+      text: "@Reviewer queued text",
+      personaId: "reviewer",
+      attachments: [queuedAttachment],
+      sendOptions: queuedSendOptions,
     });
     expect(state.loadingSessionIds.has("acp-session")).toBe(true);
     expect(state.loadingSessionIds.has("local-session")).toBe(false);

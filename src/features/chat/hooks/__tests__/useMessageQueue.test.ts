@@ -197,6 +197,51 @@ describe("useMessageQueue", () => {
     );
   });
 
+  it("preserves tagged agents, skills, and attachments when auto-sending", () => {
+    const sendMessage = vi.fn();
+    const attachments = [
+      {
+        id: "file-1",
+        kind: "file" as const,
+        name: "notes.txt",
+        path: "/tmp/notes.txt",
+      },
+    ];
+    const sendOptions = {
+      assistantPrompt: "Use these skills for this request: code-review.",
+      displayText: "@Reviewer check this diff",
+      chips: [
+        {
+          id: "reviewer",
+          label: "Reviewer",
+          agentRole: "active" as const,
+          type: "agent" as const,
+        },
+        { label: "code-review", type: "skill" as const },
+      ],
+    };
+    useChatStore.getState().enqueueMessage("s1", {
+      text: "@Reviewer check this diff",
+      personaId: "reviewer",
+      attachments,
+      sendOptions,
+    });
+
+    renderHook(
+      ({ chatState }: { chatState: ChatState }) =>
+        useMessageQueue("s1", chatState, sendMessage),
+      { initialProps: { chatState: "idle" as ChatState } },
+    );
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "@Reviewer check this diff",
+      { id: "reviewer" },
+      attachments,
+      sendOptions,
+    );
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
   it("retries a queued message on the next idle transition after one failure", () => {
     const sendMessage = vi
       .fn()
