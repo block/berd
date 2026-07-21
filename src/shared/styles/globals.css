@@ -12,7 +12,14 @@
   height: 100%;
   /* Keep the first terminal row stable; row-fitting slack falls below the grid. */
   justify-content: flex-start;
-  padding: 4px 12px 2px;
+  /* The scrollbar already owns the right-side gutter reserved by FitAddon. */
+  padding: 4px 0 2px 12px;
+}
+
+.goose-terminal .xterm-scrollable-element {
+  /* Stretch xterm's custom scrollbar layer to the full panel width. */
+  align-self: stretch;
+  width: 100%;
 }
 
 .goose-terminal .xterm-screen {
@@ -27,7 +34,8 @@
 
 .goose-terminal .xterm-scrollable-element > .scrollbar.vertical > .slider {
   border-radius: 999px;
-  left: var(--terminal-scrollbar-thumb-offset) !important;
+  left: auto !important;
+  right: var(--scrollbar-thumb-inset) !important;
   width: var(--terminal-scrollbar-thumb-size) !important;
 }
 

@@ -54,6 +54,7 @@ const MIN_COLS = 20;
 const MIN_ROWS = 5;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
+const TERMINAL_SCROLLBAR_TRACK_WIDTH_PX = 8;
 const MAX_BUFFERED_OUTPUT_CHARS = 1_000_000;
 const MAX_OUTPUT_WRITE_CHARS_PER_FRAME = 64 * 1024;
 const TERMINAL_PARKING_ROOT_ID = "goose-terminal-parking-root";
@@ -216,6 +217,7 @@ export class TerminalSession {
       fontFamily,
       fontSize: 13,
       lineHeight: 1.25,
+      overviewRuler: { width: TERMINAL_SCROLLBAR_TRACK_WIDTH_PX },
       scrollback: 10_000,
       theme,
     });
