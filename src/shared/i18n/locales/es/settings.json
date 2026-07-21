@@ -217,6 +217,10 @@
       "description": "Permite separar el área de chats de la barra lateral de la navegación principal y acoplarla al lado mientras se prueba este diseño.",
       "title": "Chats separables en la barra lateral"
     },
+    "skillDiscovery": {
+      "description": "Agrega una pestaña Descubrir a Skills para explorar e instalar skills del catálogo de Block sin salir de la app. Requiere la CLI sq-agents.",
+      "title": "Descubrimiento de skills"
+    },
     "transcriptVirtualRenderer": {
       "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
       "title": "Renderizador virtual de transcripciones"

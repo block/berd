@@ -217,6 +217,10 @@
       "description": "Let the sidebar chats area detach from the main navigation and snap beside it while this layout is being tested.",
       "title": "Detachable sidebar chats"
     },
+    "skillDiscovery": {
+      "description": "Add a Discover tab to Skills for browsing and installing skills from the Block catalog without leaving the app. Requires the sq-agents CLI.",
+      "title": "Skill discovery"
+    },
     "transcriptVirtualRenderer": {
       "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",
       "title": "Transcript virtual renderer"

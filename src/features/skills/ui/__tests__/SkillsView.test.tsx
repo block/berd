@@ -8,6 +8,7 @@ import {
 } from "@/app/contexts/TopBarActionsContext";
 import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
 import type { SkillInfo } from "../../api/skills";
+import { SKILL_DISCOVERY_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { SkillsView } from "../SkillsView";
 
 const mockRevealInFileManager = vi.hoisted(() => vi.fn());
@@ -122,6 +123,33 @@ vi.mock("@/shared/lib/fileManager", () => ({
   revealInFileManager: mockRevealInFileManager,
 }));
 
+const mockDiscoveryExperimentEnabled = vi.hoisted(() => ({ value: false }));
+const mockUseExperiment = vi.hoisted(() => vi.fn());
+vi.mock("@/features/experiments/experimentPreferences", () => ({
+  useExperiment: mockUseExperiment,
+}));
+
+const mockRemoteSkillsState = vi.hoisted(() => ({
+  value: {
+    cliState: "available" as const,
+    skills: [] as unknown[],
+    loading: false,
+    catalogState: "ready",
+    installing: new Set<string>(),
+    reload: vi.fn(),
+    install: vi.fn(),
+  },
+}));
+vi.mock("../../hooks/useRemoteSkills", () => ({
+  useRemoteSkills: () => mockRemoteSkillsState.value,
+}));
+
+vi.mock("../RemoteSkillDetailPage", () => ({
+  RemoteSkillDetailPage: ({ skill }: { skill: { name: string } }) => (
+    <div data-testid="remote-skill-detail">{skill.name}</div>
+  ),
+}));
+
 const { listSkills, deleteSkill, updateSkill, exportSkill } = (await import(
   "../../api/skills"
 )) as unknown as {
@@ -134,6 +162,21 @@ const { listSkills, deleteSkill, updateSkill, exportSkill } = (await import(
 beforeEach(() => {
   resetHomeWidgetStoreForTests();
   vi.clearAllMocks();
+  mockDiscoveryExperimentEnabled.value = false;
+  mockUseExperiment.mockImplementation((id: string) =>
+    id === SKILL_DISCOVERY_EXPERIMENT_ID
+      ? { enabled: mockDiscoveryExperimentEnabled.value }
+      : null,
+  );
+  mockRemoteSkillsState.value = {
+    cliState: "available",
+    skills: [],
+    loading: false,
+    catalogState: "ready",
+    installing: new Set<string>(),
+    reload: vi.fn(),
+    install: vi.fn(),
+  };
   mockProjects = [
     {
       id: "project-alpha",
@@ -182,6 +225,84 @@ describe("SkillsView", () => {
       name: "New skill",
     });
     expect(createTiles.length).toBeGreaterThan(0);
+  });
+
+  it("hides the discover tab when the skill-discovery experiment is off", async () => {
+    mockDiscoveryExperimentEnabled.value = false;
+    renderSkillsViewWithTopBarActions();
+    await waitFor(() => {
+      expect(listSkills).toHaveBeenCalled();
+    });
+    expect(
+      screen.queryByRole("tab", { name: "Discover" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Installed" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the installed/discover tabs when the experiment is on", async () => {
+    mockDiscoveryExperimentEnabled.value = true;
+    renderSkillsViewWithTopBarActions();
+    await waitFor(() => {
+      expect(listSkills).toHaveBeenCalled();
+    });
+    expect(
+      await screen.findByRole("tab", { name: "Installed" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Discover" })).toBeInTheDocument();
+  });
+
+  it("resolves a remote detail route by name from the catalog", async () => {
+    mockDiscoveryExperimentEnabled.value = true;
+    mockRemoteSkillsState.value = {
+      cliState: "available",
+      skills: [
+        {
+          name: "agent-browser",
+          description: "Debug visual bugs",
+          roles: [],
+          references: [],
+          author: null,
+          status: null,
+          installed: false,
+        },
+      ],
+      loading: false,
+      catalogState: "ready",
+      installing: new Set<string>(),
+      reload: vi.fn(),
+      install: vi.fn(),
+    };
+    renderSkillsViewWithTopBarActions({
+      activeSkillId: "remote:agent-browser",
+    });
+    expect(await screen.findByTestId("remote-skill-detail")).toHaveTextContent(
+      "agent-browser",
+    );
+  });
+
+  it("clears a remote detail route that can't resolve after loading", async () => {
+    mockDiscoveryExperimentEnabled.value = true;
+    mockRemoteSkillsState.value = {
+      cliState: "available",
+      skills: [],
+      loading: false,
+      catalogState: "ready",
+      installing: new Set<string>(),
+      reload: vi.fn(),
+      install: vi.fn(),
+    };
+    const onActiveSkillIdChange = vi.fn();
+    renderSkillsViewWithTopBarActions({
+      activeSkillId: "remote:missing-skill",
+      onActiveSkillIdChange,
+    });
+    await waitFor(() => {
+      expect(onActiveSkillIdChange).toHaveBeenCalledWith(null, {
+        replace: true,
+      });
+    });
   });
 
   it("ignores stale skill loads after projects change", async () => {

@@ -74,6 +74,8 @@ export const NAVIGATION_REFRESH_EXPERIMENT_ID = "navigation-refresh";
 export const NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID =
   "navigation-chats-under-projects";
 
+export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -124,6 +126,14 @@ export const EXPERIMENT_DEFINITIONS = [
     id: NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
     titleKey: "experiments.navigationChatsUnderProjects.title",
     descriptionKey: "experiments.navigationChatsUnderProjects.description",
+    defaultEnabled: false,
+  },
+  {
+    id: SKILL_DISCOVERY_EXPERIMENT_ID,
+    titleKey: "experiments.skillDiscovery.title",
+    descriptionKey: "experiments.skillDiscovery.description",
+    // Skill discovery is an opt-in surface because it requires the optional
+    // sq-agents CLI and can make remote catalog requests.
     defaultEnabled: false,
   },
   {

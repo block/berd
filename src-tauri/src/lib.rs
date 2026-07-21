@@ -491,6 +491,10 @@ pub fn run() {
             commands::window_session::focus_session_window,
             commands::window_session::list_session_windows,
             commands::agent_skills::list_agent_skills,
+            commands::skill_marketplace::skill_cli_status,
+            commands::skill_marketplace::list_remote_skills,
+            commands::skill_marketplace::show_remote_skill,
+            commands::skill_marketplace::install_remote_skill,
             commands::workspace_context::load_workspace_context,
         ])
         .build(tauri::generate_context!())

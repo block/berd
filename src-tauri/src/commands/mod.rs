@@ -27,6 +27,7 @@ pub mod project_icons;
 pub mod renderer;
 pub mod runtime_config;
 pub mod security_threshold;
+pub mod skill_marketplace;
 pub mod system;
 pub mod telemetry;
 pub mod terminal;

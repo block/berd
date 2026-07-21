@@ -261,7 +261,7 @@ function uniqueProjectDirs(projectDirs: string[]) {
   return [...new Set(projectDirs.map((dir) => dir.trim()).filter(Boolean))];
 }
 
-function isDesktopRuntime(): boolean {
+export function isDesktopRuntime(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
