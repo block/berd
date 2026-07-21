@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useChatSessionStore } from "../chatSessionStore";
+import { getVisibleSessions, useChatSessionStore } from "../chatSessionStore";
 
 function resetStore() {
   useChatSessionStore.setState({
@@ -33,6 +33,44 @@ describe("chat session builder metadata", () => {
     expect(session?.targetAgentPath ?? null).toBeNull();
     expect(session?.targetAgentSlug ?? null).toBeNull();
     expect(session?.targetAgentDraftState ?? null).toBeNull();
+    expect(session?.targetAgentDraftSaved).toBe(false);
+  });
+
+  it("treats saved builder drafts as visible recent chats", () => {
+    const builderSession = {
+      id: "builder-session",
+      title: "New agent",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent" as const,
+      targetAgentDraftSaved: true,
+    };
+    const emptyChat = {
+      id: "empty-chat",
+      title: "New chat",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messageCount: 0,
+    };
+
+    expect(getVisibleSessions([builderSession, emptyChat], {})).toEqual([
+      builderSession,
+    ]);
+  });
+
+  it("keeps unsaved empty builder drafts hidden from recent chats", () => {
+    const builderSession = {
+      id: "builder-session",
+      title: "New agent",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent" as const,
+      targetAgentDraftSaved: false,
+    };
+
+    expect(getVisibleSessions([builderSession], {})).toEqual([]);
   });
 
   it("patchSession accepts builder fields", () => {
@@ -46,6 +84,7 @@ describe("chat session builder metadata", () => {
       targetAgentPath: "/Users/x/.agents/agents/draft-abc.md",
       targetAgentSlug: "draft-abc",
       targetAgentDraftState: null,
+      targetAgentDraftSaved: true,
     });
 
     const session = useChatSessionStore.getState().getSession(created.id);
@@ -53,5 +92,6 @@ describe("chat session builder metadata", () => {
     expect(session?.targetAgentPath).toMatch(/draft-abc\.md$/);
     expect(session?.targetAgentSlug).toBe("draft-abc");
     expect(session?.targetAgentDraftState).toBeNull();
+    expect(session?.targetAgentDraftSaved).toBe(true);
   });
 });

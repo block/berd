@@ -12,6 +12,8 @@ const chatState = vi.hoisted(() => ({
     targetAgentPath?: string | null;
     targetAgentSlug?: string | null;
     targetAgentDraftState?: "preparing" | "failed" | null;
+    targetAgentDraftSaved?: boolean;
+    updatedAt?: string;
   }>,
   hasHydratedSessions: true,
   hasMoreSessions: false,
@@ -95,12 +97,15 @@ vi.mock("@/features/runtime-config/defaults", () => ({
 }));
 
 import {
+  deleteDraftAgentSession,
   discardDraftAgentSession,
   hasAgentBuilderSessionUserContent,
   isEmptyDraftAgentSession,
   promoteDraft,
   recoverDraftAgent,
   reconcileAgentBuilderSessions,
+  saveDraftAgentSession,
+  setAgentBuilderSessionSaveHandler,
   startAgentBuilderSession,
 } from "../agentBuilderSession";
 import { resetAgentBuilderSourceLifecycleForTests } from "../agentBuilderSourceLifecycle";
@@ -189,6 +194,7 @@ describe("agentBuilderSession", () => {
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: "preparing",
+      targetAgentDraftSaved: false,
     });
 
     await flushDraftPreparation();
@@ -207,6 +213,7 @@ describe("agentBuilderSession", () => {
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
       targetAgentDraftState: null,
+      targetAgentDraftSaved: false,
     });
     expect(chatState.sessions[0]).toMatchObject({
       intent: "build-agent",
@@ -270,6 +277,7 @@ describe("agentBuilderSession", () => {
       targetAgentPath: "/Users/x/.agents/agents/draft-backend-session.md",
       targetAgentSlug: "draft-backend-session",
       targetAgentDraftState: null,
+      targetAgentDraftSaved: false,
     });
   });
 
@@ -450,6 +458,56 @@ describe("agentBuilderSession", () => {
     expect(id).toBe("sess-old");
     expect(createNewTab).not.toHaveBeenCalled();
     expect(navigateChat).toHaveBeenCalledWith("sess-old");
+  });
+
+  it("saveDraftAgentSession flushes local edits and bumps draft recency", async () => {
+    addBuilderSession({ updatedAt: "2026-01-01T00:00:00.000Z" });
+    const saveHandler = vi.fn().mockResolvedValue(true);
+    setAgentBuilderSessionSaveHandler("sess-1", saveHandler);
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+
+    await saveDraftAgentSession("sess-1");
+
+    expect(saveHandler).toHaveBeenCalledTimes(1);
+    expect(chatState.sessions[0]).toMatchObject({
+      intent: "build-agent",
+      targetAgentPath: draftSource.path,
+      targetAgentSlug: "draft-sess-1",
+      targetAgentDraftState: null,
+      targetAgentDraftSaved: true,
+    });
+    expect(Date.parse(chatState.sessions[0].updatedAt ?? "")).toBeGreaterThan(
+      Date.parse("2026-01-01T00:00:00.000Z"),
+    );
+  });
+
+  it("saveDraftAgentSession keeps failed local edits queued", async () => {
+    addBuilderSession();
+    setAgentBuilderSessionSaveHandler("sess-1", () => false);
+
+    await expect(saveDraftAgentSession("sess-1")).rejects.toThrow(
+      "Failed to save local agent draft edits.",
+    );
+
+    expect(mocks.listPersonaSources).not.toHaveBeenCalled();
+  });
+
+  it("deleteDraftAgentSession fails before closing when the draft cannot be deleted", async () => {
+    addBuilderSession();
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+    mocks.deletePersonaSource.mockRejectedValue(new Error("disk locked"));
+
+    await expect(
+      deleteDraftAgentSession("sess-1", { closeSession }),
+    ).rejects.toThrow("disk locked");
+
+    expect(closeSession).not.toHaveBeenCalled();
+    expect(mocks.patchSession).not.toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ intent: null }),
+    );
   });
 
   it("discardDraftAgentSession deletes the draft and clears builder mode", async () => {
@@ -690,12 +748,16 @@ describe("agentBuilderSession", () => {
 
     await reconcileAgentBuilderSessions();
 
-    expect(mocks.patchSession).toHaveBeenCalledWith("sess-1", {
-      intent: "build-agent",
-      targetAgentPath: draftSource.path,
-      targetAgentSlug: "draft-sess-1",
-      targetAgentDraftState: null,
-    });
+    expect(mocks.patchSession).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        intent: "build-agent",
+        targetAgentPath: draftSource.path,
+        targetAgentSlug: "draft-sess-1",
+        targetAgentDraftState: null,
+        targetAgentDraftSaved: true,
+      }),
+    );
   });
 
   it("startup cleanup deletes only unchanged placeholder drafts for known-dead sessions", async () => {

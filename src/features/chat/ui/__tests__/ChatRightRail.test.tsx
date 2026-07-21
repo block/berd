@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listPersonas: vi.fn(),
   recoverDraftAgent: vi.fn(),
   setAgentBuilderSessionLocalEdits: vi.fn(),
+  setAgentBuilderSessionSaveHandler: vi.fn(),
   rightRailOpen: false,
   compactViewport: false,
   reducedMotion: false,
@@ -39,6 +40,9 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
     onRecoverMissingDraft?: () => void;
     onClose?: () => void;
     onLocalEditStateChange?: (hasLocalEdits: boolean) => void;
+    onSaveDraftHandlerChange?: (
+      saveDraft: (() => boolean | Promise<boolean>) | null,
+    ) => void;
   }) => (
     <div data-testid="agent-builder-rail">
       <span data-testid="agent-builder-target">
@@ -76,6 +80,12 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
       >
         local edits
       </button>
+      <button
+        type="button"
+        onClick={() => props.onSaveDraftHandlerChange?.(() => true)}
+      >
+        register save draft
+      </button>
     </div>
   ),
 }));
@@ -85,6 +95,8 @@ vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
     mocks.recoverDraftAgent(...args),
   setAgentBuilderSessionLocalEdits: (...args: unknown[]) =>
     mocks.setAgentBuilderSessionLocalEdits(...args),
+  setAgentBuilderSessionSaveHandler: (...args: unknown[]) =>
+    mocks.setAgentBuilderSessionSaveHandler(...args),
 }));
 
 vi.mock("@/features/agents/stores/agentStore", () => ({
@@ -150,6 +162,7 @@ describe("ChatRightRail", () => {
       slug: "recovered",
     });
     mocks.setAgentBuilderSessionLocalEdits.mockReset();
+    mocks.setAgentBuilderSessionSaveHandler.mockReset();
   });
 
   it("renders AgentBuilderRail for build-agent sessions", () => {
@@ -545,6 +558,30 @@ describe("ChatRightRail", () => {
     expect(mocks.setAgentBuilderSessionLocalEdits).toHaveBeenCalledWith(
       "s1",
       true,
+    );
+  });
+
+  it("registers a save handler for the builder session", () => {
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "register save draft" }),
+    );
+
+    expect(mocks.setAgentBuilderSessionSaveHandler).toHaveBeenCalledWith(
+      "s1",
+      expect.any(Function),
     );
   });
 });

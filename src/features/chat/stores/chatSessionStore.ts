@@ -76,6 +76,7 @@ export interface ChatSession {
   targetAgentPath?: string | null;
   targetAgentSlug?: string | null;
   targetAgentDraftState?: "preparing" | "failed" | null;
+  targetAgentDraftSaved?: boolean;
 }
 
 export interface ChatSessionReasoningEffortOption {
@@ -125,18 +126,28 @@ export interface ModelSelectionIntent {
 }
 
 export function hasSessionStarted(
-  session: Pick<ChatSession, "messageCount">,
+  session: Pick<
+    ChatSession,
+    "messageCount" | "intent" | "targetAgentDraftSaved"
+  >,
   localMessages?: ArrayLike<unknown> | number,
 ): boolean {
   const localMessageCount =
     typeof localMessages === "number"
       ? localMessages
       : (localMessages?.length ?? 0);
-  return session.messageCount > 0 || localMessageCount > 0;
+  return (
+    session.messageCount > 0 ||
+    localMessageCount > 0 ||
+    session.targetAgentDraftSaved === true
+  );
 }
 
 export function getVisibleSessions<
-  T extends Pick<ChatSession, "id" | "messageCount">,
+  T extends Pick<
+    ChatSession,
+    "id" | "messageCount" | "intent" | "targetAgentDraftSaved"
+  >,
 >(
   sessions: T[],
   messagesBySession: Record<string, ArrayLike<unknown> | number | undefined>,
@@ -463,6 +474,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: null,
+      targetAgentDraftSaved: false,
     });
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     logReasoningEffortInfo("createSession inserted", {
@@ -501,6 +513,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: null,
+      targetAgentDraftSaved: false,
     });
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
@@ -528,6 +541,23 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         id: backendSessionId,
         creationState: undefined,
         creationError: undefined,
+        intent: patch.intent ?? existing.intent,
+        targetAgentPath:
+          patch.targetAgentPath !== undefined
+            ? patch.targetAgentPath
+            : existing.targetAgentPath,
+        targetAgentSlug:
+          patch.targetAgentSlug !== undefined
+            ? patch.targetAgentSlug
+            : existing.targetAgentSlug,
+        targetAgentDraftState:
+          patch.targetAgentDraftState !== undefined
+            ? patch.targetAgentDraftState
+            : existing.targetAgentDraftState,
+        targetAgentDraftSaved:
+          patch.targetAgentDraftSaved !== undefined
+            ? patch.targetAgentDraftSaved
+            : existing.targetAgentDraftSaved,
         updatedAt: patch.updatedAt ?? existing.updatedAt,
       };
       const promoted: ChatSession =

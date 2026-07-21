@@ -654,6 +654,35 @@ describe("chatSessionStore", () => {
       );
     });
 
+    it("preserves builder metadata when promoting an optimistic draft session", () => {
+      seedSession({
+        id: "local-builder-session",
+        title: "New agent",
+        workingDir: "/tmp/project",
+        creationState: "pending",
+        intent: "build-agent",
+        targetAgentPath: "/Users/x/.agents/agents/draft-local.md",
+        targetAgentSlug: "draft-local",
+        targetAgentDraftState: null,
+        targetAgentDraftSaved: true,
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("local-builder-session", "acp-builder-session");
+
+      expect(
+        useChatSessionStore.getState().getSession("acp-builder-session"),
+      ).toMatchObject({
+        id: "acp-builder-session",
+        intent: "build-agent",
+        targetAgentPath: "/Users/x/.agents/agents/draft-local.md",
+        targetAgentSlug: "draft-local",
+        targetAgentDraftState: null,
+        targetAgentDraftSaved: true,
+      });
+    });
+
     it("marks a pending draft session failed when ACP creation fails", () => {
       seedSession({
         id: "local-session",

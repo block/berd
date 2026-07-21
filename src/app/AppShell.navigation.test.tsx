@@ -3372,6 +3372,93 @@ describe("AppShell global navigation", () => {
     expect(mockDeletePersonaSource).not.toHaveBeenCalled();
   });
 
+  it("keeps a saved agent draft visible in recent chats", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await waitForCreatedAgentBuilderTarget();
+
+    const sessionBeforeSave = useChatSessionStore
+      .getState()
+      .getSession("created-session");
+    expect(sessionBeforeSave).toMatchObject({
+      messageCount: 0,
+      intent: "build-agent",
+    });
+
+    const dirtyDraft = {
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Reviewer",
+      description: "Draft",
+      content: "Review code carefully.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([dirtyDraft]);
+    mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(await screen.findByRole("button", { name: "Save draft" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+
+    const savedSession = useChatSessionStore
+      .getState()
+      .getSession("created-session");
+    expect(savedSession).toMatchObject({
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentPath: dirtyDraft.path,
+      targetAgentDraftSaved: true,
+    });
+    expect(savedSession?.updatedAt).toEqual(expect.any(String));
+  });
+
+  it("opens the builder rail when continuing a saved agent draft", async () => {
+    const user = userEvent.setup();
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "New agent",
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+          intent: "build-agent",
+          targetAgentPath: "/Users/test/.agents/agents/draft-session.md",
+          targetAgentSlug: "draft-session",
+          targetAgentDraftState: null,
+          targetAgentDraftSaved: true,
+        },
+      ],
+      activeSessionId: null,
+      isRightRailOpen: false,
+    });
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "session-1",
+      intent: "build-agent",
+    });
+    expect(useChatSessionStore.getState().isRightRailOpen).toBe(true);
+  });
+
   it("prompts before leaving unsaved automation builder changes", async () => {
     const user = userEvent.setup();
     renderAppShell();

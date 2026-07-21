@@ -65,6 +65,9 @@ export interface AgentBuilderRailProps {
   onBack?: (source: AgentSourceEntry) => void;
   onClose?: () => void;
   onLocalEditStateChange?: (hasLocalEdits: boolean) => void;
+  onSaveDraftHandlerChange?: (
+    saveDraft: (() => boolean | Promise<boolean>) | null,
+  ) => void;
 }
 
 export function AgentBuilderRail({
@@ -78,6 +81,7 @@ export function AgentBuilderRail({
   onBack,
   onClose,
   onLocalEditStateChange,
+  onSaveDraftHandlerChange,
 }: AgentBuilderRailProps) {
   const { t } = useTranslation(["agents", "common"]);
   const handleResolvedPathChange = useCallback(
@@ -226,8 +230,7 @@ export function AgentBuilderRail({
   const isDraft = data?.properties?.draft === true;
   const showBackButton = Boolean(data && !isDraft && onBack);
   const hasLocalEdits =
-    Boolean(data && !isDraft) &&
-    (saveStatus === "unsaved" || saveStatus === "error");
+    Boolean(data) && (saveStatus === "unsaved" || saveStatus === "error");
 
   useEffect(() => {
     onLocalEditStateChange?.(hasLocalEdits);
@@ -236,6 +239,18 @@ export function AgentBuilderRail({
       onLocalEditStateChange?.(false);
     };
   }, [hasLocalEdits, onLocalEditStateChange]);
+
+  useEffect(() => {
+    if (!data) {
+      onSaveDraftHandlerChange?.(null);
+      return;
+    }
+
+    onSaveDraftHandlerChange?.(saveNow);
+    return () => {
+      onSaveDraftHandlerChange?.(null);
+    };
+  }, [data, onSaveDraftHandlerChange, saveNow]);
 
   const requiresNewDraftFields = isDraft;
   const headerName = data

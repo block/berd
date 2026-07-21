@@ -4,8 +4,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exportPersona } from "@/shared/api/agents";
 import { saveExportedAgentFile } from "@/shared/api/system";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { toast } from "sonner";
 import { AgentsView } from "../AgentsView";
+
+const mockDraftSource = vi.hoisted(() => ({
+  type: "agent",
+  path: "/Users/x/.agents/agents/draft-session.md",
+  name: "New agent",
+  description: "Draft",
+  content: "Draft in progress.",
+  global: true,
+  writable: true,
+  properties: {
+    draft: true,
+    builderSessionId: "draft-session",
+    avatar: "app-avatar:gloopies-1",
+  },
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -24,6 +40,10 @@ vi.mock("@/shared/api/agents", () => ({
   exportPersona: vi.fn(),
   importPersonas: vi.fn(),
   readImportPersonaFile: vi.fn(),
+  listPersonaSources: vi.fn().mockResolvedValue([mockDraftSource]),
+  readAgentSourceFile: vi.fn().mockResolvedValue(mockDraftSource),
+  updatePersonaSource: vi.fn().mockResolvedValue(mockDraftSource),
+  deletePersonaSource: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/shared/api/system", () => ({
@@ -123,6 +143,12 @@ describe("AgentsView entry points", () => {
       personasLoading: false,
       providers: [],
     });
+    useChatSessionStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      hasHydratedSessions: false,
+    });
   });
 
   it("clicking Create calls onStartAgentBuilderSession", () => {
@@ -134,6 +160,54 @@ describe("AgentsView entry points", () => {
     fireEvent.click(screen.getByRole("button", { name: "gallery.createAria" }));
 
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({});
+  });
+
+  it("shows draft sessions at the end of the gallery and continues or deletes them", async () => {
+    const onStartAgentBuilderSession = vi.fn();
+    const onDeleteDraftSession = vi.fn();
+    useAgentStore.setState({ personas: [persona] });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "draft-session",
+          title: "New agent",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+          intent: "build-agent",
+          targetAgentPath: "/Users/x/.agents/agents/draft-session.md",
+          targetAgentSlug: "draft-session",
+          targetAgentDraftState: null,
+          targetAgentDraftSaved: true,
+        },
+      ],
+    });
+
+    render(
+      <AgentsView
+        onStartAgentBuilderSession={onStartAgentBuilderSession}
+        onDeleteDraftSession={onDeleteDraftSession}
+      />,
+    );
+
+    expect(screen.getByText("gallery.draft")).toBeInTheDocument();
+    expect(screen.getByText("gallery.draftDescription")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.continueDraftAria" }),
+    );
+
+    expect(onStartAgentBuilderSession).toHaveBeenCalledWith({
+      path: "/Users/x/.agents/agents/draft-session.md",
+      slug: "draft-session",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+
+    expect(onDeleteDraftSession).toHaveBeenCalledWith("draft-session");
   });
 
   it("clicking detail Start chat calls onStartChatWithAgent with the persona id", () => {

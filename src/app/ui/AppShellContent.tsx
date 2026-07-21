@@ -477,6 +477,9 @@ function renderRouteContent({
           onBreadcrumbLabelChange={onAgentsBreadcrumbLabelChange}
           onStartAgentBuilderSession={onStartAgentBuilderSession}
           onStartChatWithAgent={onOpenAgent}
+          onDeleteDraftSession={(sessionId) =>
+            onArchiveChat(sessionId).then(() => undefined)
+          }
         />
       );
     case "projects":

@@ -4,11 +4,22 @@ import { IconPlus } from "@tabler/icons-react";
 import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { AgentTileButton } from "@/shared/ui/agent-tile-button";
+import { Badge } from "@/shared/ui/badge";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Persona } from "@/shared/types/agents";
 import { PersonaCard } from "@/features/agents/ui/PersonaCard";
 import { useArtifacts } from "@/shared/hooks/useArtifacts";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
+import { usePersonaSource } from "@/features/agents/hooks/usePersonaSource";
+import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
+import {
+  isPlaceholderAgentName,
+  PLACEHOLDER_AGENT_BODY,
+} from "@/features/agents/lib/agentBuilderIdentity";
 
 // Blue jello gloopy shown oversized in the gallery empty state, per the
 // onboarding Figma. Resolved from the startup artifacts catalog.
@@ -18,6 +29,7 @@ const GALLERY_CARD_STAGGER_MS = 55;
 
 interface PersonaGalleryProps {
   personas: Persona[];
+  draftSessions?: ChatSession[];
   activePersonaId?: string;
   onSelectPersona: (persona: Persona) => void;
   onStartChatPersona?: (persona: Persona) => void;
@@ -26,6 +38,8 @@ interface PersonaGalleryProps {
   onDeletePersona: (persona: Persona) => void;
   onExportPersona?: (persona: Persona) => void;
   onCreatePersona: () => void;
+  onContinueDraft?: (sessionId: string) => void;
+  onDeleteDraft?: (sessionId: string) => void;
   onImportFile?: (fileBytes: number[], fileName: string) => void;
   validateImportFile?: (
     file: Pick<File, "name" | "type" | "size">,
@@ -34,6 +48,130 @@ interface PersonaGalleryProps {
   maxImportBytes?: number;
   importTooLargeMessage?: string;
   isLoading?: boolean;
+}
+
+function draftTitle(session: ChatSession, sourceName?: string): string {
+  const name = sourceName?.trim();
+  if (name && !isPlaceholderAgentName(name)) return name;
+
+  const title = session.title.trim();
+  return title.length > 0 ? title : "Untitled agent draft";
+}
+
+function draftDescription(content?: string): string | null {
+  const trimmed = content?.trim();
+  if (!trimmed || trimmed === PLACEHOLDER_AGENT_BODY) return null;
+  return trimmed;
+}
+
+function draftAvatar(sourceAvatar: unknown): string | null {
+  return typeof sourceAvatar === "string" ? sourceAvatar : null;
+}
+
+function PersonaDraftCard({
+  session,
+  onContinue,
+  onDelete,
+}: {
+  session: ChatSession;
+  onContinue?: (sessionId: string) => void;
+  onDelete?: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation("agents");
+  const { data } = usePersonaSource(session.targetAgentPath ?? null, {
+    builderSessionId: session.id,
+  });
+  const title = draftTitle(session, data?.name);
+  const description =
+    draftDescription(data?.content) ?? t("gallery.draftDescription");
+  const avatar = draftAvatar(data?.properties?.avatar);
+  const avatarMedia = useAvatarMedia(avatar);
+  const fallbackIconSrc = resolveAgentIcon(
+    session.targetAgentPath ?? session.id,
+  );
+
+  const hoverActionsOverlay = (
+    <div
+      className={cn(
+        "pointer-events-none absolute inset-x-0 bottom-6 z-10 flex items-center justify-center gap-2 opacity-0",
+        "transition-opacity duration-200",
+        "group-hover:opacity-100 focus-within:opacity-100",
+      )}
+    >
+      <AgentTileButton
+        type="button"
+        size="sm"
+        onClick={() => onContinue?.(session.id)}
+        aria-label={t("gallery.continueDraftAria", { name: title })}
+        className="pointer-events-auto"
+      >
+        {t("gallery.continueDraft")}
+      </AgentTileButton>
+      <Button
+        type="button"
+        variant="subtle"
+        size="sm"
+        destructive
+        onClick={() => onDelete?.(session.id)}
+        aria-label={t("gallery.deleteDraftAria", { name: title })}
+        className="pointer-events-auto"
+      >
+        {t("gallery.deleteDraft")}
+      </Button>
+    </div>
+  );
+
+  return (
+    <div className="group relative flex w-full flex-col gap-4 rounded-md bg-transparent p-2 transition-colors duration-200">
+      <div className="relative">
+        <div className="relative aspect-square w-full overflow-hidden rounded-sm">
+          {avatarMedia ? (
+            <AvatarMedia
+              media={avatarMedia}
+              alt={title}
+              lazy
+              loadingStrategy="visible-video"
+              className={cn(
+                "object-contain opacity-55 saturate-[0.8] transition-transform duration-300",
+                "group-hover:scale-[1.02] group-hover:opacity-70",
+              )}
+            />
+          ) : (
+            <img
+              alt=""
+              aria-hidden="true"
+              src={fallbackIconSrc}
+              className={cn(
+                "pointer-events-none size-full object-contain opacity-55 saturate-[0.8] transition-transform duration-300",
+                "group-hover:scale-[1.02] group-hover:opacity-70",
+              )}
+            />
+          )}
+        </div>
+        {hoverActionsOverlay}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate text-base font-normal leading-5 text-foreground">
+              {title}
+            </span>
+            <Badge
+              variant="secondary"
+              className="rounded-full text-[11px] uppercase tracking-[0.08em]"
+            >
+              {t("gallery.draft")}
+            </Badge>
+          </span>
+          <span aria-hidden="true" className="size-7 shrink-0" />
+        </div>
+        <p className="line-clamp-3 max-w-[28ch] text-xs font-normal leading-4 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function SkeletonCard() {
@@ -51,6 +189,7 @@ function SkeletonCard() {
 
 export function PersonaGallery({
   personas,
+  draftSessions = [],
   activePersonaId,
   onSelectPersona,
   onStartChatPersona,
@@ -59,6 +198,8 @@ export function PersonaGallery({
   onDeletePersona,
   onExportPersona,
   onCreatePersona,
+  onContinueDraft,
+  onDeleteDraft,
   onImportFile,
   validateImportFile,
   onImportError,
@@ -115,7 +256,7 @@ export function PersonaGallery({
     );
   }
 
-  if (personas.length === 0) {
+  if (personas.length === 0 && draftSessions.length === 0) {
     return (
       <div
         {...dropHandlers}
@@ -214,6 +355,21 @@ export function PersonaGallery({
             onDuplicate={onDuplicatePersona}
             onDelete={onDeletePersona}
             onExport={onExportPersona}
+          />
+        </div>
+      ))}
+      {draftSessions.map((session, index) => (
+        <div
+          key={`draft:${session.id}`}
+          className="agents-gallery-card-enter"
+          style={{
+            animationDelay: `${(sorted.length + index + 1) * GALLERY_CARD_STAGGER_MS}ms`,
+          }}
+        >
+          <PersonaDraftCard
+            session={session}
+            onContinue={onContinueDraft}
+            onDelete={onDeleteDraft}
           />
         </div>
       ))}

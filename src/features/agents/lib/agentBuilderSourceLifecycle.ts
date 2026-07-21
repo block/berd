@@ -104,6 +104,10 @@ export async function discardAgentBuilderSource(path: string): Promise<void> {
   localDraftSourcesByPath.delete(path);
 }
 
+export function forgetLocalAgentBuilderSource(path: string): void {
+  localDraftSourcesByPath.delete(path);
+}
+
 export async function promoteAgentBuilderDraftSource(
   source: AgentSourceEntry,
 ): Promise<AgentSourceEntry> {

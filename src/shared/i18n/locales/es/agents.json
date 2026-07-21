@@ -117,6 +117,12 @@
   },
   "gallery": {
     "createAria": "Crear nuevo agente",
+    "continueDraft": "Continuar editando",
+    "continueDraftAria": "Continuar editando {{name}}",
+    "deleteDraft": "Eliminar",
+    "deleteDraftAria": "Eliminar borrador {{name}}",
+    "draft": "Borrador",
+    "draftDescription": "Termina este borrador de agente en el constructor.",
     "dropFile": "o suelta un archivo",
     "empty": {
       "aboutTitle": "¿Qué es un agente?",

@@ -1913,6 +1913,16 @@ export function AppShell({
               );
               return;
             }
+            const latestSessionPatch = {
+              intent: latestSessionAfterReady.intent,
+              targetAgentPath: latestSessionAfterReady.targetAgentPath,
+              targetAgentSlug: latestSessionAfterReady.targetAgentSlug,
+              targetAgentDraftState:
+                latestSessionAfterReady.targetAgentDraftState,
+              targetAgentDraftSaved:
+                latestSessionAfterReady.targetAgentDraftSaved,
+              updatedAt: latestSessionAfterReady.updatedAt,
+            };
             const shouldRemainActive =
               sessionStoreAfterReady.activeSessionId === session.id;
             promoteChatSessionId(session.id, sessionId);
@@ -1921,6 +1931,7 @@ export function AppShell({
               modelId: sessionModelPreference.modelId,
               modelName: sessionModelPreference.modelName,
               workingDir,
+              ...latestSessionPatch,
               ...(resolvedConfigOptionsSnapshot?.reasoningEffort
                 ? {
                     reasoningEffort:
@@ -3681,11 +3692,15 @@ export function AppShell({
         resetNavigationSecondary();
       }
       activateChatSession(id);
+      const session = useChatSessionStore.getState().getSession(id);
+      if (session?.intent === "build-agent") {
+        setRightRailOpen(true);
+      }
       clearSettingsSectionUrl();
       setActiveView("chat");
       void loadSessionMessages(id);
     },
-    [resetNavigationSecondary],
+    [resetNavigationSecondary, setRightRailOpen],
   );
   navigateAgentBuilderChatRef.current = selectSessionDirect;
 

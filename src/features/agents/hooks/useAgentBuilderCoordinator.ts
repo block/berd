@@ -9,6 +9,8 @@ import {
   hasAgentBuilderSessionUserContent,
   isDraftAgentBuilderSession,
   reconcileAgentBuilderSessions,
+  resolveAgentBuilderSessionId,
+  saveDraftAgentSession,
   startAgentBuilderSession,
   type StartAgentBuilderSessionDeps,
 } from "../lib/agentBuilderSession";
@@ -83,10 +85,26 @@ export function useAgentBuilderCoordinator({
   }, []);
 
   const runPendingNavigation = useCallback(() => {
+    const sessionId = pendingSessionIdRef.current;
     const pending = pendingNavigationRef.current;
     clearPendingNavigation();
-    pending?.next();
-  }, [clearPendingNavigation]);
+
+    if (!sessionId) {
+      pending?.next();
+      return;
+    }
+
+    const liveSessionId = resolveAgentBuilderSessionId(sessionId);
+    void saveDraftAgentSession(liveSessionId)
+      .then(() => {
+        pending?.next();
+      })
+      .catch((error) => {
+        console.error("Failed to save agent draft before leaving:", error);
+        toast.error(t("builderRail.saveError"));
+        pending?.onCancel?.();
+      });
+  }, [clearPendingNavigation, t]);
 
   const cancelPendingNavigation = useCallback(() => {
     const pending = pendingNavigationRef.current;
@@ -228,7 +246,8 @@ export function useAgentBuilderCoordinator({
       return;
     }
 
-    void discardDraftAgentSession(sessionId)
+    const liveSessionId = resolveAgentBuilderSessionId(sessionId);
+    void discardDraftAgentSession(liveSessionId)
       .catch((error) => {
         console.error("Failed to discard agent draft:", error);
       })

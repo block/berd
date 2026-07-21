@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import {
   selectPersonas,
   selectPersonasLoading,
@@ -43,6 +44,7 @@ import {
 import { isEmptyAgentsGallerySimulated } from "@/features/agents/lib/emptyGallerySimulation";
 import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
+import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 
 function decodeImportFileBytes(fileBytes: number[]): string {
@@ -85,6 +87,7 @@ interface AgentsViewProps {
     slug?: string;
   }) => void;
   onStartChatWithAgent?: (personaId: string) => void;
+  onDeleteDraftSession?: (sessionId: string) => void | Promise<void>;
 }
 
 export function AgentsView({
@@ -93,6 +96,7 @@ export function AgentsView({
   onBreadcrumbLabelChange,
   onStartAgentBuilderSession,
   onStartChatWithAgent,
+  onDeleteDraftSession,
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
   const isActivePersonaControlled = activePersonaId !== undefined;
@@ -108,6 +112,18 @@ export function AgentsView({
   const personas = useMemo(
     () => (isEmptyAgentsGallerySimulated() ? [] : storedPersonas),
     [storedPersonas],
+  );
+  const sessions = useChatSessionStore((state) => state.sessions);
+  const agentDraftSessions = useMemo(
+    () =>
+      sessions.filter(
+        (session) =>
+          session.intent === "build-agent" &&
+          session.targetAgentDraftSaved === true &&
+          !session.archivedAt &&
+          Boolean(session.targetAgentPath),
+      ),
+    [sessions],
   );
   const shouldReduceMotion = useReducedMotion();
   // Four or fewer agents fit in a single screen, so we float the grid in the
@@ -195,6 +211,32 @@ export function AgentsView({
   const handleCreatePersona = useCallback(() => {
     onStartAgentBuilderSession?.({});
   }, [onStartAgentBuilderSession]);
+
+  const handleContinueDraft = useCallback(
+    (sessionId: string) => {
+      const session = useChatSessionStore.getState().getSession(sessionId);
+      if (!session?.targetAgentPath) {
+        return;
+      }
+
+      onStartAgentBuilderSession?.({
+        path: session.targetAgentPath,
+        slug: session.targetAgentSlug ?? undefined,
+      });
+    },
+    [onStartAgentBuilderSession],
+  );
+
+  const handleDeleteDraft = useCallback(
+    (sessionId: string) => {
+      void deleteDraftAgentSession(sessionId, {
+        closeSession: onDeleteDraftSession,
+      }).catch((error) => {
+        toast.error(formatAgentError(error, t("view.deleteFailed")));
+      });
+    },
+    [onDeleteDraftSession, t],
+  );
 
   useEffect(() => {
     if (
@@ -484,6 +526,7 @@ export function AgentsView({
       >
         <PersonaGallery
           personas={personas}
+          draftSessions={agentDraftSessions}
           onSelectPersona={handleSelectPersona}
           onStartChatPersona={handleStartChat}
           onEditPersona={handleEditPersona}
@@ -491,6 +534,8 @@ export function AgentsView({
           onDeletePersona={handleDeletePersona}
           onExportPersona={handleExportPersona}
           onCreatePersona={handleCreatePersona}
+          onContinueDraft={handleContinueDraft}
+          onDeleteDraft={handleDeleteDraft}
           onImportFile={handleImportFileBytes}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}

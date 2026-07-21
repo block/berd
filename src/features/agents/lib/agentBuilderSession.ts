@@ -58,6 +58,10 @@ interface CloseSessionDeps {
 }
 
 const localEditSessionIds = new Set<string>();
+const localSaveHandlersBySessionId = new Map<
+  string,
+  () => MaybePromise<boolean>
+>();
 const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
 
 export function setAgentBuilderSessionLocalEdits(
@@ -70,6 +74,52 @@ export function setAgentBuilderSessionLocalEdits(
   }
 
   localEditSessionIds.delete(sessionId);
+}
+
+export function setAgentBuilderSessionSaveHandler(
+  sessionId: string,
+  saveHandler: (() => MaybePromise<boolean>) | null,
+): void {
+  if (saveHandler) {
+    localSaveHandlersBySessionId.set(sessionId, saveHandler);
+    return;
+  }
+
+  localSaveHandlersBySessionId.delete(sessionId);
+}
+
+export async function saveDraftAgentSession(sessionId: string): Promise<void> {
+  const saveLocalEdits = localSaveHandlersBySessionId.get(sessionId);
+  if (saveLocalEdits) {
+    const saved = await saveLocalEdits();
+    if (!saved) {
+      throw new Error("Failed to save local agent draft edits.");
+    }
+  }
+
+  const source = await findCurrentBuilderSource(sessionId);
+  if (source?.properties?.draft === true) {
+    const freshSource = await readFreshAgentSource(source.path, source).catch(
+      () => source,
+    );
+    const slug = fileStem(freshSource.path) || deriveSlug(freshSource.name);
+    useChatSessionStore.getState().patchSession(sessionId, {
+      intent: "build-agent",
+      targetAgentPath: freshSource.path,
+      targetAgentSlug: slug,
+      targetAgentDraftState: null,
+      targetAgentDraftSaved: true,
+      updatedAt: new Date().toISOString(),
+    });
+  } else {
+    useChatSessionStore.getState().patchSession(sessionId, {
+      intent: "build-agent",
+      targetAgentDraftSaved: true,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  setAgentBuilderSessionLocalEdits(sessionId, false);
 }
 
 export async function startAgentBuilderSession(
@@ -94,6 +144,7 @@ export async function startAgentBuilderSession(
         targetAgentPath: target.path,
         targetAgentSlug: target.slug,
         targetAgentDraftState: null,
+        targetAgentDraftSaved: false,
       });
 
       await deps.navigateChat(sessionId);
@@ -113,6 +164,7 @@ export async function startAgentBuilderSession(
     targetAgentPath: null,
     targetAgentSlug: null,
     targetAgentDraftState: "preparing",
+    targetAgentDraftSaved: false,
   });
 
   await deps.navigateChat(provisionalSessionId);
@@ -150,6 +202,7 @@ async function prepareProvisionalDraftTarget(
     targetAgentPath: target.path,
     targetAgentSlug: target.slug,
     targetAgentDraftState: null,
+    targetAgentDraftSaved: false,
   });
 }
 
@@ -167,6 +220,10 @@ function markProvisionalDraftTargetFailed(initialSessionId: string): void {
   useChatSessionStore.getState().patchSession(session.id, {
     targetAgentDraftState: "failed",
   });
+}
+
+export function resolveAgentBuilderSessionId(initialSessionId: string): string {
+  return findSessionByInitialId(initialSessionId)?.id ?? initialSessionId;
 }
 
 function resolveFinalBuilderSessionId(
@@ -323,6 +380,19 @@ export async function discardDraftAgentSession(
   }
 }
 
+export async function deleteDraftAgentSession(
+  sessionId: string,
+  deps: CloseSessionDeps = {},
+): Promise<void> {
+  const source = await findCurrentBuilderSource(sessionId);
+  if (source?.properties?.draft === true) {
+    await discardAgentBuilderSource(source.path);
+  }
+
+  clearBuilderSessionState(sessionId);
+  await deps.closeSession?.(sessionId);
+}
+
 export async function promoteDraft(
   sessionId: string,
 ): Promise<AgentSourceEntry | null> {
@@ -438,6 +508,7 @@ export async function reconcileAgentBuilderSessions(): Promise<void> {
         targetAgentPath: source.path,
         targetAgentSlug: fileStem(source.path) || deriveSlug(source.name),
         targetAgentDraftState: null,
+        targetAgentDraftSaved: true,
       });
       continue;
     }
@@ -450,12 +521,14 @@ export async function reconcileAgentBuilderSessions(): Promise<void> {
 
 export function clearBuilderSessionState(sessionId: string): void {
   localEditSessionIds.delete(sessionId);
+  localSaveHandlersBySessionId.delete(sessionId);
 
   useChatSessionStore.getState().patchSession(sessionId, {
     intent: null,
     targetAgentPath: null,
     targetAgentSlug: null,
     targetAgentDraftState: null,
+    targetAgentDraftSaved: false,
   });
 
   const chatStore = useChatStore.getState();

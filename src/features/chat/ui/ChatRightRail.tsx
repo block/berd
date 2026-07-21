@@ -17,6 +17,7 @@ import {
 import {
   recoverPendingDraftAgent,
   setAgentBuilderSessionLocalEdits,
+  setAgentBuilderSessionSaveHandler,
 } from "@/features/agents/lib/agentBuilderSession";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
@@ -313,6 +314,26 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       },
       [session?.id],
     );
+    const handleSaveDraft = useCallback(
+      (saveDraft: (() => boolean | Promise<boolean>) | null) => {
+        if (!session?.id) {
+          return;
+        }
+
+        setAgentBuilderSessionSaveHandler(session.id, saveDraft);
+      },
+      [session?.id],
+    );
+
+    useEffect(() => {
+      if (session?.intent !== "build-agent" || !session.id) {
+        return;
+      }
+
+      return () => {
+        setAgentBuilderSessionSaveHandler(session.id, null);
+      };
+    }, [session?.id, session?.intent]);
 
     if (session?.intent === "build-agent") {
       const draftState =
@@ -346,6 +367,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
             onBack={handleBuilderBack}
             onClose={onAgentBuilderClose}
             onLocalEditStateChange={handleLocalEditStateChange}
+            onSaveDraftHandlerChange={handleSaveDraft}
           />
         </div>
       );

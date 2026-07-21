@@ -117,6 +117,12 @@
   },
   "gallery": {
     "createAria": "Create new agent",
+    "continueDraft": "Continue editing",
+    "continueDraftAria": "Continue editing {{name}}",
+    "deleteDraft": "Delete",
+    "deleteDraftAria": "Delete draft {{name}}",
+    "draft": "Draft",
+    "draftDescription": "Finish this agent draft in the builder.",
     "dropFile": "or drop a file",
     "empty": {
       "aboutTitle": "What is an agent?",
