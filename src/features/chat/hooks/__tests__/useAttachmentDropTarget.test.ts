@@ -1,44 +1,60 @@
+import { createElement, Suspense, type PropsWithChildren } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAttachmentDropTarget } from "../useAttachmentDropTarget";
 
-let dragDropListener:
-  | ((event: {
-      payload:
-        | { type: "leave"; position: { x: number; y: number } }
-        | { type: "drop"; position: { x: number; y: number }; paths: string[] }
-        | { type: "over"; position: { x: number; y: number }; paths: string[] };
-    }) => void)
-  | null = null;
+type NativeDragDropEvent = {
+  payload:
+    | { type: "leave"; position: { x: number; y: number } }
+    | { type: "drop"; position: { x: number; y: number }; paths: string[] }
+    | { type: "over"; position: { x: number; y: number }; paths: string[] };
+};
+
+type NativeDragDropListener = (event: NativeDragDropEvent) => void;
+
+let dragDropListener: NativeDragDropListener | null = null;
 const mockUnlisten = vi.fn();
+const mockOnDragDropEvent = vi.fn(
+  (listener: NativeDragDropListener): Promise<() => void> => {
+    dragDropListener = listener;
+    return Promise.resolve(mockUnlisten);
+  },
+);
 
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({
-    onDragDropEvent: vi.fn((listener) => {
-      dragDropListener = listener;
-      return Promise.resolve(mockUnlisten);
-    }),
+    onDragDropEvent: mockOnDragDropEvent,
   }),
 }));
 
-function createDropTarget() {
+function createDropTarget({
+  left = 0,
+  top = 0,
+  right = 100,
+  bottom = 100,
+}: {
+  left?: number;
+  top?: number;
+  right?: number;
+  bottom?: number;
+} = {}) {
   const target = document.createElement("div");
   document.body.appendChild(target);
   vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
-    left: 0,
-    top: 0,
-    right: 100,
-    bottom: 100,
-    width: 100,
-    height: 100,
-    x: 0,
-    y: 0,
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    x: left,
+    y: top,
     toJSON: () => ({}),
   } as DOMRect);
   Object.defineProperty(document, "elementFromPoint", {
     configurable: true,
     value: vi.fn((x: number, y: number) =>
-      x >= 0 && x <= 100 && y >= 0 && y <= 100 ? target : null,
+      x >= left && x <= right && y >= top && y <= bottom ? target : null,
     ),
   });
 
@@ -77,6 +93,13 @@ describe("useAttachmentDropTarget", () => {
   beforeEach(() => {
     dragDropListener = null;
     mockUnlisten.mockClear();
+    mockOnDragDropEvent.mockClear();
+    mockOnDragDropEvent.mockImplementation(
+      (listener: NativeDragDropListener): Promise<() => void> => {
+        dragDropListener = listener;
+        return Promise.resolve(mockUnlisten);
+      },
+    );
     window.__TAURI_INTERNALS__ = {};
   });
 
@@ -189,6 +212,426 @@ describe("useAttachmentDropTarget", () => {
     expect(onDropFiles).not.toHaveBeenCalled();
 
     unmount();
+    cleanup();
+  });
+
+  it("keeps the native Tauri listener subscribed across callback identity changes", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const firstOnDropFiles = vi.fn();
+    const firstOnDropPaths = vi.fn();
+    const secondOnDropFiles = vi.fn();
+    const secondOnDropPaths = vi.fn();
+
+    const { result, rerender, unmount } = renderHook(
+      ({ onDropFiles, onDropPaths }) =>
+        useAttachmentDropTarget({
+          disabled: false,
+          targetRef,
+          onDropFiles,
+          onDropPaths,
+        }),
+      {
+        initialProps: {
+          onDropFiles: firstOnDropFiles,
+          onDropPaths: firstOnDropPaths,
+        },
+      },
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+    const activeListener = dragDropListener;
+
+    act(() => {
+      activeListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    rerender({
+      onDropFiles: secondOnDropFiles,
+      onDropPaths: secondOnDropPaths,
+    });
+
+    act(() => {
+      activeListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(mockOnDragDropEvent).toHaveBeenCalledTimes(1);
+    expect(mockUnlisten).not.toHaveBeenCalled();
+    expect(firstOnDropFiles).not.toHaveBeenCalled();
+    expect(firstOnDropPaths).not.toHaveBeenCalled();
+    expect(secondOnDropFiles).not.toHaveBeenCalled();
+    expect(secondOnDropPaths).toHaveBeenCalledWith(["/Users/test/report.pdf"]);
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    cleanup();
+  });
+
+  it("uses the latest disabled state and target without resubscribing", async () => {
+    const firstTarget = createDropTarget();
+    const secondTarget = createDropTarget({
+      left: 200,
+      top: 200,
+      right: 300,
+      bottom: 300,
+    });
+    const onDropPaths = vi.fn();
+
+    const { result, rerender, unmount } = renderHook(
+      ({ disabled, targetRef }) =>
+        useAttachmentDropTarget({
+          disabled,
+          targetRef,
+          onDropFiles: vi.fn(),
+          onDropPaths,
+        }),
+      {
+        initialProps: {
+          disabled: false,
+          targetRef: firstTarget.targetRef,
+        },
+      },
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    rerender({ disabled: false, targetRef: secondTarget.targetRef });
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 250, y: 250 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    rerender({ disabled: true, targetRef: secondTarget.targetRef });
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 250, y: 250 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(mockOnDragDropEvent).toHaveBeenCalledTimes(1);
+    expect(onDropPaths).not.toHaveBeenCalled();
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    firstTarget.cleanup();
+    secondTarget.cleanup();
+  });
+
+  it("uses the latest DOM drop callback without resubscribing", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const firstOnDropFiles = vi.fn();
+    const secondOnDropFiles = vi.fn();
+
+    const { result, rerender, unmount } = renderHook(
+      ({ onDropFiles }) =>
+        useAttachmentDropTarget({
+          disabled: false,
+          targetRef,
+          onDropFiles,
+          onDropPaths: vi.fn(),
+        }),
+      { initialProps: { onDropFiles: firstOnDropFiles } },
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+    rerender({ onDropFiles: secondOnDropFiles });
+
+    const file = new File(["pdf"], "report.pdf", {
+      type: "application/pdf",
+    });
+    act(() => {
+      result.current.handleDrop(createDomDropEvent(file));
+    });
+
+    expect(mockOnDragDropEvent).toHaveBeenCalledTimes(1);
+    expect(firstOnDropFiles).not.toHaveBeenCalled();
+    expect(secondOnDropFiles).toHaveBeenCalledWith([file]);
+
+    unmount();
+    cleanup();
+  });
+
+  it("uses the latest committed callback without exposing a suspended render", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const firstOnDropPaths = vi.fn();
+    const suspendedOnDropPaths = vi.fn();
+    const neverResolves = new Promise<never>(() => {});
+
+    function Wrapper({ children }: PropsWithChildren) {
+      return createElement(Suspense, { fallback: null }, children);
+    }
+
+    const { result, rerender, unmount } = renderHook(
+      ({ onDropPaths, suspend }) => {
+        useAttachmentDropTarget({
+          disabled: false,
+          targetRef,
+          onDropFiles: vi.fn(),
+          onDropPaths,
+        });
+        if (suspend) {
+          throw neverResolves;
+        }
+      },
+      {
+        initialProps: {
+          onDropPaths: firstOnDropPaths,
+          suspend: false,
+        },
+        wrapper: Wrapper,
+      },
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    rerender({
+      onDropPaths: suspendedOnDropPaths,
+      suspend: true,
+    });
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(firstOnDropPaths).toHaveBeenCalledWith(["/Users/test/report.pdf"]);
+    expect(suspendedOnDropPaths).not.toHaveBeenCalled();
+    expect(result.current).toBeUndefined();
+
+    unmount();
+    cleanup();
+  });
+
+  it("keeps handling native drops during the async registration gap a resubscribe would create", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const firstOnDropFiles = vi.fn();
+    const firstOnDropPaths = vi.fn();
+    const secondOnDropFiles = vi.fn();
+    const secondOnDropPaths = vi.fn();
+    let registrations = 0;
+
+    mockUnlisten.mockImplementation(() => {
+      dragDropListener = null;
+    });
+    mockOnDragDropEvent.mockImplementation(
+      (listener: NativeDragDropListener): Promise<() => void> => {
+        registrations += 1;
+        if (registrations === 1) {
+          dragDropListener = listener;
+          return Promise.resolve(mockUnlisten);
+        }
+        return new Promise(() => {
+          // Leave replacement registration pending to model Tauri's async gap.
+        });
+      },
+    );
+
+    const { result, rerender, unmount } = renderHook(
+      ({ onDropFiles, onDropPaths }) =>
+        useAttachmentDropTarget({
+          disabled: false,
+          targetRef,
+          onDropFiles,
+          onDropPaths,
+        }),
+      {
+        initialProps: {
+          onDropFiles: firstOnDropFiles,
+          onDropPaths: firstOnDropPaths,
+        },
+      },
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const activeListener = dragDropListener;
+
+    act(() => {
+      activeListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    rerender({
+      onDropFiles: secondOnDropFiles,
+      onDropPaths: secondOnDropPaths,
+    });
+
+    expect(dragDropListener).toBe(activeListener);
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+
+    expect(mockOnDragDropEvent).toHaveBeenCalledTimes(1);
+    expect(mockUnlisten).not.toHaveBeenCalled();
+    expect(firstOnDropFiles).not.toHaveBeenCalled();
+    expect(firstOnDropPaths).not.toHaveBeenCalled();
+    expect(secondOnDropFiles).not.toHaveBeenCalled();
+    expect(secondOnDropPaths).toHaveBeenCalledWith(["/Users/test/report.pdf"]);
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    expect(mockUnlisten).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  it("clears rejected native drops before the next valid DOM drop", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/report.pdf"],
+        },
+      });
+    });
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "drop",
+          position: { x: 10, y: 10 },
+          paths: [],
+        },
+      });
+    });
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    const file = new File(["pdf"], "report.pdf", {
+      type: "application/pdf",
+    });
+    act(() => {
+      result.current.handleDrop(createDomDropEvent(file));
+    });
+    expect(onDropFiles).toHaveBeenCalledWith([file]);
+
+    unmount();
+    cleanup();
+  });
+
+  it("does not register a native listener when unmounted before import resolves", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+
+    const { unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        targetRef,
+        onDropFiles: vi.fn(),
+        onDropPaths: vi.fn(),
+      }),
+    );
+
+    unmount();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockOnDragDropEvent).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("unlistens when native registration resolves after unmount", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+    let resolveRegistration: ((unlisten: () => void) => void) | null = null;
+
+    mockOnDragDropEvent.mockImplementation(
+      (listener: NativeDragDropListener): Promise<() => void> => {
+        dragDropListener = listener;
+        return new Promise((resolve) => {
+          resolveRegistration = resolve;
+        });
+      },
+    );
+
+    const { unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+    unmount();
+    expect(mockUnlisten).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRegistration?.(mockUnlisten);
+      await Promise.resolve();
+    });
+
+    expect(mockUnlisten).toHaveBeenCalledTimes(1);
     cleanup();
   });
 

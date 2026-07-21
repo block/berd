@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
@@ -119,13 +120,30 @@ export function useAttachmentDropTarget({
   onDropFiles,
   onDropPaths,
 }: UseAttachmentDropTargetOptions) {
-  const [isAttachmentDragOver, setIsAttachmentDragOver] = useState(false);
+  const [isAttachmentDragOver, setIsAttachmentDragOverState] = useState(false);
+  const isAttachmentDragOverRef = useRef(false);
+  const disabledRef = useRef(disabled);
+  const onDropFilesRef = useRef(onDropFiles);
+  const onDropPathsRef = useRef(onDropPaths);
+  const targetRefRef = useRef(targetRef);
   const dragDepthRef = useRef(0);
   const tauriDropHandledAtRef = useRef(0);
   const nativeDropExpectedUntilRef = useRef(0);
   const nativeDragActiveTimeoutRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+
+  useLayoutEffect(() => {
+    disabledRef.current = disabled;
+    onDropFilesRef.current = onDropFiles;
+    onDropPathsRef.current = onDropPaths;
+    targetRefRef.current = targetRef;
+  }, [disabled, onDropFiles, onDropPaths, targetRef]);
+
+  const setIsAttachmentDragOver = useCallback((isDragOver: boolean) => {
+    isAttachmentDragOverRef.current = isDragOver;
+    setIsAttachmentDragOverState(isDragOver);
+  }, []);
 
   const clearNativeDragWatchdog = useCallback(() => {
     if (nativeDragActiveTimeoutRef.current != null) {
@@ -140,7 +158,7 @@ export function useAttachmentDropTarget({
     dragDepthRef.current = 0;
     nativeDropExpectedUntilRef.current = 0;
     setIsAttachmentDragOver(false);
-  }, [clearNativeDragWatchdog, disabled]);
+  }, [clearNativeDragWatchdog, disabled, setIsAttachmentDragOver]);
 
   // Safety-net: force-reset the overlay when the drag operation ends without a
   // proper target drop/leave cycle. This covers OS-level drag cancellation
@@ -148,7 +166,7 @@ export function useAttachmentDropTarget({
   // elsewhere in the app after first entering the attachment target.
   useEffect(() => {
     const resetDragState = () => {
-      if (dragDepthRef.current > 0 || isAttachmentDragOver) {
+      if (dragDepthRef.current > 0 || isAttachmentDragOverRef.current) {
         clearNativeDragWatchdog();
         dragDepthRef.current = 0;
         nativeDropExpectedUntilRef.current = 0;
@@ -176,7 +194,7 @@ export function useAttachmentDropTarget({
     // A document-level drop means the drag operation finished, even if it did
     // not finish on the attachment target itself.
     const handleDocumentDrop = (event: DragEvent) => {
-      const target = targetRef.current;
+      const target = targetRefRef.current.current;
       const eventTarget = event.target;
       if (
         target &&
@@ -198,7 +216,7 @@ export function useAttachmentDropTarget({
       window.removeEventListener("blur", handleWindowBlur);
       document.removeEventListener("drop", handleDocumentDrop);
     };
-  }, [clearNativeDragWatchdog, isAttachmentDragOver, targetRef]);
+  }, [clearNativeDragWatchdog, setIsAttachmentDragOver]);
 
   const handleDragEnter = useCallback(
     (event: AttachmentDragEvent) => {
@@ -229,7 +247,7 @@ export function useAttachmentDropTarget({
       dragDepthRef.current += 1;
       setIsAttachmentDragOver(true);
     },
-    [disabled],
+    [disabled, setIsAttachmentDragOver],
   );
 
   const handleDragOver = useCallback(
@@ -251,26 +269,29 @@ export function useAttachmentDropTarget({
       dataTransfer.dropEffect = "copy";
       setIsAttachmentDragOver(true);
     },
-    [disabled],
+    [disabled, setIsAttachmentDragOver],
   );
 
-  const handleDragLeave = useCallback((event: AttachmentDragEvent) => {
-    event.preventDefault();
-    const currentTarget = event.currentTarget;
-    const relatedTarget = event.relatedTarget;
-    if (
-      currentTarget instanceof Node &&
-      relatedTarget instanceof Node &&
-      currentTarget.contains(relatedTarget)
-    ) {
-      return;
-    }
+  const handleDragLeave = useCallback(
+    (event: AttachmentDragEvent) => {
+      event.preventDefault();
+      const currentTarget = event.currentTarget;
+      const relatedTarget = event.relatedTarget;
+      if (
+        currentTarget instanceof Node &&
+        relatedTarget instanceof Node &&
+        currentTarget.contains(relatedTarget)
+      ) {
+        return;
+      }
 
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) {
-      setIsAttachmentDragOver(false);
-    }
-  }, []);
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsAttachmentDragOver(false);
+      }
+    },
+    [setIsAttachmentDragOver],
+  );
 
   const handleDrop = useCallback(
     (event: AttachmentDragEvent) => {
@@ -304,7 +325,7 @@ export function useAttachmentDropTarget({
       }
 
       if (!isInTauriEnvironment()) {
-        onDropFiles(files);
+        onDropFilesRef.current(files);
         return;
       }
 
@@ -317,9 +338,9 @@ export function useAttachmentDropTarget({
         return;
       }
 
-      onDropFiles(files);
+      onDropFilesRef.current(files);
     },
-    [disabled, onDropFiles],
+    [disabled, setIsAttachmentDragOver],
   );
 
   useEffect(() => {
@@ -376,8 +397,11 @@ export function useAttachmentDropTarget({
     };
 
     void import("@tauri-apps/api/webview")
-      .then(({ getCurrentWebview }) =>
-        getCurrentWebview().onDragDropEvent(({ payload }) => {
+      .then(({ getCurrentWebview }) => {
+        if (disposed) {
+          return undefined;
+        }
+        return getCurrentWebview().onDragDropEvent(({ payload }) => {
           if (disposed) {
             return;
           }
@@ -398,23 +422,27 @@ export function useAttachmentDropTarget({
             return;
           }
 
-          const hitTest = getTargetHitTest(targetRef.current, payload.position);
+          const hitTest = getTargetHitTest(
+            targetRefRef.current.current,
+            payload.position,
+          );
 
           if (payload.type === "drop") {
             clearNativeDragWatchdog();
+            dragDepthRef.current = 0;
             setIsAttachmentDragOver(false);
             const nativeDropWasExpected =
               nativeDropExpectedUntilRef.current > Date.now();
+            nativeDropExpectedUntilRef.current = 0;
             if (
               (!hitTest.inside && !nativeDropWasExpected) ||
-              disabled ||
+              disabledRef.current ||
               payload.paths.length === 0
             ) {
               return;
             }
-            nativeDropExpectedUntilRef.current = 0;
             tauriDropHandledAtRef.current = Date.now();
-            onDropPaths(payload.paths);
+            onDropPathsRef.current(payload.paths);
             return;
           }
 
@@ -422,7 +450,7 @@ export function useAttachmentDropTarget({
           // user is still actively dragging.
           resetWatchdog();
 
-          const nativeDropIsOverTarget = hitTest.inside && !disabled;
+          const nativeDropIsOverTarget = hitTest.inside && !disabledRef.current;
           if (nativeDropIsOverTarget) {
             nativeDropExpectedUntilRef.current =
               Date.now() + NATIVE_DROP_EXPECTED_MS;
@@ -430,9 +458,16 @@ export function useAttachmentDropTarget({
             nativeDropExpectedUntilRef.current = 0;
           }
           setIsAttachmentDragOver(nativeDropIsOverTarget);
-        }),
-      )
+        });
+      })
       .then((fn) => {
+        if (!fn) {
+          return;
+        }
+        if (disposed) {
+          fn();
+          return;
+        }
         unlisten = fn;
       })
       .catch(() => {
@@ -444,7 +479,7 @@ export function useAttachmentDropTarget({
       clearNativeDragWatchdog();
       unlisten?.();
     };
-  }, [clearNativeDragWatchdog, disabled, onDropPaths, targetRef]);
+  }, [clearNativeDragWatchdog, setIsAttachmentDragOver]);
 
   return {
     isAttachmentDragOver,
