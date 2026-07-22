@@ -71,6 +71,7 @@ export interface GooseToolCallUpdateMeta {
 export interface GooseClientMeta {
   goose: {
     mcpHostCapabilities: GooseMcpHostCapabilities;
+    toolCallLabelEnrichment: boolean;
   };
 }
 

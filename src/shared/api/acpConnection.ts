@@ -132,6 +132,7 @@ async function initializeConnection(): Promise<GooseClient> {
       _meta: {
         goose: {
           mcpHostCapabilities: DEFAULT_GOOSE_MCP_HOST_CAPABILITIES,
+          toolCallLabelEnrichment: true,
         },
       },
     },
