@@ -196,6 +196,45 @@ async function githubJson(endpoint) {
   return response.json();
 }
 
+function compareVersions(left, right) {
+  const parse = (version) => {
+    const [core, prerelease] = version.split("-", 2);
+    return {
+      core: core.split(".").map((part) => Number.parseInt(part, 10) || 0),
+      prerelease: prerelease ?? null,
+    };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  for (let i = 0; i < Math.max(a.core.length, b.core.length); i += 1) {
+    const diff = (a.core[i] ?? 0) - (b.core[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  // Same core version: a release outranks any prerelease. Between two
+  // prereleases, fall back to string comparison; lock inputs are pinned
+  // ranges over stable releases, so this branch is not expected in practice.
+  if (a.prerelease === b.prerelease) return 0;
+  if (a.prerelease === null) return 1;
+  if (b.prerelease === null) return -1;
+  return a.prerelease < b.prerelease ? -1 : 1;
+}
+
+function maxByVersion(entries, spec) {
+  let best = null;
+  for (const entry of entries) {
+    if (typeof entry?.version !== "string") {
+      throw new Error(`npm view ${spec} returned an entry without a version`);
+    }
+    if (best === null || compareVersions(entry.version, best.version) > 0) {
+      best = entry;
+    }
+  }
+  if (best === null) {
+    throw new Error(`npm view ${spec} matched no versions`);
+  }
+  return best;
+}
+
 async function npmView(spec, fields) {
   const cacheKey = `${spec}\0${fields.join("\0")}`;
   if (!npmViewCache.has(cacheKey)) {
@@ -204,8 +243,9 @@ async function npmView(spec, fields) {
       execFileAsync("npm", ["view", spec, ...fields, "--json"], {
         maxBuffer: 10 * 1024 * 1024,
       }).then(({ stdout }) => {
+        let parsed;
         try {
-          return JSON.parse(stdout);
+          parsed = JSON.parse(stdout);
         } catch (error) {
           throw new Error(
             `npm view ${spec} returned invalid JSON: ${
@@ -213,6 +253,11 @@ async function npmView(spec, fields) {
             }`,
           );
         }
+        // When a version range matches multiple published versions, npm view
+        // returns an array. Its order is not a reliable semver order, so
+        // resolve the range the way an install would: pick the semver-max
+        // entry by comparing version fields.
+        return Array.isArray(parsed) ? maxByVersion(parsed, spec) : parsed;
       }),
     );
   }
