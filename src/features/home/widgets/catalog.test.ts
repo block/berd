@@ -4,6 +4,49 @@ import type { WidgetInstance } from "./types";
 
 const baseClock: WidgetInstance = { id: "c1", type: "clock", x: 0, y: 0, z: 1 };
 
+describe("photo size profiles", () => {
+  it("preserves a wide photo's original aspect ratio", () => {
+    const photo: WidgetInstance = {
+      id: "photo-1",
+      type: "photo",
+      x: 0,
+      y: 0,
+      z: 1,
+      state: { shape: "original", aspectRatio: 2.5 },
+    };
+
+    expect(widgetSizeForInstance(photo)).toEqual({ width: 280, height: 112 });
+  });
+
+  it("preserves a tall photo's original aspect ratio", () => {
+    const photo: WidgetInstance = {
+      id: "photo-1",
+      type: "photo",
+      x: 0,
+      y: 0,
+      z: 1,
+      state: { shape: "original", aspectRatio: 0.4 },
+    };
+
+    expect(widgetSizeForInstance(photo)).toEqual({ width: 280, height: 700 });
+  });
+
+  it("keeps original proportions while resizing", () => {
+    const photo: WidgetInstance = {
+      id: "photo-1",
+      type: "photo",
+      x: 0,
+      y: 0,
+      z: 1,
+      state: { shape: "original", aspectRatio: 2.5 },
+    };
+
+    expect(
+      clampWidgetSizeForInstance(photo, { width: 500, height: 500 }),
+    ).toEqual({ width: 500, height: 200 });
+  });
+});
+
 describe("clock size profiles", () => {
   it("uses the analog (square) profile by default", () => {
     expect(widgetSizeForInstance(baseClock)).toEqual({

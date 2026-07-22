@@ -33,6 +33,7 @@ describe("homeLayoutMapper", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "clock", targetId: "widget:clock-1" }),
       layoutItem({ kind: "stickyNote", targetId: "onboarding:build-agent" }),
+      layoutItem({ kind: "photo", targetId: "widget:photo-1" }),
       layoutItem({ kind: "persona", targetId: "agent-1" }),
       layoutItem({ kind: "session", targetId: "session-1" }),
       layoutItem({ kind: "project", targetId: "project-1" }),
@@ -43,6 +44,7 @@ describe("homeLayoutMapper", () => {
     expect(widgets.map((widget) => widget.type)).toEqual([
       "clock",
       "stickyNote",
+      "photo",
       "agentPin",
       "chatPin",
       "projectArtifactPin",
@@ -53,6 +55,7 @@ describe("homeLayoutMapper", () => {
       "clock",
       "stickyNote",
       "checklist",
+      "photo",
       "persona",
       "session",
       "project",
@@ -196,6 +199,81 @@ describe("homeLayoutMapper", () => {
         html: "Follow up on <strong>release</strong> notes",
         tone: "cool",
       },
+    });
+  });
+
+  it("round-trips photo path and shape through widget state", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "photo-1",
+        type: "photo",
+        x: 20,
+        y: 30,
+        z: 4,
+        width: 240,
+        height: 240,
+        state: {
+          path: "/app/home-widget-media/photo.jpg",
+          shape: "circle",
+          aspectRatio: 4 / 3,
+        },
+      },
+    ]);
+
+    expect(item).toMatchObject({
+      kind: "photo",
+      targetId: "widget:photo-1",
+      widgetState: {
+        path: "/app/home-widget-media/photo.jpg",
+        shape: "circle",
+        aspectRatio: 4 / 3,
+      },
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([item]);
+    expect(restored).toMatchObject({
+      type: "photo",
+      x: 20,
+      y: 30,
+      width: 240,
+      height: 240,
+      state: {
+        path: "/app/home-widget-media/photo.jpg",
+        shape: "circle",
+        aspectRatio: 4 / 3,
+      },
+    });
+  });
+
+  it("drops invalid photo aspect ratios in both mapper directions", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "photo-invalid-ratio",
+        type: "photo",
+        x: 20,
+        y: 30,
+        z: 4,
+        state: {
+          path: "/app/home-widget-media/photo.jpg",
+          shape: "original",
+          aspectRatio: -2,
+        },
+      },
+    ]);
+    expect(item.widgetState).toEqual({
+      path: "/app/home-widget-media/photo.jpg",
+      shape: "original",
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([
+      {
+        ...item,
+        widgetState: { ...item.widgetState, aspectRatio: 0 },
+      },
+    ]);
+    expect(restored.state).toEqual({
+      path: "/app/home-widget-media/photo.jpg",
+      shape: "original",
     });
   });
 

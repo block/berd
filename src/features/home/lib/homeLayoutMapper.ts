@@ -13,6 +13,7 @@ export const HOME_LAYOUT_REPLACE_KINDS = [
   "clock",
   "stickyNote",
   "checklist",
+  "photo",
   "persona",
   "session",
   "project",
@@ -29,6 +30,7 @@ const KIND_TO_WIDGET_TYPE = {
   clock: "clock",
   stickyNote: "stickyNote",
   checklist: "checklist",
+  photo: "photo",
   persona: "agentPin",
   session: "chatPin",
   project: "projectArtifactPin",
@@ -40,6 +42,7 @@ const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   clock: "clock",
   stickyNote: "stickyNote",
   checklist: "checklist",
+  photo: "photo",
   agentPin: "persona",
   chatPin: "session",
   projectArtifactPin: "project",
@@ -52,6 +55,7 @@ function isHomeLayoutKind(kind: LayoutItemKind): kind is HomeLayoutKind {
     case "clock":
     case "stickyNote":
     case "checklist":
+    case "photo":
     case "persona":
     case "session":
     case "project":
@@ -208,6 +212,46 @@ function persistedChecklistStateFromItem(
   return Object.keys(state).length > 0 ? state : undefined;
 }
 
+function sanitizePhotoState(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const state: Record<string, unknown> = {};
+  const sizeByProfile = readSizeByProfile(value);
+  if (sizeByProfile) {
+    state[SIZE_BY_PROFILE_STATE_KEY] = sizeByProfile;
+  }
+  if (typeof value.path === "string" && value.path.trim()) {
+    state.path = value.path.trim();
+  }
+  if (
+    typeof value.aspectRatio === "number" &&
+    Number.isFinite(value.aspectRatio) &&
+    value.aspectRatio > 0
+  ) {
+    state.aspectRatio = value.aspectRatio;
+  }
+  if (
+    value.shape === "original" ||
+    value.shape === "square" ||
+    value.shape === "circle"
+  ) {
+    state.shape = value.shape;
+  }
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
+function persistedPhotoStateFromItem(
+  item: LayoutItem,
+): Record<string, unknown> | undefined {
+  return typeof item.widgetState === "object" && item.widgetState !== null
+    ? sanitizePhotoState(item.widgetState)
+    : undefined;
+}
+
 function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
   if (item.kind !== "clock" && isSyntheticTarget(item.targetId)) {
     if (item.kind === "stickyNote") {
@@ -215,6 +259,9 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
     }
     if (item.kind === "checklist") {
       return persistedChecklistStateFromItem(item);
+    }
+    if (item.kind === "photo") {
+      return persistedPhotoStateFromItem(item);
     }
     return undefined;
   }
@@ -240,6 +287,8 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
       );
     case "checklist":
       return persistedChecklistStateFromItem(item);
+    case "photo":
+      return persistedPhotoStateFromItem(item);
     case "skill":
       return { skillId: item.targetId };
     default: {
@@ -293,6 +342,8 @@ function widgetStateForLayoutItem(
       }
       return Object.keys(state).length > 0 ? state : undefined;
     }
+    case "photo":
+      return sanitizePhotoState(instance.state);
     case "persona":
     case "session":
     case "project":
@@ -323,6 +374,7 @@ function targetIdForWidget(
     case "stickyNote":
       return nonEmptyStateString(state.noteId) ?? syntheticTarget(instance.id);
     case "checklist":
+    case "photo":
       return syntheticTarget(instance.id);
     case "persona":
       return nonEmptyStateString(state.agentId) ?? syntheticTarget(instance.id);

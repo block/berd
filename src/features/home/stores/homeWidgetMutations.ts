@@ -91,9 +91,11 @@ function cleanUpStride(maxSize: number): number {
   return Math.ceil((maxSize + CLEAN_UP_GRID_GAP) / GRID_SIZE) * GRID_SIZE;
 }
 
-function cleanUpSize(type: string): WidgetSize {
-  const entry = HOME_WIDGET_CATALOG_BY_ID[type];
-  const size = clampWidgetSize(type, entry.defaultSize);
+function cleanUpSize(instance: WidgetInstance): WidgetSize {
+  const entry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
+  const size = entry.preserveSizeOnCleanUp
+    ? widgetSizeForInstance(instance)
+    : clampWidgetSize(instance.type, entry.defaultSize);
 
   return {
     width: Math.round(size.width),
@@ -336,26 +338,36 @@ export function cleanUpWidgetsMutation(
       return;
     }
 
-    const normalizedSize = cleanUpSize(entry.id);
-    const strideX = cleanUpStride(normalizedSize.width);
-    const strideY = cleanUpStride(normalizedSize.height);
+    const cleanUpSizes = new Map(
+      group.map((instance) => [instance.id, cleanUpSize(instance)]),
+    );
+    const maxSize = [...cleanUpSizes.values()].reduce(
+      (maximum, size) => ({
+        width: Math.max(maximum.width, size.width),
+        height: Math.max(maximum.height, size.height),
+      }),
+      { width: 0, height: 0 },
+    );
+    const strideX = cleanUpStride(maxSize.width);
+    const strideY = cleanUpStride(maxSize.height);
     const rows = Math.min(CLEAN_UP_MAX_GROUP_ROWS, group.length);
     const columns = Math.ceil(group.length / rows);
 
     group.forEach((instance, index) => {
+      const size = cleanUpSizes.get(instance.id) ?? maxSize;
       const position = {
         x: snapTo(groupX + Math.floor(index / rows) * strideX),
         y: snapTo(origin.y + (index % rows) * strideY),
       };
       const resolvedPosition = isLayoutConstraints(bounds)
-        ? clampToLayoutConstraints(position, normalizedSize, bounds)
+        ? clampToLayoutConstraints(position, size, bounds)
         : position;
       const next = {
         ...instance,
         ...resolvedPosition,
         z: nextById.size + 1,
-        width: normalizedSize.width,
-        height: normalizedSize.height,
+        width: size.width,
+        height: size.height,
       };
 
       if (
@@ -485,9 +497,22 @@ export function updateWidgetStateMutation(
     [profileKey(prevProfile)]: widgetSizeForInstance(target),
   };
   const remembered = sizeMemory[profileKey(nextProfile)];
+  const preserveWidth =
+    HOME_WIDGET_CATALOG_BY_ID[target.type]?.preserveWidthOnProfileChange;
+  const currentSize = widgetSizeForInstance(target);
+  const inheritedSize = preserveWidth
+    ? {
+        width: currentSize.width,
+        height:
+          currentSize.width *
+          (nextProfile.defaultSize.height / nextProfile.defaultSize.width),
+      }
+    : null;
   const nextSize = remembered
     ? clampWidgetSizeForInstance(nextInstance, remembered)
-    : nextProfile.defaultSize;
+    : inheritedSize
+      ? clampWidgetSizeForInstance(nextInstance, inheritedSize)
+      : nextProfile.defaultSize;
   const prevSize = widgetSizeForInstance(target);
   const centeredPosition = {
     x: Math.round(target.x + (prevSize.width - nextSize.width) / 2),

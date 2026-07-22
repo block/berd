@@ -6,6 +6,7 @@ export type WidgetCategory =
   | "clock"
   | "note"
   | "checklist"
+  | "photo"
   | "agent"
   | "chat"
   | "project"
@@ -87,9 +88,12 @@ export interface WidgetCatalogEntry {
   /** Optional Tailwind classes for the canvas resize handle (defaults to corner). */
   resizeHandleClassName?: string;
   /** Optional per-instance size profile. When present, sizing/resize use the
-   *  returned profile instead of the entry's static defaultSize/sizeBounds.
-   *  Only widgets whose shape depends on state (the clock) provide this. */
+   *  returned profile instead of the entry's static defaultSize/sizeBounds. */
   resolveProfile?: (instance: WidgetInstance) => WidgetSizeProfile;
+  /** Keep the current rendered width when state switches size profiles. */
+  preserveWidthOnProfileChange?: boolean;
+  /** Keep each instance's resolved size when organizing the canvas. */
+  preserveSizeOnCleanUp?: boolean;
   /** Renderable component for this widget type. Entries without a Component
    *  are catalog stubs — they appear in data but are not rendered on the canvas
    *  until the component is supplied (Task C fills in the pin types). */
@@ -149,6 +153,12 @@ export type ProjectArtifactPinState = { projectId: string };
 export type AutomationOutputPinState = { automationId: string };
 export type SkillPinState = { skillId: string };
 export type StickyNoteState = { noteId: string };
+export type PhotoShape = "original" | "square" | "circle";
+export type PhotoState = {
+  path?: string;
+  shape?: PhotoShape;
+  aspectRatio?: number;
+};
 
 export interface ChecklistItemState {
   id: string;

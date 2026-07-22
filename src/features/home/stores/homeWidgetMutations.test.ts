@@ -146,6 +146,50 @@ describe("homeWidgetMutations", () => {
     ]);
   });
 
+  it("uses resolved photo sizes when cleaning up to prevent overlap", () => {
+    const widgets: WidgetInstance[] = [
+      {
+        id: "photo-tall",
+        type: "photo",
+        x: 0,
+        y: 0,
+        z: 1,
+        width: 280,
+        height: 700,
+        state: { shape: "original", aspectRatio: 0.4 },
+      },
+      {
+        id: "photo-circle",
+        type: "photo",
+        x: 500,
+        y: 500,
+        z: 2,
+        width: 320,
+        height: 320,
+        state: { shape: "circle", aspectRatio: 4 / 3 },
+      },
+    ];
+
+    const next = cleanUpWidgetsMutation(widgets);
+
+    expect(next).toEqual([
+      expect.objectContaining({
+        id: "photo-tall",
+        x: 0,
+        y: 0,
+        width: 280,
+        height: 700,
+      }),
+      expect.objectContaining({
+        id: "photo-circle",
+        x: 0,
+        y: 768,
+        width: 320,
+        height: 320,
+      }),
+    ]);
+  });
+
   it("skips no-op cleanup mutations when widgets are already organized", () => {
     const widgets: WidgetInstance[] = [
       clockWidget({ id: "clock", x: 0, y: 0, z: 1, width: 240, height: 240 }),
@@ -179,6 +223,79 @@ describe("homeWidgetMutations", () => {
     ];
 
     expect(cleanUpWidgetsMutation(widgets)).toBeNull();
+  });
+});
+
+describe("updateWidgetStateMutation — photo shape resize", () => {
+  it("preserves displayed width when an original photo becomes square", () => {
+    const photo: WidgetInstance = {
+      id: "photo-1",
+      type: "photo",
+      x: 20,
+      y: 30,
+      z: 1,
+      width: 280,
+      height: 280,
+      state: { shape: "original", aspectRatio: 1 },
+    };
+
+    const next = updateWidgetStateMutation([photo], "photo-1", {
+      shape: "square",
+    });
+
+    expect(next?.[0]).toMatchObject({
+      x: 20,
+      y: 30,
+      width: 280,
+      height: 280,
+      state: { shape: "square" },
+    });
+  });
+
+  it("preserves widths outside the previous square bounds when changing shape", () => {
+    const photo: WidgetInstance = {
+      id: "photo-1",
+      type: "photo",
+      x: 20,
+      y: 30,
+      z: 1,
+      width: 900,
+      height: 450,
+      state: { shape: "original", aspectRatio: 2 },
+    };
+
+    const next = updateWidgetStateMutation([photo], "photo-1", {
+      shape: "square",
+    });
+
+    expect(next?.[0]).toMatchObject({
+      width: 900,
+      height: 900,
+    });
+  });
+
+  it("preserves width and recenters vertically when a landscape photo becomes square", () => {
+    const photo: WidgetInstance = {
+      id: "photo-1",
+      type: "photo",
+      x: 20,
+      y: 30,
+      z: 1,
+      width: 320,
+      height: 240,
+      state: { shape: "original", aspectRatio: 4 / 3 },
+    };
+
+    const next = updateWidgetStateMutation([photo], "photo-1", {
+      shape: "square",
+    });
+
+    expect(next?.[0]).toMatchObject({
+      x: 20,
+      y: -10,
+      width: 320,
+      height: 320,
+    });
   });
 });
 

@@ -432,6 +432,7 @@ pub fn run() {
             commands::git::git_delete_branch,
             commands::git::git_create_worktree,
             commands::git::git_remove_worktree,
+            commands::home_widget_media::import_home_widget_photo,
             commands::layout::get_layout,
             commands::layout::save_layout_items,
             commands::layout::save_layout_camera,

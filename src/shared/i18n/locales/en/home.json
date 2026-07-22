@@ -26,6 +26,33 @@
       "toggleToDigital": "Switch to digital clock",
       "toggleToAnalog": "Switch to analog clock"
     },
+    "photo": {
+      "label": "Photo",
+      "description": "A photo pinned to home",
+      "addPhoto": "Add a photo",
+      "addHint": "Choose an image from your computer",
+      "selecting": "Choosing photo…",
+      "change": "Change",
+      "toolbar": "Photo tools",
+      "chooseDialog": "Choose a photo",
+      "changeDialog": "Change photo",
+      "fileType": "Images",
+      "importFailed": "The photo could not be added.",
+      "notAFile": "Choose an image file instead of a folder.",
+      "readFailed": "Berd could not read that photo.",
+      "tooLarge": "Choose a photo smaller than 50 MB.",
+      "unsupportedType": "Choose a PNG, JPEG, WebP, GIF, or AVIF image.",
+      "unavailable": "This photo is unavailable",
+      "chooseAnother": "Choose another photo",
+      "imageAlt": "Pinned photo",
+      "shapeControl": "Photo shape: {{current}}. Activate to change to {{next}}.",
+      "clickToChangeShape": "Click to change shape",
+      "shapes": {
+        "original": "Original",
+        "square": "Square",
+        "circle": "Circle"
+      }
+    },
     "agentPin": {
       "label": "Pin an agent",
       "description": "Pin an agent for quick access",

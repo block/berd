@@ -26,6 +26,33 @@
       "toggleToDigital": "Cambiar a reloj digital",
       "toggleToAnalog": "Cambiar a reloj analógico"
     },
+    "photo": {
+      "label": "Foto",
+      "description": "Una foto fijada en inicio",
+      "addPhoto": "Agregar una foto",
+      "addHint": "Elige una imagen de tu computadora",
+      "selecting": "Eligiendo foto…",
+      "change": "Cambiar",
+      "toolbar": "Herramientas de foto",
+      "chooseDialog": "Elegir una foto",
+      "changeDialog": "Cambiar foto",
+      "fileType": "Imágenes",
+      "importFailed": "No se pudo agregar la foto.",
+      "notAFile": "Elige un archivo de imagen en lugar de una carpeta.",
+      "readFailed": "Berd no pudo leer esa foto.",
+      "tooLarge": "Elige una foto de menos de 50 MB.",
+      "unsupportedType": "Elige una imagen PNG, JPEG, WebP, GIF o AVIF.",
+      "unavailable": "Esta foto no está disponible",
+      "chooseAnother": "Elegir otra foto",
+      "imageAlt": "Foto fijada",
+      "shapeControl": "Forma de la foto: {{current}}. Activa para cambiar a {{next}}.",
+      "clickToChangeShape": "Haz clic para cambiar la forma",
+      "shapes": {
+        "original": "Original",
+        "square": "Cuadrada",
+        "circle": "Circular"
+      }
+    },
     "agentPin": {
       "label": "Fijar un agente",
       "description": "Fija un agente para acceso rápido",

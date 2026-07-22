@@ -48,6 +48,7 @@
           "$APPDATA/avatars/media/**/*",
           "$APPDATA/artifacts/media/**/*",
           "$APPDATA/project-artifacts/media/**/*",
+          "$APPDATA/home-widget-media/**/*",
           "$HOME/**/*",
           "$TEMP/**/*"
         ]

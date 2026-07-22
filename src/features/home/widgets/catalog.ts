@@ -3,6 +3,7 @@ import { AutomationOutputWidget } from "./AutomationOutputWidget";
 import { ChatPinWidget } from "./ChatPinWidget";
 import { ChecklistWidget } from "./ChecklistWidget";
 import { ClockWidget } from "./ClockWidget";
+import { photoAspectRatioOf, photoShapeOf, PhotoWidget } from "./PhotoWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 import { SkillPinWidget } from "./SkillPinWidget";
 import { StickyNoteWidget } from "./StickyNoteWidget";
@@ -89,6 +90,48 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       maxHeight: 560,
     },
     Component: ChecklistWidget,
+  },
+  {
+    id: "photo",
+    category: "photo",
+    labelKey: "widgets.photo.label",
+    descriptionKey: "widgets.photo.description",
+    defaultSize: { width: 280, height: 210 },
+    sizeBounds: {
+      minWidth: 168,
+      maxWidth: 720,
+      minHeight: 168,
+      maxHeight: 720,
+    },
+    preserveWidthOnProfileChange: true,
+    preserveSizeOnCleanUp: true,
+    resolveProfile: (instance) => {
+      const shape = photoShapeOf(instance.state);
+      if (shape === "original") {
+        const aspectRatio = photoAspectRatioOf(instance.state);
+        return {
+          defaultSize: { width: 280, height: 280 / aspectRatio },
+          sizeBounds: {
+            minWidth: 96,
+            maxWidth: 1440,
+            minHeight: 48,
+            maxHeight: 1440,
+            lockAspectRatio: true,
+          },
+        };
+      }
+      return {
+        defaultSize: { width: 240, height: 240 },
+        sizeBounds: {
+          minWidth: 96,
+          maxWidth: 1440,
+          minHeight: 96,
+          maxHeight: 1440,
+          lockAspectRatio: true,
+        },
+      };
+    },
+    Component: PhotoWidget,
   },
   {
     id: "agentPin",

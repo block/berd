@@ -120,6 +120,7 @@ pub enum LayoutItemKind {
     Clock,
     StickyNote,
     Checklist,
+    Photo,
     Automation,
     Skill,
 }
@@ -133,6 +134,7 @@ impl LayoutItemKind {
             Self::Clock => "clock",
             Self::StickyNote => "stickyNote",
             Self::Checklist => "checklist",
+            Self::Photo => "photo",
             Self::Automation => "automation",
             Self::Skill => "skill",
         }
@@ -150,6 +152,7 @@ impl TryFrom<&str> for LayoutItemKind {
             "clock" => Ok(Self::Clock),
             "stickyNote" => Ok(Self::StickyNote),
             "checklist" => Ok(Self::Checklist),
+            "photo" => Ok(Self::Photo),
             "automation" => Ok(Self::Automation),
             "skill" => Ok(Self::Skill),
             _ => Err(format!("Unknown layout item kind: {value}")),
