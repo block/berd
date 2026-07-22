@@ -6,6 +6,7 @@ import {
   useHomeWidgetStore,
 } from "@/features/home/stores/homeWidgetStore";
 import { SidebarChatDragProvider } from "../SidebarChatDragContext";
+import type { SidebarSessionItem } from "../SidebarProjectSection";
 import { SidebarRecentsSection } from "../SidebarRecentsSection";
 
 const sessions = [
@@ -21,11 +22,17 @@ const sessions = [
   },
 ];
 
-function renderRecents(showChatIcons: boolean) {
+function renderRecents(
+  showChatIcons: boolean,
+  sessionOverrides: Partial<SidebarSessionItem> = {},
+) {
   return render(
     <SidebarChatDragProvider>
       <SidebarRecentsSection
-        sessions={sessions}
+        sessions={sessions.map((session) => ({
+          ...session,
+          ...(session.id === "regular-chat" ? sessionOverrides : {}),
+        }))}
         collapsed={false}
         labelTransition=""
         labelVisible
@@ -92,5 +99,18 @@ describe("SidebarRecentsSection", () => {
     await user.hover(regularRow);
     expect(screen.queryByRole("button", { name: "Pin chat" })).toBeNull();
     expect(screen.getByRole("button", { name: "Unpin chat" })).toBeVisible();
+  });
+
+  it.each([
+    { state: { isRunning: true }, label: /chat active/i },
+    { state: { hasUnread: true }, label: /unread messages/i },
+  ])("shows $label when chat icons are hidden", ({ state, label }) => {
+    const { container } = renderRecents(false, state);
+    const regularRow = container.querySelector<HTMLElement>(
+      '[data-session-id="regular-chat"]',
+    );
+    if (!regularRow) throw new Error("Regular chat row was not rendered");
+
+    expect(within(regularRow).getByLabelText(label)).toBeInTheDocument();
   });
 });

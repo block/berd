@@ -11,6 +11,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
@@ -68,7 +69,10 @@ let mockActiveWorkspaceBySession: Record<
   string,
   { path: string; branch: string | null }
 > = {};
-let mockSessionStateById: Record<string, { hasUnread?: boolean }> = {};
+let mockSessionStateById: Record<
+  string,
+  Partial<typeof INITIAL_SESSION_CHAT_RUNTIME>
+> = {};
 const mockLoadMoreSessions = vi.fn();
 const mockAcpSearchSessions = vi.fn();
 const mockGetGitState = vi.fn();
@@ -334,6 +338,15 @@ function disableProjectGrouping() {
   setSidebarGroupChatsByProjectEnabled(false);
 }
 
+function mockSessionRuntimes() {
+  return Object.fromEntries(
+    Object.entries(mockSessionStateById).map(([sessionId, runtime]) => [
+      sessionId,
+      { ...INITIAL_SESSION_CHAT_RUNTIME, ...runtime },
+    ]),
+  );
+}
+
 vi.mock("@/features/chat/stores/chatStore", () => ({
   useChatStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
@@ -341,14 +354,14 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
         messagesBySession: {},
         draftsBySession: mockDraftsBySession,
         nonEmptyDraftSessionIds: nonEmptyDraftSessionIds(),
-        sessionStateById: mockSessionStateById,
+        sessionStateById: mockSessionRuntimes(),
       }),
     {
       getState: () => ({
         messagesBySession: {},
         draftsBySession: mockDraftsBySession,
         nonEmptyDraftSessionIds: nonEmptyDraftSessionIds(),
-        sessionStateById: mockSessionStateById,
+        sessionStateById: mockSessionRuntimes(),
       }),
     },
   ),
@@ -4941,6 +4954,85 @@ describe("NavigationPanesView", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("preserves refreshed chat activity states when idle icons are hidden", async () => {
+    const user = userEvent.setup();
+    mockSessionStateById = {
+      "running-chat": { chatState: "thinking", hasUnread: true },
+      "unread-chat": { hasUnread: true },
+    };
+    seedSessions(
+      {
+        id: "idle-chat",
+        title: "Idle Chat",
+        updatedAt: "2026-04-10T12:03:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "running-chat",
+        title: "Running Chat",
+        updatedAt: "2026-04-10T12:02:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "unread-chat",
+        title: "Unread Chat",
+        updatedAt: "2026-04-10T12:01:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "pinned-chat",
+        title: "Pinned Chat",
+        updatedAt: "2026-04-10T12:00:00.000Z",
+        messageCount: 3,
+      },
+    );
+    seedPinnedHomeChats("pinned-chat");
+
+    renderSidebar({
+      activeView: "home",
+      prototypeMode: "hybrid-push-overlay",
+      prototypeChatsUnderProjects: true,
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Chat display options" }),
+    );
+    await user.click(
+      screen.getByRole("menuitemcheckbox", { name: "Show chat icons" }),
+    );
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: "Main navigation",
+    });
+    const getRow = (sessionId: string) => {
+      const row = mainNavigation.querySelector<HTMLElement>(
+        `[data-session-id="${sessionId}"]`,
+      );
+      if (!row) throw new Error(`${sessionId} row was not rendered`);
+      return within(row);
+    };
+
+    expect(
+      getRow("idle-chat").queryByTestId("prototype-primary-chat-row-icon"),
+    ).not.toBeInTheDocument();
+    expect(
+      getRow("running-chat").getByRole("status", { name: /chat active/i }),
+    ).toBeInTheDocument();
+    expect(
+      getRow("unread-chat").getByRole("status", {
+        name: /unread messages/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      getRow("running-chat").queryByRole("status", {
+        name: /unread messages/i,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      getRow("pinned-chat").getByRole("button", { name: "Unpin chat" }),
+    ).toBeVisible();
+  });
+
   it("shows project chat display options in the project secondary header", async () => {
     const user = userEvent.setup();
     const onPrototypeSecondaryPreviewChange = vi.fn();
@@ -5016,6 +5108,47 @@ describe("NavigationPanesView", () => {
           icon.closest('[data-session-id="regular-display-chat"]'),
         ),
     ).toBe(true);
+  });
+
+  it("keeps pinned project chats visible when refreshed chat icons are hidden", async () => {
+    const user = userEvent.setup();
+    seedSessions({
+      id: "pinned-project-chat",
+      title: "Pinned Project Chat",
+      updatedAt: "2026-04-10T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+    seedPinnedHomeChats("pinned-project-chat");
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    await user.click(
+      within(projectNavigation).getByRole("button", {
+        name: "Project One chat display options",
+      }),
+    );
+    await user.click(
+      screen.getByRole("menuitemcheckbox", { name: "Show chat icons" }),
+    );
+
+    const pinnedRow = projectNavigation.querySelector<HTMLElement>(
+      '[data-session-id="pinned-project-chat"]',
+    );
+    if (!pinnedRow) throw new Error("Pinned project chat row was not rendered");
+
+    expect(
+      within(pinnedRow).getByRole("button", { name: "Unpin chat" }),
+    ).toBeVisible();
   });
 
   it("keeps expanded prototype primary chat icons in the shared leading rail", async () => {

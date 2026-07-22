@@ -1617,6 +1617,7 @@ function PrototypeProjectChatRow({
         nested={nested}
         onMenuOpenChange={onMenuOpenChange}
         onSelect={onSelect}
+        quickPinMode={showIcon ? "always" : "pinned-only"}
         session={chat.session}
         showIcon={showIcon}
         showTimestamp={showTimestamp}

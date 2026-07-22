@@ -679,6 +679,38 @@ describe("SidebarChatRow", () => {
     expect(screen.queryByTestId("regular-chat-leading")).toBeNull();
   });
 
+  it("keeps an always-pin chat's pin control visible when chat icons are hidden", () => {
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "pinned-chat" },
+        },
+      ],
+    });
+
+    render(
+      <SidebarChatRow
+        id="pinned-chat"
+        title="Pinned Chat"
+        isActive={false}
+        showLeadingIcon={false}
+        quickPinMode="always"
+        leadingIconTestId="pinned-chat-leading"
+      />,
+    );
+
+    expect(screen.getByTestId("pinned-chat-leading")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unpin chat" })).toBeVisible();
+  });
+
   it("keeps nested chat titles aligned when chat icons are shown", () => {
     const { rerender } = render(
       <SidebarChatRow

@@ -320,6 +320,7 @@ export function SidebarChatRow({
   const hasFlatProjectColumn = flatProjectName != null;
   const trimmedBranchName = branchName?.trim() ?? "";
   const hasBranchName = trimmedBranchName.length > 0;
+  const hasActivity = isRunning || hasUnread;
   // Pin presentation is surface-specific: some lists expose it on hover,
   // while compact Chat lists show only an already-pinned chat as an unpin
   // control. Both occupy the same leading slot when it exists.
@@ -331,7 +332,8 @@ export function SidebarChatRow({
     nested ||
     showLeadingIcon ||
     hasFlatProjectColumn ||
-    (quickPinMode === "pinned-only" && isPinnedToHome);
+    hasActivity ||
+    (showQuickPin && isPinnedToHome);
   const showAbsoluteLeadingSlot = !hasFlatProjectColumn && needsLeadingSlot;
   const densityClasses = SIDEBAR_CHAT_ROW_DENSITY_CLASSES[density];
   const rowPaddingClass =
