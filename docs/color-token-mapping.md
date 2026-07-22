@@ -126,9 +126,83 @@ The rule:
 - Name these tokens for their product meaning and anatomy, not the CSS hook they
   happen to use.
 
-These raw-`var()` tokens are not yet validated by `pnpm design-system:tokens`,
-which only inspects the Tailwind bridge. Keep them listed here so they stay
-discoverable and tracked.
+These raw-`var()` **color** tokens are validated by `pnpm design-system:tokens`.
+The check reads every color token in `:root`/`.dark` and requires each one to be
+either bridged into `@theme inline` or present in the raw-CSS color allowlist in
+`scripts/design-system-tokens.mjs`. That allowlist is kept identical to the
+machine-readable list below (the check fails if they drift), so a new raw-`var()`
+color token must be added in both places. Duplicate declarations in either
+`:root` or `.dark`, dark-only color tokens, and light/dark pairs whose values do
+not both resolve to colors also fail the check. Keep semantic declarations in
+the top-level theme blocks rather than nesting `:root` or `.dark` overrides in
+media queries; the contract intentionally requires one unconditional source of
+truth. Theme-invariant pairing exemptions must be removed if a token later gains
+a `.dark` override. Non-color raw-CSS tokens (opacity, filter values) are not
+part of the color contract; they are listed in the table for reference only.
+
+The authoritative list of raw-CSS color tokens (kept in sync with the script):
+
+<!-- raw-css-color-tokens:start -->
+```
+# ::selection
+--text-selection-bg
+--text-selection-fg
+# ::-webkit-scrollbar-thumb
+--scrollbar-thumb
+--scrollbar-thumb-hover
+# Sidebar row states (bg-[var(...)])
+--sidebar-row-hover
+--sidebar-row-active
+# Prototype nav text (text-[var(...)])
+--sidebar-prototype-nav-muted-fg
+--sidebar-prototype-nav-default-fg
+--sidebar-prototype-nav-active-fg
+# ::highlight(chat-search-match[-active])
+--chat-search-match-bg
+--chat-search-match-fg
+--chat-search-match-active-bg
+--chat-search-match-active-fg
+# .chat-context-panel-surface scoped block
+--chat-context-panel-bg
+--chat-context-panel-fg
+--chat-context-panel-muted-fg
+--chat-context-panel-border
+--chat-context-panel-accent
+--chat-context-panel-accent-fg
+--chat-context-panel-hover
+# .chat-context-dropdown scoped block
+--chat-context-dropdown-bg
+--chat-context-dropdown-hover
+--chat-context-dropdown-fg
+--chat-context-dropdown-muted-fg
+# Editor field surfaces (color-mix bases + arbitrary-value utilities)
+--surface-editor-panel-neutral
+--surface-editor-control
+--surface-editor-control-hover
+--surface-editor-badge
+--surface-color-picker-swatches
+--text-editor-field-placeholder
+--border-editor-divider
+# Glass/overlay surfaces (inline styles + arbitrary values)
+--surface-popover-glass
+--overlay-scrim
+--overlay-global-composer-shim
+--overlay-global-composer-shim-peak
+--overlay-global-composer-shim-clear
+--ring-composer-glass-inner
+--outline-composer-glass-outer
+# SVG stroke consumed via an inline constant
+--project-glyph-fold-stroke
+# Runtime project-tint hook (transparent default)
+--project-tint
+# Dot-grid canvas color (raw-CSS gradient)
+--dot-color-base
+```
+<!-- raw-css-color-tokens:end -->
+
+The table below is a human-readable overview of the raw-`var()` pattern. It
+groups tokens by surface and may use globs; the marker-wrapped list above is the
+exact machine-checked contract.
 
 | Token | Where it is applied | Why it is not bridged |
 | --- | --- | --- |
