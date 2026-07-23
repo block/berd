@@ -49,7 +49,7 @@ pub struct VolumeInfo {
 }
 
 const CANONICAL_APP_NAME: &str = "Berd.app";
-const LEGACY_APP_NAMES: [&str; 2] = ["Goose.app", "Goose 2.app"];
+const LEGACY_APP_NAMES: [&str; 3] = ["Goose.app", "Goose 2.app", "Goose2.app"];
 const LEGACY_BUNDLE_IDENTIFIER: &str = "com.squareup.goose-internal";
 const BERD_BUNDLE_IDENTIFIER: &str = "xyz.block.berd";
 
@@ -929,6 +929,9 @@ mod tests {
         assert!(is_legacy_installed_app_path(Path::new(
             "/Applications/Goose 2.app"
         )));
+        assert!(is_legacy_installed_app_path(Path::new(
+            "/Applications/Goose2.app"
+        )));
         assert!(!is_legacy_installed_app_path(Path::new(
             "/Applications/Berd.app"
         )));
@@ -948,6 +951,10 @@ mod tests {
         );
         assert_eq!(
             legacy_bundle_rename_target(Path::new("/Applications/Goose.app")),
+            Some(PathBuf::from("/Applications/Berd.app"))
+        );
+        assert_eq!(
+            legacy_bundle_rename_target(Path::new("/Applications/Goose2.app")),
             Some(PathBuf::from("/Applications/Berd.app"))
         );
         // A user-chosen install location is preserved; only the name changes.
