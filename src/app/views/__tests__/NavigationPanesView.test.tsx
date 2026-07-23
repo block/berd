@@ -3765,6 +3765,185 @@ describe("NavigationPanesView", () => {
     ).not.toContainElement(movedRow);
   });
 
+  it("drags an ungrouped chat into an existing project group", async () => {
+    seedSessions(
+      {
+        id: "grouped-chat",
+        title: "Grouped chat",
+        updatedAt: "2026-04-10T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+      {
+        id: "loose-chat",
+        title: "Loose chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+    );
+
+    const updates: Array<NonNullable<ProjectInfo["chatGroups"]> | null> = [];
+
+    function StatefulHarness() {
+      const [chatGroups, setChatGroups] = useState<NonNullable<
+        ProjectInfo["chatGroups"]
+      > | null>({
+        groups: [
+          {
+            id: "project-1:chat-group:launch",
+            name: "launch",
+            chatIds: ["grouped-chat"],
+          },
+        ],
+      });
+      return (
+        <NavigationPanesView
+          {...sidebarProps({
+            activeView: "home",
+            onUpdateProjectChatGroups: (_projectId, next) => {
+              updates.push(next);
+              setChatGroups(next);
+            },
+            projects: [
+              mockProject({
+                name: "Project One",
+                chatGroups: chatGroups ?? undefined,
+              }),
+            ],
+            prototypeMode: "hybrid-push-overlay",
+            prototypeSecondaryPush: true,
+            prototypeSecondaryTarget: {
+              kind: "project",
+              projectId: "project-1",
+            },
+          })}
+        />
+      );
+    }
+
+    renderWithQueryClient(<StatefulHarness />);
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const looseRow = within(projectNavigation)
+      .getByRole("button", { name: "Loose chat" })
+      .closest("[data-sidebar-chat-draggable]");
+    const groupTarget = projectNavigation.querySelector(
+      '[data-sidebar-session-drop-target="project-group"]' +
+        '[data-project-group-id="project-1:chat-group:launch"]',
+    );
+    expect(looseRow).not.toBeNull();
+    expect(groupTarget).not.toBeNull();
+    mockRect(groupTarget as Element, { top: 100, bottom: 132 });
+
+    dispatchPointerEvent(looseRow as Element, "pointerdown", {
+      pointerId: 1,
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    dispatchPointerEvent(window, "pointermove", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 116,
+    });
+    expect(groupTarget).toHaveClass("bg-sidebar-accent");
+    dispatchPointerEvent(window, "pointerup", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 116,
+    });
+
+    await waitFor(() => {
+      expect(updates.at(-1)).toEqual({
+        groups: [
+          expect.objectContaining({
+            id: "project-1:chat-group:launch",
+            chatIds: ["grouped-chat", "loose-chat"],
+          }),
+        ],
+      });
+    });
+    const movedButton = within(projectNavigation).getByRole("button", {
+      name: "Loose chat",
+    });
+    expect(movedButton).toHaveClass("pl-9");
+    expect(
+      projectNavigation.querySelector('[aria-label="Ungrouped project chats"]'),
+    ).not.toContainElement(movedButton);
+  });
+
+  it("does not accept dragging a chat onto its current group", () => {
+    const onUpdateProjectChatGroups = vi.fn();
+    seedSessions({
+      id: "grouped-chat",
+      title: "Grouped chat",
+      updatedAt: "2026-04-10T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      onUpdateProjectChatGroups,
+      projects: [
+        mockProject({
+          name: "Project One",
+          chatGroups: {
+            groups: [
+              {
+                id: "project-1:chat-group:launch",
+                name: "launch",
+                chatIds: ["grouped-chat"],
+              },
+            ],
+          },
+        }),
+      ],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: {
+        kind: "project",
+        projectId: "project-1",
+      },
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation)
+      .getByRole("button", { name: "Grouped chat" })
+      .closest("[data-sidebar-chat-draggable]");
+    const groupTarget = projectNavigation.querySelector(
+      '[data-sidebar-session-drop-target="project-group"]',
+    );
+    expect(chatRow).not.toBeNull();
+    expect(groupTarget).not.toBeNull();
+    mockRect(groupTarget as Element, { top: 100, bottom: 132 });
+
+    dispatchPointerEvent(chatRow as Element, "pointerdown", {
+      pointerId: 1,
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    dispatchPointerEvent(window, "pointermove", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 116,
+    });
+    dispatchPointerEvent(window, "pointerup", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 116,
+    });
+
+    expect(onUpdateProjectChatGroups).not.toHaveBeenCalled();
+    expect(groupTarget).not.toHaveClass("bg-sidebar-accent");
+  });
+
   it("rolls back Add to group when persistence fails", async () => {
     const user = userEvent.setup();
     let rejectPersist!: (reason?: unknown) => void;

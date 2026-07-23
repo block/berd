@@ -225,6 +225,81 @@ describe("sidebar chat drag-to-move", () => {
     expect(onMoveToProject).toHaveBeenCalledWith("p1", null);
   });
 
+  it("suppresses hover hit-testing on chat rows while dragging", () => {
+    renderSidebar(vi.fn<MoveHandler>());
+
+    const sourceRow = draggableRow("Project Chat");
+    const underlyingRow = draggableRow("Recent Chat");
+    dispatchPointerEvent(sourceRow, "pointerdown", {
+      pointerId: 1,
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    dispatchPointerEvent(window, "pointermove", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    });
+
+    expect(sourceRow).toHaveClass("pointer-events-none", "opacity-40");
+    expect(underlyingRow).toHaveClass("pointer-events-none");
+    const preview = document.querySelector("[data-sidebar-chat-drag-preview]");
+    expect(preview).toHaveTextContent("Project Chat");
+    expect(preview).toHaveStyle({ left: "32px", top: "32px" });
+
+    dispatchPointerEvent(window, "pointermove", {
+      pointerId: 1,
+      clientX: 40,
+      clientY: 50,
+    });
+    expect(preview).toHaveStyle({ left: "52px", top: "62px" });
+
+    dispatchPointerEvent(window, "pointerup", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    });
+
+    expect(sourceRow).not.toHaveClass("pointer-events-none", "opacity-40");
+    expect(underlyingRow).not.toHaveClass("pointer-events-none");
+    expect(
+      document.querySelector("[data-sidebar-chat-drag-preview]"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("restores chat row hit-testing when the pointer drag is cancelled", () => {
+    renderSidebar(vi.fn<MoveHandler>());
+
+    const sourceRow = draggableRow("Project Chat");
+    const underlyingRow = draggableRow("Recent Chat");
+    dispatchPointerEvent(sourceRow, "pointerdown", {
+      pointerId: 1,
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    dispatchPointerEvent(window, "pointermove", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    });
+    expect(sourceRow).toHaveClass("pointer-events-none", "opacity-40");
+    expect(underlyingRow).toHaveClass("pointer-events-none");
+
+    dispatchPointerEvent(window, "pointercancel", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    });
+
+    expect(sourceRow).not.toHaveClass("pointer-events-none", "opacity-40");
+    expect(underlyingRow).not.toHaveClass("pointer-events-none");
+    expect(
+      document.querySelector("[data-sidebar-chat-drag-preview]"),
+    ).not.toBeInTheDocument();
+  });
+
   it("closes the row overflow menu when a drag starts", async () => {
     const user = userEvent.setup();
     render(

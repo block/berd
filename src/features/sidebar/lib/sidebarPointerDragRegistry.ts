@@ -1,4 +1,4 @@
-export type SidebarChatDropTargetKind = "project" | "recents";
+export type SidebarChatDropTargetKind = "project" | "project-group" | "recents";
 
 export interface SidebarChatDropTarget {
   kind: SidebarChatDropTargetKind;

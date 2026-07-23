@@ -8,6 +8,7 @@ import {
   useState,
   type PointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Archive,
   Check,
@@ -215,6 +216,8 @@ interface SidebarChatRowProps {
   flatProjectColor?: string | null;
   /** Project the chat currently lives in, or null when it sits in Recents. */
   currentProjectId?: string | null;
+  /** Project chat group the chat currently lives in, when grouped. */
+  currentProjectGroupId?: string | null;
   onEditProject?: (projectId: string) => void;
   onSelect?: (id: string) => void;
   onSelectionClear?: () => void;
@@ -265,6 +268,7 @@ export function SidebarChatRow({
   flatProjectIcon,
   flatProjectColor,
   currentProjectId = null,
+  currentProjectGroupId = null,
   onEditProject,
   onSelect,
   onSelectionClear,
@@ -283,12 +287,20 @@ export function SidebarChatRow({
   renderExtraMenuItems,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const { beginSessionDrag, updateSessionDragTarget, endSessionDrag } =
-    useSidebarChatDrag();
+  const {
+    draggingSession,
+    beginSessionDrag,
+    updateSessionDragTarget,
+    endSessionDrag,
+  } = useSidebarChatDrag();
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [dragPreviewPosition, setDragPreviewPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const {
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
@@ -593,6 +605,7 @@ export function SidebarChatRow({
     clearPointerDragListeners();
     pointerDragRef.current = null;
     setDragging(false);
+    setDragPreviewPosition(null);
     endSessionDrag();
     if (suppressNextClickRef.current) {
       schedulePointerDragClickSuppressionReset(
@@ -637,11 +650,12 @@ export function SidebarChatRow({
 
       moveEvent.preventDefault();
       suppressNextClickRef.current = true;
+      setDragPreviewPosition({ x: moveEvent.clientX, y: moveEvent.clientY });
       if (!drag.dragging) {
         pointerDragRef.current = { ...drag, dragging: true };
         closeMenus();
         setDragging(true);
-        beginSessionDrag(id, currentProjectId);
+        beginSessionDrag(id, currentProjectId, currentProjectGroupId);
       }
       updateSessionDragTarget(moveEvent.clientX, moveEvent.clientY);
     };
@@ -927,12 +941,30 @@ export function SidebarChatRow({
               (!selectionEnabled || selected) &&
               "bg-sidebar-accent",
             selected && SELECTED_CHAT_ROW_CLASS,
+            draggingSession !== null && "pointer-events-none",
             dragging && "bg-sidebar-accent opacity-40",
             hasFlatProjectColumn && densityClasses.flatProjectGap,
             className,
           )}
           data-sidebar-chat-density={density}
         >
+          {dragging && dragPreviewPosition && typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  aria-hidden="true"
+                  data-sidebar-chat-drag-preview
+                  className="pointer-events-none fixed z-50 flex max-w-72 items-center gap-2 rounded-sm border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground shadow-lg"
+                  style={{
+                    left: dragPreviewPosition.x + 12,
+                    top: dragPreviewPosition.y + 12,
+                  }}
+                >
+                  <SidebarChatMenuIcon className="size-3.5 shrink-0" />
+                  <span className="truncate">{displayTitle}</span>
+                </div>,
+                document.body,
+              )
+            : null}
           {showAbsoluteLeadingSlot ? (
             <SidebarLeadingIcon
               className={absoluteLeadingSlotClass}

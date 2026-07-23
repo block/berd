@@ -1424,6 +1424,7 @@ function PrototypeSidebarChatRow({
   className,
   contentPaddingClassName,
   currentProjectId = null,
+  currentProjectGroupId = null,
   density = "dense",
   leadingIcon,
   leadingIconTestId,
@@ -1445,6 +1446,7 @@ function PrototypeSidebarChatRow({
   className?: string;
   contentPaddingClassName?: string;
   currentProjectId?: string | null;
+  currentProjectGroupId?: string | null;
   density?: ComponentProps<typeof SidebarChatRow>["density"];
   leadingIcon?: ReactNode;
   leadingIconTestId?: string;
@@ -1505,6 +1507,7 @@ function PrototypeSidebarChatRow({
       flatProjectIcon={showIcon && project ? project.icon : undefined}
       flatProjectColor={showIcon && project ? project.color : undefined}
       currentProjectId={currentProjectId}
+      currentProjectGroupId={currentProjectGroupId}
       onEditProject={onEditProject}
       onSelect={onSelect}
       onSelectionClear={behavior.onSelectionClear}
@@ -1603,6 +1606,7 @@ function PrototypeProjectChatRow({
         active={active}
         behavior={behavior}
         currentProjectId={currentProjectId}
+        currentProjectGroupId={currentGroupId}
         geometry="project-secondary"
         leadingIcon={
           showRealDraftNewChatIcon ? (
@@ -1761,22 +1765,65 @@ function PrototypeProjectChatRow({
 function PrototypeProjectGroupRow({
   group,
   expanded,
+  onDropSession,
   onRemoveGroup,
   onMenuOpenChange,
   onNewChat,
   onRenameGroup,
   onToggle,
+  projectId,
 }: {
   group: PrototypeProjectGroup;
   expanded: boolean;
+  onDropSession?: (sessionId: string, groupId: string) => void;
   onRemoveGroup?: () => void;
   onMenuOpenChange?: (open: boolean) => void;
   onNewChat?: PrototypeActionHandler;
   onRenameGroup?: () => void;
   onToggle: () => void;
+  projectId: string;
 }) {
+  const dropTargetRef = useRef<HTMLDivElement>(null);
+  const dropTargetKey = `prototype-project-group:${projectId}:${group.id}`;
+  const { activeSessionDropTargetKey, registerSessionDropTarget } =
+    useSidebarChatDrag();
+  const handleSessionDrop = useCallback(
+    (sessionId: string) => onDropSession?.(sessionId, group.id),
+    [group.id, onDropSession],
+  );
+
+  useEffect(() => {
+    const element = dropTargetRef.current;
+    if (!element || !onDropSession) return;
+
+    return registerSessionDropTarget({
+      key: dropTargetKey,
+      kind: "project-group",
+      projectId,
+      projectGroupId: group.id,
+      element,
+      onDrop: handleSessionDrop,
+    });
+  }, [
+    dropTargetKey,
+    group.id,
+    handleSessionDrop,
+    onDropSession,
+    projectId,
+    registerSessionDropTarget,
+  ]);
+
   return (
-    <div className="group/prototype-project-group relative flex items-center">
+    <div
+      ref={dropTargetRef}
+      className={cn(
+        "group/prototype-project-group relative flex items-center rounded-sm",
+        activeSessionDropTargetKey === dropTargetKey && "bg-sidebar-accent",
+      )}
+      data-sidebar-session-drop-target="project-group"
+      data-project-id={projectId}
+      data-project-group-id={group.id}
+    >
       <button
         type="button"
         aria-expanded={expanded}
@@ -2335,6 +2382,17 @@ function PrototypeSecondaryPanel({
       ...current,
       [groupId]: true,
     }));
+  };
+  const addSessionToProjectGroup = (sessionId: string, groupId: string) => {
+    const session =
+      projectSessionsById.get(sessionId) ??
+      projectSessionsByClientId.get(sessionId);
+    if (!session) return;
+
+    addChatToProjectGroup(
+      { id: session.id, session, title: session.title },
+      groupId,
+    );
   };
   const removeChatFromProjectGroup = (chat: PrototypeProjectChatItem) => {
     if (!project || chat.placeholder) return;
@@ -3057,6 +3115,7 @@ function PrototypeSecondaryPanel({
                             <PrototypeProjectGroupRow
                               group={group}
                               expanded={expanded}
+                              onDropSession={addSessionToProjectGroup}
                               onRemoveGroup={() => removeProjectGroup(group)}
                               onMenuOpenChange={(open) => {
                                 onNavigationMenuOpenChange?.(open);
@@ -3069,6 +3128,7 @@ function PrototypeSecondaryPanel({
                               }
                               onRenameGroup={() => openRenameGroupDialog(group)}
                               onToggle={() => toggleProjectGroup(group.id)}
+                              projectId={project.id}
                             />
                             <div
                               className={cn(
