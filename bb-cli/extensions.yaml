@@ -121,6 +121,8 @@
   about: Semantic search over Cash App support articles.
 - name: testrack
   about: Inspect and run commands on Testrack hardware nodes — limited to hw_testrack_users.
+- name: triage-copilot
+  about: Read source-aware health metrics for hardware test suites.
 - name: thehub
   about: Employee experience tools — Loop, feedback, and org data.
 - name: todoist
