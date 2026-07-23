@@ -32,26 +32,47 @@ function TooltipTrigger({
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
+type TooltipContentProps = React.ComponentProps<
+  typeof TooltipPrimitive.Content
+> & {
+  /** Lets pointer input pass through the portaled tooltip to the surface below. */
+  pointerEvents?: "auto" | "none";
+};
+
 function TooltipContent({
   className,
   sideOffset = 0,
   children,
+  pointerEvents = "auto",
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: TooltipContentProps) {
+  const content = (
+    <TooltipPrimitive.Content
+      data-slot="tooltip-content"
+      sideOffset={sideOffset}
+      className={cn(
+        "bg-popover-inverse text-popover-inverse-foreground animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit origin-(--radix-tooltip-content-transform-origin) rounded-md px-3 py-1.5 text-xs text-balance",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <TooltipPrimitive.Arrow className="bg-popover-inverse fill-popover-inverse z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
+    </TooltipPrimitive.Content>
+  );
+
   return (
     <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
-        className={cn(
-          "bg-popover-inverse text-popover-inverse-foreground animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-fit origin-(--radix-tooltip-content-transform-origin) rounded-md px-3 py-1.5 text-xs text-balance",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        <TooltipPrimitive.Arrow className="bg-popover-inverse fill-popover-inverse z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
-      </TooltipPrimitive.Content>
+      {pointerEvents === "none" ? (
+        <div
+          data-slot="tooltip-pointer-pass-through"
+          className="contents pointer-events-none"
+        >
+          {content}
+        </div>
+      ) : (
+        content
+      )}
     </TooltipPrimitive.Portal>
   );
 }

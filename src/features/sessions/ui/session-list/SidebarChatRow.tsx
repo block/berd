@@ -76,6 +76,7 @@ import {
   ContextMenuTrigger,
 } from "@/shared/ui/context-menu";
 import { Input } from "@/shared/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { toast } from "sonner";
@@ -92,6 +93,7 @@ const SELECTED_CHAT_ROW_CLASS = cn(
   "bg-sidebar-accent text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/80 hover:bg-sidebar-accent hover:text-sidebar-foreground",
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
 );
+const SESSION_TOOLTIP_DELAY_MS = 500;
 
 /**
  * Compact single-unit relative time for sidebar chat rows: `5m`, `3h`, `2d`,
@@ -363,6 +365,9 @@ export function SidebarChatRow({
   );
   const openWindowLabel = t("actions.openInWindow");
   const openNewWindowLabel = t("actions.openInNewWindow");
+  const rowTooltipLabel = isOpenInWindow
+    ? openWindowLabel
+    : t("actions.renameHint");
   const projectEditLabel = flatProjectName?.trim()
     ? t("actions.editProject", { name: flatProjectName })
     : t("actions.editProjectFallback");
@@ -458,6 +463,49 @@ export function SidebarChatRow({
     event.stopPropagation();
     startRename();
   };
+
+  const rowButton = (
+    <Tooltip delayDuration={SESSION_TOOLTIP_DELAY_MS} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleRowClick}
+          onDoubleClick={handleRowDoubleClick}
+          aria-label={displayTitle}
+          className={cn(
+            "min-w-0 flex-1 justify-start rounded-sm",
+            hasFlatProjectColumn ? "pl-0 gap-0" : rowPaddingClass,
+            activityTimestamp
+              ? densityClasses.timestampReserve
+              : densityClasses.menuReserve,
+            hasBranchName
+              ? "h-auto py-1.5"
+              : cn(
+                  SIDEBAR_ROW_HEIGHT_CLASS,
+                  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+                ),
+            SIDEBAR_NAV_TEXT_CLASS,
+            rowButtonStateClass,
+          )}
+          aria-pressed={selectionEnabled ? selected : undefined}
+        >
+          {rowTitleContent}
+          {isMultiWindowEnabled && isOpenInWindow ? (
+            <span
+              className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+              role="img"
+              aria-label={openWindowLabel}
+            >
+              <ExternalLink className="size-3" aria-hidden="true" />
+            </span>
+          ) : null}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent pointerEvents="none">{rowTooltipLabel}</TooltipContent>
+    </Tooltip>
+  );
 
   useEffect(() => {
     setDraftTitle(editableTitle);
@@ -937,84 +985,10 @@ export function SidebarChatRow({
                   {flatProjectGlyph}
                 </span>
               </SidebarLeadingIcon>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleRowClick}
-                onDoubleClick={handleRowDoubleClick}
-                title={
-                  isOpenInWindow ? openWindowLabel : t("actions.renameHint")
-                }
-                aria-label={displayTitle}
-                className={cn(
-                  "min-w-0 flex-1 justify-start rounded-sm pl-0",
-                  activityTimestamp
-                    ? densityClasses.timestampReserve
-                    : densityClasses.menuReserve,
-                  "gap-0",
-                  hasBranchName
-                    ? "h-auto py-1.5"
-                    : cn(
-                        SIDEBAR_ROW_HEIGHT_CLASS,
-                        SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
-                      ),
-                  SIDEBAR_NAV_TEXT_CLASS,
-                  rowButtonStateClass,
-                )}
-                aria-pressed={selectionEnabled ? selected : undefined}
-              >
-                {rowTitleContent}
-                {isMultiWindowEnabled && isOpenInWindow ? (
-                  <span
-                    className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
-                    role="img"
-                    aria-label={openWindowLabel}
-                    title={openWindowLabel}
-                  >
-                    <ExternalLink className="size-3" aria-hidden="true" />
-                  </span>
-                ) : null}
-              </Button>
+              {rowButton}
             </>
           ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleRowClick}
-              onDoubleClick={handleRowDoubleClick}
-              title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
-              aria-label={displayTitle}
-              className={cn(
-                "flex-1 min-w-0 justify-start rounded-sm",
-                activityTimestamp
-                  ? densityClasses.timestampReserve
-                  : densityClasses.menuReserve,
-                hasBranchName
-                  ? "h-auto py-1.5"
-                  : cn(
-                      SIDEBAR_ROW_HEIGHT_CLASS,
-                      SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
-                    ),
-                SIDEBAR_NAV_TEXT_CLASS,
-                rowPaddingClass,
-                rowButtonStateClass,
-              )}
-              aria-pressed={selectionEnabled ? selected : undefined}
-            >
-              {rowTitleContent}
-              {isMultiWindowEnabled && isOpenInWindow ? (
-                <span
-                  className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
-                  role="img"
-                  aria-label={openWindowLabel}
-                  title={openWindowLabel}
-                >
-                  <ExternalLink className="size-3" aria-hidden="true" />
-                </span>
-              ) : null}
-            </Button>
+            rowButton
           )}
 
           {activityTimestamp ? (

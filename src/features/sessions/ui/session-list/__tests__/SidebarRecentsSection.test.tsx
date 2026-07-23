@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -65,6 +65,36 @@ describe("SidebarRecentsSection", () => {
           state: { sessionId: "pinned-chat" },
         },
       ],
+    });
+  });
+
+  it("moves the rename tooltip between adjacent sessions", async () => {
+    const user = userEvent.setup();
+    renderRecents(true);
+    const pinnedButton = screen.getByRole("button", { name: "Pinned Chat" });
+    const regularButton = screen.getByRole("button", { name: "Regular Chat" });
+
+    await user.hover(pinnedButton);
+    expect(
+      await screen.findByRole("tooltip", {
+        name: "Double-click to rename",
+      }),
+    ).toBeInTheDocument();
+    expect(pinnedButton).toHaveAttribute("aria-describedby");
+
+    await user.hover(regularButton);
+    await screen.findByRole("tooltip", { name: "Double-click to rename" });
+    await waitFor(() => {
+      expect(pinnedButton).not.toHaveAttribute("aria-describedby");
+      expect(regularButton).toHaveAttribute("aria-describedby");
+      expect(screen.getAllByRole("tooltip")).toHaveLength(1);
+    });
+
+    await user.unhover(regularButton);
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-slot="tooltip-content"]'),
+      ).not.toBeInTheDocument();
     });
   });
 

@@ -69,6 +69,41 @@ describe("SidebarChatRow", () => {
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
+  it.each([
+    undefined,
+    "Project One",
+  ])("uses a dismissible tooltip instead of a native title (project: %s)", async (flatProjectName) => {
+    const user = userEvent.setup();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Hover Chat"
+        isActive={false}
+        flatProjectName={flatProjectName}
+      />,
+    );
+
+    const titleButton = screen.getByRole("button", { name: "Hover Chat" });
+    expect(titleButton).not.toHaveAttribute("title");
+
+    await user.hover(titleButton);
+    const tooltip = await screen.findByRole("tooltip", {
+      name: "Double-click to rename",
+    });
+    expect(tooltip).toBeInTheDocument();
+    expect(
+      tooltip.closest('[data-slot="tooltip-pointer-pass-through"]'),
+    ).toHaveClass("pointer-events-none");
+
+    await user.unhover(titleButton);
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-slot="tooltip-content"]'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("starts inline rename on double-click and commits on Enter", async () => {
     const user = userEvent.setup();
     const onRename = vi.fn();
@@ -82,7 +117,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    await user.dblClick(screen.getByTitle("Double-click to rename"));
+    await user.dblClick(screen.getByRole("button", { name: "Original Title" }));
 
     const input = screen.getByRole("textbox");
     await user.clear(input);
@@ -130,7 +165,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    await user.dblClick(screen.getByTitle("Double-click to rename"));
+    await user.dblClick(screen.getByRole("button", { name: "Same Title" }));
     const input = screen.getByRole("textbox");
 
     await user.clear(input);
@@ -138,7 +173,7 @@ describe("SidebarChatRow", () => {
 
     expect(onRename).not.toHaveBeenCalled();
 
-    await user.dblClick(screen.getByTitle("Double-click to rename"));
+    await user.dblClick(screen.getByRole("button", { name: "Same Title" }));
     const input2 = screen.getByRole("textbox");
     await user.clear(input2);
     await user.type(input2, "  Same Title  {Enter}");
@@ -250,7 +285,7 @@ describe("SidebarChatRow", () => {
     expect(container.querySelector("[data-sidebar-chat-row]")).toHaveClass(
       "gap-2",
     );
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+    expect(screen.getByRole("button", { name: "Idle Chat" })).toHaveClass(
       "pl-0",
       "pr-8",
     );
@@ -315,7 +350,7 @@ describe("SidebarChatRow", () => {
     expect(
       container.querySelector("[data-sidebar-chat-draggable]"),
     ).toBeInTheDocument();
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+    expect(screen.getByRole("button", { name: "Idle Chat" })).toHaveClass(
       "cursor-pointer",
     );
   });
@@ -336,7 +371,7 @@ describe("SidebarChatRow", () => {
     );
 
     await user.keyboard("[MetaLeft>]");
-    await user.click(screen.getByTitle("Double-click to rename"));
+    await user.click(screen.getByRole("button", { name: "Selectable Chat" }));
     await user.keyboard("[/MetaLeft]");
 
     expect(onSelectionChange).toHaveBeenCalledWith("session-1", true);
@@ -362,7 +397,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    await user.click(screen.getByTitle("Double-click to rename"));
+    await user.click(screen.getByRole("button", { name: "Selectable Chat" }));
 
     expect(onSelectionClear).toHaveBeenCalled();
     expect(onSelect).toHaveBeenCalledWith("session-1");
@@ -393,7 +428,7 @@ describe("SidebarChatRow", () => {
     await waitFor(() => expect(getSessionWindowSupport).toHaveBeenCalled());
     expect(screen.queryByLabelText(/open in window/i)).not.toBeInTheDocument();
 
-    await user.click(screen.getByTitle("Double-click to rename"));
+    await user.click(screen.getByRole("button", { name: "Windowed Chat" }));
 
     expect(focusSessionWindow).not.toHaveBeenCalled();
     expect(onSelect).toHaveBeenCalledWith("session-1");
@@ -722,7 +757,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    const titleButton = screen.getByTitle("Double-click to rename");
+    const titleButton = screen.getByRole("button", { name: "Idle Chat" });
     expect(titleButton).toHaveClass("pl-[38px]");
     expect(screen.queryByTestId("sidebar-chat-icon")).toBeNull();
 
@@ -737,7 +772,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+    expect(screen.getByRole("button", { name: "Idle Chat" })).toHaveClass(
       "pl-[38px]",
     );
     expect(screen.getByTestId("sidebar-chat-icon")).toHaveClass(
@@ -784,9 +819,9 @@ describe("SidebarChatRow", () => {
     if (!row) throw new Error("Sidebar chat row was not rendered");
     await user.hover(row);
     const pinButton = screen.getByRole("button", { name: "Pin chat" });
-    expect(screen.getByTitle("Double-click to rename")).not.toContainElement(
-      pinButton,
-    );
+    expect(
+      screen.getByRole("button", { name: "Idle Chat" }),
+    ).not.toContainElement(pinButton);
     await user.click(pinButton);
 
     expect(
@@ -842,7 +877,7 @@ describe("SidebarChatRow", () => {
 
     const unpin = screen.getByRole("button", { name: "Unpin chat" });
     expect(unpin).toHaveClass("size-full");
-    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+    expect(screen.getByRole("button", { name: "Idle Chat" })).toHaveClass(
       "pl-[38px]",
     );
 
@@ -1095,7 +1130,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    await user.dblClick(screen.getByTitle("Double-click to rename"));
+    await user.dblClick(screen.getByRole("button", { name: "New chat" }));
 
     const input = screen.getByRole("textbox");
     expect(input).toHaveValue("New chat");

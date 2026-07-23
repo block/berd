@@ -3207,6 +3207,7 @@ export const designSystemComponentManifest = [
     slots: [
       "tooltip",
       "tooltip-content",
+      "tooltip-pointer-pass-through",
       "tooltip-provider",
       "tooltip-trigger",
     ],
