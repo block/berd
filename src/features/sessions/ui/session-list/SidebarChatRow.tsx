@@ -580,20 +580,28 @@ export function SidebarChatRow({
   };
 
   const handleCopyLink = () => {
+    const link = createSessionDeepLink(id);
     closeMenus();
     void (async () => {
-      try {
-        const clipboard = navigator.clipboard;
-        if (!clipboard?.writeText) {
-          throw new Error("Clipboard API is unavailable");
-        }
-        await clipboard.writeText(createSessionDeepLink(id));
-        toast.success(t("actions.linkCopied"));
-      } catch (error) {
+      if (window.__TAURI_INTERNALS__) {
+        const { writeText } = await import(
+          "@tauri-apps/plugin-clipboard-manager"
+        );
+        await writeText(link);
+        return;
+      }
+
+      const clipboard = navigator.clipboard;
+      if (!clipboard?.writeText) {
+        throw new Error("Clipboard API is unavailable");
+      }
+      await clipboard.writeText(link);
+    })()
+      .then(() => toast.success(t("actions.linkCopied")))
+      .catch((error) => {
         console.error("Failed to copy session link:", error);
         toast.error(t("actions.copyLinkFailed"));
-      }
-    })();
+      });
   };
 
   const clearPointerDragListeners = () => {

@@ -17,6 +17,11 @@ import {
 const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  writeTextToTauriClipboard: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeText: (...args: unknown[]) => mocks.writeTextToTauriClipboard(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -44,6 +49,8 @@ describe("SidebarChatRow", () => {
   beforeEach(() => {
     mocks.toastError.mockReset();
     mocks.toastSuccess.mockReset();
+    mocks.writeTextToTauriClipboard.mockReset();
+    mocks.writeTextToTauriClipboard.mockResolvedValue(undefined);
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -943,7 +950,45 @@ describe("SidebarChatRow", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("copies an encoded chat link from the right-click menu", async () => {
+  it("uses the native clipboard for an encoded chat link in Berd", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    const { container } = render(
+      <SidebarChatRow
+        id="id/with spaces?#"
+        title="Idle Chat"
+        isActive={false}
+      />,
+    );
+
+    const row = container.querySelector("[data-sidebar-chat-row]");
+    if (!row) {
+      throw new Error("Sidebar chat row was not rendered");
+    }
+
+    fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /copy local link/i }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.writeTextToTauriClipboard).toHaveBeenCalledWith(
+        "berd://session/id%2Fwith%20spaces%3F%23",
+      ),
+    );
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Local chat link copied. It only works on this device.",
+    );
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("copies an encoded chat link from the right-click menu in the browser", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -979,16 +1024,16 @@ describe("SidebarChatRow", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
-  it("shows an error when the chat link cannot be copied", async () => {
+  it("shows an error when the native clipboard write fails", async () => {
     const user = userEvent.setup();
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
-    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
-    Object.defineProperty(navigator, "clipboard", {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
-      value: { writeText },
+      value: {},
     });
+    mocks.writeTextToTauriClipboard.mockRejectedValue(new Error("denied"));
     const { container } = render(
       <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
     );
@@ -1014,6 +1059,10 @@ describe("SidebarChatRow", () => {
   });
 
   it("shows an error when the Clipboard API is unavailable", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
     const user = userEvent.setup();
     const consoleError = vi
       .spyOn(console, "error")
