@@ -210,10 +210,101 @@ describe("transcript row state registry", () => {
     expect(decision.diagnostics.failThresholdExceeded).toBe(false);
   });
 
-  it("reports warn/fail threshold pressure using the default 40/80 policy", () => {
+  it("caps stale active streams without evicting interaction-protected rows", () => {
+    // Regression: active-stream protection signals have no TTL and rely on an
+    // explicit release. Keep their bounded backstop separate from genuine user
+    // interactions so large selections remain mounted while stale streams go.
     const registry = createTranscriptRowStateRegistry();
+    const selectedRowIds = Array.from(
+      { length: 64 },
+      (_, index) => `selected-${index + 1}`,
+    );
 
-    for (let index = 1; index <= 81; index += 1) {
+    registry.setSelectionProtection({
+      sessionId: SESSION_ID,
+      rowIds: selectedRowIds,
+      active: true,
+      nowMs: 1,
+    });
+    for (let index = 1; index <= 300; index += 1) {
+      registry.setActiveStreamingRow({
+        sessionId: SESSION_ID,
+        rowId: `stream-${index}`,
+        active: true,
+        nowMs: index + 1,
+      });
+    }
+
+    const decision = registry.evaluateKeepAlive({
+      sessionId: SESSION_ID,
+      rows: [
+        ...selectedRowIds.map((rowId) => row(rowId)),
+        ...Array.from({ length: 300 }, (_, index) =>
+          row(`stream-${index + 1}`),
+        ),
+      ],
+      nowMs: 1000,
+    });
+
+    expect(decision.protectedRowIds).toEqual(
+      expect.arrayContaining(selectedRowIds),
+    );
+    expect(
+      decision.protectedRowIds.filter((rowId) => rowId.startsWith("stream-")),
+    ).toHaveLength(
+      DEFAULT_TRANSCRIPT_KEEP_ALIVE_POLICY.activeStreamRowsPerSessionCap,
+    );
+    expect(decision.evictedRowIds).not.toEqual(
+      expect.arrayContaining(selectedRowIds),
+    );
+    expect(decision.evictedRowIds).toContain("stream-1");
+    expect(decision.protectedRowIds).toContain("stream-300");
+    expect(decision.diagnostics.failThresholdExceeded).toBe(false);
+    expect(decision.diagnostics.failThresholdJustifiedByActiveInteraction).toBe(
+      true,
+    );
+  });
+
+  it("keeps the newest projection streams when active rows exceed the cap", () => {
+    const registry = createTranscriptRowStateRegistry({
+      activeStreamRowsPerSessionCap: 3,
+    });
+    const rows = [
+      row("stream-z", { keepAlivePriority: "active-stream" }),
+      row("stream-a", { keepAlivePriority: "active-stream" }),
+      row("stream-y", { keepAlivePriority: "active-stream" }),
+      row("stream-b", { keepAlivePriority: "active-stream" }),
+      row("stream-x", { keepAlivePriority: "active-stream" }),
+    ];
+
+    const decision = registry.evaluateKeepAlive({
+      sessionId: SESSION_ID,
+      rows,
+      nowMs: 100,
+    });
+
+    expect(decision.protectedRowIds).toEqual([
+      "stream-b",
+      "stream-x",
+      "stream-y",
+    ]);
+    expect(decision.evictedRowIds).toEqual(["stream-a", "stream-z"]);
+  });
+
+  it("keeps active MCP rows protected when their stream signal exceeds the stream cap", () => {
+    const registry = createTranscriptRowStateRegistry({
+      activeStreamRowsPerSessionCap: 39,
+      mcpRowsPerSessionCap: 1,
+    });
+
+    registry.setMcpActivity({
+      sessionId: SESSION_ID,
+      rowId: "stream-1",
+      active: true,
+      kind: "host-request",
+      nowMs: 0,
+    });
+    for (let index = 1; index <= 41; index += 1) {
       registry.setActiveStreamingRow({
         sessionId: SESSION_ID,
         rowId: `stream-${index}`,
@@ -222,41 +313,19 @@ describe("transcript row state registry", () => {
       });
     }
 
-    const failed = registry.evaluateKeepAlive({
+    const decision = registry.evaluateKeepAlive({
       sessionId: SESSION_ID,
-      rows: Array.from({ length: 81 }, (_, index) =>
+      rows: Array.from({ length: 41 }, (_, index) =>
         row(`stream-${index + 1}`),
       ),
-      nowMs: 100,
+      nowMs: 200,
     });
 
-    expect(failed.diagnostics.warnThresholdExceeded).toBe(true);
-    expect(failed.diagnostics.failThresholdExceeded).toBe(true);
-    expect(failed.diagnostics.failThresholdJustifiedByActiveInteraction).toBe(
-      false,
-    );
-
-    registry.setFocusedRow({
-      sessionId: SESSION_ID,
-      rowId: "focused-override",
-      focused: true,
-      nowMs: 101,
-    });
-
-    const justified = registry.evaluateKeepAlive({
-      sessionId: SESSION_ID,
-      rows: [
-        ...Array.from({ length: 81 }, (_, index) => row(`stream-${index + 1}`)),
-        row("focused-override"),
-      ],
-      nowMs: 102,
-    });
-
-    expect(justified.diagnostics.warnThresholdExceeded).toBe(true);
-    expect(justified.diagnostics.failThresholdExceeded).toBe(false);
-    expect(
-      justified.diagnostics.failThresholdJustifiedByActiveInteraction,
-    ).toBe(true);
+    expect(decision.protectedRowIds).toContain("stream-1");
+    expect(decision.evictedRowIds).not.toContain("stream-1");
+    expect(decision.evictedRowIds).toContain("stream-2");
+    expect(decision.diagnostics.mcpProtectedRowCount).toBe(1);
+    expect(decision.diagnostics.evictedMcpRowCount).toBe(0);
   });
 
   it("expires recent MCP keepalive signals without clearing active host work", () => {

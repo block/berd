@@ -2265,7 +2265,7 @@ describe("VirtualMessageTimeline", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("falls back to explicit safe degraded mode when protected rows exceed the fail threshold", async () => {
+  it("keeps virtualization bounded when active-stream rows exceed the fail threshold", async () => {
     const diagnosticsSpy = vi.fn();
     const messages = Array.from({ length: 82 }, (_, index) =>
       textMessage(`protected-${index}`, "assistant", `Protected ${index}`, {
@@ -2284,24 +2284,23 @@ describe("VirtualMessageTimeline", () => {
 
     const list = screen.getByTestId("virtual-message-timeline-list");
     await waitFor(() =>
-      expect(list).toHaveAttribute("data-virtual-render-mode", "safe-degraded"),
+      expect(list).toHaveAttribute(
+        "data-virtual-render-mode",
+        "bounded-controller",
+      ),
     );
-    expect(list).toHaveAttribute("data-virtual-unmounting", "safe-degraded");
+    expect(list).toHaveAttribute("data-virtual-unmounting", "enabled");
     expect(list).toHaveAttribute("data-virtual-total-rows", "83");
-    expect(list).toHaveAttribute("data-virtual-mounted-rows", "83");
-    expect(list).toHaveAttribute(
-      "data-virtual-fallback-reasons",
-      "protected-row-fail-threshold",
-    );
+    expect(list).toHaveAttribute("data-virtual-protected-rows", "40");
+    expect(list).toHaveAttribute("data-virtual-fallback-reasons", "");
 
     await waitFor(() =>
       expect(diagnosticsSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          mode: "safe-degraded",
-          mountedRows: 83,
-          protectedRows: 82,
-          virtualUnmountingEnabled: false,
-          fallbackReasons: ["protected-row-fail-threshold"],
+          mode: "bounded-controller",
+          protectedRows: 40,
+          virtualUnmountingEnabled: true,
+          fallbackReasons: [],
         }),
       ),
     );

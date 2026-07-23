@@ -26,6 +26,7 @@ export type TranscriptMcpActivityKind =
   | "recent-resize";
 
 export interface TranscriptKeepAlivePolicyOptions {
+  activeStreamRowsPerSessionCap: number;
   mcpRowsPerSessionCap: number;
   recentRowsPerSessionCap: number;
   recentTtlMs: number;
@@ -35,6 +36,11 @@ export interface TranscriptKeepAlivePolicyOptions {
 
 export const DEFAULT_TRANSCRIPT_KEEP_ALIVE_POLICY: TranscriptKeepAlivePolicyOptions =
   {
+    // Active-stream rows are capped so a leaked or runaway stream signal cannot
+    // accumulate past the fail threshold and disable windowing. Genuine
+    // interaction rows (focused/selection/open-ui) remain protected without a
+    // cap; the newest streams fill the bounded stream budget.
+    activeStreamRowsPerSessionCap: 40,
     mcpRowsPerSessionCap: 8,
     recentRowsPerSessionCap: 20,
     recentTtlMs: 60_000,
@@ -271,6 +277,7 @@ interface CandidateSelection {
   forced: readonly Candidate[];
   mcp: readonly Candidate[];
   recent: readonly Candidate[];
+  evictedActiveStream: readonly Candidate[];
   evictedMcp: readonly Candidate[];
   evictedRecent: readonly Candidate[];
 }
@@ -616,6 +623,7 @@ export class TranscriptRowStateRegistry {
       ...selection.recent,
     ];
     const evictedCandidates = [
+      ...selection.evictedActiveStream,
       ...selection.evictedMcp,
       ...selection.evictedRecent,
     ];
@@ -867,16 +875,20 @@ export class TranscriptRowStateRegistry {
       }
     }
 
-    for (const row of rows) {
+    for (const [rowIndex, row] of rows.entries()) {
       if (row.keepAlivePriority === "none") {
         continue;
       }
+      // Projection-only active rows share one evaluation timestamp. Preserve
+      // transcript order as their recency tie-breaker so the bounded stream
+      // budget keeps the live tail instead of lexicographically smallest IDs.
+      const projectionOrderMs = nowMs + rowIndex;
       upsertCandidate(candidates, {
         rowId: row.rowId,
         priority: row.keepAlivePriority,
         reason: reasonForPriority(row.keepAlivePriority),
-        activatedAtMs: nowMs,
-        updatedAtMs: nowMs,
+        activatedAtMs: projectionOrderMs,
+        updatedAtMs: projectionOrderMs,
       });
     }
 
@@ -997,10 +1009,35 @@ function selectCandidates(
   candidates: readonly Candidate[],
   policy: TranscriptKeepAlivePolicyOptions,
 ): CandidateSelection {
-  const forced = candidates
-    .filter(isForcedCandidate)
+  const interactionCandidates = candidates
+    .filter(hasInteractionPriority)
     .sort(compareCandidatePriority);
-  const forcedRowIds = new Set(forced.map((candidate) => candidate.rowId));
+  const interactionRowIds = new Set(
+    interactionCandidates.map((candidate) => candidate.rowId),
+  );
+  const activeStreamCandidates = candidates
+    .filter(
+      (candidate) =>
+        !interactionRowIds.has(candidate.rowId) &&
+        candidate.priorities.has("active-stream"),
+    )
+    .sort(compareCandidatePriority);
+  const protectedActiveStream = activeStreamCandidates.slice(
+    0,
+    policy.activeStreamRowsPerSessionCap,
+  );
+  const activeStreamOverflow = activeStreamCandidates.slice(
+    policy.activeStreamRowsPerSessionCap,
+  );
+  const forced = [...interactionCandidates, ...protectedActiveStream];
+  // Exclude only selected forced rows from the MCP/recent categories. Stream
+  // overflow can still be protected by an active MCP signal; otherwise a stale
+  // stream bit could evict live embedded app state.
+  const forcedRowIds = new Set(
+    [...interactionCandidates, ...protectedActiveStream].map(
+      (candidate) => candidate.rowId,
+    ),
+  );
   const mcpCandidates = candidates
     .filter(
       (candidate) =>
@@ -1011,10 +1048,17 @@ function selectCandidates(
   const mcp = mcpCandidates.slice(0, policy.mcpRowsPerSessionCap);
   const evictedMcp = mcpCandidates.slice(policy.mcpRowsPerSessionCap);
   const selectedMcpRowIds = new Set(mcp.map((candidate) => candidate.rowId));
+  const evictedActiveStream = activeStreamOverflow.filter(
+    (candidate) => !selectedMcpRowIds.has(candidate.rowId),
+  );
+  const activeStreamRowIds = new Set(
+    activeStreamCandidates.map((candidate) => candidate.rowId),
+  );
   const recentCandidates = candidates
     .filter(
       (candidate) =>
         !forcedRowIds.has(candidate.rowId) &&
+        !activeStreamRowIds.has(candidate.rowId) &&
         !selectedMcpRowIds.has(candidate.rowId) &&
         !candidate.priorities.has("active-mcp") &&
         candidate.priorities.has("recent"),
@@ -1023,15 +1067,21 @@ function selectCandidates(
   const recent = recentCandidates.slice(0, policy.recentRowsPerSessionCap);
   const evictedRecent = recentCandidates.slice(policy.recentRowsPerSessionCap);
 
-  return { forced, mcp, recent, evictedMcp, evictedRecent };
+  return {
+    forced,
+    mcp,
+    recent,
+    evictedActiveStream,
+    evictedMcp,
+    evictedRecent,
+  };
 }
 
-function isForcedCandidate(candidate: Candidate): boolean {
+function hasInteractionPriority(candidate: Candidate): boolean {
   return (
     candidate.priorities.has("focused") ||
     candidate.priorities.has("selection") ||
-    candidate.priorities.has("open-ui") ||
-    candidate.priorities.has("active-stream")
+    candidate.priorities.has("open-ui")
   );
 }
 
@@ -1079,6 +1129,7 @@ function buildDiagnostics(input: {
   const protectedRowIdSet = new Set(input.protectedRowIds);
   const evictedRowIdSet = new Set(
     uniqueSortedRowIds([
+      ...input.selection.evictedActiveStream,
       ...input.selection.evictedMcp,
       ...input.selection.evictedRecent,
     ]),
