@@ -274,6 +274,7 @@ mod tests {
             ("session", "get") => vec!["--session-id", "s"],
             ("session", "rename") => vec!["--session-id", "s", "--title", "t"],
             ("session", "move") => vec!["--session-id", "s", "--project-id", "p"],
+            ("session", "move-to-group") => vec!["--session-id", "s", "--group-id", "g"],
             ("session", "clear-project") => vec!["--session-id", "s"],
             ("session", "set-worktree") => vec!["--session-id", "s", "--path", "/w"],
             ("session", "fork") => vec!["--session-id", "s"],
@@ -457,6 +458,24 @@ mod tests {
     }
 
     #[test]
+    fn move_to_group_maps_to_its_explicit_action() {
+        let (command, args) = wire_of(&[
+            "berdctl",
+            "session",
+            "move-to-group",
+            "--session-id",
+            "s",
+            "--group-id",
+            "g",
+        ]);
+        assert_eq!(command, "sessions");
+        assert_eq!(
+            Value::Object(args),
+            serde_json::json!({"action": "move_to_group", "session_id": "s", "group_id": "g"})
+        );
+    }
+
+    #[test]
     fn clear_project_maps_to_its_explicit_action() {
         let (command, args) =
             wire_of(&["berdctl", "session", "clear-project", "--session-id", "s"]);
@@ -568,8 +587,8 @@ berdctl talks to the running Berd desktop app and acts on what the user
 sees there:
 
   session   chat sessions        create, open, list, get, rename, move,
-                                  send, clear-project, set-worktree, fork,
-                                  archive
+                                  move-to-group, send, clear-project,
+                                  set-worktree, fork, archive
   project   projects             create, list, get, set-startup-mode, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
@@ -583,7 +602,7 @@ Usage: berdctl [OPTIONS] <COMMAND>
 
 Commands:
   session  Manage chat sessions: create, send, open, list, get, rename, move,
-           clear project, set worktree, fork, archive
+           move to group, clear project, set worktree, fork, archive
   project  Manage projects: create, list, get, set startup mode, archive
   agent    Manage agents (personas): create, list
   skill    Manage skills: create, list, get

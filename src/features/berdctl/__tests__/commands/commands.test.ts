@@ -511,6 +511,7 @@ describe("action schemas", () => {
       "sessions.get": { session_id: "s1" },
       "sessions.rename": { session_id: "s1", title: "Title" },
       "sessions.move": { session_id: "s1", project_id: "p1" },
+      "sessions.move_to_group": { session_id: "s1", group_id: "g1" },
       "sessions.clear_project": { session_id: "s1" },
       "sessions.set_worktree": { session_id: "s1", path: "/tmp/wt" },
       "sessions.fork": { session_id: "s1" },
@@ -2055,6 +2056,258 @@ describe("sessions.move", () => {
   });
 });
 
+describe("sessions.move_to_group", () => {
+  const projectWithGroups = () =>
+    makeProject({
+      id: "p-1",
+      chatGroups: {
+        groups: [
+          { id: "group-a", name: "Backlog", chatIds: ["session-1"] },
+          { id: "group-b", name: "Launch", chatIds: ["session-2"] },
+        ],
+      },
+    });
+
+  it("moves a session between existing groups in its current project", async () => {
+    const project = projectWithGroups();
+    mockSessionFound({ projectId: "p-1" });
+    mocks.listProjects.mockResolvedValue([project]);
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "move_to_group",
+        session_id: "session-1",
+        group_id: "group-b",
+      },
+      ctx,
+    );
+
+    expect(mocks.updateProject).toHaveBeenCalledWith(project, {
+      chatGroups: {
+        groups: [
+          {
+            id: "group-b",
+            name: "Launch",
+            chatIds: ["session-2", "session-1"],
+          },
+        ],
+      },
+    });
+    expect(result).toEqual({
+      ok: true,
+      project_id: "p-1",
+      group_id: "group-b",
+      group_name: "Launch",
+    });
+  });
+
+  it("preserves unrelated groups that were already empty", async () => {
+    const project = makeProject({
+      id: "p-1",
+      chatGroups: {
+        groups: [
+          { id: "group-a", name: "Backlog", chatIds: ["session-1"] },
+          { id: "group-b", name: "Launch", chatIds: ["session-2"] },
+          { id: "group-c", name: "Future", chatIds: [] },
+        ],
+      },
+    });
+    mockSessionFound({ projectId: "p-1" });
+    mocks.listProjects.mockResolvedValue([project]);
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "move_to_group",
+        session_id: "session-1",
+        group_id: "group-b",
+      },
+      ctx,
+    );
+
+    expect(mocks.updateProject).toHaveBeenCalledWith(project, {
+      chatGroups: {
+        groups: [
+          {
+            id: "group-b",
+            name: "Launch",
+            chatIds: ["session-2", "session-1"],
+          },
+          { id: "group-c", name: "Future", chatIds: [] },
+        ],
+      },
+    });
+  });
+
+  it("serializes overlapping moves so the later write keeps the earlier move", async () => {
+    let backendProject = makeProject({
+      id: "p-1",
+      chatGroups: {
+        groups: [
+          {
+            id: "group-a",
+            name: "Backlog",
+            chatIds: ["session-1", "session-2"],
+          },
+          { id: "group-b", name: "Launch", chatIds: [] },
+          { id: "group-c", name: "Follow-up", chatIds: ["session-3"] },
+        ],
+      },
+    });
+    mocks.acpListSessionsPage.mockResolvedValue({
+      sessions: [
+        makeAcpSession({ sessionId: "session-1", projectId: "p-1" }),
+        makeAcpSession({ sessionId: "session-2", projectId: "p-1" }),
+      ],
+      nextCursor: null,
+    });
+    mocks.listProjects.mockImplementation(async () => [backendProject]);
+
+    let releaseFirstUpdate!: () => void;
+    const firstUpdateBlocked = new Promise<void>((resolve) => {
+      releaseFirstUpdate = resolve;
+    });
+    mocks.updateProject
+      .mockImplementationOnce(async (project, updates) => {
+        await firstUpdateBlocked;
+        backendProject = { ...project, ...updates };
+        return backendProject;
+      })
+      .mockImplementationOnce(async (project, updates) => {
+        backendProject = { ...project, ...updates };
+        return backendProject;
+      });
+
+    const first = dispatchCommand(
+      "sessions",
+      {
+        action: "move_to_group",
+        session_id: "session-1",
+        group_id: "group-b",
+      },
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(mocks.updateProject).toHaveBeenCalledTimes(1),
+    );
+
+    const second = dispatchCommand(
+      "sessions",
+      {
+        action: "move_to_group",
+        session_id: "session-2",
+        group_id: "group-c",
+      },
+      ctx,
+    );
+    await Promise.resolve();
+    expect(mocks.updateProject).toHaveBeenCalledTimes(1);
+
+    releaseFirstUpdate();
+    await Promise.all([first, second]);
+
+    expect(mocks.updateProject).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        chatGroups: {
+          groups: [
+            { id: "group-a", name: "Backlog", chatIds: ["session-2"] },
+            { id: "group-b", name: "Launch", chatIds: ["session-1"] },
+            { id: "group-c", name: "Follow-up", chatIds: ["session-3"] },
+          ],
+        },
+      }),
+      {
+        chatGroups: {
+          groups: [
+            { id: "group-b", name: "Launch", chatIds: ["session-1"] },
+            {
+              id: "group-c",
+              name: "Follow-up",
+              chatIds: ["session-3", "session-2"],
+            },
+          ],
+        },
+      },
+    );
+  });
+
+  it("removes a client session id before writing the canonical id", async () => {
+    const project = makeProject({
+      id: "p-1",
+      chatGroups: {
+        groups: [
+          { id: "group-a", name: "Backlog", chatIds: ["client-1"] },
+          { id: "group-b", name: "Launch", chatIds: [] },
+        ],
+      },
+    });
+    seedSessions(
+      makeSession({
+        id: "session-1",
+        projectId: "p-1",
+        clientSessionId: "client-1",
+      }),
+    );
+    mockSessionFound({ projectId: "p-1" });
+    mocks.listProjects.mockResolvedValue([project]);
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "move_to_group",
+        session_id: "session-1",
+        group_id: "group-b",
+      },
+      ctx,
+    );
+
+    expect(mocks.updateProject).toHaveBeenCalledWith(project, {
+      chatGroups: {
+        groups: [{ id: "group-b", name: "Launch", chatIds: ["session-1"] }],
+      },
+    });
+  });
+
+  it("requires the session to already belong to a project", async () => {
+    mockSessionFound({ projectId: null });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "move_to_group",
+          session_id: "session-1",
+          group_id: "group-b",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(mocks.updateProject).not.toHaveBeenCalled();
+  });
+
+  it("rejects a group that is not in the session's project", async () => {
+    const project = projectWithGroups();
+    mockSessionFound({ projectId: "p-1" });
+    mocks.listProjects.mockResolvedValue([project]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "move_to_group",
+          session_id: "session-1",
+          group_id: "other-project-group",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(mocks.updateProject).not.toHaveBeenCalled();
+  });
+});
+
 describe("sessions.set_worktree", () => {
   it("re-points the session and mirrors the app's active worktree state", async () => {
     mockSessionFound();
@@ -2370,6 +2623,9 @@ describe("projects", () => {
     const project = makeProject({
       id: "p-1",
       prompt: "Use feature branches only",
+      chatGroups: {
+        groups: [{ id: "group-1", name: "Launch", chatIds: ["s-1", "s-4"] }],
+      },
     });
     useProjectStore.setState({
       projects: [project],
@@ -2410,8 +2666,69 @@ describe("projects", () => {
       workspaces: [],
       archived: false,
       session_count: 2,
+      chat_groups: [
+        {
+          group_id: "group-1",
+          name: "Launch",
+          session_ids: ["s-1", "s-4"],
+        },
+      ],
     });
     expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("get returns canonical group session ids still assigned to the project", async () => {
+    const project = makeProject({
+      id: "p-1",
+      chatGroups: {
+        groups: [
+          {
+            id: "group-1",
+            name: "Launch",
+            chatIds: [
+              "client-session-1",
+              "archived-session",
+              "moved-session",
+              "missing-session",
+            ],
+          },
+        ],
+      },
+    });
+    mocks.listProjects.mockResolvedValue([project]);
+    seedSessions(
+      makeSession({
+        id: "canonical-session-1",
+        clientSessionId: "client-session-1",
+        projectId: "p-1",
+      }),
+    );
+    mockSessionPages({
+      sessions: [
+        makeAcpSession({ sessionId: "canonical-session-1", projectId: "p-1" }),
+        makeAcpSession({
+          sessionId: "archived-session",
+          projectId: "p-1",
+          archivedAt: "2026-04-01T00:00:00.000Z",
+        }),
+        makeAcpSession({ sessionId: "moved-session", projectId: "p-2" }),
+      ],
+      nextCursor: null,
+    });
+
+    const result = (await dispatchCommand(
+      "projects",
+      { action: "get", project_id: "p-1" },
+      ctx,
+    )) as { chat_groups: Array<{ session_ids: string[] }> };
+
+    expect(result.chat_groups).toEqual([
+      {
+        group_id: "group-1",
+        name: "Launch",
+        session_ids: ["canonical-session-1"],
+      },
+    ]);
   });
 
   it("archive archives through the API and refetches the project list", async () => {

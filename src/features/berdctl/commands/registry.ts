@@ -19,6 +19,7 @@ import { listProjectsCommand } from "./impl/listProjects";
 import { listSessionsCommand } from "./impl/listSessions";
 import { listSkillsCommand } from "./impl/listSkills";
 import { moveSessionCommand } from "./impl/moveSession";
+import { moveSessionToGroupCommand } from "./impl/moveSessionToGroup";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
@@ -48,11 +49,11 @@ export const TOOL_GROUPS = {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
       "installed agent harness), send, open, list, get, rename, move, " +
-      "clear project, set worktree, fork, archive.",
+      "move to group, clear project, set worktree, fork, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, send, open, list, get, rename, move, clear project, set worktree, fork, archive",
+        "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, set worktree, fork, archive",
       verbs: {
         create: "create",
         send: "send",
@@ -61,6 +62,7 @@ export const TOOL_GROUPS = {
         get: "get",
         rename: "rename",
         move: "move",
+        "move-to-group": "move_to_group",
         "clear-project": "clear_project",
         "set-worktree": "set_worktree",
         fork: "fork",
@@ -75,6 +77,7 @@ export const TOOL_GROUPS = {
       get: getSessionCommand,
       rename: renameSessionCommand,
       move: moveSessionCommand,
+      move_to_group: moveSessionToGroupCommand,
       clear_project: clearSessionProjectCommand,
       set_worktree: setSessionWorktreeCommand,
       fork: forkSessionCommand,
