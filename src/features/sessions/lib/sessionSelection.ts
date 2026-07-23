@@ -7,6 +7,8 @@ type SelectionModifierEvent = {
 
 export type SessionAction = (sessionId: string) => unknown | Promise<unknown>;
 
+type SessionActionOutcome = { ok: boolean } | undefined;
+
 export function isMultiSelectModifier(
   event: SelectionModifierEvent,
   platform: Platform = getPlatform(),
@@ -104,15 +106,26 @@ export async function applySessionActionToIds(
     return;
   }
 
-  const results = await Promise.allSettled(
-    ids.map((sessionId) => Promise.resolve().then(() => action(sessionId))),
-  );
+  // Run sequentially so an archive action that needs dirty-workspace
+  // confirmation never races another confirmation dialog.
+  const results: PromiseSettledResult<SessionActionOutcome>[] = [];
+  for (const sessionId of ids) {
+    try {
+      const value = (await action(sessionId)) as SessionActionOutcome;
+      results.push({ status: "fulfilled", value });
+    } catch (reason) {
+      results.push({ status: "rejected", reason });
+    }
+  }
   const failedCount = results.filter(
-    (result) => result.status === "rejected",
+    (result) =>
+      result.status === "rejected" ||
+      (result.status === "fulfilled" && result.value?.ok === false),
   ).length;
-  const rejectedReasons = results.flatMap((result) =>
-    result.status === "rejected" ? [result.reason] : [],
-  );
+  const rejectedReasons = results.flatMap((result) => {
+    if (result.status === "rejected") return [result.reason];
+    return result.value?.ok === false ? [result.value] : [];
+  });
 
   return { failedCount, rejectedReasons };
 }

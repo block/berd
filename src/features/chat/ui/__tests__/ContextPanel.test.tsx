@@ -1166,7 +1166,7 @@ describe("ContextPanel", () => {
     ).toEqual([]);
   });
 
-  it("skips cleanup for a shared Goose-created worktree and removes only the selected workspace", async () => {
+  it("removes immediately when another workspace in the chat shares the worktree", async () => {
     const user = userEvent.setup();
     const worktreePath = "/Users/test/goose2-feature";
     const appPath = `${worktreePath}/app`;
@@ -1202,10 +1202,16 @@ describe("ContextPanel", () => {
     await user.click(
       screen.getByRole("menuitem", { name: /^remove from chat$/i }),
     );
-    await user.click(
-      await screen.findByRole("button", { name: /^remove workspace$/i }),
-    );
 
+    await waitFor(() => {
+      expect(
+        useChatSessionStore
+          .getState()
+          .getSession("test-session-remove-shared-worktree")
+          ?.workspaceAttachments,
+      ).toEqual([docsAttachment]);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(vi.mocked(gitApi.removeWorktree)).not.toHaveBeenCalled();
     expect(vi.mocked(gitApi.deleteBranch)).not.toHaveBeenCalled();
     expect(
@@ -1214,6 +1220,59 @@ describe("ContextPanel", () => {
         .getSession("test-session-remove-shared-worktree")
         ?.workspaceAttachments,
     ).toEqual([docsAttachment]);
+  });
+
+  it("identifies a managed worktree used by another active chat", async () => {
+    const user = userEvent.setup();
+    const worktreePath = "/Users/test/goose2-feature";
+    const attachment = createManagedWorktreeAttachment(
+      `${worktreePath}/app`,
+      worktreePath,
+    );
+    const otherAttachment = createManagedWorktreeAttachment(
+      `${worktreePath}/docs`,
+      worktreePath,
+    );
+
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "test-session-shared-worktree-current",
+          title: "Current chat",
+          workspaceAttachments: [attachment],
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 0,
+        },
+        {
+          id: "test-session-shared-worktree-other",
+          title: "Other chat",
+          workspaceAttachments: [otherAttachment],
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-shared-worktree-current",
+      projectWorkingDirs: [],
+    });
+
+    await openWorkspaceActionsMenu(user, /app/i);
+    await user.click(
+      screen.getByRole("menuitem", { name: /^remove from chat$/i }),
+    );
+
+    expect(
+      await screen.findByText(
+        /another active chat uses the same Goose-created worktree/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/another workspace in this chat/i),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a Goose-created worktree attached when cleanup fails", async () => {

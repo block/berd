@@ -220,7 +220,7 @@
       "removeWorktreeConfirmBodyWithChanges_one": "You have {{count}} uncommitted change on this worktree. If you remove this workspace, that change will be lost and {{worktree}} will be deleted from disk.",
       "removeWorktreeConfirmBodyWithChanges_other": "You have {{count}} uncommitted changes on this worktree. If you remove this workspace, those changes will be lost and {{worktree}} will be deleted from disk.",
       "removeWorktreeConfirmTitle": "Are you sure you want to remove this worktree?",
-      "removeSharedManagedConfirmBody": "This Goose-created {{resource}} is still used by another active chat or workspace. It will only be removed from this chat.",
+      "removeSharedManagedConfirmBodyOtherChat": "Another active chat uses the same Goose-created {{resource}}. Only this workspace will be removed from this chat; the {{resource}} will stay on disk.",
       "terminal": "Terminal"
     },
     "picker": {
@@ -343,8 +343,23 @@
     "modelSwitchError": "Could not switch to {{model}}. This chat is still using {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "Could not switch to {{model}}.",
     "archiveError": "Failed to archive chat",
+    "gitInspectionError": "Couldn't inspect the worktrees or branches. The chat wasn't archived.",
+    "gitCleanupError": "Chat archived, but Git cleanup couldn't finish",
     "moveError": "Failed to move chat",
     "renameError": "Failed to rename chat"
+  },
+  "gitCleanup": {
+    "archiveConfirmTitle": {
+      "worktrees": "Archive chat and remove its worktrees?",
+      "branches": "Archive chat and remove its branches?",
+      "worktreesAndBranches": "Archive chat and remove its worktrees and branches?"
+    },
+    "archiveConfirmDescriptionWithFiles": {
+      "worktrees": "This will discard local files and changes, archive the chat, then remove its Goose-created worktrees.",
+      "branches": "This will discard local changes, archive the chat, then remove its Goose-created branches.",
+      "worktreesAndBranches": "This will discard local files and changes, archive the chat, then remove its Goose-created worktrees and branches."
+    },
+    "archiveConfirmAction": "Archive and remove"
   },
   "pinToHome": {
     "action": "Pin chat",

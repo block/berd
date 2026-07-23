@@ -429,6 +429,8 @@ pub fn run() {
             commands::git::git_fetch,
             commands::git::git_pull,
             commands::git::git_create_branch,
+            commands::git::git_has_ignored_files,
+            commands::git::git_count_branch_commits_not_in_base,
             commands::git::git_delete_branch,
             commands::git::git_create_worktree,
             commands::git::git_remove_worktree,

@@ -219,7 +219,7 @@
       "removeWorktreeConfirmBodyWithChanges_one": "Tienes {{count}} cambio sin confirmar en este worktree. Si quitas este espacio de trabajo, ese cambio se perderá y {{worktree}} se eliminará del disco.",
       "removeWorktreeConfirmBodyWithChanges_other": "Tienes {{count}} cambios sin confirmar en este worktree. Si quitas este espacio de trabajo, esos cambios se perderán y {{worktree}} se eliminará del disco.",
       "removeWorktreeConfirmTitle": "¿Seguro que quieres quitar este worktree?",
-      "removeSharedManagedConfirmBody": "Este {{resource}} creado por Goose todavía se usa en otro chat o espacio de trabajo activo. Solo se quitará de este chat.",
+      "removeSharedManagedConfirmBodyOtherChat": "Otro chat activo usa el mismo {{resource}} creado por Goose. Solo se quitará este espacio de trabajo de este chat; el {{resource}} permanecerá en el disco.",
       "terminal": "Terminal"
     },
     "picker": {
@@ -342,8 +342,23 @@
     "modelSwitchError": "No se pudo cambiar a {{model}}. Este chat sigue usando {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "No se pudo cambiar a {{model}}.",
     "archiveError": "No se pudo archivar el chat",
+    "gitInspectionError": "No se pudieron inspeccionar los worktrees o las ramas. El chat no se archivó.",
+    "gitCleanupError": "El chat se archivó, pero no se pudo completar la limpieza de Git",
     "moveError": "No se pudo mover el chat",
     "renameError": "No se pudo cambiar el nombre del chat"
+  },
+  "gitCleanup": {
+    "archiveConfirmTitle": {
+      "worktrees": "¿Archivar el chat y quitar sus worktrees?",
+      "branches": "¿Archivar el chat y quitar sus ramas?",
+      "worktreesAndBranches": "¿Archivar el chat y quitar sus worktrees y ramas?"
+    },
+    "archiveConfirmDescriptionWithFiles": {
+      "worktrees": "Esto descartará archivos y cambios locales, archivará el chat y luego quitará los worktrees creados por Goose.",
+      "branches": "Esto descartará cambios locales, archivará el chat y luego quitará las ramas creadas por Goose.",
+      "worktreesAndBranches": "Esto descartará archivos y cambios locales, archivará el chat y luego quitará los worktrees y las ramas creados por Goose."
+    },
+    "archiveConfirmAction": "Archivar y quitar"
   },
   "pinToHome": {
     "action": "Fijar chat",

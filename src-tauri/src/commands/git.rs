@@ -249,6 +249,47 @@ pub async fn git_create_branch(
 }
 
 #[tauri::command]
+pub async fn git_has_ignored_files(path: String) -> Result<bool, String> {
+    let repo_path = resolve_repo_path(&path)?;
+    let output = run_git_success_async(
+        &repo_path,
+        &[
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "--no-empty-directory",
+        ],
+        GIT_STATUS_COMMAND_TIMEOUT,
+    )
+    .await?;
+    Ok(!output.trim().is_empty())
+}
+
+#[tauri::command]
+pub async fn git_count_branch_commits_not_in_base(
+    path: String,
+    branch: String,
+    base_branch: String,
+) -> Result<u32, String> {
+    let repo_path = resolve_repo_path(&path)?;
+    let branch_name = require_nonempty(&branch, "Branch name")?;
+    let base_branch_name = require_nonempty(&base_branch, "Base branch")?;
+    let range = format!("refs/heads/{base_branch_name}..refs/heads/{branch_name}");
+    let output = run_git_success_async(
+        &repo_path,
+        &["rev-list", "--count", &range],
+        GIT_READ_COMMAND_TIMEOUT,
+    )
+    .await?;
+    output
+        .trim()
+        .parse::<u32>()
+        .map_err(|error| format!("Failed to parse branch commit count: {error}"))
+}
+
+#[tauri::command]
 pub async fn git_delete_branch(
     path: String,
     branch: String,
@@ -926,6 +967,27 @@ mod tests {
             .as_std()
             .get_envs()
             .any(|(env_key, value)| env_key == key && value.is_none())
+    }
+
+    #[tokio::test]
+    async fn ignored_file_probe_reports_files_hidden_by_git_status() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        run_git_success_async(temp.path(), &["init", "-q"], GIT_MUTATING_COMMAND_TIMEOUT)
+            .await
+            .expect("initialize git repo");
+        let path = temp.path().to_string_lossy().to_string();
+
+        assert!(!git_has_ignored_files(path.clone())
+            .await
+            .expect("probe empty repo"));
+
+        std::fs::write(temp.path().join(".gitignore"), "*.secret\n").expect("write gitignore");
+        std::fs::write(temp.path().join("local.secret"), "do not delete")
+            .expect("write ignored file");
+
+        assert!(git_has_ignored_files(path)
+            .await
+            .expect("probe ignored file"));
     }
 
     #[test]

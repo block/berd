@@ -4392,12 +4392,7 @@ export function NavigationPanesView({
       collapsed={collapsed}
       labelTransition={labelTransition}
       labelVisible={labelVisible}
-      onArchiveChat={
-        onArchiveChat
-          ? (sessionId) =>
-              Promise.resolve(onArchiveChat(sessionId)).then(() => undefined)
-          : undefined
-      }
+      onArchiveChat={onArchiveChat}
       onArchiveProject={onArchiveProject}
       onCreateProject={onCreateProject}
       onEditProject={onEditProject}
@@ -4652,12 +4647,7 @@ export function NavigationPanesView({
       }
     };
     const confirmArchivePrototypeSelected = () =>
-      confirmPrototypeArchiveSelected(
-        onArchiveChat
-          ? (sessionId) =>
-              Promise.resolve(onArchiveChat(sessionId)).then(() => undefined)
-          : undefined,
-      );
+      confirmPrototypeArchiveSelected(onArchiveChat);
 
     return (
       <>
@@ -5199,14 +5189,7 @@ export function NavigationPanesView({
                   collapsed={collapsed}
                   labelTransition={labelTransition}
                   labelVisible={labelVisible}
-                  onArchiveChat={
-                    onArchiveChat
-                      ? (sessionId) =>
-                          Promise.resolve(onArchiveChat(sessionId)).then(
-                            () => undefined,
-                          )
-                      : undefined
-                  }
+                  onArchiveChat={onArchiveChat}
                   onArchiveProject={onArchiveProject}
                   onCreateProject={onCreateProject}
                   onEditProject={onEditProject}

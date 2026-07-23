@@ -406,13 +406,19 @@
           }
         },
         "archive": {
-          "description": "Archive a chat session; it disappears from the active session list (reversible from the archive).",
+          "description": "Archive a chat session, then remove eligible Goose-managed worktrees and branches. Refuses cleanup that would discard local files or changes unless --discard-changes is set.",
           "fields": [
             {
               "name": "session_id",
               "required": true,
               "kind": "string",
               "description": "Id of the session to archive."
+            },
+            {
+              "name": "discard_changes",
+              "required": false,
+              "kind": "boolean",
+              "description": "Discard local files and changes when removing managed worktrees or branches."
             }
           ],
           "schema": {
@@ -422,6 +428,10 @@
               "session_id": {
                 "description": "Id of the session to archive.",
                 "type": "string"
+              },
+              "discard_changes": {
+                "description": "Discard local files and changes when removing managed worktrees or branches.",
+                "type": "boolean"
               }
             },
             "required": ["session_id"],

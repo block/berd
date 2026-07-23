@@ -102,6 +102,8 @@ vi.mock("../SessionCard", () => ({
     isOpenInWindow,
     snippet,
     snippetLineClamp,
+    onSelectionChange,
+    onArchiveSelected,
   }: {
     id: string;
     title: string;
@@ -110,8 +112,10 @@ vi.mock("../SessionCard", () => ({
     isOpenInWindow?: boolean;
     snippet?: string;
     snippetLineClamp?: 1 | 3;
+    onSelectionChange?: (id: string, selected: boolean) => void;
+    onArchiveSelected?: () => void;
   }) => (
-    <div data-testid="session-card">
+    <div data-testid="session-card" data-session-card>
       <span>{title}</span>
       {snippet ? (
         <span
@@ -123,6 +127,12 @@ vi.mock("../SessionCard", () => ({
       ) : null}
       <button type="button" onClick={() => onExport?.(id)}>
         Export
+      </button>
+      <button type="button" onClick={() => onSelectionChange?.(id, true)}>
+        Select {title}
+      </button>
+      <button type="button" onClick={onArchiveSelected}>
+        Archive selected
       </button>
       {onOpenInWindow ? (
         <button type="button" onClick={() => onOpenInWindow(id)}>
@@ -432,6 +442,26 @@ describe("SessionHistoryView", () => {
         "session-2",
       ]);
       expect(screen.getByText("Second Needle Session")).toBeInTheDocument();
+    });
+  });
+
+  it("reports failed archive outcomes from bulk history actions", async () => {
+    const user = userEvent.setup();
+    const onArchiveChat = vi.fn().mockResolvedValue({
+      ok: false,
+      reason: "blocked_unsaved_changes",
+    });
+    setSessionStoreState({ sessions: [session()] });
+
+    render(<SessionHistoryView onArchiveChat={onArchiveChat} />);
+
+    await user.click(screen.getByRole("button", { name: "Select Chat One" }));
+    await user.click(screen.getByRole("button", { name: "Archive selected" }));
+    await user.click(await screen.findByRole("button", { name: /^archive$/i }));
+
+    await waitFor(() => {
+      expect(onArchiveChat).toHaveBeenCalledWith("session-1");
+      expect(mocks.toastError).toHaveBeenCalledWith("1 action failed");
     });
   });
 

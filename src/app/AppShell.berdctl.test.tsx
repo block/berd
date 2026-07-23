@@ -20,6 +20,7 @@ import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
@@ -84,6 +85,7 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
+  acpListSessionsPage: (...args: unknown[]) => mockAcpListSessionsPage(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
@@ -248,6 +250,26 @@ describe("AppShell berdctl integration", () => {
     useShortcutsDialogStore.setState({ open: false });
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockAcpListSessionsPage.mockReset();
+    mockAcpListSessionsPage.mockImplementation(async () => ({
+      sessions: useChatSessionStore.getState().sessions.map((session) => ({
+        sessionId: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        createdAt: session.createdAt,
+        lastMessageAt: session.lastMessageAt ?? null,
+        archivedAt: session.archivedAt ?? null,
+        userSetName: session.userSetName ?? false,
+        messageCount: session.messageCount,
+        subtitle: session.subtitle ?? null,
+        workingDir: session.workingDir ?? null,
+        projectId: session.projectId ?? null,
+        providerId: session.providerId ?? null,
+        modelId: session.modelId ?? null,
+        personaId: session.personaId ?? null,
+      })),
+      nextCursor: null,
+    }));
     mockAcpLoadSession.mockReset();
     mockAcpLoadSession.mockResolvedValue(undefined);
     mockAcpArchiveSession.mockReset();
@@ -291,6 +313,7 @@ describe("AppShell berdctl integration", () => {
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
+      archiveMutationBySessionId: {},
     });
     useAgentStore.setState({
       selectedProvider: "goose",
@@ -400,13 +423,27 @@ describe("AppShell berdctl integration", () => {
     });
   });
 
-  it("archiveSessionWithCleanup reports backend failure and keeps the session unarchived", async () => {
+  it("archiveSession ignores session pagination failures", async () => {
+    mockAcpListSessionsPage.mockRejectedValue(new Error("list failed"));
+    useChatSessionStore.setState({ sessions: [makeSession()] });
+    render(<AppShell />);
+
+    const outcome = await runCommand(() =>
+      getAppNavigationController().archiveSession("session-1", "reject"),
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(mockAcpListSessionsPage).not.toHaveBeenCalled();
+  });
+
+  it("archiveSession reports backend failure and keeps the session unarchived", async () => {
     mockAcpArchiveSession.mockRejectedValue(new Error("backend down"));
     useChatSessionStore.setState({ sessions: [makeSession()] });
     render(<AppShell />);
 
     const outcome = await runCommand(() =>
-      getAppNavigationController().archiveSessionWithCleanup("session-1"),
+      getAppNavigationController().archiveSession("session-1", "reject"),
     );
 
     expect(outcome).toEqual({ ok: false, reason: "backend_archive_failed" });
@@ -415,7 +452,7 @@ describe("AppShell berdctl integration", () => {
     ).toBeUndefined();
   });
 
-  it("archiveSessionWithCleanup of the active session waits for backend success before cleanup", async () => {
+  it("archiveSession of the active session waits for backend success before local UI cleanup", async () => {
     useChatSessionStore.setState({ sessions: [makeSession()] });
     render(<AppShell />);
 
@@ -428,7 +465,7 @@ describe("AppShell berdctl integration", () => {
 
     mockAcpArchiveSession.mockRejectedValue(new Error("backend down"));
     const outcome = await runCommand(() =>
-      getAppNavigationController().archiveSessionWithCleanup("session-1"),
+      getAppNavigationController().archiveSession("session-1", "reject"),
     );
 
     expect(outcome).toEqual({ ok: false, reason: "backend_archive_failed" });
@@ -439,7 +476,7 @@ describe("AppShell berdctl integration", () => {
     ).toBeUndefined();
   });
 
-  it("UI archive cleans up immediately, rolls back archivedAt on backend failure, and reports the error", async () => {
+  it("UI archive waits for backend success before cleaning up local state and reports failure", async () => {
     const user = userEvent.setup();
     let rejectArchive!: (error: Error) => void;
     mockAcpArchiveSession.mockReturnValue(
@@ -462,8 +499,8 @@ describe("AppShell berdctl integration", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1")?.archivedAt,
     ).toEqual(expect.any(String));
-    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
-    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
 
     await act(async () => {
       rejectArchive(new Error("backend down"));
@@ -474,21 +511,58 @@ describe("AppShell berdctl integration", () => {
         useChatSessionStore.getState().getSession("session-1")?.archivedAt,
       ).toBeUndefined();
     });
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     expect(mockToastError).toHaveBeenCalledWith("backend down");
   });
 
-  it("archiveSessionWithCleanup of an unknown session resolves session_not_found", async () => {
+  it("keeps a newly selected session active when archival finishes", async () => {
+    let resolveArchive!: () => void;
+    mockAcpArchiveSession.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveArchive = resolve;
+      }),
+    );
+    useChatSessionStore.setState({
+      sessions: [makeSession(), makeSession({ id: "session-2" })],
+    });
+    render(<AppShell />);
+
+    await runCommand(() =>
+      getAppNavigationController().openSession("session-1"),
+    );
+    const outcome = startCommand(() =>
+      getAppNavigationController().archiveSession("session-1", "reject"),
+    );
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    });
+
+    act(() => {
+      useChatSessionStore.getState().setActiveSession("session-2");
+      useChatStore.getState().setActiveSession("session-2");
+      resolveArchive();
+    });
+
+    await expect(outcome).resolves.toEqual({ ok: true });
+    expect(mockAcpListSessionsPage).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-2");
+    expect(useChatStore.getState().activeSessionId).toBe("session-2");
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+
+  it("archiveSession of an unknown session resolves session_not_found", async () => {
     render(<AppShell />);
 
     const outcome = await runCommand(() =>
-      getAppNavigationController().archiveSessionWithCleanup("missing"),
+      getAppNavigationController().archiveSession("missing", "reject"),
     );
 
     expect(outcome).toEqual({ ok: false, reason: "session_not_found" });
     expect(mockAcpArchiveSession).not.toHaveBeenCalled();
   });
 
-  it("archiveSessionWithCleanup navigates home when the session was active", async () => {
+  it("archiveSession navigates home when the session was active", async () => {
     useChatSessionStore.setState({ sessions: [makeSession()] });
     render(<AppShell />);
 
@@ -500,7 +574,7 @@ describe("AppShell berdctl integration", () => {
     });
 
     const outcome = await runCommand(() =>
-      getAppNavigationController().archiveSessionWithCleanup("session-1"),
+      getAppNavigationController().archiveSession("session-1", "reject"),
     );
 
     expect(outcome).toEqual({ ok: true });

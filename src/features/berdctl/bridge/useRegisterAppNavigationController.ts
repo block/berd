@@ -4,15 +4,11 @@ import type { AppView } from "@/app/types/appNavigation";
 import {
   type AppContext,
   type AppNavigationController,
+  type ArchiveCleanupPolicy,
   type CommandOutcome,
   clearAppNavigationController,
   registerAppNavigationController,
 } from "@/features/berdctl/bridge/appNavigationController";
-
-export interface ArchiveChatWithCleanupOptions {
-  mode?: "optimistic" | "confirmed";
-  reportErrors?: boolean;
-}
 
 /** The small set of genuinely AppShell-owned values the controller policy
  *  needs. */
@@ -21,9 +17,10 @@ export interface AppNavigationPrimitives {
   guardAppNavigation(next: () => void, onCancel?: () => void): void;
   /** Select a session in the main window without re-entering the guards. */
   selectSessionDirect(sessionId: string): void;
-  archiveChatWithCleanup(
+  archiveChat(
     sessionId: string,
-    options?: ArchiveChatWithCleanupOptions,
+    cleanupPolicy: ArchiveCleanupPolicy,
+    deadlineMs?: number,
   ): Promise<CommandOutcome>;
   getActiveSessionId(): string | null;
   hasSession(sessionId: string): boolean;
@@ -56,7 +53,7 @@ export function useRegisterAppNavigationController(
   const {
     guardAppNavigation,
     selectSessionDirect,
-    archiveChatWithCleanup,
+    archiveChat,
     getActiveSessionId,
     hasSession,
     isSessionOpenInWindow,
@@ -92,13 +89,15 @@ export function useRegisterAppNavigationController(
     });
   };
 
-  const archiveSessionWithCleanup = async (
+  const archiveSession = (
     sessionId: string,
+    cleanupPolicy: ArchiveCleanupPolicy,
+    deadlineMs?: number,
   ): Promise<CommandOutcome> => {
-    return archiveChatWithCleanup(sessionId, {
-      mode: "confirmed",
-      reportErrors: false,
-    });
+    if (!hasSession(sessionId)) {
+      return Promise.resolve({ ok: false, reason: "session_not_found" });
+    }
+    return archiveChat(sessionId, cleanupPolicy, deadlineMs);
   };
 
   // Render-assigned ref (mirror AppShell's closeAgentBuilderSessionRef) so the
@@ -106,7 +105,7 @@ export function useRegisterAppNavigationController(
   // while always delegating to the latest handler closures.
   const appNavigationHandlers: AppNavigationController = {
     openSession,
-    archiveSessionWithCleanup,
+    archiveSession,
     getAppContext,
   };
   const appNavigationHandlersRef = useRef(appNavigationHandlers);
@@ -116,8 +115,12 @@ export function useRegisterAppNavigationController(
     const controller: AppNavigationController = {
       openSession: (sessionId) =>
         appNavigationHandlersRef.current.openSession(sessionId),
-      archiveSessionWithCleanup: (sessionId) =>
-        appNavigationHandlersRef.current.archiveSessionWithCleanup(sessionId),
+      archiveSession: (sessionId, cleanupPolicy, deadlineMs) =>
+        appNavigationHandlersRef.current.archiveSession(
+          sessionId,
+          cleanupPolicy,
+          deadlineMs,
+        ),
       getAppContext: () => appNavigationHandlersRef.current.getAppContext(),
     };
     registerAppNavigationController(controller);

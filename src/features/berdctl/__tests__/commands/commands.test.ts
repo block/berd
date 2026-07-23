@@ -169,7 +169,7 @@ const ctx = {};
 
 const controller = {
   openSession: vi.fn(),
-  archiveSessionWithCleanup: vi.fn(),
+  archiveSession: vi.fn(),
   getAppContext: vi.fn(),
 };
 
@@ -391,7 +391,7 @@ beforeEach(() => {
   );
 
   controller.openSession.mockResolvedValue({ ok: true });
-  controller.archiveSessionWithCleanup.mockResolvedValue({ ok: true });
+  controller.archiveSession.mockResolvedValue({ ok: true });
   controller.getAppContext.mockReturnValue({
     view: "home",
     activeSessionId: null,
@@ -548,13 +548,15 @@ describe("action schemas", () => {
 });
 
 describe("command safety metadata", () => {
-  it("keeps every no-auth command non-destructive and visible when mutating", () => {
+  it("keeps mutations visible and limits destructive metadata to session archive", () => {
     for (const [groupName, group] of Object.entries(TOOL_GROUPS)) {
       for (const [actionName, command] of Object.entries(group.actions)) {
         const key = `${groupName}.${actionName}`;
         const metadata = command as AppCommand<unknown, unknown>;
 
-        expect(metadata.destructive, `${key} destructive`).toBe(false);
+        expect(metadata.destructive, `${key} destructive`).toBe(
+          key === "sessions.archive",
+        );
         expect(
           ["read", "create", "update", "archive"],
           `${key} effect`,
@@ -1846,7 +1848,7 @@ describe("sessions.archive", () => {
       ),
       "target_session_running",
     );
-    expect(controller.archiveSessionWithCleanup).not.toHaveBeenCalled();
+    expect(controller.archiveSession).not.toHaveBeenCalled();
   });
 
   it("refuses a session open in a pop-out window even when its runtime reads idle", async () => {
@@ -1866,7 +1868,7 @@ describe("sessions.archive", () => {
       "target_session_running",
     );
     expect(error.message).toContain("separate window");
-    expect(controller.archiveSessionWithCleanup).not.toHaveBeenCalled();
+    expect(controller.archiveSession).not.toHaveBeenCalled();
   });
 
   it("archives through the facade", async () => {
@@ -1878,15 +1880,76 @@ describe("sessions.archive", () => {
       ctx,
     );
 
-    expect(controller.archiveSessionWithCleanup).toHaveBeenCalledWith(
+    expect(controller.archiveSession).toHaveBeenCalledWith(
       "session-1",
+      "reject",
+      expect.any(Number),
     );
     expect(result).toEqual({ ok: true });
   });
 
+  it("passes the explicit discard policy through the facade", async () => {
+    mockSessionFound();
+    const deadlineMs = Date.now() + 5_000;
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "archive",
+        session_id: "session-1",
+        discard_changes: true,
+      },
+      { deadlineMs },
+    );
+
+    expect(controller.archiveSession).toHaveBeenCalledWith(
+      "session-1",
+      "discard",
+      deadlineMs,
+    );
+  });
+
+  it("tells callers how to opt into discarding changes", async () => {
+    mockSessionFound();
+    controller.archiveSession.mockResolvedValue({
+      ok: false,
+      reason: "cleanup_requires_discard",
+    });
+
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "archive", session_id: "session-1" },
+        ctx,
+      ),
+      "cleanup_requires_discard",
+    );
+
+    expect(error.message).toContain("--discard-changes");
+  });
+
+  it("returns a failure after archival when Git cleanup is incomplete", async () => {
+    mockSessionFound();
+    controller.archiveSession.mockResolvedValue({
+      ok: true,
+      cleanupIncomplete: "workspace_cleanup_failed",
+    });
+
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "archive", session_id: "session-1" },
+        ctx,
+      ),
+      "workspace_cleanup_failed",
+    );
+
+    expect(error.message).toContain("was archived");
+  });
+
   it("maps a failed facade outcome to a CommandError with its reason code", async () => {
     mockSessionFound();
-    controller.archiveSessionWithCleanup.mockResolvedValue({
+    controller.archiveSession.mockResolvedValue({
       ok: false,
       reason: "backend_archive_failed",
     });

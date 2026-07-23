@@ -10,7 +10,7 @@ import {
 function makeController(): AppNavigationController {
   return {
     openSession: async () => ({ ok: true }),
-    archiveSessionWithCleanup: async () => ({ ok: true }),
+    archiveSession: async () => ({ ok: true }),
     getAppContext: () => ({
       view: "home",
       activeSessionId: null,

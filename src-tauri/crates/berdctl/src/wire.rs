@@ -86,6 +86,11 @@ fn built_body(
             "number" => matches
                 .get_one::<u32>(&field.name)
                 .map(|value| Value::from(*value)),
+            "boolean" => matches
+                .get_one::<bool>(&field.name)
+                .copied()
+                .filter(|value| *value)
+                .map(Value::Bool),
             other => unreachable!("validation rejects wire kind `{other}`"),
         };
         if let Some(value) = value {

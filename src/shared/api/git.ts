@@ -62,6 +62,22 @@ export async function createBranch(
   return invoke("git_create_branch", { path, name, baseBranch });
 }
 
+export async function countBranchCommitsNotInBase(
+  path: string,
+  branch: string,
+  baseBranch: string,
+): Promise<number> {
+  return invoke<number>("git_count_branch_commits_not_in_base", {
+    path,
+    branch,
+    baseBranch,
+  });
+}
+
+export async function hasIgnoredFiles(path: string): Promise<boolean> {
+  return invoke<boolean>("git_has_ignored_files", { path });
+}
+
 export async function deleteBranch(
   path: string,
   branch: string,

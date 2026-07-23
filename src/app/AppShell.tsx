@@ -48,6 +48,20 @@ import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import {
+  cleanupSessionWorkspaces,
+  countSessionWorkspaceCleanupResources,
+  hasSessionWorkspaceCleanupTargets,
+  inspectSessionWorkspaceCleanup,
+  type InspectedSessionWorkspaceCleanupPlan,
+  loadAllSessionsForWorkspaceCleanup,
+  planSessionWorkspaceCleanup,
+  SessionWorkspaceCleanupInterruptedError,
+  type SessionWorkspaceCleanupInterruptionReason,
+  wouldSessionWorkspaceCleanupDiscardFiles,
+} from "@/features/chat/lib/sessionWorkspaceCleanup";
+import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
+import { SessionWorkspaceCleanupDialog } from "@/features/chat/ui/SessionWorkspaceCleanupDialog";
+import {
   type ChatSession,
   type ChatSessionReasoningEffortConfig,
   getVisibleSessions,
@@ -106,7 +120,8 @@ import {
 } from "./lib/settingsSectionUrl";
 import { useAgentBuilderCoordinator } from "@/features/agents/hooks/useAgentBuilderCoordinator";
 import {
-  type ArchiveChatWithCleanupOptions,
+  type ArchiveCleanupPolicy,
+  MUTATION_DEADLINE_MARGIN_MS,
   useRegisterAppNavigationController,
 } from "@/features/berdctl/navigation";
 import { AgentBuilderLeaveDraftDialog } from "@/features/agents/ui/AgentBuilderLeaveDraftDialog";
@@ -261,6 +276,12 @@ interface PendingProjectChatDraftRequest {
   reject: (error: unknown) => void;
 }
 
+interface PendingSessionWorkspaceCleanupConfirmation {
+  worktreeCount: number;
+  branchCount: number;
+  resolve: (confirmed: boolean) => void;
+}
+
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const PINNED_CHAT_HYDRATION_CONCURRENCY = 5;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
@@ -272,6 +293,29 @@ const PROJECT_WORKSPACE_STARTUP_CANCELLED =
   "Project workspace startup cancelled.";
 const PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING =
   "Project workspace startup already pending.";
+
+function getSessionArchiveInterruptionReason(
+  sessionId: string,
+  cleanupPolicy: ArchiveCleanupPolicy,
+  deadlineMs?: number,
+): SessionWorkspaceCleanupInterruptionReason | null {
+  if (
+    deadlineMs != null &&
+    Date.now() >= deadlineMs - MUTATION_DEADLINE_MARGIN_MS
+  ) {
+    return "timed_out";
+  }
+  if (cleanupPolicy === "confirm") {
+    return null;
+  }
+  if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+    return "target_session_running";
+  }
+  const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+  return isSessionRunning(runtime.chatState) || runtime.isRunCancellationPending
+    ? "target_session_running"
+    : null;
+}
 
 type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
@@ -667,6 +711,13 @@ export function AppShell({
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
   );
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [
+    pendingWorkspaceCleanupConfirmation,
+    setPendingWorkspaceCleanupConfirmation,
+  ] = useState<PendingSessionWorkspaceCleanupConfirmation | null>(null);
+  const pendingWorkspaceCleanupConfirmationRef =
+    useRef<PendingSessionWorkspaceCleanupConfirmation | null>(null);
+  const sessionArchiveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
   const [designSystemInspectorVisible, setDesignSystemInspectorVisible] =
@@ -3494,22 +3545,176 @@ export function AppShell({
     };
   }, [openConnections, openSettings]);
 
-  const archiveChatWithCleanup = useCallback(
-    async (sessionId: string, options: ArchiveChatWithCleanupOptions = {}) => {
-      const mode = options.mode ?? "optimistic";
-      const reportErrors = options.reportErrors ?? false;
-      const sessionStore = useChatSessionStore.getState();
-      const session = sessionStore.getSession(sessionId);
-      if (!session) {
-        return { ok: false as const, reason: "session_not_found" as const };
-      }
+  const settleWorkspaceCleanupConfirmation = useCallback(
+    (confirmed: boolean) => {
+      const pending = pendingWorkspaceCleanupConfirmationRef.current;
+      if (!pending) return;
+      pendingWorkspaceCleanupConfirmationRef.current = null;
+      setPendingWorkspaceCleanupConfirmation(null);
+      pending.resolve(confirmed);
+    },
+    [],
+  );
 
-      const wasActiveSession = sessionStore.activeSessionId === sessionId;
-      const cleanup = () => {
+  useEffect(
+    () => () => {
+      const pending = pendingWorkspaceCleanupConfirmationRef.current;
+      pendingWorkspaceCleanupConfirmationRef.current = null;
+      pending?.resolve(false);
+    },
+    [],
+  );
+
+  const confirmGitCleanup = useCallback(
+    (plans: InspectedSessionWorkspaceCleanupPlan[]): Promise<boolean> => {
+      const { worktreeCount, branchCount } =
+        countSessionWorkspaceCleanupResources(plans);
+      return new Promise((resolve) => {
+        const pending: PendingSessionWorkspaceCleanupConfirmation = {
+          worktreeCount,
+          branchCount,
+          resolve,
+        };
+        pendingWorkspaceCleanupConfirmationRef.current = pending;
+        setPendingWorkspaceCleanupConfirmation(pending);
+      });
+    },
+    [],
+  );
+
+  const archiveChat = useCallback(
+    async (
+      sessionId: string,
+      cleanupPolicy: ArchiveCleanupPolicy,
+      deadlineMs?: number,
+    ) => {
+      let releaseArchiveQueue!: () => void;
+      const previousArchive = sessionArchiveQueueRef.current;
+      sessionArchiveQueueRef.current = new Promise<void>((resolve) => {
+        releaseArchiveQueue = resolve;
+      });
+      await previousArchive;
+
+      try {
+        const sessionStore = useChatSessionStore.getState();
+        const session = sessionStore.getSession(sessionId);
+        if (!session) {
+          return { ok: false as const, reason: "session_not_found" as const };
+        }
+
+        let plans: InspectedSessionWorkspaceCleanupPlan[] = [];
+        if (hasSessionWorkspaceCleanupTargets(session)) {
+          try {
+            const allSessions = await loadAllSessionsForWorkspaceCleanup();
+            plans = await inspectSessionWorkspaceCleanup(
+              planSessionWorkspaceCleanup(session, [
+                ...allSessions,
+                ...sessionStore.sessions,
+              ]),
+            );
+          } catch (error) {
+            console.error("Failed to inspect session Git resources:", error);
+            if (cleanupPolicy === "confirm") {
+              toast.error(t("chat:notifications.gitInspectionError"), {
+                description: formatAcpErrorMessage(error),
+              });
+            }
+            return {
+              ok: false as const,
+              reason: "git_inspection_failed" as const,
+            };
+          }
+        }
+
+        const wouldDiscardFiles = plans.some(
+          wouldSessionWorkspaceCleanupDiscardFiles,
+        );
+        if (wouldDiscardFiles) {
+          if (cleanupPolicy === "reject") {
+            return {
+              ok: false as const,
+              reason: "cleanup_requires_discard" as const,
+            };
+          }
+          if (
+            cleanupPolicy === "confirm" &&
+            !(await confirmGitCleanup(plans))
+          ) {
+            return {
+              ok: false as const,
+              reason: "blocked_unsaved_changes" as const,
+            };
+          }
+        }
+
+        const preArchiveInterruption = getSessionArchiveInterruptionReason(
+          sessionId,
+          cleanupPolicy,
+          deadlineMs,
+        );
+        if (preArchiveInterruption) {
+          return { ok: false as const, reason: preArchiveInterruption };
+        }
+
+        try {
+          await useChatSessionStore.getState().archiveSession(sessionId);
+        } catch (error) {
+          if (cleanupPolicy === "confirm") {
+            toast.error(
+              formatAcpErrorMessage(
+                error,
+                t("chat:notifications.archiveError"),
+              ),
+            );
+          }
+          return {
+            ok: false as const,
+            reason:
+              error instanceof SessionNotFoundError
+                ? ("session_not_found" as const)
+                : ("backend_archive_failed" as const),
+          };
+        }
+
+        let cleanupFailureReason:
+          | "target_session_running"
+          | "workspace_cleanup_failed"
+          | "timed_out"
+          | null = null;
+        try {
+          await cleanupSessionWorkspaces(plans, {
+            getInterruptionReason: () =>
+              getSessionArchiveInterruptionReason(
+                sessionId,
+                cleanupPolicy,
+                deadlineMs,
+              ),
+          });
+        } catch (error) {
+          cleanupFailureReason =
+            error instanceof SessionWorkspaceCleanupInterruptedError
+              ? error.reason
+              : "workspace_cleanup_failed";
+          console.error(
+            "Failed to clean up archived session Git resources:",
+            error,
+          );
+          if (cleanupPolicy === "confirm") {
+            toast.error(
+              formatAcpErrorMessage(
+                error,
+                t("chat:notifications.gitCleanupError"),
+              ),
+            );
+          }
+        }
+
+        const wasActiveSession =
+          useChatSessionStore.getState().activeSessionId === sessionId;
         cleanupChatSession(sessionId);
         if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
-          releaseSession(sessionId).catch((err: unknown) =>
-            console.error("Failed to release session window:", err),
+          releaseSession(sessionId).catch((error: unknown) =>
+            console.error("Failed to release session window:", error),
           );
         }
         if (wasActiveSession) {
@@ -3533,44 +3738,18 @@ export function AppShell({
           }
           setActiveView("home");
         }
-      };
-      const handleFailure = (error: unknown) => {
-        if (reportErrors) {
-          toast.error(
-            formatAcpErrorMessage(error, t("chat:notifications.archiveError")),
-          );
-        }
-        return {
-          ok: false as const,
-          reason:
-            error instanceof SessionNotFoundError
-              ? ("session_not_found" as const)
-              : ("backend_archive_failed" as const),
-        };
-      };
 
-      const archive = useChatSessionStore.getState().archiveSession(sessionId);
-      if (mode === "optimistic") {
-        cleanup();
-        try {
-          await archive;
-          return { ok: true as const };
-        } catch (error) {
-          return handleFailure(error);
-        }
+        return cleanupFailureReason
+          ? { ok: true as const, cleanupIncomplete: cleanupFailureReason }
+          : { ok: true as const };
+      } finally {
+        releaseArchiveQueue();
       }
-
-      try {
-        await archive;
-      } catch (error) {
-        return handleFailure(error);
-      }
-      cleanup();
-      return { ok: true as const };
     },
     [
       activeNavigationSessionIsEmptyDefaultChat,
       cleanupChatSession,
+      confirmGitCleanup,
       effectiveNavigationSecondaryTarget,
       navigationRefreshExperiment?.enabled,
       setActiveSession,
@@ -3579,13 +3758,8 @@ export function AppShell({
   );
 
   const handleArchiveChat = useCallback(
-    async (sessionId: string) => {
-      return archiveChatWithCleanup(sessionId, {
-        mode: "optimistic",
-        reportErrors: true,
-      });
-    },
-    [archiveChatWithCleanup],
+    (sessionId: string) => archiveChat(sessionId, "confirm"),
+    [archiveChat],
   );
   closeAgentBuilderSessionRef.current = async (sessionId) => {
     await handleArchiveChat(sessionId);
@@ -3849,7 +4023,7 @@ export function AppShell({
   useRegisterAppNavigationController({
     guardAppNavigation,
     selectSessionDirect,
-    archiveChatWithCleanup,
+    archiveChat,
     getActiveSessionId: () => useChatSessionStore.getState().activeSessionId,
     hasSession: (sessionId) =>
       Boolean(useChatSessionStore.getState().getSession(sessionId)),
@@ -4872,6 +5046,13 @@ export function AppShell({
           </>
         )}
       </AppShellLayout>
+      <SessionWorkspaceCleanupDialog
+        open={Boolean(pendingWorkspaceCleanupConfirmation)}
+        worktreeCount={pendingWorkspaceCleanupConfirmation?.worktreeCount ?? 0}
+        branchCount={pendingWorkspaceCleanupConfirmation?.branchCount ?? 0}
+        onCancel={() => settleWorkspaceCleanupConfirmation(false)}
+        onConfirm={() => settleWorkspaceCleanupConfirmation(true)}
+      />
       <ProjectWorkspaceStartupNameDialog
         open={Boolean(pendingProjectChatDraftRequest)}
         creating={projectWorkspaceStartupCreating}

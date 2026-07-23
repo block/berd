@@ -59,6 +59,11 @@ function openFailureMessage(
     case "focus_failed":
       return "The session is open in a separate window that could not be focused; tell the user.";
     case "backend_archive_failed":
+    case "target_session_running":
+    case "cleanup_requires_discard":
+    case "git_inspection_failed":
+    case "workspace_cleanup_failed":
+    case "timed_out":
       return `Failed to open session "${sessionId}" (${reason})`;
     default:
       reason satisfies never;

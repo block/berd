@@ -429,6 +429,34 @@ mod tests {
     }
 
     #[test]
+    fn session_archive_maps_boolean_flags_onto_the_wire() {
+        let (command, args) = wire_of(&[
+            "berdctl",
+            "session",
+            "archive",
+            "--session-id",
+            "s",
+            "--discard-changes",
+        ]);
+        assert_eq!(command, "sessions");
+        assert_eq!(
+            Value::Object(args),
+            serde_json::json!({
+                "action": "archive",
+                "session_id": "s",
+                "discard_changes": true,
+            })
+        );
+
+        let (_, args_without_flag) =
+            wire_of(&["berdctl", "session", "archive", "--session-id", "s"]);
+        assert_eq!(
+            Value::Object(args_without_flag),
+            serde_json::json!({"action": "archive", "session_id": "s"})
+        );
+    }
+
+    #[test]
     fn clear_project_maps_to_its_explicit_action() {
         let (command, args) =
             wire_of(&["berdctl", "session", "clear-project", "--session-id", "s"]);

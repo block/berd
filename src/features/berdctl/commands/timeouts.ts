@@ -6,8 +6,8 @@ import type { AppCommand } from "./types";
  * deadline fallback for direct callers. The values are the authoritative half
  * of the renderer/broker timeout contract:
  *
- * - sessions.create declares a 60s override for its backend session
- *   round-trip (the prompt itself is fire-and-forget and not awaited).
+ * - sessions.create/send/fork declare 60s overrides for backend work.
+ * - sessions.archive declares a 150s override for Git inspection and cleanup.
  * - Everything else is a fast local operation.
  *
  * The broker's MAX_COMMAND_TIMEOUT (150s) is above the largest value here, so

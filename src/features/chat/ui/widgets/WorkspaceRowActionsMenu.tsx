@@ -86,6 +86,8 @@ interface WorkspaceRowActionsMenuProps {
 export interface WorkspaceRemovalPlan {
   cleanup: "none" | "branch" | "worktree";
   isLastUse: boolean;
+  usedByAnotherWorkspaceInChat: boolean;
+  usedByAnotherChat: boolean;
   branch: string | null;
   baseBranch: string | null;
   repositoryPath: string | null;
@@ -113,6 +115,8 @@ export function WorkspaceRowActionsMenu({
   removalPlan = {
     cleanup: "none",
     isLastUse: false,
+    usedByAnotherWorkspaceInChat: false,
+    usedByAnotherChat: false,
     branch: null,
     baseBranch: null,
     repositoryPath: null,
@@ -200,6 +204,8 @@ export function WorkspaceRowActionsMenu({
           resource: cleanupResourceLabel,
         })
     : tChat("contextPanel.includedWorkspaces.removeConfirmTitle");
+  const shouldConfirmRemoval =
+    shouldCleanupResource || !removalPlan.usedByAnotherWorkspaceInChat;
   const removeDialogBody = shouldCleanupResource
     ? shouldCleanupWorktree
       ? dirtyFileCount > 0
@@ -226,7 +232,7 @@ export function WorkspaceRowActionsMenu({
           })
     : removalPlan.cleanup !== "none" && !removalPlan.isLastUse
       ? tChat(
-          "contextPanel.includedWorkspaces.removeSharedManagedConfirmBody",
+          "contextPanel.includedWorkspaces.removeSharedManagedConfirmBodyOtherChat",
           {
             resource: cleanupResourceLabel,
           },
@@ -308,7 +314,13 @@ export function WorkspaceRowActionsMenu({
           {onRemoveWorkspace ? (
             <DropdownMenuItem
               className={menuItemClassName}
-              onSelect={() => setRemoveDialogOpen(true)}
+              onSelect={() => {
+                if (shouldConfirmRemoval) {
+                  setRemoveDialogOpen(true);
+                  return;
+                }
+                void handleRemoveWorkspace();
+              }}
             >
               <Trash2 className="size-4" />
               {tChat("contextPanel.includedWorkspaces.remove")}
@@ -394,7 +406,7 @@ export function WorkspaceRowActionsMenu({
         />
       ) : null}
 
-      {onRemoveWorkspace ? (
+      {onRemoveWorkspace && shouldConfirmRemoval ? (
         <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
           <DialogContent className="max-w-[600px] gap-0 overflow-hidden p-0">
             <DialogHeader className="gap-3 px-6 pb-5 pt-6 pr-14">

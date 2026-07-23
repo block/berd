@@ -9,11 +9,13 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { getAppNavigationController } from "@/features/berdctl/navigation";
 import { resetAgentBuilderSourceLifecycleForTests } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
+import type { GitState } from "@/shared/types/git";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import {
   MULTI_WORKSPACE_EXPERIMENT_ID,
@@ -45,6 +47,7 @@ import {
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
 const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockAcpGetSessionInfo = vi.hoisted(() => vi.fn());
@@ -53,6 +56,8 @@ const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockPathExists = vi.hoisted(() => vi.fn());
 const mockCheckAllProviderStatus = vi.hoisted(() => vi.fn());
 const gitMocks = vi.hoisted(() => ({
+  countBranchCommitsNotInBase: vi.fn(),
+  hasIgnoredFiles: vi.fn(),
   createBranch: vi.fn(),
   createWorktree: vi.fn(),
   deleteBranch: vi.fn(),
@@ -123,6 +128,61 @@ function appShellWithTheme(children?: ReactNode) {
 
 function renderAppShell(children?: ReactNode) {
   return render(appShellWithTheme(children));
+}
+
+function managedWorktreeGitState(
+  branch: string,
+  worktreePath = `/repo-worktrees/${branch}`,
+): GitState {
+  return {
+    isGitRepo: true,
+    currentBranch: branch,
+    dirtyFileCount: 0,
+    incomingCommitCount: 0,
+    worktrees: [
+      { path: "/repo", branch: "main", isMain: true },
+      { path: worktreePath, branch, isMain: false },
+    ],
+    isWorktree: true,
+    mainWorktreePath: "/repo",
+    localBranches: ["main", branch],
+  };
+}
+
+function makeManagedWorktreeSession(
+  branch: string,
+  worktreePath = `/repo-worktrees/${branch}`,
+): ChatSession {
+  return {
+    id: "session-1",
+    title: branch,
+    providerId: "goose",
+    workingDir: worktreePath,
+    workspaceAttachments: [
+      {
+        id: `path:${worktreePath}`,
+        path: worktreePath,
+        kind: "git-linked-worktree",
+        source: "created",
+        branch,
+        repositoryPath: "/repo",
+        worktreePath,
+        usedByAgent: true,
+        lifecycle: {
+          owner: "goose",
+          cleanup: "worktree",
+          branch,
+          baseBranch: "main",
+          repositoryPath: "/repo",
+          worktreePath,
+          createdBranch: true,
+        },
+      },
+    ],
+    createdAt: "2026-07-10T00:00:00.000Z",
+    updatedAt: "2026-07-10T00:00:00.000Z",
+    messageCount: 1,
+  };
 }
 
 async function openCenteredComposerFromChat() {
@@ -384,6 +444,7 @@ vi.mock("@/features/chat/lib/externalAgentReadiness", () => ({
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
   acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
+  acpListSessionsPage: (...args: unknown[]) => mockAcpListSessionsPage(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
@@ -397,6 +458,9 @@ vi.mock("@/shared/api/acpApi", () => ({
 }));
 
 vi.mock("@/shared/api/git", () => ({
+  countBranchCommitsNotInBase: (...args: unknown[]) =>
+    gitMocks.countBranchCommitsNotInBase(...args),
+  hasIgnoredFiles: (...args: unknown[]) => gitMocks.hasIgnoredFiles(...args),
   createBranch: (...args: unknown[]) => gitMocks.createBranch(...args),
   createWorktree: (...args: unknown[]) => gitMocks.createWorktree(...args),
   deleteBranch: (...args: unknown[]) => gitMocks.deleteBranch(...args),
@@ -725,6 +789,26 @@ describe("AppShell global navigation", () => {
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockAcpListSessionsPage.mockReset();
+    mockAcpListSessionsPage.mockImplementation(async () => ({
+      sessions: useChatSessionStore.getState().sessions.map((session) => ({
+        sessionId: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        createdAt: session.createdAt,
+        lastMessageAt: session.lastMessageAt ?? null,
+        archivedAt: session.archivedAt ?? null,
+        userSetName: session.userSetName ?? false,
+        messageCount: session.messageCount,
+        subtitle: session.subtitle ?? null,
+        workingDir: session.workingDir ?? null,
+        projectId: session.projectId ?? null,
+        providerId: session.providerId ?? null,
+        modelId: session.modelId ?? null,
+        personaId: session.personaId ?? null,
+      })),
+      nextCursor: null,
+    }));
     mockAcpArchiveSession.mockReset();
     mockAcpArchiveSession.mockResolvedValue(undefined);
     mockAcpGetSessionInfo.mockReset();
@@ -752,6 +836,10 @@ describe("AppShell global navigation", () => {
       path: "/repo-worktrees/chat-123",
       branch: "chat-123",
     });
+    gitMocks.countBranchCommitsNotInBase.mockReset();
+    gitMocks.countBranchCommitsNotInBase.mockResolvedValue(0);
+    gitMocks.hasIgnoredFiles.mockReset();
+    gitMocks.hasIgnoredFiles.mockResolvedValue(false);
     gitMocks.deleteBranch.mockReset();
     gitMocks.deleteBranch.mockResolvedValue(undefined);
     gitMocks.removeWorktree.mockReset();
@@ -803,6 +891,7 @@ describe("AppShell global navigation", () => {
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
+      archiveMutationBySessionId: {},
     });
     useAgentStore.setState({
       selectedProvider: "goose",
@@ -1821,7 +1910,7 @@ describe("AppShell global navigation", () => {
     );
   });
 
-  it("cleans up archive UI optimistically and rolls back archivedAt on backend failure", async () => {
+  it("keeps archive UI active until the backend succeeds and rolls back archivedAt on failure", async () => {
     const user = userEvent.setup();
     const archive = deferred<void>();
     mockAcpArchiveSession.mockReturnValueOnce(archive.promise);
@@ -1858,16 +1947,16 @@ describe("AppShell global navigation", () => {
     await user.click(screen.getByRole("button", { name: "Archive session 1" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
     });
-    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
-    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
     expect(
       useChatSessionStore.getState().getSession("session-1")?.archivedAt,
     ).toEqual(expect.any(String));
-    expect(useChatStore.getState().messagesBySession["session-1"]).toBe(
-      undefined,
-    );
+    expect(useChatStore.getState().messagesBySession["session-1"]).toEqual([
+      message,
+    ]);
 
     act(() => {
       archive.reject(new Error("backend down"));
@@ -1878,6 +1967,11 @@ describe("AppShell global navigation", () => {
         useChatSessionStore.getState().getSession("session-1")?.archivedAt,
       ).toBeUndefined();
     });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+    expect(useChatStore.getState().messagesBySession["session-1"]).toEqual([
+      message,
+    ]);
     expect(mockToastError).toHaveBeenCalledWith("backend down");
   });
 
@@ -2008,6 +2102,504 @@ describe("AppShell global navigation", () => {
     expect(
       screen.getByTestId("mock-sidebar-prototype-secondary-target"),
     ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
+  });
+
+  it("archives chats without managed Git resources when session pagination fails", async () => {
+    const user = userEvent.setup();
+    mockAcpListSessionsPage.mockRejectedValue(new Error("list failed"));
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Plain chat",
+          providerId: "goose",
+          workingDir: "/tmp/plain-chat",
+          createdAt: "2026-07-10T00:00:00.000Z",
+          updatedAt: "2026-07-10T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    });
+    expect(mockAcpListSessionsPage).not.toHaveBeenCalled();
+    expect(mockToastError).not.toHaveBeenCalled();
+  });
+
+  it("rejects noninteractive archive before local-file loss", async () => {
+    const worktreePath = "/repo-worktrees/cli-reject";
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.hasIgnoredFiles.mockResolvedValue(true);
+    gitMocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "cli-reject",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: worktreePath, branch: "cli-reject", isMain: false },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "cli-reject"],
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "CLI reject",
+          providerId: "goose",
+          workingDir: worktreePath,
+          workspaceAttachments: [
+            {
+              id: `path:${worktreePath}`,
+              path: worktreePath,
+              kind: "git-linked-worktree",
+              source: "created",
+              branch: "cli-reject",
+              repositoryPath: "/repo",
+              worktreePath,
+              usedByAgent: true,
+              lifecycle: {
+                owner: "goose",
+                cleanup: "worktree",
+                branch: "cli-reject",
+                baseBranch: "main",
+                repositoryPath: "/repo",
+                worktreePath,
+                createdBranch: true,
+              },
+            },
+          ],
+          createdAt: "2026-07-10T00:00:00.000Z",
+          updatedAt: "2026-07-10T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    renderAppShell();
+
+    const outcome = await getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "cleanup_requires_discard",
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("noninteractive discard archives and cleans without a dialog", async () => {
+    const worktreePath = "/repo-worktrees/cli-discard";
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.hasIgnoredFiles.mockResolvedValue(true);
+    gitMocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "cli-discard",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: worktreePath, branch: "cli-discard", isMain: false },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "cli-discard"],
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "CLI discard",
+          providerId: "goose",
+          workingDir: worktreePath,
+          workspaceAttachments: [
+            {
+              id: `path:${worktreePath}`,
+              path: worktreePath,
+              kind: "git-linked-worktree",
+              source: "created",
+              branch: "cli-discard",
+              repositoryPath: "/repo",
+              worktreePath,
+              usedByAgent: true,
+              lifecycle: {
+                owner: "goose",
+                cleanup: "worktree",
+                branch: "cli-discard",
+                baseBranch: "main",
+                repositoryPath: "/repo",
+                worktreePath,
+                createdBranch: true,
+              },
+            },
+          ],
+          createdAt: "2026-07-10T00:00:00.000Z",
+          updatedAt: "2026-07-10T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    renderAppShell();
+
+    const outcome = await getAppNavigationController().archiveSession(
+      "session-1",
+      "discard",
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
+      "/repo",
+      worktreePath,
+      true,
+    );
+  });
+
+  it("blocks destructive Git cleanup and chat archival until confirmed", async () => {
+    const user = userEvent.setup();
+    const worktreePath = "/repo-worktrees/dirty-chat";
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "dirty-chat",
+      dirtyFileCount: 2,
+      incomingCommitCount: 0,
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: worktreePath, branch: "dirty-chat", isMain: false },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "dirty-chat"],
+    });
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Dirty chat",
+      providerId: "goose",
+      workingDir: worktreePath,
+      workspaceAttachments: [
+        {
+          id: `path:${worktreePath}`,
+          path: worktreePath,
+          kind: "git-linked-worktree",
+          source: "created",
+          branch: "dirty-chat",
+          repositoryPath: "/repo",
+          worktreePath,
+          usedByAgent: true,
+          lifecycle: {
+            owner: "goose",
+            cleanup: "worktree",
+            branch: "dirty-chat",
+            baseBranch: "main",
+            repositoryPath: "/repo",
+            worktreePath,
+            createdBranch: true,
+          },
+        },
+      ],
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({ sessions: [session] });
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Archive chat and remove its worktrees?",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/discard local files and changes/i),
+    ).toBeInTheDocument();
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBeUndefined();
+
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Archive and remove" }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    });
+    expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
+      "/repo",
+      worktreePath,
+      true,
+    );
+    expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
+      "/repo",
+      "dirty-chat",
+      true,
+      "main",
+    );
+    expect(mockAcpArchiveSession.mock.invocationCallOrder[0]).toBeLessThan(
+      gitMocks.removeWorktree.mock.invocationCallOrder[0] ?? Infinity,
+    );
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+  });
+
+  it("blocks archive with pre-archive copy when Git inspection fails", async () => {
+    const user = userEvent.setup();
+    const worktreePath = "/repo-worktrees/inspect-fails";
+    mockPathExists.mockResolvedValue(true);
+    mockAcpListSessionsPage.mockRejectedValue(new Error("list failed"));
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Inspect fails",
+          providerId: "goose",
+          workingDir: worktreePath,
+          workspaceAttachments: [
+            {
+              id: `path:${worktreePath}`,
+              path: worktreePath,
+              kind: "git-linked-worktree",
+              source: "created",
+              branch: "inspect-fails",
+              repositoryPath: "/repo",
+              worktreePath,
+              usedByAgent: true,
+              lifecycle: {
+                owner: "goose",
+                cleanup: "worktree",
+                branch: "inspect-fails",
+                baseBranch: "main",
+                repositoryPath: "/repo",
+                worktreePath,
+                createdBranch: true,
+              },
+            },
+          ],
+          createdAt: "2026-07-10T00:00:00.000Z",
+          updatedAt: "2026-07-10T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Couldn't inspect the worktrees or branches. The chat wasn't archived.",
+        { description: "list failed" },
+      );
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+  });
+
+  it("prompts before removing a worktree with only ignored files", async () => {
+    const user = userEvent.setup();
+    const worktreePath = "/repo-worktrees/ignored-files";
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.hasIgnoredFiles.mockResolvedValue(true);
+    gitMocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "ignored-files",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: worktreePath, branch: "ignored-files", isMain: false },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "ignored-files"],
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Ignored files",
+          providerId: "goose",
+          workingDir: worktreePath,
+          workspaceAttachments: [
+            {
+              id: `path:${worktreePath}`,
+              path: worktreePath,
+              kind: "git-linked-worktree",
+              source: "created",
+              branch: "ignored-files",
+              repositoryPath: "/repo",
+              worktreePath,
+              usedByAgent: true,
+              lifecycle: {
+                owner: "goose",
+                cleanup: "worktree",
+                branch: "ignored-files",
+                baseBranch: "main",
+                repositoryPath: "/repo",
+                worktreePath,
+                createdBranch: true,
+              },
+            },
+          ],
+          createdAt: "2026-07-10T00:00:00.000Z",
+          updatedAt: "2026-07-10T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Archive chat and remove its worktrees?",
+      }),
+    ).toBeInTheDocument();
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("reports cleanup failure as an archived chat with incomplete cleanup", async () => {
+    const user = userEvent.setup();
+    const worktreePath = "/repo-worktrees/cleanup-fails";
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.getGitState.mockResolvedValue(
+      managedWorktreeGitState("cleanup-fails", worktreePath),
+    );
+    gitMocks.removeWorktree.mockRejectedValue(new Error("cleanup failed"));
+    const session = makeManagedWorktreeSession("cleanup-fails", worktreePath);
+    useChatSessionStore.setState({ sessions: [session] });
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    const outcome = await getAppNavigationController().archiveSession(
+      "session-1",
+      "confirm",
+    );
+
+    expect(outcome).toEqual({
+      ok: true,
+      cleanupIncomplete: "workspace_cleanup_failed",
+    });
+    expect(gitMocks.removeWorktree).toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith("cleanup failed");
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toEqual(expect.any(String));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+  });
+
+  it("reports noninteractive cleanup as incomplete if the session starts running after archival", async () => {
+    let resolveArchive!: () => void;
+    mockAcpArchiveSession.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveArchive = resolve;
+      }),
+    );
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.getGitState.mockResolvedValue(
+      managedWorktreeGitState("runs-after-archive"),
+    );
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("runs-after-archive")],
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+    );
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    });
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "thinking");
+      resolveArchive();
+    });
+
+    await expect(outcome).resolves.toEqual({
+      ok: true,
+      cleanupIncomplete: "target_session_running",
+    });
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("does not start noninteractive archival inside the deadline margin", async () => {
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("near-deadline")],
+    });
+    renderAppShell();
+
+    const outcome = await getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+      Date.now() + 2_999,
+    );
+
+    expect(outcome).toEqual({ ok: false, reason: "timed_out" });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("rechecks running state before noninteractive archival", async () => {
+    const inspection = deferred<GitState>();
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.getGitState.mockReturnValue(inspection.promise);
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("starts-running")],
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+    );
+    await waitFor(() => {
+      expect(gitMocks.getGitState).toHaveBeenCalled();
+    });
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "thinking");
+      inspection.resolve(managedWorktreeGitState("starts-running"));
+    });
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "target_session_running",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("archives the active session with Cmd+E", async () => {

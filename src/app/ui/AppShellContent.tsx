@@ -501,9 +501,7 @@ function renderRouteContent({
           onSelectSession={onSelectSession}
           onSelectSearchResult={onSelectSearchResult}
           onRenameChat={onRenameChat}
-          onArchiveChat={(sessionId) =>
-            onArchiveChat(sessionId).then(() => undefined)
-          }
+          onArchiveChat={onArchiveChat}
         />
       );
     case "chat":

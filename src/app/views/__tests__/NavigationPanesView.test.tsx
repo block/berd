@@ -6063,6 +6063,54 @@ describe("NavigationPanesView", () => {
     ).toBeInTheDocument();
   });
 
+  it("removes project chat placement when archive succeeds but cleanup is incomplete", async () => {
+    const user = userEvent.setup();
+    const onArchiveChat = vi.fn().mockResolvedValue({
+      ok: true,
+      cleanupIncomplete: "workspace_cleanup_failed",
+    });
+
+    seedSessions({
+      id: "project-seed-chat",
+      title: "audit type scale",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeView: "home",
+      projects: [mockProject({ name: "Project One" })],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: { kind: "project", projectId: "project-1" },
+      onArchiveChat,
+    });
+
+    const projectNavigation = screen.getByRole("navigation", {
+      name: "Project One project chats",
+    });
+    const chatRow = within(projectNavigation).getByRole("button", {
+      name: "audit type scale",
+    });
+
+    await user.hover(chatRow);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Options for audit type scale",
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(
+        within(projectNavigation).queryByRole("button", {
+          name: "audit type scale",
+        }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps a previewed prototype secondary panel open when the chat row menu opens", async () => {
     const user = userEvent.setup();
     const onPrototypeSecondaryTargetChange = vi.fn();
@@ -6344,7 +6392,7 @@ describe("NavigationPanesView", () => {
     await user.click(screen.getByRole("button", { name: /^archive$/i }));
 
     await waitFor(() => {
-      expect(onArchiveChat).toHaveBeenCalledTimes(2);
+      expect(onArchiveChat).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
       expect(
@@ -6365,6 +6413,7 @@ describe("NavigationPanesView", () => {
     });
 
     await waitFor(() => {
+      expect(onArchiveChat).toHaveBeenCalledTimes(2);
       expect(
         screen.getByRole("menuitem", { name: /^archive$/i }),
       ).not.toHaveAttribute("data-disabled");

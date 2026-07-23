@@ -113,7 +113,7 @@ describe("BerdctlBridge lifecycle", () => {
     // Per-group max of the actions' bridge timeouts (sessions.create is 60s).
     expect(mocks.invoke).toHaveBeenCalledWith("plugin:berdctl|set_timeouts", {
       timeouts: {
-        sessions: 60_000,
+        sessions: 150_000,
         projects: 30_000,
         agents: 30_000,
         skills: 30_000,

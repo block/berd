@@ -26,6 +26,7 @@ import {
   getVisibleSessions,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import type { SessionAction } from "@/features/sessions/lib/sessionSelection";
 import {
   compareSessionsByActivityDesc,
   isSessionRunning,
@@ -118,7 +119,7 @@ export interface SessionListCapabilityProps {
   collapsed: boolean;
   labelTransition: string;
   labelVisible: boolean;
-  onArchiveChat?: (sessionId: string) => void | Promise<void>;
+  onArchiveChat?: SessionAction;
   onArchiveProject?: (projectId: string) => void;
   onCreateProject?: () => void;
   onEditProject?: (projectId: string) => void;
@@ -791,7 +792,10 @@ export function SessionListCapability({
     onEditProject,
     onForkChat,
     onArchiveProject,
-    onArchiveChat,
+    onArchiveChat: onArchiveChat
+      ? (sessionId) =>
+          Promise.resolve(onArchiveChat(sessionId)).then(() => undefined)
+      : undefined,
     onRenameChat,
     onMarkChatRead,
     onMarkChatUnread,

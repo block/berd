@@ -57,8 +57,8 @@
         },
         "archive": {
           "action": "archive",
-          "about": "Archive a chat session (reversible; nothing is deleted)",
-          "afterHelp": "Archiving is reversible from the app's archive view; nothing is deleted.\n\nExample:\n  berdctl session archive --session-id <session-id>\n\n  Result:\n  {\"ok\": true} — the session disappears from the active session list."
+          "about": "Archive a chat and clean up its Goose-managed Git resources",
+          "afterHelp": "By default, the command refuses to archive when Git cleanup would discard local files or changes.\nUse --discard-changes to allow that loss. The command never opens an interactive prompt.\n\nExamples:\n  berdctl session archive --session-id <session-id>\n  berdctl session archive --session-id <session-id> --discard-changes\n\nResult:\n  {\"ok\": true} — the session was archived and eligible worktrees and branches were removed."
         }
       }
     },

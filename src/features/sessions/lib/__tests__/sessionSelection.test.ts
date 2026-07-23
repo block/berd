@@ -52,4 +52,30 @@ describe("sessionSelection", () => {
     expect(result).toMatchObject({ failedCount: 1 });
     expect(result?.rejectedReasons).toHaveLength(1);
   });
+
+  it("runs actions sequentially and counts unsuccessful outcomes", async () => {
+    let firstSettled = false;
+    let settleFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      settleFirst = () => {
+        firstSettled = true;
+        resolve();
+      };
+    });
+    const action = vi.fn((sessionId: string) => {
+      if (sessionId === "first") return first;
+      expect(firstSettled).toBe(true);
+      return { ok: false, reason: "blocked_unsaved_changes" };
+    });
+
+    const resultPromise = applySessionActionToIds(["first", "second"], action);
+    await Promise.resolve();
+    expect(action).toHaveBeenCalledTimes(1);
+
+    settleFirst();
+    const result = await resultPromise;
+
+    expect(action).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ failedCount: 1 });
+  });
 });

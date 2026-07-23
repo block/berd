@@ -93,15 +93,17 @@ user-requested product actions, such as creating a session or sending a prompt.
 
 Required command properties:
 
-- no destructive commands
+- destructive work requires an explicit caller opt-in and must remain visible in the app
 - no invisible non-read mutations
 - mutations are visible immediately or discoverable in normal app UI
 - one-way verbs are limited to visible product actions the caller explicitly
   asked for, such as creating a session or sending a prompt
 - broker protects app availability with in-flight caps and timeouts
 
-The first delete, bulk, silent, invisible, or broadly destructive verb requires
-reopening the auth/confirmation design before implementation. Do not add
+Delete, bulk, silent, invisible, or broadly destructive verbs require
+reopening the auth/confirmation design before implementation. A visible command
+may expose narrowly scoped destructive behavior only through an explicit flag
+that names the loss and defaults to refusal; do not add interactive prompts or
 piecemeal auth in a command PR.
 
 ## Versioning

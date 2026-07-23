@@ -166,7 +166,7 @@ fn validate_field(group: &str, action: &str, field: &Field, errors: &mut Vec<Str
             }
         }
     }
-    if !matches!(field.kind.as_str(), "string" | "number") {
+    if !matches!(field.kind.as_str(), "string" | "number" | "boolean") {
         errors.push(format!(
             "`{group}.{action}.{name}` has wire kind `{}`, which the generated \
              CLI cannot express yet",
@@ -314,14 +314,14 @@ mod tests {
         let api = MINIMAL_API.replace(
             r#"{"name": "query", "required": false, "kind": "string",
                              "description": "Title substring to match"}"#,
-            r#"{"name": "query", "required": false, "kind": "boolean",
+            r#"{"name": "query", "required": false, "kind": "object",
                              "description": "Title substring to match", "min": -1}"#,
         );
         let errors = errors_for(&api, MINIMAL_SURFACE);
         assert!(
             errors
                 .iter()
-                .any(|error| error.contains("wire kind `boolean`")),
+                .any(|error| error.contains("wire kind `object`")),
             "got: {errors:#?}"
         );
         assert!(

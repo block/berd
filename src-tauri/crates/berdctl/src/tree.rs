@@ -155,7 +155,9 @@ fn built_arg(field: &Field) -> Arg {
         .value_name(field.name.to_uppercase())
         .required(field.required)
         .help(field.description.clone());
-    if field.kind == "number" {
+    if field.kind == "boolean" {
+        arg = arg.action(ArgAction::SetTrue).value_name(None::<&str>);
+    } else if field.kind == "number" {
         // Bounds come from the zod schema via api-surface.json; clap only
         // mirrors them for fast local errors.
         let mut parser = clap::value_parser!(u32);

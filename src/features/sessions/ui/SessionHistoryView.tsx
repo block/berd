@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import type { SessionAction } from "@/features/sessions/lib/sessionSelection";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { ToastActionButton } from "@/shared/ui/sonner";
 import { Spinner } from "@/shared/ui/spinner";
@@ -95,7 +96,7 @@ interface SessionHistoryViewProps {
     query?: string,
   ) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
-  onArchiveChat?: (sessionId: string) => void | Promise<void>;
+  onArchiveChat?: SessionAction;
 }
 
 const LOAD_MORE_VIEWPORT_THRESHOLD_RATIO = 0.75;
@@ -562,8 +563,7 @@ export function SessionHistoryView({
   const handleArchive = useCallback(
     async (sessionId: string) => {
       if (onArchiveChat) {
-        await onArchiveChat(sessionId);
-        return;
+        return onArchiveChat(sessionId);
       }
 
       void useChatSessionStore

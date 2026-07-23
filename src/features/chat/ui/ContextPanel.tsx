@@ -574,6 +574,8 @@ export function ContextPanel({
         return {
           cleanup: "none",
           isLastUse: false,
+          usedByAnotherWorkspaceInChat: false,
+          usedByAnotherChat: false,
           branch: null,
           baseBranch: null,
           repositoryPath: null,
@@ -582,20 +584,31 @@ export function ContextPanel({
         };
       }
 
-      const activeUsageCount = allSessions
-        .filter((candidate) => !candidate.archivedAt)
-        .flatMap((candidate) =>
-          getWorkspaceAttachments(candidate).filter(
-            (attachment) => attachment.source !== "excluded",
+      const usedByAnotherWorkspaceInChat = Boolean(
+        session &&
+          getWorkspaceAttachments(session).some(
+            (attachment) =>
+              attachment.id !== workspace.id &&
+              attachment.source !== "excluded" &&
+              workspaceAttachmentUsesCleanupTarget(attachment, target),
           ),
-        )
-        .filter((attachment) =>
-          workspaceAttachmentUsesCleanupTarget(attachment, target),
-        ).length;
+      );
+      const usedByAnotherChat = allSessions.some(
+        (candidate) =>
+          candidate.id !== sessionId &&
+          !candidate.archivedAt &&
+          getWorkspaceAttachments(candidate).some(
+            (attachment) =>
+              attachment.source !== "excluded" &&
+              workspaceAttachmentUsesCleanupTarget(attachment, target),
+          ),
+      );
 
       return {
         cleanup: target.cleanup,
-        isLastUse: activeUsageCount <= 1,
+        isLastUse: !usedByAnotherWorkspaceInChat && !usedByAnotherChat,
+        usedByAnotherWorkspaceInChat,
+        usedByAnotherChat,
         branch: target.branch,
         baseBranch: target.baseBranch,
         repositoryPath: target.repositoryPath,
@@ -603,7 +616,7 @@ export function ContextPanel({
         createdBranch: target.createdBranch,
       };
     },
-    [allSessions],
+    [allSessions, session, sessionId],
   );
 
   const cleanupWorkspace = useCallback(
