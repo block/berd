@@ -165,9 +165,31 @@ export function hasConversationMessages(
   return messages?.some((message) => message.role !== "system") ?? false;
 }
 
+const sessionLoadPromises = new Map<string, Promise<boolean>>();
+
 export async function loadSessionMessages(
   sessionId: string,
   options: LoadSessionMessagesOptions = {},
+): Promise<boolean> {
+  const existingLoad = sessionLoadPromises.get(sessionId);
+  if (existingLoad) {
+    return existingLoad;
+  }
+
+  const load = performSessionMessagesLoad(sessionId, options);
+  sessionLoadPromises.set(sessionId, load);
+  try {
+    return await load;
+  } finally {
+    if (sessionLoadPromises.get(sessionId) === load) {
+      sessionLoadPromises.delete(sessionId);
+    }
+  }
+}
+
+async function performSessionMessagesLoad(
+  sessionId: string,
+  options: LoadSessionMessagesOptions,
 ): Promise<boolean> {
   const sid = sessionId.slice(0, 8);
   const existingMsgs = useChatStore.getState().messagesBySession[sessionId];

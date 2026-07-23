@@ -28,7 +28,7 @@ import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
 import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
-import { getTextContent } from "@/shared/types/messages";
+import { createUserMessage, getTextContent } from "@/shared/types/messages";
 
 const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   acpListSessionsPage: vi.fn(),
   acpPrepareSession: vi.fn(),
   acpSendMessage: vi.fn(),
+  loadSessionMessages: vi.fn(),
   acpSetModel: vi.fn(),
   acpSteerMessage: vi.fn(),
   discoverAcpProviders: vi.fn(),
@@ -75,6 +76,11 @@ vi.mock("@/shared/api/acp", () => ({
   acpSteerMessage: (...args: unknown[]) => mocks.acpSteerMessage(...args),
   discoverAcpProviders: (...args: unknown[]) =>
     mocks.discoverAcpProviders(...args),
+}));
+
+vi.mock("@/features/chat/lib/sessionActivation", () => ({
+  loadSessionMessages: (...args: unknown[]) =>
+    mocks.loadSessionMessages(...args),
 }));
 
 vi.mock("@/shared/api/acpApi", () => ({
@@ -335,6 +341,7 @@ beforeEach(() => {
   mocks.acpCreateSession.mockResolvedValue({ sessionId: "session-new" });
   mocks.acpPrepareSession.mockResolvedValue(undefined);
   mocks.acpSendMessage.mockResolvedValue(undefined);
+  mocks.loadSessionMessages.mockResolvedValue(true);
   mocks.acpSetModel.mockResolvedValue(undefined);
   mocks.acpSteerMessage.mockResolvedValue("run-steered");
   mocks.discoverAcpProviders.mockResolvedValue([
@@ -1123,6 +1130,7 @@ describe("sessions.send", () => {
       expect.objectContaining({ id: "project-1" }),
       "/workspace/target",
     );
+    expect(mocks.loadSessionMessages).toHaveBeenCalledWith("session-1");
     expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
       "session-1",
       "codex-acp",
@@ -1155,6 +1163,116 @@ describe("sessions.send", () => {
         }),
       );
     });
+  });
+
+  it("prepares from session metadata refreshed during hydration", async () => {
+    const refreshedProject = makeProject({ id: "project-refreshed" });
+    mocks.listProjects.mockResolvedValue([refreshedProject]);
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "agent-refreshed",
+        displayName: "Fresh Reviewer",
+        systemPrompt: "Use refreshed instructions.",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    mockSessionFound({
+      providerId: "old-provider",
+      modelId: "old-model",
+      workingDir: "/old/cwd",
+    });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      useChatSessionStore.getState().patchSession("session-1", {
+        providerId: "codex-acp",
+        modelId: "gpt-6",
+        personaId: "agent-refreshed",
+        projectId: "project-refreshed",
+        workingDir: "/refreshed/cwd",
+      });
+      return true;
+    });
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "use current settings",
+      },
+      ctx,
+    );
+
+    expect(mocks.resolveSessionCwd).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "project-refreshed" }),
+      "/refreshed/cwd",
+    );
+    expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "codex-acp",
+      "/resolved/cwd",
+    );
+    expect(mocks.acpSetModel).toHaveBeenCalledWith("session-1", "gpt-6");
+    await vi.waitFor(() => {
+      expect(mocks.acpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "use current settings",
+        expect.objectContaining({
+          personaId: "agent-refreshed",
+          personaName: "Fresh Reviewer",
+          systemPrompt: "Use refreshed instructions.",
+        }),
+      );
+    });
+  });
+
+  it("commits hydrated history before injecting the background prompt", async () => {
+    mockSessionFound();
+    mocks.loadSessionMessages.mockImplementationOnce(async (sessionId) => {
+      useChatStore
+        .getState()
+        .setMessages(sessionId as string, [createUserMessage("older prompt")]);
+      return true;
+    });
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "new monitor event",
+      },
+      ctx,
+    );
+
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-1"].map(getTextContent),
+    ).toEqual(["older prompt", "new monitor event"]);
+  });
+
+  it("does not inject a prompt when history hydration fails", async () => {
+    mockSessionFound();
+    mocks.loadSessionMessages.mockResolvedValueOnce(false);
+
+    await expect(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "what changed in ci?",
+        },
+        ctx,
+      ),
+    ).rejects.toThrow("Failed to load the target session before sending.");
+
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toBeUndefined();
   });
 
   it.each([

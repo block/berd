@@ -106,6 +106,16 @@ function seedSession(
   return session;
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
 function messagesFor(sessionId: string): Message[] {
   return useChatStore.getState().messagesBySession[sessionId] ?? [];
 }
@@ -485,6 +495,40 @@ describe("loadSessionMessages", () => {
         lastMessageAt: "2026-06-19T06:59:21.000Z",
         pinnedLoadState: undefined,
       },
+    );
+  });
+
+  it("shares one replay load between concurrent callers", async () => {
+    seedSession(
+      { id: "s-concurrent", workingDir: "/existing/session" },
+      { replay: false },
+    );
+    const replayLoad = deferred();
+    acpLoadSession.mockReturnValueOnce(replayLoad.promise);
+
+    const firstLoad = loadSessionMessages("s-concurrent");
+    const secondLoad = loadSessionMessages("s-concurrent");
+
+    await vi.waitFor(() => {
+      expect(acpLoadSession).toHaveBeenCalledTimes(1);
+    });
+    expect(useChatStore.getState().loadingSessionIds.has("s-concurrent")).toBe(
+      true,
+    );
+
+    ensureReplayBuffer("s-concurrent").push(replayUserMessage());
+    replayLoad.resolve();
+
+    await expect(Promise.all([firstLoad, secondLoad])).resolves.toEqual([
+      true,
+      true,
+    ]);
+    expect(acpLoadSession).toHaveBeenCalledTimes(1);
+    expect(messagesFor("s-concurrent").map((message) => message.id)).toEqual([
+      "m1",
+    ]);
+    expect(useChatStore.getState().loadingSessionIds.has("s-concurrent")).toBe(
+      false,
     );
   });
 

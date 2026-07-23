@@ -1,5 +1,6 @@
-import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
+import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
+import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
 import type { QueuedMessage } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
@@ -41,18 +42,29 @@ async function prepareExistingSessionForBerdctlSend(
   providerId: string;
   persona?: Pick<Persona, "id" | "displayName" | "systemPrompt">;
 }> {
+  // The first preparation of an existing ACP session replays its persisted
+  // transcript. Use the normal history loader so those notifications stay in
+  // the replay buffer and are committed atomically before the injected prompt.
+  // Preparing directly would classify them as live updates and make an old
+  // session visibly replay at streaming speed when berd-monitor wakes it.
+  const loaded = await loadSessionMessages(sessionId);
+  if (!loaded) {
+    throw new Error("Failed to load the target session before sending.");
+  }
+
+  // Pinned history loading can refresh the session's provider, model, persona,
+  // project, and cwd. Resolve all preparation inputs from that refreshed row.
   const session = requireSession(sessionId);
   const providerId = session.providerId ?? GOOSE_PROVIDER_ID;
-
   const [project, persona] = await Promise.all([
     session.projectId ? findProjectOrThrow(session.projectId) : null,
     session.personaId ? findPersonaOrThrow(session.personaId) : null,
   ]);
-
   const activeWorkspacePath =
     useChatSessionStore.getState().activeWorkspaceBySession[sessionId]?.path ??
     session.workingDir;
   const workingDir = await resolveSessionCwd(project, activeWorkspacePath);
+
   const result = await applyLatestSessionConfig({
     sessionId,
     providerId,
