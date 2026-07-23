@@ -4098,6 +4098,7 @@ export function NavigationPanesView({
   );
   const handlePrototypePaneResizeBegin = useCallback(() => {
     prototypeResizeActiveRef.current = true;
+    onPaneResizeBegin?.();
     if (prototypeSecondaryTarget) {
       markPrototypeSecondaryInteracted();
     }
@@ -4113,11 +4114,13 @@ export function NavigationPanesView({
     markPrototypeSecondaryInteracted,
     onPrototypeSecondaryPreviewChange,
     onPrototypeSecondarySelect,
+    onPaneResizeBegin,
     prototypeSecondaryTarget,
   ]);
   const handlePrototypePaneResizeEnd = useCallback(() => {
     prototypeResizeActiveRef.current = false;
-  }, []);
+    onPaneResizeEnd?.();
+  }, [onPaneResizeEnd]);
   const handlePrototypePaneResizeStart =
     usePaneResize<PrototypeResizablePaneId>({
       enabled:
@@ -4579,7 +4582,7 @@ export function NavigationPanesView({
         className={cn(
           "pointer-events-none absolute inset-y-0 left-0 z-0 rounded-md bg-sidebar",
           !prototypePrimaryCollapsed && "shadow-sidebar-panel-elevated",
-          NAV_PROTOTYPE_TRANSITION_CLASS,
+          !isResizing && NAV_PROTOTYPE_TRANSITION_CLASS,
         )}
         style={{
           backdropFilter: "var(--backdrop-sidebar-panel)",
@@ -4595,7 +4598,7 @@ export function NavigationPanesView({
           data-testid="sidebar-prototype-secondary-overlay"
           className={cn(
             "absolute top-0 z-40 h-full",
-            NAV_PROTOTYPE_TRANSITION_CLASS,
+            !isResizing && NAV_PROTOTYPE_TRANSITION_CLASS,
           )}
           style={{
             left: 0,
@@ -4653,7 +4656,10 @@ export function NavigationPanesView({
       <>
         <SidebarChatDragProvider>
           <PaneLayoutFrame
-            className={cn(NAV_PROTOTYPE_TRANSITION_CLASS, className)}
+            className={cn(
+              !isResizing && NAV_PROTOTYPE_TRANSITION_CLASS,
+              className,
+            )}
             gapPx={NAV_PROTOTYPE_PANEL_GAP_PX}
             height="100%"
             onPointerEnter={clearPrototypePreviewCloseTimeout}
@@ -4722,7 +4728,7 @@ export function NavigationPanesView({
                 width={prototypePrimaryWidth}
                 className={cn(
                   "overflow-visible",
-                  NAV_PROTOTYPE_TRANSITION_CLASS,
+                  !isResizing && NAV_PROTOTYPE_TRANSITION_CLASS,
                   prototypeSecondaryRendered &&
                     !prototypeSecondaryClosing &&
                     "rounded-r-none",

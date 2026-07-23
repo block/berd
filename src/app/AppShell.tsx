@@ -822,6 +822,17 @@ export function AppShell({
     baseNavigationWidth: sidebarWidth,
     enabled: isEffectiveDetachableSidebarChatsEnabled,
   });
+  const [isNavigationPaneResizing, setIsNavigationPaneResizing] =
+    useState(false);
+  const beginNavigationPaneResize = useCallback(() => {
+    setIsNavigationPaneResizing(true);
+    paneDockingLayout.beginNavigationPaneResize();
+  }, [paneDockingLayout.beginNavigationPaneResize]);
+  const endNavigationPaneResize = useCallback(() => {
+    setIsNavigationPaneResizing(false);
+    paneDockingLayout.endNavigationPaneResize();
+  }, [paneDockingLayout.endNavigationPaneResize]);
+  const sidebarIsResizing = isResizing || isNavigationPaneResizing;
   const [prototypePanelWidths, setPrototypePanelWidths] = useState(() => ({
     primary: NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX,
     secondary: NAV_PROTOTYPE_SECONDARY_WIDTH_PX,
@@ -4823,7 +4834,7 @@ export function AppShell({
         navigationPanes={{
           collapsed: false,
           width: sidebarWidth,
-          isResizing,
+          isResizing: sidebarIsResizing,
           onSettingsClick: () => handleNavigate("settings"),
           onOpenSettingsSection: openSettings,
           onSettingsBack: leaveSecondarySurface,
@@ -4853,8 +4864,8 @@ export function AppShell({
           activeSettingsSection,
           activeSessionId,
           detachableSessionListEnabled: showDetachedSessionList,
-          onPaneResizeBegin: paneDockingLayout.beginNavigationPaneResize,
-          onPaneResizeEnd: paneDockingLayout.endNavigationPaneResize,
+          onPaneResizeBegin: beginNavigationPaneResize,
+          onPaneResizeEnd: endNavigationPaneResize,
           onPaneResize: paneDockingLayout.resizeNavigationPane,
           paneSizes: visibleNavigationPaneSizes,
           sessionListDock: paneDockingLayout.chatListDock,
@@ -4894,7 +4905,7 @@ export function AppShell({
         sidebarWidthResizeDisabled={isNavigationPrototypeEnabled}
         sidebarOuterWidth={sidebarDockedOuterWidth}
         sidebarPanelOuterWidth={sidebarDockedPanelOuterWidth}
-        isResizing={isResizing}
+        isResizing={sidebarIsResizing}
         resizeHandleHeight={resizeHandleHeight}
         resizeHandleWidth={resizeHandleWidth}
         sidebarOuterHeight={sidebarOuterHeight}

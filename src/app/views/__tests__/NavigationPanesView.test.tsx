@@ -227,6 +227,8 @@ function NavigationPanesSelectionHarness({
 
 function PrototypeNavigationHarness({
   onSettingsClick,
+  onPaneResizeBegin,
+  onPaneResizeEnd,
   onPrototypePrimaryHoverChange,
   onPrototypePrimaryWidthResize,
   onPrototypeSecondaryPreviewChange,
@@ -236,6 +238,8 @@ function PrototypeNavigationHarness({
   prototypeChatsUnderProjects = false,
 }: {
   onSettingsClick?: () => void;
+  onPaneResizeBegin?: () => void;
+  onPaneResizeEnd?: () => void;
   onPrototypePrimaryHoverChange?: (hovered: boolean) => void;
   onPrototypePrimaryWidthResize?: (width: number) => void;
   onPrototypeSecondaryPreviewChange?: (preview: boolean) => void;
@@ -259,6 +263,8 @@ function PrototypeNavigationHarness({
         prototypeSecondaryPush: true,
         prototypeSecondaryTarget,
         onSettingsClick,
+        onPaneResizeBegin,
+        onPaneResizeEnd,
         onPrototypePrimaryHoverChange,
         onPrototypePrimaryWidthResize,
         onPrototypeSecondaryPreviewChange,
@@ -2630,6 +2636,8 @@ describe("NavigationPanesView", () => {
   });
 
   it("emits prototype panel resize changes from the primary and secondary rails", () => {
+    const onPaneResizeBegin = vi.fn();
+    const onPaneResizeEnd = vi.fn();
     const onPrototypePrimaryWidthResize = vi.fn();
     const onPrototypeSecondaryWidthResize = vi.fn();
 
@@ -2639,6 +2647,8 @@ describe("NavigationPanesView", () => {
       prototypeSecondaryPush: true,
       prototypeSecondaryTarget: { kind: "chats" },
       prototypeSecondaryWidth: 230,
+      onPaneResizeBegin,
+      onPaneResizeEnd,
       onPrototypePrimaryWidthResize,
       onPrototypeSecondaryWidthResize,
     });
@@ -2657,6 +2667,8 @@ describe("NavigationPanesView", () => {
     fireEvent.mouseUp(document, { clientX: 280 });
 
     expect(onPrototypePrimaryWidthResize).toHaveBeenLastCalledWith(280);
+    expect(onPaneResizeBegin).toHaveBeenCalledTimes(1);
+    expect(onPaneResizeEnd).toHaveBeenCalledTimes(1);
 
     fireEvent.mouseDown(
       screen.getByTestId("sidebar-prototype-resize-secondary"),
@@ -2669,6 +2681,56 @@ describe("NavigationPanesView", () => {
     fireEvent.mouseUp(document, { clientX: 300 });
 
     expect(onPrototypeSecondaryWidthResize).toHaveBeenLastCalledWith(300);
+    expect(onPaneResizeBegin).toHaveBeenCalledTimes(2);
+    expect(onPaneResizeEnd).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables prototype width transitions while resizing", () => {
+    function Harness() {
+      const [isResizing, setIsResizing] = useState(false);
+      const [width, setWidth] = useState(230);
+
+      return (
+        <NavigationPanesView
+          {...sidebarProps({
+            isResizing,
+            prototypeMode: "hybrid-push-overlay",
+            prototypePrimaryWidth: width,
+            onPaneResizeBegin: () => setIsResizing(true),
+            onPaneResizeEnd: () => setIsResizing(false),
+            onPrototypePrimaryWidthResize: setWidth,
+          })}
+        />
+      );
+    }
+
+    renderWithQueryClient(<Harness />);
+
+    const sidebarRoot = screen.getByTestId("sidebar-root");
+    const primaryPanel = screen.getByTestId("sidebar-primary-nav-panel");
+    const glassUnderlay = screen.getByTestId(
+      "sidebar-prototype-glass-underlay",
+    );
+
+    expect(sidebarRoot).toHaveClass("transition-[width,left,transform]");
+    expect(primaryPanel).toHaveClass("transition-[width,left,transform]");
+    expect(glassUnderlay).toHaveClass("transition-[width,left,transform]");
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-prototype-resize-primary"),
+      { button: 0, clientX: 230 },
+    );
+    fireEvent.mouseMove(document, { clientX: 280 });
+
+    expect(sidebarRoot).not.toHaveClass("transition-[width,left,transform]");
+    expect(primaryPanel).not.toHaveClass("transition-[width,left,transform]");
+    expect(glassUnderlay).not.toHaveClass("transition-[width,left,transform]");
+
+    fireEvent.mouseUp(document, { clientX: 280 });
+
+    expect(sidebarRoot).toHaveClass("transition-[width,left,transform]");
+    expect(primaryPanel).toHaveClass("transition-[width,left,transform]");
+    expect(glassUnderlay).toHaveClass("transition-[width,left,transform]");
   });
 
   it("commits a prototype secondary preview before resizing it", () => {
