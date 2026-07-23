@@ -6,6 +6,7 @@ import type {
   MessageContent,
 } from "@/shared/types/messages";
 import { clearReplayBuffer } from "../hooks/replayBuffer";
+import { isSessionRunning } from "../lib/sessionActivity";
 import type {
   ChatState,
   SessionChatRuntime,
@@ -31,6 +32,14 @@ function createInitialSessionRuntime(): SessionChatRuntime {
   };
 }
 
+export function isSessionRuntimeSettled(runtime: SessionChatRuntime): boolean {
+  return (
+    runtime.chatState === "idle" &&
+    runtime.activeRunId === null &&
+    !runtime.isRunCancellationPending
+  );
+}
+
 function isSessionActivelyViewed(
   state: ChatStoreState,
   sessionId: string,
@@ -48,10 +57,7 @@ function canEvictSessionMessages(
   if (!runtime) return true;
 
   return (
-    runtime.chatState === "idle" &&
-    runtime.activeRunId === null &&
-    runtime.streamingMessageId === null &&
-    !runtime.isRunCancellationPending
+    isSessionRuntimeSettled(runtime) && runtime.streamingMessageId === null
   );
 }
 
@@ -281,6 +287,8 @@ interface ChatStoreActions {
   getActiveMessages: () => Message[];
   getSessionRuntime: (sessionId: string) => SessionChatRuntime;
   setStreamingMessageId: (sessionId: string, id: string | null) => void;
+  clearSettledStreamingMessage: (sessionId: string) => boolean;
+  settleActiveRun: (sessionId: string) => void;
   setActiveRunId: (sessionId: string, runId: string | null) => void;
   setRunCancellationPending: (sessionId: string, pending: boolean) => void;
   setPendingInterventionBoundary: (
@@ -589,6 +597,67 @@ const createChatStore: StateCreator<
       };
     }),
 
+  clearSettledStreamingMessage: (sessionId) => {
+    let cleared = false;
+    set((state) => {
+      const runtime = state.sessionStateById[sessionId];
+      if (
+        !runtime ||
+        !isSessionRuntimeSettled(runtime) ||
+        (runtime.streamingMessageId === null &&
+          runtime.pendingInterventionBoundary === null)
+      ) {
+        return state;
+      }
+
+      cleared = true;
+      return {
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...runtime,
+            streamingMessageId: null,
+            pendingInterventionBoundary: null,
+          },
+        },
+      };
+    });
+    return cleared;
+  },
+
+  settleActiveRun: (sessionId) =>
+    set((state) => {
+      const current = state.sessionStateById[sessionId];
+      if (!current) return state;
+      const shouldClearStreamTracking = !isSessionRunning(current.chatState);
+      if (
+        current.activeRunId === null &&
+        !current.isRunCancellationPending &&
+        (!shouldClearStreamTracking ||
+          (current.streamingMessageId === null &&
+            current.pendingInterventionBoundary === null))
+      ) {
+        return state;
+      }
+
+      return {
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...current,
+            activeRunId: null,
+            isRunCancellationPending: false,
+            ...(shouldClearStreamTracking
+              ? {
+                  streamingMessageId: null,
+                  pendingInterventionBoundary: null,
+                }
+              : {}),
+          },
+        },
+      };
+    }),
+
   setActiveRunId: (sessionId, activeRunId) =>
     set((state) => ({
       sessionStateById: {
@@ -888,21 +957,44 @@ const createChatStore: StateCreator<
 
   // State
   setChatState: (sessionId, chatState) =>
-    set((state) => ({
-      sessionStateById: {
-        ...state.sessionStateById,
-        [sessionId]: {
-          ...(state.sessionStateById[sessionId] ??
-            createInitialSessionRuntime()),
-          chatState,
+    set((state) => {
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const isIdle = chatState === "idle";
+      const streamingMessageId = isIdle ? null : current.streamingMessageId;
+      const pendingInterventionBoundary = isIdle
+        ? null
+        : current.pendingInterventionBoundary;
+      if (
+        current.chatState === chatState &&
+        current.streamingMessageId === streamingMessageId &&
+        current.pendingInterventionBoundary === pendingInterventionBoundary
+      ) {
+        return state;
+      }
+
+      return {
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...current,
+            chatState,
+            streamingMessageId,
+            pendingInterventionBoundary,
+          },
         },
-      },
-    })),
+      };
+    }),
 
   setError: (sessionId, error) =>
     set((state) => {
       const current =
         state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const clearParkedStream =
+        error === null &&
+        current.chatState === "error" &&
+        current.activeRunId === null &&
+        !current.isRunCancellationPending;
       return {
         sessionStateById: {
           ...state.sessionStateById,
@@ -918,6 +1010,12 @@ const createChatStore: StateCreator<
               : current.chatState === "error"
                 ? ("idle" as const)
                 : current.chatState,
+            ...(clearParkedStream
+              ? {
+                  streamingMessageId: null,
+                  pendingInterventionBoundary: null,
+                }
+              : {}),
           },
         },
       };

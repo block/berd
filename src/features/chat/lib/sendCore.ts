@@ -121,13 +121,8 @@ export async function dispatchPrompt(
   const promptOwner = claimSessionPrompt(sessionId);
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
 
-  const {
-    addMessage,
-    setChatState,
-    setError,
-    setStreamingMessageId,
-    setPendingAssistantProvider,
-  } = useChatStore.getState();
+  const { addMessage, setChatState, setError, setPendingAssistantProvider } =
+    useChatStore.getState();
 
   const agent = useAgentStore.getState().getActiveAgent();
   const pendingAssistantProvider = providerId ?? agent?.provider ?? "goose";
@@ -231,7 +226,6 @@ export async function dispatchPrompt(
         flushSubtitle: true,
         owner: promptOwner,
       });
-      setStreamingMessageId(sessionId, null);
       if (isCurrent()) {
         setChatState(sessionId, "idle");
       }
@@ -243,7 +237,6 @@ export async function dispatchPrompt(
           flushSubtitle: true,
           owner: promptOwner,
         });
-        setStreamingMessageId(sessionId, null);
         if (isCurrent()) {
           setChatState(sessionId, "idle");
         }
@@ -271,7 +264,6 @@ export async function dispatchPrompt(
         createSystemNotificationMessage(errorMessage, "error"),
       );
       setError(sessionId, errorMessage);
-      setStreamingMessageId(sessionId, null);
       if (isCurrent()) {
         setChatState(sessionId, "idle");
       }
@@ -290,8 +282,7 @@ export async function dispatchPrompt(
       const liveStore = useChatStore.getState();
       const liveRuntime = liveStore.getSessionRuntime(sessionId);
       if (liveRuntime.isRunCancellationPending) {
-        liveStore.setActiveRunId(sessionId, null);
-        liveStore.setRunCancellationPending(sessionId, false);
+        liveStore.settleActiveRun(sessionId);
       }
     }
   }

@@ -36,9 +36,10 @@ export function handleSessionInfoUpdate(
         flushSubtitle: true,
       });
     }
-    chatStore.setActiveRunId(sessionId, activeRunId);
     if (activeRunId === null) {
-      chatStore.setRunCancellationPending(sessionId, false);
+      chatStore.settleActiveRun(sessionId);
+    } else {
+      chatStore.setActiveRunId(sessionId, activeRunId);
     }
   }
 

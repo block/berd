@@ -32,6 +32,12 @@ import {
   isSameWorkspacePath,
 } from "@/features/chat/lib/workspaceAttachments";
 
+export function clearIdleStreamingMessageAfterReplay(
+  sessionId: string,
+): boolean {
+  return useChatStore.getState().clearSettledStreamingMessage(sessionId);
+}
+
 function fallbackTitleFromReplay(messages: Message[]): string | null {
   for (const message of messages) {
     if (message.role !== "user") {
@@ -167,6 +173,7 @@ export async function loadSessionMessages(
   const existingMsgs = useChatStore.getState().messagesBySession[sessionId];
   if (!options.force && hasConversationMessages(existingMsgs)) {
     perfLog(`[perf:load] ${sid} skip — has messages`);
+    clearIdleStreamingMessageAfterReplay(sessionId);
     useChatSessionStore
       .getState()
       .patchSession(sessionId, { pinnedLoadState: undefined });
@@ -306,12 +313,14 @@ export async function loadSessionMessages(
         sessionStore.clearActiveWorkspace(sessionId);
       }
     }
-    chatStore.setError(sessionId, null);
     sessionStore.patchSession(sessionId, {
       pinnedLoadState: undefined,
       ...(missingCwdWarning ? { workingDir } : {}),
     });
+    // Publish replay completion before an idle/error transition can wake a queued-message subscriber and route its prompt notifications into the consumed replay buffer.
     chatStore.setSessionLoading(sessionId, false);
+    chatStore.setError(sessionId, null);
+    clearIdleStreamingMessageAfterReplay(sessionId);
     const t2 = performance.now();
     perfLog(
       `[perf:load] ${sid} replay: notifs=${replayStats?.count ?? 0} span=${replayStats?.spanMs.toFixed(1) ?? "0"}ms msgs=${replayMessages?.length ?? 0} flush=${(t2 - tFlush).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`,
@@ -325,6 +334,7 @@ export async function loadSessionMessages(
     );
     clearReplayBuffer(sessionId);
     const chatStore = useChatStore.getState();
+    clearIdleStreamingMessageAfterReplay(sessionId);
     chatStore.setSessionLoading(sessionId, false);
     chatStore.removeMessage(
       sessionId,

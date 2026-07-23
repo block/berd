@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureReplayBuffer } from "@/features/chat/hooks/replayBuffer";
-import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
+import {
+  clearIdleStreamingMessageAfterReplay,
+  loadSessionMessages,
+} from "@/features/chat/lib/sessionActivation";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
@@ -137,6 +140,70 @@ describe("loadSessionMessages", () => {
       activeWorkspaceBySession: {},
     });
     useProjectStore.setState({ projects: [] });
+  });
+
+  it.each([
+    ["after replay", false],
+    ["on the cached-message fast path", true],
+  ])("clears an idle streaming pointer %s", async (_name, cached) => {
+    seedSession({ id: "idle-replay" });
+    if (cached) {
+      useChatStore
+        .getState()
+        .setMessages("idle-replay", [replayUserMessage("cached-message")]);
+    }
+    useChatStore.getState().setStreamingMessageId("idle-replay", "assistant-1");
+
+    await expect(loadSessionMessages("idle-replay")).resolves.toBe(true);
+
+    expect(
+      useChatStore.getState().getSessionRuntime("idle-replay")
+        .streamingMessageId,
+    ).toBeNull();
+    expect(acpLoadSession).toHaveBeenCalledTimes(cached ? 0 : 1);
+  });
+
+  it.each([
+    ["a live chat state", { chatState: "streaming" as const }],
+    ["an active run", { activeRunId: "run-1" }],
+    ["pending cancellation", { isRunCancellationPending: true }],
+  ])("preserves a replay streaming pointer during %s", (_name, patch) => {
+    const sessionId = `protected-${_name}`;
+    useChatStore.setState({
+      sessionStateById: {
+        [sessionId]: {
+          ...useChatStore.getState().getSessionRuntime(sessionId),
+          streamingMessageId: "assistant-1",
+          ...patch,
+        },
+      },
+    });
+
+    expect(clearIdleStreamingMessageAfterReplay(sessionId)).toBe(false);
+    expect(
+      useChatStore.getState().getSessionRuntime(sessionId).streamingMessageId,
+    ).toBe("assistant-1");
+  });
+
+  it("clears replay loading before publishing error-to-idle", async () => {
+    seedSession({ id: "error-replay" });
+    useChatStore.getState().setError("error-replay", "stale error");
+    const observed: Array<{ loading: boolean; chatState: string }> = [];
+    const unsubscribe = useChatStore.subscribe((state) => {
+      observed.push({
+        loading: state.loadingSessionIds.has("error-replay"),
+        chatState: state.getSessionRuntime("error-replay").chatState,
+      });
+    });
+
+    await expect(loadSessionMessages("error-replay")).resolves.toBe(true);
+    unsubscribe();
+
+    expect(
+      observed.some(
+        (snapshot) => snapshot.loading && snapshot.chatState === "idle",
+      ),
+    ).toBe(false);
   });
 
   it("loads with the saved cwd and no warning when the directory exists", async () => {
@@ -437,18 +504,20 @@ describe("loadSessionMessages", () => {
     expect(checkDirectoriesExist).not.toHaveBeenCalled();
   });
 
-  it("ACP load failure appends an error notification without parking the session in error state", async () => {
+  it("ACP load failure appends an error notification and clears settled replay state", async () => {
     acpLoadSession.mockRejectedValue(new Error("backend down"));
     seedSession(
       { id: "s4", workingDir: "/existing/session" },
       { replay: false },
     );
+    useChatStore.getState().setStreamingMessageId("s4", "stale-assistant");
 
     await expect(loadSessionMessages("s4")).resolves.toBe(false);
 
     const runtime = useChatStore.getState().getSessionRuntime("s4");
     expect(runtime.error).toBeNull();
     expect(runtime.chatState).not.toBe("error");
+    expect(runtime.streamingMessageId).toBeNull();
     expect(useChatStore.getState().loadingSessionIds.has("s4")).toBe(false);
     const error = notificationFromLastMessage("s4");
     expect(error.notificationType).toBe("error");

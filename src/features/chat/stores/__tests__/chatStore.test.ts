@@ -133,6 +133,59 @@ describe("chatStore", () => {
     expect(getRuntime("s2").hasUsageSnapshot).toBe(false);
   });
 
+  it("clears the streaming pointer atomically when becoming idle", () => {
+    const store = useChatStore.getState();
+    store.setChatState("s1", "streaming");
+    store.setStreamingMessageId("s1", "stream-1");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
+
+    let writes = 0;
+    const unsubscribe = useChatStore.subscribe(() => {
+      writes += 1;
+    });
+    store.setChatState("s1", "idle");
+    unsubscribe();
+
+    expect(writes).toBe(1);
+    expect(getRuntime("s1")).toMatchObject({
+      chatState: "idle",
+      streamingMessageId: null,
+      pendingInterventionBoundary: null,
+    });
+  });
+
+  it("clears settled replay stream state atomically", () => {
+    const store = useChatStore.getState();
+    store.setStreamingMessageId("s1", "stream-1");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
+
+    let writes = 0;
+    const unsubscribe = useChatStore.subscribe(() => {
+      writes += 1;
+    });
+    expect(store.clearSettledStreamingMessage("s1")).toBe(true);
+    unsubscribe();
+
+    expect(writes).toBe(1);
+    expect(getRuntime("s1")).toMatchObject({
+      streamingMessageId: null,
+      pendingInterventionBoundary: null,
+    });
+  });
+
+  it("preserves replay stream state while a run is active", () => {
+    const store = useChatStore.getState();
+    store.setStreamingMessageId("s1", "stream-1");
+    store.setActiveRunId("s1", "run-1");
+
+    expect(store.clearSettledStreamingMessage("s1")).toBe(false);
+    expect(getRuntime("s1").streamingMessageId).toBe("stream-1");
+  });
+
   it("appends streamed text only within the targeted session", () => {
     const streaming = makeMessage({
       id: "stream-1",
@@ -252,12 +305,109 @@ describe("chatStore", () => {
     const store = useChatStore.getState();
 
     store.setError("s1", "boom");
+    store.setStreamingMessageId("s1", "stale-stream");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
     expect(getRuntime("s1").chatState).toBe("error");
 
     store.setError("s1", null);
 
-    expect(getRuntime("s1").chatState).toBe("idle");
-    expect(getRuntime("s1").error).toBeNull();
+    expect(getRuntime("s1")).toMatchObject({
+      chatState: "idle",
+      error: null,
+      streamingMessageId: null,
+      pendingInterventionBoundary: null,
+    });
+  });
+
+  it("preserves live stream state when clearing a parked error", () => {
+    const store = useChatStore.getState();
+    store.setActiveRunId("s1", "run-1");
+    store.setRunCancellationPending("s1", true);
+    store.setError("s1", "cancel failed");
+    store.setStreamingMessageId("s1", "late-stream");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
+
+    store.setError("s1", null);
+
+    expect(getRuntime("s1")).toMatchObject({
+      chatState: "idle",
+      activeRunId: "run-1",
+      isRunCancellationPending: true,
+      streamingMessageId: "late-stream",
+      pendingInterventionBoundary: { interventionMessageId: "user-1" },
+    });
+  });
+
+  it("settles an errored backend run and late stream state atomically", () => {
+    const store = useChatStore.getState();
+    store.setActiveRunId("s1", "run-1");
+    store.setRunCancellationPending("s1", true);
+    store.setError("s1", "cancel failed");
+    store.setStreamingMessageId("s1", "late-stream");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
+
+    store.settleActiveRun("s1");
+
+    expect(getRuntime("s1")).toMatchObject({
+      chatState: "error",
+      activeRunId: null,
+      isRunCancellationPending: false,
+      streamingMessageId: null,
+      pendingInterventionBoundary: null,
+    });
+  });
+
+  it("settles an idle backend run and late stream state atomically", () => {
+    const store = useChatStore.getState();
+    store.setActiveRunId("s1", "run-1");
+    store.setRunCancellationPending("s1", true);
+    store.setStreamingMessageId("s1", "late-stream");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
+
+    let writes = 0;
+    const unsubscribe = useChatStore.subscribe(() => {
+      writes += 1;
+    });
+    store.settleActiveRun("s1");
+    unsubscribe();
+
+    expect(writes).toBe(1);
+    expect(getRuntime("s1")).toMatchObject({
+      chatState: "idle",
+      activeRunId: null,
+      isRunCancellationPending: false,
+      streamingMessageId: null,
+      pendingInterventionBoundary: null,
+    });
+  });
+
+  it("preserves live stream state when settling a still-streaming backend run", () => {
+    const store = useChatStore.getState();
+    store.setChatState("s1", "streaming");
+    store.setActiveRunId("s1", "run-1");
+    store.setRunCancellationPending("s1", true);
+    store.setStreamingMessageId("s1", "live-stream");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "user-1",
+    });
+
+    store.settleActiveRun("s1");
+
+    expect(getRuntime("s1")).toMatchObject({
+      chatState: "streaming",
+      activeRunId: null,
+      isRunCancellationPending: false,
+      streamingMessageId: "live-stream",
+      pendingInterventionBoundary: { interventionMessageId: "user-1" },
+    });
   });
 
   it("leaves a live chatState untouched when clearing the error", () => {

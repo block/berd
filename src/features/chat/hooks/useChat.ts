@@ -32,6 +32,8 @@ import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepositor
 // TODO: Remove this fallback once goose2 has first-class /-commands.
 const MANUAL_COMPACT_TRIGGER = "/compact";
 const EMPTY_MESSAGES: Message[] = [];
+const cancellationOwnerBySession = new Map<string, symbol>();
+const cancellationPromiseBySession = new Map<string, Promise<boolean>>();
 type CompactConversationResult = "completed" | "failed" | "skipped";
 type EnsurePrepared = (personaId?: string) => Promise<boolean | undefined>;
 
@@ -235,27 +237,40 @@ export function useChat(
   );
 
   const stopGeneration = useCallback(() => {
-    abortRef.current?.abort();
     const chatStore = useChatStore.getState();
     const runtime = chatStore.getSessionRuntime(sessionId);
+    const pendingCancellation = cancellationPromiseBySession.get(sessionId);
+    if (runtime.isRunCancellationPending && pendingCancellation) {
+      return pendingCancellation;
+    }
+
+    abortRef.current?.abort();
     const activeStreamingMessageId = runtime.streamingMessageId;
     const shouldClearPendingAfterCancel =
       runtime.chatState === "thinking" && runtime.activeRunId === null;
+    const cancellationOwner = Symbol(sessionId);
+    cancellationOwnerBySession.set(sessionId, cancellationOwner);
+    const ownsCancellation = () =>
+      cancellationOwnerBySession.get(sessionId) === cancellationOwner;
+    const ownsPendingCancellation = () =>
+      ownsCancellation() &&
+      useChatStore.getState().getSessionRuntime(sessionId)
+        .isRunCancellationPending;
     const clearPendingIfNoActiveRun = () => {
+      if (!ownsPendingCancellation()) return;
       const latestStore = useChatStore.getState();
       const latestRuntime = latestStore.getSessionRuntime(sessionId);
       if (
         latestRuntime.isRunCancellationPending &&
         latestRuntime.activeRunId === null
       ) {
-        latestStore.setRunCancellationPending(sessionId, false);
+        latestStore.settleActiveRun(sessionId);
       }
     };
 
     chatStore.setRunCancellationPending(sessionId, true);
     flushBufferedStreamingUpdatesForSession(sessionId, { flushSubtitle: true });
     setChatState(sessionId, "idle");
-    setStreamingMessageId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
     // Cancel the backend ACP session to stop orphaned streaming/tool events. We
     // send cancellation even while still "thinking" before ACP has created a
@@ -263,15 +278,20 @@ export function useChat(
     // most for long-running tool calls.
     const cancellation = acpCancelSession(sessionId)
       .then((wasCancelled) => {
+        if (!ownsCancellation()) return wasCancelled;
         if (wasCancelled && activeStreamingMessageId) {
           markMessageStopped(sessionId, activeStreamingMessageId);
         }
-        if (!wasCancelled || shouldClearPendingAfterCancel) {
+        if (
+          ownsPendingCancellation() &&
+          (!wasCancelled || shouldClearPendingAfterCancel)
+        ) {
           clearPendingIfNoActiveRun();
         }
         return wasCancelled;
       })
       .catch((err) => {
+        if (!ownsPendingCancellation()) return false;
         const errorMessage = formatAcpErrorMessage(err);
         const latestStore = useChatStore.getState();
         latestStore.addMessage(
@@ -281,15 +301,17 @@ export function useChat(
         latestStore.setError(sessionId, errorMessage);
         clearPendingIfNoActiveRun();
         return false;
+      })
+      .finally(() => {
+        if (cancellationOwnerBySession.get(sessionId) === cancellationOwner) {
+          cancellationOwnerBySession.delete(sessionId);
+          cancellationPromiseBySession.delete(sessionId);
+        }
       });
 
+    cancellationPromiseBySession.set(sessionId, cancellation);
     return cancellation;
-  }, [
-    setChatState,
-    setPendingAssistantProvider,
-    setStreamingMessageId,
-    sessionId,
-  ]);
+  }, [setChatState, setPendingAssistantProvider, sessionId]);
 
   const clearChat = useCallback(() => {
     abortRef.current?.abort();
@@ -298,16 +320,9 @@ export function useChat(
     resetPersonaHandoff(sessionId);
     useChatStore.getState().setRunCancellationPending(sessionId, false);
     setChatState(sessionId, "idle");
-    setStreamingMessageId(sessionId, null);
     useChatStore.getState().setActiveRunId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
-  }, [
-    sessionId,
-    clearMessages,
-    setChatState,
-    setStreamingMessageId,
-    setPendingAssistantProvider,
-  ]);
+  }, [sessionId, clearMessages, setChatState, setPendingAssistantProvider]);
 
   const getWorkingDir = useCallback(() => {
     const sessionStore = useChatSessionStore.getState();
@@ -404,7 +419,6 @@ export function useChat(
       } finally {
         clearBufferedStreamingUpdatesForSession(sessionId);
         setChatState(sessionId, "idle");
-        setStreamingMessageId(sessionId, null);
         setPendingAssistantProvider(sessionId, null);
         setSessionLoading(sessionId, false);
       }

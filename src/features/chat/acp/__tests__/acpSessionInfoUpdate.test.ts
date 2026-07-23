@@ -141,6 +141,34 @@ describe("ACP session info updates", () => {
     ).toBe(false);
   });
 
+  it("settles late idle stream state when the active run ends", async () => {
+    const store = useChatStore.getState();
+    store.setActiveRunId("goose-session-late-stream", "run-123");
+    store.setRunCancellationPending("goose-session-late-stream", true);
+    store.setStreamingMessageId("goose-session-late-stream", "assistant-late");
+    store.setPendingInterventionBoundary("goose-session-late-stream", {
+      interventionMessageId: "user-steer",
+    });
+
+    await handleSessionNotification({
+      sessionId: "goose-session-late-stream",
+      update: {
+        sessionUpdate: "session_info_update",
+        _meta: { goose: { activeRunId: null } },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().getSessionRuntime("goose-session-late-stream"),
+    ).toMatchObject({
+      chatState: "idle",
+      activeRunId: null,
+      isRunCancellationPending: false,
+      streamingMessageId: null,
+      pendingInterventionBoundary: null,
+    });
+  });
+
   it("stores the active run id from alternate ACP meta field shape", async () => {
     await handleSessionNotification({
       sessionId: "goose-session-active-run",
