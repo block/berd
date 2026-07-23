@@ -76,6 +76,25 @@ describe("useArtifactAutoOpen", () => {
     ).toBeNull();
   });
 
+  it("does not auto-open history when loading starts after the first settled pass", () => {
+    // On the first session open after app startup, ChatView can mount before
+    // activation marks the transcript replay as loading.
+    artifactList = [];
+    const { rerender } = renderHook(
+      ({ loading }) => useArtifactAutoOpen("s1", loading),
+      { initialProps: { loading: false } },
+    );
+
+    rerender({ loading: true });
+    artifactList = [md("/p/reloaded.md", OLD)];
+    // Replay messages are committed just before the loading flag is cleared.
+    rerender({ loading: false });
+
+    expect(
+      useArtifactViewerStore.getState().openBySession.s1 ?? null,
+    ).toBeNull();
+  });
+
   it("auto-opens a newly appearing viewable file", () => {
     artifactList = [md("/p/old.md", OLD)];
     const { rerender } = renderHook(() => useArtifactAutoOpen("s1"));

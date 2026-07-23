@@ -56,16 +56,25 @@ export function useArtifactAutoOpen(
     }
     const watch = watchRef.current;
 
-    // Baseline: absorb everything that exists while history is loading (a
-    // reloaded transcript arrives asynchronously). The baseline closes on the
-    // first pass where history is settled; from then on, appearances are live.
+    // A history load can begin after this hook's first settled pass (for
+    // example, when the app renders a restored session before activation has
+    // marked its replay as loading). Reopen the baseline whenever that
+    // happens so replayed artifacts cannot be mistaken for live edits.
+    if (isHistoryLoading) {
+      watch.baselined = false;
+      for (const artifact of artifacts) {
+        watch.seen.add(signatureOf(artifact));
+      }
+      return;
+    }
+
+    // Baseline: absorb everything that exists on the first settled pass after
+    // mount or history loading. From then on, appearances are live.
     if (!watch.baselined) {
       for (const artifact of artifacts) {
         watch.seen.add(signatureOf(artifact));
       }
-      if (!isHistoryLoading) {
-        watch.baselined = true;
-      }
+      watch.baselined = true;
       return;
     }
 
