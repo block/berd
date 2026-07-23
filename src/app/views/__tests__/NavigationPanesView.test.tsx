@@ -41,6 +41,7 @@ import {
 const designSystemExplorer = vi.hoisted(() => ({
   isEnabled: vi.fn(() => false),
 }));
+const sidebarChatRowRender = vi.hoisted(() => vi.fn());
 
 vi.mock("@/features/providers/hooks/useAgentUpdatesAvailable", () => ({
   useAgentUpdatesAvailable: () => false,
@@ -353,6 +354,19 @@ function mockSessionRuntimes() {
   );
 }
 
+vi.mock("@/features/sessions/ui/session-list/SidebarChatRow", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/features/sessions/ui/session-list/SidebarChatRow")
+  >("@/features/sessions/ui/session-list/SidebarChatRow");
+  return {
+    ...actual,
+    SidebarChatRow: (props: ComponentProps<typeof actual.SidebarChatRow>) => {
+      sidebarChatRowRender(props);
+      return <actual.SidebarChatRow {...props} />;
+    },
+  };
+});
+
 vi.mock("@/features/chat/stores/chatStore", () => ({
   useChatStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
@@ -438,6 +452,7 @@ describe("NavigationPanesView", () => {
     mockAcpSearchSessions.mockReset();
     mockAcpSearchSessions.mockResolvedValue([]);
     mockGetGitState.mockReset();
+    sidebarChatRowRender.mockReset();
     mockGetGitState.mockResolvedValue({
       isGitRepo: false,
       currentBranch: null,
@@ -5052,6 +5067,61 @@ describe("NavigationPanesView", () => {
     expect(
       within(chatsNavigation).getByRole("button", { name: "Unpin chat" }),
     ).toBeVisible();
+  });
+
+  it("does not rerender prototype sidebar rows for subtitle-only session updates", () => {
+    seedSessions(
+      {
+        id: "primary-chat",
+        title: "Primary Chat",
+        updatedAt: "2026-04-10T12:00:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "project-chat",
+        title: "Project Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+    );
+    const props = sidebarProps({
+      activeView: "home",
+      projects: [mockProject()],
+      prototypeMode: "hybrid-push-overlay",
+      prototypeChatsUnderProjects: true,
+      prototypeSecondaryPush: true,
+      prototypeSecondaryTarget: {
+        kind: "project",
+        projectId: "project-1",
+      },
+    });
+
+    const { rerender } = renderWithQueryClient(
+      <NavigationPanesView {...props} />,
+    );
+    sidebarChatRowRender.mockClear();
+
+    seedSessions(
+      {
+        id: "primary-chat",
+        title: "Primary Chat",
+        updatedAt: "2026-04-10T12:00:00.000Z",
+        messageCount: 3,
+        subtitle: "New primary metadata",
+      },
+      {
+        id: "project-chat",
+        title: "Project Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+        subtitle: "New project metadata",
+      },
+    );
+    rerender(<NavigationPanesView {...props} />);
+
+    expect(sidebarChatRowRender).not.toHaveBeenCalled();
   });
 
   it("uses prototype menu typography and hover treatment for chat row menus", async () => {
