@@ -3903,6 +3903,7 @@ export function AppShell({
         showNavigationPrototypeChatsUnderProjects &&
         options.suppressPrototypeSecondary;
       if (
+        activeView === "chat" &&
         id === useChatSessionStore.getState().activeSessionId &&
         !suppressPrototypeSecondary
       ) {
@@ -3920,6 +3921,7 @@ export function AppShell({
       });
     },
     [
+      activeView,
       effectiveNavigationSecondaryTarget,
       guardAppNavigation,
       isMultiWindowEnabled,

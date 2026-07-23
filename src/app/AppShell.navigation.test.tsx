@@ -4225,6 +4225,38 @@ describe("AppShell global navigation", () => {
     );
   });
 
+  it("leaves Settings when the active project chat is selected from refreshed navigation", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Project chat",
+          projectId: "project-1",
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+      activeSessionId: "session-1",
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar settings" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+      "session-1",
+    );
+  });
+
   it("keeps Settings section navigation in the global stack", async () => {
     const user = userEvent.setup();
     renderAppShell();
