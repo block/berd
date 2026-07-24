@@ -1629,6 +1629,111 @@ describe("VirtualMessageTimeline", () => {
     ).not.toHaveStyle({ transition: "height 1500ms linear" });
   });
 
+  it("keeps a scrollbar drag stable when resize reconciliation beats the scroll event", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    // A native scrollbar drag updates scrollTop before React receives the
+    // corresponding scroll event. Resize/measurement reconciliation in that
+    // gap must treat the browser viewport as authoritative.
+    fireEvent.pointerDown(scroller);
+    scroller.scrollTop = 300;
+    triggerResizeObservers();
+    animationFrame.runAll(1000);
+
+    expect(scroller.scrollTop).toBe(300);
+  });
+
+  it("pauses streaming bottom follow while the user owns the scrollbar", () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const initialMessages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Streaming answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={initialMessages}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1100,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+    fireEvent.pointerDown(scroller);
+    scroller.scrollTop = 300;
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          initialMessages[0],
+          textMessage("assistant-1", "assistant", "Streaming answer update"),
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    animationFrame.runAll(1000);
+
+    expect(scroller.scrollTop).toBe(300);
+  });
+
+  it("releases scrollbar-drag ownership when switching sessions", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const primaryMessages = [
+      textMessage("primary-user", "user", "Question"),
+      textMessage("primary-assistant", "assistant", "Answer"),
+    ];
+    const secondaryMessages = [
+      textMessage("secondary-user", "user", "Another question"),
+      textMessage("secondary-assistant", "assistant", "Another answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-primary"
+        messages={primaryMessages}
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.pointerDown(scroller);
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-secondary"
+        messages={secondaryMessages}
+      />,
+    );
+    triggerResizeObservers();
+    animationFrame.runAll(1000);
+
+    expect(scroller.scrollTop).toBe(700);
+  });
+
   it("keeps detached users stable across virtual timeline resizes", async () => {
     const animationFrame = mockRequestAnimationFrame();
     const messages = [

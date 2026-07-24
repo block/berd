@@ -1178,6 +1178,10 @@ export function VirtualMessageTimeline({
   );
   const shouldPreserveVirtualScrollPosition =
     userDetached && !isNearBottomRef.current;
+  const shouldPreserveLiveVirtualScrollPosition = useCallback(
+    () => pointerScrollIntentActiveRef.current,
+    [],
+  );
   const virtualTimeline = useTranscriptVirtualTimeline({
     sessionId,
     sessionEpoch,
@@ -1186,6 +1190,10 @@ export function VirtualMessageTimeline({
     containerRef,
     footerHeight: hasLiveStreamingTail ? 0 : messageListBottomPaddingPx,
     preserveScrollPosition: shouldPreserveVirtualScrollPosition,
+    // React state trails refs by one render. Measurement flushes can run in
+    // that gap immediately after wheel/pointer intent and must not replay the
+    // old anchor over the browser-owned viewport.
+    shouldPreserveLiveScrollPosition: shouldPreserveLiveVirtualScrollPosition,
   });
   const {
     snapshot: virtualTimelineSnapshot,
@@ -1893,6 +1901,7 @@ export function VirtualMessageTimeline({
       bottomScrollFrameRef.current = null;
       if (
         scheduledBottomScrollSessionIdRef.current !== requestedSessionId ||
+        pointerScrollIntentActiveRef.current ||
         userDetachedRef.current ||
         suppressFollowResumeFromProgrammaticScrollRef.current ||
         resolvedScrollTargetMessageIdRef.current
@@ -2111,6 +2120,7 @@ export function VirtualMessageTimeline({
     const container = containerRef.current;
     if (
       !container ||
+      pointerScrollIntentActiveRef.current ||
       userDetachedRef.current ||
       suppressFollowResumeFromProgrammaticScrollRef.current
     ) {
@@ -2141,6 +2151,7 @@ export function VirtualMessageTimeline({
       const container = containerRef.current;
       if (
         !container ||
+        pointerScrollIntentActiveRef.current ||
         userDetachedRef.current ||
         suppressFollowResumeFromProgrammaticScrollRef.current ||
         !streamingBottomFollowActiveRef.current
@@ -2244,6 +2255,7 @@ export function VirtualMessageTimeline({
       suppressScrollDeltaDetachUntilRef.current =
         performance.now() + RESIZE_SCROLL_SUPPRESSION_MS;
       const wasPinnedToLatest =
+        !pointerScrollIntentActiveRef.current &&
         !userDetachedRef.current &&
         (isNearBottomRef.current ||
           stickyScrollUntilRef.current > performance.now());
@@ -2254,7 +2266,13 @@ export function VirtualMessageTimeline({
       // "jumping around" during continuous resizes.
       const scrollTopBeforeResize =
         detachedScrollTopRef.current ?? container.scrollTop;
-      syncViewportFromDom({ source: "programmatic" });
+      syncViewportFromDom({
+        source: pointerScrollIntentActiveRef.current
+          ? "browser"
+          : "programmatic",
+        userScrollIntent: pointerScrollIntentActiveRef.current,
+        preserveScrollPosition: pointerScrollIntentActiveRef.current,
+      });
       remeasureVisibleRowsSync();
 
       if (wasPinnedToLatest) {
@@ -2263,7 +2281,13 @@ export function VirtualMessageTimeline({
         return;
       }
 
-      let virtualState = syncViewportFromDom({ source: "programmatic" });
+      let virtualState = syncViewportFromDom({
+        source: pointerScrollIntentActiveRef.current
+          ? "browser"
+          : "programmatic",
+        userScrollIntent: pointerScrollIntentActiveRef.current,
+        preserveScrollPosition: pointerScrollIntentActiveRef.current,
+      });
       if (
         virtualState &&
         userDetachedRef.current &&

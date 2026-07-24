@@ -460,6 +460,91 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(result.current.snapshot.range.protectedRowIds).toEqual(["intro"]);
   });
 
+  it("does not replay measurement corrections over in-flight user scroll intent", async () => {
+    const container = createContainer({ scrollHeight: 1000 });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 5 }, (_, index) =>
+      row(`row-${index}`, 200),
+    );
+    let preserveUserViewport = false;
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+        shouldPreserveLiveScrollPosition: () => preserveUserViewport,
+      }),
+    );
+
+    await act(async () => {
+      container.scrollTop = 500;
+      result.current.syncViewportFromDom({
+        source: "browser",
+        userScrollIntent: true,
+      });
+    });
+
+    // The browser moves first; the React detached-state update that normally
+    // enables preserveScrollPosition has not committed yet.
+    container.scrollTop = 300;
+    preserveUserViewport = true;
+
+    await act(async () => {
+      result.current.measureRowElement("row-4", createMeasuredElement(300));
+      runPendingFrames();
+    });
+
+    expect(container.scrollTop).toBe(300);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(300);
+  });
+
+  it("does not replay row-update corrections over in-flight user scroll intent", async () => {
+    const container = createContainer({ scrollHeight: 1200 });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const initialRows = Array.from({ length: 5 }, (_, index) =>
+      row(`row-${index}`, 200),
+    );
+    let preserveUserViewport = false;
+
+    const { result, rerender } = renderHook(
+      ({ rows }: { rows: readonly TranscriptRowDescriptor[] }) =>
+        useTranscriptVirtualTimeline({
+          sessionId: SESSION_ID,
+          sessionEpoch: 1,
+          rows,
+          containerRef,
+          footerHeight: 0,
+          shouldPreserveLiveScrollPosition: () => preserveUserViewport,
+        }),
+      { initialProps: { rows: initialRows } },
+    );
+
+    await act(async () => {
+      container.scrollTop = 500;
+      result.current.syncViewportFromDom({
+        source: "browser",
+        userScrollIntent: true,
+      });
+    });
+
+    container.scrollTop = 300;
+    preserveUserViewport = true;
+
+    await act(async () => {
+      rerender({ rows: [...initialRows, row("new-row", 200)] });
+    });
+
+    expect(container.scrollTop).toBe(300);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(300);
+  });
+
   it("preserves live scrollTop when a protected-row rebuild replays cached measurements", async () => {
     const container = createContainer();
     const containerRef = {
@@ -535,12 +620,16 @@ describe("useTranscriptVirtualTimeline", () => {
   }
 });
 
-function createContainer(): HTMLDivElement {
+function createContainer({
+  scrollHeight = 300,
+}: {
+  scrollHeight?: number;
+} = {}): HTMLDivElement {
   const container = document.createElement("div");
   Object.defineProperties(container, {
     clientHeight: { configurable: true, value: 300 },
     clientWidth: { configurable: true, value: 720 },
-    scrollHeight: { configurable: true, value: 300 },
+    scrollHeight: { configurable: true, value: scrollHeight },
     scrollTop: { configurable: true, writable: true, value: 0 },
   });
   document.body.appendChild(container);
