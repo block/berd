@@ -1,6 +1,7 @@
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import {
   acpSessionToChatSession,
+  mergeAcpSessionInfo,
   mergeAcpSessionPage,
 } from "@/features/chat/lib/acpSessionMapping";
 import {
@@ -9,7 +10,7 @@ import {
 } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { acpListSessionsPage } from "@/shared/api/acp";
+import { acpGetSessionInfo, acpListSessionsPage } from "@/shared/api/acp";
 import {
   GOOSE_PROVIDER_ID,
   isGooseManagedProvider,
@@ -30,23 +31,32 @@ export async function loadAllSessionsForBerdctl(): Promise<void> {
 }
 
 export async function loadSessionForBerdctl(sessionId: string): Promise<void> {
-  let found = false;
   try {
-    found = await loadSessionsForBerdctlUntil(
-      (session) => session.id === sessionId,
+    const session = await acpGetSessionInfo(sessionId);
+    useChatSessionStore.setState((state) =>
+      mergeAcpSessionInfo(state, session),
     );
   } catch (error) {
+    if (isAcpResourceNotFound(error)) {
+      throw new CommandError(
+        "session_not_found",
+        sessionNotFoundMessage(sessionId),
+      );
+    }
     throw new CommandError(
       "backend_read_failed",
-      `Failed to read sessions from the app backend: ${String(error)}`,
+      `Failed to read session from the app backend: ${String(error)}`,
     );
   }
-  if (!found) {
-    throw new CommandError(
-      "session_not_found",
-      sessionNotFoundMessage(sessionId),
-    );
-  }
+}
+
+function isAcpResourceNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === -32002
+  );
 }
 
 async function loadSessionsForBerdctlUntil(

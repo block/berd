@@ -33,6 +33,7 @@ import { createUserMessage, getTextContent } from "@/shared/types/messages";
 const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
   acpDuplicateSession: vi.fn(),
+  acpGetSessionInfo: vi.fn(),
   acpListSessionsPage: vi.fn(),
   acpPrepareSession: vi.fn(),
   acpSendMessage: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
   acpDuplicateSession: (...args: unknown[]) =>
     mocks.acpDuplicateSession(...args),
+  acpGetSessionInfo: (...args: unknown[]) => mocks.acpGetSessionInfo(...args),
   acpListSessionsPage: (...args: unknown[]) =>
     mocks.acpListSessionsPage(...args),
   acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
@@ -224,10 +226,9 @@ function mockSessionPages(...pages: AcpSessionsPage[]): void {
 }
 
 function mockSessionFound(overrides: Partial<AcpSessionInfo> = {}): void {
-  mockSessionPages({
-    sessions: [makeAcpSession({ sessionId: "session-1", ...overrides })],
-    nextCursor: null,
-  });
+  const session = makeAcpSession({ sessionId: "session-1", ...overrides });
+  mocks.acpGetSessionInfo.mockResolvedValue(session);
+  mockSessionPages({ sessions: [session], nextCursor: null });
 }
 
 function seedSessions(...sessions: ChatSession[]): void {
@@ -333,12 +334,17 @@ beforeEach(() => {
   });
 
   vi.clearAllMocks();
+  mocks.acpGetSessionInfo.mockReset();
+  mocks.acpListSessionsPage.mockReset();
   mocks.resolveSessionCwd.mockResolvedValue("/resolved/cwd");
   mocks.projectRequiresStartupWorkspaceName.mockReturnValue(false);
   mocks.planProjectChatWorkspaces.mockResolvedValue(null);
   mocks.planProjectChatWorkspacesAsIs.mockReturnValue(null);
   mocks.rollbackProjectChatWorkspacePlan.mockResolvedValue(undefined);
   mocks.acpCreateSession.mockResolvedValue({ sessionId: "session-new" });
+  mocks.acpGetSessionInfo.mockRejectedValue(
+    Object.assign(new Error("Resource not found"), { code: -32002 }),
+  );
   mocks.acpPrepareSession.mockResolvedValue(undefined);
   mocks.acpSendMessage.mockResolvedValue(undefined);
   mocks.loadSessionMessages.mockResolvedValue(true);
@@ -1468,20 +1474,9 @@ describe("sessions.open", () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it("loads session pages until the target session is found", async () => {
-    mockSessionPages(
-      {
-        sessions: [makeAcpSession({ sessionId: "older-session" })],
-        nextCursor: "page-2",
-      },
-      {
-        sessions: [makeAcpSession({ sessionId: "session-1" })],
-        nextCursor: "page-3",
-      },
-      {
-        sessions: [makeAcpSession({ sessionId: "newer-session" })],
-        nextCursor: null,
-      },
+  it("loads the target session without paging the session list", async () => {
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({ sessionId: "session-1" }),
     );
 
     await dispatchCommand(
@@ -1490,13 +1485,8 @@ describe("sessions.open", () => {
       ctx,
     );
 
-    expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(2);
-    expect(mocks.acpListSessionsPage).toHaveBeenNthCalledWith(1, {
-      cursor: null,
-    });
-    expect(mocks.acpListSessionsPage).toHaveBeenNthCalledWith(2, {
-      cursor: "page-2",
-    });
+    expect(mocks.acpGetSessionInfo).toHaveBeenCalledWith("session-1");
+    expect(mocks.acpListSessionsPage).not.toHaveBeenCalled();
     expect(controller.openSession).toHaveBeenCalledWith("session-1");
   });
 
@@ -1758,22 +1748,13 @@ describe("sessions.get", () => {
     });
   });
 
-  it("finds sessions beyond the first backend page", async () => {
-    mockSessionPages(
-      {
-        sessions: [makeAcpSession({ sessionId: "s-first" })],
-        nextCursor: "page-2",
-      },
-      {
-        sessions: [
-          makeAcpSession({
-            sessionId: "session-1",
-            title: "Loaded Late",
-            projectId: "p-1",
-          }),
-        ],
-        nextCursor: null,
-      },
+  it("loads a deep session with one targeted backend request", async () => {
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({
+        sessionId: "session-1",
+        title: "Loaded Directly",
+        projectId: "p-1",
+      }),
     );
 
     const result = await dispatchCommand(
@@ -1782,26 +1763,41 @@ describe("sessions.get", () => {
       ctx,
     );
 
-    expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(2);
+    expect(mocks.acpGetSessionInfo).toHaveBeenCalledOnce();
+    expect(mocks.acpGetSessionInfo).toHaveBeenCalledWith("session-1");
+    expect(mocks.acpListSessionsPage).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       session_id: "session-1",
-      title: "Loaded Late",
+      title: "Loaded Directly",
       project_id: "p-1",
     });
   });
 
-  it("does not validate a target from stale cache unless a fetched page confirms it", async () => {
-    seedSessions(makeSession({ id: "session-1", title: "Stale Session" }));
-    mockSessionPages(
-      {
-        sessions: [makeAcpSession({ sessionId: "other-session" })],
-        nextCursor: "page-2",
-      },
-      {
-        sessions: [],
-        nextCursor: null,
-      },
+  it("does not finish full-list hydration after a targeted read", async () => {
+    useChatSessionStore.setState({ isLoading: true });
+    mocks.acpGetSessionInfo.mockResolvedValue(
+      makeAcpSession({
+        sessionId: "session-1",
+        title: "Loaded Directly",
+      }),
     );
+
+    await dispatchCommand(
+      "sessions",
+      { action: "get", session_id: "session-1" },
+      ctx,
+    );
+
+    const state = useChatSessionStore.getState();
+    expect(state.getSession("session-1")?.title).toBe("Loaded Directly");
+    expect(state.hasHydratedSessions).toBe(false);
+    expect(state.isLoading).toBe(true);
+    expect(state.sessionPageCursor).toBeNull();
+    expect(state.hasMoreSessions).toBe(false);
+  });
+
+  it("does not validate a target from stale cache unless the targeted read confirms it", async () => {
+    seedSessions(makeSession({ id: "session-1", title: "Stale Session" }));
 
     await expectCommandError(
       dispatchCommand(
@@ -1811,7 +1807,8 @@ describe("sessions.get", () => {
       ),
       "session_not_found",
     );
-    expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(2);
+    expect(mocks.acpGetSessionInfo).toHaveBeenCalledWith("session-1");
+    expect(mocks.acpListSessionsPage).not.toHaveBeenCalled();
   });
 
   it("includes the last N messages with long texts truncated", async () => {

@@ -103,6 +103,17 @@ function mergeSessionMetadata(
   };
 }
 
+export function mergeAcpSessionInfo(
+  state: Pick<SessionPageState, "sessions" | "archiveMutationBySessionId">,
+  session: AcpSessionInfo,
+): Pick<SessionPageState, "sessions" | "archiveMutationBySessionId"> {
+  return mergeSessionMetadata(
+    state.sessions,
+    [acpSessionToChatSession(session)],
+    state.archiveMutationBySessionId,
+  );
+}
+
 function isArchiveMutationConfirmed(
   session: ChatSession,
   mutation: ArchiveSessionMutation,
