@@ -2,6 +2,8 @@ import {
   ensureReplayBuffer,
   getBufferedMessage,
 } from "@/features/chat/hooks/replayBuffer";
+import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
+import { useChatStore } from "@/features/chat/stores/chatStore";
 import type { Message } from "@/shared/types/messages";
 import type { ReplayAssistantMetadata } from "@/shared/api/acpReplayMetadata";
 
@@ -81,8 +83,30 @@ function mergeAssistantMetadata(
   };
 }
 
-export function clearReplayAssistantMessage(sessionId: string): void {
+export function completeReplayAssistantMessage(sessionId: string): boolean {
+  const trackedMessageId = replayAssistantMessageIds.get(sessionId);
+  if (!trackedMessageId) return false;
+
+  const bufferedMessage = getBufferedMessage(sessionId, trackedMessageId);
+  if (bufferedMessage) {
+    const completed = completeAssistantMessage(bufferedMessage);
+    if (completed !== bufferedMessage) {
+      Object.assign(bufferedMessage, completed);
+      replayAssistantMessageIds.delete(sessionId);
+      return true;
+    }
+  }
+
+  let completedStoredMessage = false;
+  useChatStore
+    .getState()
+    .updateMessage(sessionId, trackedMessageId, (message) => {
+      const completed = completeAssistantMessage(message);
+      completedStoredMessage = completed !== message;
+      return completed;
+    });
   replayAssistantMessageIds.delete(sessionId);
+  return completedStoredMessage;
 }
 
 export function clearReplayAssistantTracking(): void {

@@ -3,6 +3,7 @@ import {
   getAndDeleteReplayBuffer,
 } from "@/features/chat/hooks/replayBuffer";
 import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
+import { completeReplayAssistantMessage } from "@/features/chat/acp/acpReplayAssistant";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   type ChatSession,
@@ -291,6 +292,9 @@ async function performSessionMessagesLoad(
     clearReplayPerf(sessionId);
     if (replayMessages) {
       useChatStore.getState().setMessages(sessionId, replayMessages);
+      if (sessionInfo?.activeRunId === null) {
+        completeReplayAssistantMessage(sessionId);
+      }
       const latestSession = useChatSessionStore
         .getState()
         .getSession(sessionId);

@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import {
+  clearReplayBuffer,
+  getReplayBuffer,
+} from "@/features/chat/hooks/replayBuffer";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  clearReplayAssistantTracking,
+  ensureReplayAssistantMessage,
+} from "../acpReplayAssistant";
 import { handleSessionNotification } from "../acpNotificationHandler";
 
 describe("ACP session info updates", () => {
   beforeEach(() => {
+    clearReplayAssistantTracking();
+    clearReplayBuffer("goose-session-replay-run");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -139,6 +149,33 @@ describe("ACP session info updates", () => {
       useChatStore.getState().getSessionRuntime("goose-session-active-run")
         .isRunCancellationPending,
     ).toBe(false);
+  });
+
+  it("completes the tracked replay assistant when the active run ends", async () => {
+    const sessionId = "goose-session-replay-run";
+    ensureReplayAssistantMessage(sessionId, "assistant-replay").content.push({
+      type: "text",
+      text: "Finished after reopening",
+    });
+    const replayMessages = getReplayBuffer(sessionId) ?? [];
+    useChatStore.getState().setMessages(sessionId, replayMessages);
+    clearReplayBuffer(sessionId);
+    useChatStore.getState().setActiveRunId(sessionId, "run-123");
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "session_info_update",
+        _meta: { goose: { activeRunId: null } },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().messagesBySession[sessionId]?.[0],
+    ).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "completed" },
+    });
   });
 
   it("settles late idle stream state when the active run ends", async () => {

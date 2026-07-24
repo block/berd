@@ -546,6 +546,35 @@ describe("chatStore", () => {
     expect(getRuntime("s1").hasUnread).toBe(true);
   });
 
+  it("completes the prior assistant when starting a steer continuation", () => {
+    const store = useChatStore.getState();
+    store.setMessages("s1", [
+      makeMessage({
+        id: "assistant-1",
+        role: "assistant",
+        metadata: { completionStatus: "inProgress" },
+      }),
+      makeMessage({
+        id: "steer-1",
+        role: "user",
+        metadata: { delivery: "steer" },
+      }),
+    ]);
+    store.setStreamingMessageId("s1", "assistant-1");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "steer-1",
+    });
+
+    store.startAssistantStreamAfterIntervention("s1");
+
+    const messages = useChatStore.getState().messagesBySession.s1;
+    expect(messages[0]?.metadata?.completionStatus).toBe("completed");
+    expect(messages[2]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+  });
+
   it("marks streamed assistant output unread for inactive sessions", () => {
     const store = useChatStore.getState();
 

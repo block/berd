@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureReplayBuffer } from "@/features/chat/hooks/replayBuffer";
 import {
+  clearReplayAssistantTracking,
+  ensureReplayAssistantMessage,
+} from "@/features/chat/acp/acpReplayAssistant";
+import { handleSessionInfoUpdate } from "@/features/chat/acp/acpSessionInfoUpdate";
+import {
   clearIdleStreamingMessageAfterReplay,
   loadSessionMessages,
 } from "@/features/chat/lib/sessionActivation";
@@ -133,6 +138,7 @@ function notificationFromLastMessage(
 describe("loadSessionMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearReplayAssistantTracking();
     window.localStorage.clear();
     acpGetSessionInfo.mockResolvedValue(null);
     acpLoadSession.mockResolvedValue(undefined);
@@ -214,6 +220,170 @@ describe("loadSessionMessages", () => {
         (snapshot) => snapshot.loading && snapshot.chatState === "idle",
       ),
     ).toBe(false);
+  });
+
+  it("completes the final replay assistant for a settled session", async () => {
+    seedSession({ id: "settled-replay" }, { replay: false });
+    ensureReplayAssistantMessage("settled-replay", "assistant-1").content.push({
+      type: "text",
+      text: "Finished answer",
+    });
+    acpLoadSession.mockImplementation(async () => {
+      handleSessionInfoUpdate("settled-replay", {
+        sessionUpdate: "session_info_update",
+        _meta: { goose: { activeRunId: null } },
+      } as never);
+    });
+
+    await expect(loadSessionMessages("settled-replay")).resolves.toBe(true);
+
+    expect(messagesFor("settled-replay")[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "completed" },
+    });
+  });
+
+  it("completes a pinned settled replay assistant from refreshed session metadata", async () => {
+    acpGetSessionInfo.mockResolvedValue({
+      sessionId: "pinned-settled-replay",
+      title: "Settled Replay",
+      updatedAt: "2026-06-25T00:45:04.000Z",
+      createdAt: "2026-06-25T00:40:00.000Z",
+      lastMessageAt: "2026-06-25T00:45:04.000Z",
+      archivedAt: null,
+      userSetName: true,
+      messageCount: 1,
+      subtitle: null,
+      workingDir: null,
+      projectId: null,
+      providerId: "goose",
+      modelId: null,
+      personaId: null,
+      activeRunId: null,
+    });
+    seedSession(
+      { id: "pinned-settled-replay", pinnedLoadState: "loading" },
+      { replay: false },
+    );
+    ensureReplayAssistantMessage(
+      "pinned-settled-replay",
+      "assistant-1",
+    ).content.push({
+      type: "text",
+      text: "Finished answer",
+    });
+
+    await expect(loadSessionMessages("pinned-settled-replay")).resolves.toBe(
+      true,
+    );
+
+    expect(messagesFor("pinned-settled-replay")[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "completed" },
+    });
+  });
+
+  it("preserves a pinned replay assistant when refreshed run state is unknown", async () => {
+    acpGetSessionInfo.mockResolvedValue({
+      sessionId: "pinned-unknown-replay",
+      title: "Unknown Replay",
+      updatedAt: "2026-06-25T00:45:04.000Z",
+      createdAt: "2026-06-25T00:40:00.000Z",
+      lastMessageAt: "2026-06-25T00:45:04.000Z",
+      archivedAt: null,
+      userSetName: true,
+      messageCount: 1,
+      subtitle: null,
+      workingDir: null,
+      projectId: null,
+      providerId: "goose",
+      modelId: null,
+      personaId: null,
+    });
+    seedSession(
+      { id: "pinned-unknown-replay", pinnedLoadState: "loading" },
+      { replay: false },
+    );
+    ensureReplayAssistantMessage(
+      "pinned-unknown-replay",
+      "assistant-1",
+    ).content.push({ type: "text", text: "Maybe still working" });
+
+    await expect(loadSessionMessages("pinned-unknown-replay")).resolves.toBe(
+      true,
+    );
+
+    expect(messagesFor("pinned-unknown-replay")[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+  });
+
+  it("waits for an affirmative run boundary before completing replay", async () => {
+    const sessionId = "active-replay";
+    seedSession({ id: sessionId }, { replay: false });
+    ensureReplayAssistantMessage(sessionId, "assistant-1").content.push({
+      type: "text",
+      text: "Still working",
+    });
+
+    await expect(loadSessionMessages(sessionId)).resolves.toBe(true);
+
+    handleSessionInfoUpdate(sessionId, {
+      sessionUpdate: "session_info_update",
+      _meta: { goose: { activeRunId: "run-1" } },
+    } as never);
+    expect(messagesFor(sessionId)[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+
+    handleSessionInfoUpdate(sessionId, {
+      sessionUpdate: "session_info_update",
+      _meta: { goose: { activeRunId: null } },
+    } as never);
+    expect(messagesFor(sessionId)[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "completed" },
+    });
+  });
+
+  it("waits for explicit run settlement before completing a replay assistant", async () => {
+    seedSession({ id: "unknown-run-replay" }, { replay: false });
+    ensureReplayAssistantMessage(
+      "unknown-run-replay",
+      "assistant-1",
+    ).content.push({
+      type: "text",
+      text: "Still working after load",
+    });
+
+    await expect(loadSessionMessages("unknown-run-replay")).resolves.toBe(true);
+
+    expect(messagesFor("unknown-run-replay")[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+
+    handleSessionInfoUpdate("unknown-run-replay", {
+      sessionUpdate: "session_info_update",
+      _meta: { goose: { activeRunId: "run-1" } },
+    } as never);
+
+    expect(messagesFor("unknown-run-replay")[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+
+    handleSessionInfoUpdate("unknown-run-replay", {
+      sessionUpdate: "session_info_update",
+      _meta: { goose: { activeRunId: null } },
+    } as never);
+
+    expect(messagesFor("unknown-run-replay")[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "completed" },
+    });
   });
 
   it("loads with the saved cwd and no warning when the directory exists", async () => {

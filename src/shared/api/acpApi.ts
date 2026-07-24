@@ -43,6 +43,7 @@ export interface AcpSessionInfo {
   providerId: string | null;
   modelId: string | null;
   personaId: string | null;
+  activeRunId?: string | null;
 }
 
 export interface AcpSessionsPage {
@@ -63,6 +64,10 @@ const LIST_SESSIONS_META = {
 
 export async function listProviders(): Promise<AcpProvider[]> {
   return getCuratedAgentProviders();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function mapLastMessageSnippet(value: unknown): string | null {
@@ -89,6 +94,14 @@ function metaNumber(
 }
 
 function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
+  const gooseMeta = isRecord(info._meta?.goose) ? info._meta.goose : null;
+  const activeRunValue =
+    gooseMeta && "activeRunId" in gooseMeta ? gooseMeta.activeRunId : undefined;
+  const activeRunId =
+    typeof activeRunValue === "string" || activeRunValue === null
+      ? activeRunValue
+      : undefined;
+
   return {
     sessionId: info.sessionId,
     title: info.title ?? null,
@@ -104,6 +117,7 @@ function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
     providerId: metaString(info._meta, "providerId"),
     modelId: metaString(info._meta, "modelId"),
     personaId: metaString(info._meta, "personaId"),
+    ...(activeRunId !== undefined ? { activeRunId } : {}),
   };
 }
 
@@ -441,10 +455,6 @@ export async function prompt(
 }
 
 const UNKNOWN_EXPECTED_RUN_ID = "__berd_unknown_active_run__";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function extractActualRunId(error: unknown): string | null {
   if (!isRecord(error) || !("data" in error)) {

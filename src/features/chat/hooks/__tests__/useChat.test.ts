@@ -10,9 +10,11 @@ import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { Message } from "@/shared/types/messages";
 import { clearReplayBuffer } from "../replayBuffer";
 import {
+  clearStreamingMessageOwners,
   enqueueStreamingTextUpdate,
   flushAllBufferedStreamingUpdates,
 } from "../../acp/liveStreamingUpdates";
+import { claimSessionPrompt } from "../../lib/sessionPromptOwnership";
 
 const mockAcpSendMessage = vi.fn();
 const mockAcpSteerMessage = vi.fn();
@@ -92,6 +94,7 @@ describe("useChat", () => {
     mockAcpSetModel.mockReset();
     clearReplayBuffer("session-1");
     clearReplayBuffer("session-2");
+    clearStreamingMessageOwners();
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -327,6 +330,297 @@ describe("useChat", () => {
       secondCancellation.resolve(false);
       await secondCancellation.promise;
     });
+  });
+
+  it("lets a pending stop win when the prompt settles first", async () => {
+    const promptDeferred = createDeferredPromise<void>();
+    const cancelDeferred = createDeferredPromise<boolean>();
+    mockAcpSendMessage.mockReturnValue(promptDeferred.promise);
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("stop this");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      result.current.stopGeneration();
+    });
+
+    await act(async () => {
+      promptDeferred.resolve();
+      await sendPromise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("inProgress");
+
+    await act(async () => {
+      cancelDeferred.resolve(true);
+      await cancelDeferred.promise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("stopped");
+  });
+
+  it("completes the stopped assistant when cancellation finds no active run before prompt settlement", async () => {
+    const firstPromptDeferred = createDeferredPromise<void>();
+    const secondPromptDeferred = createDeferredPromise<void>();
+    const cancelDeferred = createDeferredPromise<boolean>();
+    mockAcpSendMessage
+      .mockReturnValueOnce(firstPromptDeferred.promise)
+      .mockReturnValueOnce(secondPromptDeferred.promise);
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let firstSendPromise!: Promise<void>;
+    await act(async () => {
+      firstSendPromise = result.current.sendMessage("too late to stop");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      result.current.stopGeneration();
+    });
+
+    await act(async () => {
+      cancelDeferred.resolve(false);
+      await cancelDeferred.promise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("inProgress");
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", null);
+      useChatStore.getState().setRunCancellationPending("session-1", false);
+      claimSessionPrompt("session-1");
+    });
+    let secondSendPromise!: Promise<void>;
+    await act(async () => {
+      secondSendPromise = result.current.sendMessage("follow up");
+      await Promise.resolve();
+    });
+    act(() => {
+      claimSessionPrompt("session-1");
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-2",
+        "persona-a",
+        "Persona A",
+      );
+    });
+    await act(async () => {
+      firstPromptDeferred.resolve();
+      await firstSendPromise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("completed");
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[3]?.metadata
+        ?.completionStatus,
+    ).toBe("inProgress");
+
+    await act(async () => {
+      secondPromptDeferred.resolve();
+      await secondSendPromise;
+    });
+  });
+
+  it("completes the settled assistant when cancellation finds no active run", async () => {
+    const promptDeferred = createDeferredPromise<void>();
+    const cancelDeferred = createDeferredPromise<boolean>();
+    mockAcpSendMessage.mockReturnValue(promptDeferred.promise);
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("too late to stop");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      result.current.stopGeneration();
+    });
+
+    await act(async () => {
+      promptDeferred.resolve();
+      await sendPromise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("inProgress");
+
+    await act(async () => {
+      cancelDeferred.resolve(false);
+      await cancelDeferred.promise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("completed");
+  });
+
+  it("completes the settled assistant when cancellation rejects", async () => {
+    const promptDeferred = createDeferredPromise<void>();
+    const cancelDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage.mockReturnValue(promptDeferred.promise);
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("too late to stop");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      result.current.stopGeneration();
+    });
+
+    await act(async () => {
+      promptDeferred.resolve();
+      await sendPromise;
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("inProgress");
+
+    await act(async () => {
+      cancelDeferred.reject(new Error("cancel failed"));
+      try {
+        await cancelDeferred.promise;
+      } catch {
+        // stopGeneration handles cancellation rejection internally.
+      }
+      await Promise.resolve();
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("completed");
+  });
+
+  it("marks the streaming assistant completed when the prompt settles", async () => {
+    const promptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage.mockReturnValue(promptDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("finish this");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+    });
+
+    await act(async () => {
+      promptDeferred.resolve();
+      await sendPromise;
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+        ?.completionStatus,
+    ).toBe("completed");
+  });
+
+  it("preserves a newer assistant when the final flush changes prompt ownership", async () => {
+    const promptDeferred = createDeferredPromise<void>();
+    mockAcpSendMessage.mockReturnValue(promptDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("first prompt");
+      await Promise.resolve();
+    });
+    act(() => {
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      enqueueStreamingTextUpdate("session-1", "assistant-1", "final text");
+      const unsubscribe = useChatStore.subscribe(
+        (state) => state.messagesBySession["session-1"],
+        () => {
+          unsubscribe();
+          claimSessionPrompt("session-1");
+          addStreamingAssistantMessage(
+            "session-1",
+            "assistant-2",
+            "persona-a",
+            "Persona A",
+          );
+        },
+        { fireImmediately: false },
+      );
+    });
+
+    await act(async () => {
+      promptDeferred.resolve();
+      await sendPromise;
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(
+      messages.find((message) => message.id === "assistant-1"),
+    ).toMatchObject({
+      content: [{ type: "text", text: "final text" }],
+      metadata: { completionStatus: "completed" },
+    });
+    expect(
+      messages.find((message) => message.id === "assistant-2")?.metadata
+        ?.completionStatus,
+    ).toBe("inProgress");
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").streamingMessageId,
+    ).toBe("assistant-2");
   });
 
   it("clears stopped-run metadata when the foreground ACP prompt settles", async () => {
@@ -1237,7 +1531,7 @@ describe("useChat", () => {
     expect(message.metadata?.completionStatus).toBe("completed");
   });
 
-  it("does not mark the message stopped when cancellation reports no active session", async () => {
+  it("keeps the message active when cancellation reports no active session before prompt settlement", async () => {
     mockAcpCancelSession.mockResolvedValue(false);
 
     const { result } = renderHook(() => useChat("session-1"));

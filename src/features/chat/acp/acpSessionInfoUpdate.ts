@@ -1,6 +1,7 @@
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { completeReplayAssistantMessage } from "./acpReplayAssistant";
 import { flushBufferedStreamingUpdatesForSession } from "./liveStreamingUpdates";
 
 type SessionInfoUpdate = SessionUpdate & {
@@ -35,8 +36,7 @@ export function handleSessionInfoUpdate(
       flushBufferedStreamingUpdatesForSession(sessionId, {
         flushSubtitle: true,
       });
-    }
-    if (activeRunId === null) {
+      completeReplayAssistantMessage(sessionId);
       chatStore.settleActiveRun(sessionId);
     } else {
       chatStore.setActiveRunId(sessionId, activeRunId);

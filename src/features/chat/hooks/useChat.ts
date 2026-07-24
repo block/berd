@@ -16,7 +16,11 @@ import {
 } from "@/shared/api/acp";
 import { resetPersonaHandoff } from "@/shared/api/acpPersonaHandoff";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { dispatchPrompt } from "../lib/sendCore";
+import {
+  dispatchPrompt,
+  registerAssistantCancellationTarget,
+  resolveAssistantCancellation,
+} from "../lib/sendCore";
 import { perfLog } from "@/shared/lib/perfLog";
 import { sanitizeReplayMessages } from "../lib/replaySanitizer";
 import { i18n } from "@/shared/i18n";
@@ -269,6 +273,9 @@ export function useChat(
     };
 
     chatStore.setRunCancellationPending(sessionId, true);
+    const cancelledPromptOwner = activeStreamingMessageId
+      ? registerAssistantCancellationTarget(sessionId, activeStreamingMessageId)
+      : null;
     flushBufferedStreamingUpdatesForSession(sessionId, { flushSubtitle: true });
     setChatState(sessionId, "idle");
     setPendingAssistantProvider(sessionId, null);
@@ -279,8 +286,11 @@ export function useChat(
     const cancellation = acpCancelSession(sessionId)
       .then((wasCancelled) => {
         if (!ownsCancellation()) return wasCancelled;
-        if (wasCancelled && activeStreamingMessageId) {
-          markMessageStopped(sessionId, activeStreamingMessageId);
+        if (activeStreamingMessageId) {
+          if (wasCancelled) {
+            markMessageStopped(sessionId, activeStreamingMessageId);
+          }
+          resolveAssistantCancellation(cancelledPromptOwner, wasCancelled);
         }
         if (
           ownsPendingCancellation() &&
@@ -291,6 +301,10 @@ export function useChat(
         return wasCancelled;
       })
       .catch((err) => {
+        if (!ownsCancellation()) return false;
+        if (activeStreamingMessageId) {
+          resolveAssistantCancellation(cancelledPromptOwner, false);
+        }
         if (!ownsPendingCancellation()) return false;
         const errorMessage = formatAcpErrorMessage(err);
         const latestStore = useChatStore.getState();

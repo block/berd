@@ -877,6 +877,30 @@ describe("acpNotificationHandler", () => {
     expect(userMessages[2].metadata?.delivery).toBe("steer");
   });
 
+  it("marks a replay assistant completed at the next user turn", async () => {
+    markSessionReplayLoading();
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Finished answer" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "Next question" },
+      },
+    } as never);
+
+    expect(getReplayBuffer("acp-session")?.[0]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "completed" },
+    });
+  });
+
   it("attaches replay assistant persona identity from update metadata", async () => {
     markSessionReplayLoading();
 

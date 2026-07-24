@@ -171,6 +171,50 @@ describe("listSessionsPage", () => {
     });
   });
 
+  it("preserves explicit active-run metadata and omits unknown state", async () => {
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          sessionId: "active-session",
+          title: null,
+          updatedAt: null,
+          cwd: "/tmp/active",
+          _meta: { goose: { activeRunId: "run-1" } },
+        },
+        {
+          sessionId: "settled-session",
+          title: null,
+          updatedAt: null,
+          cwd: "/tmp/settled",
+          _meta: { goose: { activeRunId: null } },
+        },
+        {
+          sessionId: "unknown-session",
+          title: null,
+          updatedAt: null,
+          cwd: "/tmp/unknown",
+          _meta: {},
+        },
+        {
+          sessionId: "unsupported-top-level-session",
+          title: null,
+          updatedAt: null,
+          cwd: "/tmp/unsupported",
+          _meta: { activeRunId: null },
+        },
+      ],
+      nextCursor: null,
+    });
+
+    const { listSessionsPage } = await import("../acpApi");
+    const page = await listSessionsPage();
+
+    expect(page.sessions[0]).toHaveProperty("activeRunId", "run-1");
+    expect(page.sessions[1]).toHaveProperty("activeRunId", null);
+    expect(page.sessions[2]).not.toHaveProperty("activeRunId");
+    expect(page.sessions[3]).not.toHaveProperty("activeRunId");
+  });
+
   it("omits an empty or blank cursor at the API boundary", async () => {
     mocks.listSessions.mockResolvedValue({
       sessions: [],

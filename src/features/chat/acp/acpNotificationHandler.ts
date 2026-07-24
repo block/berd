@@ -36,8 +36,8 @@ import {
   findReplayMessageWithToolCall,
 } from "./acpToolCallContent";
 import {
-  clearReplayAssistantMessage,
   clearReplayAssistantTracking,
+  completeReplayAssistantMessage,
   ensureReplayAssistantMessage,
   getTrackedReplayAssistantMessageId,
 } from "./acpReplayAssistant";
@@ -390,7 +390,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
     }
 
     case "user_message_chunk": {
-      clearReplayAssistantMessage(sessionId);
+      completeReplayAssistantMessage(sessionId);
       replayAssistantMessageIds.delete(sessionId);
       replayAgentBoundaryActive.delete(sessionId);
       if (update.content.type !== "text" && update.content.type !== "image") {

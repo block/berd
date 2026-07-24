@@ -5,6 +5,7 @@ import type {
   Message,
   MessageContent,
 } from "@/shared/types/messages";
+import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import { clearReplayBuffer } from "../hooks/replayBuffer";
 import { isSessionRunning } from "../lib/sessionActivity";
 import type {
@@ -974,12 +975,19 @@ const createChatStore: StateCreator<
       );
       const assistantContinuationMessage =
         createAssistantContinuationMessage(streamingMessage);
+      const completedMessages = streamingMessage
+        ? messages.map((message) =>
+            message.id === streamingMessage.id
+              ? completeAssistantMessage(message)
+              : message,
+          )
+        : messages;
 
       return {
         messagesBySession: {
           ...state.messagesBySession,
           [sessionId]: insertMessageAfter(
-            messages,
+            completedMessages,
             interventionMessageId,
             assistantContinuationMessage,
           ),

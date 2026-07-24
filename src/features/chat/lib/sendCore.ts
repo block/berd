@@ -19,10 +19,12 @@ import { acpSendMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   claimSessionPrompt,
+  getSessionPromptOwner,
   ownsSessionPrompt,
   releaseSessionPrompt,
 } from "@/features/chat/lib/sessionPromptOwnership";
 import { perfLog } from "@/shared/lib/perfLog";
+import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import {
   type ChatAttachmentDraft,
   type MessageMetadata,
@@ -82,6 +84,85 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 
   throw new DOMException("The operation was aborted.", "AbortError");
+}
+
+type AssistantPromptOutcome = "completed" | "error";
+
+interface AssistantCancellationRace {
+  sessionId: string;
+  messageId: string;
+  cancellationResult?: boolean;
+  promptOutcome?: AssistantPromptOutcome;
+}
+
+const assistantCancellationRaces = new Map<symbol, AssistantCancellationRace>();
+
+function completeAssistantMessageById(
+  sessionId: string,
+  messageId: string | null,
+): void {
+  if (!messageId) return;
+  useChatStore
+    .getState()
+    .updateMessage(sessionId, messageId, completeAssistantMessage);
+}
+
+function markAssistantMessageErrored(
+  sessionId: string,
+  messageId: string,
+): void {
+  useChatStore.getState().updateMessage(sessionId, messageId, (message) => ({
+    ...message,
+    metadata: { ...message.metadata, completionStatus: "error" },
+  }));
+}
+
+function finalizeAssistantCancellationRace(promptOwner: symbol): void {
+  const race = assistantCancellationRaces.get(promptOwner);
+  if (!race || race.cancellationResult === undefined) return;
+  if (race.cancellationResult) {
+    assistantCancellationRaces.delete(promptOwner);
+    return;
+  }
+  if (!race.promptOutcome) return;
+
+  if (race.promptOutcome === "completed") {
+    completeAssistantMessageById(race.sessionId, race.messageId);
+  } else {
+    markAssistantMessageErrored(race.sessionId, race.messageId);
+  }
+  assistantCancellationRaces.delete(promptOwner);
+}
+
+export function registerAssistantCancellationTarget(
+  sessionId: string,
+  messageId: string,
+): symbol | null {
+  const promptOwner = getSessionPromptOwner(sessionId);
+  if (!promptOwner) return null;
+  assistantCancellationRaces.set(promptOwner, { sessionId, messageId });
+  return promptOwner;
+}
+
+function recordAssistantPromptOutcome(
+  promptOwner: symbol,
+  outcome: AssistantPromptOutcome,
+): void {
+  const race = assistantCancellationRaces.get(promptOwner);
+  if (!race) return;
+  race.promptOutcome = outcome;
+  finalizeAssistantCancellationRace(promptOwner);
+}
+
+export function resolveAssistantCancellation(
+  promptOwner: symbol | null,
+  cancelled: boolean,
+): void {
+  if (!promptOwner) return;
+  const race = assistantCancellationRaces.get(promptOwner);
+  if (!race) return;
+  race.cancellationResult = cancelled;
+  finalizeAssistantCancellationRace(promptOwner);
 }
 
 /**
@@ -221,16 +302,31 @@ export async function dispatchPrompt(
       );
     }
 
-    if (isCurrent()) {
+    const cancellationRace = assistantCancellationRaces.get(promptOwner);
+    if (cancellationRace) {
       flushBufferedStreamingUpdatesForSession(sessionId, {
         flushSubtitle: true,
         owner: promptOwner,
       });
+      recordAssistantPromptOutcome(promptOwner, "completed");
+    } else if (isCurrent()) {
+      const ownedStreamingMessageId = useChatStore
+        .getState()
+        .getSessionRuntime(sessionId).streamingMessageId;
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+        owner: promptOwner,
+      });
+      completeAssistantMessageById(sessionId, ownedStreamingMessageId);
       if (isCurrent()) {
         setChatState(sessionId, "idle");
       }
     }
   } catch (err) {
+    const cancellationRace = assistantCancellationRaces.get(promptOwner);
+    if (cancellationRace) {
+      recordAssistantPromptOutcome(promptOwner, "error");
+    }
     if (err instanceof DOMException && err.name === "AbortError") {
       if (isCurrent()) {
         flushBufferedStreamingUpdatesForSession(sessionId, {

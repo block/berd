@@ -288,39 +288,124 @@ export function enqueueStreamingThinkingUpdate(
   scheduleBufferedFlush();
 }
 
-function applyBufferedUpdate(update: BufferedStreamingUpdate): void {
-  if (update.owner !== getSessionPromptOwner(update.sessionId)) {
+function appendBufferedTextWithoutRuntime(
+  sessionId: string,
+  messageId: string,
+  text: string,
+): void {
+  useChatStore.getState().updateMessage(sessionId, messageId, (message) => {
+    const lastContent = message.content.at(-1);
+    if (lastContent?.type === "text") {
+      return {
+        ...message,
+        content: [
+          ...message.content.slice(0, -1),
+          { ...lastContent, text: lastContent.text + text },
+        ],
+      };
+    }
+    return {
+      ...message,
+      content: [...message.content, { type: "text", text }],
+    };
+  });
+}
+
+function appendBufferedThinkingWithoutRuntime(
+  sessionId: string,
+  messageId: string,
+  text: string,
+): void {
+  useChatStore.getState().updateMessage(sessionId, messageId, (message) => {
+    const lastContent = message.content.at(-1);
+    if (lastContent?.type !== "thinking") {
+      return {
+        ...message,
+        content: [...message.content, { type: "thinking", text }],
+      };
+    }
+    if (text === lastContent.text) return message;
+    const nextText = text.startsWith(lastContent.text)
+      ? text
+      : lastContent.text + text;
+    return {
+      ...message,
+      content: [
+        ...message.content.slice(0, -1),
+        { type: "thinking", text: nextText },
+      ],
+    };
+  });
+}
+
+function applyBufferedUpdate(
+  update: BufferedStreamingUpdate,
+  expectedOwner = getSessionPromptOwner(update.sessionId),
+): void {
+  if (update.owner !== expectedOwner) {
     return;
   }
 
   const store = useChatStore.getState();
+  const ownerIsCurrent =
+    update.owner === getSessionPromptOwner(update.sessionId);
   if (update.kind === "text") {
-    store.appendStreamingText(update.sessionId, update.messageId, update.text);
-    const accumulatedText = getAccumulatedAssistantText(
-      update.sessionId,
-      update.messageId,
-    );
-    if (accumulatedText !== null) {
-      scheduleLiveSubtitleUpdate(update.sessionId, accumulatedText);
+    if (ownerIsCurrent) {
+      store.appendStreamingText(
+        update.sessionId,
+        update.messageId,
+        update.text,
+      );
+      const accumulatedText = getAccumulatedAssistantText(
+        update.sessionId,
+        update.messageId,
+      );
+      if (accumulatedText !== null) {
+        scheduleLiveSubtitleUpdate(update.sessionId, accumulatedText);
+      }
+    } else {
+      appendBufferedTextWithoutRuntime(
+        update.sessionId,
+        update.messageId,
+        update.text,
+      );
     }
     return;
   }
 
-  store.setStreamingMessageId(update.sessionId, update.messageId);
-  for (const chunk of update.chunks) {
-    store.updateStreamingThinking(update.sessionId, chunk);
+  if (ownerIsCurrent) {
+    store.setStreamingMessageId(update.sessionId, update.messageId);
+    for (const chunk of update.chunks) {
+      store.updateStreamingThinking(update.sessionId, chunk);
+    }
+  } else {
+    for (const chunk of update.chunks) {
+      appendBufferedThinkingWithoutRuntime(
+        update.sessionId,
+        update.messageId,
+        chunk,
+      );
+    }
   }
 }
 
 export function flushAllBufferedStreamingUpdates(): void {
   cancelScheduledFrame();
 
-  const updates = bufferedStreamingUpdates.splice(
-    0,
-    bufferedStreamingUpdates.length,
-  );
+  const currentUpdates: BufferedStreamingUpdate[] = [];
+  for (
+    let index = bufferedStreamingUpdates.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    const update = bufferedStreamingUpdates[index];
+    if (update && update.owner === getSessionPromptOwner(update.sessionId)) {
+      currentUpdates.unshift(update);
+      bufferedStreamingUpdates.splice(index, 1);
+    }
+  }
 
-  for (const update of updates) {
+  for (const update of currentUpdates) {
     applyBufferedUpdate(update);
   }
 }
@@ -331,7 +416,9 @@ export function flushBufferedStreamingUpdatesForSession(
 ): void {
   const matches = (update: BufferedStreamingUpdate) =>
     update.sessionId === sessionId &&
-    (!("owner" in options) || update.owner === options.owner);
+    ("owner" in options
+      ? update.owner === options.owner
+      : update.owner === getSessionPromptOwner(sessionId));
   const sessionUpdates = bufferedStreamingUpdates.filter(matches);
   if (sessionUpdates.length === 0) {
     if (
@@ -360,7 +447,11 @@ export function flushBufferedStreamingUpdatesForSession(
   }
 
   for (const update of sessionUpdates) {
-    applyBufferedUpdate(update);
+    if ("owner" in options) {
+      applyBufferedUpdate(update, options.owner);
+    } else {
+      applyBufferedUpdate(update);
+    }
   }
 
   if (
