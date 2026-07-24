@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -273,12 +273,18 @@ pub async fn get_cached_avatar_for_ref(
     app: AppHandle,
     avatar_ref: String,
 ) -> Result<Option<CachedAvatar>, String> {
-    // No lock needed: reads atomically-placed media files and checksum markers.
+    // No lock needed: reads immutable, atomically placed media blobs.
     let avatar_id = parse_avatar_ref(&avatar_ref)?;
     let paths = avatar_cache_paths(&app)?;
     let Some(catalog) = read_cached_catalog(&paths)? else {
         return Ok(None);
     };
+    if let Some(avatar) = cached_avatar_for_id(&paths, &catalog, &avatar_id)? {
+        return Ok(Some(avatar));
+    }
+
+    let _catalog_guard = catalog_lock().lock().await;
+    prepare_legacy_media(&paths, &catalog.catalog_version)?;
     cached_avatar_for_id(&paths, &catalog, &avatar_id)
 }
 
@@ -297,7 +303,7 @@ pub async fn get_cached_avatars_for_refs(
         parsed_refs.push((avatar_ref, avatar_id));
     }
 
-    // No lock needed: reads atomically-placed media files and checksum markers.
+    // No lock needed: reads immutable, atomically placed media blobs.
     let paths = avatar_cache_paths(&app)?;
     let Some(catalog) = read_cached_catalog(&paths)? else {
         return Ok(parsed_refs
@@ -306,12 +312,25 @@ pub async fn get_cached_avatars_for_refs(
             .collect());
     };
 
-    cached_avatars_for_parsed_refs_with_format(
-        &paths,
-        &catalog,
-        parsed_refs,
-        platform_avatar_format(),
-    )
+    let format = platform_avatar_format();
+    let mut cached =
+        cached_avatars_for_parsed_refs_with_format(&paths, &catalog, parsed_refs.clone(), format)?;
+    let unresolved = parsed_refs
+        .into_iter()
+        .filter(|(avatar_ref, avatar_id)| {
+            avatar_id.is_some() && cached.get(avatar_ref).is_some_and(Option::is_none)
+        })
+        .collect::<Vec<_>>();
+    if unresolved.is_empty() {
+        return Ok(cached);
+    }
+
+    let _catalog_guard = catalog_lock().lock().await;
+    prepare_legacy_media(&paths, &catalog.catalog_version)?;
+    cached.extend(cached_avatars_for_parsed_refs_with_format(
+        &paths, &catalog, unresolved, format,
+    )?);
+    Ok(cached)
 }
 
 fn cached_avatar_for_id(
@@ -365,8 +384,8 @@ fn cached_avatar_for_id_with_format(
         return Ok(None);
     };
     let variant = variant_for_format(entry, format)?;
-    let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
-    let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? else {
+    let target = media_blob_path(paths, variant)?;
+    let Some(asset) = valid_cached_asset(entry, variant, &target)? else {
         return Ok(None);
     };
     let catalog_version = catalog.catalog_version.clone();
@@ -402,7 +421,8 @@ pub async fn ensure_avatar_collection(
             .into());
         }
 
-        // Validate collection exists while we have the catalog.
+        // Migrate verified legacy media before deciding which assets need downloads.
+        prepare_legacy_media(&paths, &catalog.catalog_version)?;
         find_collection(&catalog, &collection_id)?;
         catalog
     };
@@ -432,8 +452,8 @@ pub async fn clear_avatar_cache(app: AppHandle) -> Result<(), String> {
     // exclusive download guard is what makes the clear wait for in-flight
     // downloads to finish — and blocks new ones from starting — since downloads
     // no longer hold the catalog lock. Without it, a download could place its
-    // media file and checksum marker right after we wiped the cache dirs,
-    // leaving orphaned files behind while the clear reported success.
+    // media blob right after we wiped the cache dirs, leaving an orphan behind
+    // while the clear reported success.
     let _catalog_guard = catalog_lock().lock().await;
     let _download_guard = download_guard().write().await;
     let paths = avatar_cache_paths(&app)?;
@@ -468,6 +488,8 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
                 }
             }
         }
+        // Reuse verified legacy bytes before any network-backed warm-up.
+        prepare_legacy_media(&paths, &catalog.catalog_version)?;
         catalog
     };
 
@@ -677,25 +699,36 @@ fn catalog_lock() -> &'static tokio::sync::Mutex<()> {
 /// downloads to finish and blocks new ones from starting.
 ///
 /// Downloads no longer hold [`catalog_lock`], so without this guard an in-flight
-/// download could place its media file and checksum marker right after a clear
-/// wiped the cache directories, leaving orphaned files behind while the clear
-/// reported success. Read-only avatar resolution does not take this guard, so
+/// download could place its media blob right after a clear wiped the cache,
+/// leaving an orphan behind while the clear reported success. Read-only avatar
+/// resolution does not take this guard, so
 /// the UI never blocks on it.
 fn download_guard() -> &'static tokio::sync::RwLock<()> {
     static GUARD: OnceLock<tokio::sync::RwLock<()>> = OnceLock::new();
     GUARD.get_or_init(|| tokio::sync::RwLock::new(()))
 }
 
-// Carries the full `AvatarAssetError` (code + detail), not just the detail
-// string, so a follower reconstructs the leader's exact error code. Flattening
-// to a string would force every follower to `Unavailable` and drop a leader's
-// `NetworkAccess` (WARP) code, surfacing the generic recovery message instead.
-type InflightResult = Result<CachedAvatarAsset, AvatarAssetError>;
-type InflightMap = HashMap<String, broadcast::Sender<InflightResult>>;
+// Followers need only the verified blob placement result. Each caller builds
+// its own CachedAvatarAsset metadata because multiple avatar IDs may reference
+// the same content-addressed blob.
+type InflightResult = Result<(), AvatarAssetError>;
 
-/// Per-asset download deduplication. When a download is in flight for a given
-/// cache key (catalog_version + variant path), subsequent requests subscribe
-/// to the same broadcast channel instead of starting a duplicate download.
+struct InflightDownload {
+    sender: broadcast::Sender<InflightResult>,
+    byte_size: u64,
+    mime_type: String,
+}
+
+impl InflightDownload {
+    fn is_compatible(&self, variant: &AvatarVariant) -> bool {
+        self.byte_size == variant.byte_size && self.mime_type == variant.mime_type
+    }
+}
+
+type InflightMap = HashMap<String, InflightDownload>;
+
+/// Per-blob download deduplication. Variants with the same SHA-256 subscribe
+/// to one download even when different catalogs or avatar IDs reference it.
 ///
 /// This is a synchronous mutex: it is only ever held for brief map lookups and
 /// a cache re-check, never across an `.await`. Keeping it synchronous lets
@@ -714,8 +747,8 @@ fn lock_inflight_downloads() -> std::sync::MutexGuard<'static, InflightMap> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn inflight_key(catalog_version: &str, variant_path: &str) -> String {
-    format!("{catalog_version}/{variant_path}")
+fn inflight_key(variant: &AvatarVariant) -> Result<String, String> {
+    media_blob_filename(variant)
 }
 
 /// Either we became the downloader for an asset (`Leader`, holding the sender
@@ -759,14 +792,14 @@ async fn ensure_entry_deduped(
 ) -> Result<CachedAvatarAsset, AvatarAssetError> {
     let variant = variant_for_format(entry, format)?;
     validate_variant_path(variant, format, &entry.collection_id)?;
-    let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
+    let target = media_blob_path(paths, variant)?;
 
     // Fast path: already cached on disk.
-    if let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? {
+    if let Some(asset) = valid_cached_asset(entry, variant, &target)? {
         return Ok(asset);
     }
 
-    let key = inflight_key(&catalog.catalog_version, &variant.path);
+    let key = inflight_key(variant)?;
 
     loop {
         // Atomically become the downloader or subscribe to an in-flight one.
@@ -775,14 +808,28 @@ async fn ensure_entry_deduped(
         let role = {
             let mut inflight = lock_inflight_downloads();
             // Another task may have finished between the fast path and here.
-            if let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? {
+            if let Some(asset) = valid_cached_asset(entry, variant, &target)? {
                 return Ok(asset);
             }
             match inflight.get(&key) {
-                Some(sender) => InflightRole::Follower(sender.subscribe()),
+                Some(download) if download.is_compatible(variant) => {
+                    InflightRole::Follower(download.sender.subscribe())
+                }
+                Some(_) => {
+                    return Err(AvatarAssetError::unavailable(
+                        "Avatar variants sharing a blob disagree on size or MIME type",
+                    ));
+                }
                 None => {
                     let (tx, _) = broadcast::channel::<InflightResult>(1);
-                    inflight.insert(key.clone(), tx.clone());
+                    inflight.insert(
+                        key.clone(),
+                        InflightDownload {
+                            sender: tx.clone(),
+                            byte_size: variant.byte_size,
+                            mime_type: variant.mime_type.clone(),
+                        },
+                    );
                     InflightRole::Leader(tx)
                 }
             }
@@ -790,8 +837,9 @@ async fn ensure_entry_deduped(
 
         match role {
             InflightRole::Follower(mut receiver) => match receiver.recv().await {
-                Ok(Ok(asset)) => return Ok(asset),
-                Ok(Err(error)) => return Err(error),
+                Ok(result) => {
+                    return cached_asset_after_blob_placement(result, entry, variant, &target);
+                }
                 // The leader dropped its sender without a result (it was
                 // canceled). Its guard has removed the key, so retry: we may
                 // become the leader ourselves this time.
@@ -804,42 +852,41 @@ async fn ensure_entry_deduped(
                 let _guard = InflightGuard::new(&key);
                 // Hold the shared download guard across the download and
                 // placement so a concurrent clear_avatar_cache waits for us to
-                // finish (and we wait for it) instead of wiping the cache dirs
-                // while we are still writing the media file and checksum marker.
+                // finish (and we wait for it) instead of wiping the cache while
+                // we are still writing the media blob.
                 let _download_guard = download_guard().read().await;
-                let result =
-                    ensure_entry_download(client, paths, catalog, entry, variant, &target).await;
-                // Broadcast the full result (code + detail) so followers
-                // reconstruct the leader's exact error code, not just Unavailable.
+                let result = ensure_entry_download(client, catalog, variant, &target).await;
                 let _ = tx.send(result.clone());
-                return result;
+                result?;
+                return Ok(cached_asset(entry, variant, target));
             }
         }
     }
+}
+
+fn cached_asset_after_blob_placement(
+    result: InflightResult,
+    entry: &AvatarCatalogEntry,
+    variant: &AvatarVariant,
+    target: &Path,
+) -> Result<CachedAvatarAsset, AvatarAssetError> {
+    result?;
+    valid_cached_asset(entry, variant, target)?
+        .ok_or_else(|| AvatarAssetError::unavailable("Downloaded avatar blob was not valid"))
 }
 
 /// The actual download + verify + place logic, extracted from the old
 /// `ensure_entry` so it can be called within the dedup wrapper.
 async fn ensure_entry_download(
     client: &reqwest::Client,
-    paths: &AvatarCachePaths,
     catalog: &AvatarCatalog,
-    entry: &AvatarCatalogEntry,
     variant: &AvatarVariant,
     target: &Path,
-) -> Result<CachedAvatarAsset, AvatarAssetError> {
+) -> Result<(), AvatarAssetError> {
     delete_file_if_exists(target)?;
-    delete_file_if_exists(&checksum_marker_path(
-        paths,
-        &catalog.catalog_version,
-        &variant.path,
-    )?)?;
 
     let url = allowed_artifactory_url(&format!("{}/{}", catalog.catalog_version, variant.path))?;
-    download_asset(client, url, target, variant).await?;
-    write_checksum_marker(paths, &catalog.catalog_version, variant)?;
-
-    Ok(cached_asset(entry, variant, target.to_path_buf()))
+    download_asset(client, url, target, variant).await
 }
 
 fn read_cached_catalog(paths: &AvatarCachePaths) -> Result<Option<AvatarCatalog>, String> {
@@ -1090,48 +1137,6 @@ fn unique_part_path(target: &Path) -> PathBuf {
     target.with_extension(format!("{extension}.{}.{}.part", std::process::id(), nonce))
 }
 
-fn checksum_marker_path(
-    paths: &AvatarCachePaths,
-    catalog_version: &str,
-    variant_path: &str,
-) -> Result<PathBuf, String> {
-    validate_safe_segment(catalog_version)?;
-    validate_safe_relative_path(variant_path)?;
-    Ok(paths
-        .meta
-        .join(catalog_version)
-        .join(format!("{variant_path}.sha256")))
-}
-
-fn write_checksum_marker(
-    paths: &AvatarCachePaths,
-    catalog_version: &str,
-    variant: &AvatarVariant,
-) -> Result<(), String> {
-    atomic_write(
-        &checksum_marker_path(paths, catalog_version, &variant.path)?,
-        variant.sha256.to_ascii_lowercase().as_bytes(),
-    )
-}
-
-fn has_valid_checksum_marker(
-    paths: &AvatarCachePaths,
-    catalog_version: &str,
-    variant: &AvatarVariant,
-) -> Result<bool, String> {
-    let marker_path = checksum_marker_path(paths, catalog_version, &variant.path)?;
-    if !marker_path.exists() {
-        return Ok(false);
-    }
-    let checksum = fs::read_to_string(&marker_path).map_err(|error| {
-        format!(
-            "Failed to read cached avatar checksum marker '{}': {error}",
-            marker_path.display()
-        )
-    })?;
-    Ok(checksum.trim().eq_ignore_ascii_case(&variant.sha256))
-}
-
 async fn ensure_collection_assets(
     paths: &AvatarCachePaths,
     catalog: &AvatarCatalog,
@@ -1254,14 +1259,11 @@ fn cached_collection_assets(
             return Ok(None);
         };
         validate_variant_path(variant, format, &entry.collection_id)?;
-        let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
+        let target = media_blob_path(paths, variant)?;
         // This runs on the lock-free snapshot read path, concurrently with
         // downloads that hold no catalog lock. Only report whether the asset is
-        // cached; do not delete incomplete files, or we could race a download
-        // that just placed the media (before writing its checksum marker) and
-        // force a needless re-download. Re-downloads clean up stale files up
-        // front, and pruning reclaims obsolete versions.
-        let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? else {
+        // cached; do not delete incomplete files or race an active download.
+        let Some(asset) = valid_cached_asset(entry, variant, &target)? else {
             return Ok(None);
         };
         assets.push(asset);
@@ -1271,29 +1273,30 @@ fn cached_collection_assets(
 }
 
 fn valid_cached_asset(
-    paths: &AvatarCachePaths,
-    catalog: &AvatarCatalog,
     entry: &AvatarCatalogEntry,
     variant: &AvatarVariant,
     target: &Path,
 ) -> Result<Option<CachedAvatarAsset>, String> {
-    if !target.exists() {
+    if !valid_cached_asset_for_variant(variant, target)? {
         return Ok(None);
     }
+    Ok(Some(cached_asset(entry, variant, target.to_path_buf())))
+}
 
+fn valid_cached_asset_for_variant(variant: &AvatarVariant, target: &Path) -> Result<bool, String> {
+    // Downloads and legacy migration verify SHA-256 before atomically placing a
+    // blob at its digest-derived path. Steady-state gallery probes intentionally
+    // trust that identity and check only size to avoid rehashing multi-MB media.
+    if !target.exists() {
+        return Ok(false);
+    }
     let metadata = fs::metadata(target).map_err(|error| {
         format!(
             "Failed to inspect cached avatar '{}': {error}",
             target.display()
         )
     })?;
-    if metadata.len() != variant.byte_size {
-        return Ok(None);
-    }
-    if !has_valid_checksum_marker(paths, &catalog.catalog_version, variant)? {
-        return Ok(None);
-    }
-    Ok(Some(cached_asset(entry, variant, target.to_path_buf())))
+    Ok(metadata.len() == variant.byte_size)
 }
 
 fn cached_asset(
@@ -1354,14 +1357,24 @@ fn allowed_artifactory_url(relative_path: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-fn media_cache_path(
-    paths: &AvatarCachePaths,
-    catalog_version: &str,
-    relative_path: &str,
-) -> Result<PathBuf, String> {
-    validate_safe_segment(catalog_version)?;
-    validate_safe_relative_path(relative_path)?;
-    Ok(paths.media.join(catalog_version).join(relative_path))
+fn media_blob_path(paths: &AvatarCachePaths, variant: &AvatarVariant) -> Result<PathBuf, String> {
+    Ok(paths
+        .media
+        .join("blobs")
+        .join(media_blob_filename(variant)?))
+}
+
+fn media_blob_filename(variant: &AvatarVariant) -> Result<String, String> {
+    let sha256 = variant.sha256.to_ascii_lowercase();
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("Avatar variant checksum must be a SHA-256 hex digest".to_string());
+    }
+    let extension = Path::new(&variant.path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Avatar variant path must have an extension".to_string())?;
+    validate_safe_segment(extension)?;
+    Ok(format!("{sha256}.{extension}"))
 }
 
 fn validate_catalog(catalog: &AvatarCatalog) -> Result<(), String> {
@@ -1371,6 +1384,7 @@ fn validate_catalog(catalog: &AvatarCatalog) -> Result<(), String> {
     validate_safe_segment(&catalog.catalog_version)?;
 
     let mut asset_collections: HashMap<&str, &str> = HashMap::new();
+    let mut blob_metadata: HashMap<String, (u64, &str)> = HashMap::new();
     for entry in &catalog.assets {
         validate_avatar_id(&entry.id)?;
         validate_safe_segment(&entry.collection_id)?;
@@ -1382,6 +1396,23 @@ fn validate_catalog(catalog: &AvatarCatalog) -> Result<(), String> {
         })?;
         validate_variant_path(webm, "webm", &entry.collection_id)?;
         validate_variant_path(hevc, "hevc", &entry.collection_id)?;
+        for variant in [webm, hevc] {
+            let blob = media_blob_filename(variant)?;
+            match blob_metadata.get(&blob) {
+                Some((byte_size, mime_type))
+                    if *byte_size != variant.byte_size || *mime_type != variant.mime_type =>
+                {
+                    return Err(
+                        "Avatar variants sharing a blob must agree on size and MIME type"
+                            .to_string(),
+                    );
+                }
+                Some(_) => {}
+                None => {
+                    blob_metadata.insert(blob, (variant.byte_size, variant.mime_type.as_str()));
+                }
+            }
+        }
         if asset_collections
             .insert(entry.id.as_str(), entry.collection_id.as_str())
             .is_some()
@@ -1508,28 +1539,238 @@ fn parse_avatar_ref(value: &str) -> Result<String, String> {
     Ok(id.to_string())
 }
 
+fn prepare_legacy_media(
+    paths: &AvatarCachePaths,
+    current_version: &str,
+) -> Result<Option<String>, String> {
+    let previous_versions = valid_previous_versions(paths, current_version)?;
+    migrate_legacy_media(paths, current_version, &previous_versions)?;
+    Ok(previous_versions.into_iter().next())
+}
+
 fn prune_obsolete_versions(paths: &AvatarCachePaths, current_version: &str) -> Result<(), String> {
-    let previous_version = previous_version_to_keep(&paths.meta, current_version)?;
-    for base in [&paths.meta, &paths.media] {
-        if !base.exists() {
+    let previous_version = prepare_legacy_media(paths, current_version)?;
+    prune_catalog_versions(&paths.meta, current_version, previous_version.as_deref())?;
+    prune_media_blobs(paths, current_version, previous_version.as_deref())
+}
+
+fn valid_previous_versions(
+    paths: &AvatarCachePaths,
+    current_version: &str,
+) -> Result<Vec<String>, String> {
+    let mut valid_versions = Vec::new();
+    for version in previous_versions(&paths.meta, current_version)? {
+        let manifest = paths.meta.join(&version).join(MANIFEST_FILE);
+        let valid = read_json_file::<AvatarCatalog>(&manifest).and_then(|catalog| {
+            if catalog.catalog_version != version {
+                return Err(
+                    "Retained avatar catalog version does not match its directory".to_string(),
+                );
+            }
+            validate_catalog(&catalog)
+        });
+        match valid {
+            Ok(()) => valid_versions.push(version),
+            Err(error) => {
+                log::warn!("Discarding invalid retained avatar catalog '{version}': {error}");
+            }
+        }
+    }
+    Ok(valid_versions)
+}
+
+fn migrate_legacy_media(
+    paths: &AvatarCachePaths,
+    current_version: &str,
+    previous_versions: &[String],
+) -> Result<(), String> {
+    for version in
+        std::iter::once(current_version).chain(previous_versions.iter().map(String::as_str))
+    {
+        let manifest = paths.meta.join(version).join(MANIFEST_FILE);
+        if !manifest.exists() {
             continue;
         }
-        for entry in fs::read_dir(base)
-            .map_err(|error| format!("Failed to read avatar cache directory: {error}"))?
+        let catalog = read_json_file::<AvatarCatalog>(&manifest)?;
+        validate_catalog(&catalog)?;
+        for entry in &catalog.assets {
+            for variant in [entry.variants.webm.as_ref(), entry.variants.hevc.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                migrate_legacy_variant(paths, version, variant)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn migrate_legacy_variant(
+    paths: &AvatarCachePaths,
+    catalog_version: &str,
+    variant: &AvatarVariant,
+) -> Result<(), String> {
+    let target = media_blob_path(paths, variant)?;
+    let source = paths.media.join(catalog_version).join(&variant.path);
+    if !source.exists() {
+        return Ok(());
+    }
+    if target.exists() && legacy_media_matches_variant(&target, variant)? {
+        return Ok(());
+    }
+
+    if !legacy_media_matches_variant(&source, variant)? {
+        log::warn!(
+            "Skipping corrupt legacy avatar media '{}'; the blob will be downloaded again",
+            source.display()
+        );
+        return Ok(());
+    }
+
+    let parent = target
+        .parent()
+        .ok_or_else(|| "Avatar blob target has no parent".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create avatar blob directory: {error}"))?;
+    let part_path = unique_part_path(&target);
+    let mut part_file = PartFile::new(part_path);
+    fs::hard_link(&source, part_file.path())
+        .map_err(|error| format!("Failed to stage legacy avatar media: {error}"))?;
+    delete_file_if_exists(&target)?;
+    match fs::rename(part_file.path(), &target) {
+        Ok(()) => {
+            part_file.persist();
+            Ok(())
+        }
+        Err(error)
+            if error.kind() == std::io::ErrorKind::AlreadyExists
+                && legacy_media_matches_variant(&target, variant)? =>
         {
-            let entry =
-                entry.map_err(|error| format!("Failed to inspect avatar cache entry: {error}"))?;
-            if !entry
+            Ok(())
+        }
+        Err(error) => Err(format!("Failed to finalize migrated avatar media: {error}")),
+    }
+}
+
+fn legacy_media_matches_variant(source: &Path, variant: &AvatarVariant) -> Result<bool, String> {
+    media_file_matches_variant(source, variant)
+}
+
+fn media_file_matches_variant(path: &Path, variant: &AvatarVariant) -> Result<bool, String> {
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("Failed to inspect avatar media: {error}"))?;
+    if metadata.len() != variant.byte_size {
+        return Ok(false);
+    }
+
+    let mut file =
+        fs::File::open(path).map_err(|error| format!("Failed to open avatar media: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Failed to read avatar media: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hex_digest(hasher.finalize().as_slice()).eq_ignore_ascii_case(&variant.sha256))
+}
+
+fn prune_catalog_versions(
+    meta_root: &Path,
+    current_version: &str,
+    previous_version: Option<&str>,
+) -> Result<(), String> {
+    if !meta_root.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(meta_root)
+        .map_err(|error| format!("Failed to read avatar cache directory: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Failed to inspect avatar cache entry: {error}"))?;
+        if !entry
+            .file_type()
+            .map_err(|error| format!("Failed to inspect avatar cache file type: {error}"))?
+            .is_dir()
+        {
+            continue;
+        }
+        let version = entry.file_name().to_string_lossy().into_owned();
+        if version != current_version && Some(version.as_str()) != previous_version {
+            fs::remove_dir_all(entry.path())
+                .map_err(|error| format!("Failed to prune obsolete avatar cache: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn prune_media_blobs(
+    paths: &AvatarCachePaths,
+    current_version: &str,
+    previous_version: Option<&str>,
+) -> Result<(), String> {
+    if !paths.media.exists() {
+        return Ok(());
+    }
+
+    let mut retained = HashSet::new();
+    for version in [Some(current_version), previous_version]
+        .into_iter()
+        .flatten()
+    {
+        let manifest = paths.meta.join(version).join(MANIFEST_FILE);
+        if !manifest.exists() {
+            continue;
+        }
+        let catalog = read_json_file::<AvatarCatalog>(&manifest)?;
+        validate_catalog(&catalog)?;
+        for entry in &catalog.assets {
+            for variant in [entry.variants.webm.as_ref(), entry.variants.hevc.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                retained.insert(media_blob_path(paths, variant)?);
+            }
+        }
+    }
+
+    let blobs = paths.media.join("blobs");
+    if blobs.exists() {
+        for entry in fs::read_dir(&blobs)
+            .map_err(|error| format!("Failed to read avatar blob cache: {error}"))?
+        {
+            let entry = entry.map_err(|error| format!("Failed to inspect avatar blob: {error}"))?;
+            let path = entry.path();
+            if entry
                 .file_type()
-                .map_err(|error| format!("Failed to inspect avatar cache file type: {error}"))?
+                .map_err(|error| format!("Failed to inspect avatar blob type: {error}"))?
+                .is_file()
+                && !entry.file_name().to_string_lossy().ends_with(".part")
+                && !retained.contains(&path)
+            {
+                delete_file_if_exists(&path)?;
+            }
+        }
+    }
+
+    // Version-addressed media is legacy data after the content-addressed cache migration.
+    for entry in fs::read_dir(&paths.media)
+        .map_err(|error| format!("Failed to read avatar media cache: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Failed to inspect avatar media: {error}"))?;
+        if entry.file_name() != "blobs" {
+            let path = entry.path();
+            if entry
+                .file_type()
+                .map_err(|error| format!("Failed to inspect avatar media type: {error}"))?
                 .is_dir()
             {
-                continue;
-            }
-            let version = entry.file_name().to_string_lossy().into_owned();
-            if version != current_version && Some(version.as_str()) != previous_version.as_deref() {
-                fs::remove_dir_all(entry.path())
-                    .map_err(|error| format!("Failed to prune obsolete avatar cache: {error}"))?;
+                fs::remove_dir_all(path)
+                    .map_err(|error| format!("Failed to prune legacy avatar media: {error}"))?;
             }
         }
     }
@@ -1537,12 +1778,9 @@ fn prune_obsolete_versions(paths: &AvatarCachePaths, current_version: &str) -> R
     Ok(())
 }
 
-fn previous_version_to_keep(
-    meta_root: &Path,
-    current_version: &str,
-) -> Result<Option<String>, String> {
+fn previous_versions(meta_root: &Path, current_version: &str) -> Result<Vec<String>, String> {
     if !meta_root.exists() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let mut versions = Vec::new();
     for entry in fs::read_dir(meta_root)
@@ -1561,8 +1799,8 @@ fn previous_version_to_keep(
             }
         }
     }
-    versions.sort();
-    Ok(versions.pop())
+    versions.sort_by(|left, right| right.cmp(left));
+    Ok(versions)
 }
 
 fn clean_part_files(paths: &AvatarCachePaths) -> Result<(), String> {
@@ -1691,7 +1929,7 @@ mod tests {
     }
 
     fn cached_webm_target(paths: &AvatarCachePaths, catalog: &AvatarCatalog) -> PathBuf {
-        media_cache_path(paths, &catalog.catalog_version, &webm_variant(catalog).path).unwrap()
+        media_blob_path(paths, webm_variant(catalog)).unwrap()
     }
 
     fn write_cached_webm(
@@ -1703,10 +1941,6 @@ mod tests {
         fs::create_dir_all(target.parent().unwrap()).unwrap();
         fs::write(&target, bytes).unwrap();
         target
-    }
-
-    fn write_webm_checksum_marker(paths: &AvatarCachePaths, catalog: &AvatarCatalog) {
-        write_checksum_marker(paths, &catalog.catalog_version, webm_variant(catalog)).unwrap();
     }
 
     fn add_second_avatar(catalog: &mut AvatarCatalog, webm_variant: AvatarVariant) {
@@ -1736,15 +1970,23 @@ mod tests {
     }
 
     #[test]
-    fn media_cache_paths_reject_traversal_and_point_under_media() {
+    fn media_blob_paths_use_content_identity() {
         let paths = cache_paths_for_root(PathBuf::from("/tmp/avatars"));
-        let path = media_cache_path(&paths, "v1", "webm/gloopies/gloopy-1.webm").unwrap();
-        assert_eq!(path, paths.media.join("v1/webm/gloopies/gloopy-1.webm"));
+        let variant = variant("webm/gloopies/gloopy-1.webm", b"avatar-bytes");
+        let path = media_blob_path(&paths, &variant).unwrap();
+        assert_eq!(
+            path,
+            paths
+                .media
+                .join("blobs")
+                .join(format!("{}.webm", variant.sha256))
+        );
         assert!(path.starts_with(&paths.media));
         assert!(!path.starts_with(&paths.meta));
-        assert!(media_cache_path(&paths, "v1", "webm/../secret").is_err());
-        assert!(media_cache_path(&paths, "../v1", "webm/gloopies/gloopy-1.webm").is_err());
-        assert!(media_cache_path(&paths, ".", "webm/gloopies/gloopy-1.webm").is_err());
+
+        let mut invalid = variant;
+        invalid.sha256 = "../not-a-digest".to_string();
+        assert!(media_blob_path(&paths, &invalid).is_err());
     }
 
     #[test]
@@ -1846,25 +2088,13 @@ mod tests {
     }
 
     #[test]
-    fn cached_collection_assets_require_valid_checksum_marker_and_bytes() {
+    fn cached_collection_assets_require_valid_blob_size() {
         let bytes = b"avatar-bytes";
         let catalog = valid_catalog(bytes);
         let collection = &catalog.collections[0];
         let (_dir, paths) = temp_paths();
-        let target = write_cached_webm(&paths, &catalog, bytes);
-
-        // Missing checksum marker: reported as not cached, but the read path
-        // must leave the file in place so it never races a concurrent download.
-        assert!(
-            cached_collection_assets(&paths, &catalog, collection, "webm")
-                .unwrap()
-                .is_none()
-        );
-        assert!(target.exists());
-
-        // Wrong bytes with a marker: still not cached, still left untouched.
+        // Wrong-sized bytes at the hash-derived path are not treated as cached.
         let target = write_cached_webm(&paths, &catalog, b"avatar-bytes-plus");
-        write_webm_checksum_marker(&paths, &catalog);
         assert!(
             cached_collection_assets(&paths, &catalog, collection, "webm")
                 .unwrap()
@@ -1873,12 +2103,159 @@ mod tests {
         assert!(target.exists());
 
         let target = write_cached_webm(&paths, &catalog, bytes);
-        write_webm_checksum_marker(&paths, &catalog);
         let assets = cached_collection_assets(&paths, &catalog, collection, "webm")
             .unwrap()
             .unwrap();
         assert_eq!(assets[0].path, target.to_string_lossy());
         assert!(Path::new(&assets[0].path).starts_with(&paths.media));
+    }
+
+    #[test]
+    fn cached_avatar_survives_catalog_bump_without_a_download() {
+        let bytes = b"avatar-bytes";
+        let catalog = valid_catalog(bytes);
+        let mut bumped_catalog = catalog.clone();
+        bumped_catalog.catalog_version = "v2".to_string();
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, bytes);
+
+        assert!(
+            cached_avatar_for_id_with_format(&paths, &bumped_catalog, "gloopy-1", "webm",)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn preparing_legacy_media_satisfies_current_catalog_without_a_download() {
+        let bytes = b"avatar-bytes";
+        let previous = valid_catalog(bytes);
+        let mut current = previous.clone();
+        current.catalog_version = "v2".to_string();
+        let (_dir, paths) = temp_paths();
+        for catalog in [&previous, &current] {
+            atomic_write(
+                &paths
+                    .meta
+                    .join(&catalog.catalog_version)
+                    .join(MANIFEST_FILE),
+                &serde_json::to_vec(catalog).unwrap(),
+            )
+            .unwrap();
+        }
+        let variant = webm_variant(&previous);
+        let legacy = paths.media.join("v1").join(&variant.path);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(legacy, bytes).unwrap();
+
+        assert!(
+            cached_avatar_for_id_with_format(&paths, &current, "gloopy-1", "webm")
+                .unwrap()
+                .is_none()
+        );
+        prepare_legacy_media(&paths, "v2").unwrap();
+        assert!(
+            cached_avatar_for_id_with_format(&paths, &current, "gloopy-1", "webm")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn preparing_legacy_media_scans_past_a_metadata_only_predecessor() {
+        let bytes = b"avatar-bytes";
+        let v1 = valid_catalog(bytes);
+        let mut v2 = v1.clone();
+        v2.catalog_version = "v2".to_string();
+        let mut v3 = v1.clone();
+        v3.catalog_version = "v3".to_string();
+        let (_dir, paths) = temp_paths();
+        for catalog in [&v1, &v2, &v3] {
+            atomic_write(
+                &paths
+                    .meta
+                    .join(&catalog.catalog_version)
+                    .join(MANIFEST_FILE),
+                &serde_json::to_vec(catalog).unwrap(),
+            )
+            .unwrap();
+        }
+        let variant = webm_variant(&v1);
+        let legacy = paths.media.join("v1").join(&variant.path);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(legacy, bytes).unwrap();
+
+        let retained = prepare_legacy_media(&paths, "v3").unwrap();
+
+        assert_eq!(retained.as_deref(), Some("v2"));
+        assert!(
+            cached_avatar_for_id_with_format(&paths, &v3, "gloopy-1", "webm")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn shared_blob_followers_keep_their_own_asset_metadata() {
+        let catalog = valid_catalog(b"shared-bytes");
+        let leader = &catalog.assets[0];
+        let variant = webm_variant(&catalog);
+        let follower = AvatarCatalogEntry {
+            id: "gloopy-2".to_string(),
+            label: "Gloopy 2".to_string(),
+            collection_id: "gloopies".to_string(),
+            variants: leader.variants.clone(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("shared.webm");
+        fs::write(&target, b"shared-bytes").unwrap();
+
+        let leader_asset =
+            cached_asset_after_blob_placement(Ok(()), leader, variant, &target).unwrap();
+        let follower_asset =
+            cached_asset_after_blob_placement(Ok(()), &follower, variant, &target).unwrap();
+
+        assert_eq!(leader_asset.id, "gloopy-1");
+        assert_eq!(follower_asset.id, "gloopy-2");
+        assert_eq!(leader_asset.path, follower_asset.path);
+        assert_eq!(leader_asset.mime_type, follower_asset.mime_type);
+    }
+
+    #[test]
+    fn catalogs_reject_incompatible_shared_blob_metadata() {
+        let mut catalog = valid_catalog(b"shared-bytes");
+        let mut incompatible = webm_variant(&catalog).clone();
+        incompatible.byte_size += 1;
+        add_second_avatar(&mut catalog, incompatible);
+
+        assert!(validate_catalog(&catalog)
+            .unwrap_err()
+            .contains("sharing a blob"));
+    }
+
+    #[test]
+    fn changed_content_and_extensions_use_distinct_blobs() {
+        let paths = cache_paths_for_root(PathBuf::from("/tmp/avatars"));
+        let before = variant("webm/gloopies/gloopy-1.webm", b"before");
+        let after = variant("webm/gloopies/gloopy-1.webm", b"after");
+        let same_bytes_mp4 = variant("hevc/gloopies/gloopy-1.mp4", b"before");
+
+        assert_ne!(
+            media_blob_path(&paths, &before).unwrap(),
+            media_blob_path(&paths, &after).unwrap()
+        );
+        assert_ne!(
+            inflight_key(&before).unwrap(),
+            inflight_key(&after).unwrap()
+        );
+        assert_ne!(
+            media_blob_path(&paths, &before).unwrap(),
+            media_blob_path(&paths, &same_bytes_mp4).unwrap()
+        );
+        assert_ne!(
+            inflight_key(&before).unwrap(),
+            inflight_key(&same_bytes_mp4).unwrap()
+        );
     }
 
     #[test]
@@ -1913,7 +2290,6 @@ mod tests {
         let entry = &catalog.assets[0];
         let variant = webm_variant(&catalog);
         let target = write_cached_webm(&paths, &catalog, bytes);
-        write_webm_checksum_marker(&paths, &catalog);
 
         assert_eq!(
             cached_avatar_for_id_with_format(&paths, &catalog, "gloopy-1", "webm")
@@ -1929,7 +2305,7 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            valid_cached_asset(&paths, &catalog, entry, variant, &target)
+            valid_cached_asset(entry, variant, &target)
                 .unwrap()
                 .unwrap()
                 .id,
@@ -1943,7 +2319,6 @@ mod tests {
         let catalog = valid_catalog(bytes);
         let (_dir, paths) = temp_paths();
         write_cached_webm(&paths, &catalog, bytes);
-        write_webm_checksum_marker(&paths, &catalog);
 
         let cached = cached_avatars_for_parsed_refs_with_format(
             &paths,
@@ -1997,7 +2372,6 @@ mod tests {
         );
         let (_dir, paths) = temp_paths();
         write_cached_webm(&paths, &catalog, bytes);
-        write_webm_checksum_marker(&paths, &catalog);
 
         let (assets, failed, error_code) =
             ensure_collection_assets(&paths, &catalog, &catalog.collections[0], "webm")
@@ -2046,20 +2420,101 @@ mod tests {
     }
 
     #[test]
-    fn prunes_obsolete_versions_but_keeps_current_plus_previous() {
+    fn pruning_keeps_referenced_blobs_and_removes_legacy_media() {
         let (_dir, paths) = temp_paths();
-        for base in [&paths.meta, &paths.media] {
-            fs::create_dir_all(base.join("v1")).unwrap();
-            fs::create_dir_all(base.join("v2")).unwrap();
-            fs::create_dir_all(base.join("v3")).unwrap();
+        let v1 = valid_catalog(b"old-avatar");
+        let mut v2 = valid_catalog(b"previous-avatar");
+        v2.catalog_version = "v2".to_string();
+        let mut v3 = valid_catalog(b"current-avatar");
+        v3.catalog_version = "v3".to_string();
+        for catalog in [&v1, &v2, &v3] {
+            let target = paths
+                .meta
+                .join(&catalog.catalog_version)
+                .join(MANIFEST_FILE);
+            atomic_write(&target, &serde_json::to_vec(catalog).unwrap()).unwrap();
         }
+
+        for catalog in [&v1, &v2, &v3] {
+            for variant in [
+                catalog.assets[0].variants.webm.as_ref().unwrap(),
+                catalog.assets[0].variants.hevc.as_ref().unwrap(),
+            ] {
+                let path = media_blob_path(&paths, variant).unwrap();
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, b"cached").unwrap();
+            }
+        }
+        let legacy_variant = webm_variant(&v2);
+        let legacy_path = paths.media.join("v2").join(&legacy_variant.path);
+        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        fs::write(&legacy_path, b"previous-avatar").unwrap();
+        let migrated_blob = media_blob_path(&paths, legacy_variant).unwrap();
+        fs::write(&migrated_blob, vec![b'x'; b"previous-avatar".len()]).unwrap();
+
         prune_obsolete_versions(&paths, "v3").unwrap();
+
         assert!(!paths.meta.join("v1").exists());
         assert!(paths.meta.join("v2").exists());
         assert!(paths.meta.join("v3").exists());
+        assert!(!media_blob_path(&paths, webm_variant(&v1)).unwrap().exists());
+        assert!(migrated_blob.exists());
+        assert_eq!(fs::read(&migrated_blob).unwrap(), b"previous-avatar");
+        assert!(media_blob_path(&paths, webm_variant(&v3)).unwrap().exists());
+        assert!(!paths.media.join("v2").exists());
+    }
+
+    #[test]
+    fn pruning_skips_corrupt_candidates_and_keeps_previous_valid_manifest() {
+        let (_dir, paths) = temp_paths();
+        let previous = valid_catalog(b"previous-avatar");
+        let mut current = valid_catalog(b"current-avatar");
+        current.catalog_version = "v4".to_string();
+        for catalog in [&previous, &current] {
+            atomic_write(
+                &paths
+                    .meta
+                    .join(&catalog.catalog_version)
+                    .join(MANIFEST_FILE),
+                &serde_json::to_vec(catalog).unwrap(),
+            )
+            .unwrap();
+        }
+        fs::create_dir_all(paths.meta.join("v3")).unwrap();
+        fs::write(paths.meta.join("v3").join(MANIFEST_FILE), b"{").unwrap();
+
+        let variant = webm_variant(&previous);
+        let legacy = paths.media.join("v1").join(&variant.path);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, b"previous-avatar").unwrap();
+        prune_obsolete_versions(&paths, "v4").unwrap();
+
+        assert!(paths.meta.join("v1").exists());
+        assert!(!paths.meta.join("v3").exists());
+        assert!(paths.meta.join("v4").exists());
+        assert_eq!(
+            fs::read(media_blob_path(&paths, variant).unwrap()).unwrap(),
+            b"previous-avatar"
+        );
         assert!(!paths.media.join("v1").exists());
-        assert!(paths.media.join("v2").exists());
-        assert!(paths.media.join("v3").exists());
+    }
+
+    #[test]
+    fn pruning_skips_corrupt_legacy_media_without_blocking_the_catalog() {
+        let bytes = b"avatar-bytes";
+        let catalog = valid_catalog(bytes);
+        let (_dir, paths) = temp_paths();
+        let manifest = paths.meta.join("v1").join(MANIFEST_FILE);
+        atomic_write(&manifest, &serde_json::to_vec(&catalog).unwrap()).unwrap();
+
+        let variant = webm_variant(&catalog);
+        let legacy = paths.media.join("v1").join(&variant.path);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, vec![b'x'; bytes.len()]).unwrap();
+        prune_obsolete_versions(&paths, "v1").unwrap();
+
+        assert!(!legacy.exists());
+        assert!(!media_blob_path(&paths, variant).unwrap().exists());
     }
 
     #[test]
@@ -2225,11 +2680,8 @@ mod tests {
 
     #[tokio::test]
     async fn deduped_follower_preserves_leader_error_code() {
-        // A follower subscribes to the leader's broadcast channel and must
-        // reconstruct the leader's exact error code. Carrying only the detail
-        // string used to force every follower to Unavailable, dropping a
-        // leader's NetworkAccess (WARP) code and its "connect to WARP"
-        // recovery message on concurrent requests for the same failing asset.
+        // A follower subscribes to the blob leader's channel and preserves the
+        // full error code so concurrent requests receive the same recovery hint.
         let (tx, _) = broadcast::channel::<InflightResult>(1);
         let mut follower = tx.subscribe();
 
@@ -2241,7 +2693,7 @@ mod tests {
 
         // Mirrors the follower arm in ensure_entry_deduped.
         let error = match follower.recv().await {
-            Ok(Ok(_)) => panic!("expected the leader's error, not an asset"),
+            Ok(Ok(())) => panic!("expected the leader's error, not success"),
             Ok(Err(error)) => error,
             Err(error) => panic!("unexpected channel error: {error}"),
         };
