@@ -2270,6 +2270,12 @@ describe("sessions.move_to_group", () => {
         ],
       },
     });
+    mocks.acpGetSessionInfo.mockImplementation(async (sessionId: string) => {
+      if (sessionId === "session-1" || sessionId === "session-2") {
+        return makeAcpSession({ sessionId, projectId: "p-1" });
+      }
+      throw Object.assign(new Error("Resource not found"), { code: -32002 });
+    });
     mocks.acpListSessionsPage.mockResolvedValue({
       sessions: [
         makeAcpSession({ sessionId: "session-1", projectId: "p-1" }),

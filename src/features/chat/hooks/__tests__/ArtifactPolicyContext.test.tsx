@@ -464,6 +464,8 @@ describe("ArtifactPolicyContext", () => {
     "vbscript:msgbox(1)",
     "https://example.com/report.md",
     "mailto:hello@example.com",
+    "berd://session/session-1",
+    "berd:///session/session-1",
     "#anchor",
   ])("does not resolve blocked markdown href %s", (href) => {
     render(

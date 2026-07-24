@@ -50,15 +50,40 @@ fn focus_main_window<R: Runtime>(app: &AppHandle<R>, reveal: bool) {
     }
 }
 
-fn parse_session_deep_link(url: &Url) -> Option<String> {
+enum SessionDeepLinkRoute {
+    Host,
+    Path,
+}
+
+const SESSION_HOST_ROUTE_PREFIX: &str = "berd://session/";
+const SESSION_PATH_ROUTE_PREFIX: &str = "berd:///session/";
+
+fn raw_session_deep_link_route(url: &Url) -> Option<SessionDeepLinkRoute> {
     if url.scheme() != "berd" {
         return None;
     }
 
+    let raw = url.as_str();
+    if raw.starts_with(SESSION_HOST_ROUTE_PREFIX) {
+        return Some(SessionDeepLinkRoute::Host);
+    }
+    if raw.starts_with(SESSION_PATH_ROUTE_PREFIX) {
+        return Some(SessionDeepLinkRoute::Path);
+    }
+    None
+}
+
+fn parse_session_deep_link(url: &Url) -> Option<String> {
+    let route = raw_session_deep_link_route(url)?;
+
     let mut segments = url.path_segments()?.collect::<Vec<_>>();
-    let encoded_session_id = match url.host_str() {
-        Some("session") if segments.len() == 1 => segments.pop(),
-        None | Some("") if segments.len() == 2 && segments[0] == "session" => Some(segments[1]),
+    let encoded_session_id = match (route, url.host_str()) {
+        (SessionDeepLinkRoute::Host, Some("session")) if segments.len() == 1 => segments.pop(),
+        (SessionDeepLinkRoute::Path, None | Some(""))
+            if segments.len() == 2 && segments[0] == "session" =>
+        {
+            Some(segments[1])
+        }
         _ => None,
     }?;
 
@@ -163,6 +188,9 @@ mod tests {
     fn ignores_non_session_links() {
         assert_eq!(parse("berd://connect-return"), None);
         assert_eq!(parse("https://example.com/session/abc"), None);
+        assert_eq!(parse("berd:/session/session-1"), None);
+        assert_eq!(parse("berd:session/session-1"), None);
+        assert_eq!(parse("berd://SESSION/session-1"), None);
         assert_eq!(parse("berd://session/"), None);
         assert_eq!(parse("berd:///session/"), None);
         assert_eq!(parse("berd://session/a/b"), None);

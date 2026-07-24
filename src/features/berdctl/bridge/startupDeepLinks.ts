@@ -1,6 +1,7 @@
 import { getCurrent } from "@tauri-apps/plugin-deep-link";
 
 import { dispatchCommand } from "@/features/berdctl/commands/registry";
+import { parseSessionDeepLink } from "@/features/sessions/lib/sessionDeepLink";
 
 type DispatchCommand = typeof dispatchCommand;
 
@@ -11,55 +12,7 @@ function startupBatchKey(urls: string[]): string {
   return urls.join("\n");
 }
 
-function strictPathSegments(url: URL): string[] | null {
-  const segments = url.pathname.split("/");
-  if (segments[0] !== "") {
-    return null;
-  }
-
-  const pathSegments = segments.slice(1);
-  return pathSegments.every(Boolean) ? pathSegments : null;
-}
-
-export function parseStartupSessionDeepLink(raw: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return null;
-  }
-
-  if (url.protocol !== "berd:") {
-    return null;
-  }
-
-  const segments = strictPathSegments(url);
-  if (!segments) {
-    return null;
-  }
-
-  let encodedSessionId: string | undefined;
-  if (url.hostname === "session" && segments.length === 1) {
-    encodedSessionId = segments[0];
-  } else if (
-    url.hostname === "" &&
-    segments.length === 2 &&
-    segments[0] === "session"
-  ) {
-    encodedSessionId = segments[1];
-  }
-
-  if (!encodedSessionId) {
-    return null;
-  }
-
-  try {
-    const sessionId = decodeURIComponent(encodedSessionId);
-    return sessionId ? sessionId : null;
-  } catch {
-    return null;
-  }
-}
+export const parseStartupSessionDeepLink = parseSessionDeepLink;
 
 export async function openStartupSessionDeepLinkUrls(
   urls: string[],

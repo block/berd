@@ -16,16 +16,9 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   getCurrent: mocks.getCurrent,
 }));
 
-vi.mock("@/features/berdctl/commands/registry", async (importOriginal) => {
-  const actual =
-    await importOriginal<
-      typeof import("@/features/berdctl/commands/registry")
-    >();
-  return {
-    ...actual,
-    dispatchCommand: mocks.dispatchCommand,
-  };
-});
+vi.mock("@/features/berdctl/commands/registry", () => ({
+  dispatchCommand: mocks.dispatchCommand,
+}));
 
 function installTauriInternals(): void {
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
@@ -73,6 +66,8 @@ describe("startup session deep links", () => {
 
   it("ignores links outside the session route", () => {
     expect(parseStartupSessionDeepLink("berd://connect-return")).toBeNull();
+    expect(parseStartupSessionDeepLink("berd:/session/session-1")).toBeNull();
+    expect(parseStartupSessionDeepLink("berd:session/session-1")).toBeNull();
     expect(
       parseStartupSessionDeepLink("https://example.com/session/abc"),
     ).toBeNull();

@@ -6,6 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/shared/ui/tooltip";
+import { parseSessionDeepLink } from "@/features/sessions/lib/sessionDeepLink";
 import { isExternalHref } from "@/shared/lib/isExternalHref";
 import { isUrlTrusted } from "@/shared/lib/trustedDomains";
 import { LinkSafetyModal } from "@/shared/ui/ai-elements/link-safety-modal";
@@ -434,6 +435,41 @@ const MarkdownLink = memo(
       );
     }
 
+    if (parseSessionDeepLink(href ?? "")) {
+      return (
+        <a
+          className="wrap-anywhere font-medium text-primary underline"
+          data-streamdown="link"
+          href={href}
+          rel="noreferrer"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void import("@/features/sessions/lib/openSessionDeepLink")
+              .then(({ openSessionDeepLink }) =>
+                openSessionDeepLink(href ?? ""),
+              )
+              .catch((error: unknown) => {
+                console.error("[sessionDeepLink] open failed:", error);
+              });
+          }}
+          {...rest}
+        >
+          {children}
+        </a>
+      );
+    }
+
+    if (isReservedBerdSessionLinkPrefix(href)) {
+      return (
+        <>
+          {children}
+          {/* i18n-check-ignore — mirrors Streamdown's sanitizer marker for blocked links */}
+          {" [blocked]"}
+        </>
+      );
+    }
+
     return (
       <a
         className="wrap-anywhere font-medium text-primary underline"
@@ -468,12 +504,35 @@ function buildStreamdownComponents(imageRenderer?: MarkdownImageRenderer) {
  * `rehype-harden` treats only `/`, `./`, and `../` as relative URLs. Bare
  * filesystem paths such as `wiki/report.md` are therefore replaced with a
  * `[blocked]` indicator before Berd's artifact click handler can resolve them
- * against the session working directory. Prefix only bare path-like link and
- * image destinations for the sanitizer, then remove the prefix afterwards so
- * the renderer and artifact policy receive the original href.
+ * against the session working directory. It also blocks Berd's custom deep-link
+ * scheme. Prefix only bare path-like destinations and parseable Berd session
+ * links for the sanitizer, then remove the prefixes afterwards so the renderer
+ * and click-routing policy receive the original href. Other custom schemes and
+ * malformed `berd:` links remain blocked.
  */
 const BERD_LOCAL_PATH_PREFIX = "/__berd_local_path__/";
+const BERD_SESSION_LINK_PREFIX_ROOT = "/__berd_session_link__/";
+const BERD_SESSION_LINK_PREFIX = `${BERD_SESSION_LINK_PREFIX_ROOT}${createBerdSessionLinkNonce()}/`;
 const MARKDOWN_DESTINATION_PROPERTY = new Set(["href", "src"]);
+
+function createBerdSessionLinkNonce(): string {
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+      "",
+    );
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isReservedBerdSessionLinkPrefix(href: string | undefined): boolean {
+  return href?.startsWith(BERD_SESSION_LINK_PREFIX_ROOT) ?? false;
+}
 
 type MarkdownHastNode = {
   children?: MarkdownHastNode[];
@@ -500,15 +559,19 @@ function isBareLocalMarkdownPath(value: string): boolean {
   );
 }
 
+function isValidBerdSessionDeepLink(value: string): boolean {
+  return parseSessionDeepLink(value) !== null;
+}
+
 function visitMarkdownDestinations(
   node: MarkdownHastNode,
-  transform: (value: string) => string,
+  transform: (value: string, property: string) => string,
 ) {
   if (node.properties) {
     for (const property of MARKDOWN_DESTINATION_PROPERTY) {
       const value = node.properties[property];
       if (typeof value === "string") {
-        node.properties[property] = transform(value);
+        node.properties[property] = transform(value, property);
       }
     }
   }
@@ -517,27 +580,44 @@ function visitMarkdownDestinations(
   }
 }
 
-function prefixBareLocalMarkdownPaths() {
+function prefixBerdMarkdownDestinations() {
   return (tree: MarkdownHastNode) => {
-    visitMarkdownDestinations(tree, (value) =>
-      isBareLocalMarkdownPath(value)
-        ? `${BERD_LOCAL_PATH_PREFIX}${encodeURIComponent(value)}`
-        : value,
-    );
+    visitMarkdownDestinations(tree, (value, property) => {
+      if (isBareLocalMarkdownPath(value)) {
+        return `${BERD_LOCAL_PATH_PREFIX}${encodeURIComponent(value)}`;
+      }
+      if (property === "href" && isValidBerdSessionDeepLink(value)) {
+        return `${BERD_SESSION_LINK_PREFIX}${encodeURIComponent(value)}`;
+      }
+      return value;
+    });
   };
 }
 
-function restoreBareLocalMarkdownPaths() {
+function restoreBerdMarkdownDestinations() {
   return (tree: MarkdownHastNode) => {
-    visitMarkdownDestinations(tree, (value) => {
-      if (!value.startsWith(BERD_LOCAL_PATH_PREFIX)) return value;
-      const encodedPath = value.slice(BERD_LOCAL_PATH_PREFIX.length);
-      try {
-        const decodedPath = decodeURIComponent(encodedPath);
-        return isBareLocalMarkdownPath(decodedPath) ? decodedPath : value;
-      } catch {
-        return value;
+    visitMarkdownDestinations(tree, (value, property) => {
+      if (value.startsWith(BERD_LOCAL_PATH_PREFIX)) {
+        const encodedPath = value.slice(BERD_LOCAL_PATH_PREFIX.length);
+        try {
+          const decodedPath = decodeURIComponent(encodedPath);
+          return isBareLocalMarkdownPath(decodedPath) ? decodedPath : value;
+        } catch {
+          return value;
+        }
       }
+
+      if (property === "href" && value.startsWith(BERD_SESSION_LINK_PREFIX)) {
+        const encodedHref = value.slice(BERD_SESSION_LINK_PREFIX.length);
+        try {
+          const decodedHref = decodeURIComponent(encodedHref);
+          return isValidBerdSessionDeepLink(decodedHref) ? decodedHref : value;
+        } catch {
+          return value;
+        }
+      }
+
+      return value;
     });
   };
 }
@@ -546,10 +626,10 @@ const berdRehypePlugins: NonNullable<
   ComponentProps<typeof Streamdown>["rehypePlugins"]
 > = [
   defaultRehypePlugins.raw,
-  prefixBareLocalMarkdownPaths,
+  prefixBerdMarkdownDestinations,
   defaultRehypePlugins.sanitize,
   defaultRehypePlugins.harden,
-  restoreBareLocalMarkdownPaths,
+  restoreBerdMarkdownDestinations,
 ];
 
 const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
