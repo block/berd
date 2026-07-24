@@ -332,7 +332,19 @@ describe("MessageBubble", () => {
     expect(screen.getByText("Here is the summary.")).toBeInTheDocument();
   });
 
-  it("labels steered user messages", () => {
+  it("does not label a steering user message before delivery", () => {
+    const message = userMessage("adjust course");
+    message.metadata = {
+      ...message.metadata,
+      delivery: "steering",
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.queryByText("Steered")).not.toBeInTheDocument();
+  });
+
+  it("labels delivered steer user messages", () => {
     const message = userMessage("adjust course");
     message.metadata = {
       ...message.metadata,

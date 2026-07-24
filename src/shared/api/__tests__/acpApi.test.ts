@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   unstableForkSession: vi.fn(),
   newSession: vi.fn(),
   setSessionConfigOption: vi.fn(),
+  extMethod: vi.fn(),
 }));
 
 const includeLastMessageSnippetMeta = {
@@ -643,5 +644,65 @@ describe("provider wire translation", () => {
     );
 
     warn.mockRestore();
+  });
+});
+
+describe("steerSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getClient.mockResolvedValue({ extMethod: mocks.extMethod });
+  });
+
+  it("returns the backend message id used to correlate steer delivery", async () => {
+    mocks.extMethod.mockResolvedValue({
+      runId: "run-2",
+      messageId: "steer-message",
+    });
+
+    const { steerSession } = await import("../acpApi");
+
+    await expect(
+      steerSession(
+        "session-1",
+        [{ type: "text", text: "make it shorter" }],
+        "run-1",
+      ),
+    ).resolves.toEqual({ runId: "run-2", messageId: "steer-message" });
+    expect(mocks.extMethod).toHaveBeenCalledWith(
+      "_goose/unstable/session/steer",
+      {
+        sessionId: "session-1",
+        prompt: [{ type: "text", text: "make it shorter" }],
+        expectedRunId: "run-1",
+      },
+    );
+  });
+
+  it("keeps the delivery message id when retrying with the actual run", async () => {
+    mocks.extMethod
+      .mockRejectedValueOnce({ data: { actualRunId: "run-2" } })
+      .mockResolvedValueOnce({
+        runId: "run-2",
+        messageId: "steer-message",
+      });
+
+    const { steerSession } = await import("../acpApi");
+
+    await expect(
+      steerSession(
+        "session-1",
+        [{ type: "text", text: "make it shorter" }],
+        "run-1",
+      ),
+    ).resolves.toEqual({ runId: "run-2", messageId: "steer-message" });
+    expect(mocks.extMethod).toHaveBeenNthCalledWith(
+      2,
+      "_goose/unstable/session/steer",
+      {
+        sessionId: "session-1",
+        prompt: [{ type: "text", text: "make it shorter" }],
+        expectedRunId: "run-2",
+      },
+    );
   });
 });

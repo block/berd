@@ -281,6 +281,11 @@ interface ChatStoreActions {
     messageId: string,
     updater: (msg: Message) => Message,
   ) => void;
+  replaceMessageId: (
+    sessionId: string,
+    messageId: string,
+    replacementId: string,
+  ) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   setMessages: (sessionId: string, messages: Message[]) => void;
   clearMessages: (sessionId: string) => void;
@@ -496,6 +501,42 @@ const createChatStore: StateCreator<
       get().sessionStateById,
     );
   },
+
+  replaceMessageId: (sessionId, messageId, replacementId) =>
+    set((state) => {
+      const messages = state.messagesBySession[sessionId];
+      if (!messages || messageId === replacementId) return state;
+
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const nextPendingInterventionBoundary =
+        current.pendingInterventionBoundary?.interventionMessageId === messageId
+          ? { interventionMessageId: replacementId }
+          : current.pendingInterventionBoundary;
+
+      return {
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: messages.map((message) =>
+            message.id === messageId
+              ? { ...message, id: replacementId }
+              : message,
+          ),
+        },
+        ...(nextPendingInterventionBoundary !==
+        current.pendingInterventionBoundary
+          ? {
+              sessionStateById: {
+                ...state.sessionStateById,
+                [sessionId]: {
+                  ...current,
+                  pendingInterventionBoundary: nextPendingInterventionBoundary,
+                },
+              },
+            }
+          : {}),
+      };
+    }),
 
   removeMessage: (sessionId, messageId) =>
     set((state) => {

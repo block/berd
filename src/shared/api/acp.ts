@@ -4,6 +4,7 @@ import type {
   AcpForkSessionOptions,
   AcpSessionInfo,
   AcpSessionsPage,
+  AcpSteerResponse,
 } from "./acpApi";
 import * as sessionRegistry from "./acpSessionRegistry";
 import {
@@ -239,7 +240,7 @@ export async function acpSteerMessage(
     AcpSendMessageOptions,
     "assistantPrompt" | "goose" | "images"
   > = {},
-): Promise<string> {
+): Promise<AcpSteerResponse> {
   const { assistantPrompt, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();

@@ -466,21 +466,32 @@ function extractActualRunId(error: unknown): string | null {
   return match?.[1] ?? null;
 }
 
+export interface AcpSteerResponse {
+  runId: string;
+  messageId: string;
+}
+
 export async function steerSession(
   sessionId: string,
   content: ContentBlock[],
   expectedRunId: string | null,
   meta?: Record<string, unknown>,
-): Promise<string> {
+): Promise<AcpSteerResponse> {
   const client = await getClient();
-  const steer = async (runId: string) => {
+  const steer = async (runId: string): Promise<AcpSteerResponse> => {
     const response = await client.extMethod("_goose/unstable/session/steer", {
       sessionId,
       prompt: content,
       expectedRunId: runId,
       ...(meta ? { _meta: meta } : {}),
     });
-    return typeof response.runId === "string" ? response.runId : runId;
+    if (
+      typeof response.runId !== "string" ||
+      typeof response.messageId !== "string"
+    ) {
+      throw new Error("Steer response is missing runId or messageId");
+    }
+    return { runId: response.runId, messageId: response.messageId };
   };
 
   try {

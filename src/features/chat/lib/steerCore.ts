@@ -50,7 +50,8 @@ export async function steerPromptInSession(
   userMessage.metadata = {
     ...userMessage.metadata,
     ...sendOptions?.userMessageMetadata,
-    delivery: "steer",
+    delivery: "steering",
+    steeringRequestId: userMessage.id,
   };
 
   if (images && images.length > 0) {
@@ -72,7 +73,7 @@ export async function steerPromptInSession(
   });
 
   try {
-    const steeredRunId = await acpSteerMessage(
+    const steerResponse = await acpSteerMessage(
       sessionId,
       activeRunId,
       acpPrompt,
@@ -86,7 +87,39 @@ export async function steerPromptInSession(
         ),
       },
     );
+    const steeredRunId = steerResponse.runId;
     const liveStore = useChatStore.getState();
+    liveStore.replaceMessageId(
+      sessionId,
+      userMessage.id,
+      steerResponse.messageId,
+    );
+    const acknowledgedMessage =
+      liveStore.messagesBySession[sessionId]?.find(
+        (message) => message.id === steerResponse.messageId,
+      ) ?? userMessage;
+    const deliveryArrivedBeforeAcknowledgement =
+      acknowledgedMessage.metadata?.delivery === "steer";
+    if (!deliveryArrivedBeforeAcknowledgement) {
+      liveStore.updateMessage(
+        sessionId,
+        steerResponse.messageId,
+        (message) => ({
+          ...message,
+          metadata: {
+            ...message.metadata,
+            delivery: "steering",
+          },
+        }),
+      );
+    }
+    if (
+      deliveryArrivedBeforeAcknowledgement &&
+      liveStore.getSessionRuntime(sessionId).pendingInterventionBoundary
+        ?.interventionMessageId === steerResponse.messageId
+    ) {
+      liveStore.setPendingInterventionBoundary(sessionId, null);
+    }
     const liveRuntime = liveStore.getSessionRuntime(sessionId);
     const promptStillOwnsSession =
       promptOwner !== null && getSessionPromptOwner(sessionId) === promptOwner;
@@ -107,10 +140,21 @@ export async function steerPromptInSession(
     return true;
   } catch (err) {
     const liveStore = useChatStore.getState();
-    liveStore.removeMessage(sessionId, userMessage.id);
+    const liveMessage = liveStore.messagesBySession[sessionId]?.find(
+      (message) =>
+        message.id === userMessage.id ||
+        message.metadata?.steeringRequestId === userMessage.id,
+    );
+    const deliveryWasEstablished = liveMessage?.metadata?.delivery === "steer";
+    if (deliveryWasEstablished) {
+      return true;
+    }
+
+    const liveMessageId = liveMessage?.id ?? userMessage.id;
+    liveStore.removeMessage(sessionId, liveMessageId);
     if (
       liveStore.getSessionRuntime(sessionId).pendingInterventionBoundary
-        ?.interventionMessageId === userMessage.id
+        ?.interventionMessageId === liveMessageId
     ) {
       liveStore.setPendingInterventionBoundary(sessionId, null);
     }

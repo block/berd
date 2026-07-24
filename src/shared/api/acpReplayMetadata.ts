@@ -9,7 +9,7 @@ export type ReplayAssistantMetadata = Pick<
   MessageMetadata,
   "personaId" | "personaName"
 >;
-export type ReplayUserMetadata = Pick<MessageMetadata, "origin">;
+export type ReplayUserMetadata = Pick<MessageMetadata, "delivery" | "origin">;
 
 export function getReplayMessageId(
   source: ReplayMetadataSource,
@@ -61,9 +61,19 @@ export function getReplayUserMetadata(
     return undefined;
   }
 
-  return goose.origin === "berdctl_cross_session"
-    ? { origin: "berdctl_cross_session" }
-    : undefined;
+  const delivery = goose.steer === true ? "steer" : undefined;
+  const origin =
+    goose.origin === "berdctl_cross_session"
+      ? "berdctl_cross_session"
+      : undefined;
+  if (!delivery && !origin) {
+    return undefined;
+  }
+
+  return {
+    ...(delivery ? { delivery } : {}),
+    ...(origin ? { origin } : {}),
+  };
 }
 
 function getGooseReplayMeta(

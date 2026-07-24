@@ -416,7 +416,7 @@ describe("acpNotificationHandler", () => {
     });
   });
 
-  it("uses goose steer metadata as the live stream boundary", async () => {
+  it("marks a pending steering message delivered at the live stream boundary", async () => {
     useChatStore.getState().setMessages("acp-session", [
       {
         id: "assistant-before-steer",
@@ -439,7 +439,7 @@ describe("acpNotificationHandler", () => {
         metadata: {
           userVisible: true,
           agentVisible: true,
-          delivery: "steer",
+          delivery: "steering",
         },
       },
     ]);
@@ -479,6 +479,11 @@ describe("acpNotificationHandler", () => {
         },
       },
     } as never);
+
+    expect(
+      useChatStore.getState().messagesBySession["acp-session"][1].metadata
+        ?.delivery,
+    ).toBe("steer");
 
     const continuationMessageId =
       useChatStore.getState().getSessionRuntime("acp-session")
@@ -521,6 +526,355 @@ describe("acpNotificationHandler", () => {
       useChatStore.getState().getSessionRuntime("acp-session")
         .pendingInterventionBoundary,
     ).toBeNull();
+  });
+
+  it("correlates delivery that arrives before the steer acknowledgement", async () => {
+    useChatStore.getState().setMessages("acp-session", [
+      {
+        id: "local-steer-message",
+        role: "user",
+        created: 1,
+        content: [{ type: "text", text: "make it shorter" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steering",
+        },
+      },
+    ]);
+    useChatStore.getState().setPendingInterventionBoundary("acp-session", {
+      interventionMessageId: "local-steer-message",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "backend-steer-message",
+        content: { type: "text", text: "make it shorter" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().messagesBySession["acp-session"][0],
+    ).toMatchObject({
+      id: "backend-steer-message",
+      metadata: { delivery: "steer" },
+    });
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .pendingInterventionBoundary,
+    ).toBeNull();
+  });
+
+  it("marks a steering message delivered on an agent boundary", async () => {
+    useChatStore.getState().setMessages("acp-session", [
+      {
+        id: "local-steer-message",
+        role: "user",
+        created: 1,
+        content: [{ type: "text", text: "make it shorter" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steering",
+        },
+      },
+    ]);
+    useChatStore.getState().setPendingInterventionBoundary("acp-session", {
+      interventionMessageId: "local-steer-message",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-boundary",
+        content: { type: "text", text: "" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().messagesBySession["acp-session"],
+    ).toMatchObject([
+      { id: "local-steer-message", metadata: { delivery: "steer" } },
+      { role: "assistant" },
+    ]);
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .pendingInterventionBoundary,
+    ).toBeNull();
+  });
+
+  it("correlates overlapping delivery-before-ack steers in send order", async () => {
+    useChatStore.getState().setMessages("acp-session", [
+      {
+        id: "local-steer-1",
+        role: "user",
+        created: 1,
+        content: [{ type: "text", text: "first steer" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steering",
+        },
+      },
+      {
+        id: "local-steer-2",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "second steer" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steering",
+        },
+      },
+    ]);
+    useChatStore.getState().setPendingInterventionBoundary("acp-session", {
+      interventionMessageId: "local-steer-2",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "backend-steer-1",
+        content: { type: "text", text: "first steer" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().messagesBySession["acp-session"],
+    ).toMatchObject([
+      { id: "backend-steer-1", metadata: { delivery: "steer" } },
+      { role: "assistant" },
+      { id: "local-steer-2", metadata: { delivery: "steering" } },
+    ]);
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .pendingInterventionBoundary,
+    ).toBeNull();
+  });
+
+  it("restores delivered steer metadata from a replayed agent boundary", async () => {
+    markSessionReplayLoading();
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "steer-replay-1",
+        content: { type: "text", text: "make it shorter" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-replay-1",
+        content: { type: "text", text: "Revised answer" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    expect(getReplayBuffer("acp-session")).toMatchObject([
+      {
+        id: "steer-replay-1",
+        role: "user",
+        metadata: { delivery: "steer" },
+      },
+      { id: "assistant-replay-1", role: "assistant" },
+    ]);
+  });
+
+  it("restores overlapping replayed agent-boundary steers in send order", async () => {
+    markSessionReplayLoading();
+
+    for (const [messageId, text] of [
+      ["steer-replay-1", "first steer"],
+      ["steer-replay-2", "second steer"],
+    ]) {
+      await handleSessionNotification({
+        sessionId: "acp-session",
+        update: {
+          sessionUpdate: "user_message_chunk",
+          messageId,
+          content: { type: "text", text },
+        },
+      } as never);
+    }
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-replay-1",
+        content: { type: "text", text: "First revised answer" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    const replayMessages = getReplayBuffer("acp-session") ?? [];
+    expect(replayMessages).toMatchObject([
+      {
+        id: "steer-replay-1",
+        metadata: { delivery: "steer" },
+      },
+      { id: "steer-replay-2" },
+      { id: "assistant-replay-1", role: "assistant" },
+    ]);
+    expect(replayMessages[1].metadata?.delivery).toBeUndefined();
+  });
+
+  it("preserves a later replay steer across ordinary chunks after the first boundary", async () => {
+    markSessionReplayLoading();
+
+    for (const [messageId, text] of [
+      ["steer-replay-1", "first steer"],
+      ["steer-replay-2", "second steer"],
+    ]) {
+      await handleSessionNotification({
+        sessionId: "acp-session",
+        update: {
+          sessionUpdate: "user_message_chunk",
+          messageId,
+          content: { type: "text", text },
+        },
+      } as never);
+    }
+    for (const update of [
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-replay-1",
+        content: { type: "text", text: "First revised answer" },
+        _meta: { goose: { steer: true } },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-replay-1",
+        content: { type: "text", text: " continued" },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-replay-2",
+        content: { type: "text", text: "Second revised answer" },
+        _meta: { goose: { steer: true } },
+      },
+    ]) {
+      await handleSessionNotification({
+        sessionId: "acp-session",
+        update,
+      } as never);
+    }
+
+    const replayMessages = getReplayBuffer("acp-session") ?? [];
+    expect(replayMessages[0].metadata?.delivery).toBe("steer");
+    expect(replayMessages[1].metadata?.delivery).toBe("steer");
+  });
+
+  it("does not treat a prompt as a steer when a tool event starts its response", async () => {
+    markSessionReplayLoading();
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "prompt-replay-1",
+        content: { type: "text", text: "ordinary prompt" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "tool_call",
+        messageId: "assistant-replay-1",
+        toolCallId: "tool-1",
+        title: "search",
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "steer-replay-1",
+        content: { type: "text", text: "steer prompt" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-replay-2",
+        content: { type: "text", text: "Revised answer" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    const replayMessages = getReplayBuffer("acp-session") ?? [];
+    expect(replayMessages[0].metadata?.delivery).toBeUndefined();
+    expect(replayMessages[2].metadata?.delivery).toBe("steer");
+  });
+
+  it("does not carry an id-less ordinary prompt into a later steer boundary", async () => {
+    markSessionReplayLoading();
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "prompt-replay-1",
+        content: { type: "text", text: "first ordinary prompt" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "First answer" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "prompt-replay-2",
+        content: { type: "text", text: "second ordinary prompt" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Second answer" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "steer-replay-1",
+        content: { type: "text", text: "actual steer" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Steered answer" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    const replayMessages = getReplayBuffer("acp-session") ?? [];
+    const userMessages = replayMessages.filter(
+      (message) => message.role === "user",
+    );
+    expect(userMessages[0].metadata?.delivery).toBeUndefined();
+    expect(userMessages[1].metadata?.delivery).toBeUndefined();
+    expect(userMessages[2].metadata?.delivery).toBe("steer");
   });
 
   it("attaches replay assistant persona identity from update metadata", async () => {

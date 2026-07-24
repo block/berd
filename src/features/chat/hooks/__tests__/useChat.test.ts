@@ -30,6 +30,7 @@ vi.mock("@/shared/api/acp", () => ({
   acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
+import { handleSessionNotification } from "../../acp/acpNotificationHandler";
 import { useChat } from "../useChat";
 
 function addStreamingAssistantMessage(
@@ -58,10 +59,12 @@ function addStreamingAssistantMessage(
 
 function createDeferredPromise<T = void>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function seedChatSession(overrides: Partial<ChatSession> = {}) {
@@ -130,7 +133,10 @@ describe("useChat", () => {
       isLoading: false,
     });
     mockAcpSendMessage.mockResolvedValue(undefined);
-    mockAcpSteerMessage.mockResolvedValue("run-1");
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "run-1",
+      messageId: "steer-message",
+    });
     mockAcpCancelSession.mockResolvedValue(true);
     mockAcpLoadSession.mockResolvedValue(undefined);
     mockAcpPrepareSession.mockResolvedValue(undefined);
@@ -694,7 +700,11 @@ describe("useChat", () => {
     ).toBe("idle");
   });
 
-  it("steers the active run without changing chat state", async () => {
+  it("does not mark a steering message as steered before delivery", async () => {
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "run-1",
+      messageId: "steer-message",
+    });
     useChatStore.getState().setActiveRunId("session-1", "run-1");
     const { result } = renderHook(() => useChat("session-1"));
 
@@ -717,17 +727,24 @@ describe("useChat", () => {
       useChatStore.getState().messagesBySession["session-1"],
     ).toMatchObject([
       {
+        id: "steer-message",
         role: "user",
         metadata: {
-          delivery: "steer",
           userVisible: true,
         },
       },
     ]);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"][0].metadata
+        ?.delivery,
+    ).toBe("steering");
   });
 
   it("registers the intervention boundary before the backend acknowledges the steer", async () => {
-    const steerDeferred = createDeferredPromise<string>();
+    const steerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
     mockAcpSteerMessage.mockReturnValue(steerDeferred.promise);
     useChatStore.getState().setActiveRunId("session-1", "run-1");
     addStreamingAssistantMessage(
@@ -750,7 +767,7 @@ describe("useChat", () => {
     const messages = useChatStore.getState().messagesBySession["session-1"];
     expect(messages).toMatchObject([
       { id: "assistant-before-steer", role: "assistant" },
-      { role: "user", metadata: { delivery: "steer" } },
+      { role: "user", metadata: { delivery: "steering" } },
     ]);
     expect(
       useChatStore.getState().getSessionRuntime("session-1")
@@ -778,14 +795,66 @@ describe("useChat", () => {
     ]);
 
     await act(async () => {
-      steerDeferred.resolve("run-1");
+      steerDeferred.resolve({ runId: "run-1", messageId: "steer-message" });
       await steerPromise;
     });
   });
 
+  it("keeps a delivered steer when the acknowledgement is lost", async () => {
+    const steerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
+    mockAcpSteerMessage.mockReturnValue(steerDeferred.promise);
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().setChatState("session-1", "streaming");
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let steerPromise!: Promise<boolean>;
+    await act(async () => {
+      steerPromise = result.current.steerMessage("make it shorter");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await handleSessionNotification({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "user_message_chunk",
+          messageId: "backend-steer-message",
+          content: { type: "text", text: "make it shorter" },
+          _meta: { goose: { steer: true } },
+        },
+      } as never);
+    });
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      steerDeferred.reject(new Error("connection closed"));
+      accepted = await steerPromise;
+    });
+
+    expect(accepted).toBe(true);
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages[0]).toMatchObject({
+      id: "backend-steer-message",
+      role: "user",
+      metadata: { delivery: "steer" },
+    });
+    expect(
+      messages.filter((message) => message.role === "system"),
+    ).toHaveLength(0);
+  });
+
   it("preserves the active run across overlapping steer acknowledgements", async () => {
-    const firstSteerDeferred = createDeferredPromise<string>();
-    const secondSteerDeferred = createDeferredPromise<string>();
+    const firstSteerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
+    const secondSteerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
     mockAcpSteerMessage
       .mockReturnValueOnce(firstSteerDeferred.promise)
       .mockReturnValueOnce(secondSteerDeferred.promise);
@@ -818,8 +887,8 @@ describe("useChat", () => {
     );
 
     await act(async () => {
-      firstSteerDeferred.resolve("run-1");
-      secondSteerDeferred.resolve("run-1");
+      firstSteerDeferred.resolve({ runId: "run-1", messageId: "steer-1" });
+      secondSteerDeferred.resolve({ runId: "run-1", messageId: "steer-2" });
       await Promise.all([firstSteerPromise, secondSteerPromise]);
     });
 
@@ -829,8 +898,14 @@ describe("useChat", () => {
   });
 
   it("accepts an overlapping steer acknowledgement for the live backend run", async () => {
-    const firstSteerDeferred = createDeferredPromise<string>();
-    const secondSteerDeferred = createDeferredPromise<string>();
+    const firstSteerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
+    const secondSteerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
     mockAcpSteerMessage
       .mockReturnValueOnce(firstSteerDeferred.promise)
       .mockReturnValueOnce(secondSteerDeferred.promise);
@@ -848,7 +923,7 @@ describe("useChat", () => {
     });
 
     await act(async () => {
-      firstSteerDeferred.resolve("run-2");
+      firstSteerDeferred.resolve({ runId: "run-2", messageId: "steer-1" });
       await firstSteerPromise;
     });
     expect(
@@ -856,7 +931,7 @@ describe("useChat", () => {
     ).toBe("run-2");
 
     await act(async () => {
-      secondSteerDeferred.resolve("run-2");
+      secondSteerDeferred.resolve({ runId: "run-2", messageId: "steer-2" });
       await secondSteerPromise;
     });
     expect(
@@ -867,7 +942,10 @@ describe("useChat", () => {
   it("recovers a steer run when active run metadata arrives late", async () => {
     const sendDeferred = createDeferredPromise<void>();
     mockAcpSendMessage.mockReturnValue(sendDeferred.promise);
-    mockAcpSteerMessage.mockResolvedValue("recovered-run");
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "recovered-run",
+      messageId: "steer-message",
+    });
 
     const { result } = renderHook(() => useChat("session-1"));
 
@@ -891,7 +969,10 @@ describe("useChat", () => {
   it("does not recover a null-id steer after a newer prompt takes ownership", async () => {
     const firstSendDeferred = createDeferredPromise<void>();
     const secondSendDeferred = createDeferredPromise<void>();
-    const steerDeferred = createDeferredPromise<string>();
+    const steerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
     mockAcpSendMessage
       .mockReturnValueOnce(firstSendDeferred.promise)
       .mockReturnValueOnce(secondSendDeferred.promise);
@@ -917,7 +998,7 @@ describe("useChat", () => {
     await act(async () => {
       secondSendPromise = result.current.sendMessage("second prompt");
       await Promise.resolve();
-      steerDeferred.resolve("stale-run");
+      steerDeferred.resolve({ runId: "stale-run", messageId: "steer-message" });
       await steerPromise;
     });
 
@@ -933,7 +1014,10 @@ describe("useChat", () => {
   });
 
   it("does not restore a stale active run when stop wins a race with steer acknowledgement", async () => {
-    const steerDeferred = createDeferredPromise<string>();
+    const steerDeferred = createDeferredPromise<{
+      runId: string;
+      messageId: string;
+    }>();
     mockAcpSteerMessage.mockReturnValue(steerDeferred.promise);
     useChatStore.getState().setActiveRunId("session-1", "run-1");
     useChatStore.getState().setChatState("session-1", "streaming");
@@ -964,7 +1048,7 @@ describe("useChat", () => {
     });
 
     await act(async () => {
-      steerDeferred.resolve("run-1");
+      steerDeferred.resolve({ runId: "run-1", messageId: "steer-message" });
       await Promise.all([steerPromise, cancellation]);
     });
 
@@ -1006,7 +1090,7 @@ describe("useChat", () => {
       },
       {
         role: "user",
-        metadata: { delivery: "steer" },
+        metadata: { delivery: "steering" },
       },
     ]);
     expect(

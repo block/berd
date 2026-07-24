@@ -349,7 +349,10 @@ beforeEach(() => {
   mocks.acpSendMessage.mockResolvedValue(undefined);
   mocks.loadSessionMessages.mockResolvedValue(true);
   mocks.acpSetModel.mockResolvedValue(undefined);
-  mocks.acpSteerMessage.mockResolvedValue("run-steered");
+  mocks.acpSteerMessage.mockResolvedValue({
+    runId: "run-steered",
+    messageId: "steer-message",
+  });
   mocks.discoverAcpProviders.mockResolvedValue([
     { id: "goose", label: "Goose (Default)" },
     { id: "claude-acp", label: "Claude Code" },
@@ -1377,7 +1380,7 @@ describe("sessions.send", () => {
     ).toBe("after cancellation");
   });
 
-  it("steers a running target with provenance metadata", async () => {
+  it("reports steering without marking the message steered before delivery", async () => {
     mockSessionFound();
     useChatStore.getState().setChatState("session-1", "streaming");
     useChatStore.getState().setActiveRunId("session-1", "run-1");
@@ -1399,9 +1402,12 @@ describe("sessions.send", () => {
     });
     const messages = useChatStore.getState().messagesBySession["session-1"];
     expect(messages).toHaveLength(1);
-    expect(messages[0]?.metadata).toMatchObject({
-      delivery: "steer",
-      origin: "berdctl_cross_session",
+    expect(messages[0]).toMatchObject({
+      id: "steer-message",
+      metadata: {
+        delivery: "steering",
+        origin: "berdctl_cross_session",
+      },
     });
     expect(mocks.acpSteerMessage).toHaveBeenCalledWith(
       "session-1",

@@ -115,6 +115,23 @@ describe("chatStore", () => {
     expect(useChatStore.getState().messagesBySession.running).toHaveLength(1);
   });
 
+  it("replaces a pending intervention message id atomically", () => {
+    const store = useChatStore.getState();
+    store.setMessages("s1", [makeMessage({ id: "local-steer", role: "user" })]);
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "local-steer",
+    });
+
+    store.replaceMessageId("s1", "local-steer", "backend-steer");
+
+    expect(useChatStore.getState().messagesBySession.s1?.[0]?.id).toBe(
+      "backend-steer",
+    );
+    expect(getRuntime("s1").pendingInterventionBoundary).toEqual({
+      interventionMessageId: "backend-steer",
+    });
+  });
+
   it("updates runtime state per session", () => {
     const store = useChatStore.getState();
 

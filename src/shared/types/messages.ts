@@ -224,7 +224,8 @@ export interface MessageChip {
 export interface MessageMetadata {
   userVisible?: boolean;
   agentVisible?: boolean;
-  delivery?: "steer";
+  delivery?: "steering" | "steer";
+  steeringRequestId?: string;
   origin?: "berdctl_cross_session";
   attachments?: MessageAttachment[];
   chips?: MessageChip[];

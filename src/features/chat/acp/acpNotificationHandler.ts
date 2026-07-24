@@ -4,7 +4,10 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { getBufferedMessage } from "@/features/chat/hooks/replayBuffer";
+import {
+  getBufferedMessage,
+  getReplayBuffer,
+} from "@/features/chat/hooks/replayBuffer";
 import type {
   MessageContent,
   MessageMetadata,
@@ -67,6 +70,106 @@ interface ReplayPerf {
   count: number;
 }
 const replayPerf = new Map<string, ReplayPerf>();
+interface ReplayAgentBoundaryCandidate {
+  messageId: string;
+  precedingAssistantMessageId: string | null;
+}
+const pendingReplayAgentBoundaryCandidates = new Map<
+  string,
+  ReplayAgentBoundaryCandidate[]
+>();
+const replayAssistantMessageIds = new Map<string, string>();
+const replayAgentBoundaryActive = new Set<string>();
+
+function enqueueReplayAgentBoundaryCandidate(
+  sessionId: string,
+  messageId: string,
+): void {
+  const candidates = pendingReplayAgentBoundaryCandidates.get(sessionId) ?? [];
+  if (!candidates.some((candidate) => candidate.messageId === messageId)) {
+    candidates.push({
+      messageId,
+      precedingAssistantMessageId:
+        replayAssistantMessageIds.get(sessionId) ?? null,
+    });
+    pendingReplayAgentBoundaryCandidates.set(sessionId, candidates);
+  }
+  replayAgentBoundaryActive.delete(sessionId);
+}
+
+function removeReplayAgentBoundaryCandidate(
+  sessionId: string,
+  messageId: string,
+): void {
+  const candidates = pendingReplayAgentBoundaryCandidates.get(sessionId);
+  if (!candidates?.some((candidate) => candidate.messageId === messageId)) {
+    return;
+  }
+  const remainingCandidates = candidates.filter(
+    (candidate) => candidate.messageId !== messageId,
+  );
+  if (remainingCandidates.length === 0) {
+    pendingReplayAgentBoundaryCandidates.delete(sessionId);
+  } else {
+    pendingReplayAgentBoundaryCandidates.set(sessionId, remainingCandidates);
+  }
+}
+
+function handleReplayAssistantBoundary(
+  sessionId: string,
+  update: SessionUpdate,
+): void {
+  const replayMessageId = getReplayMessageId(update);
+  const assistantMessageId =
+    replayMessageId ?? replayAssistantMessageIds.get(sessionId) ?? "anonymous";
+  const previousAssistantMessageId =
+    replayAssistantMessageIds.get(sessionId) ?? null;
+  const isNewAssistantMessage =
+    previousAssistantMessageId !== assistantMessageId;
+  const isInterventionBoundary = isRunInterventionBoundary(update);
+
+  if (!isInterventionBoundary) {
+    replayAgentBoundaryActive.delete(sessionId);
+    if (isNewAssistantMessage) {
+      const candidates = pendingReplayAgentBoundaryCandidates.get(sessionId);
+      const remainingCandidates = candidates?.filter(
+        (candidate) =>
+          candidate.precedingAssistantMessageId !== previousAssistantMessageId,
+      );
+      if (remainingCandidates?.length) {
+        pendingReplayAgentBoundaryCandidates.set(
+          sessionId,
+          remainingCandidates,
+        );
+      } else {
+        pendingReplayAgentBoundaryCandidates.delete(sessionId);
+      }
+    }
+    replayAssistantMessageIds.set(sessionId, assistantMessageId);
+    return;
+  }
+
+  replayAssistantMessageIds.set(sessionId, assistantMessageId);
+  if (replayAgentBoundaryActive.has(sessionId)) return;
+  replayAgentBoundaryActive.add(sessionId);
+
+  const candidates = pendingReplayAgentBoundaryCandidates.get(sessionId);
+  const deliveredCandidate = candidates?.shift();
+  if (!candidates || candidates.length === 0) {
+    pendingReplayAgentBoundaryCandidates.delete(sessionId);
+  }
+  if (!deliveredCandidate) return;
+
+  const deliveredMessage = getReplayBuffer(sessionId)?.find(
+    (message) => message.id === deliveredCandidate.messageId,
+  );
+  if (deliveredMessage) {
+    deliveredMessage.metadata = {
+      ...deliveredMessage.metadata,
+      delivery: "steer",
+    };
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -172,6 +275,41 @@ function isRunInterventionBoundary(update: SessionUpdate): boolean {
   return isRecord(goose) && goose.steer === true;
 }
 
+function markSteerDelivered(sessionId: string, update: SessionUpdate): void {
+  const store = useChatStore.getState();
+  const messages = store.messagesBySession[sessionId];
+  const deliveredMessageId =
+    update.sessionUpdate === "user_message_chunk"
+      ? getChunkMessageId(update)
+      : null;
+  const messageId =
+    deliveredMessageId &&
+    messages?.some((message) => message.id === deliveredMessageId)
+      ? deliveredMessageId
+      : messages?.find(
+          // Goose picks up queued steers in request order. Match a boundary
+          // that beats its response to the oldest steer still awaiting pickup
+          // rather than the latest session-wide intervention boundary.
+          (message) =>
+            message.role === "user" &&
+            message.metadata?.delivery === "steering",
+        )?.id;
+  if (!messageId) return;
+
+  const resolvedMessageId = deliveredMessageId ?? messageId;
+  store.replaceMessageId(sessionId, messageId, resolvedMessageId);
+  store.updateMessage(sessionId, resolvedMessageId, (message) => ({
+    ...message,
+    metadata: {
+      ...message.metadata,
+      delivery: "steer",
+    },
+  }));
+  store.setPendingInterventionBoundary(sessionId, {
+    interventionMessageId: resolvedMessageId,
+  });
+}
+
 function getReplayAssistantMessageMetadata(
   sessionId: string,
   update: SessionUpdate,
@@ -217,6 +355,7 @@ function upsertThinkingContent(content: MessageContent[], text: string): void {
 function handleReplay(sessionId: string, update: SessionUpdate): void {
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
+      handleReplayAssistantBoundary(sessionId, update);
       const msg = ensureReplayAssistantMessage(
         sessionId,
         getReplayMessageId(update),
@@ -237,6 +376,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
     }
 
     case "agent_thought_chunk": {
+      handleReplayAssistantBoundary(sessionId, update);
       if (update.content.type === "text" && "text" in update.content) {
         const msg = ensureReplayAssistantMessage(
           sessionId,
@@ -251,21 +391,30 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
 
     case "user_message_chunk": {
       clearReplayAssistantMessage(sessionId);
+      replayAssistantMessageIds.delete(sessionId);
+      replayAgentBoundaryActive.delete(sessionId);
       if (update.content.type !== "text" && update.content.type !== "image") {
         break;
       }
       const messageId = getReplayMessageId(update) ?? crypto.randomUUID();
+      const metadata = getReplayUserMetadata(update);
       handleReplayUserMessageChunk(
         sessionId,
         messageId,
         update.content,
         getReplayCreated(update),
-        getReplayUserMetadata(update),
+        metadata,
       );
+      if (metadata?.delivery === "steer") {
+        removeReplayAgentBoundaryCandidate(sessionId, messageId);
+      } else {
+        enqueueReplayAgentBoundaryCandidate(sessionId, messageId);
+      }
       break;
     }
 
     case "tool_call": {
+      handleReplayAssistantBoundary(sessionId, update);
       const created = getReplayCreated(update);
       const identity = getToolCallIdentity(update);
       const chainSummary = getToolChainSummary(update);
@@ -290,6 +439,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
     }
 
     case "tool_call_update": {
+      handleReplayAssistantBoundary(sessionId, update);
       const created = getReplayCreated(update);
       const replayMessageId = getReplayMessageId(update);
       const identity = getToolCallIdentity(update);
@@ -394,6 +544,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
     case "agent_message_chunk": {
       if (isRunInterventionBoundary(update)) {
         flushBufferedStreamingUpdatesForSession(sessionId);
+        markSteerDelivered(sessionId, update);
         store.startAssistantStreamAfterIntervention(sessionId);
         break;
       }
@@ -440,6 +591,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
     case "user_message_chunk": {
       if (isRunInterventionBoundary(update)) {
         flushBufferedStreamingUpdatesForSession(sessionId);
+        markSteerDelivered(sessionId, update);
         store.startAssistantStreamAfterIntervention(sessionId);
       }
       break;
@@ -725,6 +877,9 @@ function ensureLiveAssistantMessage(
 }
 
 export function clearMessageTracking(): void {
+  pendingReplayAgentBoundaryCandidates.clear();
+  replayAssistantMessageIds.clear();
+  replayAgentBoundaryActive.clear();
   clearStreamingMessageOwners();
   clearActiveMessageTracking();
   clearReplayAssistantTracking();

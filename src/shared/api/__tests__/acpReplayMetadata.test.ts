@@ -121,6 +121,14 @@ describe("getReplayCreated", () => {
 });
 
 describe("getReplayUserMetadata", () => {
+  it("restores delivered steer metadata", () => {
+    expect(
+      getReplayUserMetadata({
+        _meta: { goose: { steer: true } },
+      }),
+    ).toEqual({ delivery: "steer" });
+  });
+
   it("restores known berdctl cross-session origin metadata", () => {
     expect(
       getReplayUserMetadata({
