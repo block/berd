@@ -30,6 +30,14 @@ interface ListSessionsResult {
     title: string;
     project_id: string | null;
     updated_at: string;
+    is_running: boolean;
+    chat_state:
+      | "idle"
+      | "thinking"
+      | "streaming"
+      | "waiting"
+      | "compacting"
+      | "error";
     message_count: number;
   }>;
 }
@@ -47,6 +55,7 @@ export const listSessionsCommand = defineCommand({
 Result:
   {"sessions": [{"session_id": "...", "title": "...",
                  "project_id": "..."|null, "updated_at": "...",
+                 "is_running": false, "chat_state": "idle",
                  "message_count": 12}, ...]}
   Most recent first; archived sessions are excluded.`,
   schema: listSessionsSchema,
@@ -54,7 +63,7 @@ Result:
     const [
       { useChatSessionStore },
       { findProjectOrThrow },
-      { loadAllSessionsForBerdctl },
+      { loadAllSessionsForBerdctl, sessionMetadata },
     ] = await Promise.all([
       import("@/features/chat/stores/chatSessionStore"),
       import("../runtime/projects"),
@@ -77,13 +86,18 @@ Result:
         query ? session.title.toLowerCase().includes(query) : true,
       )
       .slice(0, args.limit)
-      .map((session) => ({
-        session_id: session.id,
-        title: session.title,
-        project_id: session.projectId ?? null,
-        updated_at: session.updatedAt,
-        message_count: session.messageCount,
-      }));
+      .map((session) => {
+        const metadata = sessionMetadata(session);
+        return {
+          session_id: session.id,
+          title: session.title,
+          project_id: session.projectId ?? null,
+          updated_at: session.updatedAt,
+          is_running: metadata.is_running,
+          chat_state: metadata.chat_state,
+          message_count: session.messageCount,
+        };
+      });
     return { sessions };
   },
 });

@@ -1551,6 +1551,8 @@ describe("sessions.list", () => {
       nextCursor: null,
     });
 
+    useChatStore.getState().setChatState("session-a", "streaming");
+
     const result = await dispatchCommand("sessions", { action: "list" }, ctx);
 
     expect(mocks.acpListSessionsPage).toHaveBeenCalledTimes(1);
@@ -1561,6 +1563,8 @@ describe("sessions.list", () => {
           title: "Loaded Session",
           project_id: null,
           updated_at: "2026-04-02T00:00:00.000Z",
+          is_running: true,
+          chat_state: "streaming",
           message_count: 3,
         },
       ],

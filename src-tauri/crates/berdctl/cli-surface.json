@@ -23,7 +23,7 @@
         "list": {
           "action": "list",
           "about": "List the user's chat sessions (most recent first)",
-          "afterHelp": "Example:\n  berdctl session list --query \"review\" --limit 10 --json\n\nResult:\n  {\"sessions\": [{\"session_id\": \"...\", \"title\": \"...\",\n                 \"project_id\": \"...\"|null, \"updated_at\": \"...\",\n                 \"message_count\": 12}, ...]}\n  Most recent first; archived sessions are excluded."
+          "afterHelp": "Example:\n  berdctl session list --query \"review\" --limit 10 --json\n\nResult:\n  {\"sessions\": [{\"session_id\": \"...\", \"title\": \"...\",\n                 \"project_id\": \"...\"|null, \"updated_at\": \"...\",\n                 \"is_running\": false, \"chat_state\": \"idle\",\n                 \"message_count\": 12}, ...]}\n  Most recent first; archived sessions are excluded."
         },
         "get": {
           "action": "get",
