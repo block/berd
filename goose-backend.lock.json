@@ -1,17 +1,17 @@
 {
   "repo": "https://github.com/aaif-goose/goose.git",
   "ref": "main",
-  "commit": "8d5bc5d49771a851a804491b398646fd6bd83f10",
+  "commit": "7b7b8aa58f54a7e189f681883de55bd42b633634",
   "package": "goose-cli",
   "bin": "goose",
   "patches": [
     {
       "path": "patches/goose/bot-801-forward-acp-terminal-events.patch",
-      "sha256": "d99ad8e06cbc935e1e6c32e335533d91a6d2f79f7b4e946743addb5e7655df97"
+      "sha256": "3f7ef23d60106af4c4acd15b37d9115bf018eeabf18cf1ccc0696bfae67cb308"
     },
     {
       "path": "patches/goose/bot-1070-propagate-max-tokens-stop-reason.patch",
-      "sha256": "8f04ad4c5826b60a3e7496c17ff5731b20cac07ff6048f474254e0989d9c12af"
+      "sha256": "0e1bf0fb592aba533a289b27386811cbaca03533866c2f66c0f13bfba2c944c1"
     }
   ]
 }

@@ -1,5 +1,5 @@
 diff --git a/crates/goose-provider-types/Cargo.toml b/crates/goose-provider-types/Cargo.toml
-index bef8070b3..3978ddf29 100644
+index 76b8b3821..78e2a4014 100644
 --- a/crates/goose-provider-types/Cargo.toml
 +++ b/crates/goose-provider-types/Cargo.toml
 @@ -27,7 +27,7 @@ serde = { workspace = true }
@@ -12,7 +12,7 @@ index bef8070b3..3978ddf29 100644
  unicode-normalization = { version = "0.1.22", default-features = false, features = ["std"] }
  uuid = { workspace = true, features = ["v4", "std"] }
 diff --git a/crates/goose-provider-types/src/base.rs b/crates/goose-provider-types/src/base.rs
-index 91e3c5e12..290ea12bf 100644
+index 0c219121b..9603161bd 100644
 --- a/crates/goose-provider-types/src/base.rs
 +++ b/crates/goose-provider-types/src/base.rs
 @@ -3,6 +3,7 @@ use futures::Stream;
@@ -20,13 +20,13 @@ index 91e3c5e12..290ea12bf 100644
  use serde::{Deserialize, Serialize};
  use std::pin::Pin;
 +use tokio::sync::mpsc;
-
+ 
  use crate::{
      canonical::{map_to_canonical_model, CanonicalModelRegistry},
-@@ -381,6 +382,15 @@ pub trait Provider: Send + Sync {
+@@ -397,6 +398,15 @@ pub trait Provider: Send + Sync {
      /// Get the name of this provider instance
      fn get_name(&self) -> &str;
-
+ 
 +    /// Take the provider-native ACP notification stream when available.
 +    /// A single outer ACP session owns this lossless stream for the provider's
 +    /// lifetime, avoiding prompt-boundary duplicate or dropped terminal output.
@@ -40,10 +40,10 @@ index 91e3c5e12..290ea12bf 100644
      async fn stream(
          &self,
 diff --git a/crates/goose/src/acp/fs.rs b/crates/goose/src/acp/fs.rs
-index 13755da12..55ba4329e 100644
+index 9a6467f5c..c25f384e5 100644
 --- a/crates/goose/src/acp/fs.rs
 +++ b/crates/goose/src/acp/fs.rs
-@@ -74,12 +74,21 @@ fn create_terminal_request(
+@@ -78,7 +78,12 @@ fn create_terminal_request(
      params: &ShellParams,
      ctx: &crate::agents::ToolCallContext,
  ) -> CreateTerminalRequest {
@@ -57,16 +57,17 @@ index 13755da12..55ba4329e 100644
          .env(vec![EnvVariable::new("AGENT_SESSION_ID", &ctx.session_id)])
          .cwd(ctx.working_dir.clone())
          .output_byte_limit(OUTPUT_LIMIT_BYTES as u64)
+@@ -90,6 +95,9 @@ fn visible_text(text: impl Into<String>) -> RmcpContent {
+     )
  }
-
+ 
 +fn acp_shell_description() -> &'static str {
 +    "Execute a shell command in the current directory through an interactive ACP terminal. For a command the user asks to keep running, run that exact command in the foreground with a suitable timeout_secs; do not append &, use nohup/disown, redirect its output, or replace it with a background wrapper. The user can monitor and interrupt the foreground process in Berd."
 +}
-+
  fn error_result(msg: impl std::fmt::Display) -> CallToolResult {
-     CallToolResult::error(vec![RmcpContent::text(msg.to_string()).with_priority(0.0)])
+     CallToolResult::error(vec![visible_text(msg.to_string())])
  }
-@@ -340,15 +349,34 @@ impl AcpTools {
+@@ -340,15 +348,34 @@ impl AcpTools {
                      false
                  }
                  Err(_) => {
@@ -104,7 +105,7 @@ index 13755da12..55ba4329e 100644
                      true
                  }
              },
-@@ -406,6 +434,11 @@ impl McpClientTrait for AcpTools {
+@@ -406,6 +433,11 @@ impl McpClientTrait for AcpTools {
          if self.fs_read {
              result.tools.insert(0, read_tool());
          }
@@ -115,10 +116,10 @@ index 13755da12..55ba4329e 100644
 +        }
          Ok(result)
      }
-
-@@ -452,7 +485,18 @@ mod tests {
+ 
+@@ -452,7 +484,18 @@ mod tests {
      use crate::agents::ToolCallContext;
-
+ 
      #[test]
 -    fn terminal_request_includes_agent_session_id() {
 +    fn terminal_shell_guidance_keeps_persistent_commands_foregrounded() {
@@ -136,10 +137,10 @@ index 13755da12..55ba4329e 100644
          let session_id = SessionId::new("acp-session");
          let params = ShellParams {
              command: "echo test".to_string(),
-@@ -466,6 +510,14 @@ mod tests {
-
+@@ -466,6 +509,14 @@ mod tests {
+ 
          let request = create_terminal_request(&session_id, &params, &ctx);
-
+ 
 +        assert_eq!(request.command, "sh");
 +        assert_eq!(
 +            request.args,
@@ -152,7 +153,7 @@ index 13755da12..55ba4329e 100644
              request.env,
              vec![EnvVariable::new("AGENT_SESSION_ID", "agent-session")]
 diff --git a/crates/goose/src/acp/provider.rs b/crates/goose/src/acp/provider.rs
-index d053d4680..063536a36 100644
+index 50d6e916d..7a0b791e7 100644
 --- a/crates/goose/src/acp/provider.rs
 +++ b/crates/goose/src/acp/provider.rs
 @@ -152,6 +152,7 @@ pub struct AcpProvider {
@@ -193,7 +194,7 @@ index d053d4680..063536a36 100644
 @@ -413,6 +427,16 @@ impl Provider for AcpProvider {
          &self.name
      }
-
+ 
 +    fn take_acp_notification_receiver(
 +        &self,
 +    ) -> Option<(String, mpsc::UnboundedReceiver<serde_json::Value>)> {
@@ -207,7 +208,7 @@ index d053d4680..063536a36 100644
      async fn get_context_limit(&self, model_config: &ModelConfig) -> Result<usize, ProviderError> {
          let size = self.context_size.load(Ordering::Relaxed);
          if size > 0 {
-@@ -1694,6 +1718,7 @@ mod tests {
+@@ -1699,6 +1723,7 @@ mod tests {
                  },
                  pending_confirmations: Arc::new(TokioMutex::new(HashMap::new())),
                  pending_tool_updates: Arc::new(Mutex::new(HashMap::new())),
@@ -216,21 +217,21 @@ index d053d4680..063536a36 100644
                  context_size: Arc::new(AtomicU64::new(0)),
                  model_config_option_id: None,
 diff --git a/crates/goose/src/acp/server.rs b/crates/goose/src/acp/server.rs
-index e05d697a0..11cd91f8c 100644
+index 23222560b..dca716e02 100644
 --- a/crates/goose/src/acp/server.rs
 +++ b/crates/goose/src/acp/server.rs
-@@ -180,6 +180,7 @@ struct GooseAcpSession {
-     /// Tool_call_ids of chains that have already had a summary task fired.
-     /// Idempotence guard so we summarize each chain at most once.
-     summarized_chains: HashSet<String>,
+@@ -170,6 +170,7 @@ const PROVIDER_CONFIG_STATUS_CHECK_CONCURRENCY: usize = 16;
+ /// below is keyed by session ID.
+ struct GooseAcpSession {
+     agent: Arc<Agent>,
 +    provider_notification_task: Option<tokio::task::JoinHandle<()>>,
  }
-
+ 
  struct ActivePromptRun {
-@@ -187,6 +188,29 @@ struct ActivePromptRun {
+@@ -177,6 +178,29 @@ struct ActivePromptRun {
      cancel_token: CancellationToken,
  }
-
+ 
 +fn is_terminal_provider_notification(
 +    notification: &serde_json::Value,
 +    provider_session_id: &str,
@@ -254,21 +255,25 @@ index e05d697a0..11cd91f8c 100644
 +        })
 +}
 +
- /// A run of consecutive ToolRequest blocks within one assistant message,
- /// tracked by [`GooseAcpSession::chain_membership`]. Used to drive a single
- /// LLM summary for the whole run once every step has a recorded ToolResponse.
-@@ -1249,6 +1273,7 @@ impl GooseAcpAgent {
-             chain_membership: HashMap::new(),
-             responded_tool_ids: HashSet::new(),
-             summarized_chains: HashSet::new(),
+ pub struct GooseAcpAgentOptions {
+     pub provider_factory: AcpProviderFactory,
+     pub builtins: Vec<String>,
+@@ -904,7 +928,10 @@ impl GooseAcpAgent {
+     }
+ 
+     async fn register_acp_session(&self, session_id: String, agent: Arc<Agent>) {
+-        let acp_session = GooseAcpSession { agent };
++        let acp_session = GooseAcpSession {
++            agent,
 +            provider_notification_task: None,
-         };
++        };
          self.sessions.lock().await.insert(session_id, acp_session);
      }
-@@ -2654,6 +2679,53 @@ impl GooseAcpAgent {
+ 
+@@ -1802,6 +1829,53 @@ impl GooseAcpAgent {
              retry_config: None,
          };
-
+ 
 +        let needs_provider_notification_task = self
 +            .sessions
 +            .lock()
@@ -319,9 +324,9 @@ index e05d697a0..11cd91f8c 100644
          let mut stream = match agent
              .reply(user_message, session_config, Some(cancel_token.clone()))
              .await
-@@ -3139,7 +3211,11 @@ impl GooseAcpAgent {
+@@ -2251,7 +2325,11 @@ impl GooseAcpAgent {
          }
-
+ 
          let mut sessions = self.sessions.lock().await;
 -        sessions.remove(session_id);
 +        if let Some(mut session) = sessions.remove(session_id) {
@@ -330,12 +335,12 @@ index e05d697a0..11cd91f8c 100644
 +            }
 +        }
          drop(sessions);
-
+ 
          self.agent_manager
-@@ -3246,6 +3322,30 @@ mod tests {
+@@ -2356,6 +2434,30 @@ mod tests {
      use tempfile::NamedTempFile;
      use test_case::test_case;
-
+ 
 +    #[test]
 +    fn terminal_provider_notifications_are_scoped_and_filtered() {
 +        let terminal = serde_json::json!({
