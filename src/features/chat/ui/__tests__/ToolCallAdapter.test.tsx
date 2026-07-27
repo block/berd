@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactLinkCandidate } from "@/features/chat/hooks/ArtifactPolicyContext";
@@ -11,6 +11,22 @@ const mockPathExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 const mockOpenInApp =
   vi.fn<(path: string, filename?: string) => Promise<void>>();
+const terminalMocks = vi.hoisted(() => ({
+  available: false,
+  listeners: new Set<() => void>(),
+  requestOpen: vi.fn(),
+}));
+
+vi.mock("@/features/terminal/lib/acpTerminalManager", () => ({
+  hasAcpTerminal: vi.fn(() => terminalMocks.available),
+  requestOpenAcpTerminal: terminalMocks.requestOpen,
+  subscribeAcpTerminalCapability: vi.fn(
+    (_sessionId: string, _terminalId: string, listener: () => void) => {
+      terminalMocks.listeners.add(listener);
+      return () => terminalMocks.listeners.delete(listener);
+    },
+  ),
+}));
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
@@ -23,6 +39,8 @@ vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
 
 beforeEach(() => {
   mockResolveMarkdownHref.mockReturnValue(null);
+  terminalMocks.available = false;
+  terminalMocks.listeners.clear();
 });
 
 afterEach(() => {
@@ -110,6 +128,29 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     await user.click(screen.getByRole("button", { name: /view/i }));
 
     expect(mockOpenInApp).toHaveBeenCalledWith("/Users/test/project/output.md");
+  });
+});
+
+describe("ToolCallAdapter — terminal capability", () => {
+  it("shows the terminal action when async registration completes", () => {
+    renderAdapter({
+      open: true,
+      terminalId: "terminal-1",
+      terminalSessionId: "session-1",
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /open terminal/i }),
+    ).not.toBeInTheDocument();
+
+    terminalMocks.available = true;
+    act(() => {
+      for (const listener of terminalMocks.listeners) listener();
+    });
+
+    expect(
+      screen.getByRole("button", { name: /open terminal/i }),
+    ).toBeInTheDocument();
   });
 });
 

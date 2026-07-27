@@ -10,10 +10,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 class FakeTerminal {
+  static createdOptions: unknown[] = [];
   cols = 80;
   rows = 24;
   element: HTMLElement | null = null;
   options: { theme?: unknown; fontFamily?: string } = {};
+
+  constructor(options: unknown) {
+    FakeTerminal.createdOptions.push(options);
+  }
 
   clear() {}
   dispose() {}
@@ -103,6 +108,7 @@ describe("terminalSessionManager", () => {
     mocks.stopTerminal.mockClear();
     mocks.terminalWriteCallbacks = [];
     mocks.writeTerminal.mockClear();
+    FakeTerminal.createdOptions = [];
     document.getElementById("goose-terminal-parking-root")?.remove();
   });
 
@@ -289,6 +295,86 @@ describe("terminalSessionManager", () => {
     );
   });
 
+  it("waits for a backend exit before completing an ACP kill", async () => {
+    let emitTerminalEvent: (event: TerminalEvent) => void = () => undefined;
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+    mocks.startTerminal.mockImplementationOnce(({ onEvent }) => {
+      emitTerminalEvent = onEvent;
+      return Promise.resolve("terminal-1");
+    });
+    const onExit = vi.fn();
+    const session = getOrCreateTerminalSession({
+      key: "chat-session-id:agent-terminal",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+      launch: { command: "pnpm", args: ["dev"] },
+      onExit,
+    });
+    await Promise.resolve();
+
+    let completed = false;
+    const kill = session.kill().then(() => {
+      completed = true;
+    });
+    await Promise.resolve();
+
+    expect(mocks.stopTerminal).toHaveBeenCalledWith("terminal-1");
+    expect(completed).toBe(false);
+    expect(onExit).not.toHaveBeenCalled();
+
+    emitTerminalEvent({
+      event: "exited",
+      data: { terminalId: "terminal-1", exitCode: 137, signal: "SIGKILL" },
+    });
+    await kill;
+
+    expect(completed).toBe(true);
+    expect(onExit).toHaveBeenCalledWith({
+      exitCode: 137,
+      signal: "SIGKILL",
+    });
+  });
+
+  it("stops a terminal whose startup finishes after kill was requested", async () => {
+    let resolveStart: (terminalId: string) => void = () => undefined;
+    let emitTerminalEvent: (event: TerminalEvent) => void = () => undefined;
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+    mocks.startTerminal.mockImplementationOnce(
+      ({ onEvent }) =>
+        new Promise<string>((resolve) => {
+          emitTerminalEvent = onEvent;
+          resolveStart = resolve;
+        }),
+    );
+    const session = getOrCreateTerminalSession({
+      key: "chat-session-id:starting-agent-terminal",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+      launch: { command: "pnpm", args: ["dev"] },
+    });
+
+    const kill = session.kill();
+    expect(mocks.stopTerminal).not.toHaveBeenCalled();
+
+    resolveStart("terminal-late");
+    await Promise.resolve();
+    expect(mocks.stopTerminal).toHaveBeenCalledWith("terminal-late");
+
+    emitTerminalEvent({
+      event: "exited",
+      data: { terminalId: "terminal-late", exitCode: 0, signal: null },
+    });
+    await expect(kill).resolves.toBeUndefined();
+  });
+
   it("emits client-stop when a tab session is explicitly stopped", async () => {
     const changes: unknown[] = [];
     const {
@@ -319,6 +405,30 @@ describe("terminalSessionManager", () => {
       previousStatus: "running",
       source: "client-stop",
     });
+  });
+
+  it("normalizes LF-only output for read-only external terminals", async () => {
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+
+    getOrCreateTerminalSession({
+      key: "session:external",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+      external: true,
+    });
+
+    expect(FakeTerminal.createdOptions).toContainEqual(
+      expect.objectContaining({
+        convertEol: true,
+        cursorBlink: false,
+        cursorInactiveStyle: "none",
+        disableStdin: true,
+      }),
+    );
   });
 
   it("parks a stable xterm host outside the unmounting container when detached", async () => {
@@ -393,6 +503,32 @@ describe("terminalSessionManager", () => {
     await Promise.resolve();
 
     expect(getTerminalSessionStatus("chat-session-id:tab-1")).toBe("running");
+  });
+
+  it("notifies keyed availability subscribers on creation and removal", async () => {
+    const {
+      getOrCreateTerminalSession,
+      getTerminalSession,
+      stopTerminalSession,
+      subscribeTerminalSessionAvailability,
+    } = await import("./terminalSessionManager");
+    mocks.startTerminal.mockResolvedValueOnce("terminal-1");
+    const listener = vi.fn();
+    subscribeTerminalSessionAvailability("chat-session-id:tab-1", listener);
+
+    getOrCreateTerminalSession({
+      key: "chat-session-id:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(getTerminalSession("chat-session-id:tab-1")).not.toBeNull();
+
+    stopTerminalSession("chat-session-id:tab-1");
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(getTerminalSession("chat-session-id:tab-1")).toBeNull();
   });
 
   it("tracks chat sessions that have visible terminal state", async () => {

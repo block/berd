@@ -28,7 +28,9 @@
 
 .goose-terminal .xterm,
 .goose-terminal .xterm-viewport,
-.goose-terminal .xterm-screen {
+.goose-terminal .xterm-screen,
+.goose-terminal .xterm-scrollable-element,
+.goose-terminal .xterm-decoration-overview-ruler {
   background-color: var(--card) !important;
 }
 

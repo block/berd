@@ -13,10 +13,12 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/prepare-goose-sidecar.sh [path/to/goose]
 
-If no path is passed, GOOSE_BIN is used. If GOOSE_BIN is unset, the script uses
-the pinned managed Goose binary from scripts/ensure-local-goose.sh --check-bin.
-The binary is copied into src-tauri/binaries with the host target triple suffix
-required by Tauri.
+If no path is passed, GOOSE_BIN is used. If GOOSE_BIN is unset, the script
+builds (or reuses) the pinned managed Goose binary through
+scripts/ensure-local-goose.sh. That shared path validates and applies the
+ordered patches in patches/goose before returning a binary, so development and
+release bundles stage the same backend source. The binary is copied into
+src-tauri/binaries with the host target triple suffix required by Tauri.
 USAGE
 }
 
@@ -28,14 +30,7 @@ fi
 GOOSE_SOURCE="${1:-${GOOSE_BIN:-}}"
 if [[ -z "$GOOSE_SOURCE" ]]; then
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  GOOSE_SOURCE="$("$script_dir/ensure-local-goose.sh" --check-bin)" || {
-    rc=$?
-    if [[ $rc -eq 2 ]]; then
-      echo "Pinned Goose binary is not ready. Run 'just setup' or 'just goose-sync' first." >&2
-      exit 1
-    fi
-    exit "$rc"
-  }
+  GOOSE_SOURCE="$(GOOSE_DEV_MODE=required "$script_dir/ensure-local-goose.sh" --print-bin)"
 fi
 
 if [[ ! -x "$GOOSE_SOURCE" ]]; then

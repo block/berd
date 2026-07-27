@@ -1,6 +1,18 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, FolderOpen, PanelRight } from "lucide-react";
+import {
+  ChevronRight,
+  FolderOpen,
+  PanelRight,
+  SquareTerminal,
+} from "lucide-react";
 import { isViewableArtifact } from "@/features/chat/lib/artifactViewerTypes";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -22,6 +34,11 @@ import {
 } from "@/features/chat/lib/toolCallPresentation";
 import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import {
+  hasAcpTerminal,
+  requestOpenAcpTerminal,
+  subscribeAcpTerminalCapability,
+} from "@/features/terminal/lib/acpTerminalManager";
 
 interface ToolCallAdapterProps {
   className?: string;
@@ -29,6 +46,8 @@ interface ToolCallAdapterProps {
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   locations?: ToolCallLocation[];
+  terminalId?: string;
+  terminalSessionId?: string;
   result?: string;
   structuredContent?: unknown;
   isError?: boolean;
@@ -340,6 +359,8 @@ export function ToolCallAdapter({
   arguments: args,
   status,
   locations,
+  terminalId,
+  terminalSessionId,
   result,
   structuredContent,
   isError,
@@ -355,6 +376,31 @@ export function ToolCallAdapter({
   agentWorkUsePrimaryText = false,
 }: ToolCallAdapterProps) {
   const { t } = useTranslation("chat");
+  const subscribeTerminalCapability = useCallback(
+    (listener: () => void) =>
+      terminalId && terminalSessionId
+        ? subscribeAcpTerminalCapability(
+            terminalSessionId,
+            terminalId,
+            listener,
+          )
+        : () => undefined,
+    [terminalId, terminalSessionId],
+  );
+  const getTerminalCapabilitySnapshot = useCallback(
+    () =>
+      Boolean(
+        terminalId &&
+          terminalSessionId &&
+          hasAcpTerminal(terminalSessionId, terminalId),
+      ),
+    [terminalId, terminalSessionId],
+  );
+  const terminalAvailable = useSyncExternalStore(
+    subscribeTerminalCapability,
+    getTerminalCapabilitySnapshot,
+    getTerminalCapabilitySnapshot,
+  );
   const elapsed = useElapsedTime(status, startedAt);
   const state = toolStatusMap[status];
   const summaryRows = useMemo(
@@ -485,6 +531,19 @@ export function ToolCallAdapter({
           elapsedSeconds={elapsedSeconds}
         />
         <ToolContent>
+          {terminalAvailable && terminalId && terminalSessionId ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              leftIcon={<SquareTerminal />}
+              onClick={() =>
+                requestOpenAcpTerminal(terminalSessionId, terminalId)
+              }
+            >
+              {t("tools.openTerminal")}
+            </Button>
+          ) : null}
           {agentWorkLayout ? (
             <div className="space-y-3 py-1">
               <AgentWorkToolSection

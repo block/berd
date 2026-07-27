@@ -41,6 +41,7 @@
   },
   "terminal": {
     "close": "Close terminal",
+    "closeTab": "Close terminal {{path}}",
     "collapse": "Collapse terminal",
     "confirmStopDescription": "This terminates the shell and closes the terminal panel.",
     "confirmStopTabTitle": "Stop terminal {{path}}?",
@@ -60,6 +61,7 @@
       "starting": "Starting"
     },
     "stop": "Stop terminal",
+    "stopFailed": "The terminal process could not be stopped.",
     "stopAndClose": "Stop and close terminal",
     "stopAndCloseTab": "Stop and close terminal {{path}}",
     "stopped": "Terminal stopped",
@@ -509,6 +511,7 @@
     "openFolder": "Open folder",
     "openNamed": "Open {{name}}",
     "openPath": "Open path",
+    "openTerminal": "Open terminal",
     "viewFile": "View",
     "pathOutsideRoots": "Path is outside allowed roots",
     "structuredContent": "Structured content",

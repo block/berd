@@ -40,6 +40,7 @@
   },
   "terminal": {
     "close": "Cerrar terminal",
+    "closeTab": "Cerrar terminal {{path}}",
     "collapse": "Contraer terminal",
     "confirmStopDescription": "Esto finaliza el shell y cierra el panel del terminal.",
     "confirmStopTabTitle": "¿Detener terminal {{path}}?",
@@ -59,6 +60,7 @@
       "starting": "Iniciando"
     },
     "stop": "Detener terminal",
+    "stopFailed": "No se pudo detener el proceso del terminal.",
     "stopAndClose": "Detener y cerrar terminal",
     "stopAndCloseTab": "Detener y cerrar terminal {{path}}",
     "stopped": "Terminal detenido",
@@ -506,6 +508,7 @@
     "openFolder": "Abrir carpeta",
     "openNamed": "Abrir {{name}}",
     "openPath": "Abrir ruta",
+    "openTerminal": "Abrir terminal",
     "pathOutsideRoots": "La ruta está fuera de las raíces permitidas de proyecto/artefactos.",
     "structuredContent": "Contenido estructurado",
     "structuredOutput": "Salida estructurada",

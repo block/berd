@@ -1,0 +1,365 @@
+diff --git a/crates/goose-provider-types/Cargo.toml b/crates/goose-provider-types/Cargo.toml
+index bef8070b3..3978ddf29 100644
+--- a/crates/goose-provider-types/Cargo.toml
++++ b/crates/goose-provider-types/Cargo.toml
+@@ -27,7 +27,7 @@ serde = { workspace = true }
+ serde_json = { workspace = true }
+ strum = { workspace = true }
+ thiserror = { workspace = true }
+-tokio = { workspace = true, features = ["time"] }
++tokio = { workspace = true, features = ["sync", "time"] }
+ tracing = { workspace = true }
+ unicode-normalization = { version = "0.1.22", default-features = false, features = ["std"] }
+ uuid = { workspace = true, features = ["v4", "std"] }
+diff --git a/crates/goose-provider-types/src/base.rs b/crates/goose-provider-types/src/base.rs
+index 91e3c5e12..290ea12bf 100644
+--- a/crates/goose-provider-types/src/base.rs
++++ b/crates/goose-provider-types/src/base.rs
+@@ -3,6 +3,7 @@ use futures::Stream;
+ use rmcp::model::Tool;
+ use serde::{Deserialize, Serialize};
+ use std::pin::Pin;
++use tokio::sync::mpsc;
+
+ use crate::{
+     canonical::{map_to_canonical_model, CanonicalModelRegistry},
+@@ -381,6 +382,15 @@ pub trait Provider: Send + Sync {
+     /// Get the name of this provider instance
+     fn get_name(&self) -> &str;
+
++    /// Take the provider-native ACP notification stream when available.
++    /// A single outer ACP session owns this lossless stream for the provider's
++    /// lifetime, avoiding prompt-boundary duplicate or dropped terminal output.
++    fn take_acp_notification_receiver(
++        &self,
++    ) -> Option<(String, mpsc::UnboundedReceiver<serde_json::Value>)> {
++        None
++    }
++
+     /// Primary streaming method that all providers must implement.
+     async fn stream(
+         &self,
+diff --git a/crates/goose/src/acp/fs.rs b/crates/goose/src/acp/fs.rs
+index 13755da12..55ba4329e 100644
+--- a/crates/goose/src/acp/fs.rs
++++ b/crates/goose/src/acp/fs.rs
+@@ -74,12 +74,21 @@ fn create_terminal_request(
+     params: &ShellParams,
+     ctx: &crate::agents::ToolCallContext,
+ ) -> CreateTerminalRequest {
+-    CreateTerminalRequest::new(session_id.clone(), &params.command)
++    let script = format!(
++        "{}\n__goose_command_status=$?\nwait\nexit \"$__goose_command_status\"",
++        params.command
++    );
++    CreateTerminalRequest::new(session_id.clone(), "sh")
++        .args(vec!["-c".to_string(), script])
+         .env(vec![EnvVariable::new("AGENT_SESSION_ID", &ctx.session_id)])
+         .cwd(ctx.working_dir.clone())
+         .output_byte_limit(OUTPUT_LIMIT_BYTES as u64)
+ }
+
++fn acp_shell_description() -> &'static str {
++    "Execute a shell command in the current directory through an interactive ACP terminal. For a command the user asks to keep running, run that exact command in the foreground with a suitable timeout_secs; do not append &, use nohup/disown, redirect its output, or replace it with a background wrapper. The user can monitor and interrupt the foreground process in Berd."
++}
++
+ fn error_result(msg: impl std::fmt::Display) -> CallToolResult {
+     CallToolResult::error(vec![RmcpContent::text(msg.to_string()).with_priority(0.0)])
+ }
+@@ -340,15 +349,34 @@ impl AcpTools {
+                     false
+                 }
+                 Err(_) => {
+-                    let _ = self
+-                        .cx
++                    self.cx
+                         .send_request(KillTerminalRequest::new(
+                             self.session_id.clone(),
+                             terminal_id.clone(),
+                         ))
+                         .block_task()
+                         .await
+-                        .inspect_err(|e| tracing::error!("failed to kill terminal: {e:?}"));
++                        .map_err(|e| {
++                            McpError::McpError(rmcp::model::ErrorData::new(
++                                rmcp::model::ErrorCode::INTERNAL_ERROR,
++                                format!("failed to kill terminal: {e:?}"),
++                                None,
++                            ))
++                        })?;
++                    self.cx
++                        .send_request(WaitForTerminalExitRequest::new(
++                            self.session_id.clone(),
++                            terminal_id.clone(),
++                        ))
++                        .block_task()
++                        .await
++                        .map_err(|e| {
++                            McpError::McpError(rmcp::model::ErrorData::new(
++                                rmcp::model::ErrorCode::INTERNAL_ERROR,
++                                format!("failed to wait for killed terminal exit: {e:?}"),
++                                None,
++                            ))
++                        })?;
+                     true
+                 }
+             },
+@@ -406,6 +434,11 @@ impl McpClientTrait for AcpTools {
+         if self.fs_read {
+             result.tools.insert(0, read_tool());
+         }
++        if self.terminal {
++            if let Some(shell) = result.tools.iter_mut().find(|tool| tool.name == "shell") {
++                shell.description = Some(acp_shell_description().into());
++            }
++        }
+         Ok(result)
+     }
+
+@@ -452,7 +485,18 @@ mod tests {
+     use crate::agents::ToolCallContext;
+
+     #[test]
+-    fn terminal_request_includes_agent_session_id() {
++    fn terminal_shell_guidance_keeps_persistent_commands_foregrounded() {
++        let description = acp_shell_description();
++
++        assert!(description.contains("exact command in the foreground"));
++        assert!(description.contains("do not append &"));
++        assert!(description.contains("do not"));
++        assert!(description.contains("redirect its output"));
++        assert!(description.contains("monitor and interrupt"));
++    }
++
++    #[test]
++    fn terminal_request_wraps_shell_expression_and_includes_agent_session_id() {
+         let session_id = SessionId::new("acp-session");
+         let params = ShellParams {
+             command: "echo test".to_string(),
+@@ -466,6 +510,14 @@ mod tests {
+
+         let request = create_terminal_request(&session_id, &params, &ctx);
+
++        assert_eq!(request.command, "sh");
++        assert_eq!(
++            request.args,
++            vec![
++                "-c",
++                "echo test\n__goose_command_status=$?\nwait\nexit \"$__goose_command_status\""
++            ]
++        );
+         assert_eq!(
+             request.env,
+             vec![EnvVariable::new("AGENT_SESSION_ID", "agent-session")]
+diff --git a/crates/goose/src/acp/provider.rs b/crates/goose/src/acp/provider.rs
+index d053d4680..063536a36 100644
+--- a/crates/goose/src/acp/provider.rs
++++ b/crates/goose/src/acp/provider.rs
+@@ -152,6 +152,7 @@ pub struct AcpProvider {
+     pending_confirmations:
+         Arc<TokioMutex<HashMap<String, oneshot::Sender<PermissionConfirmation>>>>,
+     pending_tool_updates: Arc<Mutex<HashMap<String, AccumulatedToolCall>>>,
++    notification_rx: Mutex<Option<mpsc::UnboundedReceiver<serde_json::Value>>>,
+     handoff_context_sent: AtomicBool,
+     /// Latest `size` reported by the ACP server in a `session/update` →
+     /// `usage_update` notification. 0 means no real update has arrived yet,
+@@ -245,6 +246,18 @@ impl AcpProvider {
+         let pending_tool_updates: Arc<Mutex<HashMap<String, AccumulatedToolCall>>> =
+             Arc::new(Mutex::new(HashMap::new()));
+         let context_size = Arc::new(AtomicU64::new(0));
++        let (notification_tx, notification_rx) = mpsc::unbounded_channel();
++        let nested_notification_tx = notification_tx;
++        let mut config = config;
++        let configured_callback = config.notification_callback.take();
++        config.notification_callback = Some(Arc::new(move |notification| {
++            if let Some(callback) = configured_callback.as_ref() {
++                callback(notification.clone());
++            }
++            if let Ok(value) = serde_json::to_value(notification) {
++                let _ = nested_notification_tx.send(value);
++            }
++        }));
+         let client_loop = AcpClientLoop::new(
+             config,
+             goose_mode_shared.clone(),
+@@ -280,6 +293,7 @@ impl AcpProvider {
+             session,
+             pending_confirmations: Arc::new(TokioMutex::new(HashMap::new())),
+             pending_tool_updates,
++            notification_rx: Mutex::new(Some(notification_rx)),
+             handoff_context_sent: AtomicBool::new(false),
+             context_size,
+             model_config_option_id,
+@@ -413,6 +427,16 @@ impl Provider for AcpProvider {
+         &self.name
+     }
+
++    fn take_acp_notification_receiver(
++        &self,
++    ) -> Option<(String, mpsc::UnboundedReceiver<serde_json::Value>)> {
++        self.notification_rx
++            .lock()
++            .ok()?
++            .take()
++            .map(|receiver| (self.session.id.0.to_string(), receiver))
++    }
++
+     async fn get_context_limit(&self, model_config: &ModelConfig) -> Result<usize, ProviderError> {
+         let size = self.context_size.load(Ordering::Relaxed);
+         if size > 0 {
+@@ -1694,6 +1718,7 @@ mod tests {
+                 },
+                 pending_confirmations: Arc::new(TokioMutex::new(HashMap::new())),
+                 pending_tool_updates: Arc::new(Mutex::new(HashMap::new())),
++                notification_rx: Mutex::new(None),
+                 handoff_context_sent: AtomicBool::new(false),
+                 context_size: Arc::new(AtomicU64::new(0)),
+                 model_config_option_id: None,
+diff --git a/crates/goose/src/acp/server.rs b/crates/goose/src/acp/server.rs
+index e05d697a0..11cd91f8c 100644
+--- a/crates/goose/src/acp/server.rs
++++ b/crates/goose/src/acp/server.rs
+@@ -180,6 +180,7 @@ struct GooseAcpSession {
+     /// Tool_call_ids of chains that have already had a summary task fired.
+     /// Idempotence guard so we summarize each chain at most once.
+     summarized_chains: HashSet<String>,
++    provider_notification_task: Option<tokio::task::JoinHandle<()>>,
+ }
+
+ struct ActivePromptRun {
+@@ -187,6 +188,29 @@ struct ActivePromptRun {
+     cancel_token: CancellationToken,
+ }
+
++fn is_terminal_provider_notification(
++    notification: &serde_json::Value,
++    provider_session_id: &str,
++) -> bool {
++    if notification
++        .get("sessionId")
++        .and_then(|value| value.as_str())
++        != Some(provider_session_id)
++    {
++        return false;
++    }
++
++    notification
++        .get("update")
++        .and_then(|value| value.get("_meta"))
++        .and_then(|value| value.as_object())
++        .is_some_and(|meta| {
++            meta.contains_key("terminal_output")
++                || meta.contains_key("terminal_output_delta")
++                || meta.contains_key("terminal_exit")
++        })
++}
++
+ /// A run of consecutive ToolRequest blocks within one assistant message,
+ /// tracked by [`GooseAcpSession::chain_membership`]. Used to drive a single
+ /// LLM summary for the whole run once every step has a recorded ToolResponse.
+@@ -1249,6 +1273,7 @@ impl GooseAcpAgent {
+             chain_membership: HashMap::new(),
+             responded_tool_ids: HashSet::new(),
+             summarized_chains: HashSet::new(),
++            provider_notification_task: None,
+         };
+         self.sessions.lock().await.insert(session_id, acp_session);
+     }
+@@ -2654,6 +2679,53 @@ impl GooseAcpAgent {
+             retry_config: None,
+         };
+
++        let needs_provider_notification_task = self
++            .sessions
++            .lock()
++            .await
++            .get(&session_id)
++            .is_some_and(|session| {
++                session
++                    .provider_notification_task
++                    .as_ref()
++                    .is_none_or(tokio::task::JoinHandle::is_finished)
++            });
++        if needs_provider_notification_task {
++            let provider_notifications = agent
++                .provider()
++                .await
++                .ok()
++                .and_then(|provider| provider.take_acp_notification_receiver());
++            if let Some((provider_session_id, mut notifications)) = provider_notifications {
++                let forward_session_id = args.session_id.clone();
++                let forward_cx = cx.clone();
++                let task = tokio::spawn(async move {
++                    while let Some(mut notification) = notifications.recv().await {
++                        if !is_terminal_provider_notification(&notification, &provider_session_id) {
++                            continue;
++                        }
++                        notification["sessionId"] =
++                            serde_json::Value::String(forward_session_id.0.to_string());
++                        match serde_json::from_value::<SessionNotification>(notification) {
++                            Ok(notification) => {
++                                if forward_cx.send_notification(notification).is_err() {
++                                    break;
++                                }
++                            }
++                            Err(error) => warn!(
++                                %error,
++                                session = %forward_session_id.0,
++                                "could not decode ACP provider terminal notification"
++                            ),
++                        }
++                    }
++                });
++                if let Some(session) = self.sessions.lock().await.get_mut(&session_id) {
++                    session.provider_notification_task = Some(task);
++                }
++            }
++        }
++
+         let mut stream = match agent
+             .reply(user_message, session_config, Some(cancel_token.clone()))
+             .await
+@@ -3139,7 +3211,11 @@ impl GooseAcpAgent {
+         }
+
+         let mut sessions = self.sessions.lock().await;
+-        sessions.remove(session_id);
++        if let Some(mut session) = sessions.remove(session_id) {
++            if let Some(task) = session.provider_notification_task.take() {
++                task.abort();
++            }
++        }
+         drop(sessions);
+
+         self.agent_manager
+@@ -3246,6 +3322,30 @@ mod tests {
+     use tempfile::NamedTempFile;
+     use test_case::test_case;
+
++    #[test]
++    fn terminal_provider_notifications_are_scoped_and_filtered() {
++        let terminal = serde_json::json!({
++            "sessionId": "nested-1",
++            "update": {
++                "sessionUpdate": "tool_call_update",
++                "_meta": {
++                    "terminal_output_delta": {
++                        "terminal_id": "command-1",
++                        "data": "hello"
++                    }
++                }
++            }
++        });
++        assert!(is_terminal_provider_notification(&terminal, "nested-1"));
++        assert!(!is_terminal_provider_notification(&terminal, "nested-2"));
++
++        let ordinary = serde_json::json!({
++            "sessionId": "nested-1",
++            "update": { "sessionUpdate": "agent_message_chunk" }
++        });
++        assert!(!is_terminal_provider_notification(&ordinary, "nested-1"));
++    }
++
+     #[test_case(
+         McpServer::Stdio(
+             McpServerStdio::new("github", "/path/to/github-mcp-server")

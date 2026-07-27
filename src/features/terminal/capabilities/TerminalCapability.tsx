@@ -7,6 +7,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -26,6 +27,11 @@ import { cn } from "@/shared/lib/cn";
 import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { TerminalPanel } from "@/features/terminal/ui/TerminalPanel";
 import {
+  getTerminalSessionStatus,
+  subscribeTerminalSessionAvailability,
+  subscribeTerminalSessionStatus,
+} from "@/features/terminal/lib/terminalSessionManager";
+import {
   terminalTabButtonId,
   terminalTabPanelId,
   resolveFloatingTerminalResizeRect,
@@ -40,10 +46,17 @@ import {
   type TerminalTab,
 } from "@/features/terminal/model/terminalState";
 import type { TerminalController } from "@/features/terminal/hooks/useTerminalController";
+import type { TerminalStatus } from "@/features/terminal/lib/terminalSessionManager";
 
 const TERMINAL_HEADER_ICON_BUTTON_CLASS =
   "rounded-md text-muted-foreground opacity-70 hover:text-foreground hover:opacity-100 data-[state=open]:text-foreground data-[state=open]:opacity-100 aria-expanded:text-muted-foreground";
 const TERMINAL_HEADER_DRAG_THRESHOLD_PX = 10;
+const TERMINAL_STATUS_TRANSLATION_KEYS = {
+  error: "terminal.status.error",
+  exited: "terminal.status.exited",
+  running: "terminal.status.running",
+  starting: "terminal.status.starting",
+} as const satisfies Record<TerminalStatus, string>;
 
 function getResizeCursor(edge: TerminalResizeEdge): string {
   switch (edge) {
@@ -480,6 +493,50 @@ export function TerminalCapability({
   return panel;
 }
 
+function AgentTerminalStatusIndicator({ sessionKey }: { sessionKey: string }) {
+  const { t } = useTranslation("chat");
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeStatus = subscribeTerminalSessionStatus(
+        sessionKey,
+        listener,
+      );
+      const unsubscribeRegistry = subscribeTerminalSessionAvailability(
+        sessionKey,
+        listener,
+      );
+      return () => {
+        unsubscribeStatus();
+        unsubscribeRegistry();
+      };
+    },
+    [sessionKey],
+  );
+  const getSnapshot = useCallback(
+    () => getTerminalSessionStatus(sessionKey) ?? "exited",
+    [sessionKey],
+  );
+  const status = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  const statusLabel = t(TERMINAL_STATUS_TRANSLATION_KEYS[status]);
+  return (
+    <span
+      role="img"
+      aria-label={statusLabel}
+      title={statusLabel}
+      className={cn(
+        "size-1.5 shrink-0 rounded-full",
+        status === "running" && "bg-success",
+        status === "starting" &&
+          "border border-warning bg-transparent motion-safe:animate-pulse",
+        status === "error" && "rotate-45 rounded-none bg-destructive",
+        status === "exited" &&
+          "border border-muted-foreground/60 bg-transparent",
+      )}
+    />
+  );
+}
+
 function floatingRectStyle(
   rect: TerminalFloatingRect,
   expanded: boolean,
@@ -692,6 +749,9 @@ function TerminalPanelShell({
           {controller.tabs.map((tab) => {
             const label = controller.getTabLabel(tab);
             const selected = tab.id === controller.activeTab?.id;
+            const needsStopConfirmation =
+              tab.source !== "agent" || controller.canStopTab(tab.id);
+            const closeLabel = t("terminal.closeTab", { path: label });
             const stopAndCloseLabel = t("terminal.stopAndCloseTab", {
               path: label,
             });
@@ -702,7 +762,7 @@ function TerminalPanelShell({
               <div
                 key={tab.id}
                 className={cn(
-                  "group flex h-8 min-w-0 max-w-48 shrink-0 items-center rounded-sm border border-transparent",
+                  "group flex h-8 min-w-0 max-w-48 shrink-0 items-center gap-1 rounded-sm border border-transparent",
                   selected
                     ? "[background:color-mix(in_srgb,var(--foreground)_8%,var(--card))] text-foreground"
                     : "text-muted-foreground hover:[background:color-mix(in_srgb,var(--foreground)_5%,var(--card))] hover:text-foreground",
@@ -717,75 +777,102 @@ function TerminalPanelShell({
                   aria-label={t("terminal.selectTab", {
                     path: label,
                   })}
+                  title={label}
                   tabIndex={selected ? 0 : -1}
                   onClick={() => controller.selectTab(tab.id)}
                   onKeyDown={(event) => onTabKeyDown(event, tab.id)}
-                  className="flex h-full min-w-0 flex-1 items-center truncate px-2 text-left font-mono text-[11px] leading-none outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="flex h-full min-w-0 flex-1 items-center overflow-hidden px-2 text-left font-mono text-[11px] leading-none outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  {label}
+                  <span className="block min-w-0 truncate">{label}</span>
                 </button>
-                <Popover
-                  open={controller.closingTabId === tab.id}
-                  onOpenChange={(open) =>
-                    controller.setClosingTabId(open ? tab.id : null)
-                  }
-                >
+                {tab.source === "agent" ? (
+                  <AgentTerminalStatusIndicator
+                    sessionKey={`${sessionId}:${tab.id}`}
+                  />
+                ) : null}
+                {needsStopConfirmation ? (
+                  <Popover
+                    open={controller.closingTabId === tab.id}
+                    onOpenChange={(open) =>
+                      controller.setClosingTabId(open ? tab.id : null)
+                    }
+                  >
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={stopAndCloseLabel}
+                            className={cn(
+                              "mr-0.5 size-6",
+                              TERMINAL_HEADER_ICON_BUTTON_CLASS,
+                            )}
+                          >
+                            <IconX className="size-4" />
+                          </Button>
+                        </PopoverTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent>{stopAndCloseLabel}</TooltipContent>
+                    </Tooltip>
+                    <PopoverContent
+                      side="top"
+                      align="end"
+                      sideOffset={8}
+                      className="w-64 rounded-md p-3 text-left"
+                    >
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-foreground">
+                            {confirmStopTitle}
+                          </p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            {t("terminal.confirmStopDescription")}
+                          </p>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => controller.setClosingTabId(null)}
+                          >
+                            {t("common:actions.cancel")}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            destructive
+                            size="xs"
+                            onClick={() => controller.closeTab(tab.id)}
+                          >
+                            {t("terminal.stop")}
+                          </Button>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                ) : (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={stopAndCloseLabel}
-                          className={cn(
-                            "mr-0.5 size-6",
-                            TERMINAL_HEADER_ICON_BUTTON_CLASS,
-                          )}
-                        >
-                          <IconX className="size-4" />
-                        </Button>
-                      </PopoverTrigger>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={closeLabel}
+                        onClick={() => controller.closeTab(tab.id)}
+                        className={cn(
+                          "mr-0.5 size-6",
+                          TERMINAL_HEADER_ICON_BUTTON_CLASS,
+                        )}
+                      >
+                        <IconX className="size-4" />
+                      </Button>
                     </TooltipTrigger>
-                    <TooltipContent>{stopAndCloseLabel}</TooltipContent>
+                    <TooltipContent>{closeLabel}</TooltipContent>
                   </Tooltip>
-                  <PopoverContent
-                    side="top"
-                    align="end"
-                    sideOffset={8}
-                    className="w-64 rounded-md p-3 text-left"
-                  >
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {confirmStopTitle}
-                        </p>
-                        <p className="text-xs leading-5 text-muted-foreground">
-                          {t("terminal.confirmStopDescription")}
-                        </p>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => controller.setClosingTabId(null)}
-                        >
-                          {t("common:actions.cancel")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          destructive
-                          size="xs"
-                          onClick={() => controller.closeTab(tab.id)}
-                        >
-                          {t("terminal.stop")}
-                        </Button>
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                )}
               </div>
             );
           })}
@@ -797,7 +884,7 @@ function TerminalPanelShell({
               variant="ghost"
               size="icon-xs"
               onClick={controller.restart}
-              disabled={!controller.activeTab}
+              disabled={!controller.canRestart}
               aria-label={t("terminal.restart")}
               className={TERMINAL_HEADER_ICON_BUTTON_CLASS}
             >
@@ -895,6 +982,7 @@ function TerminalPanelShell({
                       key={tab.id}
                       sessionKey={`${sessionId}:${tab.id}`}
                       cwd={tab.cwd}
+                      existingSession={tab.source === "agent"}
                       // Treat the first entering frame as collapsed so xterm
                       // defers fitting until the 44px-to-dockHeight open
                       // transition ends, instead of fitting to intermediate

@@ -34,6 +34,9 @@ interface StartTerminalOptions {
   cwd: string;
   cols: number;
   rows: number;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   onEvent: (event: TerminalEvent) => void;
 }
 
@@ -41,6 +44,9 @@ export async function startTerminal({
   cwd,
   cols,
   rows,
+  command,
+  args,
+  env,
   onEvent,
 }: StartTerminalOptions): Promise<string> {
   const channel = new Channel<TerminalEvent>();
@@ -49,6 +55,9 @@ export async function startTerminal({
     cwd,
     cols,
     rows,
+    command,
+    args,
+    env,
     onEvent: channel,
   });
 }

@@ -1,6 +1,8 @@
 export interface TerminalTab {
   id: string;
   cwd: string;
+  title?: string;
+  source?: "user" | "agent";
 }
 
 export type TerminalDockedPlacement =
@@ -147,6 +149,20 @@ export function createTerminalTab(cwd: string): TerminalTab {
   return {
     id: createTerminalTabId(),
     cwd,
+    source: "user",
+  };
+}
+
+export function createAgentTerminalTab(
+  terminalId: string,
+  cwd: string,
+  title: string,
+): TerminalTab {
+  return {
+    id: terminalId,
+    cwd,
+    title,
+    source: "agent",
   };
 }
 
@@ -194,7 +210,13 @@ export function normalizeTerminalTabs(tabs: unknown[]): TerminalTab[] {
     }
 
     const tab = item as Partial<TerminalTab>;
-    if (typeof tab.cwd !== "string" || tab.cwd.length === 0) {
+    // Agent-owned terminals only live for the current ACP connection. Do not
+    // restore stale process tabs from localStorage after an app reload.
+    if (
+      (tab.source !== undefined && tab.source !== "user") ||
+      typeof tab.cwd !== "string" ||
+      tab.cwd.length === 0
+    ) {
       return normalizedTabs;
     }
 
@@ -210,9 +232,20 @@ export function normalizeTerminalTabs(tabs: unknown[]): TerminalTab[] {
     }
 
     seenIds.add(id);
-    normalizedTabs.push({ id, cwd: tab.cwd });
+    normalizedTabs.push({
+      id,
+      cwd: tab.cwd,
+      ...(typeof tab.title === "string" && tab.title.length > 0
+        ? { title: tab.title }
+        : {}),
+      ...(tab.source === "user" ? { source: tab.source } : {}),
+    });
     return normalizedTabs;
   }, []);
+}
+
+export function canRestartTerminalTab(tab: TerminalTab | null): boolean {
+  return Boolean(tab && tab.source !== "agent");
 }
 
 export function findDefaultTerminalTab(
@@ -223,7 +256,7 @@ export function findDefaultTerminalTab(
     return null;
   }
 
-  return tabs.find((tab) => tab.cwd === cwd) ?? null;
+  return tabs.find((tab) => tab.cwd === cwd && tab.source !== "agent") ?? null;
 }
 
 export function shortenTerminalPath(path: string): string {
@@ -240,7 +273,7 @@ export function terminalTabLabel(
   tab: TerminalTab,
   tabs: TerminalTab[],
 ): string {
-  const baseLabel = shortenTerminalPath(tab.cwd);
+  const baseLabel = tab.title?.trim() || shortenTerminalPath(tab.cwd);
   const matchingTabs = tabs.filter((candidate) => candidate.cwd === tab.cwd);
   if (matchingTabs.length <= 1) {
     return baseLabel;

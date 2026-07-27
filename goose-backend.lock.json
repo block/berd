@@ -3,5 +3,11 @@
   "ref": "main",
   "commit": "8d5bc5d49771a851a804491b398646fd6bd83f10",
   "package": "goose-cli",
-  "bin": "goose"
+  "bin": "goose",
+  "patches": [
+    {
+      "path": "patches/goose/bot-801-forward-acp-terminal-events.patch",
+      "sha256": "d99ad8e06cbc935e1e6c32e335533d91a6d2f79f7b4e946743addb5e7655df97"
+    }
+  ]
 }

@@ -1,11 +1,16 @@
 use crate::services::{dir_env, path_env::build_extended_path_from_path, shell_env};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 use std::{
     collections::HashMap,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
 };
 use tauri::{ipc::Channel, State};
@@ -15,6 +20,10 @@ const MIN_COLS: u16 = 20;
 const MIN_ROWS: u16 = 5;
 const MAX_COLS: u16 = 500;
 const MAX_ROWS: u16 = 200;
+#[cfg(unix)]
+const STOP_GRACE: Duration = Duration::from_millis(750);
+#[cfg(unix)]
+const STOP_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Default)]
 pub struct TerminalState {
@@ -24,10 +33,7 @@ pub struct TerminalState {
 impl TerminalState {
     pub fn stop_all(&self) {
         let sessions = match self.sessions.lock() {
-            Ok(mut sessions) => sessions
-                .drain()
-                .map(|(_, session)| session)
-                .collect::<Vec<_>>(),
+            Ok(sessions) => sessions.values().cloned().collect::<Vec<_>>(),
             Err(error) => {
                 log::warn!("Failed to lock terminal sessions for shutdown: {error}");
                 Vec::new()
@@ -35,23 +41,93 @@ impl TerminalState {
         };
 
         for session in sessions {
-            session.kill();
+            session.stop();
         }
     }
 }
 
+#[derive(Clone)]
 struct TerminalSession {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    process_id: Option<u32>,
+    stopping: Arc<AtomicBool>,
 }
 
 impl TerminalSession {
-    fn kill(&self) {
-        if let Ok(mut killer) = self.killer.lock() {
-            let _ = killer.kill();
+    fn stop(&self) {
+        if self.stopping.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        #[cfg(unix)]
+        if let Some(process_id) = self.process_id {
+            thread::spawn(move || stop_unix_process_group(process_id));
+            return;
+        }
+
+        // portable-pty's Windows killer terminates only the process represented
+        // by its handle; it does not establish process-tree ownership. Keep this
+        // fallback bounded, but do not claim that it terminates descendants.
+        self.kill_child();
+    }
+
+    fn kill_child(&self) {
+        match self.killer.lock() {
+            Ok(mut killer) => {
+                if let Err(error) = killer.kill() {
+                    log::warn!("Failed to stop terminal process: {error}");
+                }
+            }
+            Err(error) => log::warn!("Failed to lock terminal process killer: {error}"),
         }
     }
+}
+
+#[cfg(unix)]
+fn stop_unix_process_group(process_id: u32) {
+    if process_id > i32::MAX as u32 {
+        log::warn!("Cannot stop terminal process group with invalid id {process_id}");
+        return;
+    }
+
+    if !signal_process_group(process_id, libc::SIGHUP) {
+        return;
+    }
+
+    let deadline = Instant::now() + STOP_GRACE;
+    while process_group_exists(process_id) && Instant::now() < deadline {
+        thread::sleep(STOP_POLL_INTERVAL);
+    }
+
+    if process_group_exists(process_id) {
+        signal_process_group(process_id, libc::SIGKILL);
+    }
+}
+
+#[cfg(unix)]
+fn process_group_exists(process_id: u32) -> bool {
+    let result = unsafe { libc::kill(-(process_id as i32), 0) };
+    if result == 0 {
+        return true;
+    }
+
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(unix)]
+fn signal_process_group(process_id: u32, signal: libc::c_int) -> bool {
+    let result = unsafe { libc::kill(-(process_id as i32), signal) };
+    if result == 0 {
+        return true;
+    }
+
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() != Some(libc::ESRCH) {
+        log::warn!("Failed to signal terminal process group {process_id}: {error}");
+    }
+    false
 }
 
 #[derive(Clone, Serialize)]
@@ -81,14 +157,24 @@ pub enum TerminalEvent {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri exposes each IPC field as a command argument.
 pub async fn start_terminal(
     state: State<'_, TerminalState>,
     cwd: String,
     cols: u16,
     rows: u16,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<HashMap<String, String>>,
     on_event: Channel<TerminalEvent>,
 ) -> Result<String, String> {
     let cwd = resolve_terminal_cwd(&cwd)?;
+    if command
+        .as_ref()
+        .is_some_and(|command| command.trim().is_empty())
+    {
+        return Err("Terminal command cannot be empty.".to_string());
+    }
 
     let mut shell_env = dir_env::capture_home_interactive_env().await;
     add_fallback_env_vars(&mut shell_env);
@@ -102,20 +188,29 @@ pub async fn start_terminal(
         .openpty(size)
         .map_err(|error| format!("Failed to create terminal: {error}"))?;
 
-    let mut command = CommandBuilder::new(shell);
-    command.env_clear();
-    command.cwd(&cwd);
-    for (key, value) in &shell_env {
-        command.env(key, value);
+    let mut process = CommandBuilder::new(command.as_deref().unwrap_or(&shell));
+    if let Some(args) = args {
+        process.args(args);
     }
-    command.env("PATH", extended_path);
-    command.env("TERM", "xterm-256color");
-    command.env("COLORTERM", "truecolor");
+    process.env_clear();
+    process.cwd(&cwd);
+    for (key, value) in &shell_env {
+        process.env(key, value);
+    }
+    process.env("PATH", extended_path);
+    process.env("TERM", "xterm-256color");
+    process.env("COLORTERM", "truecolor");
+    if let Some(env) = env {
+        for (key, value) in env {
+            process.env(key, value);
+        }
+    }
 
     let mut child = pair
         .slave
-        .spawn_command(command)
+        .spawn_command(process)
         .map_err(|error| format!("Failed to start terminal shell: {error}"))?;
+    let process_id = child.process_id();
     let killer = Arc::new(Mutex::new(child.clone_killer()));
     let mut reader = pair
         .master
@@ -131,6 +226,8 @@ pub async fn start_terminal(
         master,
         writer,
         killer,
+        process_id,
+        stopping: Arc::new(AtomicBool::new(false)),
     };
 
     {
@@ -163,7 +260,7 @@ pub async fn start_terminal(
                         .is_err()
                     {
                         let session = match read_sessions.lock() {
-                            Ok(mut sessions) => sessions.remove(&read_terminal_id),
+                            Ok(sessions) => sessions.get(&read_terminal_id).cloned(),
                             Err(error) => {
                                 log::warn!(
                                     "Failed to lock terminal sessions after channel closed: {error}"
@@ -172,7 +269,7 @@ pub async fn start_terminal(
                             }
                         };
                         if let Some(session) = session {
-                            session.kill();
+                            session.stop();
                         }
                         break;
                     }
@@ -186,7 +283,7 @@ pub async fn start_terminal(
                         .is_err()
                     {
                         let session = match read_sessions.lock() {
-                            Ok(mut sessions) => sessions.remove(&read_terminal_id),
+                            Ok(sessions) => sessions.get(&read_terminal_id).cloned(),
                             Err(error) => {
                                 log::warn!(
                                     "Failed to lock terminal sessions after channel closed: {error}"
@@ -195,7 +292,7 @@ pub async fn start_terminal(
                             }
                         };
                         if let Some(session) = session {
-                            session.kill();
+                            session.stop();
                         }
                     }
                     break;
@@ -288,15 +385,15 @@ pub fn resize_terminal(
 #[tauri::command]
 pub fn stop_terminal(state: State<'_, TerminalState>, terminal_id: String) -> Result<(), String> {
     let session = {
-        let mut sessions = state
+        let sessions = state
             .sessions
             .lock()
             .map_err(|error| format!("Failed to lock terminal sessions: {error}"))?;
-        sessions.remove(&terminal_id)
+        sessions.get(&terminal_id).cloned()
     };
 
     if let Some(session) = session {
-        session.kill();
+        session.stop();
     }
 
     Ok(())
@@ -376,7 +473,32 @@ fn add_fallback_env_vars(env: &mut HashMap<String, String>) {
 #[cfg(test)]
 mod tests {
     use super::resolve_terminal_cwd;
+    #[cfg(unix)]
+    use super::{process_group_exists, stop_unix_process_group};
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
+    #[cfg(unix)]
+    use std::process::{Command, Stdio};
     use tempfile::{tempdir, NamedTempFile};
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_escalates_for_a_process_group_that_ignores_hup() {
+        let mut child = Command::new("sh")
+            .args(["-c", "trap '' HUP; while :; do sleep 1; done"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .expect("spawn HUP-ignoring process group");
+        let process_id = child.id();
+
+        assert!(process_group_exists(process_id));
+        stop_unix_process_group(process_id);
+        child.wait().expect("reap stopped process group");
+        assert!(!process_group_exists(process_id));
+    }
 
     #[test]
     fn resolve_terminal_cwd_accepts_plain_directory() {

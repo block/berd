@@ -61,14 +61,21 @@ function groupMessageToolChains(
 
 export function ToolChainSummaryMessageBubble({
   payload,
+  sessionId,
 }: {
   payload: TranscriptToolChainPayload;
+  sessionId?: string;
 }) {
   const chains = groupMessageToolChains(payload.message.content);
   return (
     <>
       {chains.map(({ chainId, toolItems }) => (
-        <ToolChainCards key={chainId} chainId={chainId} toolItems={toolItems} />
+        <ToolChainCards
+          key={chainId}
+          chainId={chainId}
+          toolItems={toolItems}
+          sessionId={sessionId}
+        />
       ))}
     </>
   );

@@ -330,6 +330,7 @@ function MessageAttachmentGrid({
 
 interface MessageBubbleProps {
   message: Message;
+  sessionId?: string;
   isStreaming?: boolean;
   actionsAlwaysVisible?: boolean;
   animateEntry?: boolean;
@@ -646,6 +647,7 @@ function renderContentBlock(
 
 export const MessageBubble = memo(function MessageBubble({
   message,
+  sessionId,
   isStreaming,
   actionsAlwaysVisible = false,
   animateEntry = true,
@@ -996,6 +998,7 @@ export const MessageBubble = memo(function MessageBubble({
                   key={section.key}
                   chainId={section.key}
                   toolItems={toolItems}
+                  sessionId={sessionId}
                 />
               );
             }
