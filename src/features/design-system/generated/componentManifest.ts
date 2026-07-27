@@ -350,6 +350,18 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Berd Loader Inline",
+    source: "src/shared/ui/berd-loader-inline.tsx",
+    description:
+      "In-app variant of the Berd loader used for session activity (left nav,\nresponding pill). Unlike the startup `berd-loader.tsx` (which morphs the\nwhole mark), this renders the settled Berd mark and only spins the diamond\nnose/beak cutout with an ease-in/ease-out rotation, then rests.\n\nTunable values live in the SPIN_* constants below.",
+    exports: ["BerdLoaderInline", "BerdLoaderInlineProps"],
+    slots: ["berd-loader-inline"],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: ["aria-hidden", 'aria-hidden="true"', "aria-label"],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Berd Loader",
     source: "src/shared/ui/berd-loader.tsx",
     description: "",

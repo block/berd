@@ -14,6 +14,7 @@ export type DesignSystemSection =
   | "component-avatar"
   | "component-badge"
   | "component-berd-loader"
+  | "component-berd-loader-inline"
   | "component-breadcrumb"
   | "component-alert"
   | "component-calendar"
@@ -96,6 +97,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-card", label: "Card" },
   { id: "component-badge", label: "Badge" },
   { id: "component-berd-loader", label: "Berd Loader" },
+  { id: "component-berd-loader-inline", label: "Berd Loader Inline" },
   { id: "component-breadcrumb", label: "Breadcrumb" },
   { id: "component-checkbox", label: "Checkbox" },
   { id: "component-collapsible", label: "Collapsible" },

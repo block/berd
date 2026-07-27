@@ -200,7 +200,7 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader"]'),
+      container.querySelector('[data-slot="berd-loader-inline"]'),
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("sidebar-chat-menu-icon"),
@@ -219,7 +219,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(container.querySelector("animate")).not.toBeInTheDocument();
+    expect(container.querySelector("animateTransform")).not.toBeInTheDocument();
   });
 
   it("shows an unread dot when the chat has unread output", () => {
@@ -242,7 +242,7 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByTestId("sidebar-chat-menu-icon")).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader"]'),
+      container.querySelector('[data-slot="berd-loader-inline"]'),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/chat active/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader"]'),
+      container.querySelector('[data-slot="berd-loader-inline"]'),
     ).toBeInTheDocument();
     expect(
       container.querySelector('[data-project-color-swatch="project-1"]'),

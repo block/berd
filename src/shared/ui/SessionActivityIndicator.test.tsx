@@ -22,9 +22,9 @@ describe("SessionActivityIndicator", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader"]'),
+      container.querySelector('[data-slot="berd-loader-inline"]'),
     ).toBeInTheDocument();
-    expect(container.querySelector("animate")).toBeInTheDocument();
+    expect(container.querySelector("animateTransform")).toBeInTheDocument();
     expect(screen.getByLabelText(/chat active/i)).toHaveClass(
       "animate-in",
       "fade-in-0",
@@ -66,7 +66,7 @@ describe("SessionActivityIndicator", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader"]'),
+      container.querySelector('[data-slot="berd-loader-inline"]'),
     ).toBeInTheDocument();
   });
 

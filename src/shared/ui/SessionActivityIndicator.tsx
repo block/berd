@@ -2,7 +2,7 @@ import { useReducedMotion } from "motion/react";
 
 import { cn } from "@/shared/lib/cn";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
-import { BerdLoader } from "@/shared/ui/berd-loader";
+import { BerdLoaderInline } from "@/shared/ui/berd-loader-inline";
 
 const ACTIVE_CHAT_BERD_SIZE_PX = 14;
 const WORKING_INDICATOR_ENTRANCE_CLASSES =
@@ -33,7 +33,7 @@ export function ActiveChatBerdIndicator({
       workingIndicatorAnimationPreference.enabled);
 
   return (
-    <BerdLoader
+    <BerdLoaderInline
       animated={motionEnabled}
       className={className}
       decorative
@@ -66,7 +66,7 @@ export function SessionActivityIndicator({
             className,
           )}
         >
-          <BerdLoader
+          <BerdLoaderInline
             animated={motionEnabled}
             decorative
             size={ACTIVE_CHAT_BERD_SIZE_PX}
@@ -85,7 +85,7 @@ export function SessionActivityIndicator({
           className,
         )}
       >
-        <BerdLoader
+        <BerdLoaderInline
           animated={motionEnabled}
           decorative
           size={ACTIVE_CHAT_BERD_SIZE_PX}

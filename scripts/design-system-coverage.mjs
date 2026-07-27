@@ -98,7 +98,74 @@ function getProductImportUsage(manifest) {
     }
   }
 
+  propagateSharedUiUsage(manifest, usageByName);
+
   return usageByName;
+}
+
+// A shared UI component rendered by another shared UI component that has
+// product usage is itself used in product (for example, BerdLoaderInline is
+// rendered everywhere SessionActivityIndicator is). Direct product-import
+// scanning ignores src/shared/ui, so propagate usage through shared UI
+// imports until a fixed point. Only value imports of component names count:
+// type-only imports, inline `type X` names, lowercase helpers such as
+// `toggleVariants`, and SCREAMING_CASE constants do not make the exporting
+// component itself product-used.
+function propagateSharedUiUsage(manifest, usageByName) {
+  const sharedUiComponents = manifest.filter((component) =>
+    component.source.startsWith("src/shared/ui/"),
+  );
+  const sourceTextBySource = new Map(
+    sharedUiComponents.map((component) => [
+      component.source,
+      fs.readFileSync(path.join(repoRoot, component.source), "utf8"),
+    ]),
+  );
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    for (const component of manifest) {
+      const importPath = component.source
+        .replace(/^src\/shared\/ui\//, "@/shared/ui/")
+        .replace(/\.tsx$/, "");
+      const namedImportPattern = new RegExp(
+        `import\\s*{([^}]*)}\\s*from\\s*["']${escapeRegex(importPath)}["']`,
+      );
+
+      for (const importer of sharedUiComponents) {
+        if (importer.source === component.source) {
+          continue;
+        }
+        if ((usageByName.get(importer.name) ?? []).length === 0) {
+          continue;
+        }
+
+        const match = sourceTextBySource
+          .get(importer.source)
+          .match(namedImportPattern);
+        const importsComponent =
+          match !== null &&
+          match[1]
+            .split(",")
+            .map((name) => name.trim())
+            .filter((name) => !name.startsWith("type "))
+            .some((name) => /^[A-Z]/.test(name) && !/^[A-Z0-9_]+$/.test(name));
+        if (!importsComponent) {
+          continue;
+        }
+
+        const usages = usageByName.get(component.name) ?? [];
+        const viaEntry = `${importer.source} (shared UI)`;
+        if (!usages.includes(viaEntry)) {
+          usages.push(viaEntry);
+          usageByName.set(component.name, usages);
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 function getFunctionBlock(sourceText, functionName) {
