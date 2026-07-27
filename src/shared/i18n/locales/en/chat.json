@@ -234,7 +234,9 @@
       "selectBranch": "Select branch",
       "search": "Search",
       "noResults": "No matching worktrees or branches",
-      "worktrees": "Worktrees",
+      "worktrees": "Active worktree",
+      "addWorktree": "Add worktree",
+      "addBranch": "Add branch",
       "allBranches": "All branches",
       "availableBranches": "Available branches",
       "branchLabel": "Branch",
@@ -271,7 +273,7 @@
     "labels": {
       "project": "Project",
       "remote": "Remote",
-      "workspace": "Workspace",
+      "workspace": "Project folder",
       "workspaces": "Workspaces"
     },
     "states": {
@@ -284,6 +286,7 @@
     },
     "tabs": {
       "details": "Context",
+      "changes": "Changes",
       "files": "Files"
     },
     "widgets": {

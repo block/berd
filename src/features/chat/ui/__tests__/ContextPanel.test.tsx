@@ -133,7 +133,7 @@ describe("ContextPanel", () => {
     screen.getByRole("button", { name: /^add a workspace$/i });
   const getWorkspaceSectionActionsMenuButton = () =>
     screen.getByRole("button", {
-      name: /open actions for workspace/i,
+      name: /open actions for (workspace|project folder)/i,
     });
   const getWorkspaceActionsMenuButton = (name: RegExp | string = /goose2/i) =>
     screen.getByRole("button", {
@@ -428,10 +428,17 @@ describe("ContextPanel", () => {
       projectName: "Desktop UX",
     });
 
-    const workspaceHeader = screen.queryByRole("button", {
+    const workspaceHeader = screen.getByRole("button", {
       name: /collapse .*goose2/i,
     });
-    expect(workspaceHeader).not.toBeInTheDocument();
+    expect(workspaceHeader).toBeInTheDocument();
+    await user.click(workspaceHeader);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /select branch/i }),
+      ).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /expand .*goose2/i }));
     await user.click(screen.getByRole("button", { name: /select branch/i }));
     await user.click(screen.getByRole("button", { name: /^dev$/i }));
     await user.click(screen.getByRole("button", { name: /carry to branch/i }));
@@ -552,14 +559,11 @@ describe("ContextPanel", () => {
       projectName: "Desktop UX",
     });
 
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
     const createBranch = screen.getByRole("button", {
-      name: /^create branch$/i,
-    });
-    const createWorktree = screen.getByRole("button", {
-      name: /^create worktree$/i,
+      name: /^add branch$/i,
     });
     expect(createBranch).toBeInTheDocument();
-    expect(createWorktree).toBeInTheDocument();
 
     await user.click(createBranch);
     expect(
@@ -567,6 +571,11 @@ describe("ContextPanel", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^cancel$/i }));
 
+    await user.click(screen.getByRole("button", { name: /select worktree/i }));
+    const createWorktree = screen.getByRole("button", {
+      name: /^add worktree$/i,
+    });
+    expect(createWorktree).toBeInTheDocument();
     await user.click(createWorktree);
     expect(
       screen.getByRole("dialog", { name: /new worktree/i }),
@@ -723,11 +732,9 @@ describe("ContextPanel", () => {
 
     expect(screen.getByRole("tab", { name: /context/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /files/i })).toBeInTheDocument();
-    expect(screen.getByText("Project")).toBeInTheDocument();
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
-    expect(screen.getByText("Desktop UX")).toBeInTheDocument();
-    expect(screen.getByText("goose2")).toBeInTheDocument();
-    expect(screen.getByText("main checkout")).toBeInTheDocument();
+    expect(screen.getByText("Project folder")).toBeInTheDocument();
+    expect(screen.getAllByText("goose2").length).toBeGreaterThan(0);
+    expect(screen.getByText("Active worktree")).toBeInTheDocument();
     expect(screen.queryByText("Main worktree")).not.toBeInTheDocument();
     expect(screen.queryByText("3 changed")).not.toBeInTheDocument();
     expect(
@@ -766,7 +773,7 @@ describe("ContextPanel", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("tab", { name: /files/i }));
 
-    expect(screen.getByText("goose2")).toBeInTheDocument();
+    expect(screen.getAllByText("goose2").length).toBeGreaterThan(0);
   });
 
   it("renders repo-relative titles for project subdirectories", () => {
@@ -800,7 +807,7 @@ describe("ContextPanel", () => {
     });
 
     expect(screen.getByText("cash-server/builderbot")).toBeInTheDocument();
-    expect(screen.getByText("main checkout")).toBeInTheDocument();
+    expect(screen.queryByText("main checkout")).not.toBeInTheDocument();
     expect(screen.queryByText("Subdirectory")).not.toBeInTheDocument();
     expect(screen.queryByText("../builderbot")).not.toBeInTheDocument();
   });
@@ -983,8 +990,8 @@ describe("ContextPanel", () => {
 
     expect(screen.getByText("repo-a/app")).toBeInTheDocument();
     expect(screen.getByText("repo-b/.../api")).toBeInTheDocument();
-    expect(screen.getByText("main checkout")).toBeInTheDocument();
-    expect(screen.getByText("service")).toBeInTheDocument();
+    expect(screen.queryByText("main checkout")).not.toBeInTheDocument();
+    expect(screen.queryByText("service")).not.toBeInTheDocument();
 
     await openWorkspaceActionsMenu(user, /repo-b\/\.\.\.\/api/i);
 
@@ -2086,7 +2093,7 @@ describe("ContextPanel", () => {
       sessionWorkingDir: "/Users/test/goose artifacts",
     });
 
-    expect(screen.getByText("General chat")).toBeInTheDocument();
+    expect(screen.getByText("Artifact folder")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /change folder/i }),
     ).toBeInTheDocument();
@@ -2189,12 +2196,12 @@ describe("ContextPanel", () => {
       sessionWorkingDir: "/Users/test/goose artifacts",
     });
 
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Project folder")).toBeInTheDocument();
     expect(
       screen.queryByText("No workspaces included yet."),
     ).not.toBeInTheDocument();
     expect(getAddWorkspaceButton()).toBeEnabled();
-    expect(screen.queryByText("Changes")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /changes/i })).toBeInTheDocument();
     expect(screen.queryByText("goose artifacts")).not.toBeInTheDocument();
     expect(screen.queryByText("Folder not set")).not.toBeInTheDocument();
     expect(
@@ -2311,12 +2318,12 @@ describe("ContextPanel", () => {
       projectName: "Desktop UX",
     });
 
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
-    expect(screen.getByText("goose2")).toBeInTheDocument();
+    expect(screen.getByText("Project folder")).toBeInTheDocument();
+    expect(screen.getAllByText("goose2").length).toBeGreaterThan(0);
     expect(
       screen.queryByRole("button", { name: /change folder/i }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Desktop UX")).toBeInTheDocument();
+    expect(screen.queryByText("Desktop UX")).not.toBeInTheDocument();
   });
 
   it("does not show session artifacts for git-backed chats", () => {

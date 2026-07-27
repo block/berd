@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
-import { GitBranch, GitFork, Plus, Search } from "lucide-react";
+import { ChevronDown, GitBranch, GitFork, Plus, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { cn } from "@/shared/lib/cn";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { Badge } from "@/shared/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog";
-import { Button, buttonVariants } from "@/shared/ui/button";
+import { buttonVariants } from "@/shared/ui/button";
 import { formatErrorMessage } from "./formatError";
 import {
   type CreatedWorkspaceWorktreeContext,
@@ -66,6 +67,10 @@ function worktreeName(path: string) {
   return normalizePath(path).split("/").at(-1) ?? path;
 }
 
+function worktreeLabel(path: string, _branch: string | null | undefined) {
+  return worktreeName(path);
+}
+
 export function WorkspaceContextPicker({
   gitState,
   currentPath,
@@ -99,10 +104,20 @@ export function WorkspaceContextPicker({
       ),
     [gitState.worktrees],
   );
+  const currentWorktree =
+    gitState.worktrees.find((worktree) =>
+      isSamePath(worktree.path, currentPath),
+    ) ?? null;
+  const currentWorktreeLabel = currentWorktree
+    ? worktreeLabel(currentWorktree.path, currentWorktree.branch)
+    : worktreeName(currentPath);
   const visibleWorktrees = gitState.worktrees.filter((worktree) => {
     const query = worktreeSearch.trim().toLowerCase();
     return (
       !query ||
+      worktreeLabel(worktree.path, worktree.branch)
+        .toLowerCase()
+        .includes(query) ||
       worktree.path.toLowerCase().includes(query) ||
       worktree.branch?.toLowerCase().includes(query)
     );
@@ -170,7 +185,7 @@ export function WorkspaceContextPicker({
   };
 
   const pickerClassName = cn(
-    "flex min-h-9 w-full items-center gap-2 rounded-sm bg-background/45 px-2.5 py-2 text-left text-sm",
+    "group flex min-h-9 w-full items-center gap-2 rounded-sm bg-background/45 px-2.5 py-2 text-left text-sm",
     "transition-colors hover:bg-background/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
     "disabled:cursor-not-allowed disabled:opacity-60",
   );
@@ -182,26 +197,12 @@ export function WorkspaceContextPicker({
 
   return (
     <>
-      <div className="space-y-3 border-t border-border/60 pt-3">
-        <div className="space-y-1.5">
+      <div className="space-y-3">
+        <div className="group/worktree-section space-y-1.5">
           <div className="flex min-h-6 items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm font-normal text-muted-foreground">
               {t("contextPanel.picker.worktrees")}
             </p>
-            {canCreateWorktree ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="size-6 rounded-sm"
-                disabled={disabled}
-                aria-label={t("contextPanel.createDialog.createWorktree")}
-                title={t("contextPanel.createDialog.createWorktree")}
-                onClick={() => setCreateMode("worktree")}
-              >
-                <Plus className="size-3.5" />
-              </Button>
-            ) : null}
           </div>
           <Popover
             open={worktreeOpen}
@@ -219,14 +220,15 @@ export function WorkspaceContextPicker({
               >
                 <GitFork className="size-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">
-                  {shortenPath(currentPath)}
+                  {currentWorktreeLabel}
                 </span>
+                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-visible:opacity-100" />
               </button>
             </PopoverTrigger>
             <PopoverContent
               align="start"
               sideOffset={6}
-              className="chat-context-dropdown-surface w-[var(--radix-popover-trigger-width)] min-w-72 rounded-sm p-2"
+              className="chat-context-dropdown-surface w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
             >
               <div className="mb-2 flex h-9 items-center gap-2 rounded-xs bg-muted/60 px-2.5 text-muted-foreground">
                 <Search className="size-3.5" />
@@ -235,10 +237,26 @@ export function WorkspaceContextPicker({
                   value={worktreeSearch}
                   onChange={(event) => setWorktreeSearch(event.target.value)}
                   placeholder={t("contextPanel.picker.search")}
-                  className="min-w-0 flex-1 border-0 bg-transparent text-sm text-foreground outline-none"
+                  className="chat-context-search-input min-w-0 flex-1 appearance-none border-0 bg-transparent text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
                 />
               </div>
-              <div className="max-h-64 overflow-y-auto">
+              <div className="scrollbar-none max-h-64 overflow-y-auto">
+                {canCreateWorktree ? (
+                  <button
+                    type="button"
+                    className={cn(optionClassName, "mb-1 text-foreground/70")}
+                    disabled={disabled}
+                    onClick={() => {
+                      setCreateMode("worktree");
+                      setWorktreeOpen(false);
+                    }}
+                  >
+                    <Plus className="mt-0.5 size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {t("contextPanel.picker.addWorktree")}
+                    </span>
+                  </button>
+                ) : null}
                 {visibleWorktrees.map((worktree) => (
                   <button
                     key={worktree.path}
@@ -253,7 +271,7 @@ export function WorkspaceContextPicker({
                     <GitFork className="mt-0.5 size-3.5 shrink-0" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">
-                        {worktreeName(worktree.path)}
+                        {worktreeLabel(worktree.path, worktree.branch)}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">
                         {shortenPath(worktree.path)}
@@ -271,23 +289,11 @@ export function WorkspaceContextPicker({
           </Popover>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="group/branch-section space-y-1.5">
           <div className="flex min-h-6 items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm font-normal text-muted-foreground">
               {t("contextPanel.picker.branchLabel")}
             </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="size-6 rounded-sm"
-              disabled={disabled}
-              aria-label={t("contextPanel.createDialog.createBranch")}
-              title={t("contextPanel.createDialog.createBranch")}
-              onClick={() => setCreateMode("branch")}
-            >
-              <Plus className="size-3.5" />
-            </Button>
           </div>
           <Popover
             open={branchOpen}
@@ -307,12 +313,13 @@ export function WorkspaceContextPicker({
                 <span className="min-w-0 flex-1 truncate">
                   {activeBranch ?? t("contextPanel.picker.noBranch")}
                 </span>
+                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-visible:opacity-100" />
               </button>
             </PopoverTrigger>
             <PopoverContent
               align="start"
               sideOffset={6}
-              className="chat-context-dropdown-surface w-[var(--radix-popover-trigger-width)] min-w-72 rounded-sm p-2"
+              className="chat-context-dropdown-surface w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
             >
               <div className="mb-2 flex h-9 items-center gap-2 rounded-xs bg-muted/60 px-2.5 text-muted-foreground">
                 <Search className="size-3.5" />
@@ -321,10 +328,24 @@ export function WorkspaceContextPicker({
                   value={branchSearch}
                   onChange={(event) => setBranchSearch(event.target.value)}
                   placeholder={t("contextPanel.picker.search")}
-                  className="min-w-0 flex-1 border-0 bg-transparent text-sm text-foreground outline-none"
+                  className="chat-context-search-input min-w-0 flex-1 appearance-none border-0 bg-transparent text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
                 />
               </div>
-              <div className="max-h-64 overflow-y-auto">
+              <div className="scrollbar-none max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  className={cn(optionClassName, "mb-1 text-foreground/70")}
+                  disabled={disabled}
+                  onClick={() => {
+                    setCreateMode("branch");
+                    setBranchOpen(false);
+                  }}
+                >
+                  <Plus className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {t("contextPanel.picker.addBranch")}
+                  </span>
+                </button>
                 {visibleBranches.map((branch) => {
                   const owningWorktree = worktreeByBranch.get(branch);
                   const current = branch === activeBranch;
@@ -344,11 +365,12 @@ export function WorkspaceContextPicker({
                       <GitBranch className="mt-0.5 size-3.5 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{branch}</span>
                       {checkedOutElsewhere ? (
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {t("contextPanel.picker.checkedOutIn", {
-                            worktree: worktreeName(owningWorktree?.path ?? ""),
-                          })}
-                        </span>
+                        <Badge
+                          variant="secondary"
+                          className="max-w-28 truncate border-transparent bg-muted/70 px-1.5 py-0.5 text-muted-foreground"
+                        >
+                          {worktreeName(owningWorktree?.path ?? "")}
+                        </Badge>
                       ) : null}
                     </button>
                   );

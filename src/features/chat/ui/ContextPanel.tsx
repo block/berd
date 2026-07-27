@@ -84,7 +84,7 @@ interface PendingCreatedWorktree {
   branch: string | null;
 }
 
-type ContextPanelTab = "details" | "files";
+type ContextPanelTab = "details" | "changes" | "files";
 type ContextPanelSection = "workspace" | "changes" | "artifacts";
 type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
 
@@ -240,10 +240,10 @@ export function ContextPanelWorktreeTracker({
 
 export function ContextPanel({
   sessionId,
-  projectId,
+  projectId: _projectId,
   projectName,
-  projectIcon,
-  projectColor,
+  projectIcon: _projectIcon,
+  projectColor: _projectColor,
   projectWorkingDirs = [],
   sessionWorkingDir,
   terminalOpen = false,
@@ -299,6 +299,8 @@ export function ContextPanel({
   const hasWorkspaceAttachments =
     isMultiWorkspaceMode && workspaceAttachments.length > 0;
   const queryClient = useQueryClient();
+  const isWorkspaceContextTab =
+    activeTab === "details" || activeTab === "changes";
   const {
     data: fallbackGitState,
     error: fallbackGitError,
@@ -306,15 +308,15 @@ export function ContextPanel({
     isFetching: fallbackGitIsFetching,
   } = useGitState(
     gitTargetPath,
-    activeTab === "details" && !hasWorkspaceAttachments,
+    isWorkspaceContextTab && !hasWorkspaceAttachments,
   );
   const workspaceGitRuntimes = useWorkspaceGitRuntimes(
     workspaceAttachments,
-    isMultiWorkspaceMode && (activeTab === "details" || isAddWorkspaceOpen),
+    isMultiWorkspaceMode && (isWorkspaceContextTab || isAddWorkspaceOpen),
   );
   const workspaceChangedFileRuntimes = useWorkspaceChangedFilesRuntimes(
     workspaceGitRuntimes,
-    activeTab === "details",
+    isWorkspaceContextTab,
   );
   const renderedWorkspaceAttachments = useMemo(
     () => workspaceGitRuntimes.map((runtime) => runtime.workspace),
@@ -338,7 +340,7 @@ export function ContextPanel({
     isLoading: isFallbackFilesLoading,
   } = useChangedFiles(
     gitTargetPath,
-    activeTab === "details" && !hasWorkspaceAttachments,
+    isWorkspaceContextTab && !hasWorkspaceAttachments,
   );
   const shouldShowChanges = hasWorkspaceAttachments
     ? workspaceChangedFileRuntimes.length > 0
@@ -811,35 +813,55 @@ export function ContextPanel({
           },
         ],
       });
-      attachWorkspace(sessionId, {
+      const session = useChatSessionStore
+        .getState()
+        .sessions.find((candidate) => candidate.id === sessionId);
+      if (!session) return;
+      const nextWorkspaceId = workspaceAttachmentIdForPath(includedPath);
+      patchSession(sessionId, {
+        workspaceAttachments: getWorkspaceAttachments(session).map(
+          (attachment) =>
+            attachment.id === workspace.id
+              ? {
+                  ...attachment,
+                  id: nextWorkspaceId,
+                  path: includedPath,
+                  branch: classification.branch,
+                  kind: classification.kind,
+                  repositoryPath:
+                    classification.repositoryPath ?? workspace.repositoryPath,
+                  worktreePath: classification.worktreePath ?? worktree.path,
+                  source: "created",
+                  lifecycle: {
+                    owner: "goose",
+                    cleanup: "worktree",
+                    branch: worktree.branch,
+                    baseBranch: context.baseBranch,
+                    repositoryPath:
+                      classification.repositoryPath ??
+                      workspace.repositoryPath ??
+                      gitState.mainWorktreePath ??
+                      null,
+                    worktreePath: worktree.path,
+                    createdBranch: context.createdBranch,
+                  },
+                }
+              : attachment,
+        ),
+        activeWorkspaceId: nextWorkspaceId,
+      });
+      setActiveWorkspace(sessionId, {
         path: includedPath,
         branch: classification.branch,
-        kind: classification.kind,
-        repositoryPath:
-          classification.repositoryPath ?? workspace.repositoryPath,
-        worktreePath: classification.worktreePath ?? worktree.path,
-        source: "created",
-        lifecycle: {
-          owner: "goose",
-          cleanup: "worktree",
-          branch: worktree.branch,
-          baseBranch: context.baseBranch,
-          repositoryPath:
-            classification.repositoryPath ??
-            workspace.repositoryPath ??
-            gitState.mainWorktreePath ??
-            null,
-          worktreePath: worktree.path,
-          createdBranch: context.createdBranch,
-        },
       });
+      void refetchAll();
       toast.success(
         t("contextPanel.includedWorkspaces.includeSuccess", {
           name: getWorkspaceDisplayName(includedPath),
         }),
       );
     },
-    [attachWorkspace, sessionId, t],
+    [patchSession, refetchAll, sessionId, setActiveWorkspace, t],
   );
 
   const handleIncludeCreatedWorktree = useCallback(
@@ -947,6 +969,13 @@ export function ContextPanel({
             {t("contextPanel.tabs.details")}
           </TabsTrigger>
           <TabsTrigger
+            value="changes"
+            variant="weight"
+            className={SIDEBAR_NAV_TEXT_CLASS}
+          >
+            {t("contextPanel.tabs.changes")}
+          </TabsTrigger>
+          <TabsTrigger
             value="files"
             variant="weight"
             className={SIDEBAR_NAV_TEXT_CLASS}
@@ -965,10 +994,7 @@ export function ContextPanel({
           {isMultiWorkspaceMode ? (
             <>
               <WorkspaceWidget
-                projectId={projectId}
                 projectName={projectName}
-                projectIcon={projectIcon}
-                projectColor={projectColor}
                 projectWorkingDirs={projectWorkingDirs}
                 sessionWorkingDir={sessionWorkingDir}
                 primaryWorkspaceRoot={gitTargetPath}
@@ -1010,10 +1036,7 @@ export function ContextPanel({
             </>
           ) : (
             <LegacyWorkspaceWidget
-              projectId={projectId}
               projectName={projectName}
-              projectIcon={projectIcon}
-              projectColor={projectColor}
               projectWorkingDirs={projectWorkingDirs}
               sessionWorkingDir={sessionWorkingDir}
               gitState={fallbackGitState}
@@ -1040,30 +1063,6 @@ export function ContextPanel({
               onToggleTerminal={onToggleTerminal}
             />
           )}
-          {shouldShowChanges &&
-            (hasWorkspaceAttachments ? (
-              <WorkspaceChangesWidget
-                groups={workspaceChangedFileRuntimes}
-                onOpenFile={handleOpenWorkspaceChangedFile}
-              />
-            ) : (
-              <ChangesWidget
-                files={fallbackChangedFiles}
-                isLoading={isFallbackFilesLoading}
-                error={
-                  fallbackChangedFilesError instanceof Error
-                    ? fallbackChangedFilesError
-                    : null
-                }
-                isLoadingError={isFallbackChangedFilesLoadingError}
-                currentBranch={fallbackGitState?.currentBranch ?? null}
-                dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
-                repoPath={gitTargetPath ?? ""}
-                onOpenFile={handleOpenChangedFile}
-                isOpen={sectionVisibility.changes}
-                onToggleOpen={() => toggleSection("changes")}
-              />
-            ))}
           {shouldShowArtifacts && (
             <ArtifactsWidget
               isOpen={sectionVisibility.artifacts}
@@ -1071,6 +1070,37 @@ export function ContextPanel({
             />
           )}
         </div>
+      </TabsContent>
+
+      <TabsContent
+        value="changes"
+        className="scrollbar-none w-full min-h-0 flex-1 overflow-y-auto"
+      >
+        {shouldShowChanges ? (
+          hasWorkspaceAttachments ? (
+            <WorkspaceChangesWidget
+              groups={workspaceChangedFileRuntimes}
+              onOpenFile={handleOpenWorkspaceChangedFile}
+            />
+          ) : (
+            <ChangesWidget
+              files={fallbackChangedFiles}
+              isLoading={isFallbackFilesLoading}
+              error={
+                fallbackChangedFilesError instanceof Error
+                  ? fallbackChangedFilesError
+                  : null
+              }
+              isLoadingError={isFallbackChangedFilesLoadingError}
+              currentBranch={fallbackGitState?.currentBranch ?? null}
+              dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
+              repoPath={gitTargetPath ?? ""}
+              onOpenFile={handleOpenChangedFile}
+              isOpen={sectionVisibility.changes}
+              onToggleOpen={() => toggleSection("changes")}
+            />
+          )
+        ) : null}
       </TabsContent>
 
       <TabsContent

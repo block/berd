@@ -128,7 +128,6 @@ export const ChatContextPanel = memo(function ChatContextPanel({
         >
           <ContextPanel
             sessionId={activeSessionId}
-            projectId={project?.id}
             projectName={project?.name}
             projectIcon={project?.icon}
             projectColor={project?.color}

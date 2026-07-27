@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ChevronDown,
   Ellipsis,
   Folder,
   FolderOpen,
@@ -33,10 +32,7 @@ import {
 import type { CreatedWorkspaceWorktreeContext } from "./WorkspaceCreateDialog";
 
 interface WorkspaceWidgetProps {
-  projectId?: string;
   projectName?: string;
-  projectIcon?: string;
-  projectColor?: string;
   projectWorkingDirs: string[];
   sessionWorkingDir?: string | null;
   primaryWorkspaceRoot: string | null;
@@ -188,6 +184,7 @@ function WorkspaceRow({
   };
 
   const canShowPickers = Boolean(gitState?.isGitRepo);
+  const hasExpandableContent = canShowPickers;
   const header = (
     <WorkspaceIdentity
       workspace={workspace}
@@ -196,6 +193,8 @@ function WorkspaceRow({
       className="min-w-0 flex-1"
       iconClassName="mt-px size-3.5"
       titleClassName="leading-[18px]"
+      showMetadata={false}
+      showHoverChevron={hasExpandableContent}
       metadataClassName="mt-1 text-sm leading-[18px] text-muted-foreground"
     />
   );
@@ -210,44 +209,31 @@ function WorkspaceRow({
     : undefined;
 
   return (
-    <div
-      className={cn(
-        "group/workspace-row relative w-full min-w-0 rounded-[10px] bg-sidebar-accent px-3 py-2",
-        "transition-colors duration-150 focus-within:bg-sidebar-accent/90",
-        collapsible && "hover:bg-sidebar-accent/90",
-      )}
-    >
-      {collapsible ? (
-        <button
-          type="button"
-          className="absolute inset-0 z-0 cursor-pointer rounded-[10px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          aria-expanded={expanded}
-          aria-label={expansionLabel}
-          onClick={onToggleExpanded}
-        />
-      ) : null}
-      <div className="pointer-events-none relative z-[1] flex min-w-0 items-start gap-2">
-        {header}
-        <div className="-mr-1 flex shrink-0 items-center gap-1">
+    <div className="group/workspace-row w-full min-w-0 py-2 first:pt-0 last:pb-0">
+      <div className="relative flex min-w-0 items-start gap-2 py-1 pl-0 pr-0">
+        {hasExpandableContent ? (
+          <button
+            type="button"
+            className="absolute inset-0 z-0 cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-expanded={expanded}
+            aria-label={expansionLabel}
+            onClick={onToggleExpanded}
+          />
+        ) : null}
+        <div className="pointer-events-none relative z-[1] flex min-w-0 flex-1 items-start gap-2">
+          {header}
+        </div>
+        <div className="pointer-events-none relative z-[1] flex shrink-0 items-center gap-1">
           {runtime.isFetching ? (
             <Spinner className="size-3.5 shrink-0 text-muted-foreground" />
           ) : null}
-          {collapsible ? (
-            <ChevronDown
-              className={cn(
-                "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
-                expanded && "rotate-180",
-              )}
-              aria-hidden="true"
-            />
-          ) : null}
-          <div className="pointer-events-auto">
+          <div className="pointer-events-auto opacity-0 transition-opacity duration-100 group-hover/workspace-row:opacity-100 focus-within:opacity-100 [&:has([data-state=open])]:opacity-100">
             <WorkspaceRowActionsMenu {...sharedMenuProps} />
           </div>
         </div>
       </div>
       {expanded && canShowPickers ? (
-        <div className="relative z-[1] mt-3">
+        <div className="mt-2 pl-5">
           <WorkspaceContextPicker
             gitState={gitState as GitState}
             currentPath={gitContext.actionPath}
@@ -349,7 +335,6 @@ function WorkspaceSectionActionsMenu({
 
 export function WorkspaceWidget({
   projectName,
-  projectColor,
   projectWorkingDirs,
   sessionWorkingDir,
   primaryWorkspaceRoot,
@@ -382,6 +367,7 @@ export function WorkspaceWidget({
   );
   const singleWorkspaceId =
     orderedWorkspaces.length === 1 ? orderedWorkspaces[0]?.workspace.id : null;
+  const autoExpandedWorkspaceIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const availableIds = new Set(
@@ -391,7 +377,13 @@ export function WorkspaceWidget({
       const next = new Set(
         [...current].filter((workspaceId) => availableIds.has(workspaceId)),
       );
-      if (singleWorkspaceId) next.add(singleWorkspaceId);
+      if (
+        singleWorkspaceId &&
+        !autoExpandedWorkspaceIdsRef.current.has(singleWorkspaceId)
+      ) {
+        next.add(singleWorkspaceId);
+        autoExpandedWorkspaceIdsRef.current.add(singleWorkspaceId);
+      }
       if (
         next.size === current.size &&
         [...next].every((workspaceId) => current.has(workspaceId))
@@ -403,7 +395,6 @@ export function WorkspaceWidget({
   }, [orderedWorkspaces, singleWorkspaceId]);
 
   const toggleWorkspace = (workspaceId: string) => {
-    if (singleWorkspaceId) return;
     setExpandedWorkspaceIds((current) => {
       const next = new Set(current);
       if (next.has(workspaceId)) next.delete(workspaceId);
@@ -416,11 +407,6 @@ export function WorkspaceWidget({
     projectWorkingDirs[0] ??
     (!projectName ? sessionWorkingDir : null);
   const isArtifactWorkspace = !projectName && projectWorkingDirs.length === 0;
-  const projectLabel = projectName
-    ? projectName
-    : isArtifactWorkspace
-      ? t("contextPanel.artifacts.workspaceLabel")
-      : t("contextPanel.empty.noProjectAssigned");
   const gitErrorMessage =
     fallbackError instanceof Error
       ? fallbackError.message
@@ -446,32 +432,6 @@ export function WorkspaceWidget({
   return (
     <section className="w-full px-4 pb-1 pt-4 text-sm font-normal">
       <div className="space-y-5">
-        <div className="space-y-2">
-          <p className="text-sm font-normal text-muted-foreground">
-            {t("contextPanel.labels.project")}
-          </p>
-          <div className="flex min-w-0 items-center gap-2">
-            {projectName ? (
-              <span
-                className="inline-block size-2 shrink-0 rounded-full bg-success"
-                style={
-                  projectColor ? { backgroundColor: projectColor } : undefined
-                }
-              />
-            ) : (
-              <span
-                className="inline-block size-2 shrink-0 rounded-full bg-success"
-                style={
-                  projectColor ? { backgroundColor: projectColor } : undefined
-                }
-              />
-            )}
-            <span className="min-w-0 flex-1 truncate text-foreground">
-              {projectLabel}
-            </span>
-          </div>
-        </div>
-
         <div className="group/workspace-section space-y-1.5">
           <div className="flex min-h-6 items-center justify-between gap-2">
             <p className="text-sm font-normal text-muted-foreground">
@@ -523,7 +483,7 @@ export function WorkspaceWidget({
               {addWorkspaceRow}
             </div>
           ) : hasWorkspaceRows ? (
-            <div className="space-y-1.5">
+            <div className="divide-y divide-border/60">
               {orderedWorkspaces.map((workspace) => (
                 <WorkspaceRow
                   key={workspace.workspace.id}
@@ -540,11 +500,8 @@ export function WorkspaceWidget({
                   onRemoveWorkspace={onRemoveWorkspace}
                   getRemovalPlan={getRemovalPlan}
                   onOpenTerminalAtPath={onOpenTerminalAtPath}
-                  expanded={
-                    singleWorkspaceId === workspace.workspace.id ||
-                    expandedWorkspaceIds.has(workspace.workspace.id)
-                  }
-                  collapsible={!singleWorkspaceId}
+                  expanded={expandedWorkspaceIds.has(workspace.workspace.id)}
+                  collapsible={Boolean(workspace.gitState?.isGitRepo)}
                   onToggleExpanded={() =>
                     toggleWorkspace(workspace.workspace.id)
                   }

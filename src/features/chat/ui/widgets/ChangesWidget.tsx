@@ -1,11 +1,16 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, File, GitBranch } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { FileContextMenu } from "@/shared/ui/file-context-menu";
 import { Skeleton } from "@/shared/ui/skeleton";
 import type { ChangedFile } from "@/shared/types/git";
 import type { WorkspaceChangedFilesRuntime } from "../hooks/useWorkspaceGitRuntimes";
+
+const CHANGES_SCROLL_CONTAINER_CLASS =
+  "scrollbar-none max-h-[300px] overflow-y-auto rounded-[10px] bg-background/45 py-1";
+const CHANGES_SCROLL_FADE_CLASS =
+  "pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-[10px] bg-gradient-to-t from-background/90 to-transparent";
 
 function splitPath(relativePath: string) {
   const lastSlash = relativePath.lastIndexOf("/");
@@ -48,15 +53,14 @@ function ChangedFileRow({
       type="button"
       disabled={isDeleted}
       className={cn(
-        "group flex min-h-9 w-full select-none items-center gap-2 rounded-[10px] bg-sidebar-accent px-3 py-2 text-left",
-        "transition-colors duration-100",
+        "group relative flex min-h-12 w-full select-none items-center gap-2 py-3 pl-3 pr-2 text-left",
+        "transition-colors duration-100 before:absolute before:inset-x-1 before:inset-y-0 before:rounded-[8px] before:transition-colors after:absolute after:bottom-0 after:left-3 after:right-3 after:h-px after:bg-border/60 last:after:hidden [&:has(+_:focus-visible)]:after:bg-transparent [&:has(+_:hover)]:after:bg-transparent [&>*]:relative [&>*]:z-[1]",
         isDeleted
           ? "cursor-not-allowed opacity-60"
-          : "cursor-pointer hover:bg-sidebar-accent/90 focus-visible:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          : "cursor-pointer hover:before:bg-background/20 hover:after:bg-transparent focus-visible:before:bg-background/20 focus-visible:after:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       )}
       onClick={isDeleted ? undefined : () => onOpen(file.path)}
     >
-      <File className="size-3.5 shrink-0 text-muted-foreground" />
       <div
         className={cn("min-w-0 flex-1 truncate", isDeleted && "line-through")}
       >
@@ -117,14 +121,13 @@ export function ChangesWidget({
 
   const changeCount = Math.max(files?.length ?? 0, dirtyFileCount);
   const hasChanges = changeCount > 0;
-  const showBranchIcon = Boolean(currentBranch);
   const errorMessage =
     error instanceof Error
       ? error.message
       : t("contextPanel.errors.gitChangesRead");
 
   return (
-    <section className="w-full px-4 pt-4 text-sm font-normal">
+    <section className="w-full px-4 py-4 text-sm font-normal">
       {isLoading && !files ? (
         <div className="space-y-2">
           <Skeleton className="h-3 w-3/4" />
@@ -136,9 +139,6 @@ export function ChangesWidget({
       ) : hasChanges ? (
         <div className="space-y-2">
           <div className="flex min-w-0 items-center gap-2 px-2">
-            {showBranchIcon ? (
-              <GitBranch className="size-3.5 shrink-0 text-foreground" />
-            ) : null}
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {renderChangeSummary(
                 t("contextPanel.summary.changes", { count: changeCount }),
@@ -168,15 +168,18 @@ export function ChangesWidget({
             )}
           </div>
           {files?.length ? (
-            <div className="max-h-[300px] space-y-1.5 overflow-y-auto">
-              {files.map((file) => (
-                <ChangedFileRow
-                  key={file.path}
-                  file={file}
-                  fullPath={`${repoPath}/${file.path}`}
-                  onOpen={onOpenFile}
-                />
-              ))}
+            <div className="relative">
+              <div className={CHANGES_SCROLL_CONTAINER_CLASS}>
+                {files.map((file) => (
+                  <ChangedFileRow
+                    key={file.path}
+                    file={file}
+                    fullPath={`${repoPath}/${file.path}`}
+                    onOpen={onOpenFile}
+                  />
+                ))}
+              </div>
+              <div className={CHANGES_SCROLL_FADE_CLASS} aria-hidden="true" />
             </div>
           ) : null}
         </div>
@@ -229,7 +232,7 @@ export function WorkspaceChangesWidget({
       : t("contextPanel.errors.gitChangesRead");
 
   return (
-    <section className="w-full px-4 pt-4 text-sm font-normal">
+    <section className="w-full px-4 py-4 text-sm font-normal">
       {isLoading && changedGroups.length === 0 ? (
         <div className="space-y-2">
           <Skeleton className="h-3 w-3/4" />
@@ -248,9 +251,6 @@ export function WorkspaceChangesWidget({
                 </p>
               ) : null}
               <div className="flex min-w-0 items-center gap-2 px-2">
-                {group.currentBranch ? (
-                  <GitBranch className="size-3.5 shrink-0 text-foreground" />
-                ) : null}
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {renderChangeSummary(
                     t("contextPanel.summary.changes", {
@@ -288,17 +288,23 @@ export function WorkspaceChangesWidget({
                 )}
               </div>
               {group.files.length > 0 ? (
-                <div className="max-h-[300px] space-y-1.5 overflow-y-auto">
-                  {group.files.map((file) => (
-                    <ChangedFileRow
-                      key={`${group.id}:${file.path}`}
-                      file={file}
-                      fullPath={`${group.repoPath}/${file.path}`}
-                      onOpen={() =>
-                        onOpenFile(`${group.repoPath}/${file.path}`)
-                      }
-                    />
-                  ))}
+                <div className="relative">
+                  <div className={CHANGES_SCROLL_CONTAINER_CLASS}>
+                    {group.files.map((file) => (
+                      <ChangedFileRow
+                        key={`${group.id}:${file.path}`}
+                        file={file}
+                        fullPath={`${group.repoPath}/${file.path}`}
+                        onOpen={() =>
+                          onOpenFile(`${group.repoPath}/${file.path}`)
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div
+                    className={CHANGES_SCROLL_FADE_CLASS}
+                    aria-hidden="true"
+                  />
                 </div>
               ) : null}
             </div>

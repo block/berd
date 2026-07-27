@@ -62,7 +62,7 @@ describe("FilesList", () => {
     expect(screen.getByText("goose2")).toBeInTheDocument();
     expect(screen.getByText("sprout")).toBeInTheDocument();
     const rootRow = screen.getByText("goose2").closest("button")?.parentElement;
-    expect(rootRow).toHaveClass("gap-3", "rounded-sm", "px-3.5", "py-2");
+    expect(rootRow).toHaveClass("gap-3", "rounded-sm", "px-3.5", "py-1.5");
     expect(rootRow).not.toHaveClass("py-2.5");
     expect(rootRow).not.toHaveClass("rounded");
     expect(container.firstElementChild).toHaveClass("px-4");
@@ -129,7 +129,7 @@ describe("FilesList", () => {
       "gap-3",
       "rounded-sm",
       "px-3.5",
-      "py-2",
+      "py-1.5",
     );
     expect(fileName.closest('[role="treeitem"]')).not.toHaveClass("py-2.5");
     expect(fileName.closest('[role="treeitem"]')).not.toHaveClass("rounded");

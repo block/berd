@@ -233,7 +233,9 @@
       "selectBranch": "Seleccionar rama",
       "search": "Buscar",
       "noResults": "No hay árboles de trabajo ni ramas que coincidan",
-      "worktrees": "Árboles de trabajo",
+      "worktrees": "Árbol de trabajo activo",
+      "addWorktree": "Agregar worktree",
+      "addBranch": "Agregar rama",
       "allBranches": "Todas las ramas",
       "availableBranches": "Ramas disponibles",
       "branchLabel": "Rama",
@@ -270,7 +272,7 @@
     "labels": {
       "project": "Proyecto",
       "remote": "Remoto",
-      "workspace": "Espacio de trabajo",
+      "workspace": "Carpeta del proyecto",
       "workspaces": "Espacios de trabajo"
     },
     "states": {
@@ -283,6 +285,7 @@
     },
     "tabs": {
       "details": "Contexto",
+      "changes": "Cambios",
       "files": "Archivos"
     },
     "widgets": {

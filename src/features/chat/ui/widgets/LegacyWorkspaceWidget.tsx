@@ -11,17 +11,13 @@ import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import { cn } from "@/shared/lib/cn";
-import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { WorkspaceActionsMenu } from "./WorkspaceActionsMenu";
 import { WorkingContextPicker } from "./WorkingContextPicker";
 import { shortenPath } from "./workspacePath";
 
 interface LegacyWorkspaceWidgetProps {
-  projectId?: string;
   projectName?: string;
-  projectIcon?: string;
-  projectColor?: string;
   projectWorkingDirs: string[];
   sessionWorkingDir?: string | null;
   gitState: GitState | undefined;
@@ -57,10 +53,7 @@ interface LegacyWorkspaceWidgetProps {
 }
 
 export function LegacyWorkspaceWidget({
-  projectId,
   projectName,
-  projectIcon,
-  projectColor,
   projectWorkingDirs,
   sessionWorkingDir,
   gitState,
@@ -85,11 +78,6 @@ export function LegacyWorkspaceWidget({
   const primaryWorkspaceRoot =
     activeContext?.path ?? sessionWorkingDir ?? projectWorkingDirs[0] ?? null;
   const isArtifactWorkspace = !projectName && projectWorkingDirs.length === 0;
-  const projectLabel = projectName
-    ? projectName
-    : isArtifactWorkspace
-      ? t("contextPanel.artifacts.workspaceLabel")
-      : t("contextPanel.empty.noProjectAssigned");
 
   const gitErrorMessage =
     error instanceof Error ? error.message : t("contextPanel.errors.gitRead");
@@ -97,33 +85,6 @@ export function LegacyWorkspaceWidget({
   return (
     <section className="w-full px-4 pb-2 pt-4 text-sm font-normal">
       <div className="space-y-5">
-        <div className="space-y-2">
-          <p className="text-sm font-normal text-muted-foreground">
-            {t("contextPanel.labels.project")}
-          </p>
-          <div className="flex min-w-0 items-center gap-2">
-            {projectName ? (
-              <ProjectIcon
-                icon={projectIcon}
-                color={projectColor}
-                projectId={projectId}
-                className="size-[18px]"
-                imageClassName="size-[18px] rounded-[4px]"
-              />
-            ) : (
-              <span
-                className="inline-block size-2 shrink-0 rounded-full bg-success"
-                style={
-                  projectColor ? { backgroundColor: projectColor } : undefined
-                }
-              />
-            )}
-            <span className="min-w-0 flex-1 truncate text-foreground">
-              {projectLabel}
-            </span>
-          </div>
-        </div>
-
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm font-normal text-muted-foreground">

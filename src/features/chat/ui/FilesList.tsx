@@ -21,7 +21,7 @@ interface DirectoryState {
 }
 
 const EMPTY_ROOTS: string[] = [];
-const FILES_TREE_ROW_CLASS = "py-2";
+const FILES_TREE_ROW_CLASS = "py-1.5";
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);

@@ -1,5 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { Folder, FolderGit, GitBranch, GitFork } from "lucide-react";
+import {
+  ChevronDown,
+  Folder,
+  FolderGit,
+  GitBranch,
+  GitFork,
+} from "lucide-react";
 import type { WorkspaceAttachment } from "@/shared/types/chat";
 import type { GitState } from "@/shared/types/git";
 import { cn } from "@/shared/lib/cn";
@@ -240,6 +246,7 @@ interface WorkspaceIdentityProps {
   iconClassName?: string;
   titleClassName?: string;
   metadataClassName?: string;
+  showHoverChevron?: boolean;
 }
 
 export function WorkspaceIdentity({
@@ -251,6 +258,7 @@ export function WorkspaceIdentity({
   iconClassName,
   titleClassName,
   metadataClassName,
+  showHoverChevron = true,
 }: WorkspaceIdentityProps) {
   const { t } = useTranslation("chat");
   const context = gitContext ?? getWorkspaceGitContext(workspace, gitState);
@@ -262,13 +270,25 @@ export function WorkspaceIdentity({
 
   return (
     <div className={cn("flex min-w-0 items-start gap-2", className)}>
-      <WorkspaceKindIcon
-        kind={iconKind}
-        className={cn(
-          "mt-px size-3.5 shrink-0 text-muted-foreground",
-          iconClassName,
-        )}
-      />
+      <span className="relative mt-px size-3.5 shrink-0 text-muted-foreground">
+        <WorkspaceKindIcon
+          kind={iconKind}
+          className={cn(
+            "absolute inset-0 size-3.5 transition-opacity duration-100",
+            showHoverChevron && "group-hover/workspace-row:opacity-0",
+            iconClassName,
+          )}
+        />
+        {showHoverChevron ? (
+          <ChevronDown
+            className={cn(
+              "absolute inset-0 size-3.5 opacity-0 transition-opacity duration-100 group-hover/workspace-row:opacity-100",
+              iconClassName,
+            )}
+            aria-hidden="true"
+          />
+        ) : null}
+      </span>
       <div className="min-w-0 flex-1">
         <span
           className={cn(

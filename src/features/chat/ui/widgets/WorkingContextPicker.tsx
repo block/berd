@@ -144,11 +144,11 @@ export function WorkingContextPicker({
   const activeBranch =
     activeWorktree?.branch ?? activeContext?.branch ?? gitState?.currentBranch;
   const activeWorktreeLabel = activeWorktree
-    ? shortenPath(activeWorktree.path)
+    ? worktreeName(activeWorktree.path)
     : currentPath
-      ? shortenPath(currentPath)
+      ? worktreeName(currentPath)
       : currentProjectPath
-        ? shortenPath(currentProjectPath)
+        ? worktreeName(currentProjectPath)
         : undefined;
   const pickerPrimaryLabel =
     activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet");
