@@ -9,6 +9,7 @@ timeout, and bridge-result commands.
 permissions = [
   "allow-start",
   "allow-stop",
+  "allow-status",
   "allow-set-timeouts",
   "allow-submit-result",
 ]

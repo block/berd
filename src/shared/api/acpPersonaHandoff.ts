@@ -86,16 +86,19 @@ export function isExternalAgentProvider(
   return providerId ? !isGooseManagedProvider(providerId) : false;
 }
 
-/** Frame the persona instructions as a handoff preamble for the agent. */
+/**
+ * Frame the handed-off content (app context, persona instructions, or both)
+ * as a preamble for the agent.
+ */
 export function buildPersonaHandoffPreamble(systemPrompt: string): string {
   return [
-    "You are operating under the following persona and instructions for this " +
+    "You are operating under the following context and instructions for this " +
       "session. Adopt them as your system prompt for the remainder of the " +
       "conversation, even though they arrive in-band:",
     "",
     systemPrompt.trim(),
     "",
-    "Follow the persona and instructions above for all subsequent turns. Do " +
+    "Follow the context and instructions above for all subsequent turns. Do " +
       "not mention this handoff unless it is relevant to the user's request.",
   ].join("\n");
 }
@@ -103,7 +106,7 @@ export function buildPersonaHandoffPreamble(systemPrompt: string): string {
 /**
  * Resolve the persona handoff for a send. Returns the preamble text to inject
  * as an assistant-audience block, or `null` when no handoff is needed (goose
- * provider, empty persona prompt, or already delivered for this handoff).
+ * provider, nothing to deliver, or already delivered for this handoff).
  *
  * Marks the handoff as delivered as a side effect, so callers must only invoke
  * this once per send when they intend to inject.
@@ -112,18 +115,28 @@ export function claimPersonaHandoff(
   sessionId: string,
   providerId: string | undefined,
   systemPrompt: string | undefined,
+  appPreamble?: string | null,
 ): string | null {
-  const trimmed = systemPrompt?.trim();
-  if (!trimmed || !isExternalAgentProvider(providerId)) {
+  if (!isExternalAgentProvider(providerId)) {
     return null;
   }
 
-  const key = handoffKey(sessionId, providerId as string, trimmed);
+  // App context first, persona after — mirroring the goose path where the
+  // app-owned keyed sections precede the client system prompt. Either part
+  // may be absent; the handoff only fires when at least one is present.
+  const combined = [appPreamble?.trim(), systemPrompt?.trim()]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+  if (!combined) {
+    return null;
+  }
+
+  const key = handoffKey(sessionId, providerId as string, combined);
   if (deliveredHandoffs.has(key)) {
     return null;
   }
   deliveredHandoffs.add(key);
-  return buildPersonaHandoffPreamble(trimmed);
+  return buildPersonaHandoffPreamble(combined);
 }
 
 /**

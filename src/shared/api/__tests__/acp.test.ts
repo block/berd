@@ -50,6 +50,12 @@ vi.mock("../acpApi", () => ({
   cancelSession: vi.fn(),
 }));
 
+const mockGetBerdctlPreamble = vi.fn<() => string | null>(() => null);
+
+vi.mock("@/features/berdctl/appPreamble", () => ({
+  getBerdctlPreamble: () => mockGetBerdctlPreamble(),
+}));
+
 vi.mock("../acpActiveMessageTracking", () => ({
   setActiveMessageId: vi.fn(),
   clearActiveMessageId: vi.fn(),
@@ -63,6 +69,9 @@ describe("acpSendMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    // clearAllMocks clears call history but not return values; reset the
+    // preamble to unavailable so tests opt in explicitly.
+    mockGetBerdctlPreamble.mockReturnValue(null);
     localStorage.removeItem(STYLE_GUIDELINES_STORAGE_KEY);
   });
 
@@ -101,10 +110,16 @@ describe("acpSendMessage", () => {
     expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
       3,
       sessionId,
+      "berd_app_context",
+      "",
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      4,
+      sessionId,
       "client_system_prompt",
       "You are Starfriend.",
     );
-    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(3);
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(4);
   });
 
   it("adds the default style guidelines when unset", async () => {
@@ -157,6 +172,75 @@ describe("acpSendMessage", () => {
       "berd_style_guidelines",
       DEFAULT_STYLE_GUIDELINES_PROMPT,
     );
+  });
+
+  it("sends the berdctl preamble under berd_app_context when available", async () => {
+    mockGetBerdctlPreamble.mockReturnValue("[Berd]\nberdctl is on your PATH.");
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-preamble",
+      "goose",
+      "/tmp/project",
+    );
+
+    await acpSendMessage("acp-session-preamble", "hello", {});
+
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledWith(
+      "acp-session-preamble",
+      "berd_app_context",
+      "[Berd]\nberdctl is on your PATH.",
+    );
+  });
+
+  it("hands the berdctl preamble off in-band for external agents, before the persona", async () => {
+    mockGetBerdctlPreamble.mockReturnValue("[Berd]\nberdctl is on your PATH.");
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
+    const { acpSendMessage } = await import("../acp");
+    __resetAllPersonaHandoffs();
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-preamble-ext",
+      "claude-acp",
+      "/tmp/project",
+    );
+
+    await acpSendMessage("acp-session-preamble-ext", "hello", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    const [, blocks] = mockPrompt.mock.calls[0];
+    expect(blocks[0].annotations).toEqual({ audience: ["assistant"] });
+    expect(blocks[0].text).toContain("berdctl is on your PATH.");
+    expect(blocks[0].text).toContain("You are Starfriend.");
+    expect(blocks[0].text.indexOf("berdctl is on your PATH.")).toBeLessThan(
+      blocks[0].text.indexOf("You are Starfriend."),
+    );
+  });
+
+  it("hands the berdctl preamble off for external agents even without a persona", async () => {
+    mockGetBerdctlPreamble.mockReturnValue("[Berd]\nberdctl is on your PATH.");
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
+    const { acpSendMessage } = await import("../acp");
+    __resetAllPersonaHandoffs();
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-preamble-only",
+      "codex-acp",
+      "/tmp/project",
+    );
+
+    await acpSendMessage("acp-session-preamble-only", "hello", {});
+
+    const [, blocks] = mockPrompt.mock.calls[0];
+    expect(blocks[0].annotations).toEqual({ audience: ["assistant"] });
+    expect(blocks[0].text).toContain("berdctl is on your PATH.");
   });
 
   it.each(

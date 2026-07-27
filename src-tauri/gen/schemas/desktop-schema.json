@@ -573,10 +573,10 @@
           "markdownDescription": "Denies the driver_result command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-set-timeouts`\n- `allow-submit-result`",
+          "description": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-status`\n- `allow-set-timeouts`\n- `allow-submit-result`",
           "type": "string",
           "const": "berdctl:default",
-          "markdownDescription": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-set-timeouts`\n- `allow-submit-result`"
+          "markdownDescription": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-status`\n- `allow-set-timeouts`\n- `allow-submit-result`"
         },
         {
           "description": "Enables the set_timeouts command without any pre-configured scope.",
@@ -589,6 +589,12 @@
           "type": "string",
           "const": "berdctl:allow-start",
           "markdownDescription": "Enables the start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the status command without any pre-configured scope.",
+          "type": "string",
+          "const": "berdctl:allow-status",
+          "markdownDescription": "Enables the status command without any pre-configured scope."
         },
         {
           "description": "Enables the stop command without any pre-configured scope.",
@@ -613,6 +619,12 @@
           "type": "string",
           "const": "berdctl:deny-start",
           "markdownDescription": "Denies the start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the status command without any pre-configured scope.",
+          "type": "string",
+          "const": "berdctl:deny-status",
+          "markdownDescription": "Denies the status command without any pre-configured scope."
         },
         {
           "description": "Denies the stop command without any pre-configured scope.",

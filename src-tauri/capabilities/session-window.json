@@ -33,6 +33,7 @@
       ]
     },
     "dialog:allow-open",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "berdctl:allow-status"
   ]
 }

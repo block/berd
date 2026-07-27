@@ -40,6 +40,21 @@ export async function stopBerdctlServer(): Promise<void> {
   await invoke("plugin:berdctl|stop");
 }
 
+interface BrokerStatus {
+  running: boolean;
+}
+
+/**
+ * Read-only broker liveness from the plugin — the single source of truth
+ * for "an agent can reach the app through `berdctl` right now". Works from
+ * any window: the broker lifecycle runs in the main window, but popped-out
+ * session windows also send prompts and must not keep a renderer-local copy
+ * of an app-global fact.
+ */
+export async function getBerdctlBrokerStatus(): Promise<BrokerStatus> {
+  return invoke<BrokerStatus>("plugin:berdctl|status");
+}
+
 /** Pushes the per-command timeout map (ms); the broker clamps each value to
  *  its MAX_COMMAND_TIMEOUT and uses its default for commands not listed. */
 export async function setBerdctlTimeouts(

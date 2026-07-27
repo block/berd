@@ -21,6 +21,7 @@ import {
   isGooseManagedProvider,
 } from "./acpPersonaHandoff";
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
+import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   applySessionConfigOptionsSnapshot,
@@ -107,6 +108,7 @@ function resolveProvidersCatalog(providers: AcpProvider[]): AcpProvider[] {
     .filter((provider): provider is AcpProvider => provider !== null);
 }
 
+const BERD_APP_CONTEXT_SYSTEM_PROMPT_KEY = "berd_app_context";
 const BERD_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY = "berd_style_guidelines";
 const LEGACY_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY =
   "goose_internal_style_guidelines";
@@ -157,11 +159,19 @@ export async function acpSendMessage(
   // method and expose no system-prompt channel, so we hand the persona off
   // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
   const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
+  const berdctlPreamble = await getBerdctlPreamble();
   let personaHandoff: string | null = null;
   if (isGooseManaged) {
     await appendBerdStyleGuidelinesPrompt(
       sessionId,
       getStyleGuidelinesPrompt(),
+    );
+    // Keyed and re-sent on every send (empty when berdctl is unreachable),
+    // so availability changes self-correct on the next message.
+    await directAcp.appendSessionSystemPrompt(
+      sessionId,
+      BERD_APP_CONTEXT_SYSTEM_PROMPT_KEY,
+      berdctlPreamble ?? "",
     );
     await directAcp.appendSessionSystemPrompt(
       sessionId,
@@ -169,7 +179,12 @@ export async function acpSendMessage(
       systemPrompt?.trim() ? systemPrompt : "",
     );
   } else {
-    personaHandoff = claimPersonaHandoff(sessionId, providerId, systemPrompt);
+    personaHandoff = claimPersonaHandoff(
+      sessionId,
+      providerId,
+      systemPrompt,
+      berdctlPreamble,
+    );
   }
 
   // Merge the persona handoff (when present) with any skill/builder assistant

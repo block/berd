@@ -188,6 +188,23 @@ mod plugin {
         Ok(StartedEndpoint { port })
     }
 
+    #[derive(Serialize)]
+    pub struct BrokerStatus {
+        pub running: bool,
+    }
+
+    /// Read-only broker liveness, for any window's renderer. The broker and
+    /// its lifecycle live in the main window, but availability is an
+    /// app-global fact: popped-out session windows ask here instead of
+    /// keeping a renderer-local copy that the main window would never update.
+    #[tauri::command]
+    async fn status(state: State<'_, BerdctlState>) -> Result<BrokerStatus, String> {
+        let server_slot = state.server.lock().await;
+        Ok(BrokerStatus {
+            running: server_slot.is_some(),
+        })
+    }
+
     #[tauri::command]
     async fn stop(state: State<'_, BerdctlState>) -> Result<(), String> {
         let mut server_slot = state.server.lock().await;
@@ -220,6 +237,7 @@ mod plugin {
             .invoke_handler(tauri::generate_handler![
                 start,
                 stop,
+                status,
                 set_timeouts,
                 submit_result
             ])

@@ -8,6 +8,7 @@ timeout, and bridge-result commands.
 
 - `allow-start`
 - `allow-stop`
+- `allow-status`
 - `allow-set-timeouts`
 - `allow-submit-result`
 
@@ -68,6 +69,32 @@ Enables the start command without any pre-configured scope.
 <td>
 
 Denies the start command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`berdctl:allow-status`
+
+</td>
+<td>
+
+Enables the status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`berdctl:deny-status`
+
+</td>
+<td>
+
+Denies the status command without any pre-configured scope.
 
 </td>
 </tr>
