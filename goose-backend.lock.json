@@ -3,15 +3,5 @@
   "ref": "main",
   "commit": "7b7b8aa58f54a7e189f681883de55bd42b633634",
   "package": "goose-cli",
-  "bin": "goose",
-  "patches": [
-    {
-      "path": "patches/goose/bot-801-forward-acp-terminal-events.patch",
-      "sha256": "3f7ef23d60106af4c4acd15b37d9115bf018eeabf18cf1ccc0696bfae67cb308"
-    },
-    {
-      "path": "patches/goose/bot-1070-propagate-max-tokens-stop-reason.patch",
-      "sha256": "0e1bf0fb592aba533a289b27386811cbaca03533866c2f66c0f13bfba2c944c1"
-    }
-  ]
+  "bin": "goose"
 }

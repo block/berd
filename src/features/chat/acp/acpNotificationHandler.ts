@@ -54,13 +54,6 @@ import {
 } from "@/shared/api/acpToolCallIdentity";
 import { applyChatSessionConfigOptionsSnapshot } from "./sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
-import { getPreparedProviderId } from "@/shared/api/acpSessionRegistry";
-import {
-  appendExternalAcpTerminalOutput,
-  finishExternalAcpTerminal,
-  registerExternalAcpTerminal,
-  requestOpenAcpTerminal,
-} from "@/features/terminal/lib/acpTerminalManager";
 import {
   enqueueStreamingTextUpdate,
   enqueueStreamingThinkingUpdate,
@@ -178,25 +171,6 @@ function handleReplayAssistantBoundary(
   }
 }
 
-const TERMINAL_AUTO_OPEN_DELAY_MS = 5_000;
-const terminalAutoOpenTimers = new Map<string, number>();
-const exitedExternalTerminals = new Set<string>();
-const terminalIdsByToolCall = new Map<string, string>();
-const terminalInfoByToolCall = new Map<
-  string,
-  { cwd: string; title: string }
->();
-const replayTerminalToolCalls = new Set<string>();
-const registeredExternalTerminals = new Set<string>();
-
-function terminalSessionKey(sessionId: string, terminalId: string): string {
-  return `${sessionId}:${terminalId}`;
-}
-
-function terminalToolCallKey(sessionId: string, toolCallId: string): string {
-  return `${sessionId}:${toolCallId}`;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -231,123 +205,15 @@ function locationsFromUpdate(
     }));
 }
 
-function terminalMetadata(update: SessionUpdate): Record<string, unknown> {
-  const meta = (update as { _meta?: unknown })._meta;
-  return isRecord(meta) ? meta : {};
-}
-
-function terminalOutputFromUpdate(update: SessionUpdate): {
-  terminalId: string;
-  data: string;
-} | null {
-  const meta = terminalMetadata(update);
-  const output = isRecord(meta.terminal_output)
-    ? meta.terminal_output
-    : isRecord(meta.terminal_output_delta)
-      ? meta.terminal_output_delta
-      : null;
-  if (!output) return null;
-  const terminalId = output.terminal_id;
-  const data = output.data;
-  return typeof terminalId === "string" && typeof data === "string"
-    ? { terminalId, data }
-    : null;
-}
-
-function terminalExitFromUpdate(update: SessionUpdate): {
-  terminalId: string;
-  exitCode: number | null;
-  signal: string | null;
-} | null {
-  const exit = terminalMetadata(update).terminal_exit;
-  if (!isRecord(exit) || typeof exit.terminal_id !== "string") return null;
-  return {
-    terminalId: exit.terminal_id,
-    exitCode: typeof exit.exit_code === "number" ? exit.exit_code : null,
-    signal: typeof exit.signal === "string" ? exit.signal : null,
-  };
-}
-
-function terminalCwdFromUpdate(update: SessionUpdate): string | null {
-  const info = terminalMetadata(update).terminal_info;
-  return isRecord(info) && typeof info.cwd === "string" ? info.cwd : null;
-}
-
-type TerminalToolCallUpdate = Extract<
-  SessionUpdate,
-  { sessionUpdate: "tool_call" | "tool_call_update" }
->;
-
-function terminalReferenceFromUpdate(
-  sessionId: string,
-  update: TerminalToolCallUpdate,
-  useKnownTerminal = false,
-): string | undefined {
-  let terminalId: string | undefined;
-  const content = (update as { content?: unknown }).content;
-  if (Array.isArray(content)) {
-    for (const item of content) {
-      if (
-        isRecord(item) &&
-        item.type === "terminal" &&
-        typeof item.terminalId === "string"
-      ) {
-        terminalId = item.terminalId;
-        break;
-      }
-    }
-  }
-
-  // Some ACP relays preserve Codex's terminal metadata but omit the terminal
-  // content block. Recover the same id from the metadata in that case.
-  const meta = terminalMetadata(update);
-  const terminalInfo = meta.terminal_info;
-  if (
-    !terminalId &&
-    isRecord(terminalInfo) &&
-    typeof terminalInfo.terminal_id === "string"
-  ) {
-    terminalId = terminalInfo.terminal_id;
-  }
-  // Codex defines the terminal id as the command tool-call id. Some relay
-  // versions omit both terminal metadata and kind=execute, so the prepared
-  // provider identity is the trust boundary for its command-shaped fallback.
-  // Other providers still require the ACP execute signal; rawInput alone is
-  // never sufficient for an arbitrary tool.
-  const providerId = getPreparedProviderId(sessionId)?.toLowerCase();
-  const isCodexExecute =
-    providerId?.includes("codex") &&
-    update.sessionUpdate === "tool_call" &&
-    isRecord(update.rawInput) &&
-    typeof update.rawInput.command === "string";
-  if (
-    !terminalId &&
-    (isCodexExecute ||
-      (update.sessionUpdate === "tool_call" && update.kind === "execute"))
-  ) {
-    terminalId = update.toolCallId;
-  }
-
-  const key = terminalToolCallKey(sessionId, update.toolCallId);
-  if (terminalId) {
-    terminalIdsByToolCall.set(key, terminalId);
-    return terminalId;
-  }
-  return useKnownTerminal ? terminalIdsByToolCall.get(key) : undefined;
-}
-
 function toolCallUpdatePatch(
-  sessionId: string,
-  update: TerminalToolCallUpdate,
-): Pick<Partial<ToolRequestContent>, "toolKind" | "locations" | "terminalId"> {
+  update: SessionUpdate,
+): Pick<Partial<ToolRequestContent>, "toolKind" | "locations"> {
   const toolKind = toolKindFromUpdate(update);
   const locations = locationsFromUpdate(update);
-  const terminalId = terminalReferenceFromUpdate(sessionId, update);
 
   return {
     ...(toolKind ? { toolKind } : {}),
     ...(locations ? { locations } : {}),
-    ...(terminalId ? { terminalId } : {}),
   };
 }
 
@@ -486,50 +352,7 @@ function upsertThinkingContent(content: MessageContent[], text: string): void {
   last.text += text;
 }
 
-function rememberTerminalInfo(
-  sessionId: string,
-  update: Extract<SessionUpdate, { sessionUpdate: "tool_call" }>,
-): void {
-  const rawInput = isRecord(update.rawInput) ? update.rawInput : {};
-  terminalInfoByToolCall.set(
-    terminalToolCallKey(sessionId, update.toolCallId),
-    {
-      cwd:
-        terminalCwdFromUpdate(update) ??
-        (typeof rawInput.cwd === "string" ? rawInput.cwd : "~"),
-      title:
-        typeof rawInput.command === "string"
-          ? rawInput.command
-          : update.title || "Agent command",
-    },
-  );
-}
-
-function retainReplayTerminalState(
-  sessionId: string,
-  update: SessionUpdate,
-): void {
-  if (
-    update.sessionUpdate !== "tool_call" &&
-    update.sessionUpdate !== "tool_call_update"
-  ) {
-    return;
-  }
-  if (update.sessionUpdate === "tool_call") {
-    rememberTerminalInfo(sessionId, update);
-  }
-  if (terminalReferenceFromUpdate(sessionId, update, true)) {
-    replayTerminalToolCalls.add(
-      terminalToolCallKey(sessionId, update.toolCallId),
-    );
-  }
-}
-
 function handleReplay(sessionId: string, update: SessionUpdate): void {
-  // Replay builds display state only. Keep terminal correlation for a live
-  // continuation, but never register/open historical processes while loading.
-  retainReplayTerminalState(sessionId, update);
-
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
       handleReplayAssistantBoundary(sessionId, update);
@@ -608,7 +431,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         ...identity,
         arguments: rawInputToArguments(update.rawInput),
         status: "in_progress",
-        ...toolCallUpdatePatch(sessionId, update),
+        ...toolCallUpdatePatch(update),
         startedAt: created ?? Date.now(),
         ...(chainSummary ? { chainSummary } : {}),
       });
@@ -638,7 +461,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         if (created !== undefined && !existingMsg && msg === replayMsg) {
           msg.created = created;
         }
-        const patch = toolCallUpdatePatch(sessionId, update);
+        const patch = toolCallUpdatePatch(update);
         if (
           update.title ||
           Object.keys(identity).length > 0 ||
@@ -667,7 +490,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
               msg.content[idx] = {
                 ...tc,
                 ...identity,
-                ...toolCallUpdatePatch(sessionId, update),
+                ...toolCallUpdatePatch(update),
                 status: update.status,
               } as ToolRequestContent;
             }
@@ -714,117 +537,8 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
   }
 }
 
-function syncExternalTerminal(sessionId: string, update: SessionUpdate): void {
-  if (
-    update.sessionUpdate !== "tool_call" &&
-    update.sessionUpdate !== "tool_call_update"
-  ) {
-    return;
-  }
-
-  const toolCallKey = terminalToolCallKey(sessionId, update.toolCallId);
-  if (update.sessionUpdate === "tool_call") {
-    rememberTerminalInfo(sessionId, update);
-  }
-
-  const terminalId = terminalReferenceFromUpdate(sessionId, update, true);
-  const info = terminalInfoByToolCall.get(toolCallKey);
-  const terminalKey = terminalId
-    ? terminalSessionKey(sessionId, terminalId)
-    : undefined;
-  const recoveredFromReplay = replayTerminalToolCalls.delete(toolCallKey);
-  if (
-    terminalId &&
-    terminalKey &&
-    info &&
-    !registeredExternalTerminals.has(terminalKey)
-  ) {
-    // Mark before the async registration to prevent output and exit arriving in
-    // the same tick from starting duplicate registrations.
-    registeredExternalTerminals.add(terminalKey);
-    void registerExternalAcpTerminal({ sessionId, terminalId, ...info })
-      .then(() => {
-        // Replayed commands are historical. A later live output/exit may need
-        // to recreate their display, but must not auto-open it as a long-running
-        // command that just started.
-        if (recoveredFromReplay || exitedExternalTerminals.has(terminalKey)) {
-          return;
-        }
-
-        // Keep short commands as lightweight tool rows. If the same command is
-        // still running after this grace period, expose the persistent process
-        // without stealing focus from the user's current work.
-        if (terminalAutoOpenTimers.has(terminalKey)) return;
-        const timer = window.setTimeout(() => {
-          terminalAutoOpenTimers.delete(terminalKey);
-          const toolRequest = useChatStore
-            .getState()
-            .messagesBySession[sessionId]?.flatMap((message) => message.content)
-            .find(
-              (content) =>
-                content.type === "toolRequest" &&
-                content.id === update.toolCallId &&
-                content.terminalId === terminalId,
-            );
-          if (
-            toolRequest?.type === "toolRequest" &&
-            toolRequest.status === "in_progress"
-          ) {
-            requestOpenAcpTerminal(sessionId, terminalId, { automatic: true });
-          }
-        }, TERMINAL_AUTO_OPEN_DELAY_MS);
-        terminalAutoOpenTimers.set(terminalKey, timer);
-      })
-      .catch((error) => {
-        registeredExternalTerminals.delete(terminalKey);
-        console.warn("Failed to register agent terminal", {
-          sessionId,
-          terminalId,
-          error,
-        });
-      });
-  }
-
-  const output = terminalOutputFromUpdate(update);
-  if (output) {
-    void appendExternalAcpTerminalOutput(
-      sessionId,
-      output.terminalId,
-      output.data,
-    ).catch((error) => {
-      console.warn("Failed to append agent terminal output", {
-        sessionId,
-        terminalId: output.terminalId,
-        error,
-      });
-    });
-  }
-
-  const exit = terminalExitFromUpdate(update);
-  if (exit) {
-    const key = terminalSessionKey(sessionId, exit.terminalId);
-    exitedExternalTerminals.add(key);
-    const autoOpenTimer = terminalAutoOpenTimers.get(key);
-    if (autoOpenTimer) {
-      window.clearTimeout(autoOpenTimer);
-      terminalAutoOpenTimers.delete(key);
-    }
-    void finishExternalAcpTerminal(sessionId, exit.terminalId, {
-      exitCode: exit.exitCode,
-      signal: exit.signal,
-    }).catch((error) => {
-      console.warn("Failed to finish agent terminal", {
-        sessionId,
-        terminalId: exit.terminalId,
-        error,
-      });
-    });
-  }
-}
-
 function handleLive(sessionId: string, update: SessionUpdate): void {
   const store = useChatStore.getState();
-  syncExternalTerminal(sessionId, update);
 
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
@@ -896,7 +610,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
         ...identity,
         arguments: rawInputToArguments(update.rawInput),
         status: "in_progress",
-        ...toolCallUpdatePatch(sessionId, update),
+        ...toolCallUpdatePatch(update),
         startedAt: Date.now(),
         ...(chainSummary ? { chainSummary } : {}),
       };
@@ -919,7 +633,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       );
       const messageId = ownerMessageId ?? ensureLiveAssistantMessage(sessionId);
 
-      const patch = toolCallUpdatePatch(sessionId, update);
+      const patch = toolCallUpdatePatch(update);
       if (
         update.title ||
         Object.keys(identity).length > 0 ||
@@ -964,7 +678,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
               ? {
                   ...block,
                   ...identity,
-                  ...toolCallUpdatePatch(sessionId, update),
+                  ...toolCallUpdatePatch(update),
                   status: resolvedStatus,
                 }
               : block,
@@ -1170,20 +884,10 @@ export function clearMessageTracking(): void {
   clearActiveMessageTracking();
   clearReplayAssistantTracking();
   clearSkillReplayChips();
-  for (const timer of terminalAutoOpenTimers.values()) {
-    window.clearTimeout(timer);
-  }
-  terminalAutoOpenTimers.clear();
-  exitedExternalTerminals.clear();
-  terminalIdsByToolCall.clear();
-  terminalInfoByToolCall.clear();
-  replayTerminalToolCalls.clear();
-  registeredExternalTerminals.clear();
 }
 
 const handler: AcpNotificationHandler = {
   handleSessionNotification,
-  handleConnectionClosed: clearMessageTracking,
 };
 
 export default handler;

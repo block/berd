@@ -14,16 +14,7 @@ const mocks = vi.hoisted(() => ({
   resolvedTheme: "light" as "dark" | "light",
   sessionStatus: "running",
   stop: vi.fn(),
-  updateAppearance: vi.fn(),
   statusListener: null as (() => void) | null,
-  registryListener: null as (() => void) | null,
-  existingSession: null as {
-    attach: ReturnType<typeof vi.fn>;
-    deferResize: ReturnType<typeof vi.fn>;
-    status: string;
-    updateAppearance: ReturnType<typeof vi.fn>;
-    updateLabels: ReturnType<typeof vi.fn>;
-  } | null,
   subscribeTerminalSessionStatus: vi.fn(
     (_sessionKey: string, listener: () => void) => {
       mocks.statusListener = listener;
@@ -56,7 +47,6 @@ vi.mock("@/app/lib/scheduleAfterNextPaint", () => ({
 }));
 
 vi.mock("../../lib/terminalSessionManager", () => ({
-  getTerminalSession: vi.fn(() => mocks.existingSession),
   getTerminalSessionStatus: vi.fn(() => mocks.sessionStatus),
   getOrCreateTerminalSession: vi.fn(() => ({
     attach: mocks.attach.mockImplementation(() => mocks.detach),
@@ -68,15 +58,8 @@ vi.mock("../../lib/terminalSessionManager", () => ({
       return mocks.sessionStatus;
     },
     stop: mocks.stop,
-    updateAppearance: mocks.updateAppearance,
     updateLabels: vi.fn(),
   })),
-  subscribeTerminalSessionAvailability: vi.fn(
-    (_sessionKey: string, listener: () => void) => {
-      mocks.registryListener = listener;
-      return vi.fn();
-    },
-  ),
   subscribeTerminalSessionStatus: (sessionKey: string, listener: () => void) =>
     mocks.subscribeTerminalSessionStatus(sessionKey, listener),
 }));
@@ -128,10 +111,7 @@ describe("TerminalPanel", () => {
     mocks.resolvedTheme = "light";
     mocks.sessionStatus = "running";
     mocks.stop.mockClear();
-    mocks.updateAppearance.mockClear();
     mocks.statusListener = null;
-    mocks.registryListener = null;
-    mocks.existingSession = null;
     mocks.scheduleAfterNextPaint.mockClear();
     mocks.subscribeTerminalSessionStatus.mockClear();
     mocks.subscriptionListener = null;
@@ -484,33 +464,6 @@ describe("TerminalPanel", () => {
     });
 
     expect(getOrCreateTerminalSessionMock).toHaveBeenCalledTimes(1);
-    expect(mocks.attach).toHaveBeenCalledTimes(1);
-  });
-
-  it("attaches an existing agent terminal when registration finishes after mount", () => {
-    render(
-      <TerminalPanel
-        sessionKey="session:agent-tab"
-        cwd="/Users/test/repo"
-        collapsed={false}
-        showHeader={false}
-        existingSession
-      />,
-    );
-
-    expect(mocks.attach).not.toHaveBeenCalled();
-
-    mocks.existingSession = {
-      attach: mocks.attach.mockImplementation(() => mocks.detach),
-      deferResize: mocks.deferResize,
-      status: "running",
-      updateAppearance: mocks.updateAppearance,
-      updateLabels: vi.fn(),
-    };
-    act(() => {
-      mocks.registryListener?.();
-    });
-
     expect(mocks.attach).toHaveBeenCalledTimes(1);
   });
 

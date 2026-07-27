@@ -75,17 +75,6 @@ lock_commit="$(read_lock_field commit)"
 lock_package="$(read_lock_field package)"
 lock_bin="$(read_lock_field bin)"
 
-read_lock_patches() {
-  [[ -f "$lock_file" ]] || return 0
-  python3 - "$lock_file" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as fh:
-    for patch in json.load(fh).get("patches", []):
-        print(f"{patch.get('path', '')}\t{patch.get('sha256', '')}")
-PY
-}
-
 mode="${GOOSE_DEV_MODE:-auto}"
 clone_url="${GOOSE_DEV_CLONE_URL:-${lock_repo:-https://github.com/aaif-goose/goose.git}}"
 remote="${GOOSE_DEV_REMOTE:-origin}"
@@ -94,70 +83,6 @@ pinned_commit="${GOOSE_DEV_COMMIT:-$lock_commit}"
 goose_package="${GOOSE_DEV_PACKAGE:-${lock_package:-goose-cli}}"
 goose_bin="${GOOSE_DEV_BIN:-${lock_bin:-goose}}"
 allow_dirty="${GOOSE_DEV_ALLOW_DIRTY:-0}"
-patch_dir="$repo_root/patches/goose"
-
-sha256_stream() {
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 | awk '{print $1}'
-  else
-    sha256sum | awk '{print $1}'
-  fi
-}
-
-canonical_patch_hash() {
-  # Git emits a single-space marker for blank context lines, while formatters
-  # may preserve the semantically equivalent empty line. Hash both forms alike.
-  sed 's/^ $//' | sha256_stream
-}
-
-locked_patches=()
-while IFS= read -r locked_patch; do
-  [[ -n "$locked_patch" ]] && locked_patches+=("$locked_patch")
-done < <(read_lock_patches)
-
-validate_locked_patches() {
-  local manifest_paths=()
-  local entry relative_path expected_hash patch_path actual_hash
-  for entry in "${locked_patches[@]}"; do
-    IFS=$'\t' read -r relative_path expected_hash <<<"$entry"
-    [[ -n "$relative_path" && -n "$expected_hash" ]] || {
-      echo "Invalid Goose patch entry in $lock_file." >&2
-      exit 1
-    }
-    patch_path="$repo_root/$relative_path"
-    [[ -f "$patch_path" ]] || {
-      echo "Locked Goose patch not found: $relative_path" >&2
-      exit 1
-    }
-    actual_hash="$(canonical_patch_hash <"$patch_path")"
-    [[ "$actual_hash" == "$expected_hash" ]] || {
-      echo "Goose patch hash mismatch for $relative_path: expected $expected_hash, got $actual_hash" >&2
-      exit 1
-    }
-    manifest_paths+=("$patch_path")
-  done
-
-  local discovered_patches=()
-  while IFS= read -r patch_path; do
-    [[ -n "$patch_path" ]] && discovered_patches+=("$patch_path")
-  done < <(find "$patch_dir" -maxdepth 1 -type f -name '*.patch' -print 2>/dev/null | sort)
-  local sorted_manifest_paths=()
-  while IFS= read -r patch_path; do
-    [[ -n "$patch_path" ]] && sorted_manifest_paths+=("$patch_path")
-  done < <(printf '%s\n' "${manifest_paths[@]}" | sort)
-  [[ "${discovered_patches[*]}" == "${sorted_manifest_paths[*]}" ]] || {
-    echo "Goose patches on disk do not match the ordered patch manifest in $lock_file." >&2
-    exit 1
-  }
-}
-
-validate_locked_patches
-patch_hash="$(
-  for entry in "${locked_patches[@]}"; do
-    IFS=$'\t' read -r relative_path _ <<<"$entry"
-    cat "$repo_root/$relative_path"
-  done | canonical_patch_hash
-)"
 
 log() { echo "[berd-goose-dev] $*" >&2; }
 
@@ -211,32 +136,6 @@ resolve_bin_path() {
   printf '%s/debug/%s\n' "$target_dir" "$goose_bin"
 }
 
-worktree_diff_hash() {
-  git -C "$goose_repo" diff --binary --no-ext-diff | canonical_patch_hash
-}
-
-checkout_matches_patch_set() {
-  [[ -n "$patch_hash" ]] || return 1
-  git -C "$goose_repo" diff --cached --quiet || return 1
-  [[ -z "$(git -C "$goose_repo" ls-files --others --exclude-standard)" ]] || return 1
-  [[ "$(worktree_diff_hash)" == "$patch_hash" ]]
-}
-
-checkout_matches_previous_managed_patch_set() {
-  [[ -f "$goose_stamp_file" ]] || return 1
-  git -C "$goose_repo" diff --cached --quiet || return 1
-  [[ -z "$(git -C "$goose_repo" ls-files --others --exclude-standard)" ]] || return 1
-  # shellcheck disable=SC1090
-  source "$goose_stamp_file"
-  [[ "${STAMP_REPO:-}" == "$goose_repo" ]] || return 1
-  [[ -n "${STAMP_PATCH_HASH:-}" ]] || return 1
-  [[ "${STAMP_PATCH_HASH:-}" == "${STAMP_WORKTREE_DIFF_HASH:-}" ]] || return 1
-  local local_head
-  local_head="$(git -C "$goose_repo" rev-parse HEAD)"
-  [[ "${STAMP_COMMIT:-}" == "$local_head" ]] || return 1
-  [[ "${STAMP_WORKTREE_DIFF_HASH:-}" == "$(worktree_diff_hash)" ]]
-}
-
 write_stamp() {
   local ref_name="$1"
   local commit_sha="$2"
@@ -248,8 +147,6 @@ write_stamp() {
     printf 'STAMP_COMMIT=%q\n' "$commit_sha"
     printf 'STAMP_PACKAGE=%q\n' "$goose_package"
     printf 'STAMP_BIN_NAME=%q\n' "$goose_bin"
-    printf 'STAMP_PATCH_HASH=%q\n' "$patch_hash"
-    printf 'STAMP_WORKTREE_DIFF_HASH=%q\n' "$(worktree_diff_hash)"
     printf 'STAMP_BIN=%q\n' "$bin_path"
   } >"$goose_stamp_file"
 }
@@ -263,8 +160,6 @@ stamp_matches_current_build() {
   [[ "${STAMP_COMMIT:-}" == "$pinned_commit" ]] || return 1
   [[ "${STAMP_PACKAGE:-$goose_package}" == "$goose_package" ]] || return 1
   [[ "${STAMP_BIN_NAME:-$goose_bin}" == "$goose_bin" ]] || return 1
-  [[ "${STAMP_PATCH_HASH:-}" == "$patch_hash" ]] || return 1
-  [[ "${STAMP_WORKTREE_DIFF_HASH:-}" == "$(worktree_diff_hash)" ]] || return 1
   [[ -x "${STAMP_BIN:-}" ]] || return 1
   # The recorded binary path must match where cargo writes today; otherwise
   # the user's cargo config (e.g. build.target-dir) changed and the stamp is
@@ -293,10 +188,8 @@ ensure_checkout_exists
 
 bin_path="$(resolve_bin_path)"
 
-if [[ "$allow_dirty" != "1" && -n "$(git -C "$goose_repo" status --porcelain)" ]] \
-  && ! checkout_matches_patch_set \
-  && ! checkout_matches_previous_managed_patch_set; then
-  fail_or_skip "Managed Goose checkout at $goose_repo is dirty and does not match the current or previously stamped patch set. Use a dedicated checkout or set GOOSE_DEV_ALLOW_DIRTY=1."
+if [[ "$allow_dirty" != "1" && -n "$(git -C "$goose_repo" status --porcelain)" ]]; then
+  fail_or_skip "Managed goose checkout at $goose_repo is dirty. Use a dedicated checkout or set GOOSE_DEV_ALLOW_DIRTY=1."
 fi
 
 if [[ "$action" == "check" ]]; then
@@ -305,17 +198,17 @@ if [[ "$action" == "check" ]]; then
   exit 0
 fi
 
+if [[ -z "$pinned_commit" ]]; then
+  pinned_commit="$(resolve_ref_to_commit "$pinned_ref")"
+  [[ -n "$pinned_commit" ]] || fail_or_skip "Could not resolve Goose ref $remote/$pinned_ref for managed checkout at $goose_repo."
+fi
+
 if stamp_matches_current_build; then
   log "Local Goose binary already matches $pinned_ref at $pinned_commit."
   if [[ "$print_bin" == "1" ]]; then
     printf '%s\n' "$STAMP_BIN"
   fi
   exit 0
-fi
-
-if [[ -z "$pinned_commit" ]]; then
-  pinned_commit="$(resolve_ref_to_commit "$pinned_ref")"
-  [[ -n "$pinned_commit" ]] || fail_or_skip "Could not resolve Goose ref $remote/$pinned_ref for managed checkout at $goose_repo."
 fi
 
 log "Fetching pinned Goose ref $pinned_ref."
@@ -332,18 +225,6 @@ fi
 
 git -C "$goose_repo" checkout --detach "$pinned_commit" >/dev/null 2>&1
 git -C "$goose_repo" reset --hard "$pinned_commit" >/dev/null 2>&1
-if [[ ${#locked_patches[@]} -gt 0 ]]; then
-  log "Applying locked Berd Goose patches ($patch_hash)."
-  patch_paths=()
-  for entry in "${locked_patches[@]}"; do
-    IFS=$'\t' read -r relative_path _ <<<"$entry"
-    patch_paths+=("$repo_root/$relative_path")
-  done
-  git -C "$goose_repo" apply --check "${patch_paths[@]}"
-  for patch in "${patch_paths[@]}"; do
-    git -C "$goose_repo" apply "$patch"
-  done
-fi
 
 log "Building Goose from $goose_repo at $pinned_commit."
 (cd "$goose_repo" && cargo build -p "$goose_package" --bin "$goose_bin")

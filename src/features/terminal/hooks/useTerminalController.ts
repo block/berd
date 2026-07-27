@@ -1,26 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
-import {
-  canStopAcpTerminal,
-  closeAcpTerminalDisplay,
-  stopAcpTerminal,
-  subscribeAcpTerminalCapability,
-  subscribeAcpTerminalOpenRequests,
-} from "../lib/acpTerminalManager";
-import {
-  getAgentTerminalTabState,
-  setAgentTerminalTabState,
-  subscribeAgentTerminalTabState,
-} from "../lib/acpTerminalTabState";
 import {
   queueTerminalCommand,
   restartTerminalSession,
@@ -30,8 +11,6 @@ import {
 } from "../lib/terminalSessionManager";
 import {
   appendActiveTerminalTab,
-  canRestartTerminalTab,
-  createAgentTerminalTab,
   createTerminalTab,
   DEFAULT_TERMINAL_STATE,
   findDefaultTerminalTab,
@@ -69,42 +48,11 @@ export function useTerminalController({
   const [closingTabId, setClosingTabId] = useState<string | null>(null);
   const [terminalRegionElement, setTerminalRegionElement] =
     useState<HTMLDivElement | null>(null);
-  const [persistedState, setPersistedState] = usePersistedState<TerminalState>(
+  const [state, setState] = usePersistedState<TerminalState>(
     `${TERMINAL_STORAGE_KEY_PREFIX}:${sessionId}`,
     DEFAULT_TERMINAL_STATE,
     validateTerminalState,
   );
-  const subscribeAgentTabs = useCallback(
-    (listener: () => void) =>
-      subscribeAgentTerminalTabState(sessionId, listener),
-    [sessionId],
-  );
-  const getAgentTabsSnapshot = useCallback(
-    () => getAgentTerminalTabState(sessionId),
-    [sessionId],
-  );
-  const agentState = useSyncExternalStore(
-    subscribeAgentTabs,
-    getAgentTabsSnapshot,
-    getAgentTabsSnapshot,
-  );
-  const state = useMemo<TerminalState>(() => {
-    const tabs = [...persistedState.tabs, ...agentState.tabs];
-    const activeTabId = tabs.some((tab) => tab.id === agentState.activeTabId)
-      ? agentState.activeTabId
-      : persistedState.activeTabId;
-    return {
-      ...persistedState,
-      tabs,
-      activeTabId: activeTabId ?? tabs[0]?.id ?? null,
-      expanded:
-        tabs.length > 0 && (persistedState.expanded || agentState.expanded),
-      placement:
-        persistedState.tabs.length > 0
-          ? persistedState.placement
-          : agentState.placement,
-    };
-  }, [agentState, persistedState]);
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
@@ -113,58 +61,14 @@ export function useTerminalController({
   const commitState = useCallback(
     (updater: (state: TerminalState) => TerminalState): TerminalState => {
       const nextState = updater(stateRef.current);
-      const userTabs = nextState.tabs.filter((tab) => tab.source !== "agent");
-      const agentTabs = nextState.tabs.filter((tab) => tab.source === "agent");
-      const activeIsAgent = agentTabs.some(
-        (tab) => tab.id === nextState.activeTabId,
-      );
       stateRef.current = nextState;
-      setPersistedState({
-        ...nextState,
-        tabs: userTabs,
-        activeTabId: activeIsAgent
-          ? (userTabs[0]?.id ?? null)
-          : nextState.activeTabId,
-        expanded: nextState.expanded && userTabs.length > 0,
-      });
-      setAgentTerminalTabState(sessionId, {
-        tabs: agentTabs,
-        activeTabId: activeIsAgent ? nextState.activeTabId : null,
-        expanded: nextState.expanded && agentTabs.length > 0,
-        placement: nextState.placement,
-      });
+      setState(nextState);
       return nextState;
     },
-    [sessionId, setPersistedState],
+    [setState],
   );
 
   const tabs = state.tabs;
-  const subscribeStopCapabilities = useCallback(
-    (listener: () => void) => {
-      const unsubscribes = tabs
-        .filter((tab) => tab.source === "agent")
-        .map((tab) =>
-          subscribeAcpTerminalCapability(sessionId, tab.id, listener),
-        );
-      return () => {
-        for (const unsubscribe of unsubscribes) unsubscribe();
-      };
-    },
-    [sessionId, tabs],
-  );
-  const getStopCapabilitiesSnapshot = useCallback(
-    () =>
-      tabs
-        .filter((tab) => tab.source === "agent")
-        .map((tab) => `${tab.id}:${canStopAcpTerminal(sessionId, tab.id)}`)
-        .join("|"),
-    [sessionId, tabs],
-  );
-  useSyncExternalStore(
-    subscribeStopCapabilities,
-    getStopCapabilitiesSnapshot,
-    getStopCapabilitiesSnapshot,
-  );
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === state.activeTabId) ?? tabs[0] ?? null,
     [tabs, state.activeTabId],
@@ -246,41 +150,6 @@ export function useTerminalController({
     [commitState, requestFocus, t],
   );
 
-  useEffect(
-    () =>
-      subscribeAcpTerminalOpenRequests((request) => {
-        if (request.sessionId !== sessionId) return;
-        if (request.focus) requestFocus();
-        commitState((current) => {
-          const existing = current.tabs.find(
-            (tab) => tab.id === request.terminalId,
-          );
-          if (existing) {
-            return request.focus
-              ? { ...current, activeTabId: existing.id, expanded: true }
-              : current;
-          }
-
-          const next = appendActiveTerminalTab(
-            current,
-            createAgentTerminalTab(
-              request.terminalId,
-              request.cwd,
-              request.title,
-            ),
-          );
-          return request.focus
-            ? next
-            : {
-                ...next,
-                activeTabId: current.activeTabId ?? next.activeTabId,
-                expanded: true,
-              };
-        });
-      }),
-    [commitState, requestFocus, sessionId],
-  );
-
   const selectTab = useCallback(
     (tabId: string) => {
       commitState((current) => {
@@ -336,39 +205,16 @@ export function useTerminalController({
     [commitState, onFocusReturn, requestFocus],
   );
 
-  const canStopTab = useCallback(
-    (tabId: string) => canStopAcpTerminal(sessionId, tabId),
-    [sessionId],
-  );
-
   const closeTab = useCallback(
-    async (tabId: string) => {
-      const tab = stateRef.current.tabs.find(
-        (candidate) => candidate.id === tabId,
-      );
-      if (!tab) return;
-
-      if (tab.source === "agent") {
-        if (canStopAcpTerminal(sessionId, tabId)) {
-          try {
-            await stopAcpTerminal(sessionId, tabId);
-          } catch (error) {
-            console.error("Failed to stop ACP terminal", error);
-            toast.error(t("terminal.stopFailed"));
-            return;
-          }
-        }
-        closeAcpTerminalDisplay(sessionId, tabId);
-      } else {
-        stopTerminalSession(`${sessionId}:${tabId}`, { writeStopped: true });
-      }
+    (tabId: string) => {
+      stopTerminalSession(`${sessionId}:${tabId}`, { writeStopped: true });
       removeTab(tabId, { userInitiated: true });
     },
-    [removeTab, sessionId, t],
+    [removeTab, sessionId],
   );
 
   const restart = useCallback(() => {
-    if (!canRestartTerminalTab(activeTab)) {
+    if (!activeTab) {
       return;
     }
 
@@ -565,11 +411,7 @@ export function useTerminalController({
   useEffect(() => {
     const unsubscribes = tabs.map((tab) =>
       subscribeTerminalSessionStatus(`${sessionId}:${tab.id}`, (change) => {
-        if (
-          change.status !== "exited" ||
-          change.source !== "backend-exit" ||
-          tab.source === "agent"
-        ) {
+        if (change.status !== "exited" || change.source !== "backend-exit") {
           return;
         }
 
@@ -595,8 +437,6 @@ export function useTerminalController({
     activeWorkspaceHasTerminal,
     addTab,
     available,
-    canRestart: canRestartTerminalTab(activeTab),
-    canStopTab,
     closeTab,
     closingTabId,
     collapse,

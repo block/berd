@@ -40,7 +40,6 @@
   },
   "terminal": {
     "close": "Cerrar terminal",
-    "closeTab": "Cerrar terminal {{path}}",
     "collapse": "Contraer terminal",
     "confirmStopDescription": "Esto finaliza el shell y cierra el panel del terminal.",
     "confirmStopTabTitle": "¿Detener terminal {{path}}?",
@@ -60,7 +59,6 @@
       "starting": "Iniciando"
     },
     "stop": "Detener terminal",
-    "stopFailed": "No se pudo detener el proceso del terminal.",
     "stopAndClose": "Detener y cerrar terminal",
     "stopAndCloseTab": "Detener y cerrar terminal {{path}}",
     "stopped": "Terminal detenido",
@@ -70,9 +68,6 @@
     "dockToBottom": "Acoplar terminal abajo",
     "popOut": "Separar terminal",
     "resize": "Redimensionar terminal"
-  },
-  "incompleteStopReasons": {
-    "maxTokens": "Esta respuesta alcanzó repetidamente el límite de salida del modelo y no pudo terminar. Intenta acotar tu solicitud o dividirla en partes."
   },
   "errors": {
     "sessionPreparationSuperseded": "La configuración de la sesión cambió durante la preparación. Intenta enviar de nuevo.",
@@ -514,7 +509,6 @@
     "openFolder": "Abrir carpeta",
     "openNamed": "Abrir {{name}}",
     "openPath": "Abrir ruta",
-    "openTerminal": "Abrir terminal",
     "pathOutsideRoots": "La ruta está fuera de las raíces permitidas de proyecto/artefactos.",
     "structuredContent": "Contenido estructurado",
     "structuredOutput": "Salida estructurada",

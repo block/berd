@@ -24,10 +24,8 @@ import { perfLog } from "@/shared/lib/perfLog";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import {
-  getTerminalSession,
   getTerminalSessionStatus,
   getOrCreateTerminalSession,
-  subscribeTerminalSessionAvailability,
   subscribeTerminalSessionStatus,
   type TerminalSession,
   type TerminalSessionLabels,
@@ -47,7 +45,6 @@ interface TerminalPanelProps {
   collapsed?: boolean;
   showHeader?: boolean;
   className?: string;
-  existingSession?: boolean;
   onCollapse?: () => void;
   onExpand?: () => void;
   onClose?: () => void;
@@ -235,7 +232,6 @@ export function TerminalPanel({
   collapsed = false,
   showHeader = true,
   className,
-  existingSession = false,
   onCollapse,
   onExpand,
   onClose,
@@ -263,31 +259,13 @@ export function TerminalPanel({
     [sessionKey],
   );
   const getStatusSnapshot = useCallback(
-    (): TerminalStatus =>
-      getTerminalSessionStatus(sessionKey) ??
-      (existingSession ? "exited" : "starting"),
-    [existingSession, sessionKey],
+    (): TerminalStatus => getTerminalSessionStatus(sessionKey) ?? "starting",
+    [sessionKey],
   );
   const status = useSyncExternalStore(
     subscribeStatus,
     getStatusSnapshot,
     () => "starting",
-  );
-  const subscribeRegistry = useCallback(
-    (onStoreChange: () => void) =>
-      existingSession
-        ? subscribeTerminalSessionAvailability(sessionKey, onStoreChange)
-        : () => undefined,
-    [existingSession, sessionKey],
-  );
-  const getExistingSessionSnapshot = useCallback(
-    () => (existingSession ? getTerminalSession(sessionKey) : null),
-    [existingSession, sessionKey],
-  );
-  const registeredSession = useSyncExternalStore(
-    subscribeRegistry,
-    getExistingSessionSnapshot,
-    getExistingSessionSnapshot,
   );
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const stopAndCloseLabel = t("terminal.stopAndCloseTab", {
@@ -302,21 +280,14 @@ export function TerminalPanel({
   }, [collapsed]);
 
   useLayoutEffect(() => {
-    const nextSession = existingSession
-      ? registeredSession
-      : getOrCreateTerminalSession({
-          key: sessionKey,
-          cwd,
-          labels,
-          theme: resolveTerminalTheme(resolvedTheme),
-          fontFamily: terminalFontFamily(),
-        });
-    if (!nextSession) return;
+    const nextSession = getOrCreateTerminalSession({
+      key: sessionKey,
+      cwd,
+      labels,
+      theme: resolveTerminalTheme(resolvedTheme),
+      fontFamily: terminalFontFamily(),
+    });
     nextSession.updateLabels(labels);
-    nextSession.updateAppearance(
-      resolveTerminalTheme(resolvedTheme),
-      terminalFontFamily(),
-    );
     sessionRef.current = nextSession;
     if (collapsedRef.current) {
       nextSession.deferResize();
@@ -337,14 +308,7 @@ export function TerminalPanel({
         sessionRef.current = null;
       }
     };
-  }, [
-    cwd,
-    existingSession,
-    labels,
-    registeredSession,
-    resolvedTheme,
-    sessionKey,
-  ]);
+  }, [cwd, labels, resolvedTheme, sessionKey]);
 
   const handleRestart = useCallback(() => {
     sessionRef.current?.restart();

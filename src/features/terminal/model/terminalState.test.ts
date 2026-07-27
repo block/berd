@@ -66,65 +66,6 @@ describe("terminal state", () => {
     expect(clamped.height).toBe(220);
   });
 
-  it("drops connection-scoped agent tabs when restoring persisted state", () => {
-    const restored = validateTerminalState(
-      {
-        tabs: [
-          { id: "user-terminal", cwd: "/repo", source: "user" },
-          {
-            id: "agent-terminal",
-            cwd: "/repo",
-            source: "agent",
-            title: "pnpm dev",
-          },
-        ],
-        activeTabId: "agent-terminal",
-        expanded: true,
-      },
-      DEFAULT_TERMINAL_STATE,
-    );
-
-    expect(restored.tabs).toEqual([
-      { id: "user-terminal", cwd: "/repo", source: "user" },
-    ]);
-    expect(restored.activeTabId).toBe("user-terminal");
-    expect(restored.expanded).toBe(true);
-  });
-
-  it("only allows user-owned terminal tabs to restart", async () => {
-    const { canRestartTerminalTab } = await import("./terminalState");
-
-    expect(canRestartTerminalTab(null)).toBe(false);
-    expect(canRestartTerminalTab({ id: "user-terminal", cwd: "/repo" })).toBe(
-      true,
-    );
-    expect(
-      canRestartTerminalTab({
-        id: "agent-terminal",
-        cwd: "/repo",
-        source: "agent",
-      }),
-    ).toBe(false);
-  });
-
-  it("does not treat an agent process as the default workspace shell", async () => {
-    const { findDefaultTerminalTab } = await import("./terminalState");
-    expect(
-      findDefaultTerminalTab(
-        [
-          {
-            id: "agent-terminal",
-            cwd: "/repo",
-            source: "agent",
-            title: "pnpm dev",
-          },
-          { id: "user-terminal", cwd: "/repo", source: "user" },
-        ],
-        "/repo",
-      )?.id,
-    ).toBe("user-terminal");
-  });
-
   it("preserves right rail dock placement and height", () => {
     expect(
       resolveTerminalDockedPlacement({

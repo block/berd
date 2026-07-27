@@ -245,12 +245,10 @@ function WorkRail({
 function AgentWorkItemRow({
   item,
   isLast,
-  sessionId,
   usePrimaryText = false,
 }: {
   item: AgentWorkTimelineItem;
   isLast: boolean;
-  sessionId?: string;
   usePrimaryText?: boolean;
 }) {
   const { t } = useTranslation("chat");
@@ -321,8 +319,6 @@ function AgentWorkItemRow({
           arguments={item.request?.arguments ?? {}}
           status={status}
           locations={item.request?.locations}
-          terminalId={item.request?.terminalId}
-          terminalSessionId={sessionId}
           result={item.response?.result}
           structuredContent={item.response?.structuredContent}
           isError={item.response?.isError}
@@ -351,11 +347,9 @@ function AgentWorkItemRow({
 
 export function AgentWorkPanel({
   payload,
-  sessionId,
   settleOnMount = false,
 }: {
   payload: TranscriptAgentWorkPayload;
-  sessionId?: string;
   settleOnMount?: boolean;
 }) {
   const { t } = useTranslation("chat");
@@ -522,7 +516,6 @@ export function AgentWorkPanel({
                       key={item.key}
                       item={item}
                       isLast={false}
-                      sessionId={sessionId}
                       usePrimaryText={open}
                     />
                   ))}
@@ -534,7 +527,6 @@ export function AgentWorkPanel({
                 key={item.key}
                 item={item}
                 isLast={index === visibleItems.length - 1}
-                sessionId={sessionId}
                 usePrimaryText={open}
               />
             ))}

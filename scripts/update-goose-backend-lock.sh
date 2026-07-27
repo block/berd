@@ -42,13 +42,6 @@ repo="${GOOSE_DEV_CLONE_URL:-$(read_lock_field repo)}"
 remote="${GOOSE_DEV_REMOTE:-origin}"
 package="$(read_lock_field package)"
 bin="$(read_lock_field bin)"
-patches="$(python3 - "$lock_file" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as fh:
-    print(json.dumps(json.load(fh).get("patches", [])))
-PY
-)"
 
 if [[ -z "$repo" ]]; then
   echo "Lockfile $lock_file does not contain a repo URL." >&2
@@ -80,7 +73,7 @@ else
   exit 1
 fi
 
-python3 - "$lock_file" "$repo" "$requested_ref" "$commit" "$package" "$bin" "$patches" <<'PY'
+python3 - "$lock_file" "$repo" "$requested_ref" "$commit" "$package" "$bin" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -92,9 +85,6 @@ data = {
     "package": sys.argv[5] or "goose-cli",
     "bin": sys.argv[6] or "goose",
 }
-patches = json.loads(sys.argv[7])
-if patches:
-    data["patches"] = patches
 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PY
 

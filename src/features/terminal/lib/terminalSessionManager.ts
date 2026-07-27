@@ -19,20 +19,12 @@ export interface TerminalSessionLabels {
   exitedWithSignal: (signal: string) => string;
 }
 
-export interface TerminalSessionOptions {
+interface TerminalSessionOptions {
   key: string;
   cwd: string;
   labels: TerminalSessionLabels;
   theme: ITheme;
   fontFamily: string;
-  launch?: {
-    command: string;
-    args?: string[];
-    env?: Record<string, string>;
-  };
-  external?: boolean;
-  onOutput?: (data: string) => void;
-  onExit?: (status: { exitCode: number | null; signal: string | null }) => void;
 }
 
 interface TerminalSessionStopOptions {
@@ -71,10 +63,6 @@ const sessions = new Map<string, TerminalSession>();
 const queuedCommands = new Map<string, string[]>();
 const statusListeners = new Map<string, Set<TerminalSessionStatusListener>>();
 const registryListeners = new Set<TerminalSessionRegistryListener>();
-const availabilityListeners = new Map<
-  string,
-  Set<TerminalSessionRegistryListener>
->();
 let terminalSessionIdsSnapshot = new Set<string>();
 let renderingSuspended = false;
 
@@ -179,10 +167,6 @@ function emitRegistryChange(): void {
   }
 }
 
-function emitAvailabilityChange(key: string): void {
-  for (const listener of availabilityListeners.get(key) ?? []) listener();
-}
-
 function emitStatusChange(change: TerminalSessionStatusChange): void {
   const listeners = statusListeners.get(change.key);
   if (listeners) {
@@ -202,10 +186,6 @@ export class TerminalSession {
 
   private terminalId: string | null = null;
   private labels: TerminalSessionLabels;
-  private readonly launch: TerminalSessionOptions["launch"];
-  private readonly external: boolean;
-  private readonly onOutput?: TerminalSessionOptions["onOutput"];
-  private readonly onExit?: TerminalSessionOptions["onExit"];
   private statusValue: TerminalStatus = "starting";
   private startupToken: symbol | null = null;
   private inputSubscription: IDisposable | null = null;
@@ -221,42 +201,19 @@ export class TerminalSession {
   private outputWriteInFlight = false;
   private outputWriteToken = 0;
   private fitDeferred = false;
-  private killRequested = false;
-  private stopRequestInFlight = false;
-  private exitWaiters = new Set<{
-    resolve: () => void;
-    reject: (error: unknown) => void;
-  }>();
   private hostElement: HTMLDivElement | null = null;
   private attachedContainer: HTMLDivElement | null = null;
   private disposed = false;
   private listeners = new Set<TerminalSessionListener>();
 
-  constructor({
-    key,
-    cwd,
-    labels,
-    theme,
-    fontFamily,
-    launch,
-    external = false,
-    onOutput,
-    onExit,
-  }: TerminalSessionOptions) {
+  constructor({ key, cwd, labels, theme, fontFamily }: TerminalSessionOptions) {
     this.key = key;
     this.cwd = cwd;
     this.labels = labels;
-    this.launch = launch;
-    this.external = external;
-    this.onOutput = onOutput;
-    this.onExit = onExit;
     this.fitAddon = new FitAddon();
     this.terminal = new Terminal({
       allowTransparency: false,
-      convertEol: external,
-      cursorBlink: !external,
-      cursorInactiveStyle: external ? "none" : "outline",
-      disableStdin: external,
+      cursorBlink: true,
       fontFamily,
       fontSize: 13,
       lineHeight: 1.25,
@@ -275,11 +232,7 @@ export class TerminalSession {
         console.warn("Failed to write terminal input", error);
       });
     });
-    if (this.external) {
-      this.setStatus("running", "start");
-    } else {
-      this.start();
-    }
+    this.start();
   }
 
   get status(): TerminalStatus {
@@ -428,7 +381,7 @@ export class TerminalSession {
   }
 
   restart(): void {
-    if (this.disposed || this.external) {
+    if (this.disposed) {
       return;
     }
 
@@ -442,37 +395,6 @@ export class TerminalSession {
     this.start();
   }
 
-  writeOutput(data: string): void {
-    this.enqueueOutput(data);
-  }
-
-  finishExternal(status: {
-    exitCode: number | null;
-    signal: string | null;
-  }): void {
-    if (this.disposed || !this.external || this.statusValue === "exited")
-      return;
-    this.onExit?.(status);
-    this.resolveExitWaiters();
-    this.setStatus("exited", "backend-exit");
-  }
-
-  kill(): Promise<void> {
-    if (this.disposed || this.statusValue === "exited") {
-      return Promise.resolve();
-    }
-    if (this.statusValue === "error") {
-      return Promise.reject(new Error("Terminal process is not running."));
-    }
-
-    this.killRequested = true;
-    const completion = new Promise<void>((resolve, reject) => {
-      this.exitWaiters.add({ resolve, reject });
-    });
-    this.requestBackendStop();
-    return completion;
-  }
-
   stop({ writeStopped = false }: TerminalSessionStopOptions = {}): void {
     if (this.disposed) {
       return;
@@ -480,7 +402,6 @@ export class TerminalSession {
 
     this.disposed = true;
     sessions.delete(this.key);
-    emitAvailabilityChange(this.key);
     emitRegistryChange();
     clearQueuedCommands(this.key);
     this.startupToken = null;
@@ -493,13 +414,11 @@ export class TerminalSession {
       this.animationFrame = 0;
     }
     this.cancelOutputDrain();
-    this.rejectExitWaiters(new Error("Terminal session was released."));
     this.clearQueuedOutput();
     if (writeStopped) {
       this.terminal.writeln("");
       this.terminal.writeln(`[${this.labels.stopped}]`);
     }
-    this.onExit?.({ exitCode: null, signal: "SIGTERM" });
 
     const terminalId = this.terminalId;
     this.terminalId = null;
@@ -529,9 +448,6 @@ export class TerminalSession {
       cwd: this.cwd,
       cols,
       rows,
-      command: this.launch?.command,
-      args: this.launch?.args,
-      env: this.launch?.env,
       onEvent: (event) => {
         if (this.disposed || this.startupToken !== startupToken) {
           return;
@@ -549,7 +465,6 @@ export class TerminalSession {
         this.terminalId = terminalId;
         this.setStatus("running", "start");
         this.scheduleFitAndResize();
-        if (this.killRequested) this.requestBackendStop();
       })
       .catch((error) => {
         if (this.disposed || this.startupToken !== startupToken) {
@@ -557,8 +472,6 @@ export class TerminalSession {
         }
 
         this.setStatus("error", "error");
-        this.rejectExitWaiters(error);
-        this.onExit?.({ exitCode: null, signal: null });
         const message =
           error instanceof Error ? error.message : this.labels.startFailed;
         this.terminal.writeln(`[${message}]`);
@@ -573,7 +486,6 @@ export class TerminalSession {
         this.scheduleFitAndResize();
         break;
       case "output":
-        this.onOutput?.(event.data.data);
         this.enqueueOutput(event.data.data);
         break;
       case "exited":
@@ -588,45 +500,14 @@ export class TerminalSession {
             `[${this.labels.exitedWithSignal(event.data.signal)}]`,
           );
         }
-        this.onExit?.({
-          exitCode: event.data.exitCode,
-          signal: event.data.signal,
-        });
-        this.resolveExitWaiters();
         this.setStatus("exited", "backend-exit");
         break;
       case "error":
         this.setStatus("error", "error");
-        this.rejectExitWaiters(new Error(event.data.message));
-        this.onExit?.({ exitCode: null, signal: null });
         this.terminal.writeln("");
         this.terminal.writeln(`[${event.data.message}]`);
         break;
     }
-  }
-
-  private requestBackendStop(): void {
-    if (this.stopRequestInFlight || !this.terminalId) return;
-
-    this.stopRequestInFlight = true;
-    void stopTerminal(this.terminalId)
-      .catch((error) => {
-        this.killRequested = false;
-        this.rejectExitWaiters(error);
-      })
-      .finally(() => {
-        this.stopRequestInFlight = false;
-      });
-  }
-
-  private resolveExitWaiters(): void {
-    for (const waiter of this.exitWaiters) waiter.resolve();
-    this.exitWaiters.clear();
-  }
-
-  private rejectExitWaiters(error: unknown): void {
-    for (const waiter of this.exitWaiters) waiter.reject(error);
-    this.exitWaiters.clear();
   }
 
   private scheduleFitAndResize(): void {
@@ -929,10 +810,6 @@ export function setTerminalRenderingSuspended(suspended: boolean): void {
   }
 }
 
-export function getTerminalSession(sessionKey: string): TerminalSession | null {
-  return sessions.get(sessionKey) ?? null;
-}
-
 export function getOrCreateTerminalSession(
   options: TerminalSessionOptions,
 ): TerminalSession {
@@ -946,7 +823,6 @@ export function getOrCreateTerminalSession(
   existing?.stop();
   const session = new TerminalSession(options);
   sessions.set(options.key, session);
-  emitAvailabilityChange(options.key);
   emitRegistryChange();
   return session;
 }
@@ -965,19 +841,6 @@ function chatSessionIdFromTerminalKey(key: string): string | null {
 
 export function getChatSessionIdsWithTerminals(): ReadonlySet<string> {
   return terminalSessionIdsSnapshot;
-}
-
-export function subscribeTerminalSessionAvailability(
-  sessionKey: string,
-  listener: TerminalSessionRegistryListener,
-): () => void {
-  const listeners = availabilityListeners.get(sessionKey) ?? new Set();
-  listeners.add(listener);
-  availabilityListeners.set(sessionKey, listeners);
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) availabilityListeners.delete(sessionKey);
-  };
 }
 
 export function subscribeTerminalSessionRegistry(

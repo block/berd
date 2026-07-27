@@ -41,7 +41,7 @@ impl TerminalState {
         };
 
         for session in sessions {
-            session.stop();
+            session.stop_blocking();
         }
     }
 }
@@ -56,8 +56,12 @@ struct TerminalSession {
 }
 
 impl TerminalSession {
+    fn begin_stop(&self) -> bool {
+        !self.stopping.swap(true, Ordering::AcqRel)
+    }
+
     fn stop(&self) {
-        if self.stopping.swap(true, Ordering::AcqRel) {
+        if !self.begin_stop() {
             return;
         }
 
@@ -70,6 +74,20 @@ impl TerminalSession {
         // portable-pty's Windows killer terminates only the process represented
         // by its handle; it does not establish process-tree ownership. Keep this
         // fallback bounded, but do not claim that it terminates descendants.
+        self.kill_child();
+    }
+
+    fn stop_blocking(&self) {
+        if !self.begin_stop() {
+            return;
+        }
+
+        #[cfg(unix)]
+        if let Some(process_id) = self.process_id {
+            stop_unix_process_group(process_id);
+            return;
+        }
+
         self.kill_child();
     }
 
@@ -157,25 +175,14 @@ pub enum TerminalEvent {
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // Tauri exposes each IPC field as a command argument.
 pub async fn start_terminal(
     state: State<'_, TerminalState>,
     cwd: String,
     cols: u16,
     rows: u16,
-    command: Option<String>,
-    args: Option<Vec<String>>,
-    env: Option<HashMap<String, String>>,
     on_event: Channel<TerminalEvent>,
 ) -> Result<String, String> {
     let cwd = resolve_terminal_cwd(&cwd)?;
-    if command
-        .as_ref()
-        .is_some_and(|command| command.trim().is_empty())
-    {
-        return Err("Terminal command cannot be empty.".to_string());
-    }
-
     let mut shell_env = dir_env::capture_home_interactive_env().await;
     add_fallback_env_vars(&mut shell_env);
     shell_env::sanitize_shell_env(&mut shell_env);
@@ -188,10 +195,7 @@ pub async fn start_terminal(
         .openpty(size)
         .map_err(|error| format!("Failed to create terminal: {error}"))?;
 
-    let mut process = CommandBuilder::new(command.as_deref().unwrap_or(&shell));
-    if let Some(args) = args {
-        process.args(args);
-    }
+    let mut process = CommandBuilder::new(shell);
     process.env_clear();
     process.cwd(&cwd);
     for (key, value) in &shell_env {
@@ -200,12 +204,6 @@ pub async fn start_terminal(
     process.env("PATH", extended_path);
     process.env("TERM", "xterm-256color");
     process.env("COLORTERM", "truecolor");
-    if let Some(env) = env {
-        for (key, value) in env {
-            process.env(key, value);
-        }
-    }
-
     let mut child = pair
         .slave
         .spawn_command(process)

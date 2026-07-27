@@ -16,7 +16,6 @@ import {
   flushBufferedStreamingUpdatesForSession,
 } from "@/features/chat/acp/liveStreamingUpdates";
 import { acpSendMessage } from "@/shared/api/acp";
-import type { StopReason } from "@agentclientprotocol/sdk";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   claimSessionPrompt,
@@ -25,7 +24,6 @@ import {
   releaseSessionPrompt,
 } from "@/features/chat/lib/sessionPromptOwnership";
 import { perfLog } from "@/shared/lib/perfLog";
-import { i18n } from "@/shared/i18n";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import {
   type ChatAttachmentDraft,
@@ -117,15 +115,6 @@ function markAssistantMessageErrored(
     ...message,
     metadata: { ...message.metadata, completionStatus: "error" },
   }));
-}
-
-const INCOMPLETE_STOP_REASON_KEYS: Partial<Record<StopReason, string>> = {
-  max_tokens: "chat:incompleteStopReasons.maxTokens",
-};
-
-function incompleteStopReasonMessage(stopReason: StopReason): string | null {
-  const key = INCOMPLETE_STOP_REASON_KEYS[stopReason];
-  return key ? i18n.t(key) : null;
 }
 
 function finalizeAssistantCancellationRace(promptOwner: symbol): void {
@@ -297,7 +286,7 @@ export async function dispatchPrompt(
         `[perf:send] ${sid} → acpSendMessage (setup took ${(tAcp - tSendStart).toFixed(1)}ms)`,
       );
     }
-    const promptResponse = await acpSendMessage(sessionId, acpPrompt, {
+    await acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
       ...(assistantPrompt ? { assistantPrompt } : {}),
       personaId: persona?.id,
@@ -311,18 +300,6 @@ export async function dispatchPrompt(
       perfLog(
         `[perf:send] ${sid} acpSendMessage returned after ${(performance.now() - tAcp).toFixed(1)}ms (total dispatchPrompt ${(performance.now() - tSendStart).toFixed(1)}ms)`,
       );
-    }
-
-    const incompleteMessage = promptResponse
-      ? incompleteStopReasonMessage(promptResponse.stopReason)
-      : null;
-    if (incompleteMessage && isCurrent()) {
-      useChatStore
-        .getState()
-        .addMessage(
-          sessionId,
-          createSystemNotificationMessage(incompleteMessage, "warning"),
-        );
     }
 
     const cancellationRace = assistantCancellationRaces.get(promptOwner);

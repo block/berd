@@ -11,14 +11,6 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
-import {
-  createAcpTerminal,
-  killAcpTerminal,
-  readAcpTerminalOutput,
-  releaseAcpTerminal,
-  teardownAcpTerminals,
-  waitForAcpTerminalExit,
-} from "@/features/terminal/lib/acpTerminalManager";
 import packageJson from "../../../package.json";
 import { createWebSocketStream } from "./createWebSocketStream";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -27,7 +19,6 @@ let notificationHandler: AcpNotificationHandler | null = null;
 
 export interface AcpNotificationHandler {
   handleSessionNotification(notification: SessionNotification): Promise<void>;
-  handleConnectionClosed?(): void;
 }
 
 export function setNotificationHandler(handler: AcpNotificationHandler): void {
@@ -51,8 +42,6 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 
 let clientPromise: Promise<GooseClient> | null = null;
 let resolvedClient: GooseClient | null = null;
-let connectionGeneration = 0;
-let terminalTeardownPromise: Promise<void> = Promise.resolve();
 
 function createClientCallbacks(): () => Client {
   return () => ({
@@ -76,37 +65,28 @@ function createClientCallbacks(): () => Client {
         await notificationHandler.handleSessionNotification(notification);
       }
     },
-
-    createTerminal: createAcpTerminal,
-    terminalOutput: readAcpTerminalOutput,
-    releaseTerminal: releaseAcpTerminal,
-    waitForTerminalExit: waitForAcpTerminalExit,
-    killTerminal: killAcpTerminal,
   });
 }
 
-function monitorConnection(client: GooseClient, generation: number): void {
-  const disconnect = (kind: "closed" | "error") => {
-    if (generation !== connectionGeneration) return;
-    console.warn(
-      `[acp] Connection ${kind}. Will reconnect on next getClient().`,
-    );
-    if (resolvedClient === client) resolvedClient = null;
-    clientPromise = null;
-    notificationHandler?.handleConnectionClosed?.();
-    terminalTeardownPromise = teardownAcpTerminals().catch((error) => {
-      console.warn("[acp] Failed to tear down terminal state.", error);
+function monitorConnection(client: GooseClient): void {
+  client.closed
+    .then(() => {
+      console.warn(
+        "[acp] Connection closed. Will reconnect on next getClient().",
+      );
+      resolvedClient = null;
+      clientPromise = null;
+    })
+    .catch(() => {
+      console.warn(
+        "[acp] Connection error. Will reconnect on next getClient().",
+      );
+      resolvedClient = null;
+      clientPromise = null;
     });
-  };
-
-  client.closed.then(
-    () => disconnect("closed"),
-    () => disconnect("error"),
-  );
 }
 
-async function initializeConnection(generation: number): Promise<GooseClient> {
-  await terminalTeardownPromise;
+async function initializeConnection(): Promise<GooseClient> {
   // Dev-only: inject a real failure into startup so the WARP probe runs
   // for real against kgoose. `VITE_DEV_STARTUP_ERROR=warp just dev` lets
   // us experience the diagnostic UI with whatever real WARP state the
@@ -149,7 +129,6 @@ async function initializeConnection(generation: number): Promise<GooseClient> {
   await client.initialize({
     protocolVersion: PROTOCOL_VERSION,
     clientCapabilities: {
-      terminal: true,
       _meta: {
         goose: {
           mcpHostCapabilities: DEFAULT_GOOSE_MCP_HOST_CAPABILITIES,
@@ -166,7 +145,7 @@ async function initializeConnection(generation: number): Promise<GooseClient> {
     `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
   );
 
-  monitorConnection(client, generation);
+  monitorConnection(client);
 
   return client;
 }
@@ -178,14 +157,13 @@ export async function getClient(): Promise<GooseClient> {
 
   if (!clientPromise) {
     perfLog("[perf:conn] getClient() → initializing new ACP connection");
-    const generation = ++connectionGeneration;
-    clientPromise = initializeConnection(generation)
+    clientPromise = initializeConnection()
       .then((client) => {
-        if (generation === connectionGeneration) resolvedClient = client;
+        resolvedClient = client;
         return client;
       })
       .catch((error) => {
-        if (generation === connectionGeneration) clientPromise = null;
+        clientPromise = null;
         throw error;
       });
   } else {

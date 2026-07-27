@@ -104,7 +104,6 @@ export interface ToolRequestContent {
   status: ToolCallStatus;
   toolKind?: ToolKind;
   locations?: AcpToolCallLocation[];
-  terminalId?: string;
   startedAt?: number;
   annotations?: Annotations;
   chainSummary?: ToolChainSummary;

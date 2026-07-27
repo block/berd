@@ -307,7 +307,6 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       >
         <MessageBubble
           message={message}
-          sessionId={rowStateProvider?.sessionId}
           animateEntry={false}
           contentOverride={row.fragment.content}
           fragmentRole={row.fragment.role}
@@ -355,7 +354,6 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       >
         <AgentWorkPanel
           payload={row.agentWork}
-          sessionId={rowStateProvider?.sessionId}
           settleOnMount={settleAgentWorkOnMount}
         />
       </div>
@@ -374,10 +372,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
         )}
       >
-        <ToolChainSummaryMessageBubble
-          payload={row.toolChainSummary}
-          sessionId={rowStateProvider?.sessionId}
-        />
+        <ToolChainSummaryMessageBubble payload={row.toolChainSummary} />
       </div>
     );
   } else if (row.kind === "tool-chain-detail" && row.toolChainDetail) {
@@ -419,7 +414,6 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       >
         <MessageBubble
           message={message}
-          sessionId={rowStateProvider?.sessionId}
           animateEntry={false}
           isStreaming={isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}

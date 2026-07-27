@@ -192,14 +192,12 @@ function getFallbackToolChainStateId(
 export function ToolChainCards({
   chainId,
   toolItems,
-  sessionId,
   hasDetailRow = false,
   detailOnly = false,
   externalChainExpanded,
 }: {
   chainId?: string;
   toolItems: ToolChainItem[];
-  sessionId?: string;
   hasDetailRow?: boolean;
   detailOnly?: boolean;
   externalChainExpanded?: boolean;
@@ -374,8 +372,6 @@ export function ToolChainCards({
               arguments={request?.arguments ?? {}}
               status={status}
               locations={request?.locations}
-              terminalId={request?.terminalId}
-              terminalSessionId={sessionId}
               result={response?.result}
               structuredContent={response?.structuredContent}
               isError={response?.isError}
@@ -406,8 +402,6 @@ export function ToolChainCards({
             arguments={request?.arguments ?? {}}
             status={status}
             locations={request?.locations}
-            terminalId={request?.terminalId}
-            terminalSessionId={sessionId}
             result={response?.result}
             structuredContent={response?.structuredContent}
             isError={response?.isError}
