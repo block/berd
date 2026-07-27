@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Regenerate Tauri icon assets from src-tauri/icons/icon.png.
+"""Regenerate Tauri icon assets from platform-specific source PNGs.
 
 Preserves the source PNG colorspace chunks (sRGB / iCCP / cHRM / gAMA) so
-the rasterized icons keep the same color tagging as the export.
+the rasterized icons keep the same color tagging as the export. macOS uses
+macos-icon.png; the other generated assets continue to use icon.png.
 """
 import os
 import struct
@@ -13,6 +14,7 @@ from PIL import Image, PngImagePlugin
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 SRC = os.path.join(ROOT, "src-tauri/icons/icon.png")
+MACOS_SRC = os.path.join(ROOT, "src-tauri/icons/macos-icon.png")
 ICONS_DIR = os.path.join(ROOT, "src-tauri/icons")
 
 with open(SRC, "rb") as f:
@@ -31,6 +33,7 @@ while i < len(raw):
 print("source chunks:", {k: [len(d) for d in v] for k, v in src_chunks.items()})
 
 src_img = Image.open(SRC).convert("RGBA")
+macos_src_img = Image.open(MACOS_SRC).convert("RGBA")
 
 
 def make_pnginfo() -> PngImagePlugin.PngInfo:
@@ -43,6 +46,10 @@ def make_pnginfo() -> PngImagePlugin.PngInfo:
 
 def resize(sz: int) -> Image.Image:
     return src_img.resize((sz, sz), Image.Resampling.LANCZOS)
+
+
+def resize_macos(sz: int) -> Image.Image:
+    return macos_src_img.resize((sz, sz), Image.Resampling.LANCZOS)
 
 
 def save_png(img: Image.Image, path: str) -> None:
@@ -121,7 +128,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ("icon_512x512.png", 512),
         ("icon_512x512@2x.png", 1024),
     ]:
-        save_png(resize(sz), os.path.join(iconset, name))
+        save_png(resize_macos(sz), os.path.join(iconset, name))
     icns_out = os.path.join(ICONS_DIR, "icon.icns")
     subprocess.run(["iconutil", "-c", "icns", "-o", icns_out, iconset], check=True)
     print("wrote", os.path.relpath(icns_out, ROOT))
