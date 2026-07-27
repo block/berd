@@ -1,4 +1,4 @@
-import type { ContentBlock } from "@agentclientprotocol/sdk";
+import type { ContentBlock, PromptResponse } from "@agentclientprotocol/sdk";
 import * as directAcp from "./acpApi";
 import type {
   AcpForkSessionOptions,
@@ -136,7 +136,7 @@ export async function acpSendMessage(
   sessionId: string,
   prompt: string,
   options: AcpSendMessageOptions = {},
-): Promise<void> {
+): Promise<PromptResponse> {
   const {
     systemPrompt,
     assistantPrompt,
@@ -232,15 +232,16 @@ export async function acpSendMessage(
   if (personaId) meta.personaId = personaId;
   if (goose && Object.keys(goose).length > 0) meta.goose = goose;
   try {
-    await directAcp.prompt(
+    const response = await directAcp.prompt(
       sessionId,
       content,
       Object.keys(meta).length > 0 ? meta : undefined,
     );
     const tDone = performance.now();
     perfLog(
-      `[perf:send] ${sid} prompt() resolved in ${(tDone - tPrompt).toFixed(1)}ms (total acpSendMessage ${(tDone - tStart).toFixed(1)}ms)`,
+      `[perf:send] ${sid} prompt() resolved in ${(tDone - tPrompt).toFixed(1)}ms (total acpSendMessage ${(tDone - tStart).toFixed(1)}ms, stopReason=${response.stopReason})`,
     );
+    return response;
   } finally {
     clearActiveMessageId(sessionId);
   }

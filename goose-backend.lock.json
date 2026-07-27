@@ -8,6 +8,10 @@
     {
       "path": "patches/goose/bot-801-forward-acp-terminal-events.patch",
       "sha256": "d99ad8e06cbc935e1e6c32e335533d91a6d2f79f7b4e946743addb5e7655df97"
+    },
+    {
+      "path": "patches/goose/bot-1070-propagate-max-tokens-stop-reason.patch",
+      "sha256": "8f04ad4c5826b60a3e7496c17ff5731b20cac07ff6048f474254e0989d9c12af"
     }
   ]
 }

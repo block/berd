@@ -15,6 +15,7 @@ import {
   flushAllBufferedStreamingUpdates,
 } from "../../acp/liveStreamingUpdates";
 import { claimSessionPrompt } from "../../lib/sessionPromptOwnership";
+import { i18n } from "@/shared/i18n";
 
 const mockAcpSendMessage = vi.fn();
 const mockAcpSteerMessage = vi.fn();
@@ -85,7 +86,8 @@ function seedChatSession(overrides: Partial<ChatSession> = {}) {
 }
 
 describe("useChat", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
     mockAcpSendMessage.mockReset();
     mockAcpSteerMessage.mockReset();
     mockAcpCancelSession.mockReset();
@@ -534,6 +536,73 @@ describe("useChat", () => {
       useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
         ?.completionStatus,
     ).toBe("completed");
+  });
+
+  it("warns when the ACP turn reaches the output token limit", async () => {
+    mockAcpSendMessage.mockResolvedValueOnce({ stopReason: "max_tokens" });
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      const sendPromise = result.current.sendMessage("finish this");
+      await Promise.resolve();
+      addStreamingAssistantMessage(
+        "session-1",
+        "assistant-1",
+        "persona-a",
+        "Persona A",
+      );
+      await sendPromise;
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(
+      messages.find((message) => message.id === "assistant-1"),
+    ).toMatchObject({ metadata: { completionStatus: "completed" } });
+    expect(messages.at(-1)?.content).toEqual([
+      {
+        type: "systemNotification",
+        notificationType: "warning",
+        text: "This response repeatedly reached the model's output limit and couldn't finish. Try narrowing your request or splitting it into parts.",
+      },
+    ]);
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("idle");
+  });
+
+  it("localizes the ACP output-limit warning", async () => {
+    await i18n.changeLanguage("es");
+    mockAcpSendMessage.mockResolvedValueOnce({ stopReason: "max_tokens" });
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.sendMessage("termina esto");
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages.at(-1)?.content).toEqual([
+      {
+        type: "systemNotification",
+        notificationType: "warning",
+        text: "Esta respuesta alcanzó repetidamente el límite de salida del modelo y no pudo terminar. Intenta acotar tu solicitud o dividirla en partes.",
+      },
+    ]);
+  });
+
+  it("does not warn for a normal ACP end turn", async () => {
+    mockAcpSendMessage.mockResolvedValueOnce({ stopReason: "end_turn" });
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.sendMessage("finish this");
+    });
+
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      1,
+    );
   });
 
   it("marks the streaming assistant completed when the prompt settles", async () => {

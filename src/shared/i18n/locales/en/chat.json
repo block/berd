@@ -72,6 +72,9 @@
     "popOut": "Pop out terminal",
     "resize": "Resize terminal"
   },
+  "incompleteStopReasons": {
+    "maxTokens": "This response repeatedly reached the model's output limit and couldn't finish. Try narrowing your request or splitting it into parts."
+  },
   "errors": {
     "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
     "steeringBackendUnavailable": "Steering is not available in this Goose backend. Restart with the steering backend branch and try again.",

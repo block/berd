@@ -69,10 +69,26 @@ describe("acpSendMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    // clearAllMocks clears call history but not return values; reset the
-    // preamble to unavailable so tests opt in explicitly.
+    // clearAllMocks clears call history but not return values; reset defaults
+    // so tests opt in to preambles and non-standard stop reasons explicitly.
     mockGetBerdctlPreamble.mockReturnValue(null);
+    mockPrompt.mockResolvedValue({ stopReason: "end_turn" });
     localStorage.removeItem(STYLE_GUIDELINES_STORAGE_KEY);
+  });
+
+  it("returns the ACP prompt stop reason", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-stop-reason",
+      "goose",
+      "/tmp/project",
+    );
+    mockPrompt.mockResolvedValueOnce({ stopReason: "max_tokens" });
+
+    await expect(
+      acpSendMessage("acp-session-stop-reason", "hello"),
+    ).resolves.toEqual({ stopReason: "max_tokens" });
   });
 
   it.each(

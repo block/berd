@@ -71,6 +71,9 @@
     "popOut": "Separar terminal",
     "resize": "Redimensionar terminal"
   },
+  "incompleteStopReasons": {
+    "maxTokens": "Esta respuesta alcanzó repetidamente el límite de salida del modelo y no pudo terminar. Intenta acotar tu solicitud o dividirla en partes."
+  },
   "errors": {
     "sessionPreparationSuperseded": "La configuración de la sesión cambió durante la preparación. Intenta enviar de nuevo.",
     "steeringBackendUnavailable": "La guía no está disponible en este backend de Goose. Reinicia con la rama del backend de guía e inténtalo de nuevo.",
