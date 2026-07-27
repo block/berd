@@ -23,9 +23,9 @@ function clearScheduledRefresh(timeoutRef: MutableRefObject<number | null>) {
 /**
  * Keeps the chat context rail's git summary in sync with agent work without
  * polling. When a chat moves from active work back to settled, we invalidate
- * the cached git queries for its current workspace. Active right-rail queries
- * refetch immediately; closed panels are only marked stale and refresh on the
- * next open.
+ * the cached git queries for its current workspace. The context panel stays
+ * mounted while the rail is hidden, so its queries remain active observers and
+ * refetch immediately — the panel is warm and current the moment it reopens.
  */
 export function useGitStateAutoRefreshOnChatSettled({
   sessionId,

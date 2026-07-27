@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { cn } from "@/shared/lib/cn";
 import { ContextPanel, ContextPanelWorktreeTracker } from "./ContextPanel";
 
 const CP_PANEL_W = 250;
+/** Stable fallback so a missing project can't break the memo boundary. */
+const EMPTY_WORKING_DIRS: string[] = [];
 export const CP_TOTAL_W = CP_PANEL_W;
 export const CHAT_CONTEXT_PANEL_COMPACT_BASE_WIDTH = 800;
 
@@ -62,8 +64,19 @@ interface ChatContextPanelProps {
   onOpenTerminalAtPath?: (path: string) => void;
 }
 
-/** Context content hosted by ChatRightRail. Rail visibility and placement live in the host. */
-export function ChatContextPanel({
+/**
+ * Context content hosted by ChatRightRail. Rail visibility and placement live
+ * in the host.
+ *
+ * Memoized as a render boundary: the panel stays mounted while hidden so its
+ * git/changed-files queries remain active observers (warm reopen, refreshed by
+ * query invalidation when a turn settles), but composer draft flushes and
+ * streaming updates re-render ChatView every few hundred milliseconds. Without
+ * this boundary the entire hidden ContextPanel subtree re-executed on each of
+ * those renders (regression introduced when #798 switched hidden from
+ * unmounted to `hidden`).
+ */
+export const ChatContextPanel = memo(function ChatContextPanel({
   activeSessionId,
   isVisible,
   project,
@@ -95,7 +108,7 @@ export function ChatContextPanel({
     <>
       <ContextPanelWorktreeTracker
         sessionId={activeSessionId}
-        projectWorkingDirs={project?.workingDirs ?? []}
+        projectWorkingDirs={project?.workingDirs ?? EMPTY_WORKING_DIRS}
         sessionWorkingDir={sessionWorkingDir}
       />
       <div
@@ -119,7 +132,7 @@ export function ChatContextPanel({
             projectName={project?.name}
             projectIcon={project?.icon}
             projectColor={project?.color}
-            projectWorkingDirs={project?.workingDirs ?? []}
+            projectWorkingDirs={project?.workingDirs ?? EMPTY_WORKING_DIRS}
             sessionWorkingDir={sessionWorkingDir}
             terminalOpen={terminalOpen}
             onToggleTerminal={onToggleTerminal}
@@ -129,4 +142,4 @@ export function ChatContextPanel({
       </div>
     </>
   );
-}
+});

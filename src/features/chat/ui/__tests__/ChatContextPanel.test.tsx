@@ -111,4 +111,51 @@ describe("ChatContextPanel", () => {
     });
     expect(screen.getByTestId("context-panel-content")).not.toBeVisible();
   });
+
+  it.each([
+    ["hidden", false],
+    ["visible", true],
+  ])("does not re-render %s panel content when the parent re-renders with equivalent props", (_state, isVisible) => {
+    // Regression: ChatView re-renders on every debounced composer draft flush
+    // and on streaming updates. The memo boundary must keep ContextPanel from
+    // re-executing on those parent renders, whether the rail is open or closed.
+    const project = { workingDirs: ["/Users/test/project"] };
+    const { rerender } = render(
+      <ChatContextPanel
+        activeSessionId="session-1"
+        isVisible={isVisible}
+        project={project}
+        sessionWorkingDir="/Users/test/project"
+      />,
+    );
+
+    const rendersAfterMount = mockContextPanel.mock.calls.length;
+    expect(rendersAfterMount).toBeGreaterThan(0);
+
+    // Same prop identities — simulates a draft-flush parent render.
+    rerender(
+      <ChatContextPanel
+        activeSessionId="session-1"
+        isVisible={isVisible}
+        project={project}
+        sessionWorkingDir="/Users/test/project"
+      />,
+    );
+
+    expect(mockContextPanel.mock.calls.length).toBe(rendersAfterMount);
+
+    // A genuine prop change must still get through the boundary.
+    rerender(
+      <ChatContextPanel
+        activeSessionId="session-1"
+        isVisible={isVisible}
+        project={project}
+        sessionWorkingDir="/Users/test/other-project"
+      />,
+    );
+
+    expect(mockContextPanel.mock.calls.length).toBeGreaterThan(
+      rendersAfterMount,
+    );
+  });
 });
