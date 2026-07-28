@@ -304,7 +304,6 @@ fn install_command() -> Command {
                 .value_name("SLUG")
                 .help("Override the slug for a local path install"),
         )
-        .arg(channel_flag())
         .arg(dry_run_flag())
         .arg(
             Arg::new("force")
@@ -330,7 +329,6 @@ fn update_command() -> Command {
         .arg(Arg::new("skill").value_name("SLUG").help("Update only this skill"))
         .arg(target_flag())
         .arg(project_flag())
-        .arg(channel_flag())
         .arg(dry_run_flag())
         .arg(
             Arg::new("force")
@@ -384,13 +382,6 @@ fn project_flag() -> Arg {
         .long("project")
         .help("Operate on project-local skill directories (./.agents/skills, ...) instead of global ones")
         .action(ArgAction::SetTrue)
-}
-
-fn channel_flag() -> Arg {
-    Arg::new("channel")
-        .long("channel")
-        .value_name("CHANNEL")
-        .help("Release channel (default: `channel` preference, else stable)")
 }
 
 fn dry_run_flag() -> Arg {
@@ -976,7 +967,6 @@ struct PlanContext {
     targets: Vec<ResolvedTarget>,
     target_names: Vec<String>,
     scope: Scope,
-    channel: String,
 }
 
 fn plan_context(
@@ -990,11 +980,6 @@ fn plan_context(
     } else {
         Scope::Global
     };
-    let channel = matches
-        .get_one::<String>("channel")
-        .cloned()
-        .or_else(|| preferences.channel.clone())
-        .unwrap_or_else(|| "stable".to_string());
     let target_names = matches
         .get_many::<String>("target")
         .map(|values| values.cloned().collect::<Vec<_>>())
@@ -1010,7 +995,6 @@ fn plan_context(
         targets,
         target_names,
         scope,
-        channel,
     })
 }
 
@@ -1107,7 +1091,6 @@ fn install(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     };
 
     let request = InstallPlanRequest {
-        channel: context.channel.clone(),
         scope: context.scope.as_str().to_string(),
         targets: vec![requested],
         installed: installed_request_payload(&installed, &force_slugs),
@@ -1293,7 +1276,6 @@ fn update(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Vec::new()
     };
     let request = InstallPlanRequest {
-        channel: context.channel.clone(),
         scope: context.scope.as_str().to_string(),
         targets: update_slugs
             .iter()
@@ -1651,7 +1633,6 @@ fn preferences(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
             let preferences = config.read_preferences()?;
             let value: Value = match key.as_str() {
                 "org" => json!(preferences.org.unwrap_or_default()),
-                "channel" => json!(preferences.channel.unwrap_or_else(|| "stable".to_string())),
                 "targets" => json!(if preferences.targets.is_empty() {
                     "agents".to_string()
                 } else {
@@ -1684,7 +1665,6 @@ fn preferences(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
             let mut preferences = config.read_preferences()?;
             match key.as_str() {
                 "org" => preferences.org = Some(normalize_org(value)?),
-                "channel" => preferences.channel = Some(value.clone()),
                 "targets" => {
                     let names = value
                         .split(',')

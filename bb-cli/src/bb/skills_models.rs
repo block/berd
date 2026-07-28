@@ -121,7 +121,6 @@ fn default_true() -> bool {
 
 #[derive(Debug, Serialize)]
 pub struct InstallPlanRequest {
-    pub channel: String,
     pub scope: String,
     pub targets: Vec<RequestedTarget>,
     pub installed: Vec<InstalledSkillRequest>,

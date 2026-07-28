@@ -1069,30 +1069,6 @@ fn bb_config_set_and_get_roundtrip() {
     write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
 
-    let set = bb_command()
-        .env("BB_HOME", &bb_home)
-        .env("BB_SKILLS_HOME", &skills_home)
-        .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args(["config", "set", "channel", "beta", "--json"])
-        .output()
-        .expect("run bb config set");
-    let (set_stdout, set_stderr) = output_text(&set);
-    assert!(set.status.success(), "stderr was: {set_stderr}");
-    let set_response = serde_json::from_str::<Value>(&set_stdout).expect("parse set output");
-    assert_eq!(set_response["updated"], json!("channel"));
-
-    let get = bb_command()
-        .env("BB_HOME", &bb_home)
-        .env("BB_SKILLS_HOME", &skills_home)
-        .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args(["config", "get", "channel", "--json"])
-        .output()
-        .expect("run bb config get");
-    let (get_stdout, get_stderr) = output_text(&get);
-    assert!(get.status.success(), "stderr was: {get_stderr}");
-    let get_response = serde_json::from_str::<Value>(&get_stdout).expect("parse get output");
-    assert_eq!(get_response["channel"], json!("beta"));
-
     let set_org = bb_command()
         .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
@@ -1164,13 +1140,13 @@ fn bb_skills_auth_is_removed_but_config_alias_still_works() {
         .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args(["skills", "config", "get", "channel", "--json"])
+        .args(["skills", "config", "get", "org", "--json"])
         .output()
         .expect("run bb skills config get");
     let (get_stdout, get_stderr) = output_text(&get);
     assert!(get.status.success(), "stderr was: {get_stderr}");
     let get_response = serde_json::from_str::<Value>(&get_stdout).expect("parse get output");
-    assert_eq!(get_response["channel"], json!("stable"));
+    assert_eq!(get_response["org"], json!("test"));
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
@@ -1341,6 +1317,10 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
     assert_eq!(
         requests[1].body["client"]["install_targets"],
         json!(["agents"])
+    );
+    assert!(
+        requests[1].body.get("channel").is_none(),
+        "install-plan requests must not expose a channel selector"
     );
     assert_eq!(requests[2].method, "GET");
     assert_eq!(
@@ -1983,6 +1963,10 @@ fn bb_skills_update_reports_up_to_date_skills() {
     assert_eq!(
         requests[1].body["installed"][0]["slug"],
         json!("builderbot-tools")
+    );
+    assert!(
+        requests[1].body.get("channel").is_none(),
+        "update requests must not expose a channel selector"
     );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }

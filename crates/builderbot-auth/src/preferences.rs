@@ -15,10 +15,6 @@ pub const PREFERENCE_KEYS: &[PreferenceKeySpec] = &[
         help: "Org used for access",
     },
     PreferenceKeySpec {
-        key: "channel",
-        help: "release channel for installs/updates (default: stable)",
-    },
-    PreferenceKeySpec {
         key: "targets",
         help: "comma-separated default install targets (default: agents)",
     },
@@ -37,8 +33,6 @@ pub const PREFERENCE_KEYS: &[PreferenceKeySpec] = &[
 pub struct BuilderBotPreferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub org: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,7 +52,6 @@ mod tests {
     fn preference_keys_match_builderbot_preferences_fields() {
         let populated = BuilderBotPreferences {
             org: Some("test".to_string()),
-            channel: Some("stable".to_string()),
             targets: vec!["agents".to_string()],
             install_strategy: Some("symlink".to_string()),
             no_auto_updates: Some(false),
