@@ -114,6 +114,12 @@ Run these as passes, then consolidate findings before presenting them. A finding
 - Do best-effort lookups fail softly when the primary user flow can continue?
 - Are request, response, and persistence shapes kept minimal and consumed on both sides of the boundary?
 
+#### Goose Backend Ownership
+- Treat checked-in patches against the Goose backend, patch registrations in `goose-backend.lock.json`, and scripts that apply or maintain local Goose patches as **P0 [Must Fix]** findings.
+- Do not accept a local patch as an interim or expedient implementation. If Berd needs different Goose backend behavior, require the change to be contributed to the Goose backend/upstream repository, then update Berd's pinned backend commit after that change lands.
+- Keep Berd-side changes limited to genuine client integration around backend capabilities. Flag backend behavior copied, overridden, or reimplemented in Berd when the durable ownership belongs in Goose.
+- When reporting the finding, explain the build and maintenance risk: local patches can drift from the pinned backend, fail during backend upgrades or packaging, and create a second unsupported implementation path.
+
 #### Code Cleanliness
 - Are there leftover `console.log` statements, commented-out code, unused imports, dead exports, or unrelated files?
 - Are names clear and domain-specific?
