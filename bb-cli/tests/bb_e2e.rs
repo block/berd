@@ -352,12 +352,12 @@ fn bb_skills_list_fetches_marketplace_skills_and_bundle_membership() {
     assert_eq!(requests[0].method, "GET");
     assert_eq!(
         requests[0].path,
-        "/cash-app/goose/v1/marketplace/skills?limit=5000"
+        "/api/goose/v1/marketplace/skills?limit=5000"
     );
     assert_eq!(requests[1].method, "GET");
     assert_eq!(
         requests[1].path,
-        "/cash-app/goose/v1/marketplace/bundles?limit=5000"
+        "/api/goose/v1/marketplace/bundles?limit=5000"
     );
 }
 
@@ -510,11 +510,11 @@ fn bb_skills_search_passes_query_filter() {
     assert_eq!(requests.len(), 2);
     assert_eq!(
         requests[0].path,
-        "/cash-app/goose/v1/marketplace/skills?limit=5000&query=builder"
+        "/api/goose/v1/marketplace/skills?limit=5000&query=builder"
     );
     assert_eq!(
         requests[1].path,
-        "/cash-app/goose/v1/marketplace/bundles?limit=5000"
+        "/api/goose/v1/marketplace/bundles?limit=5000"
     );
 }
 
@@ -540,7 +540,7 @@ fn bb_skills_show_prints_skill_detail() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].path,
-        "/cash-app/goose/v1/marketplace/skills/builderbot-tools"
+        "/api/goose/v1/marketplace/skills/builderbot-tools"
     );
 }
 
@@ -573,7 +573,7 @@ fn bb_skills_bundles_lists_bundles() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].path,
-        "/cash-app/goose/v1/marketplace/bundles?limit=5000"
+        "/api/goose/v1/marketplace/bundles?limit=5000"
     );
 }
 
@@ -630,8 +630,7 @@ fn bb_skills_list_uses_stored_session_credential_despite_legacy_profile_auth() {
         ),
     )
     .expect("write skills config");
-    let storage_key =
-        browser_auth_storage_key("local", &format!("{}/cash-app/goose", server.base_url));
+    let storage_key = browser_auth_storage_key("local", &format!("{}/api/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -830,7 +829,7 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
         "roles": ["ROLE_USER"]
     }))]);
     let storage_key =
-        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+        browser_auth_storage_key("default", &format!("{}/api/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -860,7 +859,7 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
     assert_eq!(response["expires_at"], json!("2026-06-15T00:00:00Z"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
+    assert_eq!(requests[0].path, "/api/goose/v1/auth/me");
     assert_eq!(
         requests[0]
             .headers
@@ -885,7 +884,7 @@ fn bb_auth_login_uses_valid_stored_file_session() {
         "roles": ["ROLE_USER"]
     }))]);
     let storage_key =
-        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+        browser_auth_storage_key("default", &format!("{}/api/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -916,7 +915,7 @@ fn bb_auth_login_uses_valid_stored_file_session() {
     assert_eq!(response["credentialPrefix"], Value::Null);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
+    assert_eq!(requests[0].path, "/api/goose/v1/auth/me");
     assert_eq!(
         requests[0]
             .headers
@@ -941,7 +940,7 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
         "roles": ["ROLE_USER"]
     }))]);
     let storage_key =
-        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+        browser_auth_storage_key("default", &format!("{}/api/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -968,7 +967,7 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
 
     assert!(output.status.success(), "stderr was: {stderr}");
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/me");
+    assert_eq!(requests[0].path, "/api/goose/v1/auth/me");
     assert_eq!(
         requests[0].headers.get("baggage").map(String::as_str),
         Some("kgoose-builderbot-playpen=baxen")
@@ -983,7 +982,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({}))]);
-    let server_url = format!("{}/cash-app/goose", server.base_url);
+    let server_url = format!("{}/api/goose", server.base_url);
     let default_key = browser_auth_storage_key("default", &server_url);
     let other_key = browser_auth_storage_key("other", &server_url);
     fs::write(
@@ -1020,7 +1019,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     assert_eq!(response["storage"], json!("file"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path, "/cash-app/goose/v1/auth/logout");
+    assert_eq!(requests[0].path, "/api/goose/v1/auth/logout");
     assert_eq!(
         requests[0]
             .headers
@@ -1332,15 +1331,9 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
 
     assert_eq!(requests.len(), 4);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(
-        requests[0].path,
-        "/cash-app/goose/v1/marketplace/capabilities"
-    );
+    assert_eq!(requests[0].path, "/api/goose/v1/marketplace/capabilities");
     assert_eq!(requests[1].method, "POST");
-    assert_eq!(
-        requests[1].path,
-        "/cash-app/goose/v1/marketplace/install-plan"
-    );
+    assert_eq!(requests[1].path, "/api/goose/v1/marketplace/install-plan");
     assert_eq!(
         requests[1].body["targets"][0]["slug"],
         json!("builderbot-tools")
@@ -1352,12 +1345,12 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
     assert_eq!(requests[2].method, "GET");
     assert_eq!(
         requests[2].path,
-        "/cash-app/goose/v1/marketplace/skills/builderbot-tools"
+        "/api/goose/v1/marketplace/skills/builderbot-tools"
     );
     assert_eq!(requests[3].method, "GET");
     assert_eq!(
         requests[3].path,
-        "/cash-app/goose/v1/marketplace/artifacts/art_builderbot_tools/download"
+        "/api/goose/v1/marketplace/artifacts/art_builderbot_tools/download"
     );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
@@ -1986,10 +1979,7 @@ fn bb_skills_update_reports_up_to_date_skills() {
     assert_eq!(response["up_to_date"], json!(["builderbot-tools"]));
     assert_eq!(response["installed"], json!([]));
     assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1].path,
-        "/cash-app/goose/v1/marketplace/install-plan"
-    );
+    assert_eq!(requests[1].path, "/api/goose/v1/marketplace/install-plan");
     assert_eq!(
         requests[1].body["installed"][0]["slug"],
         json!("builderbot-tools")
@@ -2025,7 +2015,7 @@ fn bb_skills_installed_reports_update_availability() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].path,
-        "/cash-app/goose/v1/marketplace/skills?limit=5000"
+        "/api/goose/v1/marketplace/skills?limit=5000"
     );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }

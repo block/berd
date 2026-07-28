@@ -470,7 +470,7 @@ mod tests {
             kgoose_auth_storage_lookup_urls("https://test.blockstaging.build", "/cash-app/goose"),
             vec![
                 "https://test.blockstaging.build".to_string(),
-                "https://test.blockstaging.build/cash-app/goose".to_string()
+                "https://test.blockstaging.build/cash-app/goose".to_string(),
             ]
         );
         assert_eq!(
