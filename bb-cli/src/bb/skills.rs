@@ -4,6 +4,7 @@
 //! the marketplace client, local package state, and target linking together.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as FmtWrite;
 use std::io::Write as IoWrite;
 
 use anyhow::{Context, Result};
@@ -643,11 +644,14 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
     };
 
     if !config.json {
+        let workspace_name = me.active_workspace_name()?;
+        let workspace_name = terminal_safe_text(workspace_name);
         println!("BuilderBot CLI auth");
         println!("  profile: {}", config.profile);
         println!("  kgoose base: {}", config.kgoose_base_url);
         println!("  kgoose service path: {}", config.kgoose_service_path);
         println!("  authenticated: yes");
+        println!("  workspace: {workspace_name}");
         if let Some(expires_at) = &me.expires_at {
             println!("  expires at: {expires_at}");
         }
@@ -658,6 +662,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         "kgoose_base_url": config.kgoose_base_url,
         "kgoose_service_path": config.kgoose_service_path,
         "profile": config.profile,
+        "workspace_name": me.active_workspace_name()?,
         "expires_at": me.expires_at,
     }))
 }
@@ -681,6 +686,10 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
     println!("  kgoose base: {}", summary.kgoose_base_url);
     println!("  kgoose service path: {}", summary.kgoose_service_path);
     println!("  storage: {}", summary.storage);
+    println!(
+        "  workspace: {}",
+        terminal_safe_text(&summary.workspace_name)
+    );
     if let Some(expires_at) = &summary.expires_at {
         println!("  expires at: {expires_at}");
     }
@@ -1715,11 +1724,45 @@ fn preferences(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
 // output
 
 fn print_json<T: Serialize>(value: &T) -> Result<()> {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).context("serialize JSON output")?
-    );
+    let json = serde_json::to_string_pretty(value).context("serialize JSON output")?;
+    println!("{}", json_with_escaped_bidi_controls(&json));
     Ok(())
+}
+
+fn json_with_escaped_bidi_controls(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if is_bidi_control(character) {
+            write!(escaped, "\\u{:04x}", character as u32)
+                .expect("writing to a String cannot fail");
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+fn terminal_safe_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if character.is_control() || is_bidi_control(character) {
+            escaped.extend(character.escape_default());
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+fn is_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061c}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
+    )
 }
 
 fn report_plan(config: &SkillsConfig, plan: &InstallPlanResponse, dry_run: bool) -> Result<()> {
@@ -2133,6 +2176,24 @@ mod tests {
             provenance_suffix("bundle:frontend"),
             "  (from bundle frontend)"
         );
+    }
+
+    #[test]
+    fn terminal_safe_text_escapes_controls_and_preserves_unicode() {
+        assert_eq!(
+            terminal_safe_text("Workspace\u{1b}]52;c;secret\u{7}\n\u{202e}fake\u{2066}日本語"),
+            "Workspace\\u{1b}]52;c;secret\\u{7}\\n\\u{202e}fake\\u{2066}日本語"
+        );
+    }
+
+    #[test]
+    fn json_with_escaped_bidi_controls_remains_valid_json() {
+        let input = format!(r#"{{"name":"safe{}fake{}日本語"}}"#, '\u{202e}', '\u{2066}');
+        let escaped = json_with_escaped_bidi_controls(&input);
+
+        assert_eq!(escaped, r#"{"name":"safe\u202efake\u2066日本語"}"#);
+        let parsed: Value = serde_json::from_str(&escaped).expect("valid escaped JSON");
+        assert_eq!(parsed["name"], "safe\u{202e}fake\u{2066}日本語");
     }
 
     #[test]

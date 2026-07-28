@@ -826,7 +826,11 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
         "email": "test@example.com",
         "name": "Test User",
         "expires_at": "2026-06-15T00:00:00Z",
-        "roles": ["ROLE_USER"]
+        "roles": ["ROLE_USER"],
+        "workspaces": {"active": [
+            {"name": "Test \u{202e}Workspace"},
+            {"name": "Other Workspace"}
+        ]}
     }))]);
     let storage_key =
         browser_auth_storage_key("default", &format!("{}/api/goose", server.base_url));
@@ -854,9 +858,11 @@ fn bb_auth_status_uses_auth_me_for_stored_file_session() {
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
+    assert!(stdout.contains(r#""workspace_name": "Test \u202eWorkspace""#));
     let response = serde_json::from_str::<Value>(&stdout).expect("parse status output");
     assert_eq!(response["authenticated"], json!(true));
     assert_eq!(response["expires_at"], json!("2026-06-15T00:00:00Z"));
+    assert_eq!(response["workspace_name"], json!("Test \u{202e}Workspace"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
     assert_eq!(requests[0].path, "/api/goose/v1/auth/me");
@@ -881,7 +887,11 @@ fn bb_auth_login_uses_valid_stored_file_session() {
         "email": "test@example.com",
         "name": "Test User",
         "expires_at": "2026-06-15T00:00:00Z",
-        "roles": ["ROLE_USER"]
+        "roles": ["ROLE_USER"],
+        "workspaces": {"active": [
+            {"name": "Test \u{202e}Workspace"},
+            {"name": "Other Workspace"}
+        ]}
     }))]);
     let storage_key =
         browser_auth_storage_key("default", &format!("{}/api/goose", server.base_url));
@@ -909,9 +919,11 @@ fn bb_auth_login_uses_valid_stored_file_session() {
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
+    assert!(stdout.contains(r#""workspace_name": "Test \u202eWorkspace""#));
     let response = serde_json::from_str::<Value>(&stdout).expect("parse login output");
     assert_eq!(response["source"], json!("stored"));
     assert_eq!(response["storage"], json!("file"));
+    assert_eq!(response["workspace_name"], json!("Test \u{202e}Workspace"));
     assert_eq!(response["credentialPrefix"], Value::Null);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
@@ -937,7 +949,8 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
         "email": "test@example.com",
         "name": "Test User",
         "expires_at": "2026-06-15T00:00:00Z",
-        "roles": ["ROLE_USER"]
+        "roles": ["ROLE_USER"],
+        "workspaces": {"active": [{"name": "Test Workspace"}]}
     }))]);
     let storage_key =
         browser_auth_storage_key("default", &format!("{}/api/goose", server.base_url));

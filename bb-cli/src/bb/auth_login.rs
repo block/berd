@@ -25,6 +25,7 @@ pub struct BrowserLoginSummary {
     pub kgoose_service_path: String,
     pub storage: String,
     pub source: BrowserLoginCredentialSource,
+    pub workspace_name: String,
     pub expires_at: Option<String>,
     pub credential_prefix: Option<String>,
     pub credential_sha256_prefix: Option<String>,
@@ -60,11 +61,13 @@ pub fn run_browser_login(
                         storage.kind()
                     ),
                 );
+                let workspace_name = me.active_workspace_name()?.to_string();
                 return Ok(BrowserLoginSummary {
                     kgoose_base_url: config.kgoose_base_url.clone(),
                     kgoose_service_path: config.kgoose_service_path.clone(),
                     storage: storage.kind().to_string(),
                     source: BrowserLoginCredentialSource::Stored,
+                    workspace_name,
                     expires_at: me.expires_at.or(stored.expires_at),
                     credential_prefix: None,
                     credential_sha256_prefix: None,
@@ -120,6 +123,7 @@ pub fn run_browser_login(
         exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
     let stored = verified.credential;
     let me = verified.me;
+    let workspace_name = me.active_workspace_name()?.to_string();
     storage.set(&storage_key, &stored)?;
     auth_info(
         config,
@@ -134,6 +138,7 @@ pub fn run_browser_login(
         kgoose_service_path: config.kgoose_service_path.clone(),
         storage: storage.kind().to_string(),
         source: BrowserLoginCredentialSource::BrowserLogin,
+        workspace_name,
         expires_at: me.expires_at.or_else(|| stored.expires_at.clone()),
         credential_prefix: Some(safe_prefix(&stored.session_credential)),
         credential_sha256_prefix: Some(sha256_prefix(&stored.session_credential)),

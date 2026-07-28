@@ -860,7 +860,7 @@ mod tests {
         clear_auth_env();
         let dir = tempdir().expect("tempdir");
         let server = AuthMeServer::start(
-            r#"{"subject":"auth0|user_123","email":"morgan@example.com","name":"Morgan","expires_at":"2026-06-25T00:00:00Z","roles":["ROLE_USER"]}"#,
+            r#"{"subject":"auth0|user_123","email":"morgan@example.com","name":"Morgan","expires_at":"2026-06-25T00:00:00Z","roles":["ROLE_USER"],"workspaces":{"active":[{"name":"Test Workspace"}]}}"#,
         );
         let storage_path = dir.path().join("sessions.json");
         env::set_var(BB_HOME_ENV_VAR, dir.path());

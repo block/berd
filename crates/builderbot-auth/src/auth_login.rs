@@ -25,6 +25,27 @@ pub struct AuthMeResponse {
     pub email: Option<String>,
     pub name: Option<String>,
     pub expires_at: Option<String>,
+    pub workspaces: AuthMeWorkspaces,
+}
+
+impl AuthMeResponse {
+    pub fn active_workspace_name(&self) -> Result<&str> {
+        self.workspaces
+            .active
+            .first()
+            .map(|workspace| workspace.name.as_str())
+            .ok_or_else(|| anyhow!("/v1/auth/me returned no active workspaces"))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuthMeWorkspaces {
+    pub active: Vec<AuthMeWorkspace>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuthMeWorkspace {
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -273,7 +294,7 @@ mod tests {
     fn verify_session_credential_accepts_successful_me_response() {
         let server = SingleResponseServer::start(
             200,
-            r#"{"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expires_at":"2026-06-15T00:00:00Z","roles":["ROLE_USER"]}"#,
+            r#"{"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expires_at":"2026-06-15T00:00:00Z","roles":["ROLE_USER"],"workspaces":{"active":[{"name":"Test Workspace"},{"name":"Other Workspace"}]}}"#,
         );
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
         let credential = StoredSessionCredential {
@@ -288,6 +309,10 @@ mod tests {
 
         assert_eq!(verified.subject.as_deref(), Some("auth0|user_123"));
         assert_eq!(verified.expires_at.as_deref(), Some("2026-06-15T00:00:00Z"));
+        assert_eq!(
+            verified.active_workspace_name().expect("active workspace"),
+            "Test Workspace"
+        );
         assert_eq!(
             request.bb_session_credential.as_deref(),
             Some("valid-session")
@@ -332,7 +357,7 @@ mod tests {
             ),
             (
                 200,
-                r#"{"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expires_at":"2026-06-16T00:00:00Z","roles":["ROLE_USER"]}"#,
+                r#"{"subject":"auth0|user_123","email":"test@example.com","name":"Test User","expires_at":"2026-06-16T00:00:00Z","roles":["ROLE_USER"],"workspaces":{"active":[{"name":"Test Workspace"},{"name":"Other Workspace"}]}}"#,
             ),
         ]);
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
@@ -348,6 +373,13 @@ mod tests {
             Some("2026-06-15T00:00:00Z")
         );
         assert_eq!(verified.me.subject.as_deref(), Some("auth0|user_123"));
+        assert_eq!(
+            verified
+                .me
+                .active_workspace_name()
+                .expect("active workspace"),
+            "Test Workspace"
+        );
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].path, "/v1/auth/login/exchange");
         assert_eq!(requests[1].path, "/v1/auth/me");
