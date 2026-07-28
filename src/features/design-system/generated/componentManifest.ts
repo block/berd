@@ -2588,6 +2588,21 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Sidebar Row Menu Button",
+    source: "src/shared/ui/sidebar-row-menu-button.tsx",
+    description: "",
+    exports: ["SidebarRowMenuButton"],
+    slots: [],
+    cva: [],
+    tokenClasses: ["focus-visible:bg-sidebar-accent"],
+    stateClasses: [
+      "focus-visible:bg-sidebar-accent",
+      "focus-visible:ring-0",
+      "focus-visible:ring-offset-0",
+    ],
+    sourceTokenClasses: ["focus-visible:bg-sidebar-accent"],
+  },
+  {
     name: "Sidebar",
     source: "src/shared/ui/sidebar.tsx",
     description: "",

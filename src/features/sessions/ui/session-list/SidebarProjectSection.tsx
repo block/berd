@@ -47,7 +47,7 @@ export interface SidebarSessionItem {
   activityAt?: string | null;
   updatedAt: string;
   lastMessageAt?: string | null;
-  projectId?: string;
+  projectId?: string | null;
   projectName?: string;
   projectIcon?: string | null;
   projectColor?: string | null;
@@ -84,8 +84,10 @@ export function SidebarProjectSection({
   showChatIcons,
   showTimestamps,
   onNavigate,
+  onOpenProject,
   hasMoreSessions: _hasMoreSessions = false,
   dropTargetEnabled = true,
+  showExpansionChevron = true,
 }: {
   project: ProjectInfo;
   projectChats: SidebarSessionItem[];
@@ -115,8 +117,10 @@ export function SidebarProjectSection({
   showChatIcons: boolean;
   showTimestamps: boolean;
   onNavigate?: (view: AppView) => void;
+  onOpenProject?: (projectId: string) => void;
   hasMoreSessions?: boolean;
   dropTargetEnabled?: boolean;
+  showExpansionChevron?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
   const { activeSessionDropTargetKey, registerSessionDropTarget } =
@@ -289,7 +293,7 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-sm pr-3 hover:bg-[var(--sidebar-row-hover)] focus-within:bg-[var(--sidebar-row-hover)]",
+          "relative flex items-center group group/chat-row rounded-sm pr-3 hover:bg-[var(--sidebar-row-hover)] focus-within:bg-[var(--sidebar-row-hover)]",
           SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
           menuOpen && "bg-[var(--sidebar-row-active)]",
         )}
@@ -301,6 +305,10 @@ export function SidebarProjectSection({
           onClick={() => {
             if (projectHasChats) {
               toggleProject(project.id);
+            } else if (onOpenProject) {
+              onOpenProject(project.id);
+            } else {
+              onNavigate?.("projects");
             }
           }}
           aria-expanded={projectHasChats ? isExpanded : undefined}
@@ -310,7 +318,6 @@ export function SidebarProjectSection({
             SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
             SIDEBAR_NAV_TEXT_CLASS,
             PROJECT_ROW_TEXT_CLASS,
-            !projectHasChats && "cursor-default",
           )}
         >
           <SidebarLeadingIcon
@@ -319,52 +326,36 @@ export function SidebarProjectSection({
             unreadLabel={t("status.unreadMessages")}
             className="text-sidebar-foreground"
           >
-            <span
-              className={cn(
-                "absolute",
-                projectHasChats && "group-hover:hidden",
-              )}
-            >
+            {showExpansionChevron && projectHasChats ? (
+              <>
+                <span className="group-hover/chat-row:hidden group-focus-within/chat-row:hidden">
+                  <ProjectIcon
+                    icon={project.icon}
+                    color={project.color}
+                    projectId={project.id}
+                    imageClassName="size-[18px] rounded-[4px]"
+                  />
+                </span>
+                {isExpanded ? (
+                  <IconChevronDown className="hidden size-3 text-muted-foreground group-hover/chat-row:block group-focus-within/chat-row:block" />
+                ) : (
+                  <IconChevronRight className="hidden size-3 text-muted-foreground group-hover/chat-row:block group-focus-within/chat-row:block" />
+                )}
+              </>
+            ) : (
               <ProjectIcon
                 icon={project.icon}
                 color={project.color}
                 projectId={project.id}
                 imageClassName="size-[18px] rounded-[4px]"
               />
-            </span>
-            {projectHasChats ? (
-              isExpanded ? (
-                <IconChevronDown className="absolute hidden size-3 text-muted-foreground group-hover:block" />
-              ) : (
-                <IconChevronRight className="absolute hidden size-3 text-muted-foreground group-hover:block" />
-              )
-            ) : null}
+            )}
           </SidebarLeadingIcon>
           <span className="flex-1 min-w-0 truncate text-left">
             {project.name}
           </span>
         </Button>
-        <div className="translate-y-px" data-sidebar-drag-ignore>
-          <SidebarItemMenu
-            label={project.name}
-            onOpenChange={setMenuOpen}
-            onPinToHome={() =>
-              isPinnedToHome ? unpinFromHome() : void pinToHome()
-            }
-            pinToHomeDisabled={isPinningToHome}
-            isPinnedToHome={isPinnedToHome}
-            pinToHomeLabel={
-              isPinnedToHome
-                ? t("common:actions.unpinFromHome")
-                : isPinningToHome
-                  ? t("common:actions.pinningToHome")
-                  : t("common:actions.pinToHome")
-            }
-            onEdit={() => onEditProject?.(project.id)}
-            onArchive={() => onArchiveProject?.(project.id)}
-          />
-        </div>
-        <span data-sidebar-drag-ignore className="ml-1 flex flex-shrink-0">
+        <span data-sidebar-drag-ignore className="flex flex-shrink-0">
           <SidebarSectionHeaderAction
             icon={IconEdit}
             label={t("actions.newChatInProject")}
@@ -379,6 +370,26 @@ export function SidebarProjectSection({
             }
           />
         </span>
+        <div className="ml-1 translate-y-px" data-sidebar-drag-ignore>
+          <SidebarItemMenu
+            label={project.name}
+            onOpenChange={setMenuOpen}
+            onPinToHome={() =>
+              isPinnedToHome ? unpinFromHome() : void pinToHome()
+            }
+            pinToHomeDisabled={isPinningToHome}
+            isPinnedToHome={isPinnedToHome}
+            pinToHomeLabel={
+              isPinnedToHome
+                ? t("sidebar:actions.unpinProject")
+                : isPinningToHome
+                  ? t("common:actions.pinningToHome")
+                  : t("sidebar:actions.pinProject")
+            }
+            onEdit={() => onEditProject?.(project.id)}
+            onArchive={() => onArchiveProject?.(project.id)}
+          />
+        </div>
 
         {dragOver && (
           <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
@@ -405,6 +416,7 @@ export function SidebarProjectSection({
                 selectedSessionIds={selectedSessionIds}
                 showLeadingIcon={showChatIcons}
                 showTimestamp={showTimestamps}
+                showRenameTooltip={false}
                 nested
                 currentProjectId={project.id}
                 onSelect={onSelectSession}
@@ -443,6 +455,7 @@ export function SidebarProjectSection({
                     selectedSessionIds={selectedSessionIds}
                     showLeadingIcon={showChatIcons}
                     showTimestamp={showTimestamps}
+                    showRenameTooltip={false}
                     nested
                     currentProjectId={project.id}
                     onSelect={onSelectSession}

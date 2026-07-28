@@ -2,26 +2,15 @@ import { describe, expect, it } from "vitest";
 import { validateDisplayOptions } from "./SessionListCapability";
 
 const defaults = {
-  showChatIcons: false,
-  showTimestamps: true,
+  pinnedShowTimestamps: true,
+  projectShowChatIcons: false,
+  projectShowTimestamps: true,
+  chatShowChatIcons: false,
+  chatShowTimestamps: true,
 };
 
 describe("validateDisplayOptions", () => {
-  it("migrates former grouped-project display settings to unified settings", () => {
-    expect(
-      validateDisplayOptions(
-        {
-          showChatIcons: true,
-          showProjectChatIcons: false,
-          showTimestamps: false,
-          showProjectTimestamps: true,
-        },
-        defaults,
-      ),
-    ).toEqual(defaults);
-  });
-
-  it("uses unified settings after legacy fields have been removed", () => {
+  it("migrates unified legacy settings into each section", () => {
     expect(
       validateDisplayOptions(
         {
@@ -31,8 +20,41 @@ describe("validateDisplayOptions", () => {
         defaults,
       ),
     ).toEqual({
-      showChatIcons: true,
-      showTimestamps: false,
+      pinnedShowTimestamps: false,
+      projectShowChatIcons: true,
+      projectShowTimestamps: false,
+      chatShowChatIcons: true,
+      chatShowTimestamps: false,
     });
+  });
+
+  it("migrates legacy project-specific settings", () => {
+    expect(
+      validateDisplayOptions(
+        {
+          showChatIcons: false,
+          showTimestamps: true,
+          showProjectChatIcons: true,
+          showProjectTimestamps: false,
+        },
+        defaults,
+      ),
+    ).toMatchObject({
+      projectShowChatIcons: true,
+      projectShowTimestamps: false,
+      chatShowChatIcons: false,
+      chatShowTimestamps: true,
+    });
+  });
+
+  it("preserves independent section settings", () => {
+    const settings = {
+      pinnedShowTimestamps: false,
+      projectShowChatIcons: true,
+      projectShowTimestamps: true,
+      chatShowChatIcons: false,
+      chatShowTimestamps: true,
+    };
+    expect(validateDisplayOptions(settings, defaults)).toEqual(settings);
   });
 });

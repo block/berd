@@ -76,10 +76,20 @@ describe("SidebarChatRow", () => {
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
+  it("does not show the rename tooltip while a quick pin is available", async () => {
+    const user = userEvent.setup();
+    render(<SidebarChatRow id="session-1" title="Pin Chat" isActive={false} />);
+
+    await user.hover(screen.getByRole("button", { name: "Pin Chat" }));
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it.each([
     undefined,
     "Project One",
-  ])("uses a dismissible tooltip instead of a native title (project: %s)", async (flatProjectName) => {
+  ])("uses a delayed dismissible tooltip instead of a native title (project: %s)", async (flatProjectName) => {
     const user = userEvent.setup();
 
     render(
@@ -88,6 +98,7 @@ describe("SidebarChatRow", () => {
         title="Hover Chat"
         isActive={false}
         flatProjectName={flatProjectName}
+        quickPinMode="never"
       />,
     );
 
@@ -95,9 +106,11 @@ describe("SidebarChatRow", () => {
     expect(titleButton).not.toHaveAttribute("title");
 
     await user.hover(titleButton);
-    const tooltip = await screen.findByRole("tooltip", {
-      name: "Double-click to rename",
-    });
+    const tooltip = await screen.findByRole(
+      "tooltip",
+      { name: "Double-click to rename" },
+      { timeout: 2_500 },
+    );
     expect(tooltip).toBeInTheDocument();
     expect(
       tooltip.closest('[data-slot="tooltip-pointer-pass-through"]'),
@@ -945,6 +958,9 @@ describe("SidebarChatRow", () => {
     expect(
       document.querySelector('[data-slot="context-menu-content"]'),
     ).toHaveAttribute("data-variant", "inverse");
+    expect(
+      document.querySelector('[data-slot="context-menu-content"]'),
+    ).toHaveClass("w-52", "px-1", "py-1", "text-sm");
     expect(
       document.querySelector('[data-slot="dropdown-menu-content"]'),
     ).not.toBeInTheDocument();

@@ -75,27 +75,13 @@ describe("SidebarFlatChatsSection", () => {
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
-  it("does not offer chat icon visibility in the flat chats menu", async () => {
-    const user = userEvent.setup();
-
-    renderFlatChatsSection({ onNewChat: vi.fn() });
-
-    await user.click(
-      screen.getByRole("button", { name: "Chat display options" }),
-    );
-
-    expect(
-      screen.queryByRole("menuitemcheckbox", { name: "Show chat icons" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("switches to grouped chats from the display options menu", async () => {
+  it("offers grouping in the flat chats menu", async () => {
     const user = userEvent.setup();
     const onGroupChatsByProjectChange = vi.fn();
 
     renderFlatChatsSection({
-      onGroupChatsByProjectChange,
       onNewChat: vi.fn(),
+      onGroupChatsByProjectChange,
     });
 
     await user.click(
@@ -110,9 +96,22 @@ describe("SidebarFlatChatsSection", () => {
     expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(true);
   });
 
+  it("does not offer chat icon visibility in the flat chats menu", async () => {
+    const user = userEvent.setup();
+
+    renderFlatChatsSection({ onNewChat: vi.fn() });
+
+    await user.click(
+      screen.getByRole("button", { name: "Chat display options" }),
+    );
+
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Show chat icons" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("uses shared display settings across grouped project and general chats", async () => {
     const user = userEvent.setup();
-    const onGroupChatsByProjectChange = vi.fn();
     const onShowChatIconsChange = vi.fn();
     const onShowTimestampsChange = vi.fn();
 
@@ -141,11 +140,16 @@ describe("SidebarFlatChatsSection", () => {
         flatChatGroups={flatChatGroups}
         hasFlatChatOverflow={false}
         groupChatsByProject
-        onGroupChatsByProjectChange={onGroupChatsByProjectChange}
-        showChatIcons={false}
-        onShowChatIconsChange={onShowChatIconsChange}
-        showTimestamps={false}
-        onShowTimestampsChange={onShowTimestampsChange}
+        pinnedShowTimestamps={false}
+        onPinnedShowTimestampsChange={vi.fn()}
+        projectShowChatIcons={false}
+        onProjectShowChatIconsChange={onShowChatIconsChange}
+        projectShowTimestamps={false}
+        onProjectShowTimestampsChange={onShowTimestampsChange}
+        chatShowChatIcons={false}
+        onChatShowChatIconsChange={vi.fn()}
+        chatShowTimestamps={false}
+        onChatShowTimestampsChange={vi.fn()}
         showGitBranches={false}
         onShowGitBranchesChange={vi.fn()}
         expandedProjects={{ "project-1": true }}
@@ -181,17 +185,6 @@ describe("SidebarFlatChatsSection", () => {
     expect(showTimestamps).not.toBeChecked();
     await user.click(showTimestamps);
     expect(onShowTimestampsChange).toHaveBeenCalledWith(true);
-
-    await user.click(
-      screen.getByRole("button", { name: "Project display options" }),
-    );
-    await user.click(
-      screen.getByRole("menuitemcheckbox", {
-        name: "Group chats by project",
-      }),
-    );
-
-    expect(onGroupChatsByProjectChange).toHaveBeenCalledWith(false);
   });
 
   it("uses icon-only flat chat rows when collapsed", async () => {

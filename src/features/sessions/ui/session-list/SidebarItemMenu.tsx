@@ -3,7 +3,7 @@ import { IconDots } from "@tabler/icons-react";
 import { Pencil, PinIcon, Trash2 } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
-import { Button } from "@/shared/ui/button";
+import { SidebarRowMenuButton } from "@/shared/ui/sidebar-row-menu-button";
 import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 import {
   DropdownMenu,
@@ -44,11 +44,7 @@ export function SidebarItemMenu({
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          flush
-          size="icon-xs"
+        <SidebarRowMenuButton
           aria-label={t("menu.optionsFor", { label })}
           onClick={(e) => e.stopPropagation()}
           className={cn(
@@ -59,7 +55,7 @@ export function SidebarItemMenu({
           )}
         >
           <IconDots className="size-4" />
-        </Button>
+        </SidebarRowMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         variant="inverse"

@@ -47,6 +47,7 @@ import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
   SIDEBAR_CHAT_ROW_DENSITY_CLASSES,
+  SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
@@ -94,7 +95,7 @@ const SELECTED_CHAT_ROW_CLASS = cn(
   "bg-sidebar-accent text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/80 hover:bg-sidebar-accent hover:text-sidebar-foreground",
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
 );
-const SESSION_TOOLTIP_DELAY_MS = 500;
+const SESSION_TOOLTIP_DELAY_MS = 1_500;
 
 /**
  * Compact single-unit relative time for sidebar chat rows: `5m`, `3h`, `2d`,
@@ -199,6 +200,9 @@ interface SidebarChatRowProps {
   nested?: boolean;
   /** Leading pin-control policy for this list surface. */
   quickPinMode?: "always" | "pinned-only" | "never";
+  /** Rename guidance is omitted on surfaces where rows move under the pointer. */
+  showRenameTooltip?: boolean;
+  pointerDragEnabled?: boolean;
   density?: SidebarChatRowDensity;
   showLeadingIcon?: boolean;
   leadingIconTestId?: string;
@@ -253,6 +257,8 @@ export function SidebarChatRow({
   contentPaddingClassName,
   nested = false,
   quickPinMode = "always",
+  showRenameTooltip = true,
+  pointerDragEnabled = true,
   density = "default",
   showLeadingIcon = true,
   leadingIconTestId,
@@ -380,6 +386,7 @@ export function SidebarChatRow({
   const rowTooltipLabel = isOpenInWindow
     ? openWindowLabel
     : t("actions.renameHint");
+  const showRowTooltip = isOpenInWindow || (showRenameTooltip && !showQuickPin);
   const projectEditLabel = flatProjectName?.trim()
     ? t("actions.editProject", { name: flatProjectName })
     : t("actions.editProjectFallback");
@@ -476,47 +483,47 @@ export function SidebarChatRow({
     startRename();
   };
 
-  const rowButton = (
-    <Tooltip delayDuration={SESSION_TOOLTIP_DELAY_MS} disableHoverableContent>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleRowClick}
-          onDoubleClick={handleRowDoubleClick}
-          aria-label={displayTitle}
-          className={cn(
-            "min-w-0 flex-1 justify-start rounded-sm",
-            hasFlatProjectColumn ? "pl-0 gap-0" : rowPaddingClass,
-            activityTimestamp
-              ? densityClasses.timestampReserve
-              : densityClasses.menuReserve,
-            hasBranchName
-              ? "h-auto py-1.5"
-              : cn(
-                  SIDEBAR_ROW_HEIGHT_CLASS,
-                  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
-                ),
-            SIDEBAR_NAV_TEXT_CLASS,
-            rowButtonStateClass,
-          )}
-          aria-pressed={selectionEnabled ? selected : undefined}
+  const titleButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={handleRowClick}
+      onDoubleClick={handleRowDoubleClick}
+      aria-label={displayTitle}
+      className={cn(
+        "min-w-0 flex-1 justify-start rounded-sm",
+        hasFlatProjectColumn ? "pl-0 gap-0" : rowPaddingClass,
+        activityTimestamp
+          ? densityClasses.timestampReserve
+          : densityClasses.menuReserve,
+        hasBranchName
+          ? "h-auto py-1.5"
+          : cn(SIDEBAR_ROW_HEIGHT_CLASS, SIDEBAR_ROW_VERTICAL_PADDING_CLASS),
+        SIDEBAR_NAV_TEXT_CLASS,
+        rowButtonStateClass,
+      )}
+      aria-pressed={selectionEnabled ? selected : undefined}
+    >
+      {rowTitleContent}
+      {isMultiWindowEnabled && isOpenInWindow ? (
+        <span
+          className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+          role="img"
+          aria-label={openWindowLabel}
         >
-          {rowTitleContent}
-          {isMultiWindowEnabled && isOpenInWindow ? (
-            <span
-              className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
-              role="img"
-              aria-label={openWindowLabel}
-            >
-              <ExternalLink className="size-3" aria-hidden="true" />
-            </span>
-          ) : null}
-        </Button>
-      </TooltipTrigger>
+          <ExternalLink className="size-3" aria-hidden="true" />
+        </span>
+      ) : null}
+    </Button>
+  );
+  const rowButton = showRowTooltip ? (
+    <Tooltip delayDuration={SESSION_TOOLTIP_DELAY_MS} disableHoverableContent>
+      <TooltipTrigger asChild>{titleButton}</TooltipTrigger>
       <TooltipContent pointerEvents="none">{rowTooltipLabel}</TooltipContent>
     </Tooltip>
+  ) : (
+    titleButton
   );
 
   useEffect(() => {
@@ -932,7 +939,7 @@ export function SidebarChatRow({
           data-session-id={id}
           data-sidebar-chat-row
           data-sidebar-chat-draggable
-          onPointerDown={handlePointerDown}
+          onPointerDown={pointerDragEnabled ? handlePointerDown : undefined}
           onClickCapture={(event) => {
             if (!suppressNextClickRef.current) return;
             clearPointerDragClickSuppression(
@@ -1099,7 +1106,11 @@ export function SidebarChatRow({
               align="start"
               alignOffset={-4}
               sideOffset={4}
-              className={menuContentClassName}
+              className={cn(
+                SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
+                "w-52",
+                menuContentClassName,
+              )}
             >
               {renderMenuItems({
                 Item: DropdownMenuItem as MenuItemComponent,
@@ -1113,7 +1124,14 @@ export function SidebarChatRow({
           </DropdownMenu>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent variant="inverse" className={menuContentClassName}>
+      <ContextMenuContent
+        variant="inverse"
+        className={cn(
+          SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
+          "w-52",
+          menuContentClassName,
+        )}
+      >
         {renderMenuItems({
           Item: ContextMenuItem as MenuItemComponent,
           Label: ContextMenuLabel as MenuLabelComponent,

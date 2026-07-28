@@ -13,9 +13,12 @@
     "search": "Search",
     "newChat": "New chat",
     "newChatInProject": "New chat in project",
+    "pinProject": "Pin project",
+    "unpinProject": "Unpin project",
     "newProject": "New project",
     "projectDisplayOptions": "Project display options",
     "chatDisplayOptions": "Chat display options",
+    "pinnedDisplayOptions": "Pinned display options",
     "viewSessionHistory": "View session history",
     "showChatIcons": "Show chat icons",
     "hideChatIcons": "Hide chat icons",
@@ -76,6 +79,7 @@
     "searching": "Searching chats..."
   },
   "sections": {
+    "pinned": "Pinned",
     "projects": "Projects",
     "recents": "Chats"
   },

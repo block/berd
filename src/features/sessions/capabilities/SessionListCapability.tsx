@@ -32,10 +32,14 @@ import {
   isSessionRunning,
   sessionActivityAt,
 } from "@/features/chat/lib/sessionActivity";
-import { getPinnedHomeChatSessionIds } from "@/features/home/lib/pinnedHomeChats";
+import {
+  getPinnedHomeChatSessionIds,
+  getPinnedHomeNavigationTargets,
+} from "@/features/home/lib/pinnedHomeChats";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
 import {
   areSetsEqual,
@@ -59,33 +63,45 @@ import {
 } from "@/features/terminal/lib/terminalSessionManager";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import type { SidebarSessionItem } from "@/features/sessions/ui/session-list/SidebarProjectSection";
-import type { SidebarProjectsSectionProps } from "@/features/sessions/ui/session-list/SidebarProjectsSection";
+import type {
+  SidebarPinnedNavigationItem,
+  SidebarProjectsSectionProps,
+} from "@/features/sessions/ui/session-list/SidebarProjectsSection";
 import { SessionListSurface } from "./SessionListSurface";
 
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
 const DISPLAY_OPTIONS_STORAGE_KEY = "goose:sidebar:display-options";
+const PINNED_NAV_ORDER_STORAGE_KEY = "goose:sidebar:pinned-nav-order";
 const MAX_RECENTS = 20;
 const FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS = 60 * 1000;
 
 type SessionListSectionVisibility = {
+  pinned: boolean;
   projects: boolean;
   recents: boolean;
 };
 
 type SessionListDisplayOptions = {
-  showChatIcons: boolean;
-  showTimestamps: boolean;
+  pinnedShowTimestamps: boolean;
+  projectShowChatIcons: boolean;
+  projectShowTimestamps: boolean;
+  chatShowChatIcons: boolean;
+  chatShowTimestamps: boolean;
 };
 
 const DEFAULT_SECTION_VISIBILITY: SessionListSectionVisibility = {
+  pinned: true,
   projects: true,
   recents: true,
 };
 
 const DEFAULT_DISPLAY_OPTIONS: SessionListDisplayOptions = {
-  showChatIcons: false,
-  showTimestamps: true,
+  pinnedShowTimestamps: true,
+  projectShowChatIcons: false,
+  projectShowTimestamps: true,
+  chatShowChatIcons: false,
+  chatShowTimestamps: true,
 };
 
 type SessionListGroups = {
@@ -128,6 +144,7 @@ export interface SessionListCapabilityProps {
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   onNavigate?: (view: AppView) => void;
+  onOpenProject?: (projectId: string) => void;
   onNewChat?: () => void;
   onNewChatInProject?: (projectId: string) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
@@ -358,6 +375,8 @@ function validateSectionVisibility(
     Record<keyof SessionListSectionVisibility, unknown>
   >;
   return {
+    pinned:
+      typeof parsed.pinned === "boolean" ? parsed.pinned : defaults.pinned,
     projects:
       typeof parsed.projects === "boolean"
         ? parsed.projects
@@ -375,22 +394,50 @@ export function validateDisplayOptions(
   const parsed = value as Partial<
     Record<keyof SessionListDisplayOptions, unknown>
   > & {
+    showChatIcons?: unknown;
+    showTimestamps?: unknown;
     showProjectChatIcons?: unknown;
     showProjectTimestamps?: unknown;
   };
+  const legacyShowChatIcons =
+    typeof parsed.showChatIcons === "boolean" ? parsed.showChatIcons : null;
+  const legacyShowTimestamps =
+    typeof parsed.showTimestamps === "boolean" ? parsed.showTimestamps : null;
+  const booleanOption = (
+    value: unknown,
+    legacy: boolean | null,
+    fallback: boolean,
+  ) => (typeof value === "boolean" ? value : (legacy ?? fallback));
   return {
-    showChatIcons:
+    pinnedShowTimestamps: booleanOption(
+      parsed.pinnedShowTimestamps,
+      legacyShowTimestamps,
+      defaults.pinnedShowTimestamps,
+    ),
+    projectShowChatIcons: booleanOption(
+      parsed.projectShowChatIcons,
       typeof parsed.showProjectChatIcons === "boolean"
         ? parsed.showProjectChatIcons
-        : typeof parsed.showChatIcons === "boolean"
-          ? parsed.showChatIcons
-          : defaults.showChatIcons,
-    showTimestamps:
+        : legacyShowChatIcons,
+      defaults.projectShowChatIcons,
+    ),
+    projectShowTimestamps: booleanOption(
+      parsed.projectShowTimestamps,
       typeof parsed.showProjectTimestamps === "boolean"
         ? parsed.showProjectTimestamps
-        : typeof parsed.showTimestamps === "boolean"
-          ? parsed.showTimestamps
-          : defaults.showTimestamps,
+        : legacyShowTimestamps,
+      defaults.projectShowTimestamps,
+    ),
+    chatShowChatIcons: booleanOption(
+      parsed.chatShowChatIcons,
+      legacyShowChatIcons,
+      defaults.chatShowChatIcons,
+    ),
+    chatShowTimestamps: booleanOption(
+      parsed.chatShowTimestamps,
+      legacyShowTimestamps,
+      defaults.chatShowTimestamps,
+    ),
   };
 }
 
@@ -408,6 +455,7 @@ export function SessionListCapability({
   onMarkChatUnread,
   onMoveToProject,
   onNavigate,
+  onOpenProject,
   onNewChat,
   onNewChatInProject,
   onRenameChat,
@@ -441,6 +489,14 @@ export function SessionListCapability({
     DEFAULT_DISPLAY_OPTIONS,
     validateDisplayOptions,
   );
+  const [pinnedNavOrder, setPinnedNavOrder] = usePersistedState<string[]>(
+    PINNED_NAV_ORDER_STORAGE_KEY,
+    [],
+    (value) =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : [],
+  );
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -471,6 +527,9 @@ export function SessionListCapability({
     Date.now(),
   );
   const attemptedFlatChatLoadMoreCursorRef = useRef<string | null>(null);
+  const hasFetchedProjects = useProjectStore(
+    (state) => state.hasFetchedProjects,
+  );
   const projectIds = useMemo(
     () => new Set(projects.map((project) => project.id)),
     [projects],
@@ -510,10 +569,112 @@ export function SessionListCapability({
     enabled: gitBranchSubtitlePreference.enabled,
   });
   const homeWidgetInstances = useHomeWidgetStore((state) => state.instances);
+  const homeWidgetLoadStatus = useHomeWidgetStore((state) => state.loadStatus);
+  const pinnedHomeNavigationTargets = useMemo(
+    () => getPinnedHomeNavigationTargets(homeWidgetInstances),
+    [homeWidgetInstances],
+  );
   const pinnedHomeChatSessionIds = useMemo(
     () => getPinnedHomeChatSessionIds(homeWidgetInstances),
     [homeWidgetInstances],
   );
+  const pinnedProjectIds = useMemo(
+    () =>
+      new Set(
+        pinnedHomeNavigationTargets
+          .filter((target) => target.kind === "project")
+          .map((target) => target.id),
+      ),
+    [pinnedHomeNavigationTargets],
+  );
+  const pinnedNavigationItems = useMemo(() => {
+    const sessionsById = new Map(
+      activeSessions.map((session) => [session.id, session]),
+    );
+    const itemByKey = new Map<string, SidebarPinnedNavigationItem>();
+    for (const target of pinnedHomeNavigationTargets) {
+      if (target.kind === "project") {
+        const project = projectsById.get(target.id);
+        if (project)
+          itemByKey.set(`project:${target.id}`, { kind: "project", project });
+      } else {
+        const session = sessionsById.get(target.id);
+        if (session)
+          itemByKey.set(`chat:${target.id}`, { kind: "chat", session });
+      }
+    }
+
+    const orderedKeys = [
+      ...pinnedNavOrder.filter((key) => itemByKey.has(key)),
+      ...Array.from(itemByKey.keys()).filter(
+        (key) => !pinnedNavOrder.includes(key),
+      ),
+    ];
+    return orderedKeys.flatMap((key) => {
+      const item = itemByKey.get(key);
+      return item ? [item] : [];
+    });
+  }, [
+    activeSessions,
+    pinnedHomeNavigationTargets,
+    pinnedNavOrder,
+    projectsById,
+  ]);
+  useEffect(() => {
+    const validKeys = new Set(
+      pinnedHomeNavigationTargets.map(
+        (target) => `${target.kind}:${target.id}`,
+      ),
+    );
+    setPinnedNavOrder((current) => {
+      const next = current.filter((key) => validKeys.has(key));
+      return next.length === current.length ? current : next;
+    });
+  }, [pinnedHomeNavigationTargets, setPinnedNavOrder]);
+
+  useEffect(() => {
+    if (homeWidgetLoadStatus !== "ready" || !hasFetchedProjects) return;
+    for (const instance of homeWidgetInstances) {
+      const isStaleProject =
+        instance.type === "projectArtifactPin" &&
+        typeof instance.state?.projectId === "string" &&
+        !projectIds.has(instance.state.projectId.trim());
+      if (isStaleProject) {
+        useHomeWidgetStore.getState().removeWidget(instance.id);
+      }
+    }
+  }, [
+    hasFetchedProjects,
+    homeWidgetInstances,
+    homeWidgetLoadStatus,
+    projectIds,
+  ]);
+
+  const reorderPinnedNavigationItem = useCallback(
+    (fromKey: string, toKey: string, placement: "before" | "after") => {
+      setPinnedNavOrder(() => {
+        const current = pinnedNavigationItems.map((item) =>
+          item.kind === "project"
+            ? `project:${item.project.id}`
+            : `chat:${item.session.id}`,
+        );
+        const fromIndex = current.indexOf(fromKey);
+        const toIndex = current.indexOf(toKey);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex)
+          return current;
+        const [moved] = current.splice(fromIndex, 1);
+        const adjustedTarget = fromIndex < toIndex ? toIndex - 1 : toIndex;
+        current.splice(
+          placement === "after" ? adjustedTarget + 1 : adjustedTarget,
+          0,
+          moved,
+        );
+        return current;
+      });
+    },
+    [pinnedNavigationItems, setPinnedNavOrder],
+  );
+
   const selectedCount = selectedSessionIds.size;
   const clearSelection = () => setSelectedSessionIds(new Set());
 
@@ -600,11 +761,33 @@ export function SessionListCapability({
     }
   }, [groupChatsByProject]);
 
+  const pinnedProjectSessions = useMemo(
+    () =>
+      getSessionListGroups(
+        visibleSessions.sessions.filter(
+          (session) => !pinnedHomeChatSessionIds.has(session.id),
+        ),
+        projectIds,
+        sessionStateById,
+        visibleSessions.placeholderSessionIds,
+        branchNameBySessionId,
+        pinnedHomeChatSessionIds,
+      ),
+    [
+      branchNameBySessionId,
+      pinnedHomeChatSessionIds,
+      projectIds,
+      sessionStateById,
+      visibleSessions,
+    ],
+  );
   const projectSessions = useMemo(
     () =>
       groupChatsByProject
         ? getSessionListGroups(
-            visibleSessions.sessions,
+            visibleSessions.sessions.filter(
+              (session) => !pinnedHomeChatSessionIds.has(session.id),
+            ),
             projectIds,
             sessionStateById,
             visibleSessions.placeholderSessionIds,
@@ -624,7 +807,11 @@ export function SessionListCapability({
   const flatSessionCandidates = useMemo(() => {
     if (groupChatsByProject) return [];
     return getFlatSessionListItems(
-      visibleSessions.sessions,
+      visibleSessions.sessions.filter(
+        (session) =>
+          !pinnedHomeChatSessionIds.has(session.id) &&
+          (!session.projectId || !pinnedProjectIds.has(session.projectId)),
+      ),
       projectsById,
       sessionStateById,
       visibleSessions.placeholderSessionIds,
@@ -633,6 +820,8 @@ export function SessionListCapability({
   }, [
     branchNameBySessionId,
     groupChatsByProject,
+    pinnedHomeChatSessionIds,
+    pinnedProjectIds,
     projectsById,
     sessionStateById,
     visibleSessions,
@@ -666,6 +855,7 @@ export function SessionListCapability({
       pinnedHomeChatSessionIds,
     ],
   );
+
   const hasFlatChatOverflow =
     flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS ||
     (flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS && hasMoreSessions);
@@ -744,12 +934,10 @@ export function SessionListCapability({
   const toggleSection = (section: keyof SessionListSectionVisibility) => {
     setSectionVisibility((prev) => ({ ...prev, [section]: !prev[section] }));
   };
-  const setShowChatIcons = (showChatIcons: boolean) => {
-    setDisplayOptions((prev) => ({ ...prev, showChatIcons }));
-  };
-  const setShowTimestamps = (showTimestamps: boolean) => {
-    setDisplayOptions((prev) => ({ ...prev, showTimestamps }));
-  };
+  const setDisplayOption =
+    (key: keyof SessionListDisplayOptions) => (value: boolean) => {
+      setDisplayOptions((prev) => ({ ...prev, [key]: value }));
+    };
   const toggleSessionSelection = (sessionId: string, selected: boolean) => {
     setSelectedSessionIds((current) =>
       getToggledSessionSelection({
@@ -765,19 +953,28 @@ export function SessionListCapability({
   };
 
   const sectionProps: SidebarProjectsSectionProps = {
-    projects,
+    projects: projects.filter((project) => !pinnedProjectIds.has(project.id)),
+    pinnedNavigationItems,
+    onReorderPinnedNavigationItem: reorderPinnedNavigationItem,
+    pinnedProjectSessionsByProject: pinnedProjectSessions.byProject,
     projectSessions,
     hasVisibleChats: activeSessions.length > 0,
     flatChatGroups,
     hasFlatChatOverflow,
     groupChatsByProject,
-    showChatIcons: displayOptions.showChatIcons,
-    onShowChatIconsChange: setShowChatIcons,
-    showTimestamps: displayOptions.showTimestamps,
-    onShowTimestampsChange: setShowTimestamps,
+    onGroupChatsByProjectChange: setGroupChatsByProject,
+    pinnedShowTimestamps: displayOptions.pinnedShowTimestamps,
+    onPinnedShowTimestampsChange: setDisplayOption("pinnedShowTimestamps"),
+    projectShowChatIcons: displayOptions.projectShowChatIcons,
+    onProjectShowChatIconsChange: setDisplayOption("projectShowChatIcons"),
+    projectShowTimestamps: displayOptions.projectShowTimestamps,
+    onProjectShowTimestampsChange: setDisplayOption("projectShowTimestamps"),
+    chatShowChatIcons: displayOptions.chatShowChatIcons,
+    onChatShowChatIconsChange: setDisplayOption("chatShowChatIcons"),
+    chatShowTimestamps: displayOptions.chatShowTimestamps,
+    onChatShowTimestampsChange: setDisplayOption("chatShowTimestamps"),
     showGitBranches: gitBranchSubtitlePreference.enabled,
     onShowGitBranchesChange: gitBranchSubtitlePreference.setEnabled,
-    onGroupChatsByProjectChange: setGroupChatsByProject,
     expandedProjects,
     toggleProject,
     collapsed,
@@ -785,6 +982,7 @@ export function SessionListCapability({
     labelVisible,
     activeSessionId,
     onNavigate,
+    onOpenProject,
     onSelectSession: selectSession,
     onNewChatInProject,
     onNewChat,
@@ -812,8 +1010,10 @@ export function SessionListCapability({
     onMarkSelectedUnread: () => void applySelectionAction(onMarkChatUnread),
     onReorderProject,
     hasMoreSessions,
+    pinnedSectionOpen: sectionVisibility.pinned,
     projectsSectionOpen: sectionVisibility.projects,
     recentsSectionOpen: sectionVisibility.recents,
+    onTogglePinnedSection: () => toggleSection("pinned"),
     onToggleProjectsSection: () => toggleSection("projects"),
     onToggleRecentsSection: () => toggleSection("recents"),
     showTopDivider: surface.showTopDivider,

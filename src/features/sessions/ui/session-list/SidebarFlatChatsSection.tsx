@@ -25,6 +25,7 @@ import { SidebarChatRow } from "./SidebarChatRow";
 
 export function SidebarFlatChatsSection({
   groups,
+  onGroupChatsByProjectChange,
   collapsed,
   labelTransition,
   labelVisible,
@@ -53,11 +54,11 @@ export function SidebarFlatChatsSection({
   onShowTimestampsChange,
   showGitBranches = false,
   onShowGitBranchesChange,
-  onGroupChatsByProjectChange,
   showViewAllInHistory = false,
   showTopDivider: _showTopDivider = true,
 }: {
   groups: FlatChatGroup[];
+  onGroupChatsByProjectChange?: (grouped: boolean) => void;
   collapsed: boolean;
   labelTransition: string;
   labelVisible: boolean;
@@ -86,7 +87,6 @@ export function SidebarFlatChatsSection({
   onShowTimestampsChange: (show: boolean) => void;
   showGitBranches?: boolean;
   onShowGitBranchesChange?: (show: boolean) => void;
-  onGroupChatsByProjectChange?: (grouped: boolean) => void;
   showViewAllInHistory?: boolean;
   showTopDivider?: boolean;
 }) {
@@ -257,7 +257,7 @@ export function SidebarFlatChatsSection({
                     <ProjectIcon
                       icon={session.projectIcon}
                       color={session.projectColor}
-                      projectId={session.projectId}
+                      projectId={session.projectId ?? undefined}
                       className="size-[18px]"
                       imageClassName="size-4 rounded-[4px]"
                     />
@@ -298,6 +298,7 @@ export function SidebarFlatChatsSection({
                       activityAt={session.activityAt}
                       showLeadingIcon={false}
                       showTimestamp={showTimestamps}
+                      showRenameTooltip={false}
                       isActive={isActive}
                       isRunning={session.isRunning ?? false}
                       hasUnread={session.hasUnread ?? false}

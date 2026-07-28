@@ -297,10 +297,6 @@
       "queue": "Queue",
       "steer": "Steer (Goose harness only)"
     },
-    "groupChatsByProject": {
-      "description": "Show project groups in the sidebar. Turn this off for one recency-sorted chat list.",
-      "label": "Group Chats by Project"
-    },
     "terminalFallback": {
       "change": "Change",
       "chooseDialogTitle": "Choose terminal fallback folder",
@@ -400,9 +396,6 @@
       "expired": "Expired",
       "disconnected": "Disconnected"
     }
-  },
-  "navigation": {
-    "title": "Navigation"
   },
   "nav": {
     "about": "About",

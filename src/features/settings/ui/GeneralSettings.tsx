@@ -62,7 +62,6 @@ import {
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { RuntimeConfigSettings } from "./RuntimeConfigSettings";
-import { useSidebarChatGroupingPreference } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import { useStyleGuidelinesPreference } from "@/shared/preferences/styleGuidelinesPreference";
 import {
   getBbCliStatus,
@@ -158,7 +157,6 @@ export function GeneralSettings({
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
   const responseStartGutterPreference = useResponseStartGutterPreference();
-  const sidebarChatGroupingPreference = useSidebarChatGroupingPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -901,23 +899,6 @@ export function GeneralSettings({
             customColorLabel={t("appearance.primary.custom")}
             swatchSize="sm"
             variant="swatches"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection title={t("navigation.title")}>
-        <SettingRow
-          label={t("general.groupChatsByProject.label")}
-          description={t("general.groupChatsByProject.description")}
-        >
-          {/* Known gap: like the other boolean preference toggles here, a
-              failed localStorage write is silent and the toggle reverts on
-              restart. If we add save feedback, do it for all of them via
-              createBooleanLocalStoragePreference rather than one-off. */}
-          <Switch
-            checked={sidebarChatGroupingPreference.enabled}
-            onCheckedChange={sidebarChatGroupingPreference.setEnabled}
-            aria-label={t("general.groupChatsByProject.label")}
           />
         </SettingRow>
       </SettingsSection>

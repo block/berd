@@ -13,6 +13,8 @@
     "search": "Buscar",
     "newChat": "Nuevo chat",
     "newChatInProject": "Nuevo chat en el proyecto",
+    "pinProject": "Fijar proyecto",
+    "unpinProject": "Desfijar proyecto",
     "newProject": "Nuevo proyecto",
     "projectDisplayOptions": "Opciones de visualización de proyectos",
     "chatDisplayOptions": "Opciones de visualización de chats",

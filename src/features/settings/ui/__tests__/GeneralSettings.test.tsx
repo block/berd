@@ -25,7 +25,6 @@ import type {
   RuntimeConfig,
   RuntimeConfigLoadResult,
 } from "@/shared/runtime-config/schema";
-import { SIDEBAR_GROUP_CHATS_BY_PROJECT_STORAGE_KEY } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import { STYLE_GUIDELINES_STORAGE_KEY } from "@/shared/preferences/styleGuidelinesPreference";
 import { trustDomain } from "@/shared/lib/trustedDomains";
 import { GeneralSettings } from "../GeneralSettings";
@@ -326,27 +325,6 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
-  });
-
-  it("updates sidebar chat grouping", async () => {
-    const user = userEvent.setup();
-
-    renderGeneralSettings();
-
-    const switchControl = screen.getByRole("switch", {
-      name: "Group Chats by Project",
-    });
-
-    expect(switchControl).toBeChecked();
-
-    await user.click(switchControl);
-
-    await waitFor(() => {
-      expect(
-        localStorage.getItem(SIDEBAR_GROUP_CHATS_BY_PROJECT_STORAGE_KEY),
-      ).toBe("false");
-    });
-    expect(switchControl).not.toBeChecked();
   });
 
   it("updates style guidelines", async () => {

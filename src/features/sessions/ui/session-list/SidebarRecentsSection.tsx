@@ -248,6 +248,7 @@ export function SidebarRecentsSection({
                 showLeadingIcon={showChatIcons}
                 quickPinMode={showChatIcons ? "always" : "pinned-only"}
                 showTimestamp={showTimestamps}
+                showRenameTooltip={false}
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}

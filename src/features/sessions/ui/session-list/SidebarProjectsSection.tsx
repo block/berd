@@ -24,9 +24,21 @@ import { SidebarDisplayOptionsMenu } from "./SidebarDisplayOptionsMenu";
 import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
+import { SidebarPinnedItemsSection } from "./SidebarPinnedItemsSection";
+
+export type SidebarPinnedNavigationItem =
+  | { kind: "project"; project: ProjectInfo }
+  | { kind: "chat"; session: SidebarSessionItem };
 
 export interface SidebarProjectsSectionProps {
   projects: ProjectInfo[];
+  pinnedNavigationItems?: SidebarPinnedNavigationItem[];
+  onReorderPinnedNavigationItem?: (
+    fromKey: string,
+    toKey: string,
+    placement: "before" | "after",
+  ) => void;
+  pinnedProjectSessionsByProject?: Record<string, SidebarSessionItem[]>;
   projectSessions: {
     byProject: Record<string, SidebarSessionItem[]>;
     standalone: SidebarSessionItem[];
@@ -36,10 +48,16 @@ export interface SidebarProjectsSectionProps {
   hasFlatChatOverflow: boolean;
   groupChatsByProject: boolean;
   onGroupChatsByProjectChange?: (grouped: boolean) => void;
-  showChatIcons: boolean;
-  onShowChatIconsChange: (show: boolean) => void;
-  showTimestamps: boolean;
-  onShowTimestampsChange: (show: boolean) => void;
+  pinnedShowTimestamps: boolean;
+  onPinnedShowTimestampsChange: (show: boolean) => void;
+  projectShowChatIcons: boolean;
+  onProjectShowChatIconsChange: (show: boolean) => void;
+  projectShowTimestamps: boolean;
+  onProjectShowTimestampsChange: (show: boolean) => void;
+  chatShowChatIcons: boolean;
+  onChatShowChatIconsChange: (show: boolean) => void;
+  chatShowTimestamps: boolean;
+  onChatShowTimestampsChange: (show: boolean) => void;
   showGitBranches: boolean;
   onShowGitBranchesChange: (show: boolean) => void;
   expandedProjects: Record<string, boolean>;
@@ -49,6 +67,7 @@ export interface SidebarProjectsSectionProps {
   labelVisible: boolean;
   activeSessionId?: string | null;
   onNavigate?: (view: AppView) => void;
+  onOpenProject?: (projectId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onNewChatInProject?: (projectId: string) => void;
   onNewChat?: () => void;
@@ -77,8 +96,10 @@ export interface SidebarProjectsSectionProps {
     placement?: "before" | "after",
   ) => void;
   hasMoreSessions?: boolean;
+  pinnedSectionOpen?: boolean;
   projectsSectionOpen: boolean;
   recentsSectionOpen: boolean;
+  onTogglePinnedSection?: () => void;
   onToggleProjectsSection: () => void;
   onToggleRecentsSection: () => void;
   showTopDivider?: boolean;
@@ -90,16 +111,25 @@ const SECTION_HEADER_TEXT_CLASS = SIDEBAR_GROUP_LABEL_TEXT_CLASS;
 
 export function SidebarProjectsSection({
   projects,
+  pinnedNavigationItems = [],
+  onReorderPinnedNavigationItem,
+  pinnedProjectSessionsByProject = {},
   projectSessions,
   hasVisibleChats,
   flatChatGroups,
   hasFlatChatOverflow,
   groupChatsByProject,
   onGroupChatsByProjectChange,
-  showChatIcons,
-  onShowChatIconsChange,
-  showTimestamps,
-  onShowTimestampsChange,
+  pinnedShowTimestamps,
+  onPinnedShowTimestampsChange,
+  projectShowChatIcons,
+  onProjectShowChatIconsChange,
+  projectShowTimestamps,
+  onProjectShowTimestampsChange,
+  chatShowChatIcons,
+  onChatShowChatIconsChange,
+  chatShowTimestamps,
+  onChatShowTimestampsChange,
   showGitBranches,
   onShowGitBranchesChange,
   expandedProjects,
@@ -109,6 +139,7 @@ export function SidebarProjectsSection({
   labelVisible,
   activeSessionId,
   onNavigate,
+  onOpenProject,
   onSelectSession,
   onNewChatInProject,
   onNewChat,
@@ -133,8 +164,10 @@ export function SidebarProjectsSection({
   onMarkSelectedUnread,
   onReorderProject,
   hasMoreSessions = false,
+  pinnedSectionOpen = true,
   projectsSectionOpen,
   recentsSectionOpen,
+  onTogglePinnedSection,
   onToggleProjectsSection,
   onToggleRecentsSection,
   showTopDivider: _showTopDivider = true,
@@ -150,26 +183,32 @@ export function SidebarProjectsSection({
     "w-full justify-start gap-2 text-sm text-muted-foreground",
     SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
   );
-
-  if (!groupChatsByProject) {
-    return (
-      <SidebarFlatChatsSection
-        groups={flatChatGroups}
-        onGroupChatsByProjectChange={onGroupChatsByProjectChange}
+  const pinnedSection =
+    pinnedNavigationItems.length > 0 ? (
+      <SidebarPinnedItemsSection
+        items={pinnedNavigationItems}
+        isOpen={pinnedSectionOpen}
+        onToggleOpen={onTogglePinnedSection ?? (() => {})}
+        onReorder={onReorderPinnedNavigationItem}
         collapsed={collapsed}
         labelTransition={labelTransition}
         labelVisible={labelVisible}
         activeSessionId={activeSessionId}
-        onNewChat={onNewChat}
-        onCreateProject={onCreateProject}
+        projectSessionsByProject={pinnedProjectSessionsByProject}
+        expandedProjects={expandedProjects}
+        toggleProject={toggleProject}
         onNavigate={onNavigate}
-        onEditProject={onEditProject}
+        onOpenProject={onOpenProject}
         onSelectSession={onSelectSession}
+        onNewChatInProject={onNewChatInProject}
+        onEditProject={onEditProject}
+        onArchiveProject={onArchiveProject}
         onArchiveChat={onArchiveChat}
         onRenameChat={onRenameChat}
         onForkChat={onForkChat}
         onMarkChatRead={onMarkChatRead}
         onMarkChatUnread={onMarkChatUnread}
+        onMoveToProject={onMoveToProject}
         selectedSessionIds={selectedSessionIds}
         selectionEnabled={selectionEnabled}
         selectionActionsDisabled={selectionActionsDisabled}
@@ -180,13 +219,50 @@ export function SidebarProjectsSection({
         isPinningSelectedToHome={isPinningSelectedToHome}
         onMarkSelectedRead={onMarkSelectedRead}
         onMarkSelectedUnread={onMarkSelectedUnread}
-        showTimestamps={showTimestamps}
-        onShowTimestampsChange={onShowTimestampsChange}
-        showGitBranches={showGitBranches}
-        onShowGitBranchesChange={onShowGitBranchesChange}
-        showViewAllInHistory={hasFlatChatOverflow}
-        showTopDivider={_showTopDivider}
+        showTimestamps={pinnedShowTimestamps}
+        onShowTimestampsChange={onPinnedShowTimestampsChange}
       />
+    ) : null;
+
+  if (!groupChatsByProject) {
+    return (
+      <>
+        {pinnedSection}
+        <SidebarFlatChatsSection
+          groups={flatChatGroups}
+          onGroupChatsByProjectChange={onGroupChatsByProjectChange}
+          collapsed={collapsed}
+          labelTransition={labelTransition}
+          labelVisible={labelVisible}
+          activeSessionId={activeSessionId}
+          onNewChat={onNewChat}
+          onCreateProject={onCreateProject}
+          onNavigate={onNavigate}
+          onEditProject={onEditProject}
+          onSelectSession={onSelectSession}
+          onArchiveChat={onArchiveChat}
+          onRenameChat={onRenameChat}
+          onForkChat={onForkChat}
+          onMarkChatRead={onMarkChatRead}
+          onMarkChatUnread={onMarkChatUnread}
+          selectedSessionIds={selectedSessionIds}
+          selectionEnabled={selectionEnabled}
+          selectionActionsDisabled={selectionActionsDisabled}
+          onSelectionClear={onSelectionClear}
+          onSelectionChange={onSelectionChange}
+          onArchiveSelected={onArchiveSelected}
+          onPinSelectedToHome={onPinSelectedToHome}
+          isPinningSelectedToHome={isPinningSelectedToHome}
+          onMarkSelectedRead={onMarkSelectedRead}
+          onMarkSelectedUnread={onMarkSelectedUnread}
+          showTimestamps={chatShowTimestamps}
+          onShowTimestampsChange={onChatShowTimestampsChange}
+          showGitBranches={showGitBranches}
+          onShowGitBranchesChange={onShowGitBranchesChange}
+          showViewAllInHistory={hasFlatChatOverflow}
+          showTopDivider={_showTopDivider}
+        />
+      </>
     );
   }
 
@@ -203,6 +279,7 @@ export function SidebarProjectsSection({
               : "opacity-0 max-h-0 overflow-hidden",
         )}
       >
+        {pinnedSection}
         <SidebarSectionHeader
           label={t("sections.projects")}
           collapsed={collapsed}
@@ -217,10 +294,10 @@ export function SidebarProjectsSection({
               <>
                 <SidebarDisplayOptionsMenu
                   labelKey="actions.projectDisplayOptions"
-                  showChatIcons={showChatIcons}
-                  onShowChatIconsChange={onShowChatIconsChange}
-                  showTimestamps={showTimestamps}
-                  onShowTimestampsChange={onShowTimestampsChange}
+                  showChatIcons={projectShowChatIcons}
+                  onShowChatIconsChange={onProjectShowChatIconsChange}
+                  showTimestamps={projectShowTimestamps}
+                  onShowTimestampsChange={onProjectShowTimestampsChange}
                   showGitBranches={showGitBranches}
                   onShowGitBranchesChange={onShowGitBranchesChange}
                   groupChatsByProject
@@ -266,8 +343,8 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
-            showChatIcons={showChatIcons}
-            showTimestamps={showTimestamps}
+            showChatIcons={projectShowChatIcons}
+            showTimestamps={projectShowTimestamps}
             onReorderProject={onReorderProject}
             hasMoreSessions={hasMoreSessions}
             dropTargetsEnabled={showProjects}
@@ -400,10 +477,10 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
-            showChatIcons={showChatIcons}
-            onShowChatIconsChange={onShowChatIconsChange}
-            showTimestamps={showTimestamps}
-            onShowTimestampsChange={onShowTimestampsChange}
+            showChatIcons={chatShowChatIcons}
+            onShowChatIconsChange={onChatShowChatIconsChange}
+            showTimestamps={chatShowTimestamps}
+            onShowTimestampsChange={onChatShowTimestampsChange}
             showGitBranches={showGitBranches}
             onShowGitBranchesChange={onShowGitBranchesChange}
             isOpen={recentsSectionOpen}

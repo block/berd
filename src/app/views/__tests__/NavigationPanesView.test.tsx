@@ -1021,7 +1021,7 @@ describe("NavigationPanesView", () => {
     expect(within(rows[1]).queryByRole("button", { name: /edit/i })).toBeNull();
   });
 
-  it("keeps pinned flat chats above recent flat chats", () => {
+  it("moves pinned flat chats into the global pinned section", () => {
     disableProjectGrouping();
     seedPinnedHomeChats("old-pinned-chat");
     seedSessions(
@@ -1049,16 +1049,18 @@ describe("NavigationPanesView", () => {
       "new-unpinned-chat",
     ]);
     expect(
-      screen.getByRole("button", { name: "Unpin chat" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Unpin chat" }),
+    ).not.toBeInTheDocument();
 
     const groups = Array.from(
       container.querySelectorAll<HTMLElement>("[data-sidebar-flat-chat-group]"),
     );
     expect(groups.map((group) => group.dataset.sidebarFlatChatGroup)).toEqual([
-      "pinned",
       "last-hour",
     ]);
+    expect(screen.getByTestId("sidebar-pinned-section")).toHaveTextContent(
+      "Old Pinned Chat",
+    );
   });
 
   it("shows Git branch subtitles in flat chat mode", async () => {
@@ -5390,8 +5392,13 @@ describe("NavigationPanesView", () => {
       name: "Project Display Chat",
     });
     expect(projectChatButton).toHaveClass("pl-8");
+    const projectChatRow = projectChatButton.closest<HTMLElement>(
+      "[data-sidebar-chat-row]",
+    );
+    expect(projectChatRow).not.toBeNull();
+    if (!projectChatRow) throw new Error("project chat row missing");
     expect(
-      within(projectChatButton.closest("[data-sidebar-chat-row]")!)
+      within(projectChatRow)
         .getByTestId("sidebar-chat-menu-icon")
         .closest("span.absolute"),
     ).toHaveClass("left-2");
@@ -5408,10 +5415,16 @@ describe("NavigationPanesView", () => {
     ).toBeInTheDocument();
     await user.click(showIcons);
     expect(onPrototypeSecondaryPreviewChange).not.toHaveBeenCalled();
-    expect(projectChatButton).toHaveClass("pl-[10px]");
-    expect(
-      within(projectNavigation).queryByTestId("sidebar-chat-icon"),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        within(projectNavigation).getByRole("button", {
+          name: "Project Display Chat",
+        }),
+      ).toHaveClass("pl-[10px]");
+      expect(
+        within(projectNavigation).queryByTestId("sidebar-chat-icon"),
+      ).not.toBeInTheDocument();
+    });
     expect(
       screen
         .getAllByTestId("prototype-primary-chat-row-icon")

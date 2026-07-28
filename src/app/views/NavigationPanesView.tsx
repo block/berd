@@ -227,7 +227,7 @@ const NAV_PROTOTYPE_CHAT_ROW_MENU_CONTENT_CLASS = cn(
   NAV_PROTOTYPE_MENU_CONTENT_CLASS,
 );
 const NAV_PROTOTYPE_MENU_ITEM_CLASS =
-  "gap-2 whitespace-nowrap rounded-[6px] px-2 py-1.5 text-[14px] leading-[18px] opacity-[0.85] hover:!bg-transparent hover:opacity-100 focus:!bg-transparent focus:!text-popover-inverse-foreground focus:opacity-100 data-[highlighted]:!bg-transparent data-[highlighted]:!text-popover-inverse-foreground data-[highlighted]:opacity-100";
+  "gap-2 whitespace-nowrap rounded-[6px] px-2 py-1 text-[14px] leading-[18px] opacity-[0.85] hover:!bg-transparent hover:opacity-100 focus:!bg-transparent focus:!text-popover-inverse-foreground focus:opacity-100 data-[highlighted]:!bg-transparent data-[highlighted]:!text-popover-inverse-foreground data-[highlighted]:opacity-100";
 const NAV_PROTOTYPE_MENU_LABEL_CLASS = "px-2 py-1 text-[14px] leading-[18px]";
 const NAV_PROTOTYPE_ROW_ACTION_RAIL_CLASS =
   "absolute right-1.5 z-10 flex items-center";
@@ -314,6 +314,7 @@ export interface NavigationPanesViewProps {
     placement?: "before" | "after",
   ) => void;
   onNavigate?: (view: AppView) => void;
+  onOpenProject?: (projectId: string) => void;
   onSelectSession?: (
     sessionId: string,
     options?: NavigationSelectSessionOptions,
@@ -3436,6 +3437,7 @@ export function NavigationPanesView({
   onMoveToProject,
   onReorderProject,
   onNavigate,
+  onOpenProject,
   onSelectSession,
   activeView,
   activeSettingsSection = DEFAULT_SETTINGS_SECTION,
@@ -4560,6 +4562,7 @@ export function NavigationPanesView({
       onMarkChatUnread={onMarkChatUnread}
       onMoveToProject={onMoveToProject}
       onNavigate={onNavigate}
+      onOpenProject={onOpenProject}
       onNewChat={onNewChat}
       onNewChatInProject={onNewChatInProject}
       onRenameChat={onRenameChat}
@@ -5354,6 +5357,7 @@ export function NavigationPanesView({
                   onMarkChatUnread={onMarkChatUnread}
                   onMoveToProject={onMoveToProject}
                   onNavigate={onNavigate}
+                  onOpenProject={onOpenProject}
                   onNewChat={onNewChat}
                   onNewChatInProject={onNewChatInProject}
                   onRenameChat={onRenameChat}

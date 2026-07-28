@@ -27,6 +27,10 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import {
+  resetHomeWidgetStoreForTests,
+  useHomeWidgetStore,
+} from "@/features/home/stores/homeWidgetStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
@@ -778,6 +782,7 @@ describe("AppShell global navigation", () => {
   });
 
   beforeEach(() => {
+    resetHomeWidgetStoreForTests();
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     mockBuildFeatures.byoKeyProviders = false;
@@ -1973,6 +1978,48 @@ describe("AppShell global navigation", () => {
       message,
     ]);
     expect(mockToastError).toHaveBeenCalledWith("backend down");
+  });
+
+  it("removes a pinned chat from Home only after archive succeeds", async () => {
+    const user = userEvent.setup();
+    const archive = deferred<void>();
+    mockAcpArchiveSession.mockReturnValueOnce(archive.promise);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Pinned chat",
+          providerId: "goose",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useHomeWidgetStore.setState({
+      loadStatus: "ready",
+      itemRevision: 1,
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "session-1" },
+        },
+      ],
+    });
+
+    renderAppShell();
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+    expect(useHomeWidgetStore.getState().instances).toHaveLength(1);
+
+    await act(async () => archive.resolve(undefined));
+    await waitFor(() => {
+      expect(useHomeWidgetStore.getState().instances).toHaveLength(0);
+    });
   });
 
   it("keeps the active project open after archiving its session in refreshed navigation", async () => {

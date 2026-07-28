@@ -36,7 +36,6 @@ import {
   SidebarNavSettingsIcon,
   SidebarNavSkillsIcon,
 } from "./sidebarNavIcons";
-import { SidebarPinnedSection } from "./SidebarPinnedSection";
 
 type SidebarNavItemIcon = NonNullable<
   ComponentProps<typeof SidebarNavItem>["icon"]
@@ -256,8 +255,6 @@ export const PrimaryNavigationSurface = forwardRef<
                 onClick={() => onSettingsClick?.()}
               />
             </div>
-
-            {!navCollapsed && <SidebarPinnedSection />}
 
             {renderInlineSessionList?.()}
           </nav>

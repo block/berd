@@ -3669,6 +3669,15 @@ export function AppShell({
 
         try {
           await useChatSessionStore.getState().archiveSession(sessionId);
+          const homeWidgetState = useHomeWidgetStore.getState();
+          const pinnedWidget = homeWidgetState.instances.find(
+            (instance) =>
+              instance.type === "chatPin" &&
+              instance.state?.sessionId === sessionId,
+          );
+          if (pinnedWidget) {
+            homeWidgetState.removeWidget(pinnedWidget.id);
+          }
         } catch (error) {
           if (cleanupPolicy === "confirm") {
             toast.error(
@@ -4031,6 +4040,14 @@ export function AppShell({
       isAutomationsFeatureEnabled,
       isBuilderbotSurfaceEnabled,
     ],
+  );
+
+  const handleOpenProject = useCallback(
+    (projectId: string) => {
+      useProjectStore.getState().setActiveProject(projectId);
+      handleNavigate("projects");
+    },
+    [handleNavigate],
   );
 
   useRegisterAppNavigationController({
@@ -4852,6 +4869,7 @@ export function AppShell({
           },
           onCreateProject: () => openCreateProjectDialog(),
           onEditProject: handleEditProject,
+          onOpenProject: handleOpenProject,
           onArchiveProject: handleArchiveProject,
           onUpdateProjectChatGroups: handleUpdateProjectChatGroups,
           onArchiveChat: handleArchiveChat,
