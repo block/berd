@@ -9,6 +9,12 @@ import {
 } from "@/shared/types/messages";
 import type { ChatSendOptions } from "../types";
 import {
+  formatAttachmentsTooLargeMessage,
+  MAX_PROMPT_ATTACHMENT_BYTES,
+  promptAttachmentBytes,
+  PromptPayloadTooLargeError,
+} from "./attachmentPayloadBudget";
+import {
   appendAttachmentPaths,
   buildAcpImages,
   buildMessageAttachments,
@@ -39,6 +45,26 @@ export async function steerPromptInSession(
   const promptOwner = getSessionPromptOwner(sessionId);
 
   if (!text.trim() && !hasAttachments) {
+    return false;
+  }
+
+  // Defense-in-depth mirror of the dispatchPrompt guard: the composer
+  // already budget-checks steers synchronously, but non-composer callers
+  // (berdctl, queued steers) reach here directly. An oversized ACP message
+  // silently kills the shared WebSocket and every open chat (BOT-1463), so
+  // reject before committing anything.
+  const attachmentBytes = promptAttachmentBytes(attachments);
+  if (attachmentBytes > MAX_PROMPT_ATTACHMENT_BYTES) {
+    const errorMessage = formatAttachmentsTooLargeMessage(attachmentBytes);
+    useChatStore
+      .getState()
+      .addMessage(
+        sessionId,
+        createSystemNotificationMessage(errorMessage, "error"),
+      );
+    if (options.throwOnError) {
+      throw new PromptPayloadTooLargeError(errorMessage);
+    }
     return false;
   }
 

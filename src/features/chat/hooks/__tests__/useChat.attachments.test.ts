@@ -16,6 +16,7 @@ vi.mock("@/shared/api/acp", () => ({
   acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
+import { MAX_PROMPT_ATTACHMENT_BYTES } from "../../lib/attachmentPayloadBudget";
 import { useChat } from "../useChat";
 
 describe("useChat attachments", () => {
@@ -264,5 +265,41 @@ describe("useChat attachments", () => {
         images: undefined,
       },
     );
+  });
+
+  it("rejects an over-budget attachment payload before committing anything", async () => {
+    // Discriminating test for the dispatchPrompt budget guard: this is the
+    // only budget check on non-composer paths (berdctl, queue flush), where
+    // an oversized ACP message would silently kill the shared WebSocket and
+    // every open chat with it (BOT-1463). Pre-guard code sends the payload
+    // and commits the user message; guarded code must do neither.
+    const { result } = renderHook(() => useChat("session-1"));
+    const attachments = [
+      {
+        id: "image-1",
+        kind: "image" as const,
+        name: "huge.jpeg",
+        mimeType: "image/jpeg",
+        base64: "x".repeat(MAX_PROMPT_ATTACHMENT_BYTES + 1),
+        previewUrl: "blob:huge",
+      },
+    ];
+
+    await act(async () => {
+      await result.current.sendMessage("look at this", undefined, attachments);
+    });
+
+    // Nothing goes over the wire and no user message lands in the
+    // transcript — the draft stays with the composer for the user to fix.
+    expect(mockAcpSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"] ?? [],
+    ).toHaveLength(0);
+
+    // The failure is recorded, not silent: session error state carries the
+    // user-facing budget message.
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").error,
+    ).toBeTruthy();
   });
 });

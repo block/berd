@@ -71,6 +71,7 @@
     "resize": "Resize terminal"
   },
   "errors": {
+    "attachmentsTooLarge": "Attachments are too large to send ({{totalMb}} MB, limit {{limitMb}} MB). Remove some attachments and try again.",
     "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
     "steeringBackendUnavailable": "Steering is not available in this Goose backend. Restart with the steering backend branch and try again.",
     "voiceInputFailedTitle": "Voice dictation failed",

@@ -18,6 +18,7 @@ import { GlobalComposerPill } from "./GlobalComposerPill";
 const mockOpenDialog = vi.fn();
 const mockInspectAttachmentPaths = vi.fn();
 const mockReadImageAttachment = vi.fn();
+const mockNormalizeImageBase64 = vi.fn();
 const mockSearchFilesForMentions = vi.fn();
 const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
@@ -50,6 +51,8 @@ vi.mock("@/shared/api/system", () => ({
 
 vi.mock("@/features/chat/lib/resizeImage", () => ({
   resizeImage: (file: File) => mockResizeImage(file),
+  normalizeImageBase64: (base64: string, mimeType: string | undefined) =>
+    mockNormalizeImageBase64(base64, mimeType),
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
@@ -190,6 +193,11 @@ describe("GlobalComposerPill", () => {
     mockOpenDialog.mockReset();
     mockInspectAttachmentPaths.mockReset();
     mockReadImageAttachment.mockReset();
+    mockNormalizeImageBase64.mockReset();
+    mockNormalizeImageBase64.mockImplementation(
+      (base64: string, mimeType: string | undefined) =>
+        Promise.resolve({ base64, mimeType }),
+    );
     mockSearchFilesForMentions.mockReset();
     mockResizeImage.mockReset();
     vi.mocked(listSkills).mockReset();

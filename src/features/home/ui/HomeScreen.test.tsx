@@ -113,6 +113,15 @@ vi.mock("@/shared/api/system", () => ({
   searchFilesForMentions: vi.fn().mockResolvedValue([]),
 }));
 
+// jsdom cannot decode image bytes, so stand in for the normalize pipeline;
+// its behavior is covered by useChatInputAttachments tests.
+vi.mock("@/features/chat/lib/resizeImage", () => ({
+  resizeImage: (file: File) =>
+    Promise.resolve({ base64: `base64:${file.name}`, mimeType: file.type }),
+  normalizeImageBase64: (base64: string, mimeType: string | undefined) =>
+    Promise.resolve({ base64, mimeType }),
+}));
+
 vi.mock("@/features/chat/hooks/useChatSessionController", () => ({
   useChatSessionController: () => mockController,
 }));

@@ -11,7 +11,7 @@ import type {
   ChatImageAttachmentDraft,
 } from "@/shared/types/messages";
 import { getPlatform } from "@/shared/lib/platform";
-import { resizeImage } from "../lib/resizeImage";
+import { normalizeImageBase64, resizeImage } from "../lib/resizeImage";
 
 function isBlobPreview(url: string) {
   return url.startsWith("blob:");
@@ -43,20 +43,12 @@ async function createImageAttachmentFromFile(
   const previewUrl = URL.createObjectURL(file);
 
   try {
-    const { base64, mimeType } = await resizeImage(file).catch(
-      () =>
-        new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            const [header, base64] = dataUrl.split(",");
-            const mimeType = header.replace("data:", "").replace(";base64", "");
-            resolve({ base64, mimeType });
-          };
-          reader.onerror = () => reject(new Error("Failed to read image"));
-          reader.readAsDataURL(file);
-        }),
-    );
+    // Every image goes through the normalize pipeline; there is no raw
+    // pass-through fallback. An image the browser cannot decode cannot be
+    // resized or validated, so sending its bytes anyway would ship an
+    // unsupported payload that fails the whole request at the provider
+    // (BOT-1463). Rejection drops the file from the draft instead.
+    const { base64, mimeType } = await resizeImage(file);
 
     return {
       id: crypto.randomUUID(),
@@ -167,17 +159,29 @@ export function useChatInputAttachments(
           if (attachmentPath.mimeType?.startsWith("image/")) {
             try {
               const image = await readImageAttachment(attachmentPath.path);
+              // Picker and drag-drop images go through the same normalize
+              // pipeline as pasted images: full-size photos are downscaled
+              // (a handful of raw phone JPEGs overflows the ACP transport,
+              // BOT-1463) and non-whitelisted formats (HEIC/TIFF/...) are
+              // re-encoded to types the providers accept.
+              const normalized = await normalizeImageBase64(
+                image.base64,
+                image.mimeType,
+              );
               return {
                 id: crypto.randomUUID(),
                 kind: "image",
                 name: attachmentPath.name,
                 path: attachmentPath.path,
-                mimeType: image.mimeType,
-                base64: image.base64,
+                mimeType: normalized.mimeType,
+                base64: normalized.base64,
                 previewUrl: pathToPreviewUrl(attachmentPath.path),
               } satisfies ChatImageAttachmentDraft;
             } catch {
-              // Fall back to a generic file attachment if image loading fails.
+              // Fall back to a generic file attachment if image loading or
+              // normalization fails: the path still reaches the agent via
+              // appendAttachmentPaths, so backends that can read local files
+              // keep working; we just never ship undecodable image bytes.
             }
           }
 

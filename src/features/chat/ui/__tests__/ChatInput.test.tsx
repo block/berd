@@ -14,6 +14,7 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { Persona } from "@/shared/types/agents";
 import type { ChatInputComposerActions } from "../../types";
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "../../lib/streamingShortcutPreference";
+import { MAX_PROMPT_ATTACHMENT_BYTES } from "../../lib/attachmentPayloadBudget";
 
 const mockVoiceDictation = {
   isEnabled: true,
@@ -2436,6 +2437,46 @@ describe("ChatInput", () => {
 
     steerDeferred.resolve(false);
     await waitFor(() => expect(onSteerMessage).toHaveBeenCalledOnce());
+  });
+
+  it("keeps an oversized steer draft in the composer instead of steering", async () => {
+    // Discriminating test for the synchronous budget guard in
+    // handleSteerCurrentMessage: steering is fire-and-forget (the draft
+    // clears before acknowledgement), so without the guard an oversized
+    // draft would be discarded even though nothing was sent (BOT-1463).
+    const onSteerMessage = vi.fn();
+    const onDraftAttachmentsChange = vi.fn();
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+        initialAttachments={[
+          {
+            id: "image-1",
+            kind: "image",
+            name: "huge.jpeg",
+            mimeType: "image/jpeg",
+            base64: "x".repeat(MAX_PROMPT_ATTACHMENT_BYTES + 1),
+            previewUrl: "blob:huge",
+          },
+        ]}
+        onDraftAttachmentsChange={onDraftAttachmentsChange}
+      />,
+    );
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "look at this");
+    await user.keyboard("{Enter}");
+
+    // Nothing steers and nothing clears: the draft survives for the user
+    // to remove attachments and retry.
+    expect(onSteerMessage).not.toHaveBeenCalled();
+    expect(input).toHaveValue("look at this");
+    expect(onDraftAttachmentsChange).not.toHaveBeenCalledWith([]);
   });
 
   it("does not send or clear the draft when queue is full", async () => {
