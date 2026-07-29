@@ -6,6 +6,7 @@ import { filterSessions, type FilterResolvers } from "./filterSessions";
 interface BuildSessionSearchResultsOptions {
   locale?: string;
   getDisplayTitle?: (session: ChatSession) => string;
+  visibleMetadataOnly?: boolean;
 }
 
 export interface SessionSearchDisplayResult {

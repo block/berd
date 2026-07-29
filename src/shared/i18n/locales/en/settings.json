@@ -297,6 +297,10 @@
       "queue": "Queue",
       "steer": "Steer (Goose harness only)"
     },
+    "groupChatsByProject": {
+      "description": "Show project groups in the sidebar. Turn this off for one chat list sorted by activity.",
+      "label": "Group chats by project"
+    },
     "terminalFallback": {
       "change": "Change",
       "chooseDialogTitle": "Choose terminal fallback folder",

@@ -12,10 +12,20 @@ import type {
   ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { Search, X } from "lucide-react";
+import { cn } from "@/shared/lib/cn";
+import { Button } from "@/shared/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { useShallow } from "zustand/react/shallow";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
+import { compareSessionsByActivityDesc } from "@/features/chat/lib/sessionActivity";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import {
+  getVisibleSettingsSections,
+  type SectionId,
+} from "@/features/settings/ui/settingsSections";
+import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import {
@@ -26,12 +36,23 @@ import {
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
+import type { SessionSearchDisplayResult } from "@/features/sessions/lib/buildSessionSearchResults";
 import { useDebouncedValue } from "@/shared/hooks/useDebouncedValue";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { useExtensionSearch } from "../hooks/useExtensionSearch";
+import {
+  extensionSearchIdentity,
+  useExtensionSearch,
+} from "../hooks/useExtensionSearch";
 import { useAgentSearch } from "../hooks/useAgentSearch";
 import { useAutomationSearch } from "../hooks/useAutomationSearch";
 import { useSkillSearch } from "../hooks/useSkillSearch";
+import {
+  buildResultNavigationModel,
+  buildSettingsSearchResults,
+  findResultPosition,
+  type SearchCategory,
+  searchResultId,
+} from "../lib/searchResultModel";
 import { AgentResultRow } from "./AgentResultRow";
 import { AutomationResultRow } from "./AutomationResultRow";
 import { ChatResultRow } from "./ChatResultRow";
@@ -42,8 +63,10 @@ import {
   type SearchResultsCardTone,
 } from "./SearchResultsCard";
 import { SkillResultRow } from "./SkillResultRow";
+import { SettingsResultRow } from "./SettingsResultRow";
 
 interface SearchViewProps {
+  variant?: "page" | "dialog";
   onExit: () => void;
   onSelectSearchResult: (
     sessionId: string,
@@ -54,54 +77,37 @@ interface SearchViewProps {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
+  onOpenSettings?: (sectionId: SectionId) => void;
 }
 
 const DEBOUNCE_MS = 100;
-
 const searchViewStyle = {
-  "--search-results-top": "clamp(260px, 39vh, 374px)",
-  "--search-heading-raised-top":
-    "clamp(32px, calc(50% - 264px), calc(var(--search-results-top) - 152px))",
-  "--search-results-height":
-    "min(512px, max(220px, calc(100% - var(--search-results-top) - 132px)))",
+  "--search-results-top": "100px",
+  "--search-results-height": "min(620px, calc(100% - 132px))",
 } as CSSProperties;
 
-function searchResultId(kind: string, key: string): string {
-  return `search-result-${kind}-${key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
-}
-
-function findResultPosition(
-  resultColumns: string[][],
-  resultId: string | null,
-): { columnIndex: number; rowIndex: number } | null {
-  if (!resultId) {
-    return null;
-  }
-
-  for (
-    let columnIndex = 0;
-    columnIndex < resultColumns.length;
-    columnIndex += 1
-  ) {
-    const rowIndex = resultColumns[columnIndex].indexOf(resultId);
-    if (rowIndex >= 0) {
-      return { columnIndex, rowIndex };
-    }
-  }
-
-  return null;
-}
-
 export function SearchView({
+  variant = "page",
   onExit,
   onSelectSearchResult,
   onOpenExtension,
   onOpenAgent,
   onOpenAutomation,
   onOpenSkill,
+  onOpenSettings,
 }: SearchViewProps) {
-  const { t, i18n } = useTranslation(["search", "sessions", "common"]);
+  const { t, i18n } = useTranslation([
+    "search",
+    "sessions",
+    "common",
+    "settings",
+  ]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
+  const capabilities = useProfileCapabilities();
+  const visibleSettingsSections = useMemo(
+    () => getVisibleSettingsSections(capabilities),
+    [capabilities],
+  );
   const resultsId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [railEl, setRailEl] = useState<HTMLDivElement | null>(null);
@@ -109,6 +115,12 @@ export function SearchView({
   const [rightFadeAmount, setRightFadeAmount] = useState(0);
   const [query, setQuery] = useState("");
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState<SearchCategory>("all");
+  const [dialogResultsEl, setDialogResultsEl] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [showDialogTopFade, setShowDialogTopFade] = useState(false);
+  const [showDialogBottomFade, setShowDialogBottomFade] = useState(false);
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
   const trimmedQuery = query.trim();
   const trimmedDebouncedQuery = debouncedQuery.trim();
@@ -150,6 +162,7 @@ export function SearchView({
     resolvers,
     locale: i18n.resolvedLanguage,
     getDisplayTitle,
+    visibleMetadataOnly: true,
   });
   const {
     clear: clearChatSearch,
@@ -163,6 +176,16 @@ export function SearchView({
   const agentResults = useAgentSearch(debouncedQuery);
   const automationResults = useAutomationSearch(debouncedQuery);
   const skillResults = useSkillSearch(debouncedQuery);
+  const settingsResults = useMemo(
+    () =>
+      buildSettingsSearchResults({
+        query: trimmedDebouncedQuery,
+        enabled: Boolean(onOpenSettings),
+        translate: (key) => t(`settings:${key}`),
+        visibleSections: visibleSettingsSections,
+      }),
+    [onOpenSettings, t, trimmedDebouncedQuery, visibleSettingsSections],
+  );
 
   useEffect(() => {
     setChatQuery(debouncedQuery);
@@ -198,6 +221,28 @@ export function SearchView({
       ro.disconnect();
     };
   }, [railEl, updateFades]);
+
+  useEffect(() => {
+    if (!dialogResultsEl) return;
+    const updateDialogFades = () => {
+      const remaining =
+        dialogResultsEl.scrollHeight -
+        dialogResultsEl.clientHeight -
+        dialogResultsEl.scrollTop;
+      setShowDialogTopFade(dialogResultsEl.scrollTop > 8);
+      setShowDialogBottomFade(remaining > 8);
+    };
+    updateDialogFades();
+    dialogResultsEl.addEventListener("scroll", updateDialogFades, {
+      passive: true,
+    });
+    const observer = new ResizeObserver(updateDialogFades);
+    observer.observe(dialogResultsEl);
+    return () => {
+      dialogResultsEl.removeEventListener("scroll", updateDialogFades);
+      observer.disconnect();
+    };
+  }, [dialogResultsEl]);
 
   // Recompute fades when the rendered result counts change. The listener
   // effect above catches scroll + container resize; this dep list catches
@@ -236,43 +281,71 @@ export function SearchView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [clearChatSearch, onExit, query]);
 
+  const recentChatResults = useMemo<SessionSearchDisplayResult[]>(
+    () =>
+      [...visibleSessions]
+        .sort(compareSessionsByActivityDesc)
+        .slice(0, 15)
+        .map((session) => ({ session, matchType: "metadata" as const })),
+    [visibleSessions],
+  );
+  const displayedChatResults = trimmedDebouncedQuery.length
+    ? chatResults
+    : recentChatResults;
+
   const hasAnyResults =
-    chatResults.length > 0 ||
+    displayedChatResults.length > 0 ||
     extensionResults.length > 0 ||
     agentResults.length > 0 ||
     automationResults.length > 0 ||
-    skillResults.length > 0;
-  const showResults = trimmedDebouncedQuery.length > 0 && hasAnyResults;
+    skillResults.length > 0 ||
+    settingsResults.length > 0;
+  const showResults = hasAnyResults;
   const showNoMatches =
     trimmedDebouncedQuery.length > 0 && !hasAnyResults && !isChatSearching;
 
-  const resultColumns = useMemo(
-    () =>
-      [
-        chatResults.map((result) =>
-          searchResultId(
-            "chat",
-            `${result.session.id}:${result.messageId ?? "session"}`,
-          ),
+  const resultColumnsByCategory = useMemo<Record<SearchCategory, string[]>>(
+    () => ({
+      all: [],
+      chat: displayedChatResults.map((result) =>
+        searchResultId(
+          "chat",
+          `${result.session.id}:${result.messageId ?? "session"}`,
         ),
-        extensionResults.map(({ entry }) =>
-          searchResultId("extension", entry.config_key),
-        ),
-        agentResults.map((agent) => searchResultId("agent", agent.id)),
-        skillResults.map((skill) => searchResultId("skill", skill.name)),
-        automationResults.flatMap((automation) =>
-          automation.id ? [searchResultId("automation", automation.id)] : [],
-        ),
-      ].filter((column) => column.length > 0),
+      ),
+      extensions: extensionResults.map(({ entry }) =>
+        searchResultId("extension", extensionSearchIdentity(entry)),
+      ),
+      agents: agentResults.map((agent) => searchResultId("agent", agent.id)),
+      skills: skillResults.map((skill) => searchResultId("skill", skill.name)),
+      automations: automationResults.flatMap((automation) =>
+        automation.id ? [searchResultId("automation", automation.id)] : [],
+      ),
+      settings: settingsResults.map((section) =>
+        searchResultId("settings", section.id),
+      ),
+    }),
     [
       agentResults,
       automationResults,
-      chatResults,
+      displayedChatResults,
       extensionResults,
+      settingsResults,
       skillResults,
     ],
   );
-  const resultIds = useMemo(() => resultColumns.flat(), [resultColumns]);
+  const {
+    allIds: allResultIds,
+    navigableColumns: navigableResultColumns,
+    navigableIds: navigableResultIds,
+  } = useMemo(
+    () =>
+      buildResultNavigationModel({
+        activeCategory,
+        columnsByCategory: resultColumnsByCategory,
+      }),
+    [activeCategory, resultColumnsByCategory],
+  );
 
   useEffect(() => {
     if (!showResults) {
@@ -281,9 +354,9 @@ export function SearchView({
     }
 
     setActiveResultId((current) =>
-      current && resultIds.includes(current) ? current : null,
+      current && navigableResultIds.includes(current) ? current : null,
     );
-  }, [resultIds, showResults]);
+  }, [navigableResultIds, showResults]);
 
   useEffect(() => {
     if (!activeResultId) {
@@ -301,17 +374,25 @@ export function SearchView({
       if (
         (event.key === "ArrowDown" || event.key === "ArrowUp") &&
         showResults &&
-        resultIds.length > 0
+        navigableResultIds.length > 0
       ) {
         event.preventDefault();
         setActiveResultId((current) => {
-          const currentIndex = current ? resultIds.indexOf(current) : -1;
+          const currentIndex = current
+            ? navigableResultIds.indexOf(current)
+            : -1;
           if (event.key === "ArrowDown") {
-            return resultIds[(currentIndex + 1) % resultIds.length] ?? null;
+            return (
+              navigableResultIds[
+                (currentIndex + 1) % navigableResultIds.length
+              ] ?? null
+            );
           }
           const previousIndex =
-            currentIndex <= 0 ? resultIds.length - 1 : currentIndex - 1;
-          return resultIds[previousIndex] ?? null;
+            currentIndex <= 0
+              ? navigableResultIds.length - 1
+              : currentIndex - 1;
+          return navigableResultIds[previousIndex] ?? null;
         });
         return;
       }
@@ -319,25 +400,25 @@ export function SearchView({
       if (
         (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
         showResults &&
-        resultColumns.length > 0
+        navigableResultColumns.length > 0
       ) {
         event.preventDefault();
         setActiveResultId((current) => {
-          const position = findResultPosition(resultColumns, current);
+          const position = findResultPosition(navigableResultColumns, current);
           const direction = event.key === "ArrowRight" ? 1 : -1;
 
           if (!position) {
             const column =
               direction > 0
-                ? resultColumns[0]
-                : resultColumns[resultColumns.length - 1];
+                ? navigableResultColumns[0]
+                : navigableResultColumns[navigableResultColumns.length - 1];
             return column?.[0] ?? null;
           }
 
           const columnIndex =
-            (position.columnIndex + direction + resultColumns.length) %
-            resultColumns.length;
-          const column = resultColumns[columnIndex];
+            (position.columnIndex + direction + navigableResultColumns.length) %
+            navigableResultColumns.length;
+          const column = navigableResultColumns[columnIndex];
           const rowIndex = Math.min(position.rowIndex, column.length - 1);
           return column[rowIndex] ?? null;
         });
@@ -352,22 +433,24 @@ export function SearchView({
         }
       }
     },
-    [activeResultId, resultColumns, resultIds, showResults],
+    [activeResultId, navigableResultColumns, navigableResultIds, showResults],
   );
 
   const resultSections: Array<{
     key: string;
     label: string;
     tone: SearchResultsCardTone;
-    children: ReactNode;
+    children: ReactNode[];
   }> = [];
 
-  if (chatResults.length > 0) {
+  if (displayedChatResults.length > 0) {
     resultSections.push({
       key: "chat",
-      label: t("sections.chat"),
+      label: trimmedDebouncedQuery.length
+        ? t("sections.chat")
+        : t("sections.recents"),
       tone: "file",
-      children: chatResults.map((result) => {
+      children: displayedChatResults.map((result) => {
         const title = getDisplaySessionTitle(
           result.session.title,
           defaultTitle,
@@ -383,8 +466,15 @@ export function SearchView({
             result={result}
             defaultTitle={defaultTitle}
             ariaLabel={t("actions.openSession", { name: title })}
+            query={trimmedQuery}
+            project={
+              result.session.projectId
+                ? projects.find(
+                    (project) => project.id === result.session.projectId,
+                  )
+                : undefined
+            }
             formatRelativeTimeToNow={formatRelativeTimeToNow}
-            t={t}
             isActive={activeResultId === resultId}
             onActive={() => setActiveResultId(resultId)}
             onSelect={(sessionId, messageId) =>
@@ -405,22 +495,23 @@ export function SearchView({
       key: "extensions",
       label: t("sections.extensions"),
       tone: "automation",
-      children: extensionResults.map(({ entry, state }) => (
-        <ExtensionResultRow
-          id={searchResultId("extension", entry.config_key)}
-          key={entry.config_key}
-          entry={entry}
-          stateLabel={t(`states.${state}`)}
-          ariaLabel={t("actions.openExtension", { name: entry.name })}
-          isActive={
-            activeResultId === searchResultId("extension", entry.config_key)
-          }
-          onActive={() =>
-            setActiveResultId(searchResultId("extension", entry.config_key))
-          }
-          onSelect={onOpenExtension}
-        />
-      )),
+      children: extensionResults.map(({ entry, state }) => {
+        const extensionIdentity = extensionSearchIdentity(entry);
+        const resultId = searchResultId("extension", extensionIdentity);
+        return (
+          <ExtensionResultRow
+            id={resultId}
+            key={extensionIdentity}
+            entry={entry}
+            stateLabel={t(`states.${state}`)}
+            ariaLabel={t("actions.openExtension", { name: entry.name })}
+            query={trimmedQuery}
+            isActive={activeResultId === resultId}
+            onActive={() => setActiveResultId(resultId)}
+            onSelect={onOpenExtension}
+          />
+        );
+      }),
     });
   }
 
@@ -437,6 +528,7 @@ export function SearchView({
           ariaLabel={t("actions.openAgent", {
             name: agent.displayName,
           })}
+          query={trimmedQuery}
           isActive={activeResultId === searchResultId("agent", agent.id)}
           onActive={() => setActiveResultId(searchResultId("agent", agent.id))}
           onSelect={onOpenAgent}
@@ -456,6 +548,7 @@ export function SearchView({
           key={skill.name}
           skill={skill}
           ariaLabel={t("actions.openSkill", { name: skill.name })}
+          query={trimmedQuery}
           isActive={activeResultId === searchResultId("skill", skill.name)}
           onActive={() =>
             setActiveResultId(searchResultId("skill", skill.name))
@@ -484,6 +577,7 @@ export function SearchView({
             automation={automation}
             fallbackTitle={automationFallback}
             ariaLabel={t("actions.openAutomation", { name: displayName })}
+            query={trimmedQuery}
             isActive={activeResultId === resultId}
             onActive={resultId ? () => setActiveResultId(resultId) : undefined}
             onSelect={onOpenAutomation}
@@ -493,24 +587,168 @@ export function SearchView({
     });
   }
 
+  if (settingsResults.length > 0 && onOpenSettings) {
+    resultSections.push({
+      key: "settings",
+      label: t("settings:navigationLabel"),
+      tone: "automation",
+      children: settingsResults.map((item) => {
+        const resultId = searchResultId("settings", item.id);
+        return (
+          <SettingsResultRow
+            id={resultId}
+            key={item.id}
+            sectionId={item.sectionId}
+            title={item.title}
+            meta={t("settingsResult.meta", { name: item.title })}
+            ariaLabel={t("actions.openSettings", { name: item.title })}
+            query={trimmedQuery}
+            isActive={activeResultId === resultId}
+            onActive={() => setActiveResultId(resultId)}
+            onSelect={onOpenSettings}
+          />
+        );
+      }),
+    });
+  }
+
+  const categorySections = trimmedDebouncedQuery
+    ? resultSections
+    : resultSections.filter((section) => section.key === "chat");
+  const visibleSections =
+    activeCategory === "all"
+      ? categorySections
+      : categorySections.filter((section) => section.key === activeCategory);
+  const visibleResultsContent = visibleSections.flatMap(
+    (section) => section.children,
+  );
+  useEffect(() => {
+    if (
+      activeCategory !== "all" &&
+      !categorySections.some((section) => section.key === activeCategory)
+    ) {
+      setActiveCategory("all");
+    }
+  }, [activeCategory, categorySections]);
+  const recentContent = resultSections.find(
+    (section) => section.key === "chat",
+  )?.children;
+
   return (
     <section
-      className="relative h-full w-full overflow-hidden"
-      style={searchViewStyle}
+      className={cn(
+        "relative h-full w-full",
+        variant === "page" && "overflow-hidden",
+        variant === "dialog" &&
+          "min-h-0 min-w-0 max-w-full flex flex-col overflow-visible [contain:inline-size]",
+      )}
+      style={variant === "page" ? searchViewStyle : undefined}
     >
-      <SearchHeadingInput
-        ref={inputRef}
-        value={query}
-        onChange={setQuery}
-        activeDescendant={showResults ? activeResultId : null}
-        controlsId={resultsId}
-        isRaised={trimmedQuery.length > 0}
-        placeholder={t("heading.placeholder")}
-        ariaLabel={t("heading.ariaLabel")}
-        onKeyDown={handleSearchKeyDown}
-      />
+      <div className={cn(variant === "dialog" && "relative shrink-0")}>
+        {variant === "dialog" ? (
+          <Search
+            aria-hidden="true"
+            className="absolute left-1 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+        ) : null}
+        <SearchHeadingInput
+          ref={inputRef}
+          value={query}
+          onChange={setQuery}
+          activeDescendant={showResults ? activeResultId : null}
+          controlsId={resultsId}
+          isRaised={trimmedQuery.length > 0}
+          variant={variant}
+          placeholder={t("heading.placeholder")}
+          ariaLabel={t("heading.ariaLabel")}
+          onKeyDown={handleSearchKeyDown}
+        />
+        {variant === "dialog" && query ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("actions.clear")}
+            title={t("actions.clear")}
+            onClick={() => {
+              setQuery("");
+              clearChatSearch();
+              inputRef.current?.focus();
+            }}
+            className="absolute right-0 top-1/2 z-10 -translate-y-1/2"
+          >
+            <X aria-hidden="true" className="!size-4" />
+          </Button>
+        ) : null}
+      </div>
 
-      {showResults && (
+      {variant === "dialog" && showResults ? (
+        <div className="relative -mx-2 min-h-0 min-w-0 w-[calc(100%+1rem)] flex-1 overflow-hidden">
+          <div
+            key={trimmedQuery || "recents"}
+            ref={setDialogResultsEl}
+            id={resultsId}
+            className="mt-4 h-[calc(100%-1rem)] min-w-0 max-w-full overflow-y-auto overflow-x-hidden px-2 pb-10 scrollbar-visible [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1"
+          >
+            <div
+              className={cn(
+                "sticky top-0 z-20 mb-2 flex h-8 min-w-0 max-w-full items-center bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-gradient-to-b after:from-background after:to-transparent after:transition-opacity after:duration-150",
+                showDialogTopFade ? "after:opacity-100" : "after:opacity-0",
+              )}
+            >
+              {trimmedDebouncedQuery.length ? (
+                <Tabs
+                  value={activeCategory}
+                  onValueChange={(value) =>
+                    setActiveCategory(value as SearchCategory)
+                  }
+                  className="min-w-0 max-w-full"
+                >
+                  <TabsList
+                    variant="weight"
+                    aria-label={t("heading.filterAriaLabel")}
+                    className="max-w-full justify-start gap-3 overflow-x-auto font-normal scrollbar-none [&_[data-slot=tabs-trigger]]:font-normal"
+                  >
+                    <TabsTrigger variant="weight" value="all">
+                      {t("sections.results")} ({allResultIds.length})
+                    </TabsTrigger>
+                    {categorySections.map((section) => (
+                      <TabsTrigger
+                        key={section.key}
+                        variant="weight"
+                        value={section.key}
+                      >
+                        {section.label} ({section.children.length})
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              ) : (
+                <h2 className="text-sm font-normal text-muted-foreground/75">
+                  {t("sections.recents")}
+                </h2>
+              )}
+            </div>
+            <div
+              key={`${trimmedQuery}:${activeCategory}`}
+              className="space-y-0.5"
+            >
+              {trimmedDebouncedQuery.length
+                ? visibleResultsContent
+                : recentContent}
+            </div>
+          </div>
+          <div
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-background transition-opacity duration-150",
+              showDialogBottomFade ? "opacity-100" : "opacity-0",
+            )}
+          />
+        </div>
+      ) : null}
+
+      {variant === "page" && showResults && (
         <div
           className="absolute"
           style={{
@@ -544,7 +782,14 @@ export function SearchView({
       )}
 
       {showNoMatches && (
-        <p className="absolute left-1/2 top-[520px] -translate-x-1/2 animate-fade-in text-center text-[14px] italic text-muted-foreground motion-reduce:animate-none">
+        <p
+          className={cn(
+            "animate-fade-in text-center text-sm italic text-muted-foreground motion-reduce:animate-none",
+            variant === "page" &&
+              "absolute left-1/2 top-[520px] -translate-x-1/2",
+            variant === "dialog" && "py-8",
+          )}
+        >
           {t("noMatches", { query: trimmedDebouncedQuery })}
         </p>
       )}

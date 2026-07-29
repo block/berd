@@ -4,6 +4,7 @@ import {
   type AutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import { useProfileCapability } from "@/shared/profile/capabilities";
+import { automationResultMeta } from "../lib/automationResultText";
 import { filterByQuery } from "../lib/filterByQuery";
 
 let automationCache: AutomationTile[] | null = null;
@@ -58,11 +59,10 @@ export function useAutomationSearch(query: string): AutomationTile[] {
       return [];
     }
 
-    return filterByQuery(automations, query, (automation) => [
-      automation.title,
-      automation.schedule,
-      ...(automation.humanReadableInstructions ?? []),
-      ...(automation.instructions ?? []),
-    ]);
+    return filterByQuery(
+      automations.filter((automation) => Boolean(automation.id)),
+      query,
+      (automation) => [automation.title, automationResultMeta(automation)],
+    );
   }, [automations, automationsEnabled, query]);
 }

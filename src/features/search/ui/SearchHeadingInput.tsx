@@ -9,6 +9,7 @@ interface SearchHeadingInputProps {
   activeDescendant?: string | null;
   controlsId?: string;
   isRaised: boolean;
+  variant?: "page" | "dialog";
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
 
@@ -23,7 +24,7 @@ export const SearchHeadingInput = forwardRef<
     ariaLabel,
     activeDescendant,
     controlsId,
-    isRaised,
+    variant = "page",
     onKeyDown,
   },
   ref,
@@ -42,11 +43,12 @@ export const SearchHeadingInput = forwardRef<
       autoCorrect="off"
       autoCapitalize="none"
       spellCheck={false}
-      className="absolute left-10 z-10 w-[calc(100%-80px)] appearance-none border-0 bg-transparent font-sans text-[114px] font-light leading-[0.96] tracking-normal text-foreground shadow-none outline-none ring-0 transition-[top] duration-[250ms] ease-out placeholder:text-foreground placeholder:opacity-10 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 motion-reduce:transition-none"
-      style={{
-        top: isRaised ? "var(--search-heading-raised-top)" : "calc(50% - 90px)",
-        boxShadow: "none",
-      }}
+      className={
+        variant === "dialog"
+          ? "h-12 w-full appearance-none border-0 border-b border-border bg-transparent pl-8 pr-8 font-sans text-sm font-normal text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground focus:border-border focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+          : "absolute left-8 top-5 z-10 h-12 w-[calc(100%-64px)] appearance-none border-0 border-b border-border bg-transparent pl-10 font-sans text-xl font-normal tracking-normal text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground focus:border-border focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+      }
+      style={{ boxShadow: "none" }}
     />
   );
 });

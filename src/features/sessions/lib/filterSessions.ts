@@ -10,6 +10,7 @@ export interface FilterResolvers {
 interface FilterOptions {
   locale?: string;
   getDisplayTitle?: (session: ChatSession) => string;
+  visibleMetadataOnly?: boolean;
 }
 
 function buildSearchableString(
@@ -24,7 +25,7 @@ function buildSearchableString(
     parts.push(session.title);
   }
 
-  if (session.personaId) {
+  if (!options.visibleMetadataOnly && session.personaId) {
     const name = resolvers.getPersonaName(session.personaId);
     if (name) parts.push(name);
   }
@@ -34,19 +35,21 @@ function buildSearchableString(
     if (name) parts.push(name);
   }
 
-  const date = new Date(sessionActivityAt(session));
-  parts.push(
-    formatDate(
-      date,
-      {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      },
-      options.locale,
-    ),
-  );
+  if (!options.visibleMetadataOnly) {
+    const date = new Date(sessionActivityAt(session));
+    parts.push(
+      formatDate(
+        date,
+        {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        },
+        options.locale,
+      ),
+    );
+  }
 
   return parts.join(" ").toLowerCase();
 }

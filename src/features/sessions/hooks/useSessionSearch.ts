@@ -14,6 +14,7 @@ interface UseSessionSearchOptions {
   resolvers: FilterResolvers;
   locale?: string;
   getDisplayTitle?: (session: ChatSession) => string;
+  visibleMetadataOnly?: boolean;
 }
 
 function searchErrorMessage(error: unknown): string {
@@ -32,6 +33,7 @@ export function useSessionSearch({
   resolvers,
   locale,
   getDisplayTitle,
+  visibleMetadataOnly,
 }: UseSessionSearchOptions) {
   const [query, setQuery] = useState("");
   const [submittedSearch, setSubmittedSearch] =
@@ -59,9 +61,10 @@ export function useSessionSearch({
         {
           locale,
           getDisplayTitle,
+          visibleMetadataOnly,
         },
       ),
-    [getDisplayTitle, locale, resolvers],
+    [getDisplayTitle, locale, resolvers, visibleMetadataOnly],
   );
 
   const applyResults = useCallback(

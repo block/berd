@@ -1,5 +1,7 @@
+import { RefreshCw } from "lucide-react";
 import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
 import { automationTitle } from "@/features/automations/lib/automationFormatting";
+import { automationResultMeta } from "../lib/automationResultText";
 import { ResultRow } from "./ResultRow";
 
 interface AutomationResultRowProps {
@@ -7,19 +9,10 @@ interface AutomationResultRowProps {
   automation: AutomationTile;
   fallbackTitle: string;
   ariaLabel: string;
+  query?: string;
   isActive?: boolean;
   onActive?: () => void;
   onSelect: (automationId: string) => void;
-}
-
-function buildMeta(automation: AutomationTile): string {
-  if (automation.humanReadableInstructions?.length) {
-    return automation.humanReadableInstructions.join(" ");
-  }
-  if (automation.instructions?.length) {
-    return automation.instructions.join(" ");
-  }
-  return automation.schedule ?? "";
 }
 
 export function AutomationResultRow({
@@ -27,6 +20,7 @@ export function AutomationResultRow({
   automation,
   fallbackTitle,
   ariaLabel,
+  query,
   isActive,
   onActive,
   onSelect,
@@ -39,8 +33,10 @@ export function AutomationResultRow({
     <ResultRow
       id={rowId}
       title={automationTitle(automation, fallbackTitle)}
-      meta={buildMeta(automation)}
+      meta={automationResultMeta(automation)}
+      icon={<RefreshCw aria-hidden="true" />}
       ariaLabel={ariaLabel}
+      query={query}
       isActive={isActive}
       onActive={onActive}
       onClick={() => onSelect(id)}

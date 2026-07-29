@@ -12,6 +12,22 @@ export interface ExtensionSearchResult {
   state: "enabled" | "available";
 }
 
+export function canonicalExtensionDisplayName(entry: ExtensionEntry): string {
+  return getDisplayName(entry)
+    .normalize("NFKD")
+    .replace(/[\p{M}\p{Cf}\p{Cc}]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+export function extensionSearchIdentity(entry: ExtensionEntry): string {
+  const backendIdentity = entry.config_key
+    .replace(/-(?:platform|stdio)$/u, "")
+    .toLocaleLowerCase();
+  return `${canonicalExtensionDisplayName(entry)}:${backendIdentity}`;
+}
+
 let extensionCache: ExtensionEntry[] | null = null;
 let extensionRequest: Promise<ExtensionEntry[]> | null = null;
 
@@ -58,17 +74,26 @@ export function useExtensionSearch(query: string): ExtensionSearchResult[] {
     };
   }, []);
 
-  return useMemo(
-    () =>
-      filterByQuery(extensions, query, (entry) => [
-        getDisplayName(entry),
-        entry.name,
-        entry.description,
-        entry.type,
-      ]).map((entry) => ({
-        entry,
-        state: entry.enabled ? "enabled" : "available",
-      })),
-    [extensions, query],
-  );
+  return useMemo(() => {
+    const matches = filterByQuery(extensions, query, (entry) => [
+      getDisplayName(entry),
+      entry.description,
+    ]);
+    const uniqueMatches = new Map<string, ExtensionEntry>();
+    for (const entry of matches) {
+      // The backend may expose the same user-facing connection through more
+      // than one transport/config record. Global search is destination-first,
+      // so collapse entries by their display name rather than backend type or
+      // config key.
+      const identity = extensionSearchIdentity(entry);
+      const existing = uniqueMatches.get(identity);
+      if (!existing || (!existing.enabled && entry.enabled)) {
+        uniqueMatches.set(identity, entry);
+      }
+    }
+    return [...uniqueMatches.values()].map((entry) => ({
+      entry,
+      state: entry.enabled ? "enabled" : "available",
+    }));
+  }, [extensions, query]);
 }

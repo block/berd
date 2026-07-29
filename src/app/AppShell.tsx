@@ -5012,6 +5012,7 @@ export function AppShell({
               onOpenAgent={handleStartChatWithAgent}
               onOpenAutomation={handleOpenAutomationFromSearch}
               onOpenSkill={handleStartChatWithSkill}
+              onOpenSettings={openSettings}
               onTagHomeComposerAgent={handleTagHomeComposerAgent}
               onTagHomeComposerProject={handleTagHomeComposerProject}
               onTagHomeComposerSkill={handleTagHomeComposerSkill}

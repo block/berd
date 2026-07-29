@@ -91,6 +91,34 @@ describe("buildSessionSearchResults", () => {
     expect(results[0].session.id).toBe("session-2");
   });
 
+  it("can restrict metadata matching to fields shown by global search", () => {
+    const sessions = [
+      makeSession({
+        id: "session-1",
+        title: "Architecture notes",
+        personaId: "persona-1",
+        updatedAt: "2026-04-10T12:00:00Z",
+      }),
+    ];
+
+    expect(
+      buildSessionSearchResults(sessions, "builder", [], resolvers, {
+        visibleMetadataOnly: true,
+      }),
+    ).toEqual([]);
+    expect(
+      buildSessionSearchResults(sessions, "friday", [], resolvers, {
+        locale: "en-US",
+        visibleMetadataOnly: true,
+      }),
+    ).toEqual([]);
+    expect(
+      buildSessionSearchResults(sessions, "architecture", [], resolvers, {
+        visibleMetadataOnly: true,
+      }),
+    ).toHaveLength(1);
+  });
+
   it("includes message-only matches even when metadata does not match", () => {
     const sessions = [
       makeSession({

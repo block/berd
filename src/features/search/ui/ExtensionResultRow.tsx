@@ -1,3 +1,4 @@
+import { Plug } from "lucide-react";
 import {
   getDisplayName,
   type ExtensionEntry,
@@ -9,6 +10,7 @@ interface ExtensionResultRowProps {
   entry: ExtensionEntry;
   stateLabel: string;
   ariaLabel: string;
+  query?: string;
   isActive?: boolean;
   onActive?: () => void;
   onSelect: (entry: ExtensionEntry) => void;
@@ -19,6 +21,7 @@ export function ExtensionResultRow({
   entry,
   stateLabel,
   ariaLabel,
+  query,
   isActive,
   onActive,
   onSelect,
@@ -32,7 +35,9 @@ export function ExtensionResultRow({
       id={id}
       title={title}
       meta={meta}
+      icon={<Plug aria-hidden="true" />}
       ariaLabel={ariaLabel}
+      query={query}
       isActive={isActive}
       onActive={onActive}
       onClick={() => onSelect(entry)}
