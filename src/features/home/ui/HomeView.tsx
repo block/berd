@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
-import { PageHeaderButton } from "@/shared/ui/page-header-button";
+import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { clampLayoutCamera } from "../lib/layoutCamera";
 import { getPinnedHomeChatSessionIds } from "../lib/pinnedHomeChats";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
@@ -143,22 +143,24 @@ export function HomeView({
 
     setTopBarActions(
       <>
-        <PageHeaderButton
+        <TopBarIconButton
           type="button"
           onClick={handleCleanUp}
           disabled={!hasCleanableWidgets}
           aria-label={cleanUpControlTitle}
           title={cleanUpControlTitle}
-          leftIcon={<LayoutGrid aria-hidden="true" />}
-        />
-        <PageHeaderButton
+        >
+          <LayoutGrid aria-hidden="true" />
+        </TopBarIconButton>
+        <TopBarIconButton
           type="button"
           onClick={handleRecenter}
           disabled={!recenterTarget}
           aria-label={recenterTitle}
           title={recenterTitle}
-          leftIcon={<Crosshair aria-hidden="true" />}
-        />
+        >
+          <Crosshair aria-hidden="true" />
+        </TopBarIconButton>
       </>,
     );
 

@@ -1,17 +1,7 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { TopBar } from "../TopBar";
-
-const DEFAULT_WINDOW_WIDTH = 1440;
-
-function setWindowWidth(width: number) {
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    value: width,
-  });
-}
 
 function renderTopBar(props: Partial<Parameters<typeof TopBar>[0]> = {}) {
   return render(
@@ -24,36 +14,21 @@ function renderTopBar(props: Partial<Parameters<typeof TopBar>[0]> = {}) {
 }
 
 describe("TopBar", () => {
-  afterEach(() => {
-    setWindowWidth(DEFAULT_WINDOW_WIDTH);
-  });
-
-  it("navigates home when the Berd logo is clicked", async () => {
-    const user = userEvent.setup();
-    const onGoHome = vi.fn();
-
-    renderTopBar({ onGoHome });
-
-    await user.click(screen.getByRole("button", { name: /Berd home/i }));
-
-    expect(onGoHome).toHaveBeenCalledOnce();
-  });
-
-  it("keeps the Berd home logo at its top-bar brand size", () => {
-    renderTopBar({ onGoHome: vi.fn() });
-
-    const button = screen.getByRole("button", { name: /Berd home/i });
-    const icon = button.querySelector('[role="img"]');
-
-    expect(icon).toHaveClass("size-5");
-  });
-
-  it("omits the Berd home logo when onGoHome is not provided", () => {
+  it("does not render the Berd home logo", () => {
     renderTopBar();
 
     expect(
       screen.queryByRole("button", { name: /Berd home/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not render breadcrumbs", () => {
+    renderTopBar({
+      breadcrumbs: [{ label: "Chat" }, { label: "Model and system info" }],
+    });
+
+    expect(screen.queryByText("Chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model and system info")).not.toBeInTheDocument();
   });
 
   it("omits search when onSearchClick is not provided", () => {
@@ -72,35 +47,35 @@ describe("TopBar", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps only the current breadcrumb at narrow widths", () => {
-    setWindowWidth(900);
-
-    renderTopBar({
+  it("keeps a long chat title in the flexible middle track", () => {
+    const { container } = renderTopBar({
       breadcrumbs: [
-        { label: "Chat" },
-        { label: "Berd" },
-        { label: "Model and system info" },
+        {
+          id: "chat-session",
+          label: "A very long chat title that must truncate before controls",
+        },
       ],
+      onSearchClick: vi.fn(),
+      rightRailLabel: "Details",
+      showRightRailToggle: true,
     });
 
-    expect(screen.queryByText("Chat")).not.toBeInTheDocument();
-    expect(screen.queryByText("Berd")).not.toBeInTheDocument();
-    expect(screen.getByText("Model and system info")).toBeInTheDocument();
+    const header = container.querySelector("header");
+    const title = screen.getByText(/A very long chat title/);
+    expect(header).toHaveClass(
+      "grid-cols-[calc(var(--app-sidebar-outer-width)+24px)_minmax(0,1fr)_auto]",
+    );
+    expect(title).toHaveClass("truncate");
+    expect(title).not.toHaveClass("absolute");
   });
 
-  it("keeps toolbar controls available at narrow widths", () => {
-    setWindowWidth(900);
-
+  it("keeps right-side toolbar controls available", () => {
     renderTopBar({
       rightRailLabel: "Details",
-      onGoHome: vi.fn(),
       onSearchClick: vi.fn(),
       showRightRailToggle: true,
     });
 
-    expect(
-      screen.getByRole("button", { name: /Berd home/i }),
-    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /search/i })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /feedback/i }),

@@ -155,6 +155,7 @@ export function AppShellLayout({
 
   const shellStyle = {
     "--project-tint": projectTint ?? "transparent",
+    "--app-sidebar-outer-width": `${sidebarOuterWidth}px`,
   } as CSSProperties;
   useFocusRegion(
     useMemo(

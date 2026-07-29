@@ -4418,45 +4418,18 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("shows the page title as the top bar header on subpages", async () => {
+  it("keeps non-chat page titles and breadcrumbs out of the top bar", async () => {
     const user = userEvent.setup();
     renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
-
-    expect(
-      screen.queryByRole("link", { name: "goose" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Home" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText("Agents")).toBeInTheDocument();
-  });
-
-  it("shows and navigates from third-level Skills breadcrumbs", async () => {
-    const user = userEvent.setup();
-    renderAppShell();
+    expect(screen.queryByText("Agents")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
     await user.click(screen.getByRole("button", { name: "Open skill detail" }));
-
-    expect(screen.getByRole("link", { name: "Skills" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Code Review" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await user.click(screen.getByRole("link", { name: "Skills" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("skill-route")).toHaveTextContent("list");
-    });
-  });
-
-  it("shows Automations history as a third-level breadcrumb", async () => {
-    const user = userEvent.setup();
-    renderAppShell();
+    expect(screen.queryByRole("link", { name: "Skills" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Code Review" })).toBeNull();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -4464,85 +4437,26 @@ describe("AppShell global navigation", () => {
     await user.click(
       screen.getByRole("button", { name: "Open automation history" }),
     );
+    expect(screen.queryByRole("link", { name: "Automations" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "History" })).toBeNull();
 
-    expect(
-      screen.getByRole("link", { name: "Automations" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-  });
-
-  it("shows and navigates from Builderbot task breadcrumbs", async () => {
     enableBuilderbotExperiment();
-    const user = userEvent.setup();
-    renderAppShell();
-
     await user.click(
       screen.getByRole("button", { name: "Sidebar builderbot" }),
     );
     await user.click(
       screen.getByRole("button", { name: "Open builderbot task" }),
     );
+    expect(screen.queryByRole("link", { name: "Builderbot" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "TASK-1" })).toBeNull();
 
-    expect(
-      screen.getByRole("link", { name: "Builderbot" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "TASK-1" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await user.click(screen.getByRole("link", { name: "Tasks" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
-        '"surface":"overview"',
-      );
-    });
-    expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
-      '"tab":"tasks"',
-    );
-  });
-
-  it("shows and navigates from Builderbot automation breadcrumbs", async () => {
-    enableBuilderbotExperiment();
-    const user = userEvent.setup();
-    renderAppShell();
-
-    await user.click(
-      screen.getByRole("button", { name: "Sidebar builderbot" }),
-    );
     await user.click(
       screen.getByRole("button", { name: "Open builderbot automation" }),
     );
-
-    expect(
-      screen.getByRole("link", { name: "Builderbot" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Automations" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Daily docs" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await user.click(screen.getByRole("link", { name: "Automations" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
-        '"surface":"overview"',
-      );
-    });
-    expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
-      '"tab":"automations"',
-    );
+    expect(screen.queryByRole("link", { name: "Daily docs" })).toBeNull();
   });
 
-  it("shows Chat / project / session title for a chat inside a project", async () => {
+  it("shows only the session title for a project chat", async () => {
     const user = userEvent.setup();
     const { container } = renderAppShell();
 
@@ -4585,10 +4499,10 @@ describe("AppShell global navigation", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Chat")).toBeInTheDocument();
-      expect(screen.getByText("Sample Project")).toBeInTheDocument();
       expect(screen.getByText("MCPs vs Extensions")).toBeInTheDocument();
     });
+    expect(screen.queryByText("Sample Project")).toBeNull();
+    expect(screen.queryByText("Chat")).toBeNull();
     expect(
       (container.firstElementChild as HTMLElement).style.getPropertyValue(
         "--project-tint",
