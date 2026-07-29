@@ -144,6 +144,7 @@ import {
   focusSessionWindow,
   releaseSession,
 } from "@/features/chat/lib/sessionWindowCommands";
+import { sendSessionWindowSearchTarget } from "@/features/chat/lib/sessionWindowSearchEvents";
 import { useSessionHandoffSource } from "@/features/chat/hooks/useSessionHandoffSource";
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
@@ -171,6 +172,13 @@ import {
   hasOpenKeyboardOwningLayer,
 } from "./focus/FocusRegionProvider";
 import { SessionQuickSwitcher } from "@/features/sessions/ui/SessionQuickSwitcher";
+import { SearchView } from "@/features/search/ui/SearchView";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/shared/ui/dialog";
 import { useForkSession } from "@/features/sessions/hooks/useForkSession";
 import {
   GlobalComposerPill,
@@ -478,17 +486,6 @@ function isTerminalOwnedHistoryShortcut(event: KeyboardEvent) {
 }
 
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
-  // Connections graduated from Settings to a main navigation surface; keep
-  // legacy settings deep links (including the older "extensions" section)
-  // landing on the new top-level view.
-  if (window.location.pathname === "/settings") {
-    const legacySection = new URLSearchParams(window.location.search).get(
-      "section",
-    );
-    if (legacySection === "connections" || legacySection === "extensions") {
-      return "connections";
-    }
-  }
   if (initialSettingsSection) return "settings";
   if (
     isDesignSystemExplorerEnabled() &&
@@ -681,7 +678,13 @@ export function AppShell({
   children?: React.ReactNode;
   onLoggedOut?: (status: AuthStatus) => void;
 }) {
-  const { t } = useTranslation(["chat", "common", "agents", "settings"]);
+  const { t } = useTranslation([
+    "chat",
+    "common",
+    "agents",
+    "settings",
+    "search",
+  ]);
   const {
     expandSidebar,
     handleCornerResizeDoubleClick,
@@ -711,6 +714,8 @@ export function AppShell({
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
   );
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [searchEscapeRequest, setSearchEscapeRequest] = useState(0);
   const [
     pendingWorkspaceCleanupConfirmation,
     setPendingWorkspaceCleanupConfirmation,
@@ -2788,8 +2793,13 @@ export function AppShell({
   );
 
   const handleStartChatWithSkill = useCallback(
-    (skill: SkillInfo, projectId?: string | null) => {
+    (
+      skill: SkillInfo,
+      projectId?: string | null,
+      onNavigationAccepted?: () => void,
+    ) => {
       guardAppNavigation(() => {
+        onNavigationAccepted?.();
         const project = projectId
           ? projects.find((candidate) => candidate.id === projectId)
           : undefined;
@@ -2869,8 +2879,9 @@ export function AppShell({
   );
 
   const handleStartChatWithAgent = useCallback(
-    (agentId: string) => {
+    (agentId: string, onNavigationAccepted?: () => void) => {
       guardAppNavigation(() => {
+        onNavigationAccepted?.();
         if (activeView === "agents" && agentsPersonaId === agentId) {
           setGlobalComposerFocusRequest((request) => request + 1);
           return;
@@ -3462,21 +3473,6 @@ export function AppShell({
     ],
   );
 
-  const openConnections = useCallback(() => {
-    guardAppNavigation(() => {
-      resetGlobalComposerTransition();
-      resetNavigationSecondary();
-      setActiveSession(null);
-      clearSettingsSectionUrl();
-      setActiveView("connections");
-    });
-  }, [
-    guardAppNavigation,
-    resetGlobalComposerTransition,
-    resetNavigationSecondary,
-    setActiveSession,
-  ]);
-
   const leaveSecondarySurface = useCallback(() => {
     if (returnToAgentBuilderSettingsTarget()) {
       return;
@@ -3529,13 +3525,6 @@ export function AppShell({
     const handleOpenSettingsEvent = (event: Event) => {
       const detail = (event as CustomEvent<OpenSettingsEventDetail>).detail;
       const section = detail?.section;
-      // Connections is a main navigation surface now; keep legacy
-      // open-settings requests (and the older "extensions" section) working.
-      if (section === "connections" || section === "extensions") {
-        setAgentBuilderSettingsReturnTarget(null);
-        openConnections();
-        return;
-      }
       setAgentBuilderSettingsReturnTarget(
         detail?.returnTarget?.type === "agent-builder-provider-setup"
           ? detail.returnTarget
@@ -3554,7 +3543,7 @@ export function AppShell({
         handleOpenSettingsEvent as EventListener,
       );
     };
-  }, [openConnections, openSettings]);
+  }, [openSettings]);
 
   const settleWorkspaceCleanupConfirmation = useCallback(
     (confirmed: boolean) => {
@@ -3942,33 +3931,62 @@ export function AppShell({
 
   const handleSelectSearchResult = useCallback(
     (sessionId: string, messageId?: string, query?: string) => {
-      if (messageId) {
-        useChatStore
-          .getState()
-          .setScrollTargetMessage(sessionId, messageId, query);
-      }
-      handleSelectSession(sessionId);
+      guardAppNavigation(() => {
+        setSearchDialogOpen(false);
+        if (messageId) {
+          useChatStore
+            .getState()
+            .setScrollTargetMessage(sessionId, messageId, query);
+        }
+        const sessionWindowStore = useSessionWindowStore.getState();
+        if (
+          isMultiWindowEnabled &&
+          sessionWindowStore.isOpenInWindow(sessionId)
+        ) {
+          const windowLabel = sessionWindowStore.getWindowLabel(sessionId);
+          if (messageId && windowLabel) {
+            void sendSessionWindowSearchTarget(windowLabel, {
+              sessionId,
+              messageId,
+              query,
+            }).then(() => focusSessionWindow(sessionId));
+          } else {
+            void focusSessionWindow(sessionId);
+          }
+          return;
+        }
+        selectSessionDirect(sessionId);
+      });
     },
-    [handleSelectSession],
+    [guardAppNavigation, isMultiWindowEnabled, selectSessionDirect],
   );
 
   const handleForkChat = useForkSession({ onForked: handleSelectSession });
 
+  const handleOpenSettingsFromSearch = useCallback(
+    (section: SectionId) => {
+      guardAppNavigation(() => {
+        setSearchDialogOpen(false);
+        openSettings(section);
+      });
+    },
+    [guardAppNavigation, openSettings],
+  );
+
   const handleOpenExtensionFromSearch = useCallback(
     (_entry: ExtensionEntry) => {
-      // Connections is a single page now; company-managed and custom
-      // connections both live on it, so no per-entry tab routing is needed.
-      openConnections();
+      handleOpenSettingsFromSearch("connections");
     },
-    [openConnections],
+    [handleOpenSettingsFromSearch],
   );
 
   const handleOpenAutomationFromSearch = useCallback(
-    (automationId: string) => {
+    (automationId: string, onNavigationAccepted?: () => void) => {
       if (!isAutomationsFeatureEnabled) {
         return;
       }
       guardAppNavigation(() => {
+        onNavigationAccepted?.();
         resetNavigationSecondary();
         replaceNextNavigationEntryRef.current = false;
         setAutomationsRoute({
@@ -4629,10 +4647,10 @@ export function AppShell({
         toggleSidebar();
         return;
       }
-      // Universal search (default mod+k)
+      // Global search dialog (default mod+k).
       if (eventMatchesShortcutCommand(e, "navigation.search")) {
         e.preventDefault();
-        handleNavigate("search");
+        setSearchDialogOpen(true);
         return;
       }
       // Session quick switcher (default mod+p)
@@ -4847,7 +4865,7 @@ export function AppShell({
           rightRailLabel,
           onToggleRightRail: toggleRightRail,
           onFeedbackClick: isFeedbackEnabled ? handleFeedbackClick : undefined,
-          onSearchClick: () => handleNavigate("search"),
+          onSearchClick: () => setSearchDialogOpen(true),
         }}
         navigationPanes={{
           collapsed: false,
@@ -5012,7 +5030,6 @@ export function AppShell({
               onOpenAgent={handleStartChatWithAgent}
               onOpenAutomation={handleOpenAutomationFromSearch}
               onOpenSkill={handleStartChatWithSkill}
-              onOpenSettings={openSettings}
               onTagHomeComposerAgent={handleTagHomeComposerAgent}
               onTagHomeComposerProject={handleTagHomeComposerProject}
               onTagHomeComposerSkill={handleTagHomeComposerSkill}
@@ -5099,6 +5116,54 @@ export function AppShell({
         onSkip={handleProjectWorkspaceStartupNameSkip}
         onSubmit={handleProjectWorkspaceStartupNameSubmit}
       />
+      <Dialog open={searchDialogOpen} onOpenChange={setSearchDialogOpen}>
+        <DialogContent
+          size="xl"
+          surface="solid"
+          showCloseButton={false}
+          overlayClassName="bg-[var(--overlay-search-scrim)] backdrop-filter-none [-webkit-backdrop-filter:none]"
+          className="h-[clamp(320px,calc(100dvh-4rem),536px)] overflow-hidden rounded-[var(--radius-lg)] px-6 pt-2 pb-6"
+          onEscapeKeyDown={(event) => {
+            event.preventDefault();
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest('[data-search-view="true"]')
+            ) {
+              return;
+            }
+            setSearchEscapeRequest((request) => request + 1);
+          }}
+        >
+          <DialogTitle className="sr-only">{t("search:title")}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("search:placeholderDescription")}
+          </DialogDescription>
+          <SearchView
+            variant="dialog"
+            escapeRequest={searchEscapeRequest}
+            onExit={() => setSearchDialogOpen(false)}
+            onSelectSearchResult={handleSelectSearchResult}
+            onOpenExtension={handleOpenExtensionFromSearch}
+            onOpenAgent={(agentId) => {
+              handleStartChatWithAgent(agentId, () =>
+                setSearchDialogOpen(false),
+              );
+            }}
+            onOpenAutomation={(automationId) => {
+              handleOpenAutomationFromSearch(automationId, () =>
+                setSearchDialogOpen(false),
+              );
+            }}
+            onOpenSkill={(skill) => {
+              handleStartChatWithSkill(skill, undefined, () =>
+                setSearchDialogOpen(false),
+              );
+            }}
+            onOpenSettings={handleOpenSettingsFromSearch}
+          />
+        </DialogContent>
+      </Dialog>
       <SessionQuickSwitcher
         open={quickSwitcherOpen}
         onOpenChange={setQuickSwitcherOpen}

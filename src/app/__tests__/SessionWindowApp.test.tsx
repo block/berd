@@ -26,6 +26,13 @@ const handoffListeners = vi.hoisted(() => ({
   available: undefined as
     | ((payload: SessionHandoffSnapshotAvailable) => void)
     | undefined,
+  searchTarget: undefined as
+    | ((payload: {
+        sessionId: string;
+        messageId: string;
+        query?: string;
+      }) => void)
+    | undefined,
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -52,6 +59,15 @@ vi.mock("@/features/chat/lib/sessionHandoffEvents", () => ({
     handoffListeners.available = handler;
     return Promise.resolve(() => {
       handoffListeners.available = undefined;
+    });
+  }),
+}));
+
+vi.mock("@/features/chat/lib/sessionWindowSearchEvents", () => ({
+  listenSessionWindowSearchTarget: vi.fn((handler) => {
+    handoffListeners.searchTarget = handler;
+    return Promise.resolve(() => {
+      handoffListeners.searchTarget = undefined;
     });
   }),
 }));
@@ -179,6 +195,7 @@ describe("SessionWindowApp", () => {
   beforeEach(() => {
     vi.useRealTimers();
     handoffListeners.available = undefined;
+    handoffListeners.searchTarget = undefined;
     useSessionWindowStore.getState().setSnapshot([]);
     useChatStore.setState({
       messagesBySession: {},
@@ -212,6 +229,25 @@ describe("SessionWindowApp", () => {
     expect(
       await screen.findByText(/can.t find this session/i),
     ).toBeInTheDocument();
+  });
+
+  it("applies message search targets sent from the main window", async () => {
+    seedSession();
+    renderSessionWindow();
+    await screen.findByTestId("chat-view");
+    await waitFor(() => expect(handoffListeners.searchTarget).toBeDefined());
+
+    act(() => {
+      handoffListeners.searchTarget?.({
+        sessionId: "session-1",
+        messageId: "message-2",
+        query: "matched text",
+      });
+    });
+
+    expect(
+      useChatStore.getState().scrollTargetMessageBySession["session-1"],
+    ).toEqual({ messageId: "message-2", query: "matched text" });
   });
 
   it("mounts security confirmations when security ML is enabled", async () => {

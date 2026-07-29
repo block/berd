@@ -417,6 +417,7 @@
      content ghosts through it. Blur radii stay modest for WKWebView
      performance (see --backdrop-composer-glass). */
   --overlay-scrim: rgba(255, 255, 255, 0.12);
+  --overlay-search-scrim: rgba(0, 0, 0, 0.15);
   --backdrop-overlay-glass: blur(8px) saturate(130%) brightness(1.03);
   --backdrop-popover-glass: blur(24px) saturate(150%);
   --overlay-global-composer-shim: rgba(255, 255, 255, 0.28);
@@ -852,6 +853,7 @@
   --surface-glass-strong-fg: var(--color-gray-900);
   --surface-popover-glass: rgba(20, 20, 20, 0.35);
   --overlay-scrim: rgba(0, 0, 0, 0.25);
+  --overlay-search-scrim: rgba(0, 0, 0, 0.15);
   --backdrop-overlay-glass: blur(8px) saturate(130%);
   --backdrop-popover-glass: blur(24px) saturate(150%);
   --overlay-global-composer-shim: rgba(255, 255, 255, 0.18);

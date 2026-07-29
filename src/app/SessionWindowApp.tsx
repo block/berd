@@ -8,6 +8,7 @@ import {
   listenSessionHandoffSnapshotAvailable,
   type SessionHandoffSnapshotAvailable,
 } from "@/features/chat/lib/sessionHandoffEvents";
+import { listenSessionWindowSearchTarget } from "@/features/chat/lib/sessionWindowSearchEvents";
 import {
   activateSession,
   loadSessionMessages,
@@ -147,6 +148,25 @@ export function SessionWindowApp({
   const handleToggleRightRail = useCallback(() => {
     setRightRailOpen(!isRightRailOpen);
   }, [isRightRailOpen, setRightRailOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listenSessionWindowSearchTarget((target) => {
+      if (target.sessionId === sessionId) {
+        useChatStore
+          .getState()
+          .setScrollTargetMessage(sessionId, target.messageId, target.query);
+      }
+    }).then((cleanup) => {
+      unlisten = cleanup;
+      if (cancelled) cleanup();
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     let cancelled = false;

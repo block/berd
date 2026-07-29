@@ -73,6 +73,8 @@ function DialogOverlay({
   );
 }
 
+type DialogSurface = "glass" | "solid";
+
 function DialogContent({
   className,
   children,
@@ -80,12 +82,14 @@ function DialogContent({
   positionerClassName,
   showCloseButton = true,
   size = "lg",
+  surface = "glass",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   overlayClassName?: string;
   positionerClassName?: string;
   showCloseButton?: boolean;
   size?: DialogSize;
+  surface?: DialogSurface;
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
@@ -100,7 +104,10 @@ function DialogContent({
         <DialogPrimitive.Content
           data-slot="dialog-content"
           className={cn(
-            "group/dialog pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full gap-4 overflow-y-auto rounded-md bg-[var(--surface-popover-glass)] p-6 shadow-[var(--shadow-modal)] [backdrop-filter:var(--backdrop-popover-glass)] [-webkit-backdrop-filter:var(--backdrop-popover-glass)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+            "group/dialog pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full gap-4 overflow-y-auto rounded-md p-6 shadow-[var(--shadow-modal)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+            surface === "glass"
+              ? "bg-[var(--surface-popover-glass)] [backdrop-filter:var(--backdrop-popover-glass)] [-webkit-backdrop-filter:var(--backdrop-popover-glass)]"
+              : "bg-background text-foreground backdrop-filter-none [-webkit-backdrop-filter:none]",
             // Zoned mode: a DialogBody child switches the content to a pinned
             // header / scrollable body / pinned footer column. Padding moves
             // from the surface to the zones (see DialogHeader/Body/Footer).

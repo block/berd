@@ -192,6 +192,7 @@ const rawCssColorAllowlist = new Set([
   // Glass/overlay surfaces consumed via inline styles or arbitrary values
   "surface-popover-glass",
   "overlay-scrim",
+  "overlay-search-scrim",
   "overlay-global-composer-shim",
   "overlay-global-composer-shim-peak",
   "overlay-global-composer-shim-clear",

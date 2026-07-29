@@ -26,7 +26,6 @@ import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import type { CommandOutcome } from "@/features/berdctl/navigation";
-import type { SectionId } from "@/features/settings/ui/settingsSections";
 import type {
   AppNavigationLocation,
   AppNavigationUpdateOptions,
@@ -110,7 +109,6 @@ interface AppShellContentProps {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
-  onOpenSettings: (sectionId: SectionId) => void;
   onTagHomeComposerAgent: (agentId: string) => void;
   onTagHomeComposerProject: (projectId: string) => void;
   onTagHomeComposerSkill: (skill: SkillInfo) => void;
@@ -173,7 +171,6 @@ export function AppShellContent({
   onOpenAgent,
   onOpenAutomation,
   onOpenSkill,
-  onOpenSettings,
   onTagHomeComposerAgent,
   onTagHomeComposerProject,
   onTagHomeComposerSkill,
@@ -262,7 +259,6 @@ export function AppShellContent({
     onOpenAgent,
     onOpenAutomation,
     onOpenExtension,
-    onOpenSettings,
     onOpenProjectSettings,
     onLoggedOut,
     onOpenSkill,
@@ -360,7 +356,6 @@ interface RenderRouteContentOptions {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
-  onOpenSettings: (sectionId: SectionId) => void;
   onLoggedOut?: (status: AuthStatus) => void;
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
@@ -405,7 +400,6 @@ function renderRouteContent({
   onOpenAgent,
   onOpenAutomation,
   onOpenExtension,
-  onOpenSettings,
   onOpenProjectSettings,
   onLoggedOut,
   onOpenSkill,
@@ -499,7 +493,6 @@ function renderRouteContent({
           onOpenAgent={onOpenAgent}
           onOpenAutomation={onOpenAutomation}
           onOpenSkill={onOpenSkill}
-          onOpenSettings={onOpenSettings}
         />
       );
     case "session-history":

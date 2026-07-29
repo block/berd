@@ -25,6 +25,7 @@ interface SessionWindowState {
   handoffs: Record<string, SessionWindowHandoff>;
   setSnapshot: (entries: SessionWindowEntry[]) => void;
   isOpenInWindow: (sessionId: string) => boolean;
+  getWindowLabel: (sessionId: string) => string | undefined;
   isInHandoff: (sessionId: string) => boolean;
 }
 
@@ -54,5 +55,6 @@ export const useSessionWindowStore = create<SessionWindowState>((set, get) => ({
     set({ openSessions, handoffs });
   },
   isOpenInWindow: (sessionId) => sessionId in get().openSessions,
+  getWindowLabel: (sessionId) => get().openSessions[sessionId],
   isInHandoff: (sessionId) => sessionId in get().handoffs,
 }));

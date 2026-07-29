@@ -78,6 +78,7 @@ interface SearchViewProps {
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
   onOpenSettings?: (sectionId: SectionId) => void;
+  escapeRequest?: number;
 }
 
 const DEBOUNCE_MS = 100;
@@ -95,6 +96,7 @@ export function SearchView({
   onOpenAutomation,
   onOpenSkill,
   onOpenSettings,
+  escapeRequest = 0,
 }: SearchViewProps) {
   const { t, i18n } = useTranslation([
     "search",
@@ -260,27 +262,6 @@ export function SearchView({
     automationResults.length,
   ]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-
-      event.preventDefault();
-      if (query.trim()) {
-        setQuery("");
-        clearChatSearch();
-        inputRef.current?.focus();
-        return;
-      }
-
-      onExit();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearChatSearch, onExit, query]);
-
   const recentChatResults = useMemo<SessionSearchDisplayResult[]>(
     () =>
       [...visibleSessions]
@@ -368,6 +349,33 @@ export function SearchView({
       element.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }, [activeResultId]);
+
+  const handleEscape = useCallback(() => {
+    if (query.trim()) {
+      setQuery("");
+      clearChatSearch();
+      inputRef.current?.focus();
+    } else {
+      onExit();
+    }
+  }, [clearChatSearch, onExit, query]);
+
+  const handledEscapeRequestRef = useRef(escapeRequest);
+  useEffect(() => {
+    if (handledEscapeRequestRef.current === escapeRequest) return;
+    handledEscapeRequestRef.current = escapeRequest;
+    handleEscape();
+  }, [escapeRequest, handleEscape]);
+
+  const handleEscapeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      handleEscape();
+    },
+    [handleEscape],
+  );
 
   const handleSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -590,7 +598,7 @@ export function SearchView({
   if (settingsResults.length > 0 && onOpenSettings) {
     resultSections.push({
       key: "settings",
-      label: t("settings:navigationLabel"),
+      label: t("sections.settings"),
       tone: "automation",
       children: settingsResults.map((item) => {
         const resultId = searchResultId("settings", item.id);
@@ -643,6 +651,8 @@ export function SearchView({
           "min-h-0 min-w-0 max-w-full flex flex-col overflow-visible [contain:inline-size]",
       )}
       style={variant === "page" ? searchViewStyle : undefined}
+      data-search-view="true"
+      onKeyDownCapture={handleEscapeKeyDown}
     >
       <div className={cn(variant === "dialog" && "relative shrink-0")}>
         {variant === "dialog" ? (

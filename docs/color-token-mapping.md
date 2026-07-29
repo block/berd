@@ -186,6 +186,7 @@ The authoritative list of raw-CSS color tokens (kept in sync with the script):
 # Glass/overlay surfaces (inline styles + arbitrary values)
 --surface-popover-glass
 --overlay-scrim
+--overlay-search-scrim
 --overlay-global-composer-shim
 --overlay-global-composer-shim-peak
 --overlay-global-composer-shim-clear
@@ -212,6 +213,7 @@ exact machine-checked contract.
 | `filter-chat-responding-goose` | `filter` property | Non-color CSS property, not a color utility. |
 | `app-top-bar-control-hover-opacity` | `opacity` via `hover:opacity-[var(...)]` | Opacity value, consumed through an arbitrary-value utility. |
 | `chat-context-panel-*` | `.chat-context-panel-surface` scoped block | Scoped palette applied through a class, not per-element color utilities. |
+| `overlay-search-scrim` | Global search dialog overlay | Search intentionally uses a lighter, blur-free scrim than standard dialogs while retaining a theme-governed semantic color. |
 | `overlay-global-composer-shim`, `overlay-global-composer-shim-peak`, `overlay-global-composer-shim-clear` | `.global-composer-shim` and `@keyframes global-composer-shim-*` | Main-canvas glass shim and white midpoint cross-fade are authored in raw CSS during the global composer handoff, not through per-element color utilities. |
 
 ## Decision Tree

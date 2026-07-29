@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -204,6 +204,37 @@ describe("SearchView", () => {
     expect(input).not.toHaveAttribute("aria-activedescendant");
   });
 
+  it("uses localized copy for settings results", async () => {
+    const user = userEvent.setup();
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(input, "animated avatars");
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open Animated avatars settings",
+      }),
+    ).toHaveTextContent("Settings > Animated avatars");
+    expect(
+      screen.getByRole("tab", { name: "Settings (1)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: /Settings navigation/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("excludes automations without IDs from results and counts", async () => {
     mockListSkills.mockResolvedValue([]);
     useAgentStore.setState({ personas: [] });
@@ -250,6 +281,37 @@ describe("SearchView", () => {
     expect(
       await screen.findByText('No matches for "hidden midnight schedule"'),
     ).toBeInTheDocument();
+  });
+
+  it("clears the query before Escape exits search", async () => {
+    const user = userEvent.setup();
+    const onExit = vi.fn();
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={onExit}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(input, "reviewer");
+    const reviewer = await screen.findByRole("button", {
+      name: "Start chat with Reviewer",
+    });
+    fireEvent.focus(reviewer);
+    fireEvent.keyDown(reviewer, { key: "Escape" });
+
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    expect(onExit).not.toHaveBeenCalled();
+
+    await user.keyboard("{Escape}");
+    expect(onExit).toHaveBeenCalledOnce();
   });
 
   it("limits keyboard navigation to the selected result category", async () => {

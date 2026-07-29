@@ -26,7 +26,8 @@
     "extensions": "Extensiones",
     "skills": "Skills",
     "recents": "Recientes",
-    "results": "Resultados"
+    "results": "Resultados",
+    "settings": "Configuración"
   },
   "states": {
     "available": "Disponible",

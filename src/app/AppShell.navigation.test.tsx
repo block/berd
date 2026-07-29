@@ -13,6 +13,7 @@ import { getAppNavigationController } from "@/features/berdctl/navigation";
 import { resetAgentBuilderSourceLifecycleForTests } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
@@ -56,6 +57,7 @@ const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockAcpGetSessionInfo = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
+const mockListExtensions = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockPathExists = vi.hoisted(() => vi.fn());
 const mockCheckAllProviderStatus = vi.hoisted(() => vi.fn());
@@ -82,6 +84,8 @@ const mockListenSessionDeepLinkErrors = vi.hoisted(() => vi.fn());
 const mockAfterNextPaint = vi.hoisted(() => ({
   callbacks: [] as Array<{ callback: () => void; cancelled: boolean }>,
 }));
+const mockSessionWindowSupport = vi.hoisted(() => ({ supported: false }));
+const mockFocusSessionWindow = vi.hoisted(() => vi.fn());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -433,6 +437,19 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
       </button>
     </nav>
   ),
+}));
+
+vi.mock("@/features/chat/hooks/useSessionWindowSupport", () => ({
+  useSessionWindowSupport: () => mockSessionWindowSupport,
+}));
+
+vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
+  focusSessionWindow: (...args: unknown[]) => mockFocusSessionWindow(...args),
+  releaseSession: vi.fn(),
+}));
+
+vi.mock("@/features/extensions/api/extensions", () => ({
+  listExtensions: (...args: unknown[]) => mockListExtensions(...args),
 }));
 
 vi.mock("@/features/providers/api/credentials", () => ({
@@ -792,6 +809,11 @@ describe("AppShell global navigation", () => {
     resetAgentBuilderSourceLifecycleForTests();
     useShortcutsDialogStore.setState({ open: false });
     document.documentElement.removeAttribute("data-global-composer-visible");
+    mockSessionWindowSupport.supported = false;
+    mockFocusSessionWindow.mockReset();
+    useSessionWindowStore.getState().setSnapshot([]);
+    mockListExtensions.mockReset();
+    mockListExtensions.mockResolvedValue([]);
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
     mockAcpListSessionsPage.mockReset();
@@ -4174,7 +4196,7 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("prompts before leaving unsaved automation builder changes with keyboard search navigation", async () => {
+  it("opens search over unsaved automation builder changes without navigating", async () => {
     const user = userEvent.setup();
     renderAppShell();
 
@@ -4191,8 +4213,91 @@ describe("AppShell global navigation", () => {
     await user.keyboard("{Meta>}k{/Meta}");
 
     expect(
+      await screen.findByRole("textbox", { name: "Universal search" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Unsaved automation changes")).toBeNull();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+  });
+
+  it("guards settings results selected over unsaved automation changes", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const search = await screen.findByRole("textbox", {
+      name: "Universal search",
+    });
+    await user.type(search, "animated avatars");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Open Animated avatars settings",
+      }),
+    );
+
+    expect(
       await screen.findByText("Unsaved automation changes"),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+    expect(
+      screen.getByRole("textbox", { name: "Universal search" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps search open when guarded agent navigation is cancelled", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "agent-reviewer",
+          displayName: "Reviewer",
+          systemPrompt: "Review code changes",
+          isBuiltin: true,
+          writable: false,
+        },
+      ],
+    });
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const search = await screen.findByRole("textbox", {
+      name: "Universal search",
+    });
+    await user.type(search, "reviewer");
+    await user.click(
+      await screen.findByRole("button", { name: "Start chat with Reviewer" }),
+    );
+
+    expect(
+      await screen.findByText("Unsaved automation changes"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+
+    expect(search).toBeInTheDocument();
+    expect(search).toHaveValue("reviewer");
     expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
   });
 
@@ -4402,6 +4507,82 @@ describe("AppShell global navigation", () => {
     );
   });
 
+  it("focuses a detached chat selected from search", async () => {
+    mockSessionWindowSupport.supported = true;
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([
+        { sessionId: "session-1", windowLabel: "session-session-1" },
+      ]);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Detached planning",
+          createdAt: "2026-07-28T11:00:00.000Z",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+          messageCount: 2,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([
+        { sessionId: "session-1", windowLabel: "session-session-1" },
+      ]);
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const search = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(search, "detached planning");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Open chat Detached planning",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockFocusSessionWindow).toHaveBeenCalledWith("session-1");
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+  });
+
+  it("opens extension search results in Settings Connections", async () => {
+    mockListExtensions.mockResolvedValue([
+      {
+        config_key: "glean-stdio",
+        type: "stdio",
+        name: "Glean",
+        description: "Search internal documents",
+        cmd: "glean",
+        args: [],
+        enabled: true,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const search = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(search, "glean");
+    await user.click(
+      await screen.findByRole("button", { name: "Open extension Glean" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "connections",
+    );
+    expect(window.location.pathname).toBe("/settings");
+    expect(new URLSearchParams(window.location.search).get("section")).toBe(
+      "connections",
+    );
+  });
+
   it("opens search from the top bar and returns to the previous view", async () => {
     const user = userEvent.setup();
     renderAppShell();
@@ -4410,11 +4591,44 @@ describe("AppShell global navigation", () => {
     expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
 
     await user.click(screen.getByRole("button", { name: "Search" }));
-    expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+    expect(
+      screen.getByRole("textbox", { name: "Universal search" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
 
-    await user.click(screen.getByRole("button", { name: "Exit search" }));
+    await user.keyboard("{Escape}");
     await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+      expect(
+        screen.queryByRole("textbox", { name: "Universal search" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+  });
+
+  it("clears a focused search query before Escape closes the dialog", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const search = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(search, "reviewer");
+    await user.keyboard("{Escape}");
+
+    expect(search).toHaveValue("");
+    expect(search).toBeInTheDocument();
+  });
+
+  it("closes search with Escape when focus is on the dialog", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.focus(dialog);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
 
@@ -4803,8 +5017,11 @@ describe("AppShell global navigation", () => {
     await user.keyboard("{Meta>}k{/Meta}");
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+      expect(
+        screen.getByRole("textbox", { name: "Universal search" }),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
   });
 
   it("opens search with Ctrl+K off macOS", async () => {
@@ -4815,8 +5032,11 @@ describe("AppShell global navigation", () => {
     await user.keyboard("{Control>}k{/Control}");
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+      expect(
+        screen.getByRole("textbox", { name: "Universal search" }),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
   });
 
   it("toggles the dev design system inspector with Cmd+Shift+D", async () => {
@@ -4950,11 +5170,17 @@ describe("AppShell global navigation", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    expect(
+      screen.queryByRole("textbox", { name: "Universal search" }),
+    ).not.toBeInTheDocument();
 
     await user.keyboard("{Meta>}{Shift>}x{/Shift}{/Meta}");
     await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+      expect(
+        screen.getByRole("textbox", { name: "Universal search" }),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
   });
 
   it("toggles the shortcuts reference with an overridden combo, including while it is open", async () => {
@@ -4992,6 +5218,9 @@ describe("AppShell global navigation", () => {
 
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    expect(
+      screen.queryByRole("textbox", { name: "Universal search" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens the session quick switcher with Cmd+P, honoring an override over the default", async () => {

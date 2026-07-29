@@ -1230,6 +1230,7 @@ export const designSystemComponentManifest = [
       'className="focus-visible:ring-ring/50',
       "data-[state=open]:bg-muted",
       "data-[state=open]:text-muted-foreground",
+      "text-foreground",
     ],
     stateClasses: [
       "data-[state=closed]:animate-out",
@@ -1257,6 +1258,7 @@ export const designSystemComponentManifest = [
       'className="focus-visible:ring-ring/50',
       "data-[state=open]:bg-muted",
       "data-[state=open]:text-muted-foreground",
+      "text-foreground",
     ],
   },
   {
