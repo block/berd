@@ -751,6 +751,7 @@ export function ChatView({
       <ArtifactAutoOpenMount
         sessionId={sessionId}
         isHistoryLoading={controller.isLoadingHistory}
+        sessionCwd={controller.sessionArtifactCwd}
       />
       <div
         className={cn(

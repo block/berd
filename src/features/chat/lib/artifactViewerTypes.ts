@@ -54,15 +54,19 @@ export interface ViewableArtifactTarget {
 }
 
 /**
- * Returns the single viewable artifact (markdown/image) across the given
- * tool requests, or null when there are zero or several distinct ones.
- * Shared by the transcript's chain/work headers to surface a "View" action
- * that stays reachable while the steps are collapsed — one file keeps the
- * action unambiguous; several fall back to expand-to-choose.
+ * Every distinct viewable artifact (markdown/image) across the given tool
+ * requests, in first-seen order.
+ *
+ * This replaced an earlier `singleViewableArtifact` helper that collapsed to
+ * null whenever a chain touched two or more files. That kept a *header* action
+ * unambiguous, but it also meant the busiest chains — the ones where getting
+ * back to a file matters most — offered no way back, and the same document
+ * surfaced as a different-looking control depending on how the run grouped.
+ * Inline chips render one affordance per file, so they need the full list.
  */
-export function singleViewableArtifact(
+export function viewableArtifacts(
   requests: Iterable<ToolRequestContent | undefined>,
-): ViewableArtifactTarget | null {
+): ViewableArtifactTarget[] {
   const seen = new Set<string>();
   const viewable: ViewableArtifactTarget[] = [];
   for (const request of requests) {
@@ -74,7 +78,7 @@ export function singleViewableArtifact(
       viewable.push({ path, filename: artifactBasename(path) });
     }
   }
-  return viewable.length === 1 ? viewable[0] : null;
+  return viewable;
 }
 
 export function isViewableArtifact(path: string): boolean {

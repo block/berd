@@ -100,7 +100,11 @@ describe("ToolChainCards", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows a header View action when the chain has exactly one viewable artifact", async () => {
+  // Re-entry contract: chips are the ONLY way back into the viewer from a
+  // chain. The former header "View" action rendered solely when a chain
+  // touched exactly one viewable file, so identical documents surfaced as
+  // different-looking controls depending on how the run grouped.
+  it("shows a chip for a single viewable artifact", async () => {
     mockOpenInApp.mockClear();
     const user = userEvent.setup();
     render(
@@ -112,14 +116,30 @@ describe("ToolChainCards", () => {
       />,
     );
 
-    const viewButton = screen.getByRole("button", { name: /^view$/i });
-    expect(viewButton).toBeInTheDocument();
-
-    await user.click(viewButton);
+    await user.click(screen.getByRole("button", { name: /open notes-2\.md/i }));
     expect(mockOpenInApp).toHaveBeenCalledWith("/p/notes-2.md", "notes-2.md");
   });
 
-  it("does NOT show a header View action when multiple viewable artifacts exist", () => {
+  it("shows a chip for a lone tool call (ungrouped render)", async () => {
+    // A single write_file call is the most common "write me a doc" shape and
+    // renders through the ungrouped early-return, not the chain header path.
+    // The chip contract must hold there too — this test fails if chips are
+    // only wired into the grouped branch.
+    mockOpenInApp.mockClear();
+    const user = userEvent.setup();
+    render(
+      <ToolChainCards
+        toolItems={[pairWithLocation("Writing notes", "/p/solo.md")]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /open solo\.md/i }));
+    expect(mockOpenInApp).toHaveBeenCalledWith("/p/solo.md", "solo.md");
+  });
+
+  it("shows a chip per file for a multi-file chain", async () => {
+    mockOpenInApp.mockClear();
+    const user = userEvent.setup();
     render(
       <ToolChainCards
         toolItems={[
@@ -128,12 +148,56 @@ describe("ToolChainCards", () => {
         ]}
       />,
     );
-    expect(
-      screen.queryByRole("button", { name: /^view$/i }),
-    ).not.toBeInTheDocument();
+
+    expect(screen.getByText("a.md")).toBeInTheDocument();
+    expect(screen.getByText("b.md")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open a\.md/i }));
+    expect(mockOpenInApp).toHaveBeenCalledWith("/p/a.md", "a.md");
   });
 
-  it("does NOT show a header View action for a non-viewable artifact", () => {
+  it("retires the header View action in favor of chips", () => {
+    render(
+      <ToolChainCards
+        toolItems={[
+          pair("Listing notes"),
+          pairWithLocation("Writing notes", "/p/notes.md"),
+        ]}
+      />,
+    );
+    // One consistent control, not a header action plus a chip.
+    expect(screen.queryByRole("button", { name: /^view$/i })).toBeNull();
+    expect(
+      document.querySelector('[data-role="artifact-chips"]'),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps chips reachable in both collapsed and expanded states", async () => {
+    // Chips live outside the collapsible body, so collapse must not take away
+    // the way back into the viewer. A completed chain mounts collapsed, so
+    // this starts in the state that matters most.
+    const user = userEvent.setup();
+    render(
+      <ToolChainCards
+        toolItems={[
+          pairWithLocation("Writing a", "/p/a.md"),
+          pairWithLocation("Writing b", "/p/b.md"),
+        ]}
+      />,
+    );
+
+    const header = screen.getByRole("button", { expanded: false });
+    expect(screen.getByText("a.md")).toBeInTheDocument();
+    expect(screen.getByText("b.md")).toBeInTheDocument();
+
+    // Still there once the steps are expanded.
+    await user.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("a.md")).toBeInTheDocument();
+    expect(screen.getByText("b.md")).toBeInTheDocument();
+  });
+
+  it("does NOT show a chip row for a non-viewable artifact", () => {
     render(
       <ToolChainCards
         toolItems={[

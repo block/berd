@@ -44,17 +44,19 @@ function renderAdapter(
 }
 
 describe("ToolCallAdapter — ArtifactActions", () => {
-  it('renders a "View" button for a viewable (markdown) location', () => {
+  it("does NOT render a per-card action for a viewable (markdown) location", () => {
+    // Viewable files are owned by the message-level ArtifactChips row; a
+    // per-card "View" button here would put two different-looking controls
+    // for the same file on one expanded card.
     const locations: ToolCallLocation[] = [
       { path: "/Users/test/project/output.md" },
     ];
 
     renderAdapter({ locations });
 
-    expect(screen.getByRole("button", { name: /view/i })).toBeEnabled();
     expect(
-      screen.getByText("/Users/test/project/output.md"),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /view|open file/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders an "Open file" button for a non-viewable location', () => {
@@ -75,11 +77,11 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows "More outputs" toggle when there are multiple locations', async () => {
+  it('shows "More outputs" toggle when there are multiple non-viewable locations', async () => {
     const user = userEvent.setup();
     const locations: ToolCallLocation[] = [
-      { path: "/Users/test/project/output.md" },
-      { path: "/Users/test/project/notes.md" },
+      { path: "/Users/test/project/main.rs" },
+      { path: "/Users/test/project/lib.rs" },
     ];
 
     renderAdapter({ locations });
@@ -88,28 +90,40 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     expect(toggle).toBeInTheDocument();
 
     expect(
-      screen.queryByText("/Users/test/project/notes.md"),
+      screen.queryByText("/Users/test/project/lib.rs"),
     ).not.toBeInTheDocument();
 
     await user.click(toggle);
 
-    expect(
-      screen.getByText("/Users/test/project/notes.md"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("/Users/test/project/lib.rs")).toBeInTheDocument();
+  });
+
+  it("counts only non-viewable locations toward the overflow toggle", () => {
+    // One code file + one markdown file: the markdown is ceded to chips, so
+    // there is exactly one action and no "More outputs" disclosure.
+    const locations: ToolCallLocation[] = [
+      { path: "/Users/test/project/main.rs" },
+      { path: "/Users/test/project/notes.md" },
+    ];
+
+    renderAdapter({ locations });
+
+    expect(screen.getByRole("button", { name: /open file/i })).toBeEnabled();
+    expect(screen.queryByText(/more outputs/i)).not.toBeInTheDocument();
   });
 
   it("invokes openInApp when an artifact button is clicked", async () => {
     const user = userEvent.setup();
     mockOpenInApp.mockResolvedValue(undefined);
     const locations: ToolCallLocation[] = [
-      { path: "/Users/test/project/output.md" },
+      { path: "/Users/test/project/main.rs" },
     ];
 
     renderAdapter({ locations });
 
-    await user.click(screen.getByRole("button", { name: /view/i }));
+    await user.click(screen.getByRole("button", { name: /open file/i }));
 
-    expect(mockOpenInApp).toHaveBeenCalledWith("/Users/test/project/output.md");
+    expect(mockOpenInApp).toHaveBeenCalledWith("/Users/test/project/main.rs");
   });
 });
 

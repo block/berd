@@ -1,16 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Check,
-  ChevronRight,
-  CircleIcon,
-  ClockIcon,
-  PanelRight,
-} from "lucide-react";
+import { Check, ChevronRight, CircleIcon, ClockIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
-import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
-import { singleViewableArtifact } from "@/features/chat/lib/artifactViewerTypes";
+import { viewableArtifacts } from "@/features/chat/lib/artifactViewerTypes";
+import { ArtifactChips } from "./ArtifactChips";
 import {
   createVirtualLayoutStabilityAttributes,
   useVirtualLayoutPendingForChange,
@@ -203,9 +197,13 @@ export function ToolChainCards({
   externalChainExpanded?: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const { openInApp } = useArtifactActionsContext();
-  const viewableArtifact = useMemo(
-    () => singleViewableArtifact(toolItems.map((item) => item.request)),
+  // Every viewable file this chain touched. Chips are the single way back into
+  // the viewer for a chain: they render for any count and stay put when the
+  // chain collapses. The old header "View" action only appeared for exactly
+  // one file, so the same document surfaced as a different-looking control
+  // depending on how the run happened to group — chips replace it outright.
+  const chainArtifacts = useMemo(
+    () => viewableArtifacts(toolItems.map((item) => item.request)),
     [toolItems],
   );
   const { rowState, updateRowState, markRowInteracted } =
@@ -509,6 +507,14 @@ export function ToolChainCards({
         {primaryItems.map((item) =>
           renderToolItem(item, { withRail: false, forceClose: hasDetailRow }),
         )}
+        {/*
+          A lone tool call is the most common "write me a doc" shape, so the
+          chip contract has to hold here too — same control as grouped chains,
+          not a different-looking per-card action.
+        */}
+        {chainArtifacts.length > 0 ? (
+          <ArtifactChips artifacts={chainArtifacts} />
+        ) : null}
       </div>
     );
   }
@@ -569,27 +575,16 @@ export function ToolChainCards({
           </span>
           <span className="min-w-0 flex-1 truncate">{headerText}</span>
         </button>
-        {viewableArtifact ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              void openInApp(
-                viewableArtifact.path,
-                viewableArtifact.filename,
-              ).catch(() => {});
-            }}
-            title={viewableArtifact.path}
-            aria-label={t("tools.viewFile")}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-accent/55 hover:text-foreground"
-          >
-            <PanelRight className="size-3.5 shrink-0" />
-            <span className="max-w-[10rem] truncate">
-              {t("tools.viewFile")}
-            </span>
-          </button>
-        ) : null}
       </div>
+
+      {/*
+        One chip per viewable file, for any count. This is the only re-entry
+        control on a chain: it survives collapse and looks the same whether the
+        run wrote one document or six.
+      */}
+      {chainArtifacts.length > 0 ? (
+        <ArtifactChips artifacts={chainArtifacts} className="pt-0.5 pb-1" />
+      ) : null}
 
       {chainExpanded && !hasDetailRow && (
         <div className="relative flex flex-col gap-1 pt-1.5">

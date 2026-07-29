@@ -567,5 +567,9 @@
   "markdownImages": {
     "disabledHint": "Local image previews are off.",
     "enable": "Show local images"
+  },
+  "artifactChips": {
+    "open": "Open {{name}} in viewer",
+    "more": "+{{count}} more"
   }
 }

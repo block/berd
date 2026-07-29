@@ -6,10 +6,9 @@ import {
   IconMessageCircle,
   IconTool,
 } from "@tabler/icons-react";
-import { PanelRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
-import { singleViewableArtifact } from "@/features/chat/lib/artifactViewerTypes";
+import { viewableArtifacts } from "@/features/chat/lib/artifactViewerTypes";
+import { ArtifactChips } from "./ArtifactChips";
 import { cn } from "@/shared/lib/cn";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
@@ -357,13 +356,14 @@ export function AgentWorkPanel({
     () => buildAgentWorkTimeline(payload.content),
     [payload.content],
   );
-  const { openInApp } = useArtifactActionsContext();
-  // Single viewable artifact (markdown/image) across this work's tool calls:
-  // surfaces a header "View" action that stays reachable while the steps are
-  // collapsed, mirroring the ToolChainCards chain header.
-  const viewableArtifact = useMemo(
+  // Every viewable file this work touched. Chips are the single way back into
+  // the viewer: they render for any count and survive collapse. The old header
+  // "View" action only appeared for exactly one file, so the same document
+  // surfaced as a different-looking control depending on how the run grouped —
+  // chips replace it outright.
+  const workArtifacts = useMemo(
     () =>
-      singleViewableArtifact(
+      viewableArtifacts(
         items.map((item) => (item.kind === "tool" ? item.request : undefined)),
       ),
     [items],
@@ -458,27 +458,15 @@ export function AgentWorkPanel({
               </Button>
             </CollapsibleTrigger>
           ) : null}
-          {showTrigger && viewableArtifact ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void openInApp(
-                  viewableArtifact.path,
-                  viewableArtifact.filename,
-                ).catch(() => {});
-              }}
-              title={viewableArtifact.path}
-              aria-label={t("tools.viewFile")}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-accent/55 hover:text-foreground"
-            >
-              <PanelRight className="size-3.5 shrink-0" />
-              <span className="max-w-[10rem] truncate">
-                {t("tools.viewFile")}
-              </span>
-            </button>
-          ) : null}
         </div>
+        {/*
+          One chip per viewable file, for any count. This is the only re-entry
+          control on an agent-work panel: it survives collapse and looks the
+          same whether the run wrote one document or six.
+        */}
+        {workArtifacts.length > 0 ? (
+          <ArtifactChips artifacts={workArtifacts} className="px-1 pb-1.5" />
+        ) : null}
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="min-h-0 space-y-0">
             {shouldShowPreviousSteps ? (

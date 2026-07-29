@@ -18,6 +18,7 @@ import {
   artifactBasename,
   isViewableArtifact,
 } from "@/features/chat/lib/artifactViewerTypes";
+import { isWithinBase } from "@/features/chat/lib/artifactAutoOpenPolicy";
 
 export interface ArtifactLinkCandidate {
   resolvedPath: string;
@@ -170,22 +171,6 @@ function resolvePath(path: string, sessionCwd: string | null): string {
   return sessionCwd
     ? resolveRelativeToBase(sessionCwd, normalized)
     : normalized;
-}
-
-/**
- * Returns true when `resolvedPath` is the session cwd itself or a descendant
- * of it. Used to enforce that cwd-scoped consumers never resolve to a path
- * outside the session working directory (absolute paths, `..`-escapes, etc.).
- * Comparison is done on normalized, boundary-terminated paths so a sibling
- * like `/work-secrets` does not count as inside `/work`.
- */
-function isWithinBase(base: string | null, resolvedPath: string): boolean {
-  if (!base || !resolvedPath) return false;
-  const normalizedBase = normalizePath(base).replace(/\/+$/, "");
-  const normalizedTarget = normalizePath(resolvedPath).replace(/\/+$/, "");
-  if (!normalizedBase) return false;
-  if (normalizedTarget === normalizedBase) return true;
-  return normalizedTarget.startsWith(`${normalizedBase}/`);
 }
 
 function isNonEmptyLocation(

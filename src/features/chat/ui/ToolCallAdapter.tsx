@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, FolderOpen, PanelRight } from "lucide-react";
+import { ChevronRight, FolderOpen } from "lucide-react";
 import { isViewableArtifact } from "@/features/chat/lib/artifactViewerTypes";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -106,7 +106,14 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
   const [moreOutputsOpen, setMoreOutputsOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const { openInApp } = useArtifactActionsContext();
-  const artifactLocations = visibleLocations(locations);
+  // Viewable files (markdown, images) are owned by the ArtifactChips row that
+  // ToolChainCards anchors at the message level, so this per-card action list
+  // only handles the rest: folders, code files, and other open-externally
+  // targets. Rendering viewables here too would put two different-looking
+  // controls for the same file on one expanded card.
+  const artifactLocations = visibleLocations(locations).filter(
+    (location) => !isViewableArtifact(location.path),
+  );
 
   if (artifactLocations.length === 0) return null;
 
@@ -133,13 +140,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
     iconClassName: string,
   ) => {
     const kind = getLocationKind(location.path);
-    // Viewable files (markdown, images) open in the in-app viewer panel;
-    // distinguish that affordance with a panel icon + "View" label.
-    const viewable = isViewableArtifact(location.path);
-    const Icon = viewable ? PanelRight : FolderOpen;
-    const label = viewable
-      ? t("tools.viewFile")
-      : (kindLabel[kind] ?? t("common:actions.open"));
+    const label = kindLabel[kind] ?? t("common:actions.open");
     return (
       <Button
         type="button"
@@ -148,7 +149,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
         className={className}
         title={location.path}
       >
-        <Icon className={iconClassName} />
+        <FolderOpen className={iconClassName} />
         <span className="truncate">{label}</span>
         <span className="truncate text-[10px] text-muted-foreground">
           {location.path}

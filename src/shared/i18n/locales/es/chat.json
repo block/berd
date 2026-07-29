@@ -549,5 +549,9 @@
     "resize": "Redimensionar panel derecho",
     "open": "Abrir panel derecho",
     "close": "Cerrar panel derecho"
+  },
+  "artifactChips": {
+    "open": "Abrir {{name}} en el visor",
+    "more": "+{{count}} más"
   }
 }
