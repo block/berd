@@ -11,8 +11,6 @@ import {
   type ExperimentRegistry,
   type ExperimentState,
 } from "./experimentPreferences";
-import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
-import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import {
@@ -65,8 +63,7 @@ export function ExperimentConfigControls({
           : null;
         const isMultilineTextControl =
           control.type === "text" && control.multiline !== false;
-        const isStackedControl =
-          isMultilineTextControl || control.type === "shortcut";
+        const isStackedControl = isMultilineTextControl;
         const controlContainerClassName = isStackedControl
           ? "w-full"
           : control.type === "boolean"
@@ -84,8 +81,7 @@ export function ExperimentConfigControls({
           >
             <div className="min-w-0 flex-1">
               <Label
-                // The shortcut row renders no labelable control.
-                htmlFor={control.type === "shortcut" ? undefined : controlId}
+                htmlFor={controlId}
                 className="text-xs text-muted-foreground"
               >
                 {t(control.labelKey)}
@@ -144,24 +140,6 @@ export function ExperimentConfigControls({
                   placeholder={control.placeholderKey}
                   onCommit={(value) => handleConfigChange(key, value)}
                 />
-              ) : null}
-              {control.type === "shortcut" ? (
-                /* Shortcut editing moved to Settings → Keyboard shortcuts
-                   (app shortcuts are owned by the shortcut registry). */
-                <div className="flex flex-col items-start gap-1">
-                  <p className="text-xs text-muted-foreground">
-                    {t("experiments.shortcutMoved")}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="text-xs"
-                    onClick={() => requestOpenSettings("shortcuts")}
-                  >
-                    {t("nav.shortcuts")}
-                  </Button>
-                </div>
               ) : null}
             </div>
           </div>

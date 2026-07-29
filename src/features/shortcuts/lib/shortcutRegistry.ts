@@ -1,10 +1,6 @@
 import { useSyncExternalStore } from "react";
 
 import {
-  EXPERIMENT_PREFERENCES_CHANGE_EVENT,
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-} from "@/features/experiments/experimentPreferences";
-import {
   keyboardShortcutFromEvent,
   normalizeKeyboardShortcut,
   type KeyboardShortcut,
@@ -311,9 +307,6 @@ function resolveOverrideConflicts(
 
 interface PreferencesCache {
   raw: string | null;
-  /** Sanitization consults experiment state (pane-jump gating and its
-   *  configured shortcut), so the cache keys on that raw value too. */
-  experimentsRaw: string | null;
   snapshot: ShortcutPreferencesSnapshot;
 }
 
@@ -327,25 +320,11 @@ function safeReadRaw(): string | null {
   }
 }
 
-function safeReadExperimentsRaw(): string | null {
-  try {
-    return window.localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
 function getPreferencesSnapshot(): ShortcutPreferencesSnapshot {
   const raw = safeReadRaw();
-  const experimentsRaw = safeReadExperimentsRaw();
-  if (
-    !preferencesCache ||
-    preferencesCache.raw !== raw ||
-    preferencesCache.experimentsRaw !== experimentsRaw
-  ) {
+  if (!preferencesCache || preferencesCache.raw !== raw) {
     preferencesCache = {
       raw,
-      experimentsRaw,
       snapshot: { overrides: sanitizeOverrides(raw) },
     };
   }
@@ -384,9 +363,8 @@ function writeOverrides(next: ShortcutOverrides): ShortcutSaveResult {
   return { ok: true };
 }
 
-/** Effective bindings regardless of the command's `when()` gate — callers
- *  own availability (FocusRegionProvider gates on the experiment's enabled
- *  flag). `eventMatchesShortcutCommand` is the gated entry point. */
+/** Effective bindings regardless of the command's `when()` gate.
+ *  `eventMatchesShortcutCommand` is the gated entry point. */
 export function getShortcutBindings(
   commandId: ShortcutCommandId,
 ): ShortcutBinding[] {
@@ -493,29 +471,17 @@ export function resolveShortcutGroups(): ResolvedShortcutGroup[] {
   })).filter((group) => group.shortcuts.length > 0);
 }
 
-/** Snapshots also depend on experiment state (pane-jump gating and its
- *  configured shortcut — the cache keys on that raw value), so subscribe to
- *  both stores' same-window custom events and cross-window storage events. */
 function subscribeToPreferences(onStoreChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    if (
-      event.key === null ||
-      event.key === SHORTCUT_PREFERENCES_STORAGE_KEY ||
-      event.key === EXPERIMENT_PREFERENCES_STORAGE_KEY
-    ) {
+    if (event.key === null || event.key === SHORTCUT_PREFERENCES_STORAGE_KEY) {
       onStoreChange();
     }
   };
   window.addEventListener(SHORTCUT_PREFERENCES_CHANGED_EVENT, onStoreChange);
-  window.addEventListener(EXPERIMENT_PREFERENCES_CHANGE_EVENT, onStoreChange);
   window.addEventListener("storage", onStorage);
   return () => {
     window.removeEventListener(
       SHORTCUT_PREFERENCES_CHANGED_EVENT,
-      onStoreChange,
-    );
-    window.removeEventListener(
-      EXPERIMENT_PREFERENCES_CHANGE_EVENT,
       onStoreChange,
     );
     window.removeEventListener("storage", onStorage);

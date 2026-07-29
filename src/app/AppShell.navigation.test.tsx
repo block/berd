@@ -252,8 +252,6 @@ function selectCodexProvider() {
 }
 
 vi.mock("@/shared/profile/buildProfile", () => ({
-  filterExperimentRegistryForBuildProfile: <T,>(registry: readonly T[]) =>
-    registry,
   getBuildFeatureState: () => ({
     authGate: false,
     agentToolsTip: true,

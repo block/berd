@@ -192,11 +192,6 @@
       "description": "Enable multiple chat and project workspaces, project workspace startup policies, and multi-workspace agent context.",
       "title": "Multi-workspace chats"
     },
-    "globalShortcut": {
-      "description": "Use Opt-Space to create and find chats from anywhere in macOS.",
-      "shortcutLabel": "Shortcut",
-      "title": "Global shortcut"
-    },
     "navigationRefresh": {
       "description": "Try the refreshed primary and secondary navigation for projects, chats, and settings.",
       "title": "Refreshed navigation"
@@ -229,8 +224,7 @@
       "title": "Render local images in chat",
       "description": "Show Markdown image links that point at local files in the chat's working directory inline, instead of a broken image. Scoped to the working directory; remote http(s) images stay blocked."
     },
-    "title": "Experiments",
-    "shortcutMoved": "Customize this shortcut in Settings → Keyboard shortcuts."
+    "title": "Experiments"
   },
   "general": {
     "agentToolsTips": {
@@ -296,6 +290,10 @@
     "groupChatsByProject": {
       "description": "Show project groups in the sidebar. Turn this off for one chat list sorted by activity.",
       "label": "Group chats by project"
+    },
+    "globalShortcut": {
+      "description": "Use your configured global shortcut to create and find chats from anywhere in macOS.",
+      "label": "Enable global shortcut"
     },
     "terminalFallback": {
       "change": "Change",

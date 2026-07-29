@@ -9,14 +9,8 @@ import {
 } from "../experimentDefinitions";
 import { ExperimentsSettings } from "../ExperimentsSettings";
 import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "../experimentPreferences";
-import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
-
-const getPlatformMock = vi.hoisted(() => vi.fn(() => "mac"));
-vi.mock("@/shared/lib/platform", () => ({
-  getPlatform: getPlatformMock,
-}));
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -62,15 +56,8 @@ const uiRegistry = [
   },
 ] as const satisfies readonly ExperimentDefinition[];
 
-function experimentDescriptionText(experimentKey: "globalShortcut") {
-  return i18n.t(`experiments.${experimentKey}.description`, {
-    ns: "settings",
-  });
-}
-
 describe("ExperimentsSettings", () => {
   beforeEach(() => {
-    getPlatformMock.mockReturnValue("mac");
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   });
 
@@ -106,17 +93,6 @@ describe("ExperimentsSettings", () => {
     expect(
       screen.getByText(
         i18n.t("experiments.builderbot.description", { ns: "settings" }),
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", {
-        name: i18n.t("experiments.globalShortcut.title", { ns: "settings" }),
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByText(
-        (_, element) =>
-          element?.textContent === experimentDescriptionText("globalShortcut"),
       ),
     ).toBeInTheDocument();
     expect(
@@ -174,12 +150,6 @@ describe("ExperimentsSettings", () => {
         i18n.t("experiments.defaultLabel", { ns: "settings" }),
       ),
     ).not.toBeInTheDocument();
-    expect(
-      screen
-        .getAllByRole("heading", { level: 4 })
-        .map((heading) => heading.textContent)
-        .at(-1),
-    ).toBe(i18n.t("experiments.globalShortcut.title", { ns: "settings" }));
   });
 
   it("keeps the default navigation separate from opt-in nav experiments", async () => {
@@ -230,45 +200,6 @@ describe("ExperimentsSettings", () => {
       JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
         .experiments[NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID].enabled,
     ).toBe(true);
-  });
-
-  it("hides the global shortcut experiment off macOS", () => {
-    vi.stubEnv("DEV", false);
-    getPlatformMock.mockReturnValue("windows");
-
-    renderWithProviders(<ExperimentsSettings />);
-
-    expect(
-      screen.queryByRole("switch", {
-        name: i18n.t("experiments.globalShortcut.title", { ns: "settings" }),
-      }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("opens keyboard shortcut settings from the Global shortcut control", async () => {
-    vi.stubEnv("DEV", false);
-    const user = userEvent.setup();
-    const openSettingsListener = vi.fn();
-    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
-    renderWithProviders(<ExperimentsSettings />);
-
-    const globalShortcutSection = screen
-      .getByRole("switch", {
-        name: i18n.t("experiments.globalShortcut.title", { ns: "settings" }),
-      })
-      .closest("section");
-    expect(globalShortcutSection).not.toBeNull();
-
-    await user.click(
-      within(globalShortcutSection as HTMLElement).getByRole("button", {
-        name: i18n.t("nav.shortcuts", { ns: "settings" }),
-      }),
-    );
-
-    expect(openSettingsListener).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: { section: "shortcuts" } }),
-    );
-    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
   });
 
   it("renders dev default copy on a separate line", () => {

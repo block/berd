@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useGlobalShortcutPreference } from "@/features/global-shortcut/globalShortcutPreference";
 import { useShortcutBindings } from "@/features/shortcuts/lib/shortcutRegistry";
 import {
   launchGlobalShortcutHandler,
@@ -11,8 +10,7 @@ import { getPlatform } from "@/shared/lib/platform";
 
 export function GlobalShortcutBridge() {
   const isMac = getPlatform() === "mac";
-  const experiment = useExperiment(GLOBAL_SHORTCUT_EXPERIMENT_ID);
-  const enabled = experiment?.enabled === true;
+  const { enabled } = useGlobalShortcutPreference();
   const bindings = useShortcutBindings("navigation.globalShortcut");
   const shortcut = bindings[0]?.shortcut ?? null;
   const activeShortcutRef = useRef<string | null>(null);

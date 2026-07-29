@@ -6,9 +6,6 @@ import {
   type ExperimentConfigValue,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
-import { normalizeKeyboardShortcut } from "@/shared/keyboard/keyboardShortcut";
-import { filterExperimentRegistryForBuildProfile } from "@/shared/profile/buildProfile";
-
 export const EXPERIMENT_PREFERENCES_STORAGE_KEY = "goose:experimental-features";
 export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 2;
 export const EXPERIMENT_PREFERENCES_CHANGE_EVENT =
@@ -251,8 +248,6 @@ function coerceConfigValue(
         control.options.some((option) => option.value === value)
         ? value
         : control.defaultValue;
-    case "shortcut":
-      return normalizeKeyboardShortcut(value, control.defaultValue);
     case "number": {
       const numberValue =
         typeof value === "number" ? value : control.defaultValue;
@@ -331,7 +326,7 @@ function findDefinition(id: string, registry: ExperimentRegistry) {
 export function getVisibleExperimentRegistry(
   registry: ExperimentRegistry = EXPERIMENT_DEFINITIONS,
 ): ExperimentRegistry {
-  return filterExperimentRegistryForBuildProfile(registry);
+  return registry;
 }
 
 export function listExperiments(

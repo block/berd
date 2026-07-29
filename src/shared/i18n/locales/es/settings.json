@@ -192,11 +192,6 @@
       "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
       "title": "Chats con varios espacios de trabajo"
     },
-    "globalShortcut": {
-      "description": "Usa Opt-Space para crear y encontrar chats desde cualquier lugar de macOS.",
-      "shortcutLabel": "Atajo",
-      "title": "Atajo global"
-    },
     "navigationRefresh": {
       "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
       "title": "Navegación renovada"
@@ -229,8 +224,7 @@
       "title": "Mostrar imágenes locales en el chat",
       "description": "Muestra los enlaces de imagen de Markdown que apuntan a archivos locales en el directorio de trabajo del chat de forma insertada, en lugar de una imagen rota. Limitado al directorio de trabajo; las imágenes remotas http(s) siguen bloqueadas."
     },
-    "title": "Experimentos",
-    "shortcutMoved": "Personaliza este atajo en Ajustes → Atajos de teclado."
+    "title": "Experimentos"
   },
   "general": {
     "agentToolsTips": {
@@ -292,6 +286,10 @@
     "groupChatsByProject": {
       "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
       "label": "Agrupar chats por proyecto"
+    },
+    "globalShortcut": {
+      "description": "Usa el atajo global configurado para crear y encontrar chats desde cualquier lugar de macOS.",
+      "label": "Activar atajo global"
     },
     "terminalFallback": {
       "change": "Cambiar",

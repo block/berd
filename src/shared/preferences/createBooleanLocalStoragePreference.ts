@@ -43,9 +43,16 @@ export function createBooleanLocalStoragePreference({
     listeners.add(onStoreChange);
 
     if (!removeWindowListener) {
+      const handleStorage = (event: StorageEvent) => {
+        if (event.key === storageKey || event.key === null) {
+          notifyListeners();
+        }
+      };
       window.addEventListener(changedEvent, notifyListeners);
+      window.addEventListener("storage", handleStorage);
       removeWindowListener = () => {
         window.removeEventListener(changedEvent, notifyListeners);
+        window.removeEventListener("storage", handleStorage);
       };
     }
 

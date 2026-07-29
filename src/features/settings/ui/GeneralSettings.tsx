@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { type LocalePreference, useLocale } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
+import { getPlatform } from "@/shared/lib/platform";
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import { Textarea } from "@/shared/ui/textarea";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
+import { useGlobalShortcutPreference } from "@/features/global-shortcut/globalShortcutPreference";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
@@ -157,6 +159,7 @@ export function GeneralSettings({
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
   const responseStartGutterPreference = useResponseStartGutterPreference();
+  const globalShortcutPreference = useGlobalShortcutPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -184,6 +187,7 @@ export function GeneralSettings({
   const followUpBehavior =
     streamingShortcutPreference.mode === "cmd-enter-steers" ? "queue" : "steer";
   const showAgentToolsTipsSetting = useProfileCapability("agentToolsTip");
+  const isMac = getPlatform() === "mac";
 
   // The picker is self-contained: a "follow theme" swatch (clears the custom
   // override so the primary tracks the active light/dark theme) plus the
@@ -595,6 +599,19 @@ export function GeneralSettings({
             {t("shortcuts:settings.customize")}
           </Button>
         </SettingRow>
+
+        {isMac ? (
+          <SettingRow
+            label={t("general.globalShortcut.label")}
+            description={t("general.globalShortcut.description")}
+          >
+            <Switch
+              checked={globalShortcutPreference.enabled}
+              onCheckedChange={globalShortcutPreference.setEnabled}
+              aria-label={t("general.globalShortcut.label")}
+            />
+          </SettingRow>
+        ) : null}
 
         <SettingRow
           label={t("general.followUpBehavior.label")}

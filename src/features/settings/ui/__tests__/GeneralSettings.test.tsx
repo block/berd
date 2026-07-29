@@ -26,19 +26,26 @@ import type {
   RuntimeConfigLoadResult,
 } from "@/shared/runtime-config/schema";
 import { STYLE_GUIDELINES_STORAGE_KEY } from "@/shared/preferences/styleGuidelinesPreference";
+import { GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY } from "@/features/global-shortcut/globalShortcutPreference";
 import { trustDomain } from "@/shared/lib/trustedDomains";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
-const { mockLogout, mockOpenDialog, mockRuntimeConfigApi } = vi.hoisted(() => ({
-  mockLogout: vi.fn(),
-  mockOpenDialog: vi.fn(),
-  mockRuntimeConfigApi: {
-    clearFakeRuntimeConfig: vi.fn(),
-    getRuntimeConfig: vi.fn(),
-    refreshRuntimeConfig: vi.fn(),
-    setFakeRuntimeConfig: vi.fn(),
-  },
+const { mockGetPlatform, mockLogout, mockOpenDialog, mockRuntimeConfigApi } =
+  vi.hoisted(() => ({
+    mockGetPlatform: vi.fn(() => "mac"),
+    mockLogout: vi.fn(),
+    mockOpenDialog: vi.fn(),
+    mockRuntimeConfigApi: {
+      clearFakeRuntimeConfig: vi.fn(),
+      getRuntimeConfig: vi.fn(),
+      refreshRuntimeConfig: vi.fn(),
+      setFakeRuntimeConfig: vi.fn(),
+    },
+  }));
+
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: mockGetPlatform,
 }));
 
 vi.mock("@/shared/api/localMediaCaches", () => ({
@@ -138,6 +145,7 @@ function getClearCachedMediaButton() {
 describe("GeneralSettings appearance section", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockGetPlatform.mockReturnValue("mac");
     vi.stubEnv("DEV", true);
     localStorage.clear();
     setReadyRuntimeConfig();
@@ -263,6 +271,36 @@ describe("GeneralSettings appearance section", () => {
     } finally {
       window.removeEventListener(OPEN_SETTINGS_EVENT, listener);
     }
+  });
+
+  it("defaults the global shortcut off on macOS and persists enabling it", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Enable global shortcut",
+    });
+    expect(switchControl).not.toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY)).toBe(
+        "true",
+      );
+    });
+    expect(switchControl).toBeChecked();
+  });
+
+  it("hides the global shortcut setting off macOS", () => {
+    mockGetPlatform.mockReturnValue("windows");
+
+    renderGeneralSettings();
+
+    expect(
+      screen.queryByRole("switch", { name: "Enable global shortcut" }),
+    ).not.toBeInTheDocument();
   });
 
   it("restores Agent Tools composer tips", async () => {

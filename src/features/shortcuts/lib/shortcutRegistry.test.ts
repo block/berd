@@ -1,13 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const getExperimentMock = vi.hoisted(() => vi.fn());
-vi.mock("@/features/experiments/experimentPreferences", () => ({
-  getExperiment: getExperimentMock,
-  EXPERIMENT_PREFERENCES_CHANGE_EVENT: "goose:experimental-features-change",
-  EXPERIMENT_PREFERENCES_STORAGE_KEY: "goose:experimental-features",
-}));
-
 const getPlatformMock = vi.hoisted(() => vi.fn(() => "mac"));
 vi.mock("@/shared/lib/platform", () => ({
   getPlatform: getPlatformMock,
@@ -20,7 +13,6 @@ vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
 
 import en from "@/shared/i18n/locales/en/shortcuts.json";
 import es from "@/shared/i18n/locales/es/shortcuts.json";
-import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   eventMatchesShortcutCommand,
   getShortcutBindings,
@@ -86,7 +78,6 @@ function listenForChanges(): () => number {
 beforeEach(() => {
   localStorage.clear();
   getPlatformMock.mockReturnValue("mac");
-  getExperimentMock.mockReturnValue(undefined);
   isDesignSystemExplorerEnabledMock.mockReturnValue(false);
 });
 
@@ -257,7 +248,6 @@ describe("shortcut command definitions", () => {
     ]);
     for (const platform of ["mac", "windows"] as const) {
       getPlatformMock.mockReturnValue(platform);
-      getExperimentMock.mockReturnValue({ enabled: true, config: {} });
       const enabled = SHORTCUT_COMMANDS.filter(
         (command) => command.when?.() ?? true,
       );
@@ -698,30 +688,7 @@ describe("pane-jump", () => {
 });
 
 describe("global shortcut", () => {
-  it("exposes the Global shortcut only while the experiment is enabled", () => {
-    getExperimentMock.mockImplementation((id: string) =>
-      id === GLOBAL_SHORTCUT_EXPERIMENT_ID
-        ? { enabled: false, config: {} }
-        : undefined,
-    );
-
-    expect(
-      flattenGroups().map((shortcut) => shortcut.id),
-      "disabled experiment",
-    ).not.toContain("navigation.globalShortcut");
-    expect(
-      eventMatchesShortcutCommand(
-        keyEvent({ key: " ", altKey: true }),
-        "navigation.globalShortcut",
-      ),
-    ).toBe(false);
-
-    getExperimentMock.mockImplementation((id: string) =>
-      id === GLOBAL_SHORTCUT_EXPERIMENT_ID
-        ? { enabled: true, config: {} }
-        : undefined,
-    );
-
+  it("is visible and configurable only on macOS", () => {
     expect(
       flattenGroups().find(
         (shortcut) => shortcut.id === "navigation.globalShortcut",
@@ -730,21 +697,21 @@ describe("global shortcut", () => {
     expect(getShortcutBindings("navigation.globalShortcut")).toEqual([
       { shortcut: "alt+space" },
     ]);
+
+    getPlatformMock.mockReturnValue("windows");
+
+    expect(flattenGroups().map((shortcut) => shortcut.id)).not.toContain(
+      "navigation.globalShortcut",
+    );
     expect(
       eventMatchesShortcutCommand(
         keyEvent({ key: " ", altKey: true }),
         "navigation.globalShortcut",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("uses a configured Global shortcut while the experiment is enabled", () => {
-    getExperimentMock.mockImplementation((id: string) =>
-      id === GLOBAL_SHORTCUT_EXPERIMENT_ID
-        ? { enabled: true, config: {} }
-        : undefined,
-    );
-
+  it("uses a configured global shortcut on macOS", () => {
     expect(
       setShortcutOverride("navigation.globalShortcut", "ctrl+alt+c"),
     ).toEqual({

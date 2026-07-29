@@ -2,11 +2,10 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GlobalShortcutBridge } from "./GlobalShortcutBridge";
-import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+  GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY,
+  setGlobalShortcutEnabled,
+} from "@/features/global-shortcut/globalShortcutPreference";
 import {
   setShortcutOverride,
   SHORTCUT_PREFERENCES_STORAGE_KEY,
@@ -57,7 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPlatform.mockReturnValue("mac");
   window.__TAURI_INTERNALS__ = {};
-  localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+  localStorage.removeItem(GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY);
   localStorage.removeItem(SHORTCUT_PREFERENCES_STORAGE_KEY);
   mocks.invoke.mockResolvedValue(undefined);
 });
@@ -70,9 +69,16 @@ afterEach(async () => {
 });
 
 describe("GlobalShortcutBridge", () => {
+  it("defaults to disabled", async () => {
+    render(<GlobalShortcutBridge />);
+    await flushAsync();
+
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
   it("does not invoke Tauri commands outside the desktop shell", async () => {
     window.__TAURI_INTERNALS__ = undefined;
-    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+    setGlobalShortcutEnabled(true);
 
     render(<GlobalShortcutBridge />);
     await flushAsync();
@@ -82,7 +88,7 @@ describe("GlobalShortcutBridge", () => {
 
   it("does not launch the global shortcut helper off macOS", async () => {
     mocks.getPlatform.mockReturnValue("windows");
-    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+    setGlobalShortcutEnabled(true);
 
     render(<GlobalShortcutBridge />);
     await flushAsync();
@@ -90,8 +96,27 @@ describe("GlobalShortcutBridge", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
-  it("launches the global shortcut helper hidden when the experiment was already enabled at app start", async () => {
-    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+  it("stops an active helper if the preference changes in another window", async () => {
+    setGlobalShortcutEnabled(true);
+    render(<GlobalShortcutBridge />);
+    await flushAsync();
+
+    act(() => {
+      localStorage.setItem(GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY, "false");
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY,
+          newValue: "false",
+        }),
+      );
+    });
+    await flushAsync();
+
+    expect(stopCalls()).toHaveLength(1);
+  });
+
+  it("launches the global shortcut helper hidden when the preference was already enabled at app start", async () => {
+    setGlobalShortcutEnabled(true);
 
     render(<GlobalShortcutBridge />);
     await flushAsync();
@@ -105,12 +130,12 @@ describe("GlobalShortcutBridge", () => {
     expect(stopCalls()).toHaveLength(0);
   });
 
-  it("launches the global shortcut helper hidden when the experiment is toggled on", async () => {
+  it("launches the global shortcut helper hidden when the preference is toggled on", async () => {
     render(<GlobalShortcutBridge />);
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+      setGlobalShortcutEnabled(true);
     });
     await flushAsync();
 
@@ -128,7 +153,7 @@ describe("GlobalShortcutBridge", () => {
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+      setGlobalShortcutEnabled(true);
     });
     await flushAsync();
 
@@ -169,7 +194,7 @@ describe("GlobalShortcutBridge", () => {
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+      setGlobalShortcutEnabled(true);
     });
     await flushAsync();
 
@@ -207,7 +232,7 @@ describe("GlobalShortcutBridge", () => {
     ]);
   });
 
-  it("queues stop behind a pending launch when the experiment is disabled", async () => {
+  it("queues stop behind a pending launch when the preference is disabled", async () => {
     const firstLaunch = deferred();
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "launch_global_shortcut_handler") {
@@ -216,12 +241,12 @@ describe("GlobalShortcutBridge", () => {
       return Promise.resolve();
     });
 
-    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+    setGlobalShortcutEnabled(true);
     render(<GlobalShortcutBridge />);
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, false);
+      setGlobalShortcutEnabled(false);
     });
     await flushAsync();
 
@@ -256,17 +281,17 @@ describe("GlobalShortcutBridge", () => {
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+      setGlobalShortcutEnabled(true);
     });
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, false);
+      setGlobalShortcutEnabled(false);
     });
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+      setGlobalShortcutEnabled(true);
     });
     await flushAsync();
 
@@ -289,7 +314,7 @@ describe("GlobalShortcutBridge", () => {
     expect(stopCalls()).toHaveLength(1);
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, false);
+      setGlobalShortcutEnabled(false);
     });
     await flushAsync();
 
@@ -297,13 +322,13 @@ describe("GlobalShortcutBridge", () => {
     consoleError.mockRestore();
   });
 
-  it("stops the global shortcut helper when the experiment is disabled", async () => {
-    setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+  it("stops the global shortcut helper when the preference is disabled", async () => {
+    setGlobalShortcutEnabled(true);
     render(<GlobalShortcutBridge />);
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, false);
+      setGlobalShortcutEnabled(false);
     });
     await flushAsync();
 
@@ -315,7 +340,7 @@ describe("GlobalShortcutBridge", () => {
     await flushAsync();
 
     act(() => {
-      setExperimentEnabled(GLOBAL_SHORTCUT_EXPERIMENT_ID, true);
+      setGlobalShortcutEnabled(true);
     });
     await flushAsync();
 

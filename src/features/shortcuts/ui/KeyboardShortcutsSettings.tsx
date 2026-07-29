@@ -71,8 +71,6 @@ export function KeyboardShortcutsSettings() {
   );
   const [rowError, setRowError] = useState<RowError | null>(null);
 
-  // Reactivity only: the snapshot subscription also covers experiment
-  // changes (pane-jump gating), so commands re-resolve on either store.
   const preferences = useShortcutPreferences();
 
   const commands = resolveShortcutCommands().filter(

@@ -1,5 +1,3 @@
-import { getPlatform, type Platform } from "@/shared/lib/platform";
-
 export type BuildFeature =
   | "authGate"
   | "agentToolsTip"
@@ -41,19 +39,4 @@ const BUILD_FEATURES: Record<BuildFeature, boolean> = {
 
 export function getBuildFeatureState(): Record<BuildFeature, boolean> {
   return BUILD_FEATURES;
-}
-
-interface PlatformScopedMetadata {
-  platforms?: readonly Platform[];
-}
-
-export function filterExperimentRegistryForBuildProfile<T>(
-  registry: readonly T[],
-): readonly T[] {
-  const platform = getPlatform();
-  const filtered = registry.filter((definition) => {
-    const platforms = (definition as PlatformScopedMetadata).platforms;
-    return !platforms || platforms.includes(platform);
-  });
-  return filtered.length === registry.length ? registry : filtered;
 }

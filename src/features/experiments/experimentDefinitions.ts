@@ -1,5 +1,3 @@
-import type { Platform } from "@/shared/lib/platform";
-
 export type ExperimentConfigValue = boolean | number | string;
 
 export type ExperimentConfigControl =
@@ -35,12 +33,6 @@ export type ExperimentConfigControl =
       defaultValue: string;
       placeholderKey?: string;
       multiline?: boolean;
-    }
-  | {
-      type: "shortcut";
-      labelKey: string;
-      descriptionKey?: string;
-      defaultValue: string;
     };
 
 export interface ExperimentDefinition {
@@ -49,14 +41,10 @@ export interface ExperimentDefinition {
   descriptionKey: string;
   /** Default state for users without an explicit per-experiment override. */
   defaultEnabled?: boolean;
-  /** Omit the experiment outside these runtime platforms. */
-  platforms?: readonly Platform[];
   config?: Record<string, ExperimentConfigControl>;
 }
 
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
-
-export const GLOBAL_SHORTCUT_EXPERIMENT_ID = "global-shortcut";
 
 export const MULTI_WORKSPACE_EXPERIMENT_ID = "multi-workspace";
 
@@ -127,19 +115,5 @@ export const EXPERIMENT_DEFINITIONS = [
     // Skill discovery is an opt-in surface because it requires the optional
     // sq-agents CLI and can make remote catalog requests.
     defaultEnabled: false,
-  },
-  {
-    id: GLOBAL_SHORTCUT_EXPERIMENT_ID,
-    titleKey: "experiments.globalShortcut.title",
-    descriptionKey: "experiments.globalShortcut.description",
-    config: {
-      shortcut: {
-        type: "shortcut",
-        labelKey: "experiments.globalShortcut.shortcutLabel",
-        defaultValue: "alt+space",
-      },
-    },
-    defaultEnabled: false,
-    platforms: ["mac"],
   },
 ] as const satisfies readonly ExperimentDefinition[];

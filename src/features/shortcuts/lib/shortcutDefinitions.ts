@@ -1,5 +1,3 @@
-import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { getExperiment } from "@/features/experiments/experimentPreferences";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import type { ShortcutBinding } from "@/shared/keyboard/keyboardShortcut";
 import { getPlatform } from "@/shared/lib/platform";
@@ -113,10 +111,6 @@ export interface ShortcutCommandDefinition {
   when?: () => boolean;
 }
 
-function globalShortcutExperiment() {
-  return getExperiment(GLOBAL_SHORTCUT_EXPERIMENT_ID);
-}
-
 /**
  * Every app-owned keyboard handler is represented here. Configurable
  * commands can be rebound from Settings → Keyboard shortcuts; fixed
@@ -223,7 +217,7 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     descriptionKey: "actions.globalShortcut",
     configurable: true,
     discoverable: true,
-    when: () => globalShortcutExperiment()?.enabled === true,
+    when: () => getPlatform() === "mac",
   },
   {
     id: "navigation.paneJump",
