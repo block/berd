@@ -1502,6 +1502,50 @@ describe("VirtualMessageTimeline", () => {
     await waitFor(() => expect(scroller.scrollTop).toBe(4650));
   });
 
+  it("bounds live-tail handoff ownership to one frame", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    mockTranscriptElementMeasurements();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("streaming fragment", 120)}\n[height:650]`,
+      ),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 4700,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+    fireEvent.wheel(scroller, { deltaY: -80 });
+    setScrollMetrics(scroller, {
+      scrollTop: 4650,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId={null}
+      />,
+    );
+    expect(animationFrame.run(1001)).toBe(true);
+  });
+
   it("does not auto-scroll again for the same latest user message after detaching", async () => {
     mockTranscriptElementMeasurements();
     const latestUser = textMessage("user-latest", "user", "Follow up");
@@ -1658,6 +1702,79 @@ describe("VirtualMessageTimeline", () => {
     expect(scroller.scrollTop).toBe(300);
   });
 
+  it("keeps wheel scrolling stable when transcript measurement beats the scroll event", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    // Wheel intent arrives before the browser's corresponding scroll event.
+    // A transcript update in that gap must not replay the previous anchor.
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 640;
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          messages[0],
+          textMessage("assistant-1", "assistant", "Updated answer"),
+        ]}
+      />,
+    );
+    animationFrame.runAll(1000);
+
+    expect(scroller.scrollTop).toBe(640);
+  });
+
+  it("expires wheel ownership when no scroll event follows", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    // Boundary and horizontal wheel gestures may not produce a scroll event.
+    // Their browser ownership must expire before a later reconciliation.
+    fireEvent.wheel(scroller, { deltaY: 0 });
+    expect(animationFrame.run(1000)).toBe(true);
+    scroller.scrollTop = 640;
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          messages[0],
+          textMessage("assistant-1", "assistant", "Updated answer"),
+        ]}
+      />,
+    );
+    animationFrame.runAll(2000);
+
+    expect(scroller.scrollTop).toBe(700);
+  });
+
   it("pauses streaming bottom follow while the user owns the scrollbar", () => {
     const animationFrame = mockRequestAnimationFrame();
     const initialMessages = [
@@ -1726,6 +1843,53 @@ describe("VirtualMessageTimeline", () => {
       <VirtualMessageTimeline
         sessionId="session-secondary"
         messages={secondaryMessages}
+      />,
+    );
+    triggerResizeObservers();
+    animationFrame.runAll(1000);
+
+    expect(scroller.scrollTop).toBe(700);
+  });
+
+  it("releases wheel ownership when switching sessions", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const primaryMessages = [
+      textMessage("primary-user", "user", "Question"),
+      textMessage("primary-assistant", "assistant", "Answer"),
+    ];
+    const secondaryMessages = [
+      textMessage("secondary-user", "user", "Another question"),
+      textMessage("secondary-assistant", "assistant", "Another answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-primary"
+        messages={primaryMessages}
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    animationFrame.runAll(0);
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.wheel(scroller, { deltaY: 0 });
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-secondary"
+        messages={secondaryMessages}
+      />,
+    );
+    scroller.scrollTop = 300;
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-secondary"
+        messages={[
+          secondaryMessages[0],
+          textMessage("secondary-assistant", "assistant", "Updated answer"),
+        ]}
       />,
     );
     triggerResizeObservers();
