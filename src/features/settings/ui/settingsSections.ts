@@ -9,7 +9,7 @@ import {
   Shield,
   Stethoscope,
 } from "lucide-react";
-import { IconPlug } from "@tabler/icons-react";
+import { IconPlug, IconServer } from "@tabler/icons-react";
 import type {
   ProfileCapabilityId,
   ProfileCapabilityState,
@@ -25,7 +25,8 @@ type SettingsSectionDefinition = {
 
 export const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: Settings2 },
-  { id: "providers", labelKey: "nav.providers", icon: IconPlug },
+  { id: "connections", labelKey: "nav.connections", icon: IconPlug },
+  { id: "providers", labelKey: "nav.providers", icon: IconServer },
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
@@ -54,6 +55,7 @@ export const DEFAULT_SETTINGS_SECTION: SectionId = "general";
 const LEGACY_SECTION_REDIRECTS: Record<string, SectionId> = {
   projects: "archive",
   chats: "archive",
+  extensions: "connections",
   voice: "general",
 };
 

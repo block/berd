@@ -123,7 +123,6 @@ const buttonStylingBaseline = new Set([
   "src/features/extensions/ui/ExtensionModal.tsx",
   "src/features/home/widgets/ChecklistWidget.tsx",
   "src/features/home/widgets/StickyNoteWidget.tsx",
-  "src/features/navigation/ui/PrimaryNavigationSurface.tsx",
   "src/features/projects/ui/CreateProjectDialog.tsx",
   "src/features/projects/ui/ProjectsView.tsx",
   "src/features/sessions/ui/SessionCard.tsx",

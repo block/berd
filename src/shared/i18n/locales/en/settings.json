@@ -402,6 +402,7 @@
     "appearance": "Appearance",
     "archive": "Archive",
     "compaction": "Compaction",
+    "connections": "Connections",
     "doctor": "Doctor",
     "experiments": "Experiments",
     "extensions": "Extensions",

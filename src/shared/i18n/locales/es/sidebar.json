@@ -42,7 +42,8 @@
     "resizeNavigationPanel": "Cambiar tamaño del panel de navegación",
     "resizeSidebarPanels": "Cambiar tamaño de los paneles laterales",
     "resizeSessionListPanel": "Cambiar tamaño del panel de proyectos y chats",
-    "renameHint": "Haz doble clic para renombrar"
+    "renameHint": "Haz doble clic para renombrar",
+    "pinnedDisplayOptions": "Opciones de visualización de elementos fijados"
   },
   "bulk": {
     "selectedContext_one": "{{displayCount}} chat seleccionado",
@@ -75,11 +76,14 @@
     "loadingMore": "Buscando más chats...",
     "placeholder": "Buscar chats...",
     "searchMore": "Buscar más chats",
-    "searching": "Buscando chats..."
+    "searching": "Buscando chats...",
+    "closeJumpToChat": "Cerrar búsqueda de chats",
+    "jumpToChat": "Ir a un chat"
   },
   "sections": {
     "projects": "Proyectos",
-    "recents": "Chats"
+    "recents": "Chats",
+    "pinned": "Fijados"
   },
   "status": {
     "chatActive": "Chat activo",

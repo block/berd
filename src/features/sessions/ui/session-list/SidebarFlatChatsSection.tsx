@@ -1,4 +1,4 @@
-import { IconCubePlus, IconEdit } from "@tabler/icons-react";
+import { IconCubePlus, IconEdit, IconPlus } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { AppView } from "@/app/AppShell";
 import { SidebarNavChatsIcon } from "@/features/navigation/ui/sidebarNavIcons";
@@ -6,6 +6,7 @@ import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { SidebarDisclosureButton } from "@/shared/ui/sidebar-disclosure-button";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
@@ -50,11 +51,14 @@ export function SidebarFlatChatsSection({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  showChatIcons = false,
   showTimestamps,
   onShowTimestampsChange,
   showGitBranches = false,
   onShowGitBranchesChange,
   showViewAllInHistory = false,
+  compactGroups = false,
+  compactHeader = false,
   showTopDivider: _showTopDivider = true,
 }: {
   groups: FlatChatGroup[];
@@ -83,11 +87,14 @@ export function SidebarFlatChatsSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  showChatIcons?: boolean;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
   showGitBranches?: boolean;
   onShowGitBranchesChange?: (show: boolean) => void;
   showViewAllInHistory?: boolean;
+  compactGroups?: boolean;
+  compactHeader?: boolean;
   showTopDivider?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
@@ -116,6 +123,7 @@ export function SidebarFlatChatsSection({
           labelTransition={labelTransition}
           labelVisible={labelVisible}
           labelClassName={sectionHeaderTextClass}
+          className={compactHeader ? "pt-0" : undefined}
           actions={
             (onNavigate && showViewAllInHistory) ||
             onCreateProject ||
@@ -133,7 +141,7 @@ export function SidebarFlatChatsSection({
                 />
                 {onCreateProject ? (
                   <SidebarSectionHeaderAction
-                    icon={IconCubePlus}
+                    icon={IconPlus}
                     label={t("actions.newProject")}
                     onClick={onCreateProject}
                   />
@@ -280,7 +288,10 @@ export function SidebarFlatChatsSection({
             {groups.map((group, groupIndex) => (
               <div
                 key={group.id}
-                className={cn("space-y-0", groupIndex > 0 && "mt-1 pt-1")}
+                className={cn(
+                  "space-y-0",
+                  !compactGroups && groupIndex > 0 && "mt-1 pt-1",
+                )}
                 data-sidebar-flat-chat-group={group.id}
               >
                 {group.sessions.map((session) => {
@@ -296,7 +307,7 @@ export function SidebarFlatChatsSection({
                       title={session.title}
                       branchName={session.branchName}
                       activityAt={session.activityAt}
-                      showLeadingIcon={false}
+                      showLeadingIcon={showChatIcons}
                       showTimestamp={showTimestamps}
                       showRenameTooltip={false}
                       isActive={isActive}
@@ -333,19 +344,17 @@ export function SidebarFlatChatsSection({
               </div>
             ))}
             {showViewAllInHistory && onNavigate ? (
-              <Button
+              <SidebarDisclosureButton
                 type="button"
-                variant="ghost"
-                flush
-                size="xs"
+                row
                 onClick={() => onNavigate("session-history")}
                 className={cn(
-                  "mt-1 h-auto w-full justify-start rounded-sm px-3 py-1",
+                  "h-7 w-full justify-start rounded-sm px-3 py-1 text-sm",
                   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
                 )}
               >
                 {t("viewAllInHistory")}
-              </Button>
+              </SidebarDisclosureButton>
             ) : null}
           </div>
         )}

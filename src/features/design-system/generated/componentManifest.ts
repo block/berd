@@ -2588,6 +2588,28 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Sidebar Disclosure Button",
+    source: "src/shared/ui/sidebar-disclosure-button.tsx",
+    description: "",
+    exports: ["SidebarDisclosureButton", "SidebarDisclosureButtonProps"],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "active:text-muted-foreground",
+      "hover:text-muted-foreground",
+      "text-muted-foreground/75",
+    ],
+    stateClasses: [
+      "active:text-muted-foreground",
+      "hover:text-muted-foreground",
+    ],
+    sourceTokenClasses: [
+      "active:text-muted-foreground",
+      "hover:text-muted-foreground",
+      "text-muted-foreground/75",
+    ],
+  },
+  {
     name: "Sidebar Row Menu Button",
     source: "src/shared/ui/sidebar-row-menu-button.tsx",
     description: "",

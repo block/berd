@@ -619,6 +619,60 @@ describe("NavigationPanesView", () => {
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
+  it("replaces the settings footer while sidebar search is active", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    await user.click(screen.getByRole("button", { name: "Jump to a chat" }));
+
+    expect(
+      screen.getByRole("searchbox", { name: "Jump to a chat" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("nav-settings")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close chat search" }));
+    expect(screen.getByTestId("nav-settings")).toHaveAccessibleName("Settings");
+  });
+
+  it("keeps Settings visible when compact sidebar search cannot expand", async () => {
+    const user = userEvent.setup();
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+        chatList: 240,
+      },
+      sessionListDock: "side",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Jump to a chat" }));
+
+    expect(
+      screen.queryByRole("searchbox", { name: "Jump to a chat" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("nav-settings")).toHaveAccessibleName("Settings");
+  });
+
+  it("selects a filtered chat before search collapses on blur", async () => {
+    const user = userEvent.setup();
+    const onSelectSession = vi.fn();
+    seedSessions({
+      id: "profile-chat",
+      title: "Profile polish",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({ onSelectSession });
+
+    await user.click(screen.getByRole("button", { name: "Jump to a chat" }));
+    const search = screen.getByRole("searchbox", { name: "Jump to a chat" });
+    await user.type(search, "profile");
+    await user.click(screen.getByRole("button", { name: "Profile polish" }));
+
+    expect(onSelectSession).toHaveBeenCalledWith("profile-chat");
+  });
+
   it("moves roving focus through main sidebar rows", () => {
     renderSidebar();
 
@@ -657,6 +711,34 @@ describe("NavigationPanesView", () => {
     expect(project).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("fades the top of main navigation after scrolling below the header", async () => {
+    renderSidebar();
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    Object.defineProperties(mainNavigation, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 100 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    fireEvent.scroll(mainNavigation);
+    expect(mainNavigation.style.maskImage).toBe("");
+
+    mainNavigation.scrollTop = 24;
+    fireEvent.scroll(mainNavigation);
+    await waitFor(() =>
+      expect(mainNavigation.style.maskImage).toContain(
+        "transparent 0, black 48px",
+      ),
+    );
+
+    mainNavigation.scrollTop = 0;
+    fireEvent.scroll(mainNavigation);
+    await waitFor(() => expect(mainNavigation.style.maskImage).toBe(""));
+  });
+
   it("only fades the bottom of the main navigation when more content is below", async () => {
     renderSidebar();
 
@@ -675,9 +757,13 @@ describe("NavigationPanesView", () => {
       expect(mainNavigation.style.maskImage).toContain("linear-gradient"),
     );
 
-    mainNavigation.scrollTop = 100;
+    mainNavigation.scrollTop = 60;
     fireEvent.scroll(mainNavigation);
-    await waitFor(() => expect(mainNavigation.style.maskImage).toBe(""));
+    await waitFor(() =>
+      expect(mainNavigation.style.maskImage).toContain(
+        "transparent 0, black 48px",
+      ),
+    );
   });
 
   it.skip("scrolls the active main nav item into view after navigating from the recents history link", async () => {
@@ -1405,7 +1491,7 @@ describe("NavigationPanesView", () => {
     expect(
       screen.queryByText(`Flat Chat ${MAX_FLAT_SIDEBAR_CHATS + 1}`),
     ).not.toBeInTheDocument();
-    const viewAll = screen.getByRole("button", { name: "View all" });
+    const viewAll = screen.getByRole("button", { name: "View all chats" });
     await user.click(viewAll);
     expect(onNavigate).toHaveBeenCalledWith("session-history");
     await user.click(
@@ -1638,22 +1724,17 @@ describe("NavigationPanesView", () => {
     expect(onNavigate).toHaveBeenCalledWith("builderbot");
   });
 
-  it("renders settings after session history in main navigation", () => {
+  it("renders settings in the sticky navigation footer", () => {
     renderSidebar();
 
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,
     });
-    const labels = within(mainNavigation)
-      .getAllByRole("button")
-      .map((button) => button.getAttribute("aria-label"))
-      .filter((label): label is string => Boolean(label));
 
-    const sessionHistoryIndex = labels.indexOf("Session history");
-    const settingsIndex = labels.indexOf("Settings");
-
-    expect(sessionHistoryIndex).toBeGreaterThanOrEqual(0);
-    expect(settingsIndex).toBe(sessionHistoryIndex + 1);
+    expect(
+      within(mainNavigation).queryByRole("button", { name: "Session history" }),
+    ).toBeNull();
+    expect(screen.getByTestId("nav-settings")).toHaveAccessibleName("Settings");
   });
 
   it("renders custom project image icons in the prototype project rows", () => {
@@ -2173,15 +2254,9 @@ describe("NavigationPanesView", () => {
       .filter((label): label is string => Boolean(label));
 
     expect(labels).toEqual(
-      expect.arrayContaining([
-        "Home",
-        "Agents",
-        "Skills",
-        "Automations",
-        "Session history",
-        "Settings",
-      ]),
+      expect.arrayContaining(["Home", "Agents", "Skills", "Automations"]),
     );
+    expect(screen.getByTestId("nav-settings")).toHaveAccessibleName("Settings");
     expect(labels).not.toContain("Design system");
     expect(labels).not.toContain("Design system (dev only)");
 
@@ -2220,7 +2295,10 @@ describe("NavigationPanesView", () => {
 
     renderSidebar();
 
-    const recentsHeader = screen.getByRole("button", { name: /chats/i });
+    const recentsHeader = screen.getByRole("button", {
+      name: "Chats",
+      expanded: true,
+    });
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
 
     await user.click(recentsHeader);
@@ -6756,9 +6834,17 @@ describe("NavigationPanesView", () => {
       onSettingsSectionChange,
     });
 
+    const settingsNavigation = screen.getByRole("navigation", {
+      name: /settings navigation/i,
+    });
+    expect(settingsNavigation).toHaveClass("px-1.5", "py-1");
+    expect(screen.getByRole("button", { name: /^back$/i })).toHaveClass(
+      "h-7",
+      "px-3",
+    );
     expect(
-      screen.getByRole("navigation", { name: /settings navigation/i }),
-    ).toBeInTheDocument();
+      within(settingsNavigation).getByRole("button", { name: /providers/i }),
+    ).toHaveClass("h-7", "px-3");
     expect(screen.getByRole("button", { name: /providers/i })).toHaveAttribute(
       "aria-current",
       "page",

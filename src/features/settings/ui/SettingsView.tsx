@@ -10,6 +10,7 @@ import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
+import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { PageShell } from "@/shared/ui/page-shell";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
@@ -55,6 +56,10 @@ export function SettingsView({
     }
     void refreshDoctorReportFreshness(queryClient);
   }, [doctorEnabled, queryClient]);
+
+  if (activeSection === "connections") {
+    return <ConnectionsView />;
+  }
 
   return (
     <PageShell contentWidth="narrow" contentClassName="gap-0">

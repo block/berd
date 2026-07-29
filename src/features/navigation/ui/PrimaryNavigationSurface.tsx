@@ -5,10 +5,13 @@ import {
   type KeyboardEventHandler,
   type ReactNode,
   type Ref,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { IconArrowLeft, IconServer } from "@tabler/icons-react";
-import { ArrowUpCircle, ChevronLeft, ChevronRight, Link2 } from "lucide-react";
+import { IconArrowLeft, IconSearch, IconServer } from "@tabler/icons-react";
+import { ArrowUpCircle, ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { PaneSurface } from "@/app/layout/panes/paneChrome";
 import {
@@ -18,24 +21,21 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 import {
-  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-  SIDEBAR_NAV_ROW_SPACING_CLASS,
-  SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS,
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
-  SIDEBAR_ROW_HOVER_CLASS,
-  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
+  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarNavItem } from "./SidebarNavItem";
 import {
   SidebarNavAgentsIcon,
   SidebarNavAutomationsIcon,
-  SidebarNavChatsIcon,
   SidebarNavHomeIcon,
   SidebarNavSettingsIcon,
   SidebarNavSkillsIcon,
 } from "./sidebarNavIcons";
+import { SidebarPinnedSection } from "./SidebarPinnedSection";
 
 type SidebarNavItemIcon = NonNullable<
   ComponentProps<typeof SidebarNavItem>["icon"]
@@ -46,6 +46,8 @@ interface PrimaryNavigationSurfaceProps {
   activeView?: AppView;
   agentUpdatesAvailable: boolean;
   bottomMaskStyle: CSSProperties;
+  topMaskStyle: CSSProperties;
+  bothEdgeMaskStyle: CSSProperties;
   detachable: boolean;
   elevatedShadow?: boolean;
   fullHeight: boolean;
@@ -61,12 +63,13 @@ interface PrimaryNavigationSurfaceProps {
   onSettingsBack?: () => void;
   onSettingsClick?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
-  renderInlineSessionList?: () => ReactNode;
+  renderInlineSessionList?: (searchQuery: string) => ReactNode;
   renderPrimaryNavResizeRail?: () => ReactNode;
   renderUnifiedResizeRail?: () => ReactNode;
   secondaryNavRef: Ref<HTMLElement>;
   settingsSections: readonly (typeof SETTINGS_SECTIONS)[number][];
   showBottomMask: boolean;
+  showTopMask: boolean;
   showAutomationsSurface: boolean;
   showBuilderbotSurface: boolean;
   showPrimaryNavWidthToggle: boolean;
@@ -84,6 +87,8 @@ export const PrimaryNavigationSurface = forwardRef<
     activeView = "home",
     agentUpdatesAvailable,
     bottomMaskStyle,
+    topMaskStyle,
+    bothEdgeMaskStyle,
     detachable,
     elevatedShadow = false,
     fullHeight,
@@ -105,6 +110,7 @@ export const PrimaryNavigationSurface = forwardRef<
     secondaryNavRef,
     settingsSections,
     showBottomMask,
+    showTopMask,
     showAutomationsSurface,
     showBuilderbotSurface,
     showPrimaryNavWidthToggle,
@@ -115,6 +121,32 @@ export const PrimaryNavigationSurface = forwardRef<
   ref,
 ) {
   const { t } = useTranslation(["sidebar", "common", "settings"]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchLabelRef = useRef<HTMLLabelElement>(null);
+  const searchBlurTimerRef = useRef<number | null>(null);
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const expandSearch = () => {
+    setSearchExpanded(true);
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+  useEffect(
+    () => () => {
+      if (searchBlurTimerRef.current !== null) {
+        window.clearTimeout(searchBlurTimerRef.current);
+      }
+    },
+    [],
+  );
+  useEffect(() => {
+    const focusSearch = () => {
+      setSearchExpanded(true);
+      window.requestAnimationFrame(() => searchInputRef.current?.focus());
+    };
+    window.addEventListener("goose:focus-nav-search", focusSearch);
+    return () =>
+      window.removeEventListener("goose:focus-nav-search", focusSearch);
+  }, []);
   const mainNavItems: readonly {
     id: AppView;
     label: string;
@@ -122,11 +154,6 @@ export const PrimaryNavigationSurface = forwardRef<
   }[] = [
     { id: "agents", label: t("navigation.agents"), icon: SidebarNavAgentsIcon },
     { id: "skills", label: t("navigation.skills"), icon: SidebarNavSkillsIcon },
-    {
-      id: "connections",
-      label: t("navigation.connections"),
-      icon: Link2,
-    },
     ...(showAutomationsSurface
       ? [
           {
@@ -145,11 +172,6 @@ export const PrimaryNavigationSurface = forwardRef<
           },
         ]
       : []),
-    {
-      id: "session-history",
-      label: t("navigation.sessionHistory"),
-      icon: SidebarNavChatsIcon,
-    },
   ];
 
   const primaryNavWidthToggleLabel = navPanelCompact
@@ -201,19 +223,111 @@ export const PrimaryNavigationSurface = forwardRef<
           inert={isSecondarySurface ? true : undefined}
           aria-hidden={isSecondarySurface}
         >
+          <div className="flex h-7 flex-shrink-0 items-center px-1.5">
+            {navCollapsed ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("search.jumpToChat")}
+                title={t("search.jumpToChat")}
+                onClick={expandSearch}
+              >
+                <IconSearch aria-hidden="true" className="!size-4" />
+              </Button>
+            ) : searchExpanded ? (
+              <label
+                ref={searchLabelRef}
+                className="group relative block w-full overflow-hidden rounded-sm"
+                onBlur={() => {
+                  if (searchBlurTimerRef.current !== null) {
+                    window.clearTimeout(searchBlurTimerRef.current);
+                  }
+                  searchBlurTimerRef.current = window.setTimeout(() => {
+                    searchBlurTimerRef.current = null;
+                    if (
+                      searchLabelRef.current?.contains(document.activeElement)
+                    ) {
+                      return;
+                    }
+                    setSearchQuery("");
+                    setSearchExpanded(false);
+                  }, 0);
+                }}
+                onFocus={() => {
+                  if (searchBlurTimerRef.current !== null) {
+                    window.clearTimeout(searchBlurTimerRef.current);
+                    searchBlurTimerRef.current = null;
+                  }
+                }}
+              >
+                <IconSearch
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground group-focus-within:text-muted-foreground"
+                />
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t("search.jumpToChat")}
+                  aria-label={t("search.jumpToChat")}
+                  className="h-7 w-full appearance-none rounded-sm border-0 bg-transparent pl-9 pr-8 text-sm font-normal text-muted-foreground/50 shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/60 hover:text-muted-foreground focus:bg-muted/60 focus:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:appearance-none"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("search.closeJumpToChat")}
+                  title={t("search.closeJumpToChat")}
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSearchExpanded(false);
+                  }}
+                  className="absolute right-1 top-1/2 size-5 -translate-y-1/2 rounded-sm"
+                >
+                  <X aria-hidden="true" />
+                </Button>
+              </label>
+            ) : (
+              <div className="flex w-full items-center justify-between pl-2 pr-1">
+                <BerdIcon className="ml-0.5 size-5 text-foreground" />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("search.jumpToChat")}
+                  title={t("search.jumpToChat")}
+                  onClick={expandSearch}
+                >
+                  <IconSearch aria-hidden="true" className="!size-4" />
+                </Button>
+              </div>
+            )}
+          </div>
           <nav
             ref={mainNavRef}
             onKeyDown={onKeyDown}
             className={cn(
-              "min-h-0 overflow-x-hidden px-2.5 py-1 pb-1 scrollbar-none",
+              "min-h-0 overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none",
               stackedDetachedLayout
                 ? "flex-none overflow-y-visible"
                 : "flex-1 overflow-y-auto",
             )}
-            style={showBottomMask ? bottomMaskStyle : undefined}
+            style={
+              showTopMask && showBottomMask
+                ? bothEdgeMaskStyle
+                : showTopMask
+                  ? topMaskStyle
+                  : showBottomMask
+                    ? bottomMaskStyle
+                    : undefined
+            }
             aria-label={t("navigation.main")}
           >
-            <div className="relative z-10 space-y-0">
+            <div
+              className={cn("relative z-10 space-y-0", searchQuery && "hidden")}
+            >
               <SidebarNavItem
                 testId="nav-home"
                 navId="home"
@@ -242,7 +356,21 @@ export const PrimaryNavigationSurface = forwardRef<
                   />
                 );
               })}
+            </div>
 
+            {!navCollapsed && !searchQuery && <SidebarPinnedSection />}
+
+            {renderInlineSessionList?.(searchQuery)}
+          </nav>
+          {(!searchExpanded || navCollapsed) && (
+            <div className="flex-shrink-0 px-1.5 py-1.5">
+              <div
+                aria-hidden="true"
+                className={cn(
+                  "mb-1.5 h-px bg-border/70",
+                  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+                )}
+              />
               <SidebarNavItem
                 testId="nav-settings"
                 navId="settings"
@@ -255,9 +383,7 @@ export const PrimaryNavigationSurface = forwardRef<
                 onClick={() => onSettingsClick?.()}
               />
             </div>
-
-            {renderInlineSessionList?.()}
-          </nav>
+          )}
           {renderUnifiedResizeRail?.()}
         </div>
 
@@ -275,46 +401,22 @@ export const PrimaryNavigationSurface = forwardRef<
           inert={!isSecondarySurface ? true : undefined}
           aria-hidden={!isSecondarySurface}
         >
-          <div className={cn("flex-shrink-0", "px-2.5 py-1.5")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size={navCollapsed ? "icon-sm" : "default"}
-              onClick={onSettingsBack}
-              className={cn(
-                "h-10 w-full rounded-sm bg-transparent active:bg-[var(--sidebar-row-active)]",
-                SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
-                SIDEBAR_ROW_HOVER_CLASS,
-                SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-                navCollapsed
-                  ? "justify-center p-3"
-                  : cn("h-auto justify-start", SIDEBAR_NAV_ROW_SPACING_CLASS),
-              )}
-              title={t("actions.backToMainNavigation")}
-              aria-label={t("actions.backToMainNavigation")}
-            >
-              <IconArrowLeft className="size-4 flex-shrink-0" />
-              {!navCollapsed && (
-                <span
-                  className={cn(
-                    "whitespace-nowrap",
-                    SIDEBAR_NAV_TEXT_CLASS,
-                    labelTransition,
-                    navLabelVisible
-                      ? "opacity-100 w-auto"
-                      : "opacity-0 w-0 overflow-hidden",
-                  )}
-                >
-                  {t("actions.backToMainNavigation")}
-                </span>
-              )}
-            </Button>
+          <div className="flex h-7 flex-shrink-0 items-center px-1.5">
+            <SidebarNavItem
+              icon={IconArrowLeft}
+              label={t("actions.backToMainNavigation")}
+              collapsed={navCollapsed}
+              labelTransition={labelTransition}
+              labelVisible={navLabelVisible}
+              isActive={false}
+              onClick={() => onSettingsBack?.()}
+            />
           </div>
           <nav
             ref={secondaryNavRef}
             onKeyDown={onKeyDown}
             className={cn(
-              "min-h-0 overflow-x-hidden px-2.5 py-1 pb-1 scrollbar-none",
+              "min-h-0 overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none",
               stackedDetachedLayout && !isSecondarySurface
                 ? "flex-none overflow-y-visible"
                 : "flex-1 overflow-y-auto",
@@ -357,7 +459,7 @@ export const PrimaryNavigationSurface = forwardRef<
         </div>
       </div>
       {showPrimaryNavWidthToggle && (
-        <div className="flex-shrink-0 px-2.5 py-1.5">
+        <div className="flex-shrink-0 px-1.5 py-1.5">
           <SidebarNavItem
             testId="sidebar-primary-nav-width-toggle"
             icon={PrimaryNavWidthToggleIcon}

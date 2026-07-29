@@ -363,9 +363,19 @@ export interface NavigationPanesViewProps {
 // scroll-into-view math so a row never lands underneath the fade.
 const BOTTOM_MASK_PX = 48;
 const BOTTOM_MASK = `linear-gradient(to bottom, black calc(100% - ${BOTTOM_MASK_PX}px), transparent 100%)`;
+const TOP_MASK = `linear-gradient(to bottom, transparent 0, black ${BOTTOM_MASK_PX}px)`;
+const BOTH_EDGE_MASK = `linear-gradient(to bottom, transparent 0, black ${BOTTOM_MASK_PX}px, black calc(100% - ${BOTTOM_MASK_PX}px), transparent 100%)`;
 const BOTTOM_MASK_STYLE: CSSProperties = {
   maskImage: BOTTOM_MASK,
   WebkitMaskImage: BOTTOM_MASK,
+};
+const TOP_MASK_STYLE: CSSProperties = {
+  maskImage: TOP_MASK,
+  WebkitMaskImage: TOP_MASK,
+};
+const BOTH_EDGE_MASK_STYLE: CSSProperties = {
+  maskImage: BOTH_EDGE_MASK,
+  WebkitMaskImage: BOTH_EDGE_MASK,
 };
 const SCROLL_BOTTOM_EPSILON_PX = 1;
 const ACTIVE_SCROLL_TOP_OFFSET_PX = 40;
@@ -382,24 +392,53 @@ const MAIN_NAV_SCROLL_TARGETS: ReadonlySet<AppView> = new Set([
   "session-history",
 ]);
 
-function hasScrollableContentBelow(element: HTMLElement) {
+function hasScrollableContentBelow(
+  element: HTMLElement,
+  bottomEpsilonPx = SCROLL_BOTTOM_EPSILON_PX,
+) {
   return (
     element.scrollHeight - element.scrollTop - element.clientHeight >
-    SCROLL_BOTTOM_EPSILON_PX
+    bottomEpsilonPx
   );
 }
 
-function useBottomMaskState(ref: RefObject<HTMLElement | null>) {
+function useTopMaskState(ref: RefObject<HTMLElement | null>) {
+  const [showTopMask, setShowTopMask] = useState(false);
+
+  const updateTopMask = useCallback(() => {
+    const nextShowTopMask = Boolean(ref.current && ref.current.scrollTop > 1);
+    setShowTopMask((current) =>
+      current === nextShowTopMask ? current : nextShowTopMask,
+    );
+  }, [ref]);
+
+  useLayoutEffect(() => {
+    const scrollContainer = ref.current;
+    if (!scrollContainer) return;
+    updateTopMask();
+    scrollContainer.addEventListener("scroll", updateTopMask, {
+      passive: true,
+    });
+    return () => scrollContainer.removeEventListener("scroll", updateTopMask);
+  }, [ref, updateTopMask]);
+
+  return showTopMask;
+}
+
+function useBottomMaskState(
+  ref: RefObject<HTMLElement | null>,
+  bottomEpsilonPx = SCROLL_BOTTOM_EPSILON_PX,
+) {
   const [showBottomMask, setShowBottomMask] = useState(false);
 
   const updateBottomMask = useCallback(() => {
     const nextShowBottomMask = ref.current
-      ? hasScrollableContentBelow(ref.current)
+      ? hasScrollableContentBelow(ref.current, bottomEpsilonPx)
       : false;
     setShowBottomMask((current) =>
       current === nextShowBottomMask ? current : nextShowBottomMask,
     );
-  }, [ref]);
+  }, [bottomEpsilonPx, ref]);
 
   useLayoutEffect(() => {
     const scrollContainer = ref.current;
@@ -3480,13 +3519,19 @@ export function NavigationPanesView({
   const sessionListNavRef = useRef<HTMLElement>(null);
   const skipActiveSessionScrollRef = useRef<string | null>(null);
   const secondaryNavRef = useRef<HTMLElement>(null);
-  const { showBottomMask, updateBottomMask } = useBottomMaskState(navRef);
+  const { showBottomMask, updateBottomMask } = useBottomMaskState(
+    navRef,
+    prototypeMode ? SCROLL_BOTTOM_EPSILON_PX : BOTTOM_MASK_PX,
+  );
+  const showTopMask = useTopMaskState(navRef);
   const {
     showBottomMask: showSessionListBottomMask,
     updateBottomMask: updateSessionListBottomMask,
-  } = useBottomMaskState(sessionListNavRef);
-  const { showBottomMask: showSecondaryBottomMask } =
-    useBottomMaskState(secondaryNavRef);
+  } = useBottomMaskState(sessionListNavRef, BOTTOM_MASK_PX);
+  const { showBottomMask: showSecondaryBottomMask } = useBottomMaskState(
+    secondaryNavRef,
+    SCROLL_BOTTOM_EPSILON_PX,
+  );
   const [stackedPrimaryNavPanelHeight, setStackedPrimaryNavPanelHeight] =
     useState(DEFAULT_STACKED_PRIMARY_NAV_PANEL_HEIGHT_PX);
   const [prototypeChatSearch, setPrototypeChatSearch] = useState("");
@@ -5325,6 +5370,8 @@ export function NavigationPanesView({
         activeView={activeView}
         agentUpdatesAvailable={agentUpdatesAvailable}
         bottomMaskStyle={BOTTOM_MASK_STYLE}
+        topMaskStyle={TOP_MASK_STYLE}
+        bothEdgeMaskStyle={BOTH_EDGE_MASK_STYLE}
         detachable={canDetachSessionList}
         elevatedShadow={elevatedShadow}
         fullHeight={!canDetachSessionList || visualSessionListSideDocked}
@@ -5342,7 +5389,7 @@ export function NavigationPanesView({
         onSettingsSectionChange={onSettingsSectionChange}
         renderInlineSessionList={
           !collapsed && useUnifiedDefaultNavigation
-            ? () => (
+            ? (searchQuery) => (
                 <SessionListCapability
                   activeSessionId={activeSessionId}
                   collapsed={collapsed}
@@ -5365,6 +5412,7 @@ export function NavigationPanesView({
                   onSelectSession={onSelectSession}
                   onSessionSelectForScroll={handleSessionSelectForScroll}
                   projects={projects}
+                  searchQuery={searchQuery}
                   surface={{
                     dragging: sessionListDragging,
                     renderDragHandle: renderSessionListDragHandle,
@@ -5383,6 +5431,7 @@ export function NavigationPanesView({
         secondaryNavRef={secondaryNavRef}
         settingsSections={visibleSettingsSections}
         showBottomMask={showBottomMask}
+        showTopMask={!prototypeMode && showTopMask}
         showAutomationsSurface={showAutomationsSurface}
         showBuilderbotSurface={showBuilderbotSurface}
         showPrimaryNavWidthToggle={

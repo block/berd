@@ -1,10 +1,16 @@
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconCubePlus, IconEdit } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconCubePlus,
+  IconEdit,
+  IconPlus,
+} from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { SidebarDisclosureButton } from "@/shared/ui/sidebar-disclosure-button";
 import { CollapseReveal } from "@/shared/ui/collapse-reveal";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
@@ -46,6 +52,8 @@ export interface SidebarProjectsSectionProps {
   hasVisibleChats: boolean;
   flatChatGroups: FlatChatGroup[];
   hasFlatChatOverflow: boolean;
+  compactFlatGroups?: boolean;
+  searchActive?: boolean;
   groupChatsByProject: boolean;
   onGroupChatsByProjectChange?: (grouped: boolean) => void;
   pinnedShowTimestamps: boolean;
@@ -118,6 +126,8 @@ export function SidebarProjectsSection({
   hasVisibleChats,
   flatChatGroups,
   hasFlatChatOverflow,
+  compactFlatGroups = false,
+  searchActive = false,
   groupChatsByProject,
   onGroupChatsByProjectChange,
   pinnedShowTimestamps,
@@ -259,7 +269,9 @@ export function SidebarProjectsSection({
           onShowTimestampsChange={onChatShowTimestampsChange}
           showGitBranches={showGitBranches}
           onShowGitBranchesChange={onShowGitBranchesChange}
-          showViewAllInHistory={hasFlatChatOverflow}
+          showViewAllInHistory={hasFlatChatOverflow && !searchActive}
+          compactGroups={compactFlatGroups}
+          compactHeader={searchActive}
           showTopDivider={_showTopDivider}
         />
       </>
@@ -305,7 +317,7 @@ export function SidebarProjectsSection({
                   className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
                 />
                 <SidebarSectionHeaderAction
-                  icon={IconCubePlus}
+                  icon={IconPlus}
                   label={t("actions.newProject")}
                   onClick={onCreateProject}
                 />
@@ -488,6 +500,19 @@ export function SidebarProjectsSection({
             sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}
           />
         )}
+        {!collapsed && onNavigate ? (
+          <SidebarDisclosureButton
+            type="button"
+            row
+            onClick={() => onNavigate("session-history")}
+            className={cn(
+              "h-7 w-full justify-start rounded-sm px-3 py-1 text-sm",
+              SIDEBAR_GROUP_LABEL_TEXT_CLASS,
+            )}
+          >
+            {t("viewAllInHistory")}
+          </SidebarDisclosureButton>
+        ) : null}
       </div>
     </SidebarChatDragProvider>
   );

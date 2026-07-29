@@ -152,6 +152,7 @@ export interface SessionListCapabilityProps {
   onSelectSession?: (sessionId: string) => void;
   onSessionSelectForScroll?: (sessionId: string) => void;
   projects: ProjectInfo[];
+  searchQuery?: string;
   surface: SessionListSurfaceOptions;
 }
 
@@ -463,6 +464,7 @@ export function SessionListCapability({
   onSelectSession,
   onSessionSelectForScroll,
   projects,
+  searchQuery = "",
   surface,
 }: SessionListCapabilityProps) {
   const { t } = useTranslation(["sidebar", "common"]);
@@ -555,9 +557,29 @@ export function SessionListCapability({
       sessions,
     ],
   );
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const effectiveGroupChatsByProject =
+    normalizedSearchQuery.length > 0 ? false : groupChatsByProject;
+  const searchedVisibleSessions = useMemo(
+    () => ({
+      ...visibleSessions,
+      sessions: normalizedSearchQuery
+        ? visibleSessions.sessions.filter((session) => {
+            const projectName = session.projectId
+              ? projectsById.get(session.projectId)?.name
+              : undefined;
+            return [session.title, projectName].some((value) =>
+              value?.toLowerCase().includes(normalizedSearchQuery),
+            );
+          })
+        : visibleSessions.sessions,
+    }),
+    [normalizedSearchQuery, projectsById, visibleSessions],
+  );
   const activeSessions = useMemo(
-    () => visibleSessions.sessions.filter((session) => !session.archivedAt),
-    [visibleSessions],
+    () =>
+      searchedVisibleSessions.sessions.filter((session) => !session.archivedAt),
+    [searchedVisibleSessions],
   );
   const activeSessionIds = useMemo(
     () => new Set(activeSessions.map((session) => session.id)),
@@ -747,19 +769,19 @@ export function SessionListCapability({
   }, [activeSessionId, activeSessionIds]);
 
   useEffect(() => {
-    if (groupChatsByProject) return;
+    if (effectiveGroupChatsByProject) return;
     setFlatChatGroupNowMs(Date.now());
     const interval = window.setInterval(() => {
       setFlatChatGroupNowMs(Date.now());
     }, FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [groupChatsByProject]);
+  }, [effectiveGroupChatsByProject]);
 
   useEffect(() => {
-    if (groupChatsByProject) {
+    if (effectiveGroupChatsByProject) {
       attemptedFlatChatLoadMoreCursorRef.current = null;
     }
-  }, [groupChatsByProject]);
+  }, [effectiveGroupChatsByProject]);
 
   const pinnedProjectSessions = useMemo(
     () =>
@@ -783,9 +805,9 @@ export function SessionListCapability({
   );
   const projectSessions = useMemo(
     () =>
-      groupChatsByProject
+      effectiveGroupChatsByProject
         ? getSessionListGroups(
-            visibleSessions.sessions.filter(
+            searchedVisibleSessions.sessions.filter(
               (session) => !pinnedHomeChatSessionIds.has(session.id),
             ),
             projectIds,
@@ -797,17 +819,18 @@ export function SessionListCapability({
         : EMPTY_SESSION_LIST_GROUPS,
     [
       branchNameBySessionId,
-      groupChatsByProject,
+      effectiveGroupChatsByProject,
       pinnedHomeChatSessionIds,
       projectIds,
       sessionStateById,
-      visibleSessions,
+      searchedVisibleSessions,
+      visibleSessions.placeholderSessionIds,
     ],
   );
   const flatSessionCandidates = useMemo(() => {
-    if (groupChatsByProject) return [];
+    if (effectiveGroupChatsByProject) return [];
     return getFlatSessionListItems(
-      visibleSessions.sessions.filter(
+      searchedVisibleSessions.sessions.filter(
         (session) =>
           !pinnedHomeChatSessionIds.has(session.id) &&
           (!session.projectId || !pinnedProjectIds.has(session.projectId)),
@@ -819,12 +842,13 @@ export function SessionListCapability({
     );
   }, [
     branchNameBySessionId,
-    groupChatsByProject,
+    effectiveGroupChatsByProject,
     pinnedHomeChatSessionIds,
     pinnedProjectIds,
     projectsById,
     sessionStateById,
-    visibleSessions,
+    searchedVisibleSessions,
+    visibleSessions.placeholderSessionIds,
   ]);
   const flatSessions = useMemo(
     () =>
@@ -841,7 +865,7 @@ export function SessionListCapability({
   );
   const flatChatGroups = useMemo(
     () =>
-      groupChatsByProject
+      effectiveGroupChatsByProject
         ? []
         : groupFlatChatsByActivityAge(
             flatSessions,
@@ -851,7 +875,7 @@ export function SessionListCapability({
     [
       flatChatGroupNowMs,
       flatSessions,
-      groupChatsByProject,
+      effectiveGroupChatsByProject,
       pinnedHomeChatSessionIds,
     ],
   );
@@ -864,7 +888,7 @@ export function SessionListCapability({
   useEffect(() => {
     if (
       surface.preview ||
-      groupChatsByProject ||
+      effectiveGroupChatsByProject ||
       !hasMoreSessions ||
       isLoadingMoreSessions ||
       flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS
@@ -882,7 +906,7 @@ export function SessionListCapability({
   }, [
     flatChatLoadMoreCursorKey,
     flatSessionCandidates.length,
-    groupChatsByProject,
+    effectiveGroupChatsByProject,
     hasMoreSessions,
     isLoadingMoreSessions,
     loadMoreSessions,
@@ -961,7 +985,9 @@ export function SessionListCapability({
     hasVisibleChats: activeSessions.length > 0,
     flatChatGroups,
     hasFlatChatOverflow,
-    groupChatsByProject,
+    compactFlatGroups: normalizedSearchQuery.length > 0,
+    searchActive: normalizedSearchQuery.length > 0,
+    groupChatsByProject: effectiveGroupChatsByProject,
     onGroupChatsByProjectChange: setGroupChatsByProject,
     pinnedShowTimestamps: displayOptions.pinnedShowTimestamps,
     onPinnedShowTimestampsChange: setDisplayOption("pinnedShowTimestamps"),
