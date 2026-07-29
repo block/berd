@@ -6,7 +6,7 @@ import esChat from "../locales/es/chat.json";
  * Focused parity check for the artifact-chip strings.
  *
  * A full en↔es parity gate would be the better long-term tool, but the
- * locales already have pre-existing gaps (artifactViewer, markdownImages,
+ * locales already have pre-existing gaps (artifactViewer,
  * settings.security, …) that predate this feature, so a blanket check would
  * fail on drift this feature did not create. Until that backlog is cleared,
  * this test pins the contract for the keys this feature owns: every chip

@@ -564,10 +564,6 @@
     "loadError": "Couldn't load this file.",
     "imageAlt": "Preview of {{filename}}"
   },
-  "markdownImages": {
-    "disabledHint": "Local image previews are off.",
-    "enable": "Show local images"
-  },
   "artifactChips": {
     "open": "Open {{name}} in viewer",
     "more": "+{{count}} more"

@@ -220,10 +220,6 @@
       "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
       "title": "Renderizador virtual de transcripciones"
     },
-    "localMarkdownImages": {
-      "title": "Mostrar imágenes locales en el chat",
-      "description": "Muestra los enlaces de imagen de Markdown que apuntan a archivos locales en el directorio de trabajo del chat de forma insertada, en lugar de una imagen rota. Limitado al directorio de trabajo; las imágenes remotas http(s) siguen bloqueadas."
-    },
     "title": "Experimentos"
   },
   "general": {

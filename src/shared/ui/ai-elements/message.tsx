@@ -488,9 +488,8 @@ MarkdownLink.displayName = "MarkdownLink";
 export type MarkdownImageRenderer = NonNullable<StreamdownComponents["img"]>;
 
 // Default Markdown image renderer: plain <img>. Chat injects a feature-aware
-// renderer (local file → asset: scheme, gated by experiment) via the
-// `imageRenderer` prop on MessageResponse so this shared module stays free of
-// chat-feature dependencies.
+// renderer (local file → asset: scheme) via the `imageRenderer` prop on
+// MessageResponse so this shared module stays free of chat-feature dependencies.
 const DefaultMarkdownImage: MarkdownImageRenderer = ({
   node: _node,
   ...rest
