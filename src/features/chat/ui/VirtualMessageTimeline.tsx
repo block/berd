@@ -3492,18 +3492,33 @@ export function VirtualMessageTimeline({
       };
   const renderVirtualFlowSpacerRows = () => {
     const nodes: ReactNode[] = [];
+    const virtualItems = virtualTimelineSnapshot.range.virtualItems;
     let cursor = 0;
 
     // Keep mounted transcript text in normal document flow. The virtual engine
     // still owns the pixel model; inert spacers represent unmounted ranges.
-    for (const virtualItem of virtualTimelineSnapshot.range.virtualItems) {
+    // The edge spacers keep stable identities as the rendered range changes so
+    // WebKit can resize them without replacing the scroll-height endpoints.
+    const leadingGapSize = Math.max(0, virtualItems[0]?.start ?? 0);
+    nodes.push(
+      <div
+        key="virtual-flow-spacer-before"
+        aria-hidden="true"
+        data-testid="virtual-message-timeline-flow-spacer"
+        data-virtual-flow-spacer="before"
+        style={{ flexShrink: 0, height: leadingGapSize }}
+      />,
+    );
+
+    for (const virtualItem of virtualItems) {
       const gapSize = Math.max(0, virtualItem.start - cursor);
-      if (gapSize > 0) {
+      if (cursor > 0 && gapSize > 0) {
         nodes.push(
           <div
-            key={`virtual-flow-spacer-before:${virtualItem.key}`}
+            key={`virtual-flow-spacer-gap:${virtualItem.key}`}
             aria-hidden="true"
             data-testid="virtual-message-timeline-flow-spacer"
+            data-virtual-flow-spacer="gap"
             style={{ flexShrink: 0, height: gapSize }}
           />,
         );
@@ -3514,16 +3529,15 @@ export function VirtualMessageTimeline({
     }
 
     const trailingGapSize = Math.max(0, effectiveVirtualScrollHeight - cursor);
-    if (trailingGapSize > 0) {
-      nodes.push(
-        <div
-          key="virtual-flow-spacer-after"
-          aria-hidden="true"
-          data-testid="virtual-message-timeline-flow-spacer"
-          style={{ flexShrink: 0, height: trailingGapSize }}
-        />,
-      );
-    }
+    nodes.push(
+      <div
+        key="virtual-flow-spacer-after"
+        aria-hidden="true"
+        data-testid="virtual-message-timeline-flow-spacer"
+        data-virtual-flow-spacer="after"
+        style={{ flexShrink: 0, height: trailingGapSize }}
+      />,
+    );
 
     return nodes;
   };

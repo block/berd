@@ -853,6 +853,51 @@ describe("VirtualMessageTimeline", () => {
     );
   });
 
+  it("keeps the edge flow spacers mounted when the transcript rerenders", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = Array.from({ length: 160 }, (_, index) =>
+      textMessage(
+        `message-${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        `Message ${index}`,
+      ),
+    );
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+
+    const history = screen.getByTestId("virtual-message-timeline-history");
+    let leadingSpacer: Element | null = null;
+    let trailingSpacer: Element | null = null;
+    await waitFor(() => {
+      leadingSpacer = history.querySelector(
+        '[data-virtual-flow-spacer="before"]',
+      );
+      trailingSpacer = history.querySelector(
+        '[data-virtual-flow-spacer="after"]',
+      );
+      expect(leadingSpacer).not.toBeNull();
+      expect(trailingSpacer).not.toBeNull();
+    });
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages.slice(0, 120)}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(history).toHaveAttribute("data-virtual-history-rows"),
+    );
+    expect(history.querySelector('[data-virtual-flow-spacer="before"]')).toBe(
+      leadingSpacer,
+    );
+    expect(history.querySelector('[data-virtual-flow-spacer="after"]')).toBe(
+      trailingSpacer,
+    );
+  });
+
   it("renders an over-tall streaming assistant message as a live flow tail", async () => {
     mockTranscriptElementMeasurements();
     const initialMessages = [
