@@ -17,6 +17,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Progress } from "@/shared/ui/progress";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/shared/ui/tooltip";
+import { Kbd } from "@/shared/ui/kbd";
 import { AgentModelPicker } from "./AgentModelPicker";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { getCatalogEntryFromEntries } from "@/features/providers/providerCatalog";
@@ -45,6 +46,7 @@ interface ChatInputToolbarComposerActions {
   voiceEnabled?: boolean;
   voiceRecording?: boolean;
   voiceTranscribing?: boolean;
+  voiceShortcutDisplayParts?: string[];
   onVoiceToggle?: () => void;
 }
 
@@ -114,6 +116,7 @@ export function ChatInputToolbar({
     voiceEnabled = false,
     voiceRecording = false,
     voiceTranscribing = false,
+    voiceShortcutDisplayParts,
     onVoiceToggle,
   } = composerActions;
   const compactionControlsSupported =
@@ -424,11 +427,22 @@ export function ChatInputToolbar({
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                {voiceRecording
-                  ? t("toolbar.voiceInputRecording")
-                  : voiceTranscribing
-                    ? t("toolbar.voiceInputTranscribing")
-                    : t("toolbar.voiceInput")}
+                {voiceRecording ? (
+                  t("toolbar.voiceInputRecording")
+                ) : voiceTranscribing ? (
+                  t("toolbar.voiceInputTranscribing")
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <span>{t("toolbar.voiceInput")}</span>
+                    {voiceShortcutDisplayParts?.length ? (
+                      <span className="flex items-center gap-1">
+                        {voiceShortcutDisplayParts.map((part) => (
+                          <Kbd key={part}>{part}</Kbd>
+                        ))}
+                      </span>
+                    ) : null}
+                  </span>
+                )}
               </TooltipContent>
             </Tooltip>
           )}

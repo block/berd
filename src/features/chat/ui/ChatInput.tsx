@@ -39,8 +39,13 @@ import {
   recordAssistiveMomentDismissed,
   recordAssistiveMomentRetired,
 } from "@/shared/assistive-ux/runtime";
-import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
+import {
+  eventMatchesShortcutCommand,
+  useShortcutBindings,
+} from "@/features/shortcuts/lib/shortcutRegistry";
+import { keyboardShortcutDisplayParts } from "@/shared/keyboard/keyboardShortcut";
 import { cn } from "@/shared/lib/cn";
+import { getPlatform } from "@/shared/lib/platform";
 import { Badge } from "@/shared/ui/badge";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import { MentionAutocomplete } from "./MentionAutocomplete";
@@ -69,6 +74,7 @@ import {
 import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
 import type { Persona } from "@/shared/types/agents";
 import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
+import { useVoiceDictationShortcutTarget } from "../lib/voiceDictationShortcutController";
 
 const DOCKED_TEXTAREA_MIN_HEIGHT_PX = 140;
 const DOCKED_TEXTAREA_MAX_HEIGHT_PX = 300;
@@ -205,6 +211,15 @@ export function ChatInput({
   onAttachmentDragOverChange,
   surface = "pill",
 }: ChatInputProps) {
+  const voiceDictationBindings = useShortcutBindings(
+    "chat.toggleVoiceDictation",
+  );
+  const voiceDictationShortcutDisplayParts = voiceDictationBindings[0]
+    ? keyboardShortcutDisplayParts(
+        voiceDictationBindings[0].shortcut,
+        getPlatform() === "mac",
+      )
+    : undefined;
   const {
     onSend,
     onSteerMessage,
@@ -637,6 +652,16 @@ export function ChatInput({
       hasQueuedMessage || disabled || sendDisabled || attachmentWorkPending,
   });
 
+  const handleVoiceDictationShortcut = useVoiceDictationShortcutTarget(
+    textareaRef,
+    {
+      surface: "selected-chat",
+      canStart: scopedControls.voice && dictation.isEnabled && !disabled,
+      isRecording: scopedControls.voice && dictation.isRecording,
+      toggle: dictation.toggleRecording,
+    },
+  );
+
   const submitRestoredQueuedMessage = useCallback(
     async (
       submittedText: string,
@@ -950,6 +975,10 @@ export function ChatInput({
       }
     }
     if (isComposing) {
+      return;
+    }
+    if (handleVoiceDictationShortcut(event.nativeEvent)) {
+      event.stopPropagation();
       return;
     }
     if (event.key === "Escape" && isStreaming && onStop) {
@@ -1584,6 +1613,7 @@ export function ChatInput({
                   voiceRecording: scopedControls.voice && dictation.isRecording,
                   voiceTranscribing:
                     scopedControls.voice && dictation.isTranscribing,
+                  voiceShortcutDisplayParts: voiceDictationShortcutDisplayParts,
                   onVoiceToggle: scopedControls.voice
                     ? dictation.toggleRecording
                     : undefined,

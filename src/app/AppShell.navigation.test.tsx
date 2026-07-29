@@ -4819,7 +4819,7 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("toggles the dev design system inspector with Cmd+D", async () => {
+  it("toggles the dev design system inspector with Cmd+Shift+D", async () => {
     mockDesignSystemExplorerEnabled.mockReturnValue(true);
     renderAppShell();
 
@@ -4830,6 +4830,7 @@ describe("AppShell global navigation", () => {
     fireEvent.keyDown(window, {
       key: "d",
       metaKey: true,
+      shiftKey: true,
     });
 
     expect(
@@ -4839,6 +4840,7 @@ describe("AppShell global navigation", () => {
     fireEvent.keyDown(window, {
       key: "d",
       metaKey: true,
+      shiftKey: true,
     });
 
     await waitFor(() => {

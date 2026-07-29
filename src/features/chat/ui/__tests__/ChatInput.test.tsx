@@ -1,5 +1,6 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -15,6 +16,11 @@ import type { Persona } from "@/shared/types/agents";
 import type { ChatInputComposerActions } from "../../types";
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "../../lib/streamingShortcutPreference";
 import { MAX_PROMPT_ATTACHMENT_BYTES } from "../../lib/attachmentPayloadBudget";
+import {
+  resetShortcutOverride,
+  setShortcutOverride,
+} from "@/features/shortcuts/lib/shortcutRegistry";
+import { resetVoiceDictationShortcutControllerForTests } from "../../lib/voiceDictationShortcutController";
 
 const mockVoiceDictation = {
   isEnabled: true,
@@ -25,7 +31,7 @@ const mockVoiceDictation = {
   toggleRecording: vi.fn(),
 };
 
-vi.mock("../hooks/useVoiceDictation", () => ({
+vi.mock("../../hooks/useVoiceDictation", () => ({
   useVoiceDictation: () => mockVoiceDictation,
 }));
 
@@ -271,6 +277,8 @@ async function stageRecallAttachment() {
 
 describe("ChatInput", () => {
   beforeEach(() => {
+    resetVoiceDictationShortcutControllerForTests();
+    resetShortcutOverride("chat.toggleVoiceDictation");
     setViewportHeight(DEFAULT_VIEWPORT_HEIGHT);
     localStorage.clear();
     mockSearchFilesForMentions.mockClear();
@@ -345,6 +353,106 @@ describe("ChatInput", () => {
     expect(wasNotPrevented).toBe(true);
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("hello");
+  });
+
+  it("toggles voice dictation with the default platform composer shortcut without changing the draft", () => {
+    const onSend = vi.fn();
+    const onDraftChange = vi.fn();
+    const onParentKeyDown = vi.fn();
+    render(
+      <form onKeyDown={onParentKeyDown}>
+        <ChatInput
+          onSend={onSend}
+          onDraftChange={onDraftChange}
+          initialValue="keep this draft"
+        />
+      </form>,
+    );
+
+    const input = screen.getByRole("textbox");
+    const wasNotPrevented = fireEvent.keyDown(input, {
+      key: "d",
+      code: "KeyD",
+      metaKey: true,
+    });
+
+    expect(wasNotPrevented).toBe(false);
+    expect(mockVoiceDictation.toggleRecording).toHaveBeenCalledOnce();
+    expect(onParentKeyDown).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("keep this draft");
+  });
+
+  it("focuses and toggles dictation once from a non-editable outside target without mutating the draft", () => {
+    const onSend = vi.fn();
+    const onDraftChange = vi.fn();
+    render(
+      <>
+        <button type="button">Outside</button>
+        <ChatInput
+          onSend={onSend}
+          onDraftChange={onDraftChange}
+          initialValue="keep this draft"
+        />
+      </>,
+    );
+
+    const outside = screen.getByRole("button", { name: "Outside" });
+    const input = screen.getByRole("textbox");
+    input.getBoundingClientRect = () =>
+      ({
+        bottom: 40,
+        height: 30,
+        left: 10,
+        right: 210,
+        top: 10,
+        width: 200,
+        x: 10,
+        y: 10,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    outside.focus();
+    expect(outside).toHaveFocus();
+
+    const wasNotPrevented = fireEvent.keyDown(outside, {
+      key: "d",
+      code: "KeyD",
+      metaKey: true,
+    });
+
+    expect(wasNotPrevented).toBe(false);
+    expect(input).toHaveFocus();
+    expect(mockVoiceDictation.toggleRecording).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue("keep this draft");
+  });
+
+  it("shows the platform-formatted dictation shortcut and updates it when rebound", async () => {
+    const user = userEvent.setup();
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await user.hover(screen.getByRole("button", { name: "Voice dictation" }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Voice dictation⌘D");
+    expect(
+      within(tooltip)
+        .getAllByText(/⌘|D/)
+        .map((part) => part.tagName),
+    ).toEqual(["KBD", "KBD"]);
+
+    act(() => {
+      expect(setShortcutOverride("chat.toggleVoiceDictation", "alt+d")).toEqual(
+        { ok: true },
+      );
+    });
+
+    await waitFor(() => {
+      expect(tooltip).toHaveTextContent("Voice dictation⌥D");
+    });
+    expect(tooltip).not.toHaveTextContent("⌘");
   });
 
   it("does not send while IME composition is active", async () => {

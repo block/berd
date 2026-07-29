@@ -14,6 +14,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { listSkills } from "@/features/skills/api/skills";
 import { GlobalComposerPill } from "./GlobalComposerPill";
+import { resetVoiceDictationShortcutControllerForTests } from "@/features/chat/lib/voiceDictationShortcutController";
 
 const mockOpenDialog = vi.fn();
 const mockInspectAttachmentPaths = vi.fn();
@@ -24,6 +25,14 @@ const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
 const mockRefreshAllModelProviders = vi.fn();
 const mockRefreshAgentProviderStatus = vi.fn();
+const mockVoiceDictation = {
+  isEnabled: false,
+  isRecording: false,
+  isTranscribing: false,
+  isStarting: vi.fn(() => false),
+  stopRecording: vi.fn(),
+  toggleRecording: vi.fn(),
+};
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: (...args: unknown[]) => mockOpenDialog(...args),
@@ -60,14 +69,13 @@ vi.mock("@/features/skills/api/skills", () => ({
 }));
 
 vi.mock("@/features/chat/hooks/useVoiceDictation", () => ({
-  useVoiceDictation: () => ({
-    isEnabled: false,
-    isRecording: false,
-    isTranscribing: false,
-    isStarting: () => false,
-    stopRecording: vi.fn(),
-    toggleRecording: vi.fn(),
-  }),
+  useVoiceDictation: () => mockVoiceDictation,
+}));
+
+// Deterministic shortcut modifiers across dev machines and CI: "mod"
+// resolves to Meta on macOS.
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: () => "mac",
 }));
 
 vi.mock("@/features/providers/hooks/useProviderModels", () => ({
@@ -190,6 +198,7 @@ function deferred<T>() {
 
 describe("GlobalComposerPill", () => {
   beforeEach(() => {
+    resetVoiceDictationShortcutControllerForTests();
     mockOpenDialog.mockReset();
     mockInspectAttachmentPaths.mockReset();
     mockReadImageAttachment.mockReset();
@@ -208,6 +217,13 @@ describe("GlobalComposerPill", () => {
     mockRefreshAllModelProviders.mockResolvedValue(undefined);
     mockRefreshAgentProviderStatus.mockReset();
     mockRefreshAgentProviderStatus.mockResolvedValue(undefined);
+    mockVoiceDictation.isEnabled = false;
+    mockVoiceDictation.isRecording = false;
+    mockVoiceDictation.isTranscribing = false;
+    mockVoiceDictation.isStarting.mockReset();
+    mockVoiceDictation.isStarting.mockReturnValue(false);
+    mockVoiceDictation.stopRecording.mockReset();
+    mockVoiceDictation.toggleRecording.mockReset();
     mockOpenDialog.mockResolvedValue(null);
     mockInspectAttachmentPaths.mockResolvedValue([]);
     mockReadImageAttachment.mockResolvedValue({
@@ -263,6 +279,71 @@ describe("GlobalComposerPill", () => {
 
     expect(input).toHaveClass("scrollbar-none", "overscroll-contain");
     expect(input).not.toHaveClass("scrollbar-subtle");
+  });
+
+  it("toggles voice dictation with the default platform shortcut without submitting or changing the draft", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const onParentKeyDown = vi.fn();
+    mockVoiceDictation.isEnabled = true;
+    render(
+      <form onKeyDown={onParentKeyDown}>
+        <GlobalComposerPill onSend={onSend} />
+      </form>,
+    );
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "keep this draft");
+    expect(input).toHaveFocus();
+    onParentKeyDown.mockClear();
+
+    const wasNotPrevented = fireEvent.keyDown(input, {
+      key: "d",
+      code: "KeyD",
+      metaKey: true,
+    });
+
+    expect(wasNotPrevented).toBe(false);
+    expect(mockVoiceDictation.toggleRecording).toHaveBeenCalledOnce();
+    expect(onParentKeyDown).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("keep this draft");
+  });
+
+  it("focuses and toggles dictation once from the body without sending or mutating the draft", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    mockVoiceDictation.isEnabled = true;
+    renderGlobalComposer(onSend, { placement: "centered" });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "keep this draft");
+    input.getBoundingClientRect = () =>
+      ({
+        bottom: 40,
+        height: 30,
+        left: 10,
+        right: 210,
+        top: 10,
+        width: 200,
+        x: 10,
+        y: 10,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    input.blur();
+    expect(input).not.toHaveFocus();
+
+    const wasNotPrevented = fireEvent.keyDown(document.body, {
+      key: "d",
+      code: "KeyD",
+      metaKey: true,
+    });
+
+    expect(wasNotPrevented).toBe(false);
+    expect(input).toHaveFocus();
+    expect(mockVoiceDictation.toggleRecording).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("keep this draft");
   });
 
   it("switches @ mention tabs without inserting extra text", async () => {

@@ -23,6 +23,7 @@
     "paneJump": "Saltar entre paneles",
     "archiveSession": "Archivar sesión actual",
     "findInConversation": "Buscar en la conversación",
+    "toggleVoiceDictation": "Iniciar o detener el dictado por voz",
     "sendMessage": "Enviar mensaje",
     "insertNewline": "Insertar salto de línea",
     "sendNow": "Enviar inmediatamente",

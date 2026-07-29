@@ -50,6 +50,7 @@ import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
+import { useVoiceDictationShortcutTarget } from "@/features/chat/lib/voiceDictationShortcutController";
 
 export interface GlobalComposeOptions {
   providerId?: string;
@@ -928,6 +929,16 @@ export function GlobalComposerPill({
     isSendLocked: attachmentWorkPending,
   });
 
+  const handleVoiceDictationShortcut = useVoiceDictationShortcutTarget(
+    textareaRef,
+    {
+      surface: placement === "centered" ? "centered-global" : "home-global",
+      canStart: dictation.isEnabled && !handoffActive,
+      isRecording: dictation.isRecording,
+      toggle: dictation.toggleRecording,
+    },
+  );
+
   useEffect(() => {
     if (selectedAgentId !== "goose") {
       setGooseDefaultSelection(null);
@@ -1203,6 +1214,10 @@ export function GlobalComposerPill({
                   const isComposing =
                     event.nativeEvent.isComposing ||
                     event.nativeEvent.keyCode === 229;
+                  if (handleVoiceDictationShortcut(event.nativeEvent)) {
+                    event.stopPropagation();
+                    return;
+                  }
                   if (
                     !isComposing &&
                     handleMentionCategoryKey(event.nativeEvent)

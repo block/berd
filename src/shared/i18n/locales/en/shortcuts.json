@@ -23,6 +23,7 @@
     "paneJump": "Jump between panes",
     "archiveSession": "Archive current session",
     "findInConversation": "Find in conversation",
+    "toggleVoiceDictation": "Start or stop voice dictation",
     "sendMessage": "Send message",
     "insertNewline": "Insert newline",
     "sendNow": "Send immediately",

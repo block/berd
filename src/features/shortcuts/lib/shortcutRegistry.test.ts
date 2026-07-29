@@ -13,6 +13,11 @@ vi.mock("@/shared/lib/platform", () => ({
   getPlatform: getPlatformMock,
 }));
 
+const isDesignSystemExplorerEnabledMock = vi.hoisted(() => vi.fn());
+vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
+  isDesignSystemExplorerEnabled: isDesignSystemExplorerEnabledMock,
+}));
+
 import en from "@/shared/i18n/locales/en/shortcuts.json";
 import es from "@/shared/i18n/locales/es/shortcuts.json";
 import { GLOBAL_SHORTCUT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
@@ -82,6 +87,7 @@ beforeEach(() => {
   localStorage.clear();
   getPlatformMock.mockReturnValue("mac");
   getExperimentMock.mockReturnValue(undefined);
+  isDesignSystemExplorerEnabledMock.mockReturnValue(false);
 });
 
 describe("shortcut command definitions", () => {
@@ -190,6 +196,34 @@ describe("shortcut command definitions", () => {
     ]);
   });
 
+  it("registers chat.toggleVoiceDictation as a configurable, discoverable composer shortcut", () => {
+    const command = getShortcutCommand("chat.toggleVoiceDictation");
+    expect(command).toBeDefined();
+    expect(command?.scope).toBe("composer");
+    expect(command?.configurable).toBe(true);
+    expect(command?.discoverable).toBe(true);
+
+    expect(getShortcutBindings("chat.toggleVoiceDictation")).toEqual([
+      { shortcut: "meta+d" },
+    ]);
+
+    for (const platform of ["windows", "linux"] as const) {
+      getPlatformMock.mockReturnValue(platform);
+      expect(getShortcutBindings("chat.toggleVoiceDictation")).toEqual([
+        { shortcut: "ctrl+d" },
+      ]);
+    }
+  });
+
+  it("accepts an override for chat.toggleVoiceDictation", () => {
+    expect(
+      setShortcutOverride("chat.toggleVoiceDictation", "meta+shift+d"),
+    ).toEqual({ ok: true });
+    expect(getShortcutBindings("chat.toggleVoiceDictation")).toEqual([
+      { shortcut: "meta+shift+d" },
+    ]);
+  });
+
   it("registers the design system inspector shortcuts on macOS", () => {
     const visibilityCommand = getShortcutCommand(
       "view.toggleDesignSystemInspector",
@@ -198,7 +232,7 @@ describe("shortcut command definitions", () => {
     expect(visibilityCommand?.configurable).toBe(true);
     expect(visibilityCommand?.discoverable).toBe(true);
     expect(getShortcutBindings("view.toggleDesignSystemInspector")).toEqual([
-      { shortcut: "meta+d" },
+      { shortcut: "meta+shift+d" },
     ]);
 
     const inspectModeCommand = getShortcutCommand(
@@ -213,6 +247,8 @@ describe("shortcut command definitions", () => {
   });
 
   it("ships no colliding default combos across overlapping scopes", () => {
+    isDesignSystemExplorerEnabledMock.mockReturnValue(true);
+
     // Deliberate exceptions, both reconciled by ChatSearchBar stopping
     // propagation of consumed keys (Ctrl+N/Ctrl+P off macOS).
     const allowed = new Set([
