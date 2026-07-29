@@ -32,10 +32,7 @@ import {
   isSessionRunning,
   sessionActivityAt,
 } from "@/features/chat/lib/sessionActivity";
-import {
-  getPinnedHomeChatSessionIds,
-  getPinnedHomeNavigationTargets,
-} from "@/features/home/lib/pinnedHomeChats";
+import { getPinnedHomeChatSessionIdsInOrder } from "@/features/home/lib/pinnedHomeChats";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -47,7 +44,6 @@ import {
   toggleSessionSelection as getToggledSessionSelection,
 } from "@/features/sessions/lib/sessionSelection";
 import { useSidebarBranchSubtitles } from "@/features/sidebar/hooks/useSidebarBranchSubtitles";
-import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { useSidebarChatGroupingPreference } from "@/features/sidebar/lib/sidebarChatGroupingPreference";
 import {
   MAX_FLAT_SIDEBAR_CHATS,
@@ -83,6 +79,7 @@ type SessionListSectionVisibility = {
 };
 
 type SessionListDisplayOptions = {
+  pinnedShowChatIcons: boolean;
   pinnedShowTimestamps: boolean;
   projectShowChatIcons: boolean;
   projectShowTimestamps: boolean;
@@ -97,6 +94,7 @@ const DEFAULT_SECTION_VISIBILITY: SessionListSectionVisibility = {
 };
 
 const DEFAULT_DISPLAY_OPTIONS: SessionListDisplayOptions = {
+  pinnedShowChatIcons: true,
   pinnedShowTimestamps: true,
   projectShowChatIcons: false,
   projectShowTimestamps: true,
@@ -410,6 +408,11 @@ export function validateDisplayOptions(
     fallback: boolean,
   ) => (typeof value === "boolean" ? value : (legacy ?? fallback));
   return {
+    pinnedShowChatIcons: booleanOption(
+      parsed.pinnedShowChatIcons,
+      legacyShowChatIcons,
+      defaults.pinnedShowChatIcons,
+    ),
     pinnedShowTimestamps: booleanOption(
       parsed.pinnedShowTimestamps,
       legacyShowTimestamps,
@@ -522,7 +525,6 @@ export function SessionListCapability({
   );
   const sessionPageCursor = useChatSessionStore((s) => s.sessionPageCursor);
   const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
-  const gitBranchSubtitlePreference = useSidebarGitBranchSubtitlePreference();
   const { enabled: groupChatsByProject, setEnabled: setGroupChatsByProject } =
     useSidebarChatGroupingPreference();
   const [flatChatGroupNowMs, setFlatChatGroupNowMs] = useState(() =>
@@ -588,42 +590,32 @@ export function SessionListCapability({
   const branchNameBySessionId = useSidebarBranchSubtitles({
     sessions: visibleSessions.sessions,
     activeWorkspaceBySession,
-    enabled: gitBranchSubtitlePreference.enabled,
+    enabled: false,
   });
   const homeWidgetInstances = useHomeWidgetStore((state) => state.instances);
   const homeWidgetLoadStatus = useHomeWidgetStore((state) => state.loadStatus);
-  const pinnedHomeNavigationTargets = useMemo(
-    () => getPinnedHomeNavigationTargets(homeWidgetInstances),
+  const pinnedHomeChatSessionIdsInOrder = useMemo(
+    () => getPinnedHomeChatSessionIdsInOrder(homeWidgetInstances),
     [homeWidgetInstances],
   );
   const pinnedHomeChatSessionIds = useMemo(
-    () => getPinnedHomeChatSessionIds(homeWidgetInstances),
-    [homeWidgetInstances],
-  );
-  const pinnedProjectIds = useMemo(
-    () =>
-      new Set(
-        pinnedHomeNavigationTargets
-          .filter((target) => target.kind === "project")
-          .map((target) => target.id),
-      ),
-    [pinnedHomeNavigationTargets],
+    () => new Set(pinnedHomeChatSessionIdsInOrder),
+    [pinnedHomeChatSessionIdsInOrder],
   );
   const pinnedNavigationItems = useMemo(() => {
+    const itemByKey = new Map<string, SidebarPinnedNavigationItem>();
     const sessionsById = new Map(
       activeSessions.map((session) => [session.id, session]),
     );
-    const itemByKey = new Map<string, SidebarPinnedNavigationItem>();
-    for (const target of pinnedHomeNavigationTargets) {
-      if (target.kind === "project") {
-        const project = projectsById.get(target.id);
-        if (project)
-          itemByKey.set(`project:${target.id}`, { kind: "project", project });
-      } else {
-        const session = sessionsById.get(target.id);
-        if (session)
-          itemByKey.set(`chat:${target.id}`, { kind: "chat", session });
-      }
+    for (const sessionId of pinnedHomeChatSessionIdsInOrder) {
+      const session = sessionsById.get(sessionId);
+      if (!session) continue;
+      const item = toSessionListItem(
+        session,
+        sessionStateById,
+        branchNameBySessionId,
+      );
+      itemByKey.set(`chat:${session.id}`, { kind: "chat", session: item });
     }
 
     const orderedKeys = [
@@ -638,21 +630,20 @@ export function SessionListCapability({
     });
   }, [
     activeSessions,
-    pinnedHomeNavigationTargets,
+    branchNameBySessionId,
+    pinnedHomeChatSessionIdsInOrder,
     pinnedNavOrder,
-    projectsById,
+    sessionStateById,
   ]);
   useEffect(() => {
     const validKeys = new Set(
-      pinnedHomeNavigationTargets.map(
-        (target) => `${target.kind}:${target.id}`,
-      ),
+      Array.from(pinnedHomeChatSessionIds, (id) => `chat:${id}`),
     );
     setPinnedNavOrder((current) => {
       const next = current.filter((key) => validKeys.has(key));
       return next.length === current.length ? current : next;
     });
-  }, [pinnedHomeNavigationTargets, setPinnedNavOrder]);
+  }, [pinnedHomeChatSessionIds, setPinnedNavOrder]);
 
   useEffect(() => {
     if (homeWidgetLoadStatus !== "ready" || !hasFetchedProjects) return;
@@ -675,10 +666,8 @@ export function SessionListCapability({
   const reorderPinnedNavigationItem = useCallback(
     (fromKey: string, toKey: string, placement: "before" | "after") => {
       setPinnedNavOrder(() => {
-        const current = pinnedNavigationItems.map((item) =>
-          item.kind === "project"
-            ? `project:${item.project.id}`
-            : `chat:${item.session.id}`,
+        const current = pinnedNavigationItems.map(
+          (item) => `chat:${item.session.id}`,
         );
         const fromIndex = current.indexOf(fromKey);
         const toIndex = current.indexOf(toKey);
@@ -783,25 +772,14 @@ export function SessionListCapability({
     }
   }, [effectiveGroupChatsByProject]);
 
-  const pinnedProjectSessions = useMemo(
+  const pinnedChatProjectIds = useMemo(
     () =>
-      getSessionListGroups(
-        visibleSessions.sessions.filter(
-          (session) => !pinnedHomeChatSessionIds.has(session.id),
-        ),
-        projectIds,
-        sessionStateById,
-        visibleSessions.placeholderSessionIds,
-        branchNameBySessionId,
-        pinnedHomeChatSessionIds,
+      new Set(
+        activeSessions
+          .filter((session) => pinnedHomeChatSessionIds.has(session.id))
+          .flatMap((session) => (session.projectId ? [session.projectId] : [])),
       ),
-    [
-      branchNameBySessionId,
-      pinnedHomeChatSessionIds,
-      projectIds,
-      sessionStateById,
-      visibleSessions,
-    ],
+    [activeSessions, pinnedHomeChatSessionIds],
   );
   const projectSessions = useMemo(
     () =>
@@ -831,9 +809,7 @@ export function SessionListCapability({
     if (effectiveGroupChatsByProject) return [];
     return getFlatSessionListItems(
       searchedVisibleSessions.sessions.filter(
-        (session) =>
-          !pinnedHomeChatSessionIds.has(session.id) &&
-          (!session.projectId || !pinnedProjectIds.has(session.projectId)),
+        (session) => !pinnedHomeChatSessionIds.has(session.id),
       ),
       projectsById,
       sessionStateById,
@@ -844,7 +820,6 @@ export function SessionListCapability({
     branchNameBySessionId,
     effectiveGroupChatsByProject,
     pinnedHomeChatSessionIds,
-    pinnedProjectIds,
     projectsById,
     sessionStateById,
     searchedVisibleSessions,
@@ -977,10 +952,10 @@ export function SessionListCapability({
   };
 
   const sectionProps: SidebarProjectsSectionProps = {
-    projects: projects.filter((project) => !pinnedProjectIds.has(project.id)),
+    projects,
     pinnedNavigationItems,
     onReorderPinnedNavigationItem: reorderPinnedNavigationItem,
-    pinnedProjectSessionsByProject: pinnedProjectSessions.byProject,
+    pinnedChatProjectIds,
     projectSessions,
     hasVisibleChats: activeSessions.length > 0,
     flatChatGroups,
@@ -989,6 +964,8 @@ export function SessionListCapability({
     searchActive: normalizedSearchQuery.length > 0,
     groupChatsByProject: effectiveGroupChatsByProject,
     onGroupChatsByProjectChange: setGroupChatsByProject,
+    pinnedShowChatIcons: displayOptions.pinnedShowChatIcons,
+    onPinnedShowChatIconsChange: setDisplayOption("pinnedShowChatIcons"),
     pinnedShowTimestamps: displayOptions.pinnedShowTimestamps,
     onPinnedShowTimestampsChange: setDisplayOption("pinnedShowTimestamps"),
     projectShowChatIcons: displayOptions.projectShowChatIcons,
@@ -999,8 +976,6 @@ export function SessionListCapability({
     onChatShowChatIconsChange: setDisplayOption("chatShowChatIcons"),
     chatShowTimestamps: displayOptions.chatShowTimestamps,
     onChatShowTimestampsChange: setDisplayOption("chatShowTimestamps"),
-    showGitBranches: gitBranchSubtitlePreference.enabled,
-    onShowGitBranchesChange: gitBranchSubtitlePreference.setEnabled,
     expandedProjects,
     toggleProject,
     collapsed,

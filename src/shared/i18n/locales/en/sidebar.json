@@ -13,7 +13,7 @@
     "search": "Search",
     "newChat": "New chat",
     "newChatInProject": "New chat in project",
-    "pinProject": "Pin project",
+    "pinProject": "Add to Home",
     "unpinProject": "Unpin project",
     "newProject": "New project",
     "projectDisplayOptions": "Project display options",
@@ -25,7 +25,6 @@
     "showTimestamp": "Show timestamp",
     "hideTimestamp": "Hide timestamp",
     "linkCopied": "Local chat link copied. It only works on this device.",
-    "showGitBranches": "Show git branches",
     "groupChats": "Group chats by project",
     "markRead": "Mark read",
     "markUnread": "Mark unread",
@@ -53,7 +52,9 @@
     "optionsFor": "Options for {{label}}"
   },
   "empty": {
+    "chatsPinned": "Chats are pinned",
     "createProject": "Create a project",
+    "noChats": "No chats",
     "startChat": "Start a chat"
   },
   "flat": {

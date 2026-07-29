@@ -41,6 +41,7 @@ interface ProjectDropTargetState {
 export function SidebarProjectList({
   projects,
   projectSessionsByProject,
+  pinnedChatProjectIds,
   expandedProjects,
   toggleProject,
   collapsed,
@@ -74,6 +75,7 @@ export function SidebarProjectList({
 }: {
   projects: ProjectInfo[];
   projectSessionsByProject: Record<string, SidebarSessionItem[]>;
+  pinnedChatProjectIds?: ReadonlySet<string>;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
   collapsed: boolean;
@@ -331,6 +333,13 @@ export function SidebarProjectList({
           <SidebarProjectSection
             project={project}
             projectChats={projectSessionsByProject[project.id] ?? []}
+            emptyState={
+              (projectSessionsByProject[project.id]?.length ?? 0) === 0
+                ? pinnedChatProjectIds?.has(project.id)
+                  ? "chats-pinned"
+                  : "no-chats"
+                : undefined
+            }
             isExpanded={expandedProjects[project.id] ?? false}
             toggleProject={toggleProject}
             activeSessionId={activeSessionId}

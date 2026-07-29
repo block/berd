@@ -199,7 +199,7 @@ interface SidebarChatRowProps {
   contentPaddingClassName?: string;
   nested?: boolean;
   /** Leading pin-control policy for this list surface. */
-  quickPinMode?: "always" | "pinned-only" | "never";
+  quickPinMode?: "always" | "hover-only" | "pinned-only" | "never";
   /** Rename guidance is omitted on surfaces where rows move under the pointer. */
   showRenameTooltip?: boolean;
   pointerDragEnabled?: boolean;
@@ -347,6 +347,7 @@ export function SidebarChatRow({
   const showQuickPin =
     !selectionEnabled &&
     (quickPinMode === "always" ||
+      quickPinMode === "hover-only" ||
       (quickPinMode === "pinned-only" && isPinnedToHome));
   const needsLeadingSlot =
     nested ||
@@ -992,6 +993,7 @@ export function SidebarChatRow({
                   ? {
                       pinned: isPinnedToHome,
                       disabled: isPinningToHome,
+                      persistWhenPinned: quickPinMode !== "hover-only",
                       pinLabel: t("common:actions.pinChat"),
                       unpinLabel: t("common:actions.unpinChat"),
                       onClick: toggleQuickPin,
@@ -1021,6 +1023,7 @@ export function SidebarChatRow({
                     ? {
                         pinned: isPinnedToHome,
                         disabled: isPinningToHome,
+                        persistWhenPinned: quickPinMode !== "hover-only",
                         pinLabel: t("common:actions.pinChat"),
                         unpinLabel: t("common:actions.unpinChat"),
                         onClick: toggleQuickPin,

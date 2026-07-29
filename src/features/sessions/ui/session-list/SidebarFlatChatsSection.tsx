@@ -54,8 +54,6 @@ export function SidebarFlatChatsSection({
   showChatIcons = false,
   showTimestamps,
   onShowTimestampsChange,
-  showGitBranches = false,
-  onShowGitBranchesChange,
   showViewAllInHistory = false,
   compactGroups = false,
   compactHeader = false,
@@ -90,8 +88,6 @@ export function SidebarFlatChatsSection({
   showChatIcons?: boolean;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
-  showGitBranches?: boolean;
-  onShowGitBranchesChange?: (show: boolean) => void;
   showViewAllInHistory?: boolean;
   compactGroups?: boolean;
   compactHeader?: boolean;
@@ -133,8 +129,6 @@ export function SidebarFlatChatsSection({
                   labelKey="actions.chatDisplayOptions"
                   showTimestamps={showTimestamps}
                   onShowTimestampsChange={onShowTimestampsChange}
-                  showGitBranches={showGitBranches}
-                  onShowGitBranchesChange={onShowGitBranchesChange}
                   groupChatsByProject={false}
                   onGroupChatsByProjectChange={onGroupChatsByProjectChange}
                   className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}

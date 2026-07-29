@@ -1,9 +1,5 @@
 import type { WidgetInstance } from "@/features/home/widgets/types";
 
-export type PinnedHomeNavigationTarget =
-  | { kind: "chat"; id: string }
-  | { kind: "project"; id: string };
-
 function normalizedStateId(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const id = value.trim();
@@ -11,45 +7,29 @@ function normalizedStateId(value: unknown): string | null {
 }
 
 /**
- * Returns the home pins that also belong in global navigation. The widget
- * order is preserved so projects and chats can share one Pinned section.
+ * Returns the chats pinned to Home that also belong in the sidebar's compact
+ * Pinned section. Project widgets stay on Home and do not become sidebar
+ * navigation groups.
  */
-export function getPinnedHomeNavigationTargets(
+export function getPinnedHomeChatSessionIdsInOrder(
   instances: readonly WidgetInstance[],
-): PinnedHomeNavigationTarget[] {
-  const targets: PinnedHomeNavigationTarget[] = [];
+): readonly string[] {
+  const ids: string[] = [];
   const seen = new Set<string>();
 
   for (const instance of instances) {
-    const target =
-      instance.type === "chatPin"
-        ? ({
-            kind: "chat" as const,
-            id: normalizedStateId(instance.state?.sessionId),
-          } as const)
-        : instance.type === "projectArtifactPin"
-          ? ({
-              kind: "project" as const,
-              id: normalizedStateId(instance.state?.projectId),
-            } as const)
-          : null;
-    if (!target?.id) continue;
-
-    const key = `${target.kind}:${target.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    targets.push({ kind: target.kind, id: target.id });
+    if (instance.type !== "chatPin") continue;
+    const id = normalizedStateId(instance.state?.sessionId);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
   }
 
-  return targets;
+  return ids;
 }
 
 export function getPinnedHomeChatSessionIds(
   instances: readonly WidgetInstance[],
 ): ReadonlySet<string> {
-  return new Set(
-    getPinnedHomeNavigationTargets(instances)
-      .filter((target) => target.kind === "chat")
-      .map((target) => target.id),
-  );
+  return new Set(getPinnedHomeChatSessionIdsInOrder(instances));
 }

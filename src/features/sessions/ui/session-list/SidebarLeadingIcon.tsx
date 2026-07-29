@@ -8,6 +8,7 @@ import { SidebarUnreadDot } from "./SidebarUnreadDot";
 interface SidebarLeadingIconQuickPin {
   pinned: boolean;
   disabled?: boolean;
+  persistWhenPinned?: boolean;
   pinLabel: string;
   unpinLabel: string;
   onClick: MouseEventHandler<HTMLButtonElement>;
@@ -75,7 +76,9 @@ export function SidebarLeadingIcon({
                 "flex size-full items-center justify-center transition-opacity duration-150",
                 quickPin &&
                   "group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
-                quickPin?.pinned && "opacity-0",
+                quickPin?.pinned &&
+                  quickPin.persistWhenPinned !== false &&
+                  "opacity-0",
                 baseClassName,
               )}
             >
@@ -87,7 +90,9 @@ export function SidebarLeadingIcon({
               className={cn(
                 "absolute inset-0 opacity-0 transition-opacity duration-150",
                 "pointer-events-none group-hover/chat-row:pointer-events-auto group-hover/chat-row:opacity-100 group-focus-within/chat-row:pointer-events-auto group-focus-within/chat-row:opacity-100",
-                quickPin.pinned && "pointer-events-auto opacity-100",
+                quickPin.pinned &&
+                  quickPin.persistWhenPinned !== false &&
+                  "pointer-events-auto opacity-100",
               )}
             >
               <Button
@@ -99,7 +104,11 @@ export function SidebarLeadingIcon({
                 aria-label={quickPinLabel}
                 title={quickPinLabel}
                 disabled={quickPin.disabled}
-                tabIndex={quickPin.pinned ? undefined : -1}
+                tabIndex={
+                  quickPin.pinned && quickPin.persistWhenPinned !== false
+                    ? undefined
+                    : -1
+                }
                 onClick={quickPin.onClick}
                 className="size-full"
               >

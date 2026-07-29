@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateDisplayOptions } from "./SessionListCapability";
 
 const defaults = {
+  pinnedShowChatIcons: true,
   pinnedShowTimestamps: true,
   projectShowChatIcons: false,
   projectShowTimestamps: true,
@@ -20,6 +21,7 @@ describe("validateDisplayOptions", () => {
         defaults,
       ),
     ).toEqual({
+      pinnedShowChatIcons: true,
       pinnedShowTimestamps: false,
       projectShowChatIcons: true,
       projectShowTimestamps: false,
@@ -49,6 +51,7 @@ describe("validateDisplayOptions", () => {
 
   it("preserves independent section settings", () => {
     const settings = {
+      pinnedShowChatIcons: false,
       pinnedShowTimestamps: false,
       projectShowChatIcons: true,
       projectShowTimestamps: true,

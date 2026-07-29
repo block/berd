@@ -89,6 +89,7 @@ export function SidebarProjectSection({
   hasMoreSessions: _hasMoreSessions = false,
   dropTargetEnabled = true,
   showExpansionChevron = true,
+  emptyState,
 }: {
   project: ProjectInfo;
   projectChats: SidebarSessionItem[];
@@ -122,6 +123,7 @@ export function SidebarProjectSection({
   hasMoreSessions?: boolean;
   dropTargetEnabled?: boolean;
   showExpansionChevron?: boolean;
+  emptyState?: "no-chats" | "chats-pinned";
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
   const { activeSessionDropTargetKey, registerSessionDropTarget } =
@@ -140,6 +142,7 @@ export function SidebarProjectSection({
   const [menuOpen, setMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
   const projectHasChats = projectChats.length > 0;
+  const projectCanExpand = projectHasChats || emptyState != null;
   // When collapsed, surface unread on the project identity because its chat
   // rows are hidden. Expanded chats carry their own activity overlays.
   const showProjectUnread = projectHasUnread && !isExpanded;
@@ -304,7 +307,7 @@ export function SidebarProjectSection({
           variant="ghost"
           size="sm"
           onClick={() => {
-            if (projectHasChats) {
+            if (projectCanExpand) {
               toggleProject(project.id);
             } else if (onOpenProject) {
               onOpenProject(project.id);
@@ -312,7 +315,7 @@ export function SidebarProjectSection({
               onNavigate?.("projects");
             }
           }}
-          aria-expanded={projectHasChats ? isExpanded : undefined}
+          aria-expanded={projectCanExpand ? isExpanded : undefined}
           className={cn(
             "flex-1 min-w-0 justify-start rounded-sm",
             SIDEBAR_NAV_ROW_SPACING_CLASS,
@@ -327,7 +330,7 @@ export function SidebarProjectSection({
             unreadLabel={t("status.unreadMessages")}
             className="text-sidebar-foreground"
           >
-            {showExpansionChevron && projectHasChats ? (
+            {showExpansionChevron && projectCanExpand ? (
               <>
                 <span className="group-hover/chat-row:hidden group-focus-within/chat-row:hidden">
                   <ProjectIcon
@@ -399,6 +402,15 @@ export function SidebarProjectSection({
 
       {renderProjectChats ? (
         <CollapseReveal open={showProjectChats}>
+          {emptyState ? (
+            <div className="h-7 py-1 pl-[38px] pr-3 text-sm font-normal leading-normal text-muted-foreground">
+              {t(
+                emptyState === "chats-pinned"
+                  ? "empty.chatsPinned"
+                  : "empty.noChats",
+              )}
+            </div>
+          ) : null}
           {baseVisibleChats.map((session) => {
             const isActive = activeSessionId === session.id;
             return (

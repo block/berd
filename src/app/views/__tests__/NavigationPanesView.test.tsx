@@ -488,7 +488,7 @@ describe("NavigationPanesView", () => {
     expect(mockGetGitState).not.toHaveBeenCalled();
   });
 
-  it("replaces latest message snippets with Git branches when enabled", async () => {
+  it("ignores the retired Git branch subtitle preference", async () => {
     localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
     mockGetGitState.mockResolvedValue({
       isGitRepo: true,
@@ -512,60 +512,16 @@ describe("NavigationPanesView", () => {
     renderSidebar();
 
     expect(
-      await screen.findByText("feature/sidebar-branch"),
-    ).toBeInTheDocument();
+      screen.queryByText("feature/sidebar-branch"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText("Latest message snippet"),
     ).not.toBeInTheDocument();
-    expect(mockGetGitState).toHaveBeenCalledWith("/repo");
+    expect(mockGetGitState).not.toHaveBeenCalled();
   });
 
-  it("refreshes a selected workspace branch subtitle from Git state", async () => {
-    localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
-    mockActiveWorkspaceBySession = {
-      "session-1": { path: "/repo", branch: "stale-workspace-branch" },
-    };
-    mockGetGitState.mockResolvedValueOnce({
-      isGitRepo: true,
-      currentBranch: "actual-git-branch",
-      dirtyFileCount: 0,
-      incomingCommitCount: 0,
-      worktrees: [],
-      isWorktree: false,
-      mainWorktreePath: null,
-      localBranches: [],
-    });
-    seedSessions({
-      id: "session-1",
-      title: "Workspace chat",
-      subtitle: "Latest message snippet",
-      workingDir: "/repo",
-      updatedAt: "2026-04-09T12:00:00.000Z",
-      messageCount: 3,
-    });
-
-    renderSidebar();
-
-    expect(screen.getByText("stale-workspace-branch")).toBeInTheDocument();
-    expect(mockGetGitState).toHaveBeenCalledWith("/repo");
-    expect(await screen.findByText("actual-git-branch")).toBeInTheDocument();
-    expect(
-      screen.queryByText("stale-workspace-branch"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("toggles Git branches from the project display menu", async () => {
+  it("omits Git branch toggles from sidebar display menus", async () => {
     const user = userEvent.setup();
-    mockGetGitState.mockResolvedValue({
-      isGitRepo: true,
-      currentBranch: "feature/sidebar-menu",
-      dirtyFileCount: 0,
-      incomingCommitCount: 0,
-      worktrees: [],
-      isWorktree: false,
-      mainWorktreePath: null,
-      localBranches: ["feature/sidebar-menu"],
-    });
     seedSessions({
       id: "project-chat",
       title: "Project Chat",
@@ -580,19 +536,22 @@ describe("NavigationPanesView", () => {
       projects: [mockProject()],
     });
 
-    expect(screen.queryByText("feature/sidebar-menu")).not.toBeInTheDocument();
     await user.hover(screen.getByText("Projects"));
     await user.click(
       screen.getByRole("button", { name: "Project display options" }),
     );
-    await user.click(
-      screen.getByRole("menuitemcheckbox", { name: "Show git branches" }),
-    );
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Show git branches" }),
+    ).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
-    expect(await screen.findByText("feature/sidebar-menu")).toBeInTheDocument();
-    expect(localStorage.getItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY)).toBe(
-      "true",
+    await user.hover(screen.getByText("Chats"));
+    await user.click(
+      screen.getByRole("button", { name: "Chat display options" }),
     );
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Show git branches" }),
+    ).not.toBeInTheDocument();
   });
 
   afterEach(() => {
@@ -1107,6 +1066,35 @@ describe("NavigationPanesView", () => {
     expect(within(rows[1]).queryByRole("button", { name: /edit/i })).toBeNull();
   });
 
+  it("preserves Home pin order in the global pinned section", () => {
+    disableProjectGrouping();
+    seedPinnedHomeChats("older-pin", "newer-pin");
+    seedSessions(
+      {
+        id: "newer-pin",
+        title: "Newer Pin",
+        updatedAt: "2026-04-09T12:05:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "older-pin",
+        title: "Older Pin",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    renderSidebar();
+    const pinnedSection = screen.getByTestId("sidebar-pinned-section");
+    const rows = Array.from(
+      pinnedSection.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+    );
+    expect(rows.map((row) => row.dataset.sessionId)).toEqual([
+      "older-pin",
+      "newer-pin",
+    ]);
+  });
+
   it("moves pinned flat chats into the global pinned section", () => {
     disableProjectGrouping();
     seedPinnedHomeChats("old-pinned-chat");
@@ -1134,9 +1122,10 @@ describe("NavigationPanesView", () => {
       "old-pinned-chat",
       "new-unpinned-chat",
     ]);
-    expect(
-      screen.queryByRole("button", { name: "Unpin chat" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unpin chat" })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
 
     const groups = Array.from(
       container.querySelectorAll<HTMLElement>("[data-sidebar-flat-chat-group]"),
@@ -1147,40 +1136,6 @@ describe("NavigationPanesView", () => {
     expect(screen.getByTestId("sidebar-pinned-section")).toHaveTextContent(
       "Old Pinned Chat",
     );
-  });
-
-  it("shows Git branch subtitles in flat chat mode", async () => {
-    disableProjectGrouping();
-    localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
-    mockGetGitState.mockResolvedValue({
-      isGitRepo: true,
-      currentBranch: "main",
-      dirtyFileCount: 0,
-      incomingCommitCount: 0,
-      worktrees: [],
-      isWorktree: false,
-      mainWorktreePath: null,
-      localBranches: ["main"],
-    });
-    seedSessions({
-      id: "branch-chat",
-      title: "Branch Chat",
-      subtitle: "Latest message snippet",
-      workingDir: "/repo",
-      updatedAt: "2026-04-09T12:00:00.000Z",
-      messageCount: 3,
-      projectId: "project-1",
-    });
-
-    renderSidebar({ projects: [mockProject()] });
-
-    expect(screen.getByText("Branch Chat")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Latest message snippet"),
-    ).not.toBeInTheDocument();
-
-    expect(await screen.findByText("main")).toBeInTheDocument();
-    expect(mockGetGitState).toHaveBeenCalledWith("/repo");
   });
 
   it("does not make stale flat project icons clickable", () => {

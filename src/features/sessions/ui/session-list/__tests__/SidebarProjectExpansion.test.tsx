@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { SidebarChatDragProvider } from "../SidebarChatDragContext";
@@ -56,6 +57,54 @@ describe("project chat expansion", () => {
       newChat.compareDocumentPosition(projectMenu) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("labels the project pin action as Add to Home", async () => {
+    const user = userEvent.setup();
+    render(
+      <SidebarChatDragProvider>
+        <SidebarProjectSection
+          project={PROJECT}
+          projectChats={CHATS}
+          isExpanded
+          toggleProject={vi.fn()}
+          showChatIcons
+          showTimestamps
+        />
+      </SidebarChatDragProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Options for Alpha" }));
+
+    expect(
+      screen.getByRole("menuitem", { name: "Add to Home" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["no-chats", "No chats"],
+    ["chats-pinned", "Chats are pinned"],
+  ] as const)("shows the %s placeholder for an expanded empty project", (emptyState, label) => {
+    render(
+      <SidebarChatDragProvider>
+        <SidebarProjectSection
+          project={PROJECT}
+          projectChats={[]}
+          emptyState={emptyState}
+          isExpanded
+          toggleProject={vi.fn()}
+          showChatIcons
+          showTimestamps
+        />
+      </SidebarChatDragProvider>,
+    );
+
+    const placeholder = screen.getByText(label);
+    expect(placeholder).toHaveClass("text-muted-foreground");
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it("keeps View more visible until extra chats begin revealing", () => {

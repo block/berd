@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
-import type { AppView } from "@/app/AppShell";
+import type { ProjectInfo } from "@/features/projects/api/projects";
+import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { SidebarDisplayOptionsMenu } from "./SidebarDisplayOptionsMenu";
 import {
   SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS,
   SidebarSectionHeader,
 } from "./SidebarSectionHeader";
-import { SidebarProjectSection } from "./SidebarProjectSection";
 import { SidebarChatRow } from "./SidebarChatRow";
 import type { SidebarPinnedNavigationItem } from "./SidebarProjectsSection";
 
@@ -19,21 +25,14 @@ export function SidebarPinnedItemsSection({
   labelTransition,
   labelVisible,
   activeSessionId,
-  projectSessionsByProject,
-  expandedProjects,
-  toggleProject,
-  onNavigate,
-  onOpenProject,
+  projectsById,
   onSelectSession,
-  onNewChatInProject,
   onEditProject,
-  onArchiveProject,
   onArchiveChat,
   onRenameChat,
   onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
-  onMoveToProject,
   selectedSessionIds,
   selectionEnabled,
   selectionActionsDisabled,
@@ -44,6 +43,8 @@ export function SidebarPinnedItemsSection({
   isPinningSelectedToHome,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  showChatIcons,
+  onShowChatIconsChange,
   showTimestamps,
   onShowTimestampsChange,
 }: {
@@ -59,24 +60,14 @@ export function SidebarPinnedItemsSection({
   labelTransition: string;
   labelVisible: boolean;
   activeSessionId?: string | null;
-  projectSessionsByProject: Record<
-    string,
-    import("./SidebarProjectSection").SidebarSessionItem[]
-  >;
-  expandedProjects: Record<string, boolean>;
-  toggleProject: (projectId: string) => void;
-  onNavigate?: (view: AppView) => void;
-  onOpenProject?: (projectId: string) => void;
+  projectsById: ReadonlyMap<string, ProjectInfo>;
   onSelectSession?: (sessionId: string) => void;
-  onNewChatInProject?: (projectId: string) => void;
   onEditProject?: (projectId: string) => void;
-  onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
   onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
-  onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   selectedSessionIds?: Set<string>;
   selectionEnabled?: boolean;
   selectionActionsDisabled?: boolean;
@@ -87,6 +78,8 @@ export function SidebarPinnedItemsSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  showChatIcons: boolean;
+  onShowChatIconsChange: (show: boolean) => void;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
 }) {
@@ -94,6 +87,10 @@ export function SidebarPinnedItemsSection({
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const pointerDragCleanupRef = useRef<(() => void) | null>(null);
   const suppressNextClickRef = useRef(false);
+  const [dropTarget, setDropTarget] = useState<{
+    key: string;
+    placement: "before" | "after";
+  } | null>(null);
   const dragRef = useRef<{
     key: string;
     pointerId: number;
@@ -101,10 +98,7 @@ export function SidebarPinnedItemsSection({
     dragging: boolean;
   } | null>(null);
   const itemKey = useCallback(
-    (item: SidebarPinnedNavigationItem) =>
-      item.kind === "project"
-        ? `project:${item.project.id}`
-        : `chat:${item.session.id}`,
+    (item: SidebarPinnedNavigationItem) => `chat:${item.session.id}`,
     [],
   );
   useEffect(
@@ -139,6 +133,25 @@ export function SidebarPinnedItemsSection({
         return;
       drag.dragging = true;
       suppressNextClickRef.current = true;
+      const target = Array.from(rowRefs.current.entries()).find(
+        ([targetKey, element]) => {
+          if (targetKey === drag.key) return false;
+          const rect = element.getBoundingClientRect();
+          return (
+            moveEvent.clientY >= rect.top && moveEvent.clientY <= rect.bottom
+          );
+        },
+      );
+      if (target) {
+        const rect = target[1].getBoundingClientRect();
+        setDropTarget({
+          key: target[0],
+          placement:
+            moveEvent.clientY > rect.top + rect.height / 2 ? "after" : "before",
+        });
+      } else {
+        setDropTarget(null);
+      }
       moveEvent.preventDefault();
     };
     const finish = (upEvent: globalThis.PointerEvent) => {
@@ -164,6 +177,7 @@ export function SidebarPinnedItemsSection({
         }
       }
       dragRef.current = null;
+      setDropTarget(null);
       pointerDragCleanupRef.current?.();
     };
     window.addEventListener("pointermove", onMove);
@@ -191,6 +205,8 @@ export function SidebarPinnedItemsSection({
         actions={
           <SidebarDisplayOptionsMenu
             labelKey="actions.pinnedDisplayOptions"
+            showChatIcons={showChatIcons}
+            onShowChatIconsChange={onShowChatIconsChange}
             showTimestamps={showTimestamps}
             onShowTimestampsChange={onShowTimestampsChange}
             className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
@@ -203,6 +219,7 @@ export function SidebarPinnedItemsSection({
             return (
               <div
                 key={key}
+                data-pinned-reorder-row={key}
                 ref={(element) => {
                   if (element) rowRefs.current.set(key, element);
                   else rowRefs.current.delete(key);
@@ -214,81 +231,78 @@ export function SidebarPinnedItemsSection({
                   event.preventDefault();
                   event.stopPropagation();
                 }}
+                className="relative"
               >
-                {item.kind === "project" ? (
-                  <SidebarProjectSection
-                    key={`project:${item.project.id}`}
-                    project={item.project}
-                    projectChats={
-                      projectSessionsByProject[item.project.id] ?? []
-                    }
-                    isExpanded={expandedProjects[item.project.id] ?? false}
-                    toggleProject={toggleProject}
-                    activeSessionId={activeSessionId}
-                    onNavigate={onNavigate}
-                    onOpenProject={onOpenProject}
-                    onSelectSession={onSelectSession}
-                    onNewChatInProject={onNewChatInProject}
-                    onEditProject={onEditProject}
-                    onArchiveProject={onArchiveProject}
-                    onArchiveChat={onArchiveChat}
-                    onRenameChat={onRenameChat}
-                    onForkChat={onForkChat}
-                    onMarkChatRead={onMarkChatRead}
-                    onMarkChatUnread={onMarkChatUnread}
-                    onMoveToProject={onMoveToProject}
-                    selectedSessionIds={selectedSessionIds}
-                    selectionEnabled={selectionEnabled}
-                    selectionActionsDisabled={selectionActionsDisabled}
-                    onSelectionClear={onSelectionClear}
-                    onSelectionChange={onSelectionChange}
-                    onArchiveSelected={onArchiveSelected}
-                    onPinSelectedToHome={onPinSelectedToHome}
-                    isPinningSelectedToHome={isPinningSelectedToHome}
-                    onMarkSelectedRead={onMarkSelectedRead}
-                    onMarkSelectedUnread={onMarkSelectedUnread}
-                    showChatIcons={false}
-                    showTimestamps={showTimestamps}
-                    dropTargetEnabled={false}
-                    showExpansionChevron
-                  />
-                ) : (
-                  <SidebarChatRow
-                    key={`chat:${item.session.id}`}
-                    id={item.session.id}
-                    title={item.session.title}
-                    branchName={item.session.branchName}
-                    activityAt={item.session.activityAt}
-                    isActive={activeSessionId === item.session.id}
-                    isRunning={item.session.isRunning ?? false}
-                    hasUnread={item.session.hasUnread ?? false}
-                    selected={selectedSessionIds?.has(item.session.id) ?? false}
-                    selectionEnabled={selectionEnabled}
-                    selectionActionsDisabled={selectionActionsDisabled}
-                    selectedSessionIds={selectedSessionIds}
-                    showLeadingIcon
-                    leadingIconTestId="sidebar-pinned-chat-icon"
-                    contentPaddingClassName="pl-9"
-                    showTimestamp={showTimestamps}
-                    showRenameTooltip={false}
-                    quickPinMode="never"
-                    pointerDragEnabled={false}
-                    currentProjectId={item.session.projectId ?? null}
-                    onSelect={onSelectSession}
-                    onSelectionClear={onSelectionClear}
-                    onSelectionChange={onSelectionChange}
-                    onRename={onRenameChat}
-                    onFork={onForkChat}
-                    onMarkRead={onMarkChatRead}
-                    onMarkUnread={onMarkChatUnread}
-                    onArchive={onArchiveChat}
-                    onArchiveSelected={onArchiveSelected}
-                    onPinSelectedToHome={onPinSelectedToHome}
-                    isPinningSelectedToHome={isPinningSelectedToHome}
-                    onMarkSelectedRead={onMarkSelectedRead}
-                    onMarkSelectedUnread={onMarkSelectedUnread}
+                {dropTarget?.key === key && (
+                  <div
+                    data-testid="pinned-reorder-indicator"
+                    className={`pointer-events-none absolute left-3 right-3 z-10 h-0.5 rounded-full bg-border ${
+                      dropTarget.placement === "after" ? "bottom-0" : "top-0"
+                    }`}
                   />
                 )}
+                {(() => {
+                  const project = item.session.projectId
+                    ? projectsById.get(item.session.projectId)
+                    : undefined;
+                  return (
+                    <SidebarChatRow
+                      key={`chat:${item.session.id}`}
+                      id={item.session.id}
+                      title={item.session.title}
+                      branchName={item.session.branchName}
+                      activityAt={item.session.activityAt}
+                      isActive={activeSessionId === item.session.id}
+                      isRunning={item.session.isRunning ?? false}
+                      hasUnread={item.session.hasUnread ?? false}
+                      selected={
+                        selectedSessionIds?.has(item.session.id) ?? false
+                      }
+                      selectionEnabled={selectionEnabled}
+                      selectionActionsDisabled={selectionActionsDisabled}
+                      selectedSessionIds={selectedSessionIds}
+                      showLeadingIcon={showChatIcons}
+                      leadingIcon={
+                        project ? (
+                          <ProjectIcon
+                            icon={project.icon}
+                            color={project.color}
+                            projectId={project.id}
+                            className="size-[18px]"
+                            imageClassName="size-[18px] rounded-[4px]"
+                          />
+                        ) : undefined
+                      }
+                      leadingIconTestId="sidebar-pinned-chat-icon"
+                      contentPaddingClassName={
+                        showChatIcons ||
+                        item.session.isRunning ||
+                        item.session.hasUnread
+                          ? "pl-9"
+                          : "pl-3"
+                      }
+                      showTimestamp={showTimestamps}
+                      showRenameTooltip={false}
+                      quickPinMode={showChatIcons ? "hover-only" : "never"}
+                      pointerDragEnabled={false}
+                      currentProjectId={item.session.projectId ?? null}
+                      onEditProject={onEditProject}
+                      onSelect={onSelectSession}
+                      onSelectionClear={onSelectionClear}
+                      onSelectionChange={onSelectionChange}
+                      onRename={onRenameChat}
+                      onFork={onForkChat}
+                      onMarkRead={onMarkChatRead}
+                      onMarkUnread={onMarkChatUnread}
+                      onArchive={onArchiveChat}
+                      onArchiveSelected={onArchiveSelected}
+                      onPinSelectedToHome={onPinSelectedToHome}
+                      isPinningSelectedToHome={isPinningSelectedToHome}
+                      onMarkSelectedRead={onMarkSelectedRead}
+                      onMarkSelectedUnread={onMarkSelectedUnread}
+                    />
+                  );
+                })()}
               </div>
             );
           })

@@ -53,8 +53,6 @@ export function SidebarRecentsSection({
   onShowChatIconsChange,
   showTimestamps,
   onShowTimestampsChange,
-  showGitBranches = false,
-  onShowGitBranchesChange,
   isOpen,
   onToggleOpen,
   sectionHeaderTextClass,
@@ -89,8 +87,6 @@ export function SidebarRecentsSection({
   onShowChatIconsChange: (show: boolean) => void;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
-  showGitBranches?: boolean;
-  onShowGitBranchesChange?: (show: boolean) => void;
   isOpen: boolean;
   onToggleOpen: () => void;
   sectionHeaderTextClass: string;
@@ -144,8 +140,6 @@ export function SidebarRecentsSection({
                   onShowChatIconsChange={onShowChatIconsChange}
                   showTimestamps={showTimestamps}
                   onShowTimestampsChange={onShowTimestampsChange}
-                  showGitBranches={showGitBranches}
-                  onShowGitBranchesChange={onShowGitBranchesChange}
                   className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
                 />
                 {onNewChat && !showEmptyState ? (

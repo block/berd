@@ -32,9 +32,10 @@ import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
 import { SidebarPinnedItemsSection } from "./SidebarPinnedItemsSection";
 
-export type SidebarPinnedNavigationItem =
-  | { kind: "project"; project: ProjectInfo }
-  | { kind: "chat"; session: SidebarSessionItem };
+export type SidebarPinnedNavigationItem = {
+  kind: "chat";
+  session: SidebarSessionItem;
+};
 
 export interface SidebarProjectsSectionProps {
   projects: ProjectInfo[];
@@ -44,7 +45,7 @@ export interface SidebarProjectsSectionProps {
     toKey: string,
     placement: "before" | "after",
   ) => void;
-  pinnedProjectSessionsByProject?: Record<string, SidebarSessionItem[]>;
+  pinnedChatProjectIds?: ReadonlySet<string>;
   projectSessions: {
     byProject: Record<string, SidebarSessionItem[]>;
     standalone: SidebarSessionItem[];
@@ -56,6 +57,8 @@ export interface SidebarProjectsSectionProps {
   searchActive?: boolean;
   groupChatsByProject: boolean;
   onGroupChatsByProjectChange?: (grouped: boolean) => void;
+  pinnedShowChatIcons: boolean;
+  onPinnedShowChatIconsChange: (show: boolean) => void;
   pinnedShowTimestamps: boolean;
   onPinnedShowTimestampsChange: (show: boolean) => void;
   projectShowChatIcons: boolean;
@@ -66,8 +69,6 @@ export interface SidebarProjectsSectionProps {
   onChatShowChatIconsChange: (show: boolean) => void;
   chatShowTimestamps: boolean;
   onChatShowTimestampsChange: (show: boolean) => void;
-  showGitBranches: boolean;
-  onShowGitBranchesChange: (show: boolean) => void;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
   collapsed: boolean;
@@ -121,7 +122,7 @@ export function SidebarProjectsSection({
   projects,
   pinnedNavigationItems = [],
   onReorderPinnedNavigationItem,
-  pinnedProjectSessionsByProject = {},
+  pinnedChatProjectIds,
   projectSessions,
   hasVisibleChats,
   flatChatGroups,
@@ -130,6 +131,8 @@ export function SidebarProjectsSection({
   searchActive = false,
   groupChatsByProject,
   onGroupChatsByProjectChange,
+  pinnedShowChatIcons,
+  onPinnedShowChatIconsChange,
   pinnedShowTimestamps,
   onPinnedShowTimestampsChange,
   projectShowChatIcons,
@@ -140,8 +143,6 @@ export function SidebarProjectsSection({
   onChatShowChatIconsChange,
   chatShowTimestamps,
   onChatShowTimestampsChange,
-  showGitBranches,
-  onShowGitBranchesChange,
   expandedProjects,
   toggleProject,
   collapsed,
@@ -149,7 +150,6 @@ export function SidebarProjectsSection({
   labelVisible,
   activeSessionId,
   onNavigate,
-  onOpenProject,
   onSelectSession,
   onNewChatInProject,
   onNewChat,
@@ -204,21 +204,14 @@ export function SidebarProjectsSection({
         labelTransition={labelTransition}
         labelVisible={labelVisible}
         activeSessionId={activeSessionId}
-        projectSessionsByProject={pinnedProjectSessionsByProject}
-        expandedProjects={expandedProjects}
-        toggleProject={toggleProject}
-        onNavigate={onNavigate}
-        onOpenProject={onOpenProject}
+        projectsById={new Map(projects.map((project) => [project.id, project]))}
         onSelectSession={onSelectSession}
-        onNewChatInProject={onNewChatInProject}
         onEditProject={onEditProject}
-        onArchiveProject={onArchiveProject}
         onArchiveChat={onArchiveChat}
         onRenameChat={onRenameChat}
         onForkChat={onForkChat}
         onMarkChatRead={onMarkChatRead}
         onMarkChatUnread={onMarkChatUnread}
-        onMoveToProject={onMoveToProject}
         selectedSessionIds={selectedSessionIds}
         selectionEnabled={selectionEnabled}
         selectionActionsDisabled={selectionActionsDisabled}
@@ -229,6 +222,8 @@ export function SidebarProjectsSection({
         isPinningSelectedToHome={isPinningSelectedToHome}
         onMarkSelectedRead={onMarkSelectedRead}
         onMarkSelectedUnread={onMarkSelectedUnread}
+        showChatIcons={pinnedShowChatIcons}
+        onShowChatIconsChange={onPinnedShowChatIconsChange}
         showTimestamps={pinnedShowTimestamps}
         onShowTimestampsChange={onPinnedShowTimestampsChange}
       />
@@ -267,8 +262,6 @@ export function SidebarProjectsSection({
           onMarkSelectedUnread={onMarkSelectedUnread}
           showTimestamps={chatShowTimestamps}
           onShowTimestampsChange={onChatShowTimestampsChange}
-          showGitBranches={showGitBranches}
-          onShowGitBranchesChange={onShowGitBranchesChange}
           showViewAllInHistory={hasFlatChatOverflow && !searchActive}
           compactGroups={compactFlatGroups}
           compactHeader={searchActive}
@@ -310,8 +303,6 @@ export function SidebarProjectsSection({
                   onShowChatIconsChange={onProjectShowChatIconsChange}
                   showTimestamps={projectShowTimestamps}
                   onShowTimestampsChange={onProjectShowTimestampsChange}
-                  showGitBranches={showGitBranches}
-                  onShowGitBranchesChange={onShowGitBranchesChange}
                   groupChatsByProject
                   onGroupChatsByProjectChange={onGroupChatsByProjectChange}
                   className={SIDEBAR_SECTION_HEADER_ACTION_REVEAL_CLASS}
@@ -330,6 +321,7 @@ export function SidebarProjectsSection({
           <SidebarProjectList
             projects={projects}
             projectSessionsByProject={projectSessions.byProject}
+            pinnedChatProjectIds={pinnedChatProjectIds}
             expandedProjects={expandedProjects}
             toggleProject={toggleProject}
             collapsed={collapsed}
@@ -493,8 +485,6 @@ export function SidebarProjectsSection({
             onShowChatIconsChange={onChatShowChatIconsChange}
             showTimestamps={chatShowTimestamps}
             onShowTimestampsChange={onChatShowTimestampsChange}
-            showGitBranches={showGitBranches}
-            onShowGitBranchesChange={onShowGitBranchesChange}
             isOpen={recentsSectionOpen}
             onToggleOpen={onToggleRecentsSection}
             sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}

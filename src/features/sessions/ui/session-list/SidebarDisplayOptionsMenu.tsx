@@ -19,8 +19,6 @@ interface SidebarDisplayOptionsMenuProps {
   onShowChatIconsChange?: (show: boolean) => void;
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
-  showGitBranches?: boolean;
-  onShowGitBranchesChange?: (show: boolean) => void;
   groupChatsByProject?: boolean;
   onGroupChatsByProjectChange?: (grouped: boolean) => void;
   className?: string;
@@ -57,8 +55,6 @@ export function SidebarDisplayOptionsMenu({
   onShowChatIconsChange,
   showTimestamps,
   onShowTimestampsChange,
-  showGitBranches = false,
-  onShowGitBranchesChange,
   groupChatsByProject = false,
   onGroupChatsByProjectChange,
   className,
@@ -101,14 +97,6 @@ export function SidebarDisplayOptionsMenu({
         >
           {t("actions.showTimestamp")}
         </CheckableMenuItem>
-        {onShowGitBranchesChange ? (
-          <CheckableMenuItem
-            checked={showGitBranches}
-            onCheckedChange={onShowGitBranchesChange}
-          >
-            {t("actions.showGitBranches")}
-          </CheckableMenuItem>
-        ) : null}
         {onGroupChatsByProjectChange ? (
           <CheckableMenuItem
             checked={groupChatsByProject}
