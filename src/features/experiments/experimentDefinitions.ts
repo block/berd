@@ -63,8 +63,6 @@ export const MULTI_WORKSPACE_EXPERIMENT_ID = "multi-workspace";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
-export const AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID = "agent-work-transcript";
-
 export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
 
 export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
@@ -92,12 +90,6 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.transcriptVirtualRenderer.title",
     descriptionKey: "experiments.transcriptVirtualRenderer.description",
     defaultEnabled: true,
-  },
-  {
-    id: AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
-    titleKey: "experiments.agentWorkTranscript.title",
-    descriptionKey: "experiments.agentWorkTranscript.description",
-    defaultEnabled: false,
   },
   {
     id: LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID,

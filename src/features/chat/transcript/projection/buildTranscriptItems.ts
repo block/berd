@@ -24,14 +24,11 @@ import type {
   TranscriptDateLabelKey,
   TranscriptItemDescriptor,
   TranscriptMessageItem,
-  TranscriptToolChainDetailItem,
-  TranscriptToolChainItem,
 } from "./transcriptItemTypes";
 
 interface BuildTranscriptItemsInput {
   messages: readonly Message[];
   streamingMessageId: string | null;
-  enableAgentWork: boolean;
   nowBucket: string;
   localeKey: string;
   calendarRevisionToken: string;
@@ -116,7 +113,6 @@ export function invalidateTranscriptItemDescriptorCache(): void {
 export function buildTranscriptItems({
   messages,
   streamingMessageId,
-  enableAgentWork,
   nowBucket,
   localeKey,
   calendarRevisionToken,
@@ -134,10 +130,9 @@ export function buildTranscriptItems({
       continue;
     }
 
-    const userVisibleContent = getUserVisibleMessageContent(message.content);
-    const visibleContent = enableAgentWork
-      ? expandReasoningContentSections(userVisibleContent)
-      : stripAssistantReasoningContent(message, userVisibleContent);
+    const visibleContent = expandReasoningContentSections(
+      getUserVisibleMessageContent(message.content),
+    );
     if (message.role === "user" && visibleContent.length === 0) {
       continue;
     }
@@ -179,23 +174,20 @@ export function buildTranscriptItems({
 
     const isStreaming = message.id === streamingMessageId;
     const contentForProjection: readonly MessageContent[] =
-      enableAgentWork && message.role === "assistant"
+      message.role === "assistant"
         ? filterDuplicateDisplayedReasoning(
             visibleContent,
             displayedReasoningSignatures,
           )
         : visibleContent;
 
-    if (enableAgentWork && message.role === "assistant") {
+    if (message.role === "assistant") {
       for (const signature of getLeadingReasoningSignatures(
         contentForProjection,
       )) {
         displayedReasoningSignatures.add(signature);
       }
-    } else if (
-      enableAgentWork &&
-      !isToolResponseOnlyContent(contentForProjection)
-    ) {
+    } else if (!isToolResponseOnlyContent(contentForProjection)) {
       displayedReasoningSignatures = new Set<string>();
     }
 
@@ -205,24 +197,13 @@ export function buildTranscriptItems({
       continue;
     }
 
-    if (enableAgentWork) {
-      const agentWorkItems = buildAgentWorkItems({
-        message,
-        visibleContent: contentForProjection,
-        isStreaming,
-      });
-      if (agentWorkItems) {
-        items.push(...agentWorkItems);
-        continue;
-      }
-    }
-
-    const toolChainItems = buildToolChainItems({
+    const agentWorkItems = buildAgentWorkItems({
       message,
       visibleContent: contentForProjection,
+      isStreaming,
     });
-    if (toolChainItems) {
-      items.push(...toolChainItems);
+    if (agentWorkItems) {
+      items.push(...agentWorkItems);
       continue;
     }
 
@@ -659,26 +640,6 @@ function isReasoningContent(
   );
 }
 
-function stripAssistantReasoningContent(
-  message: Message,
-  visibleContent: readonly MessageContent[],
-): readonly MessageContent[] {
-  if (message.role !== "assistant") {
-    return visibleContent;
-  }
-  return visibleContent.filter((block) => !isReasoningContent(block));
-}
-
-function canProjectToolChainRows(
-  message: Message,
-  visibleContent: readonly MessageContent[],
-): boolean {
-  if (message.role !== "assistant" || visibleContent.length === 0) {
-    return false;
-  }
-  return visibleContent.every(isToolContent);
-}
-
 function isTextContent(block: MessageContent): block is TextLikeContent {
   return block.type === "text";
 }
@@ -1079,15 +1040,17 @@ function buildAgentWorkItem({
   content,
   isStreaming,
   hasFinalAnswer = false,
+  idSuffix = "agent-work",
 }: {
   message: Message;
   content: readonly MessageContent[];
   isStreaming: boolean;
   hasFinalAnswer?: boolean;
+  idSuffix?: string;
 }): TranscriptAgentWorkItem {
   const workMessage: Message = {
     ...message,
-    id: `${message.id}:work`,
+    id: `${message.id}:work:${idSuffix}`,
     content: [...content],
   };
   const revisions = buildMessageRevisions(workMessage, content);
@@ -1118,13 +1081,14 @@ function buildAgentWorkItem({
     },
   });
 
+  const rowId = `message:${message.id}:${idSuffix}`;
   return {
-    itemId: `message:${message.id}:agent-work`,
+    itemId: rowId,
     kind: "agent-work",
-    rowId: `message:${message.id}:agent-work`,
+    rowId,
     messageId: message.id,
     message: workMessage,
-    workId: message.id,
+    workId: rowId,
     content,
     isActiveWork,
     hasFinalAnswer,
@@ -1134,12 +1098,14 @@ function buildAgentWorkItem({
     renderRevision: [
       "agent-work",
       message.id,
+      idSuffix,
       hasFinalAnswer ? "answered" : "unanswered",
       revisions.renderRevision,
     ].join(":"),
     heightRevision: [
       "agent-work-height",
       message.id,
+      idSuffix,
       revisions.heightRevision,
     ].join(":"),
     estimatedHeight: estimateAgentWorkHeight(content),
@@ -1212,11 +1178,6 @@ function buildAgentWorkItems({
     }
   }
   const answerIndexes = new Set(answerEntries.map(({ index }) => index));
-  const workContent = compactWorkContent(
-    workAndTextEntries
-      .filter(({ index }) => !answerIndexes.has(index))
-      .map(({ block }) => block),
-  );
   const finalTextContent = compactTextContent(
     answerEntries.map(({ block }) => block).filter(isTextContent),
   );
@@ -1225,17 +1186,37 @@ function buildAgentWorkItems({
     index: number;
     item: TranscriptItemDescriptor;
   }> = [];
-  const firstWorkIndex = workAndTextEntries.find(
+  const workEntries = workAndTextEntries.filter(
     ({ index }) => !answerIndexes.has(index),
-  )?.index;
-  positionedItems.push({
-    index: firstWorkIndex ?? 0,
-    item: buildAgentWorkItem({
-      message,
-      content: workContent,
-      isStreaming,
-      hasFinalAnswer: finalTextContent.length > 0,
-    }),
+  );
+  const workEntryGroups: Array<typeof workEntries> = [];
+  for (const entry of workEntries) {
+    const currentGroup = workEntryGroups[workEntryGroups.length - 1];
+    const previousEntry = currentGroup?.[currentGroup.length - 1];
+    if (!previousEntry || entry.index !== previousEntry.index + 1) {
+      workEntryGroups.push([entry]);
+    } else {
+      currentGroup.push(entry);
+    }
+  }
+
+  workEntryGroups.forEach((entries, groupIndex) => {
+    const content = compactWorkContent(entries.map(({ block }) => block));
+    positionedItems.push({
+      index: entries[0]?.index ?? 0,
+      item: buildAgentWorkItem({
+        message,
+        content,
+        isStreaming,
+        hasFinalAnswer:
+          groupIndex === workEntryGroups.length - 1 &&
+          finalTextContent.length > 0,
+        idSuffix:
+          workEntryGroups.length === 1
+            ? "agent-work"
+            : `agent-work-${groupIndex}`,
+      }),
+    });
   });
 
   if (finalTextContent.length > 0) {
@@ -1276,121 +1257,6 @@ function buildAgentWorkItems({
   return positionedItems
     .sort((left, right) => left.index - right.index)
     .map(({ item }) => item);
-}
-
-function isActiveToolChain(visibleContent: readonly MessageContent[]): boolean {
-  return visibleContent.some(
-    (block) =>
-      block.type === "toolRequest" &&
-      (block.status === "pending" || block.status === "in_progress"),
-  );
-}
-
-function buildToolChainItems({
-  message,
-  visibleContent,
-}: {
-  message: Message;
-  visibleContent: readonly MessageContent[];
-}): readonly [TranscriptToolChainItem, TranscriptToolChainDetailItem] | null {
-  if (!canProjectToolChainRows(message, visibleContent)) {
-    return null;
-  }
-
-  const chainId = message.id;
-  const summaryRowId = `message:${message.id}:tool-chain`;
-  const detailRowId = `message:${message.id}:tool-chain-detail`;
-  const isActive = isActiveToolChain(visibleContent);
-  const revisions = buildMessageRevisions(message, visibleContent);
-
-  const summaryMeasurement = classifyTranscriptMeasurementPolicy({
-    rowKind: "tool-chain",
-    message,
-    content: visibleContent,
-    capabilities: {
-      stateful: true,
-      hasToolContent: true,
-      hasActiveToolWork: isActive,
-      hasActiveTimer: isActive,
-    },
-  });
-
-  const detailMeasurement = classifyTranscriptMeasurementPolicy({
-    rowKind: "tool-chain-detail",
-    message,
-    content: visibleContent,
-    capabilities: {
-      stateful: true,
-      hasToolContent: true,
-      hasActiveToolWork: isActive,
-      hasDynamicAsyncLayout: true,
-    },
-  });
-
-  const summaryItem: TranscriptToolChainItem = {
-    itemId: summaryRowId,
-    kind: "tool-chain",
-    rowId: summaryRowId,
-    messageId: message.id,
-    message,
-    chainId,
-    detailRowId,
-    isActiveChain: isActive,
-    renderRevision: ["tool-chain", message.id, revisions.renderRevision].join(
-      ":",
-    ),
-    heightRevision: [
-      "tool-chain-height",
-      message.id,
-      revisions.heightRevision,
-    ].join(":"),
-    estimatedHeight: estimateToolChainSummaryHeight(visibleContent),
-    capabilities: summaryMeasurement.capabilities,
-    measurementPolicy: summaryMeasurement.policy,
-    layoutPendingPolicy: summaryMeasurement.layoutPendingPolicy,
-    measurementSafetyReasons: summaryMeasurement.reasons,
-    anchorPriority: "stable",
-    keepAlivePriority: isActive ? "active-stream" : "none",
-  };
-
-  const detailItem: TranscriptToolChainDetailItem = {
-    itemId: detailRowId,
-    kind: "tool-chain-detail",
-    rowId: detailRowId,
-    messageId: message.id,
-    message,
-    chainId,
-    summaryRowId,
-    isActiveChain: isActive,
-    renderRevision: [
-      "tool-chain-detail",
-      message.id,
-      revisions.renderRevision,
-    ].join(":"),
-    heightRevision: [
-      "tool-chain-detail-height",
-      message.id,
-      revisions.heightRevision,
-    ].join(":"),
-    estimatedHeight: 0,
-    capabilities: detailMeasurement.capabilities,
-    measurementPolicy: detailMeasurement.policy,
-    layoutPendingPolicy: detailMeasurement.layoutPendingPolicy,
-    measurementSafetyReasons: detailMeasurement.reasons,
-    anchorPriority: "none",
-    keepAlivePriority: "none",
-  };
-
-  return [summaryItem, detailItem];
-}
-
-function estimateToolChainSummaryHeight(
-  visibleContent: readonly MessageContent[],
-): number {
-  const requestCount = visibleContent.filter(
-    (b) => b.type === "toolRequest",
-  ).length;
-  return Math.max(60, requestCount * 56);
 }
 
 function canProjectAssistantTextFragments(

@@ -35,6 +35,7 @@ interface TranscriptHarnessWindow extends Window {
     collectDiagnostics?: () =>
       | Record<string, unknown>
       | Promise<Record<string, unknown>>;
+    getRowIdForMessage?: (messageId: string) => string;
   };
   __GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__?: {
     protectedRows?: number;
@@ -253,6 +254,20 @@ async function waitForVirtualDiagnostics(
       { cause: error },
     );
   }
+}
+
+async function messageRowSelector(
+  page: Page,
+  messageId: string,
+): Promise<string> {
+  const rowId = await page.evaluate(
+    (id) =>
+      (
+        window as TranscriptHarnessWindow
+      ).__TRANSCRIPT_VIRTUALIZATION_HARNESS__?.getRowIdForMessage?.(id),
+    messageId,
+  );
+  return `[data-virtual-row-id="${rowId ?? `message:${messageId}`}"]`;
 }
 
 async function waitForProtectedRows(page: Page, protectedRows: number) {
@@ -746,7 +761,7 @@ test.describe("transcript product contract proof", () => {
     await scrollToMessage(page, fixture, "mcp-message-000");
 
     for (const messageId of protectedMessageIds) {
-      const row = page.locator(`[data-virtual-row-id="message:${messageId}"]`);
+      const row = page.locator(await messageRowSelector(page, messageId));
       await expect(row).toHaveAttribute("data-virtual-row-protected", "true");
       await expect(row).toHaveAttribute("data-virtual-row-visible", "false");
     }
@@ -802,10 +817,10 @@ test.describe("transcript product contract proof", () => {
       blankViewportPixels: 0,
     });
     await expect(
-      page.locator('[data-virtual-row-id="message:mcp-message-000"]'),
+      page.locator(await messageRowSelector(page, "mcp-message-000")),
     ).toHaveAttribute("data-virtual-row-protected", "false");
     await expect(
-      page.locator('[data-virtual-row-id="message:mcp-message-011"]'),
+      page.locator(await messageRowSelector(page, "mcp-message-011")),
     ).toHaveAttribute("data-virtual-row-protected", "true");
 
     await applyHarnessOperation(page, {

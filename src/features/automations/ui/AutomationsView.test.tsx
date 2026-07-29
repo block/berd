@@ -17,11 +17,6 @@ import {
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
 import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
-import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
 import { AutomationsWorkbench as AutomationsView } from "./AutomationsView";
 import type { AutomationNavigationRoute } from "@/app/types/appNavigation";
 
@@ -111,10 +106,6 @@ async function renderDailyRevenueDigestDetails() {
 
 describe("AutomationsView", () => {
   beforeEach(() => {
-    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
-    expect(
-      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true),
-    ).toBe(true);
     resetHomeWidgetStoreForTests();
     vi.clearAllMocks();
     vi.mocked(getAutomationTiles).mockResolvedValue({

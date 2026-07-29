@@ -401,7 +401,6 @@ describe("transcript projection cache", () => {
     expect(workRow.agentWork?.thoughtCount).toBe(2);
     expect(workRow.agentWork?.toolCount).toBe(2);
     expect(snapshot.wholeMessageFallbackRowCount).toBe(0);
-    expect(snapshot.toolChainRowCount).toBe(0);
   });
 
   it("dedupes adjacent duplicate reasoning-only assistant messages", () => {
@@ -899,16 +898,44 @@ describe("transcript projection cache", () => {
       "date-separator",
       "agent-work",
       "message",
+      "agent-work",
       "message",
     ]);
     const workRow = rowById(
       snapshot,
-      "message:assistant-leading-progress:agent-work",
+      "message:assistant-leading-progress:agent-work-0",
     );
     expect(workRow.agentWork?.content).toContainEqual({
       type: "text",
       text: "I’m preparing the preview.",
     });
+  });
+
+  it("preserves work and companion source order", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-interleaved-companion",
+      "assistant",
+      [
+        toolRequest("tool-1"),
+        { type: "image", data: "cHJldmlldw==", mimeType: "image/png" },
+        toolRequest("tool-2"),
+        { type: "text", text: "Here is the final answer." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-interleaved-companion",
+      "message:assistant-interleaved-companion:agent-work-0",
+      expect.stringMatching(
+        /^message:assistant-interleaved-companion:companion-image-/,
+      ),
+      "message:assistant-interleaved-companion:agent-work-1",
+      "message:assistant-interleaved-companion:answer",
+    ]);
   });
 
   it("does not merge final-answer text across a companion boundary", () => {
@@ -1003,40 +1030,6 @@ describe("transcript projection cache", () => {
     expect(second.rows.some((row) => row.rowId === secondAppRowId)).toBe(true);
   });
 
-  it("keeps mixed assistant content as a message row when agent work is disabled", () => {
-    const cache = createTranscriptProjectionCache();
-    const assistant = messageWithContent(
-      "assistant-reasoning-tools-text",
-      "assistant",
-      [
-        { type: "thinking", text: "I should inspect the files first." },
-        toolRequest("tool-1"),
-        { type: "text", text: "Here are my findings." },
-      ],
-      utc(2026, 6, 4, 10),
-    );
-
-    const snapshot = update(cache, [assistant], null, false);
-
-    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
-      "date:2026-06-04:before:assistant-reasoning-tools-text",
-      "message:assistant-reasoning-tools-text",
-    ]);
-    expect(messageRow(snapshot, "assistant-reasoning-tools-text").kind).toBe(
-      "message",
-    );
-    const item = snapshot.items.find(
-      (candidate) => candidate.kind === "message",
-    );
-    expect(item?.kind).toBe("message");
-    if (item?.kind === "message") {
-      expect(item.visibleContent.map((content) => content.type)).toEqual([
-        "toolRequest",
-        "text",
-      ]);
-    }
-  });
-
   it("keeps active assistant text inside agent work until streaming completes", () => {
     const cache = createTranscriptProjectionCache();
     const assistant = messageWithContent(
@@ -1094,7 +1087,6 @@ describe("transcript projection cache", () => {
     expect(
       rowById(snapshot, "message:assistant-reasoning-tools-text:answer").kind,
     ).toBe("message");
-    expect(snapshot.toolChainRowCount).toBe(0);
   });
 
   it("keeps pre-tool progress text inside the agent work row", () => {
@@ -1580,15 +1572,8 @@ function update(
   cache: ReturnType<typeof createTranscriptProjectionCache>,
   messages: readonly Message[],
   streamingMessageId: string | null = null,
-  enableAgentWork = true,
 ): TranscriptProjectionSnapshot {
-  return updateSession(
-    cache,
-    SESSION_ID,
-    messages,
-    streamingMessageId,
-    enableAgentWork,
-  );
+  return updateSession(cache, SESSION_ID, messages, streamingMessageId);
 }
 
 function updateSession(
@@ -1596,14 +1581,12 @@ function updateSession(
   sessionId: string,
   messages: readonly Message[],
   streamingMessageId: string | null = null,
-  enableAgentWork = true,
 ): TranscriptProjectionSnapshot {
   return cache.update({
     sessionId,
     sessionEpoch: 1,
     messages,
     streamingMessageId,
-    enableAgentWork,
     nowBucket: NOW_BUCKET,
     localeKey: LOCALE_KEY,
   });

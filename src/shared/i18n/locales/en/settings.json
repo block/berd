@@ -225,10 +225,6 @@
       "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",
       "title": "Transcript virtual renderer"
     },
-    "agentWorkTranscript": {
-      "description": "Groups thinking, tool calls, and progress into an Agent work panel with a separate final answer row.",
-      "title": "Agent work transcript"
-    },
     "localMarkdownImages": {
       "title": "Render local images in chat",
       "description": "Show Markdown image links that point at local files in the chat's working directory inline, instead of a broken image. Scoped to the working directory; remote http(s) images stay blocked."

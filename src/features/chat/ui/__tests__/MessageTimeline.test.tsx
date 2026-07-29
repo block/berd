@@ -8,13 +8,9 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
-import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
 import { RESPONSE_START_GUTTER_STORAGE_KEY } from "@/features/chat/lib/responseStartGutterPreference";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "@/features/experiments/experimentPreferences";
 import { MessageTimeline } from "../MessageTimeline";
 import { REDUCED_MOTION_QUERY } from "../messageTimelineShared";
 import type { Message } from "@/shared/types/messages";
@@ -43,9 +39,6 @@ beforeEach(() => {
   localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
   localStorage.removeItem(RESPONSE_START_GUTTER_STORAGE_KEY);
-  expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
-    true,
-  );
   resizeObserverCallbacks.length = 0;
   Object.defineProperty(globalThis, "ResizeObserver", {
     configurable: true,
@@ -307,56 +300,29 @@ describe("MessageTimeline", () => {
       metadata: { userVisible: true },
     };
 
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        experiments: { "agent-work-transcript": { enabled: false } },
+      }),
+    );
     renderWithProviders(
       <MessageTimeline messages={[userMessage, assistantMessage]} />,
     );
 
-    expect(screen.getByText(/previous steps?$/)).toBeInTheDocument();
-    expect(screen.getByText("Done.")).toBeInTheDocument();
-    expect(
-      screen.queryByText(/Thought for a few seconds/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it("hides reasoning boxes while the agent work transcript experiment is off", () => {
-    expect(
-      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, false),
-    ).toBe(true);
-    const assistantMessage: Message = {
-      id: "assistant-1",
-      role: "assistant",
-      created: Date.UTC(2026, 4, 20, 12, 1, 0),
-      content: [
-        { type: "thinking", text: "Planning\n\nI should inspect first." },
-        {
-          type: "toolRequest",
-          id: "tool-1",
-          name: "shell · git status",
-          arguments: { command: "git status" },
-          status: "completed",
-        },
-      ],
-      metadata: { userVisible: true },
-    };
-
-    renderWithProviders(
-      <MessageTimeline
-        messages={[
-          message("user-1", "user", "Please inspect"),
-          assistantMessage,
-        ]}
-      />,
-    );
-
-    expect(
-      screen.queryByText(/Thought for a few seconds/i),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText(/previous steps?$/)).not.toBeInTheDocument();
     expect(
       screen.getByTestId(
-        "virtual-transcript-row-message:assistant-1:tool-chain",
+        "virtual-transcript-row-message:assistant-1:agent-work",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText(/previous steps?$/)).toBeInTheDocument();
+    expect(screen.getByTestId("message-assistant-1:answer")).toHaveTextContent(
+      "Done.",
+    );
+    expect(
+      screen.queryByText(/Thought for a few seconds/i),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps active assistant text inside agent work while its turn streams", () => {

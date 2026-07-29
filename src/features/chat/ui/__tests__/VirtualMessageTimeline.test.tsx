@@ -1,13 +1,9 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
-import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
 import { RESPONSE_START_GUTTER_STORAGE_KEY } from "@/features/chat/lib/responseStartGutterPreference";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "@/features/experiments/experimentPreferences";
 import type { Message } from "@/shared/types/messages";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import {
@@ -132,9 +128,6 @@ beforeEach(() => {
   localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
   localStorage.removeItem(RESPONSE_START_GUTTER_STORAGE_KEY);
-  expect(setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true)).toBe(
-    true,
-  );
   resizeObserverCallbacks.length = 0;
   Object.defineProperty(globalThis, "ResizeObserver", {
     configurable: true,
@@ -524,6 +517,13 @@ describe("VirtualMessageTimeline", () => {
       ],
     };
 
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        experiments: { "agent-work-transcript": { enabled: false } },
+      }),
+    );
     renderWithProviders(
       <VirtualMessageTimeline
         sessionId="session-1"

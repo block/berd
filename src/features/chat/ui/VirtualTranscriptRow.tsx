@@ -25,7 +25,6 @@ import {
   MessageDateSeparator,
   type MessageBubbleCallbacks,
 } from "./messageTimelineShared";
-import { ToolChainSummaryMessageBubble } from "./ToolChainVirtualRows";
 import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowSpacing";
 
 const STREAMING_ROW_ACTION_GUTTER = "0.75rem";
@@ -358,35 +357,6 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         />
       </div>
     );
-  } else if (row.kind === "tool-chain" && row.toolChainSummary) {
-    rowContent = (
-      <div
-        ref={registerElement}
-        data-testid={rowTestId}
-        {...rowDiagnostics}
-        style={rowStyle}
-        className={cn(
-          spacingClassName,
-          flowContainmentClassName,
-          "rounded-lg transition-[background-color,box-shadow]",
-          isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
-        )}
-      >
-        <ToolChainSummaryMessageBubble payload={row.toolChainSummary} />
-      </div>
-    );
-  } else if (row.kind === "tool-chain-detail" && row.toolChainDetail) {
-    // Expanded content stays in the summary row so it remains adjacent to the
-    // tool that owns it. Keep this zero-height row for projection compatibility.
-    rowContent = (
-      <div
-        ref={registerElement}
-        data-testid={rowTestId}
-        {...rowDiagnostics}
-        style={rowStyle}
-        className={cn(spacingClassName, flowContainmentClassName)}
-      />
-    );
   } else if (row.kind !== "message" || !message) {
     rowContent = (
       <div
@@ -452,19 +422,12 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     return rowContent;
   }
 
-  // tool-chain-detail rows share the state slot of their paired summary row so
-  // both components read from the same registry entry.
-  const stateRowId =
-    row.kind === "tool-chain-detail" && row.toolChainDetail
-      ? row.toolChainDetail.summaryRowId
-      : row.rowId;
-
   return (
     <TranscriptRowStateProvider
       registry={rowStateProvider.registry}
       sessionId={rowStateProvider.sessionId}
       sessionEpoch={rowStateProvider.sessionEpoch}
-      rowId={stateRowId}
+      rowId={row.rowId}
       onRowStateChange={rowStateProvider.onRowStateChange}
     >
       {rowContent}

@@ -8,11 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageBubble } from "../MessageBubble";
-import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "@/features/experiments/experimentPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import type {
@@ -130,9 +126,6 @@ function expectNoVisibleText(container: HTMLElement, text: string) {
 describe("MessageBubble", () => {
   beforeEach(() => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
-    expect(
-      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, true),
-    ).toBe(true);
     useAgentStore.setState({ personas: [] });
     useProviderCatalogStore.getState().setEntries(providerCatalogEntries);
     vi.mocked(openPath).mockClear();
@@ -1126,22 +1119,19 @@ describe("MessageBubble", () => {
     expect(screen.queryByText("Tool result")).not.toBeInTheDocument();
   });
 
-  it("renders thinking content as Reasoning block", () => {
+  it("renders thinking content regardless of stored experiment state", () => {
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        experiments: { "agent-work-transcript": { enabled: false } },
+      }),
+    );
     const msg = assistantMessage([{ type: "thinking", text: "deep thoughts" }]);
+
     render(<MessageBubble message={msg} />);
+
     expect(screen.getByText(/thought for/i)).toBeInTheDocument();
-  });
-
-  it("hides thinking content when the agent work transcript experiment is disabled", () => {
-    expect(
-      setExperimentEnabled(AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID, false),
-    ).toBe(true);
-    const msg = assistantMessage([{ type: "thinking", text: "deep thoughts" }]);
-
-    render(<MessageBubble message={msg} />);
-
-    expect(screen.queryByText(/thought for/i)).not.toBeInTheDocument();
-    expect(screen.queryByText("deep thoughts")).not.toBeInTheDocument();
   });
 
   it("prefers the message persona name over the provider identity", () => {

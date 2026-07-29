@@ -21,8 +21,6 @@ import {
   toDateBucket,
   type TranscriptRowDescriptor,
 } from "@/features/chat/transcript/projection";
-import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
@@ -136,10 +134,6 @@ export function MessageTimeline({
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
-  const agentWorkExperiment = useExperiment(
-    AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
-  );
-  const enableAgentWork = agentWorkExperiment?.enabled === true;
   const responseStartGutterPreference = useResponseStartGutterPreference();
   const containerRef = useRef<HTMLDivElement>(null);
   // The composer is docked in flow at the bottom of the chat panel; its
@@ -200,11 +194,10 @@ export function MessageTimeline({
         sessionEpoch: 1,
         messages,
         streamingMessageId: streamingMessageId ?? null,
-        enableAgentWork,
         nowBucket,
         localeKey,
       }),
-    [enableAgentWork, messages, nowBucket, streamingMessageId],
+    [messages, nowBucket, streamingMessageId],
   );
   const visibleMessages = useMemo(
     () =>

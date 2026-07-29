@@ -20,8 +20,6 @@ export type TranscriptRowKind =
   | "assistant-content-fragment"
   | "assistant-message-actions"
   | "agent-work"
-  | "tool-chain"
-  | "tool-chain-detail"
   | "top-loading-sentinel";
 
 export type TranscriptKeepAlivePriority =

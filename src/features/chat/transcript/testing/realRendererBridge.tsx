@@ -25,6 +25,10 @@ import {
   type VirtualMessageTimelineDiagnostics,
 } from "@/features/chat/ui/VirtualMessageTimeline";
 import type { Message } from "@/shared/types/messages";
+import {
+  createTranscriptProjectionCache,
+  toDateBucket,
+} from "@/features/chat/transcript/projection";
 import type { TranscriptVirtualTimelineRowStateControls } from "../virtual/react/useTranscriptVirtualTimeline";
 import type {
   TranscriptFixture,
@@ -53,6 +57,7 @@ interface TranscriptVirtualizationBrowserHarness {
   ) => Promise<void>;
   applyOperation: (operation: TranscriptHarnessOperation) => Promise<void>;
   collectDiagnostics: () => TranscriptDiagnostics;
+  getRowIdForMessage: (messageId: string) => string;
 }
 
 declare global {
@@ -433,8 +438,31 @@ function scrollToMessageOffset(messageId: string, offsetPx: number) {
   }
 }
 
-function rowIdForMessageId(messageId: string): string {
-  return `message:${messageId}`;
+function rowIdForMessageId(
+  state: RealRendererBridgeState,
+  messageId: string,
+): string {
+  const session = activeSession(state);
+  if (!session) {
+    return `message:${messageId}`;
+  }
+  const snapshot = createTranscriptProjectionCache().update({
+    sessionId: session.sessionId,
+    sessionEpoch: 0,
+    messages: session.messages,
+    streamingMessageId: session.streamingMessageId ?? null,
+    nowBucket: toDateBucket(Date.now()),
+    localeKey: "en",
+  });
+  const companionRow = snapshot.rows.find(
+    (row) =>
+      row.messageId === messageId && row.rowId.includes(":companion-mcpApp-"),
+  );
+  return (
+    companionRow?.rowId ??
+    snapshot.rowByMessageId.get(messageId) ??
+    `message:${messageId}`
+  );
 }
 
 function isNearBottom(): boolean {
@@ -992,7 +1020,7 @@ function RealRendererBridgeApp() {
         }
         case "resizeMcpApp":
           virtualTimelineControlsRef.current?.setRowMcpActivity(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             true,
             {
               kind: "recent-resize",
@@ -1019,7 +1047,7 @@ function RealRendererBridgeApp() {
           break;
         case "mcpFocus":
           virtualTimelineControlsRef.current?.setRowFocused(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             operation.active !== false,
             {
               focusTargetId: operation.messageId,
@@ -1032,7 +1060,7 @@ function RealRendererBridgeApp() {
           break;
         case "mcpOverlay":
           virtualTimelineControlsRef.current?.setRowOpenOverlay(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             operation.active !== false,
             {
               overlayKind: "popover",
@@ -1045,7 +1073,7 @@ function RealRendererBridgeApp() {
           break;
         case "mcpHostWork":
           virtualTimelineControlsRef.current?.setRowMcpActivity(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             operation.active !== false,
             {
               kind: "host-request",
@@ -1058,7 +1086,7 @@ function RealRendererBridgeApp() {
           break;
         case "mcpNestedToolWork":
           virtualTimelineControlsRef.current?.setRowMcpActivity(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             operation.active !== false,
             {
               kind: "nested-tool-request",
@@ -1072,7 +1100,7 @@ function RealRendererBridgeApp() {
           break;
         case "mcpRecentMessage":
           virtualTimelineControlsRef.current?.setRowMcpActivity(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             operation.active !== false,
             {
               kind: "recent-message",
@@ -1086,7 +1114,7 @@ function RealRendererBridgeApp() {
           break;
         case "mcpRecentResize":
           virtualTimelineControlsRef.current?.setRowMcpActivity(
-            rowIdForMessageId(operation.messageId),
+            rowIdForMessageId(stateRef.current, operation.messageId),
             operation.active !== false,
             {
               kind: "recent-resize",
@@ -1314,6 +1342,8 @@ function RealRendererBridgeApp() {
       loadFixture,
       applyOperation,
       collectDiagnostics,
+      getRowIdForMessage: (messageId) =>
+        rowIdForMessageId(stateRef.current, messageId),
     };
   }, [applyOperation, collectDiagnostics, loadFixture]);
 

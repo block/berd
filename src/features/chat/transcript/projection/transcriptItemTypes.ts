@@ -65,20 +65,6 @@ export interface TranscriptAgentWorkPayload {
   textCount: number;
 }
 
-export interface TranscriptToolChainPayload {
-  chainId: string;
-  message: Message;
-  detailRowId: string;
-  isActiveChain: boolean;
-}
-
-export interface TranscriptToolChainDetailPayload {
-  chainId: string;
-  message: Message;
-  summaryRowId: string;
-  isActiveChain: boolean;
-}
-
 export interface TranscriptRowDescriptor {
   rowId: string;
   reactKey: string;
@@ -93,8 +79,6 @@ export interface TranscriptRowDescriptor {
   fragment?: TranscriptAssistantContentFragmentPayload;
   date?: TranscriptDateSeparatorPayload;
   agentWork?: TranscriptAgentWorkPayload;
-  toolChainSummary?: TranscriptToolChainPayload;
-  toolChainDetail?: TranscriptToolChainDetailPayload;
   renderRevision: string;
   heightRevision: string;
   layoutRevision: string;
@@ -203,53 +187,11 @@ export interface TranscriptAgentWorkItem {
   keepAlivePriority: TranscriptKeepAlivePriority;
 }
 
-export interface TranscriptToolChainItem {
-  itemId: string;
-  kind: "tool-chain";
-  rowId: string;
-  messageId: string;
-  message: Message;
-  chainId: string;
-  detailRowId: string;
-  isActiveChain: boolean;
-  renderRevision: string;
-  heightRevision: string;
-  estimatedHeight: number;
-  capabilities: TranscriptRowCapabilities;
-  measurementPolicy: TranscriptMeasurementPolicy;
-  layoutPendingPolicy: TranscriptLayoutPendingPolicy;
-  measurementSafetyReasons: readonly TranscriptMeasurementSafetyReason[];
-  anchorPriority: TranscriptAnchorPriority;
-  keepAlivePriority: TranscriptKeepAlivePriority;
-}
-
-export interface TranscriptToolChainDetailItem {
-  itemId: string;
-  kind: "tool-chain-detail";
-  rowId: string;
-  messageId: string;
-  message: Message;
-  chainId: string;
-  summaryRowId: string;
-  isActiveChain: boolean;
-  renderRevision: string;
-  heightRevision: string;
-  estimatedHeight: number;
-  capabilities: TranscriptRowCapabilities;
-  measurementPolicy: TranscriptMeasurementPolicy;
-  layoutPendingPolicy: TranscriptLayoutPendingPolicy;
-  measurementSafetyReasons: readonly TranscriptMeasurementSafetyReason[];
-  anchorPriority: TranscriptAnchorPriority;
-  keepAlivePriority: TranscriptKeepAlivePriority;
-}
-
 export type TranscriptItemDescriptor =
   | TranscriptDateSeparatorItem
   | TranscriptMessageItem
   | TranscriptAssistantContentFragmentItem
-  | TranscriptAgentWorkItem
-  | TranscriptToolChainItem
-  | TranscriptToolChainDetailItem;
+  | TranscriptAgentWorkItem;
 
 export interface TranscriptArtifactDescriptor {
   artifactKey: string;
@@ -293,7 +235,6 @@ export interface TranscriptProjectionSnapshot {
   completedStreamingFragmentRowCount: number;
   streamingTailRowCount: number;
   wholeMessageFallbackRowCount: number;
-  toolChainRowCount: number;
   reusedPrefixCount: number;
   reusedSuffixCount: number;
   projectionDurationMs: number;
@@ -304,7 +245,6 @@ export interface TranscriptProjectionCacheUpdateInput {
   sessionEpoch: number;
   messages: readonly Message[];
   streamingMessageId: string | null;
-  enableAgentWork: boolean;
   nowBucket: string;
   localeKey: string;
   previous?: TranscriptProjectionSnapshot;

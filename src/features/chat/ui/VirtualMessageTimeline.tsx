@@ -34,8 +34,6 @@ import {
   type TranscriptProjectionSnapshot,
   type TranscriptRowDescriptor,
 } from "../transcript/projection";
-import { AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import {
   createTranscriptShellBlockAttributes,
@@ -480,7 +478,11 @@ interface TimelineDiagnosticsAccumulator {
   scrollCorrectionDeltasPx: number[];
   previousCorrectionCount: number;
   hasCorrectionBaseline: boolean;
-  hasProjectionBaseline: boolean;
+  previousProjectionRowsById: ReadonlyMap<
+    string,
+    TranscriptRowDescriptor
+  > | null;
+  previousProjectionSessionId: string | null;
   firstVisibleTailMs: number | null;
   heapBaselineBytes: number | null;
   heapGrowthMb: number;
@@ -500,7 +502,8 @@ function createTimelineDiagnosticsAccumulator(): TimelineDiagnosticsAccumulator 
     scrollCorrectionDeltasPx: [],
     previousCorrectionCount: 0,
     hasCorrectionBaseline: false,
-    hasProjectionBaseline: false,
+    previousProjectionRowsById: null,
+    previousProjectionSessionId: null,
     firstVisibleTailMs: null,
     heapBaselineBytes: null,
     heapGrowthMb: 0,
@@ -886,9 +889,11 @@ function applyTimelineDiagnosticSamples(
   return {
     ...diagnostics,
     projectionP95Ms: percentile(accumulator.projectionDurationsMs, 0.95),
-    descriptorChurnPercent: accumulator.hasProjectionBaseline
-      ? percentOfTotal(diagnostics.descriptorChurn, diagnostics.totalRows)
-      : 0,
+    descriptorChurnPercent:
+      accumulator.previousProjectionRowsById == null ||
+      accumulator.previousProjectionSessionId !== diagnostics.sessionId
+        ? 0
+        : percentOfTotal(diagnostics.descriptorChurn, diagnostics.totalRows),
     heapGrowthMb: accumulator.heapGrowthMb,
     reactCommitP95Ms: percentile(accumulator.reactCommitDurationsMs, 0.95),
     scrollHandlerP95Ms: percentile(accumulator.scrollHandlerDurationsMs, 0.95),
@@ -954,10 +959,6 @@ export function VirtualMessageTimeline({
 }: VirtualMessageTimelineProps) {
   const { t, i18n } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
-  const agentWorkExperiment = useExperiment(
-    AGENT_WORK_TRANSCRIPT_EXPERIMENT_ID,
-  );
-  const enableAgentWork = agentWorkExperiment?.enabled === true;
   const responseStartGutterPreference = useResponseStartGutterPreference();
   const projectionCacheRef = useRef<TranscriptProjectionCache | null>(null);
   const sessionLifecycleRef = useRef({ sessionId, sessionEpoch: 0 });
@@ -1095,7 +1096,6 @@ export function VirtualMessageTimeline({
         sessionEpoch,
         messages,
         streamingMessageId: streamingMessageId ?? null,
-        enableAgentWork,
         nowBucket,
         localeKey,
       }) ??
@@ -1104,12 +1104,10 @@ export function VirtualMessageTimeline({
         sessionEpoch,
         messages,
         streamingMessageId: streamingMessageId ?? null,
-        enableAgentWork,
         nowBucket,
         localeKey,
       }),
     [
-      enableAgentWork,
       localeKey,
       messages,
       nowBucket,
@@ -1385,10 +1383,24 @@ export function VirtualMessageTimeline({
   const activeStreamingRowId = streamingMessageId
     ? (snapshot.rowByMessageId.get(streamingMessageId) ?? null)
     : null;
-  const structuralDescriptorChurn =
-    activeStreamingRowId && snapshot.changedRowIds.has(activeStreamingRowId)
-      ? Math.max(0, snapshot.descriptorChurn - 1)
-      : snapshot.descriptorChurn;
+  const previousProjectionRowsById =
+    diagnosticsAccumulatorRef.current.previousProjectionSessionId === sessionId
+      ? diagnosticsAccumulatorRef.current.previousProjectionRowsById
+      : null;
+  const structuralDescriptorChurn = previousProjectionRowsById
+    ? snapshot.rows.reduce((count, row) => {
+        if (row.rowId === activeStreamingRowId) {
+          return count;
+        }
+        const previousRow = previousProjectionRowsById.get(row.rowId);
+        if (!previousRow || previousRow.kind !== row.kind) {
+          return count + 1;
+        }
+        return previousRow.renderRevision === row.renderRevision
+          ? count
+          : count + 1;
+      }, 0)
+    : snapshot.descriptorChurn;
   const diagnostics = useMemo<VirtualMessageTimelineDiagnostics>(
     () =>
       applyTimelineDiagnosticSamples(
@@ -1659,12 +1671,16 @@ export function VirtualMessageTimeline({
       }),
     );
 
-    accumulator.hasProjectionBaseline = true;
+    accumulator.previousProjectionRowsById = new Map(
+      stableRows.map((row) => [row.rowId, row]),
+    );
+    accumulator.previousProjectionSessionId = sessionId;
   }, [
     diagnostics,
     hasLiveStreamingTail,
     onDiagnostics,
     onTranscriptDiagnostics,
+    sessionId,
     stableRows,
     streamingMessageId,
     virtualTimelineSnapshot.controllerState.nearBottom,
