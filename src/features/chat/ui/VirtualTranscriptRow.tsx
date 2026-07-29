@@ -415,6 +415,9 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         <MessageBubble
           message={message}
           animateEntry={false}
+          contentOverride={row.messageContent}
+          contentContext={row.messageContentContext}
+          actionMessageId={row.responseStartMessageId ?? row.messageId}
           isStreaming={isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}
           showJumpToResponseStartHint={showJumpToResponseStartHint}

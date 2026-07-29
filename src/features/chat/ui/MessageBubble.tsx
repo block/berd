@@ -334,6 +334,8 @@ interface MessageBubbleProps {
   actionsAlwaysVisible?: boolean;
   animateEntry?: boolean;
   contentOverride?: readonly MessageContent[];
+  contentContext?: readonly MessageContent[];
+  actionMessageId?: string;
   fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
@@ -489,7 +491,7 @@ function renderContentBlock(
   options: {
     defaultImageAlt: string;
     redactedThinking: string;
-    contentBlocks: MessageContent[];
+    contentBlocks: readonly MessageContent[];
     onSendMcpAppMessage?: McpAppMessageHandler;
     onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
     onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
@@ -650,6 +652,8 @@ export const MessageBubble = memo(function MessageBubble({
   actionsAlwaysVisible = false,
   animateEntry = true,
   contentOverride,
+  contentContext,
+  actionMessageId = message.id,
   fragmentRole,
   onRetryMessage,
   onEditMessage,
@@ -677,6 +681,7 @@ export const MessageBubble = memo(function MessageBubble({
     : role === "user"
       ? filterUserVisibleContent(rawContent)
       : rawContent;
+  const renderingContext = contentContext ?? content;
   const { handleContentClick, pathNotice } = useArtifactLinkHandler();
   const persona = useAgentStore((state) =>
     message.metadata?.personaId
@@ -791,7 +796,7 @@ export const MessageBubble = memo(function MessageBubble({
             renderContentBlock(c, i, {
               defaultImageAlt: t("message.defaultImageAlt"),
               redactedThinking: t("message.redactedThinking"),
-              contentBlocks: content,
+              contentBlocks: renderingContext,
               onEditProject,
               onOpenContextPanel,
               editProjectLabel: t("toolbar.editProjectFolders"),
@@ -1008,7 +1013,7 @@ export const MessageBubble = memo(function MessageBubble({
                   {
                     defaultImageAlt: t("message.defaultImageAlt"),
                     redactedThinking: t("message.redactedThinking"),
-                    contentBlocks: content,
+                    contentBlocks: renderingContext,
                     onSendMcpAppMessage,
                     onMcpAppAutoScroll,
                     onRunShellCommand,
@@ -1046,7 +1051,7 @@ export const MessageBubble = memo(function MessageBubble({
           >
             <MessageBubbleActions
               isUser={isUser}
-              messageId={message.id}
+              messageId={actionMessageId}
               timestamp={timestamp}
               textContent={actionTextContent}
               copied={isCopyConfirmed}

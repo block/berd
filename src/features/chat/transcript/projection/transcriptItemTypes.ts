@@ -86,6 +86,10 @@ export interface TranscriptRowDescriptor {
   messageId?: string;
   responseStartMessageId?: string;
   blockIds?: readonly string[];
+  /** Visible blocks for a synthetic message row. */
+  messageContent?: readonly MessageContent[];
+  /** Related blocks needed to render the visible content without displaying them. */
+  messageContentContext?: readonly MessageContent[];
   fragment?: TranscriptAssistantContentFragmentPayload;
   date?: TranscriptDateSeparatorPayload;
   agentWork?: TranscriptAgentWorkPayload;

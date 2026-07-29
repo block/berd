@@ -69,6 +69,14 @@ export function buildTranscriptRows(
           messageId: item.messageId,
           responseStartMessageId: item.responseStartMessageId,
           blockIds: item.blockIds,
+          messageContent:
+            item.visibleContent === item.message.content
+              ? undefined
+              : item.visibleContent,
+          messageContentContext:
+            item.visibleContent === item.message.content
+              ? undefined
+              : item.message.content,
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
           layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
@@ -220,6 +228,8 @@ export function canReuseTranscriptRowDescriptor(
     previous.layoutPendingPolicy === next.layoutPendingPolicy &&
     previous.keepAlivePriority === next.keepAlivePriority &&
     previous.blockIds === next.blockIds &&
+    previous.messageContent === next.messageContent &&
+    previous.messageContentContext === next.messageContentContext &&
     previous.fragment === next.fragment &&
     previous.date === next.date &&
     previous.agentWork === next.agentWork &&
@@ -238,6 +248,11 @@ export function canReuseTranscriptRowDescriptor(
     previous.messageId === next.messageId &&
     previous.responseStartMessageId === next.responseStartMessageId &&
     stringArraysEqual(previous.blockIds, next.blockIds) &&
+    messageContentArraysEqual(previous.messageContent, next.messageContent) &&
+    messageContentArraysEqual(
+      previous.messageContentContext,
+      next.messageContentContext,
+    ) &&
     fragmentsEqual(previous.fragment, next.fragment) &&
     datePayloadsEqual(previous.date, next.date) &&
     agentWorkPayloadsEqual(previous.agentWork, next.agentWork) &&
@@ -416,6 +431,21 @@ function fragmentContentEqual(
     return left.text === right.text;
   }
   return left === right;
+}
+
+function messageContentArraysEqual(
+  left: readonly MessageContent[] | undefined,
+  right: readonly MessageContent[] | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+  return left.every((content, index) =>
+    fragmentContentEqual(content, right[index]),
+  );
 }
 
 function stringArraysEqual(

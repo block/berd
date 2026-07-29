@@ -787,6 +787,222 @@ describe("transcript projection cache", () => {
     );
   });
 
+  it("keeps agent work projected when a completed turn also contains an image", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-work-with-image",
+      "assistant",
+      [
+        { type: "thinking", text: "I should inspect the rendered result." },
+        toolRequest("tool-1"),
+        { type: "text", text: "The implementation is complete." },
+        {
+          type: "image",
+          data: "c2NyZWVuc2hvdA==",
+          mimeType: "image/png",
+        },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-work-with-image",
+      "message:assistant-work-with-image:agent-work",
+      "message:assistant-work-with-image:answer",
+      expect.stringMatching(
+        /^message:assistant-work-with-image:companion-image-/,
+      ),
+    ]);
+    expect(
+      rowById(snapshot, "message:assistant-work-with-image:agent-work").kind,
+    ).toBe("agent-work");
+    expect(
+      rowById(snapshot, "message:assistant-work-with-image:answer").kind,
+    ).toBe("message");
+    expect(
+      snapshot.rows.find((row) =>
+        row.rowId.startsWith(
+          "message:assistant-work-with-image:companion-image-",
+        ),
+      )?.kind,
+    ).toBe("message");
+  });
+
+  it("keeps agent work projected when a turn also contains MCP app content", () => {
+    const cache = createTranscriptProjectionCache();
+    const mcpApp: McpAppContent = {
+      type: "mcpApp",
+      id: "mcp-app-1",
+      payload: {
+        sessionId: "mcp-session-1",
+        toolCallId: "tool-1",
+        toolCallTitle: "Preview",
+        source: "toolCallUpdateMeta",
+        tool: {
+          name: "preview",
+          extensionName: "mcp",
+          resourceUri: "ui://preview",
+        },
+        resource: { result: null },
+      },
+    };
+    const assistant = messageWithContent(
+      "assistant-work-with-mcp",
+      "assistant",
+      [
+        { type: "thinking", text: "I should open the interactive preview." },
+        toolRequest("tool-1"),
+        mcpApp,
+        { type: "text", text: "The preview is ready." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-work-with-mcp",
+      "message:assistant-work-with-mcp:agent-work",
+      "message:assistant-work-with-mcp:companion-mcpApp-mcp-app-1",
+      "message:assistant-work-with-mcp:answer",
+    ]);
+    expect(
+      rowById(snapshot, "message:assistant-work-with-mcp:agent-work").kind,
+    ).toBe("agent-work");
+    expect(
+      rowById(
+        snapshot,
+        "message:assistant-work-with-mcp:companion-mcpApp-mcp-app-1",
+      ).responseStartMessageId,
+    ).toBe("assistant-work-with-mcp");
+  });
+
+  it("keeps leading progress before a companion in agent work order", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-leading-progress",
+      "assistant",
+      [
+        { type: "text", text: "I’m preparing the preview." },
+        { type: "image", data: "cHJldmlldw==", mimeType: "image/png" },
+        toolRequest("tool-1"),
+        { type: "text", text: "The preview is ready." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.kind)).toEqual([
+      "date-separator",
+      "agent-work",
+      "message",
+      "message",
+    ]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-leading-progress:agent-work",
+    );
+    expect(workRow.agentWork?.content).toContainEqual({
+      type: "text",
+      text: "I’m preparing the preview.",
+    });
+  });
+
+  it("does not merge final-answer text across a companion boundary", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-split-answer",
+      "assistant",
+      [
+        toolRequest("tool-1"),
+        { type: "text", text: "The first result is ready." },
+        { type: "image", data: "cHJldmlldw==", mimeType: "image/png" },
+        { type: "text", text: "Here is the final answer." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const workRow = rowById(
+      snapshot,
+      "message:assistant-split-answer:agent-work",
+    );
+
+    expect(snapshot.rows.map((row) => row.kind)).toEqual([
+      "date-separator",
+      "agent-work",
+      "message",
+      "message",
+    ]);
+    expect(workRow.agentWork?.content).toContainEqual({
+      type: "text",
+      text: "The first result is ready.",
+    });
+    const answer = snapshot.items.find(
+      (item) => item.itemId === "message:assistant-split-answer:answer",
+    );
+    expect(answer?.kind).toBe("message");
+    if (answer?.kind === "message") {
+      expect(answer.visibleContent).toEqual([
+        { type: "text", text: "Here is the final answer." },
+      ]);
+    }
+  });
+
+  it("keeps an MCP companion row identity stable when another app is inserted", () => {
+    const cache = createTranscriptProjectionCache();
+    const mcpApp = (id: string): McpAppContent => ({
+      type: "mcpApp",
+      id,
+      payload: {
+        sessionId: "mcp-session-1",
+        toolCallId: "tool-1",
+        toolCallTitle: "Preview",
+        source: "toolCallUpdateMeta",
+        tool: {
+          name: "preview",
+          extensionName: "mcp",
+          resourceUri: `ui://${id}`,
+        },
+        resource: { result: null },
+      },
+    });
+    const baseContent: MessageContent[] = [
+      { type: "thinking", text: "I should inspect both previews." },
+      toolRequest("tool-1"),
+      mcpApp("first-app"),
+      mcpApp("second-app"),
+    ];
+    const first = update(cache, [
+      messageWithContent(
+        "assistant-stable-companions",
+        "assistant",
+        baseContent,
+        utc(2026, 6, 4, 10),
+      ),
+    ]);
+    const secondAppRowId = first.rows.find((row) =>
+      row.rowId.includes("companion-mcpApp-second-app"),
+    )?.rowId;
+
+    const second = update(cache, [
+      messageWithContent(
+        "assistant-stable-companions",
+        "assistant",
+        [...baseContent.slice(0, 3), mcpApp("inserted-app"), baseContent[3]],
+        utc(2026, 6, 4, 10),
+      ),
+    ]);
+
+    expect(secondAppRowId).toBe(
+      "message:assistant-stable-companions:companion-mcpApp-second-app",
+    );
+    expect(second.rows.some((row) => row.rowId === secondAppRowId)).toBe(true);
+  });
+
   it("keeps mixed assistant content as a message row when agent work is disabled", () => {
     const cache = createTranscriptProjectionCache();
     const assistant = messageWithContent(

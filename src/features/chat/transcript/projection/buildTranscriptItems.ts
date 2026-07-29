@@ -13,6 +13,7 @@ import {
 import {
   buildBlockId,
   buildMessageRevisions,
+  stableValueRevision,
   type RevisionParts,
 } from "./messageRevisions";
 import type {
@@ -1005,17 +1006,19 @@ function buildMessageItemForContent({
   isStreaming,
   idSuffix,
   responseStartMessageId,
+  preserveMessageContext = false,
 }: {
   message: Message;
   content: readonly MessageContent[];
   isStreaming: boolean;
   idSuffix: string;
   responseStartMessageId?: string;
+  preserveMessageContext?: boolean;
 }): TranscriptMessageItem {
   const syntheticMessage: Message = {
     ...message,
     id: `${message.id}:${idSuffix}`,
-    content: [...content],
+    content: preserveMessageContext ? message.content : [...content],
   };
   const revisions = buildMessageRevisions(syntheticMessage, content);
   const measurementDecision = getMessageMeasurementDecision({
@@ -1039,6 +1042,18 @@ function buildMessageItemForContent({
 
 function isWorkContent(block: MessageContent): boolean {
   return isToolContent(block) || isReasoningContent(block);
+}
+
+function getCompanionIdentity(block: MessageContent): string {
+  if (
+    block.type === "mcpApp" ||
+    block.type === "actionRequired" ||
+    block.type === "toolRequest" ||
+    block.type === "toolResponse"
+  ) {
+    return `${block.type}-${encodeURIComponent(block.id)}`;
+  }
+  return `${block.type}-${stableValueRevision(block)}`;
 }
 
 function compactTextContent(
@@ -1150,90 +1165,117 @@ function buildAgentWorkItems({
     return null;
   }
 
-  if (
-    !visibleContent.every(
-      (block) =>
-        isToolContent(block) ||
-        isReasoningContent(block) ||
-        isTextContent(block),
+  // Agent work is one semantic part of an assistant turn, not an all-or-nothing
+  // rendering mode for the message. Images, MCP apps, notifications, and future
+  // companion blocks should stay in sequence without ejecting reasoning and
+  // tools back to the legacy whole-message renderer.
+  const workAndTextEntries = visibleContent.flatMap((block, index) =>
+    isWorkContent(block) || isTextContent(block) ? [{ block, index }] : [],
+  );
+  if (!workAndTextEntries.some(({ block }) => isWorkContent(block))) {
+    return null;
+  }
+
+  let answerEndEntryIndex = workAndTextEntries.length - 1;
+  while (
+    !isStreaming &&
+    answerEndEntryIndex >= 0 &&
+    isReasoningContent(
+      workAndTextEntries[answerEndEntryIndex]?.block as MessageContent,
     )
   ) {
-    return null;
+    answerEndEntryIndex -= 1;
   }
 
-  if (isStreaming) {
-    const workContent = compactWorkContent(visibleContent);
-    if (!workContent.some(isWorkContent)) {
-      return null;
-    }
-    return [buildAgentWorkItem({ message, content: workContent, isStreaming })];
-  }
-
-  // The agent's final answer is the contiguous run of text blocks at the END of
-  // the message, ignoring any trailing reasoning/thinking blocks the model emits
-  // AFTER its answer (GPT 5.5 does this). Those trailing thoughts stay in the
-  // work panel so they don't drag the answer into it.
-  let lastNonReasoningIndex = visibleContent.length - 1;
-  while (
-    lastNonReasoningIndex >= 0 &&
-    isReasoningContent(visibleContent[lastNonReasoningIndex] as MessageContent)
-  ) {
-    lastNonReasoningIndex -= 1;
-  }
-
-  let answerStartIndex = lastNonReasoningIndex + 1;
+  const answerEntries: typeof workAndTextEntries = [];
   if (
-    lastNonReasoningIndex >= 0 &&
-    isTextContent(visibleContent[lastNonReasoningIndex] as MessageContent)
+    !isStreaming &&
+    answerEndEntryIndex >= 0 &&
+    isTextContent(
+      workAndTextEntries[answerEndEntryIndex]?.block as MessageContent,
+    )
   ) {
-    answerStartIndex = lastNonReasoningIndex;
-    while (
-      answerStartIndex - 1 >= 0 &&
-      isTextContent(visibleContent[answerStartIndex - 1] as MessageContent)
-    ) {
-      answerStartIndex -= 1;
+    // Only adjacent text blocks belong to the same answer. A companion block is
+    // a real sequence boundary, so text on its other side stays in agent work.
+    let expectedIndex = workAndTextEntries[answerEndEntryIndex]?.index;
+    for (let index = answerEndEntryIndex; index >= 0; index -= 1) {
+      const entry = workAndTextEntries[index];
+      if (
+        !entry ||
+        !isTextContent(entry.block) ||
+        entry.index !== expectedIndex
+      ) {
+        break;
+      }
+      answerEntries.unshift(entry);
+      expectedIndex -= 1;
     }
   }
-
-  const answerBlocks = visibleContent.slice(
-    answerStartIndex,
-    lastNonReasoningIndex + 1,
+  const answerIndexes = new Set(answerEntries.map(({ index }) => index));
+  const workContent = compactWorkContent(
+    workAndTextEntries
+      .filter(({ index }) => !answerIndexes.has(index))
+      .map(({ block }) => block),
   );
-  const workBlocks = [
-    ...visibleContent.slice(0, answerStartIndex),
-    ...visibleContent.slice(lastNonReasoningIndex + 1),
-  ];
-
-  const workContent = compactWorkContent(workBlocks);
-  if (!workContent.some(isWorkContent)) {
-    return null;
-  }
-
   const finalTextContent = compactTextContent(
-    answerBlocks.filter(isTextContent),
+    answerEntries.map(({ block }) => block).filter(isTextContent),
   );
-  const items: TranscriptItemDescriptor[] = [
-    buildAgentWorkItem({
+
+  const positionedItems: Array<{
+    index: number;
+    item: TranscriptItemDescriptor;
+  }> = [];
+  const firstWorkIndex = workAndTextEntries.find(
+    ({ index }) => !answerIndexes.has(index),
+  )?.index;
+  positionedItems.push({
+    index: firstWorkIndex ?? 0,
+    item: buildAgentWorkItem({
       message,
       content: workContent,
       isStreaming,
       hasFinalAnswer: finalTextContent.length > 0,
     }),
-  ];
+  });
 
   if (finalTextContent.length > 0) {
-    items.push(
-      buildMessageItemForContent({
+    positionedItems.push({
+      index: answerEntries[0]?.index ?? visibleContent.length,
+      item: buildMessageItemForContent({
         message,
         content: finalTextContent,
         isStreaming,
         idSuffix: "answer",
         responseStartMessageId: message.id,
       }),
-    );
+    });
   }
 
-  return items;
+  const companionIdentityCounts = new Map<string, number>();
+  for (const [index, block] of visibleContent.entries()) {
+    if (isWorkContent(block) || isTextContent(block)) {
+      continue;
+    }
+    const identity = getCompanionIdentity(block);
+    const occurrence = companionIdentityCounts.get(identity) ?? 0;
+    companionIdentityCounts.set(identity, occurrence + 1);
+    const idSuffix = `companion-${identity}${occurrence ? `-${occurrence}` : ""}`;
+    positionedItems.push({
+      index,
+      item: buildMessageItemForContent({
+        message,
+        content: [block],
+        isStreaming,
+        idSuffix,
+        responseStartMessageId: message.id,
+        preserveMessageContext: block.type === "mcpApp",
+      }),
+    });
+  }
+
+  return positionedItems
+    .sort((left, right) => left.index - right.index)
+    .map(({ item }) => item);
 }
 
 function isActiveToolChain(visibleContent: readonly MessageContent[]): boolean {

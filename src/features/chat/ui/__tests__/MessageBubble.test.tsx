@@ -492,6 +492,27 @@ describe("MessageBubble", () => {
     expect(onForkFromMessage).toHaveBeenCalledWith("a1");
   });
 
+  it("uses an explicit original message id for projected-row actions", async () => {
+    const user = userEvent.setup();
+    const onForkFromMessage = vi.fn();
+    render(
+      <MessageBubble
+        message={{
+          ...assistantMessage([{ type: "text", text: "response" }]),
+          id: "a1:companion-mcpApp-tool-1",
+        }}
+        actionMessageId="a1"
+        onForkFromMessage={onForkFromMessage}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Fork session from here" }),
+    );
+
+    expect(onForkFromMessage).toHaveBeenCalledWith("a1");
+  });
+
   it("renders and invokes fork-from-here for completed user messages", async () => {
     const user = userEvent.setup();
     const onForkFromMessage = vi.fn();
