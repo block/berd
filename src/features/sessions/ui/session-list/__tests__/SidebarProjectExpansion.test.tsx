@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe("project chat expansion", () => {
-  it("places the project menu to the right of the new chat action", () => {
+  it("places the new chat action to the right of the project menu", () => {
     render(
       <SidebarChatDragProvider>
         <SidebarProjectSection
@@ -54,7 +54,7 @@ describe("project chat expansion", () => {
     });
 
     expect(
-      newChat.compareDocumentPosition(projectMenu) &
+      projectMenu.compareDocumentPosition(newChat) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });

@@ -15,6 +15,7 @@ import { cn } from "@/shared/lib/cn";
 import {
   SIDEBAR_COLLAPSE_TRANSITION_EASE,
   SIDEBAR_COLLAPSE_TRANSITION_MS,
+  SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
 } from "@/shared/ui/sidebar-tokens";
 import { UpdateButton } from "@/features/updates/ui/UpdateButton";
 import { TopBar } from "./TopBar";
@@ -272,47 +273,76 @@ export function AppShellLayout({
                   <div
                     onMouseDown={onResizeStart}
                     onDoubleClick={onResizeDoubleClick}
-                    className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-ew-resize items-center justify-center overflow-hidden"
+                    className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 cursor-ew-resize overflow-hidden"
                     style={{
-                      width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
+                      width: sidebarCollapsed
+                        ? 0
+                        : resizeHandleWidth + SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                      transform: `translateX(${resizeHandleWidth}px)`,
                       opacity: sidebarCollapsed ? 0 : 1,
                       transition: sidebarHandleFadeTransition,
                     }}
                     aria-hidden={sidebarCollapsed || undefined}
                   >
-                    <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                    <div
+                      className="absolute top-1/2 h-8 w-px -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border"
+                      style={{ left: SIDEBAR_RESIZE_HANDLE_INSIDE_PX }}
+                    />
                   </div>
                 )}
                 {sidebarHeightResizeEnabled && (
                   <div
                     onMouseDown={onHeightResizeStart}
                     onDoubleClick={onHeightResizeDoubleClick}
-                    className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-ns-resize items-center justify-center overflow-hidden"
+                    className="group absolute right-0 bottom-0 left-3 z-10 cursor-ns-resize overflow-hidden"
                     style={{
-                      height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
+                      height: sidebarCollapsed
+                        ? 0
+                        : resizeHandleHeight + SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                      transform: `translateY(${resizeHandleHeight}px)`,
                       opacity: sidebarCollapsed ? 0 : 1,
                       transition: sidebarHandleFadeTransition,
                     }}
                     aria-hidden={sidebarCollapsed || undefined}
                   >
-                    <div className="h-px w-8 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                    <div
+                      className="absolute left-1/2 h-px w-8 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border"
+                      style={{ top: SIDEBAR_RESIZE_HANDLE_INSIDE_PX }}
+                    />
                   </div>
                 )}
                 {sidebarCornerResizeEnabled && (
                   <div
                     onMouseDown={onCornerResizeStart}
                     onDoubleClick={onCornerResizeDoubleClick}
-                    className="group absolute right-0 bottom-0 z-20 translate-x-1/2 translate-y-1/2 cursor-nwse-resize overflow-hidden"
+                    className="group absolute right-0 bottom-0 z-20 cursor-nwse-resize overflow-hidden"
                     style={{
-                      height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
-                      width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
+                      height: sidebarCollapsed
+                        ? 0
+                        : resizeHandleHeight + SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                      width: sidebarCollapsed
+                        ? 0
+                        : resizeHandleWidth + SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                      transform: `translate(${resizeHandleWidth}px, ${resizeHandleHeight}px)`,
                       opacity: sidebarCollapsed ? 0 : 1,
                       transition: sidebarHandleFadeTransition,
                     }}
                     aria-hidden={sidebarCollapsed || undefined}
                   >
-                    <div className="absolute top-1/2 left-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
-                    <div className="absolute top-1/2 left-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                    <div
+                      className="absolute h-px w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border"
+                      style={{
+                        top: SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                        left: SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                      }}
+                    />
+                    <div
+                      className="absolute h-3 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border"
+                      style={{
+                        top: SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                        left: SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+                      }}
+                    />
                   </div>
                 )}
               </>

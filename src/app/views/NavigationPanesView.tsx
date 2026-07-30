@@ -5298,7 +5298,7 @@ export function NavigationPanesView({
                     </div>
                   </div>
 
-                  <div className="-mx-2 shrink-0 px-2 pb-2 pt-3">
+                  <div className="-mx-2 shrink-0 px-2 pb-3 pt-3">
                     <div className="relative">
                       <div
                         aria-hidden="true"

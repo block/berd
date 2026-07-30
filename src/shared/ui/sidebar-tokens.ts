@@ -45,6 +45,14 @@ export const SIDEBAR_INVERSE_MENU_CONTENT_CLASS =
 export const SIDEBAR_COLLAPSE_TRANSITION_MS = 320;
 export const SIDEBAR_COLLAPSE_TRANSITION_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
+/**
+ * How far a resize rail's invisible hitbox may extend *inside* its panel.
+ * Rails stay generous on the outside of the edge (empty gutter space) but
+ * thin on the inside so they never cover row content (e.g. the Settings row
+ * near the sidebar's bottom edge).
+ */
+export const SIDEBAR_RESIZE_HANDLE_INSIDE_PX = 6;
+
 /** Micro section labels in sidebar surfaces (Pinned, design-system groups). */
 export const SIDEBAR_NAV_MICRO_LABEL_TEXT_CLASS =
   "text-xs font-normal normal-case tracking-normal";

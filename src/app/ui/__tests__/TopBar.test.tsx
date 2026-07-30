@@ -63,7 +63,7 @@ describe("TopBar", () => {
     const header = container.querySelector("header");
     const title = screen.getByText(/A very long chat title/);
     expect(header).toHaveClass(
-      "grid-cols-[calc(var(--app-sidebar-outer-width)+24px)_minmax(0,1fr)_auto]",
+      "grid-cols-[calc(var(--app-sidebar-outer-width)+var(--spacing-app-panel-gutter-inline))_minmax(0,1fr)_auto]",
     );
     expect(title).toHaveClass("truncate");
     expect(title).not.toHaveClass("absolute");

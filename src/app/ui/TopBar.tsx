@@ -78,18 +78,19 @@ export function TopBar({
       ? "w-[var(--spacing-app-top-bar-leading)]"
       : "w-4";
   return (
+    // The whole top bar is a window drag surface (`deep`). Tauri's drag
+    // script exempts semantic controls (buttons, links, roles) automatically,
+    // so any interactive content rendered here — including `viewActions` —
+    // must use semantic elements, or it will start window drags on click.
     <header
       className={cn(
-        "relative grid h-[var(--spacing-app-top-bar)] min-w-0 select-none grid-cols-[calc(var(--app-sidebar-outer-width)+24px)_minmax(0,1fr)_auto] items-center gap-2 pr-4",
+        "relative grid h-[var(--spacing-app-top-bar)] min-w-0 select-none grid-cols-[calc(var(--app-sidebar-outer-width)+var(--spacing-app-panel-gutter-inline))_minmax(0,1fr)_auto] items-center gap-2 pr-4",
         className,
       )}
-      data-tauri-drag-region
+      data-tauri-drag-region="deep"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <div
-          className={cn("h-full shrink-0", leadingSpaceClassName)}
-          data-tauri-drag-region
-        />
+        <div className={cn("h-full shrink-0", leadingSpaceClassName)} />
         <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
           <TopBarIconButton
             type="button"
@@ -124,12 +125,9 @@ export function TopBar({
           </div>
         </div>
       </div>
-      <div
-        className="flex min-w-0 items-center self-stretch"
-        data-tauri-drag-region
-      >
+      <div className="flex min-w-0 items-center self-stretch">
         {chatTitle ? (
-          <span className="truncate text-lg font-normal text-foreground">
+          <span className="truncate text-[length:var(--text-app-top-bar-title)] font-normal text-foreground">
             {chatTitle}
           </span>
         ) : null}

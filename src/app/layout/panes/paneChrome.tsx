@@ -9,6 +9,10 @@ import {
   useState,
 } from "react";
 import { cn } from "@/shared/lib/cn";
+import {
+  SIDEBAR_DETACHED_PANEL_GAP_PX,
+  SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+} from "@/shared/ui/sidebar-tokens";
 import type { AppShellPaneId, PaneDragReleaseIntent } from "./paneTypes";
 
 export type PaneDragState = {
@@ -354,10 +358,18 @@ export function PaneResizeRail<SurfaceId extends string>({
   title: string;
 }) {
   return (
+    // Asymmetric hitbox: generous on the outside of the panel edge (gutter
+    // space, matching the detached-panel gap), thin on the inside so the
+    // rail never covers row content near the edge (e.g. row actions or the
+    // Settings row). The 1px divider stays centered on the panel edge.
     <div
       data-testid={testId}
       onMouseDown={(event) => onResizeStart(surfaceId, event)}
-      className="group/pane-resize absolute top-2 right-0 bottom-2 z-20 flex w-5 translate-x-1/2 cursor-ew-resize items-center justify-center"
+      className="group/pane-resize absolute top-2 bottom-2 z-20 flex cursor-ew-resize items-center"
+      style={{
+        right: -SIDEBAR_DETACHED_PANEL_GAP_PX,
+        width: SIDEBAR_DETACHED_PANEL_GAP_PX + SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
+      }}
       title={title}
       aria-hidden="true"
     >
@@ -366,6 +378,7 @@ export function PaneResizeRail<SurfaceId extends string>({
           "h-8 w-px rounded-full bg-transparent transition-colors group-hover/pane-resize:bg-border",
           dividerClassName,
         )}
+        style={{ marginLeft: SIDEBAR_RESIZE_HANDLE_INSIDE_PX - 0.5 }}
       />
     </div>
   );
