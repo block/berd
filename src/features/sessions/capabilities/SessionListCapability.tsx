@@ -69,7 +69,8 @@ const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
 const DISPLAY_OPTIONS_STORAGE_KEY = "goose:sidebar:display-options";
 const PINNED_NAV_ORDER_STORAGE_KEY = "goose:sidebar:pinned-nav-order";
-const MAX_RECENTS = 20;
+const MAX_RECENTS = MAX_FLAT_SIDEBAR_CHATS;
+const MAX_AUTO_LOADED_GROUPED_CHATS = MAX_FLAT_SIDEBAR_CHATS * 2;
 const FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS = 60 * 1000;
 
 type SessionListSectionVisibility = {
@@ -530,7 +531,7 @@ export function SessionListCapability({
   const [flatChatGroupNowMs, setFlatChatGroupNowMs] = useState(() =>
     Date.now(),
   );
-  const attemptedFlatChatLoadMoreCursorRef = useRef<string | null>(null);
+  const attemptedChatLoadMoreCursorRef = useRef<string | null>(null);
   const hasFetchedProjects = useProjectStore(
     (state) => state.hasFetchedProjects,
   );
@@ -766,12 +767,6 @@ export function SessionListCapability({
     return () => window.clearInterval(interval);
   }, [effectiveGroupChatsByProject]);
 
-  useEffect(() => {
-    if (effectiveGroupChatsByProject) {
-      attemptedFlatChatLoadMoreCursorRef.current = null;
-    }
-  }, [effectiveGroupChatsByProject]);
-
   const pinnedChatProjectIds = useMemo(
     () =>
       new Set(
@@ -858,33 +853,45 @@ export function SessionListCapability({
   const hasFlatChatOverflow =
     flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS ||
     (flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS && hasMoreSessions);
-  const flatChatLoadMoreCursorKey = sessionPageCursor ?? "__initial__";
+  const standaloneChatCount = effectiveGroupChatsByProject
+    ? projectSessions.standalone.length
+    : flatSessionCandidates.length;
+  const groupedChatCount = useMemo(
+    () =>
+      projectSessions.standalone.length +
+      Object.values(projectSessions.byProject).reduce(
+        (count, chats) => count + chats.length,
+        0,
+      ),
+    [projectSessions],
+  );
+  const reachedAutoLoadLimit = effectiveGroupChatsByProject
+    ? standaloneChatCount >= MAX_FLAT_SIDEBAR_CHATS ||
+      groupedChatCount >= MAX_AUTO_LOADED_GROUPED_CHATS
+    : standaloneChatCount >= MAX_FLAT_SIDEBAR_CHATS;
+  const chatLoadMoreCursorKey = sessionPageCursor ?? "__initial__";
 
   useEffect(() => {
     if (
       surface.preview ||
-      effectiveGroupChatsByProject ||
       !hasMoreSessions ||
       isLoadingMoreSessions ||
-      flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS
+      reachedAutoLoadLimit
     ) {
       return;
     }
-    if (
-      attemptedFlatChatLoadMoreCursorRef.current === flatChatLoadMoreCursorKey
-    ) {
+    if (attemptedChatLoadMoreCursorRef.current === chatLoadMoreCursorKey) {
       return;
     }
 
-    attemptedFlatChatLoadMoreCursorRef.current = flatChatLoadMoreCursorKey;
+    attemptedChatLoadMoreCursorRef.current = chatLoadMoreCursorKey;
     void loadMoreSessions();
   }, [
-    flatChatLoadMoreCursorKey,
-    flatSessionCandidates.length,
-    effectiveGroupChatsByProject,
+    chatLoadMoreCursorKey,
     hasMoreSessions,
     isLoadingMoreSessions,
     loadMoreSessions,
+    reachedAutoLoadLimit,
     surface.preview,
   ]);
 

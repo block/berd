@@ -160,7 +160,7 @@ describe("SidebarPinnedItemsSection", () => {
     expect(row?.querySelector("button")?.className).not.toContain("pl-9");
   });
 
-  it("reserves the activity gutter when pinned icons are hidden", () => {
+  it("keeps running pinned rows aligned when icons are hidden", () => {
     renderSection({
       items: [
         {
@@ -174,8 +174,8 @@ describe("SidebarPinnedItemsSection", () => {
     const row = screen
       .getByText("Pinned Chat")
       .closest("[data-sidebar-chat-row]");
-    expect(row?.querySelector("button")?.className).toContain("pl-9");
-    expect(row?.querySelector("button")?.className).not.toContain("pl-3");
+    expect(row?.querySelector("button")?.className).toContain("pl-3");
+    expect(row?.querySelector("button")?.className).not.toContain("pl-9");
   });
 
   it("requests collapsing the pinned section", async () => {

@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconSearch, IconServer } from "@tabler/icons-react";
-import { ArrowUpCircle, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowUpCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { PaneSurface } from "@/app/layout/panes/paneChrome";
 import {
@@ -21,7 +21,6 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 import {
   SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS,
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
@@ -122,22 +121,19 @@ export const PrimaryNavigationSurface = forwardRef<
 ) {
   const { t } = useTranslation(["sidebar", "common", "settings"]);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const searchLabelRef = useRef<HTMLLabelElement>(null);
-  const searchBlurTimerRef = useRef<number | null>(null);
-  const [searchExpanded, setSearchExpanded] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(!navCollapsed);
   const [searchQuery, setSearchQuery] = useState("");
   const expandSearch = () => {
     setSearchExpanded(true);
     window.requestAnimationFrame(() => searchInputRef.current?.focus());
   };
-  useEffect(
-    () => () => {
-      if (searchBlurTimerRef.current !== null) {
-        window.clearTimeout(searchBlurTimerRef.current);
-      }
-    },
-    [],
-  );
+  useEffect(() => {
+    if (navCollapsed) {
+      setSearchQuery("");
+      return;
+    }
+    setSearchExpanded(true);
+  }, [navCollapsed]);
   useEffect(() => {
     const focusSearch = () => {
       setSearchExpanded(true);
@@ -195,8 +191,6 @@ export const PrimaryNavigationSurface = forwardRef<
       fullHeight={fullHeight}
       width={width}
     >
-      {/* The goose home affordance now lives in the TopBar (left of the
-          panel toggle) so it survives when the panel is collapsed. */}
       <div className="flex-shrink-0 pt-1.5" aria-hidden="true" />
 
       <div
@@ -223,7 +217,7 @@ export const PrimaryNavigationSurface = forwardRef<
           inert={isSecondarySurface ? true : undefined}
           aria-hidden={isSecondarySurface}
         >
-          <div className="flex h-7 flex-shrink-0 items-center px-1.5">
+          <div className="mb-1 flex h-7 flex-shrink-0 items-center px-1.5">
             {navCollapsed ? (
               <Button
                 type="button"
@@ -236,31 +230,7 @@ export const PrimaryNavigationSurface = forwardRef<
                 <IconSearch aria-hidden="true" className="!size-4" />
               </Button>
             ) : searchExpanded ? (
-              <label
-                ref={searchLabelRef}
-                className="group relative block w-full overflow-hidden rounded-sm"
-                onBlur={() => {
-                  if (searchBlurTimerRef.current !== null) {
-                    window.clearTimeout(searchBlurTimerRef.current);
-                  }
-                  searchBlurTimerRef.current = window.setTimeout(() => {
-                    searchBlurTimerRef.current = null;
-                    if (
-                      searchLabelRef.current?.contains(document.activeElement)
-                    ) {
-                      return;
-                    }
-                    setSearchQuery("");
-                    setSearchExpanded(false);
-                  }, 0);
-                }}
-                onFocus={() => {
-                  if (searchBlurTimerRef.current !== null) {
-                    window.clearTimeout(searchBlurTimerRef.current);
-                    searchBlurTimerRef.current = null;
-                  }
-                }}
-              >
+              <label className="group relative block w-full overflow-hidden rounded-sm">
                 <IconSearch
                   aria-hidden="true"
                   className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground group-focus-within:text-muted-foreground"
@@ -272,38 +242,10 @@ export const PrimaryNavigationSurface = forwardRef<
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder={t("search.jumpToChat")}
                   aria-label={t("search.jumpToChat")}
-                  className="h-7 w-full appearance-none rounded-sm border-0 bg-transparent pl-9 pr-8 text-sm font-normal text-muted-foreground/50 shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/60 hover:text-muted-foreground focus:bg-muted/60 focus:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:appearance-none"
+                  className="h-7 w-full appearance-none rounded-sm border-0 bg-muted/40 pl-9 pr-3 text-sm font-normal text-muted-foreground/50 shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/60 hover:text-muted-foreground focus:bg-muted/60 focus:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:appearance-none"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("search.closeJumpToChat")}
-                  title={t("search.closeJumpToChat")}
-                  onClick={() => {
-                    setSearchQuery("");
-                    setSearchExpanded(false);
-                  }}
-                  className="absolute right-1 top-1/2 size-5 -translate-y-1/2 rounded-sm"
-                >
-                  <X aria-hidden="true" />
-                </Button>
               </label>
-            ) : (
-              <div className="flex w-full items-center justify-between pl-2 pr-1">
-                <BerdIcon className="ml-0.5 size-5 text-foreground" />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("search.jumpToChat")}
-                  title={t("search.jumpToChat")}
-                  onClick={expandSearch}
-                >
-                  <IconSearch aria-hidden="true" className="!size-4" />
-                </Button>
-              </div>
-            )}
+            ) : null}
           </div>
           <nav
             ref={mainNavRef}
@@ -362,7 +304,7 @@ export const PrimaryNavigationSurface = forwardRef<
 
             {renderInlineSessionList?.(searchQuery)}
           </nav>
-          {(!searchExpanded || navCollapsed) && (
+          {(!searchQuery || navCollapsed) && (
             <div className="flex-shrink-0 px-1.5 py-1.5">
               <div
                 aria-hidden="true"

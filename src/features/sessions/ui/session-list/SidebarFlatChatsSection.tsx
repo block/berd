@@ -278,7 +278,7 @@ export function SidebarFlatChatsSection({
             })}
           </div>
         ) : (
-          <div className="pb-1">
+          <div>
             {groups.map((group, groupIndex) => (
               <div
                 key={group.id}

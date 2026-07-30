@@ -578,19 +578,49 @@ describe("NavigationPanesView", () => {
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
-  it("replaces the settings footer while sidebar search is active", async () => {
-    const user = userEvent.setup();
+  it("shows the sidebar search field by default", () => {
     renderSidebar();
-
-    await user.click(screen.getByRole("button", { name: "Jump to a chat" }));
 
     expect(
       screen.getByRole("searchbox", { name: "Jump to a chat" }),
     ).toBeInTheDocument();
-    expect(screen.queryByTestId("nav-settings")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Close chat search" }));
     expect(screen.getByTestId("nav-settings")).toHaveAccessibleName("Settings");
+  });
+
+  it("clears the search query when the navigation becomes compact", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderSidebar({
+      detachableSessionListEnabled: true,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
+        chatList: 240,
+      },
+      sessionListDock: "side",
+    });
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Jump to a chat" }),
+      "missing chat",
+    );
+    expect(screen.getByTestId("nav-home").parentElement).toHaveClass("hidden");
+
+    rerender(
+      <NavigationPanesView
+        {...sidebarProps({
+          detachableSessionListEnabled: true,
+          paneSizes: {
+            primaryNav: SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+            chatList: 240,
+          },
+          sessionListDock: "side",
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("nav-home")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("searchbox", { name: "Jump to a chat" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps Settings visible when compact sidebar search cannot expand", async () => {
@@ -624,7 +654,6 @@ describe("NavigationPanesView", () => {
 
     renderSidebar({ onSelectSession });
 
-    await user.click(screen.getByRole("button", { name: "Jump to a chat" }));
     const search = screen.getByRole("searchbox", { name: "Jump to a chat" });
     await user.type(search, "profile");
     await user.click(screen.getByRole("button", { name: "Profile polish" }));
@@ -1225,6 +1254,24 @@ describe("NavigationPanesView", () => {
     await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledOnce());
   });
 
+  it("bounds grouped chat auto-loading when project chats dominate", async () => {
+    mockHasMoreSessions = true;
+    seedSessions(
+      ...Array.from({ length: MAX_FLAT_SIDEBAR_CHATS * 2 }, (_, index) => ({
+        id: `loaded-project-chat-${index + 1}`,
+        title: `Loaded Project Chat ${index + 1}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+        projectId: "project-1",
+      })),
+    );
+
+    renderSidebar({ projects: [mockProject()] });
+    await waitForAnimationFrame();
+
+    expect(mockLoadMoreSessions).not.toHaveBeenCalled();
+  });
+
   it("does not retry flat chat auto-load for the same pagination cursor", async () => {
     disableProjectGrouping();
     mockHasMoreSessions = true;
@@ -1592,7 +1639,7 @@ describe("NavigationPanesView", () => {
 
     expect(screen.getByText("New chat")).toBeInTheDocument();
     expect(screen.getByText("Recent Chat 20")).toBeInTheDocument();
-    expect(screen.queryByText("Recent Chat 0")).not.toBeInTheDocument();
+    expect(screen.getByText("Recent Chat 0")).toBeInTheDocument();
     expect(renderedSessionIds()[0]).toBe("old-draft");
   });
 

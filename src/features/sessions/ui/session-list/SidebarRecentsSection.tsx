@@ -229,7 +229,7 @@ export function SidebarRecentsSection({
           ))}
         </div>
       ) : !collapsed && sessions.length > 0 ? (
-        <CollapseReveal open={isOpen} className="pb-1">
+        <CollapseReveal open={isOpen}>
           {sessions.map((session) => {
             const isActive = activeSessionId === session.id;
             return (

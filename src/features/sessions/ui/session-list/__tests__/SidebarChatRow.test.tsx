@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
-import { setWorkingIndicatorAnimationEnabled } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
@@ -13,6 +12,7 @@ import {
   focusSessionWindow,
   getSessionWindowSupport,
 } from "@/features/chat/lib/sessionWindowCommands";
+import { setWorkingIndicatorAnimationEnabled } from "@/shared/preferences/workingIndicatorAnimationPreference";
 
 const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
@@ -201,7 +201,7 @@ describe("SidebarChatRow", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
-  it("shows the Berd loader when the chat is active", () => {
+  it("pairs the shimmer with a trailing pulsing dot when the chat is active", () => {
     const { container } = render(
       <SidebarChatRow
         id="session-1"
@@ -213,16 +213,22 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader-inline"]'),
+      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByTestId("sidebar-chat-menu-icon"),
+      container.querySelector('[data-slot="berd-loader-inline"]'),
     ).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-chat-menu-icon")).toBeInTheDocument();
+    expect(
+      container.querySelector("[data-sidebar-chat-status]"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Busy Chat").closest(".shimmer-text"),
+    ).toBeInTheDocument();
   });
 
-  it("renders a static Berd loader when sidebar working animation is disabled", () => {
+  it("shows static running status when sidebar animation is disabled", () => {
     setWorkingIndicatorAnimationEnabled(false);
-
     const { container } = render(
       <SidebarChatRow
         id="session-1"
@@ -232,11 +238,38 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(container.querySelector("animateTransform")).not.toBeInTheDocument();
+    expect(screen.getByText("Busy Chat").closest(".shimmer-text")).toBeNull();
+    expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
+    ).not.toHaveClass("animate-[active-chat-dot-pulse_ease-in-out_infinite]");
   });
 
-  it("shows an unread dot when the chat has unread output", () => {
-    render(
+  it("replaces the timestamp with trailing status while running", () => {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000);
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Busy Chat"
+        activityAt={fiveMinutesAgo.toISOString()}
+        isActive={false}
+        isRunning
+      />,
+    );
+
+    expect(
+      container.querySelector("[data-sidebar-chat-status]"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector("[data-sidebar-chat-timestamp]"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an unread dot on the right when the chat has unread output", () => {
+    const { container } = render(
       <SidebarChatRow
         id="session-1"
         title="Unread Chat"
@@ -246,6 +279,9 @@ describe("SidebarChatRow", () => {
     );
 
     expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
+    expect(
+      container.querySelector("[data-sidebar-chat-ready-status]"),
+    ).toBeInTheDocument();
   });
 
   it("shows a chat menu icon for idle chats without an activity indicator", () => {
@@ -343,11 +379,11 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="berd-loader-inline"]'),
+      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
     ).toBeInTheDocument();
     expect(
       container.querySelector('[data-project-color-swatch="project-1"]'),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /edit project/i })).toBeNull();
 
     await user.click(
@@ -481,7 +517,7 @@ describe("SidebarChatRow", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("shows the unread dot in the icon slot only when the chat has unread output", () => {
+  it("shows the trailing ready dot only when the chat has unread output", () => {
     const { rerender } = render(
       <SidebarChatRow id="session-1" title="Recent Chat" isActive={false} />,
     );

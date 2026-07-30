@@ -1,6 +1,7 @@
 import { useReducedMotion } from "motion/react";
 
 import { cn } from "@/shared/lib/cn";
+import { RESPONDING_SHIMMER_PROPS } from "@/shared/ui/ai-elements/shimmer";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { BerdLoaderInline } from "@/shared/ui/berd-loader-inline";
 
@@ -38,6 +39,31 @@ export function ActiveChatBerdIndicator({
       className={className}
       decorative
       size={size}
+    />
+  );
+}
+
+export function ActiveChatPulseDot({ className }: { className?: string }) {
+  const shouldReduceMotion = useReducedMotion();
+  const workingIndicatorAnimationPreference =
+    useWorkingIndicatorAnimationPreference();
+  const motionEnabled =
+    workingIndicatorAnimationPreference.enabled && !shouldReduceMotion;
+
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="active-chat-pulse-dot"
+      className={cn(
+        "size-[7px] rounded-full bg-[color-mix(in_srgb,var(--color-sidebar-foreground)_55%,white)]",
+        motionEnabled && "animate-[active-chat-dot-pulse_ease-in-out_infinite]",
+        className,
+      )}
+      style={
+        motionEnabled
+          ? { animationDuration: `${RESPONDING_SHIMMER_PROPS.duration}s` }
+          : undefined
+      }
     />
   );
 }

@@ -29,7 +29,20 @@ export interface TextShimmerProps {
   spread?: number;
   delay?: number;
   tone?: "default" | "soft" | "strong" | "current";
+  baseColor?: string;
+  highlightColor?: string;
 }
+
+/** Shared motion recipe used by Responding… and running sidebar chats. */
+export const RESPONDING_SHIMMER_PROPS = {
+  delay: 0.35,
+  duration: 2.2,
+  spread: 5,
+  tone: "current",
+} as const satisfies Pick<
+  TextShimmerProps,
+  "delay" | "duration" | "spread" | "tone"
+>;
 
 const ShimmerComponent = ({
   children,
@@ -39,6 +52,8 @@ const ShimmerComponent = ({
   spread = 2,
   delay = 0,
   tone = "default",
+  baseColor,
+  highlightColor,
 }: TextShimmerProps) => {
   const MotionComponent = getMotionComponent(
     Component as keyof JSX.IntrinsicElements,
@@ -94,8 +109,8 @@ const ShimmerComponent = ({
             "linear-gradient(90deg, #0000 calc(50% - var(--spread)), var(--shimmer-highlight), #0000 calc(50% + var(--spread)))",
           "--shimmer-delay": `${delay}s`,
           "--shimmer-duration": `${duration}s`,
-          "--shimmer-base": shimmerColors.base,
-          "--shimmer-highlight": shimmerColors.highlight,
+          "--shimmer-base": baseColor ?? shimmerColors.base,
+          "--shimmer-highlight": highlightColor ?? shimmerColors.highlight,
           backgroundImage:
             "var(--bg), linear-gradient(var(--shimmer-base), var(--shimmer-base))",
           backgroundPosition: "130% center, 0 0",

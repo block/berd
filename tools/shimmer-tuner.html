@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sidebar shimmer tuner</title>
+  <style>
+    @font-face {
+      font-family: "Inter";
+      src: url("../src/app/assets/fonts/Inter%5Bopsz,wght%5D.ttf") format("truetype-variations");
+      font-weight: 100 900;
+      font-style: normal;
+    }
+    :root {
+      color-scheme: dark;
+      --shimmer-duration: 2.2s;
+      --shimmer-delay: .35s;
+      --dot-duration: 2.2s;
+      --spread: 165px;
+      --base: #242424;
+      --highlight: #8e8e8e;
+      --dot-min: .88;
+      --dot-max: 1;
+      --dot-opacity: .55;
+      /* Exact Berd dark semantic tokens used by the live sidebar. */
+      --canvas: #1f1f1f;
+      --foreground: #ffffff;
+      --muted-foreground: #999999;
+      --sidebar: rgba(0, 0, 0, .62);
+      --sidebar-row-hover: color-mix(in srgb, var(--foreground) 5%, transparent);
+      --sidebar-row-active: color-mix(in srgb, var(--foreground) 7%, transparent);
+      --border: #333333;
+      --success: #a3d795;
+      --control: #232323;
+      --control-hover: #333333;
+      --code-bg: #111111;
+      --code-text: #b9d7b9;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      /* Exact Berd light semantic tokens used by the live sidebar. */
+      --canvas: #f5f5f5;
+      --foreground: #242424;
+      --muted-foreground: #666666;
+      --sidebar: rgba(255, 255, 255, .8);
+      --sidebar-row-hover: color-mix(in srgb, var(--foreground) 3%, transparent);
+      --sidebar-row-active: color-mix(in srgb, var(--foreground) 4%, transparent);
+      --border: #e8e8e8;
+      --success: #15803d;
+      --control: #f0f0f0;
+      --control-hover: #e8e8e8;
+      --code-bg: #ffffff;
+      --code-text: #376b45;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 40px;
+      display: grid;
+      grid-template-columns: 230px minmax(320px, 560px);
+      gap: 48px;
+      align-items: start;
+      justify-content: center;
+      background: var(--canvas);
+      color: var(--foreground);
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: -.01em;
+      font-feature-settings: "rlig" 1, "calt" 1;
+    }
+    /* Mirrors PaneSurface: 230px, rounded-md, translucent sidebar token,
+       backdrop blur, no invented border or drop shadow. */
+    .nav {
+      width: 230px;
+      padding: 6px;
+      overflow: hidden;
+      border-radius: 12px;
+      background: var(--sidebar);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .nav-top {
+      display: flex;
+      height: 28px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 6px;
+      margin-bottom: 4px;
+    }
+    .berd-mark { display: block; width: 20px; height: 20px; color: var(--foreground); }
+    .search { width: 16px; height: 16px; color: var(--muted-foreground); }
+    .section {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      padding: 14px 12px 0;
+      color: var(--muted-foreground);
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+    .row {
+      position: relative;
+      display: flex;
+      width: 100%;
+      height: 28px;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 48px 4px 12px;
+      border-radius: 6px;
+      color: var(--foreground);
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      transition: background-color 250ms ease-in-out, color 250ms ease-in-out;
+    }
+    .row:hover { background: var(--sidebar-row-hover); }
+    .row.active { background: var(--sidebar-row-active); }
+    .row.nested { padding-left: 36px; }
+    .icon {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      flex: none;
+      align-items: center;
+      justify-content: center;
+      color: var(--foreground);
+    }
+    .icon svg { width: 16px; height: 16px; display: block; }
+    .project-glyph { width: 16px; height: 16px; border-radius: 4px; background: #bcc6f4; }
+    .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+    .time, .status {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .time { color: color-mix(in srgb, var(--muted-foreground) 70%, transparent); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .shimmer {
+      display: inline;
+      color: transparent;
+      line-height: inherit;
+      background-image:
+        linear-gradient(90deg, transparent calc(50% - var(--spread)), var(--highlight), transparent calc(50% + var(--spread))),
+        linear-gradient(var(--base), var(--base));
+      background-size: 250% 100%, auto;
+      background-repeat: no-repeat, padding-box;
+      background-position: 130% center, 0 0;
+      background-clip: text;
+      -webkit-background-clip: text;
+      animation: shimmer var(--shimmer-duration) linear var(--shimmer-delay) infinite;
+    }
+    .dot {
+      display: block;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--foreground) 70%, transparent);
+      animation: pulse var(--dot-duration) ease-in-out infinite;
+    }
+    .ready { width: 7px; height: 7px; background: var(--success); animation: none; transform: none; }
+    .project-space { height: 8px; }
+    @keyframes shimmer {
+      0% { background-position: 130% center, 0 0; }
+      70%, 100% { background-position: -30% center, 0 0; }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: var(--dot-opacity); transform: scale(var(--dot-min)); }
+      50% { opacity: 1; transform: scale(var(--dot-max)); }
+    }
+    .panel { padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--sidebar); backdrop-filter: blur(12px); }
+    h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.4; }
+    .lede { margin: 0 0 24px; color: var(--muted-foreground); }
+    label { display: grid; grid-template-columns: 130px 1fr 54px; gap: 12px; align-items: center; margin: 14px 0; }
+    input[type="range"] { width: 100%; accent-color: var(--foreground); }
+    input[type="color"] { width: 54px; height: 30px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: transparent; }
+    output { color: var(--muted-foreground); font-variant-numeric: tabular-nums; text-align: right; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    button { border: 1px solid var(--border); border-radius: 6px; padding: 7px 11px; color: var(--foreground); background: var(--control); font: inherit; cursor: pointer; }
+    button:hover { background: var(--control-hover); }
+    button[aria-pressed="true"] { border-color: var(--foreground); }
+    pre { margin: 20px 0 0; padding: 14px; overflow: auto; border-radius: 6px; background: var(--code-bg); color: var(--code-text); font: 12px/1.5 ui-monospace, monospace; }
+    @media (max-width: 820px) { body { grid-template-columns: 1fr; padding: 20px; } .nav { width: 230px; max-width: 100%; } }
+    @media (prefers-reduced-motion: reduce) { .shimmer, .dot { animation: none; } }
+  </style>
+</head>
+<body>
+  <aside class="nav" aria-label="Fake sidebar preview">
+    <div class="nav-top">
+      <svg class="berd-mark" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="currentColor" opacity=".12"/><path d="M6 6.5h5.2a2.8 2.8 0 0 1 0 5.6H8.5L6 14.5v-8Z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>
+      <svg class="search" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+    </div>
+    <div class="row"><span class="icon"><svg viewBox="0 0 13 15" aria-hidden="true"><path d="M2 5.67 6.72 2l4.71 3.67v5.76c0 .58-.47 1.05-1.05 1.05H3.05A1.05 1.05 0 0 1 2 11.43V5.67Z" fill="none" stroke="currentColor" stroke-width="1.04" stroke-linejoin="round"/><path d="M5.14 12.48V7.24h3.15v5.24" fill="none" stroke="currentColor" stroke-width="1.04"/></svg></span><span class="title">Home</span></div>
+    <div class="section">Chats</div>
+    <div class="row active"><span class="icon"><svg viewBox="0 0 13 15" aria-hidden="true"><path d="M11 10a1 1 0 0 1-1 1H4l-2 2V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v5Z" fill="none" stroke="currentColor" stroke-width="1.04" stroke-linejoin="round"/></svg></span><span class="title shimmer">Polish the sidebar loading states</span><span class="status"><i class="dot"></i></span></div>
+    <div class="row"><span class="icon"><svg viewBox="0 0 13 15" aria-hidden="true"><path d="M11 10a1 1 0 0 1-1 1H4l-2 2V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v5Z" fill="none" stroke="currentColor" stroke-width="1.04" stroke-linejoin="round"/></svg></span><span class="title">Build an animation tuner</span><span class="status"><i class="dot ready"></i></span></div>
+    <div class="row"><span class="icon"><svg viewBox="0 0 13 15" aria-hidden="true"><path d="M11 10a1 1 0 0 1-1 1H4l-2 2V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v5Z" fill="none" stroke="currentColor" stroke-width="1.04" stroke-linejoin="round"/></svg></span><span class="title">Review navigation spacing</span><span class="time">8m</span></div>
+    <div class="section">Projects</div>
+    <div class="row"><span class="icon"><i class="project-glyph"></i></span><span class="title">Berd</span></div>
+    <div class="row nested"><span class="title">Fix status placement</span><span class="time">2h</span></div>
+    <div class="project-space"></div>
+    <div class="row"><span class="icon"><i class="project-glyph" style="background:#cdcda1"></i></span><span class="title">Design explorations</span></div>
+  </aside>
+
+  <main class="panel">
+    <h1>Sidebar shimmer tuner</h1>
+    <p class="lede">Tune the loading title and synchronized status dot in the live sidebar geometry.</p>
+    <label>Shimmer speed <input id="shimmerDuration" type="range" min=".5" max="6" step=".1" value="2.2"><output>2.2s</output></label>
+    <label>Dot pulse speed <input id="dotDuration" type="range" min=".5" max="6" step=".1" value="2.2"><output>2.2s</output></label>
+    <label>Highlight width <input id="spread" type="range" min="10" max="220" step="1" value="165"><output>165px</output></label>
+    <label>Base color <input id="base" type="color" value="#242424"><output>#242424</output></label>
+    <label>Shimmer color <input id="highlight" type="color" value="#8e8e8e"><output>#8e8e8e</output></label>
+    <label>Dot min scale <input id="dotMin" type="range" min=".5" max="1" step=".01" value=".88"><output>0.88</output></label>
+    <label>Dot max scale <input id="dotMax" type="range" min="1" max="1.6" step=".01" value="1"><output>1</output></label>
+    <label>Dot min opacity <input id="dotOpacity" type="range" min=".1" max="1" step=".01" value=".55"><output>0.55</output></label>
+    <div class="actions"><button type="button" id="theme" aria-pressed="false">Light mode</button><button type="button" id="pause">Pause</button><button type="button" id="reset">Reset</button><button type="button" id="copy">Copy values</button></div>
+    <pre id="values"></pre>
+  </main>
+<script>
+  const root = document.documentElement;
+  const themeColors = {
+    dark: { base: '#ffffff', highlight: '#ffffff' },
+    light: { base: '#242424', highlight: '#8e8e8e' }
+  };
+  const config = {
+    shimmerDuration: { css: '--shimmer-duration', unit: 's', initial: 2.2 },
+    dotDuration: { css: '--dot-duration', unit: 's', initial: 2.2 },
+    spread: { css: '--spread', unit: 'px', initial: 165 },
+    base: { css: '--base', unit: '', initial: '#242424' },
+    highlight: { css: '--highlight', unit: '', initial: '#8e8e8e' },
+    dotMin: { css: '--dot-min', unit: '', initial: .88 },
+    dotMax: { css: '--dot-max', unit: '', initial: 1 },
+    dotOpacity: { css: '--dot-opacity', unit: '', initial: .55 }
+  };
+  function update() {
+    for (const [id, c] of Object.entries(config)) {
+      const el = document.getElementById(id); const value = el.value;
+      root.style.setProperty(c.css, value + c.unit);
+      el.nextElementSibling.value = value + c.unit;
+    }
+    values.textContent = `shimmer duration={${shimmerDuration.value}}\ndot duration={${dotDuration.value}}\nspread={5} (≈ ${spread.value}px for this title)\ntone="current"\ndelay={0.35}\nbase: ${base.value}\nhighlight: ${highlight.value}\ndot scale: ${dotMin.value} → ${dotMax.value}\ndot opacity: ${dotOpacity.value} → 1`;
+  }
+  Object.keys(config).forEach(id => { document.getElementById(id).addEventListener('input', update); });
+  theme.onclick = () => {
+    const light = root.dataset.theme !== 'light';
+    const nextTheme = light ? 'light' : 'dark';
+    root.dataset.theme = nextTheme;
+    base.value = themeColors[nextTheme].base;
+    highlight.value = themeColors[nextTheme].highlight;
+    theme.textContent = light ? 'Dark mode' : 'Light mode';
+    theme.setAttribute('aria-pressed', String(light));
+    update();
+  };
+  pause.onclick = () => { const paused = root.classList.toggle('paused'); document.querySelectorAll('.shimmer,.dot:not(.ready)').forEach(el => { el.style.animationPlayState = paused ? 'paused' : 'running'; }); pause.textContent = paused ? 'Play' : 'Pause'; };
+  reset.onclick = () => { for (const [id,c] of Object.entries(config)) document.getElementById(id).value = c.initial; const colors = themeColors[root.dataset.theme]; base.value = colors.base; highlight.value = colors.highlight; update(); };
+  copy.onclick = async () => { await navigator.clipboard.writeText(values.textContent); copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy values', 1000); };
+  update();
+</script>
+</body>
+</html>

@@ -31,6 +31,25 @@ afterEach(() => {
 });
 
 describe("project chat expansion", () => {
+  it("adds separation below an expanded project list", () => {
+    const { container } = render(
+      <SidebarChatDragProvider>
+        <SidebarProjectSection
+          project={PROJECT}
+          projectChats={CHATS}
+          isExpanded
+          toggleProject={vi.fn()}
+          showChatIcons
+          showTimestamps
+        />
+      </SidebarChatDragProvider>,
+    );
+
+    expect(
+      container.querySelector("[data-sidebar-project-chat-list]"),
+    ).toHaveClass("pb-2");
+  });
+
   it("places the new chat action to the right of the project menu", () => {
     render(
       <SidebarChatDragProvider>

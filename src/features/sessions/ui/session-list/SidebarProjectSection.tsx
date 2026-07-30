@@ -402,126 +402,128 @@ export function SidebarProjectSection({
 
       {renderProjectChats ? (
         <CollapseReveal open={showProjectChats}>
-          {emptyState ? (
-            <div className="h-7 py-1 pl-[38px] pr-3 text-sm font-normal leading-normal text-muted-foreground">
-              {t(
-                emptyState === "chats-pinned"
-                  ? "empty.chatsPinned"
-                  : "empty.noChats",
-              )}
-            </div>
-          ) : null}
-          {baseVisibleChats.map((session) => {
-            const isActive = activeSessionId === session.id;
-            return (
-              <SidebarChatRow
-                key={session.id}
-                id={session.id}
-                title={session.title}
-                branchName={session.branchName}
-                activityAt={session.activityAt}
-                isActive={isActive}
-                isRunning={session.isRunning ?? false}
-                hasUnread={session.hasUnread ?? false}
-                selected={selectedSessionIds?.has(session.id) ?? false}
-                selectionEnabled={selectionEnabled}
-                selectionActionsDisabled={selectionActionsDisabled}
-                selectedSessionIds={selectedSessionIds}
-                showLeadingIcon={showChatIcons}
-                showTimestamp={showTimestamps}
-                showRenameTooltip={false}
-                nested
-                currentProjectId={project.id}
-                onSelect={onSelectSession}
-                onSelectionClear={onSelectionClear}
-                onSelectionChange={onSelectionChange}
-                onRename={onRenameChat}
-                onFork={onForkChat}
-                onMarkRead={onMarkChatRead}
-                onMarkUnread={onMarkChatUnread}
-                onArchive={onArchiveChat}
-                onArchiveSelected={onArchiveSelected}
-                onPinSelectedToHome={onPinSelectedToHome}
-                isPinningSelectedToHome={isPinningSelectedToHome}
-                onMarkSelectedRead={onMarkSelectedRead}
-                onMarkSelectedUnread={onMarkSelectedUnread}
-              />
-            );
-          })}
-          {renderExpandedChats ? (
-            <CollapseReveal open={showExpandedChats}>
-              {expandedVisibleChats.map((session) => {
-                const isActive = activeSessionId === session.id;
-                return (
-                  <SidebarChatRow
-                    key={session.id}
-                    id={session.id}
-                    title={session.title}
-                    branchName={session.branchName}
-                    activityAt={session.activityAt}
-                    isActive={isActive}
-                    isRunning={session.isRunning ?? false}
-                    hasUnread={session.hasUnread ?? false}
-                    selected={selectedSessionIds?.has(session.id) ?? false}
-                    selectionEnabled={selectionEnabled}
-                    selectionActionsDisabled={selectionActionsDisabled}
-                    selectedSessionIds={selectedSessionIds}
-                    showLeadingIcon={showChatIcons}
-                    showTimestamp={showTimestamps}
-                    showRenameTooltip={false}
-                    nested
-                    currentProjectId={project.id}
-                    onSelect={onSelectSession}
-                    onSelectionClear={onSelectionClear}
-                    onSelectionChange={onSelectionChange}
-                    onRename={onRenameChat}
-                    onFork={onForkChat}
-                    onMarkRead={onMarkChatRead}
-                    onMarkUnread={onMarkChatUnread}
-                    onArchive={onArchiveChat}
-                    onArchiveSelected={onArchiveSelected}
-                    onPinSelectedToHome={onPinSelectedToHome}
-                    isPinningSelectedToHome={isPinningSelectedToHome}
-                    onMarkSelectedRead={onMarkSelectedRead}
-                    onMarkSelectedUnread={onMarkSelectedUnread}
-                  />
-                );
-              })}
-              {projectChats.length > MAX_VISIBLE_PROJECT_CHATS ? (
-                <div className="flex items-center pl-[38px] pr-3">
-                  <SidebarDisclosureButton
-                    type="button"
-                    onClick={collapseExpandedChats}
-                    className={PROJECT_CHAT_DISCLOSURE_CLASS}
-                  >
-                    {t("showLess")}
-                  </SidebarDisclosureButton>
-                  {canOpenAllProjectChats ? (
+          <div data-sidebar-project-chat-list className="pb-2">
+            {emptyState ? (
+              <div className="h-7 py-1 pl-[38px] pr-3 text-sm font-normal leading-normal text-muted-foreground">
+                {t(
+                  emptyState === "chats-pinned"
+                    ? "empty.chatsPinned"
+                    : "empty.noChats",
+                )}
+              </div>
+            ) : null}
+            {baseVisibleChats.map((session) => {
+              const isActive = activeSessionId === session.id;
+              return (
+                <SidebarChatRow
+                  key={session.id}
+                  id={session.id}
+                  title={session.title}
+                  branchName={session.branchName}
+                  activityAt={session.activityAt}
+                  isActive={isActive}
+                  isRunning={session.isRunning ?? false}
+                  hasUnread={session.hasUnread ?? false}
+                  selected={selectedSessionIds?.has(session.id) ?? false}
+                  selectionEnabled={selectionEnabled}
+                  selectionActionsDisabled={selectionActionsDisabled}
+                  selectedSessionIds={selectedSessionIds}
+                  showLeadingIcon={showChatIcons}
+                  showTimestamp={showTimestamps}
+                  showRenameTooltip={false}
+                  nested
+                  currentProjectId={project.id}
+                  onSelect={onSelectSession}
+                  onSelectionClear={onSelectionClear}
+                  onSelectionChange={onSelectionChange}
+                  onRename={onRenameChat}
+                  onFork={onForkChat}
+                  onMarkRead={onMarkChatRead}
+                  onMarkUnread={onMarkChatUnread}
+                  onArchive={onArchiveChat}
+                  onArchiveSelected={onArchiveSelected}
+                  onPinSelectedToHome={onPinSelectedToHome}
+                  isPinningSelectedToHome={isPinningSelectedToHome}
+                  onMarkSelectedRead={onMarkSelectedRead}
+                  onMarkSelectedUnread={onMarkSelectedUnread}
+                />
+              );
+            })}
+            {renderExpandedChats ? (
+              <CollapseReveal open={showExpandedChats}>
+                {expandedVisibleChats.map((session) => {
+                  const isActive = activeSessionId === session.id;
+                  return (
+                    <SidebarChatRow
+                      key={session.id}
+                      id={session.id}
+                      title={session.title}
+                      branchName={session.branchName}
+                      activityAt={session.activityAt}
+                      isActive={isActive}
+                      isRunning={session.isRunning ?? false}
+                      hasUnread={session.hasUnread ?? false}
+                      selected={selectedSessionIds?.has(session.id) ?? false}
+                      selectionEnabled={selectionEnabled}
+                      selectionActionsDisabled={selectionActionsDisabled}
+                      selectedSessionIds={selectedSessionIds}
+                      showLeadingIcon={showChatIcons}
+                      showTimestamp={showTimestamps}
+                      showRenameTooltip={false}
+                      nested
+                      currentProjectId={project.id}
+                      onSelect={onSelectSession}
+                      onSelectionClear={onSelectionClear}
+                      onSelectionChange={onSelectionChange}
+                      onRename={onRenameChat}
+                      onFork={onForkChat}
+                      onMarkRead={onMarkChatRead}
+                      onMarkUnread={onMarkChatUnread}
+                      onArchive={onArchiveChat}
+                      onArchiveSelected={onArchiveSelected}
+                      onPinSelectedToHome={onPinSelectedToHome}
+                      isPinningSelectedToHome={isPinningSelectedToHome}
+                      onMarkSelectedRead={onMarkSelectedRead}
+                      onMarkSelectedUnread={onMarkSelectedUnread}
+                    />
+                  );
+                })}
+                {projectChats.length > MAX_VISIBLE_PROJECT_CHATS ? (
+                  <div className="flex items-center pl-[38px] pr-3">
                     <SidebarDisclosureButton
                       type="button"
-                      onClick={() => onNavigate?.("session-history")}
-                      className={cn(PROJECT_CHAT_DISCLOSURE_CLASS, "ml-auto")}
+                      onClick={collapseExpandedChats}
+                      className={PROJECT_CHAT_DISCLOSURE_CLASS}
                     >
-                      {t("viewAllInHistory")}
+                      {t("showLess")}
                     </SidebarDisclosureButton>
-                  ) : null}
-                </div>
-              ) : null}
-            </CollapseReveal>
-          ) : null}
-          {canRevealLoadedChats && (
-            <SidebarDisclosureButton
-              type="button"
-              onClick={revealExpandedChats}
-              className={cn(
-                PROJECT_CHAT_DISCLOSURE_CLASS,
-                "w-full pl-[38px] pr-3",
-                "animate-in fade-in-0 duration-300",
-              )}
-            >
-              {t("viewMoreChats")}
-            </SidebarDisclosureButton>
-          )}
+                    {canOpenAllProjectChats ? (
+                      <SidebarDisclosureButton
+                        type="button"
+                        onClick={() => onNavigate?.("session-history")}
+                        className={cn(PROJECT_CHAT_DISCLOSURE_CLASS, "ml-auto")}
+                      >
+                        {t("viewAllInHistory")}
+                      </SidebarDisclosureButton>
+                    ) : null}
+                  </div>
+                ) : null}
+              </CollapseReveal>
+            ) : null}
+            {canRevealLoadedChats && (
+              <SidebarDisclosureButton
+                type="button"
+                onClick={revealExpandedChats}
+                className={cn(
+                  PROJECT_CHAT_DISCLOSURE_CLASS,
+                  "w-full pl-[38px] pr-3",
+                  "animate-in fade-in-0 duration-300",
+                )}
+              >
+                {t("viewMoreChats")}
+              </SidebarDisclosureButton>
+            )}
+          </div>
         </CollapseReveal>
       ) : null}
     </div>

@@ -4854,6 +4854,7 @@ export function AppShell({
           canGoBack: navigationAvailability.canGoBack,
           canGoForward: navigationAvailability.canGoForward,
           onToggleSidebar: toggleSidebar,
+          onHomeClick: () => handleNavigate("home"),
           onGoBack: goBack,
           onGoForward: goForward,
           showRightRailToggle:

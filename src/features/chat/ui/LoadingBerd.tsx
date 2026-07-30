@@ -1,6 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { motion, useReducedMotion } from "motion/react";
-import { Shimmer } from "@/shared/ui/ai-elements/shimmer";
+import {
+  RESPONDING_SHIMMER_PROPS,
+  Shimmer,
+} from "@/shared/ui/ai-elements/shimmer";
 import { cn } from "@/shared/lib/cn";
 
 export type LoadingChatState =
@@ -16,9 +19,6 @@ interface LoadingBerdProps {
 }
 
 const LOADING_FADE_S = 0.45;
-const LOADING_SHIMMER_S = 2.2;
-const LOADING_SHIMMER_SPREAD = 5;
-const LOADING_SHIMMER_DELAY_S = 0.35;
 
 const MESSAGE_KEY_BY_STATE: Record<
   Exclude<LoadingChatState, "idle">,
@@ -58,14 +58,7 @@ export function LoadingBerd({
       {shouldReduceMotion ? (
         <span>{message}</span>
       ) : (
-        <Shimmer
-          as="span"
-          className="text-xs"
-          tone="current"
-          delay={LOADING_SHIMMER_DELAY_S}
-          duration={LOADING_SHIMMER_S}
-          spread={LOADING_SHIMMER_SPREAD}
-        >
+        <Shimmer as="span" className="text-xs" {...RESPONDING_SHIMMER_PROPS}>
           {message}
         </Shimmer>
       )}

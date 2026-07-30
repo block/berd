@@ -14,12 +14,13 @@ function renderTopBar(props: Partial<Parameters<typeof TopBar>[0]> = {}) {
 }
 
 describe("TopBar", () => {
-  it("does not render the Berd home logo", () => {
-    renderTopBar();
+  it("renders the Berd home logo and navigates home", async () => {
+    const onHomeClick = vi.fn();
+    renderTopBar({ onHomeClick });
 
-    expect(
-      screen.queryByRole("button", { name: /Berd home/i }),
-    ).not.toBeInTheDocument();
+    const home = screen.getByRole("button", { name: /Berd home/i });
+    home.click();
+    expect(onHomeClick).toHaveBeenCalledOnce();
   });
 
   it("does not render breadcrumbs", () => {
@@ -62,9 +63,7 @@ describe("TopBar", () => {
 
     const header = container.querySelector("header");
     const title = screen.getByText(/A very long chat title/);
-    expect(header).toHaveClass(
-      "grid-cols-[calc(var(--app-sidebar-outer-width)+var(--spacing-app-panel-gutter-inline))_minmax(0,1fr)_auto]",
-    );
+    expect(header).toHaveClass("grid-cols-[max-content_minmax(0,1fr)_auto]");
     expect(title).toHaveClass("truncate");
     expect(title).not.toHaveClass("absolute");
   });

@@ -6,7 +6,7 @@ export interface FlatChatGroup {
   sessions: SidebarSessionItem[];
 }
 
-export const MAX_FLAT_SIDEBAR_CHATS = 64;
+export const MAX_FLAT_SIDEBAR_CHATS = 30;
 const FLAT_CHAT_GROUP_DEFINITIONS: Array<Omit<FlatChatGroup, "sessions">> = [
   { id: "pinned" },
   { id: "last-hour" },

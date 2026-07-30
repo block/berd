@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
+import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 
 type TopBarLeadingChromeInset = "compact" | "trafficLights";
 export interface TopBarChromeInsets {
@@ -33,6 +34,7 @@ interface TopBarProps {
   onToggleRightRail?: () => void;
   onToggleSidebar?: () => void;
   onFeedbackClick?: () => void;
+  onHomeClick?: () => void;
   onSearchClick?: () => void;
 }
 
@@ -57,6 +59,7 @@ export function TopBar({
   onToggleRightRail,
   onToggleSidebar,
   onFeedbackClick,
+  onHomeClick,
   onSearchClick,
 }: TopBarProps) {
   const { t } = useTranslation(["sidebar", "feedback"]);
@@ -84,7 +87,8 @@ export function TopBar({
     // must use semantic elements, or it will start window drags on click.
     <header
       className={cn(
-        "relative grid h-[var(--spacing-app-top-bar)] min-w-0 select-none grid-cols-[calc(var(--app-sidebar-outer-width)+var(--spacing-app-panel-gutter-inline))_minmax(0,1fr)_auto] items-center gap-2 pr-4",
+        "relative grid h-[var(--spacing-app-top-bar)] min-w-0 select-none items-center gap-2 pr-4",
+        "grid-cols-[max-content_minmax(0,1fr)_auto]",
         className,
       )}
       data-tauri-drag-region="deep"
@@ -92,6 +96,15 @@ export function TopBar({
       <div className="flex min-w-0 items-center gap-2">
         <div className={cn("h-full shrink-0", leadingSpaceClassName)} />
         <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
+          <TopBarIconButton
+            type="button"
+            size="icon-top-bar"
+            onClick={onHomeClick}
+            aria-label={t("navigation.gooseHome")}
+            title={t("navigation.gooseHome")}
+          >
+            <BerdIcon aria-hidden="true" className="size-4" />
+          </TopBarIconButton>
           <TopBarIconButton
             type="button"
             size="icon-top-bar"

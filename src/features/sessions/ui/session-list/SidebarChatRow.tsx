@@ -50,7 +50,10 @@ import {
   SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_ROW_ACTIVE_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
+  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
   SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
   type SidebarChatRowDensity,
 } from "@/shared/ui/sidebar-tokens";
@@ -79,20 +82,29 @@ import {
 } from "@/shared/ui/context-menu";
 import { Input } from "@/shared/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
+import {
+  RESPONDING_SHIMMER_PROPS,
+  Shimmer,
+} from "@/shared/ui/ai-elements/shimmer";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
+import { SidebarUnreadDot } from "./SidebarUnreadDot";
+import { ActiveChatPulseDot } from "@/shared/ui/SessionActivityIndicator";
+import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { toast } from "sonner";
 
 const INACTIVE_CHAT_ROW_CLASS = cn(
-  "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+  SIDEBAR_ROW_TEXT_DEFAULT_CLASS,
+  SIDEBAR_ROW_HOVER_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
 );
 const ACTIVE_CHAT_ROW_CLASS = cn(
-  "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+  SIDEBAR_ROW_ACTIVE_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
 );
 const SELECTED_CHAT_ROW_CLASS = cn(
-  "bg-sidebar-accent text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/80 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+  SIDEBAR_ROW_ACTIVE_CLASS,
+  "ring-1 ring-inset ring-sidebar-border/80",
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
 );
 const SESSION_TOOLTIP_DELAY_MS = 1_500;
@@ -293,6 +305,10 @@ export function SidebarChatRow({
   renderExtraMenuItems,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
+  const workingIndicatorAnimationPreference =
+    useWorkingIndicatorAnimationPreference();
+  const animateRunningState =
+    isRunning && workingIndicatorAnimationPreference.enabled;
   const {
     draggingSession,
     beginSessionDrag,
@@ -340,7 +356,7 @@ export function SidebarChatRow({
   const hasFlatProjectColumn = flatProjectName != null;
   const trimmedBranchName = branchName?.trim() ?? "";
   const hasBranchName = trimmedBranchName.length > 0;
-  const hasActivity = isRunning || hasUnread;
+  // Running and ready/unread states share the trailing timestamp slot.
   // Pin presentation is surface-specific: some lists expose it on hover,
   // while compact Chat lists show only an already-pinned chat as an unpin
   // control. Both occupy the same leading slot when it exists.
@@ -353,7 +369,6 @@ export function SidebarChatRow({
     nested ||
     showLeadingIcon ||
     hasFlatProjectColumn ||
-    hasActivity ||
     (showQuickPin && isPinnedToHome);
   const showAbsoluteLeadingSlot = !hasFlatProjectColumn && needsLeadingSlot;
   const densityClasses = SIDEBAR_CHAT_ROW_DENSITY_CLASSES[density];
@@ -403,6 +418,19 @@ export function SidebarChatRow({
   );
   // Title block shared by the flat and grouped row variants: single-line
   // title, or a two-line title + git branch subtitle when a branch is shown.
+  const titleText = animateRunningState ? (
+    <Shimmer
+      as="span"
+      {...RESPONDING_SHIMMER_PROPS}
+      baseColor="var(--color-sidebar-foreground)"
+      highlightColor="color-mix(in srgb, var(--color-sidebar-foreground) 55%, var(--color-background))"
+      className="!inline leading-[inherit] [--shimmer-ink:var(--color-sidebar-foreground)]"
+    >
+      {displayTitle}
+    </Shimmer>
+  ) : (
+    displayTitle
+  );
   const rowTitleContent = hasBranchName ? (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
       <span
@@ -411,7 +439,7 @@ export function SidebarChatRow({
           titleTone === "muted" && "text-muted-foreground",
         )}
       >
-        {displayTitle}
+        {titleText}
       </span>
       <span className="flex min-w-0 items-center gap-1 truncate text-xs leading-snug text-muted-foreground/70">
         <IconGitBranch className="size-3 shrink-0" aria-hidden="true" />
@@ -425,7 +453,7 @@ export function SidebarChatRow({
         titleTone === "muted" && "text-muted-foreground",
       )}
     >
-      {displayTitle}
+      {titleText}
     </span>
   );
 
@@ -495,7 +523,7 @@ export function SidebarChatRow({
       className={cn(
         "min-w-0 flex-1 justify-start rounded-sm",
         hasFlatProjectColumn ? "pl-0 gap-0" : rowPaddingClass,
-        activityTimestamp
+        isRunning || hasUnread || activityTimestamp
           ? densityClasses.timestampReserve
           : densityClasses.menuReserve,
         hasBranchName
@@ -951,14 +979,14 @@ export function SidebarChatRow({
             event.stopPropagation();
           }}
           className={cn(
-            "relative flex items-center group/chat-row rounded-sm hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+            "relative flex items-center group/chat-row rounded-sm hover:bg-[var(--sidebar-row-hover)] focus-within:bg-[var(--sidebar-row-hover)]",
             SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
             (isActive || menuOpen || contextMenuOpen) &&
               (!selectionEnabled || selected) &&
-              "bg-sidebar-accent",
+              "bg-[var(--sidebar-row-active)]",
             selected && SELECTED_CHAT_ROW_CLASS,
             draggingSession !== null && "pointer-events-none",
-            dragging && "bg-sidebar-accent opacity-40",
+            dragging && "bg-[var(--sidebar-row-active)] opacity-40",
             hasFlatProjectColumn && densityClasses.flatProjectGap,
             className,
           )}
@@ -984,8 +1012,6 @@ export function SidebarChatRow({
           {showAbsoluteLeadingSlot ? (
             <SidebarLeadingIcon
               className={absoluteLeadingSlotClass}
-              isRunning={isRunning}
-              hasUnread={hasUnread}
               activeLabel={t("status.chatActive")}
               unreadLabel={t("status.unreadMessages")}
               quickPin={
@@ -1010,8 +1036,6 @@ export function SidebarChatRow({
           {hasFlatProjectColumn ? (
             <>
               <SidebarLeadingIcon
-                isRunning={isRunning}
-                hasUnread={hasUnread}
                 activeLabel={t("status.chatActive")}
                 unreadLabel={t("status.unreadMessages")}
                 className={cn(
@@ -1041,7 +1065,39 @@ export function SidebarChatRow({
             rowButton
           )}
 
-          {activityTimestamp ? (
+          {isRunning ? (
+            <span
+              data-sidebar-chat-status
+              role="status"
+              aria-label={t("status.chatActive")}
+              className={cn(
+                "pointer-events-none absolute flex size-5 items-center justify-center transition-opacity duration-75",
+                hasBranchName ? "top-1" : "top-1/2 -translate-y-1/2",
+                densityClasses.menuInset,
+                selectionEnabled || menuOpen || contextMenuOpen || dragging
+                  ? "opacity-0"
+                  : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
+              )}
+            >
+              <ActiveChatPulseDot />
+            </span>
+          ) : hasUnread ? (
+            <span
+              data-sidebar-chat-ready-status
+              role="status"
+              aria-label={t("status.unreadMessages")}
+              className={cn(
+                "pointer-events-none absolute flex size-5 items-center justify-center transition-opacity duration-75",
+                hasBranchName ? "top-1" : "top-1/2 -translate-y-1/2",
+                densityClasses.menuInset,
+                selectionEnabled || menuOpen || contextMenuOpen || dragging
+                  ? "opacity-0"
+                  : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
+              )}
+            >
+              <SidebarUnreadDot />
+            </span>
+          ) : activityTimestamp ? (
             <span
               data-sidebar-chat-timestamp
               className={cn(

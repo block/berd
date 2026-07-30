@@ -2507,8 +2507,12 @@ export const designSystemComponentManifest = [
     name: "Session Activity Indicator",
     source: "src/shared/ui/SessionActivityIndicator.tsx",
     description: "",
-    exports: ["ActiveChatBerdIndicator", "SessionActivityIndicator"],
-    slots: [],
+    exports: [
+      "ActiveChatBerdIndicator",
+      "ActiveChatPulseDot",
+      "SessionActivityIndicator",
+    ],
+    slots: ["active-chat-pulse-dot"],
     cva: [],
     tokenClasses: ["bg-success"],
     stateClasses: [],
@@ -2602,7 +2606,10 @@ export const designSystemComponentManifest = [
       "text-muted-foreground/75",
     ],
     stateClasses: [
+      "active:bg-[var(--sidebar-row-active)]",
       "active:text-muted-foreground",
+      "focus-visible:bg-[var(--sidebar-row-hover)]",
+      "hover:bg-[var(--sidebar-row-hover)]",
       "hover:text-muted-foreground",
     ],
     sourceTokenClasses: [

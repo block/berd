@@ -274,13 +274,7 @@ export function SidebarPinnedItemsSection({
                         ) : undefined
                       }
                       leadingIconTestId="sidebar-pinned-chat-icon"
-                      contentPaddingClassName={
-                        showChatIcons ||
-                        item.session.isRunning ||
-                        item.session.hasUnread
-                          ? "pl-9"
-                          : "pl-3"
-                      }
+                      contentPaddingClassName={showChatIcons ? "pl-9" : "pl-3"}
                       showTimestamp={showTimestamps}
                       showRenameTooltip={false}
                       quickPinMode={showChatIcons ? "hover-only" : "never"}
