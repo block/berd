@@ -394,12 +394,18 @@ export async function cancelSession(sessionId: string): Promise<void> {
   await client.cancel({ sessionId });
 }
 
+export interface NewSessionOptions {
+  providerId?: string;
+  projectId?: string;
+  personaId?: string;
+  hidden?: boolean;
+}
+
 export async function newSession(
   workingDir: string,
-  providerId?: string,
-  projectId?: string,
-  personaId?: string,
+  options: NewSessionOptions = {},
 ): Promise<NewSessionResponse> {
+  const { providerId, projectId, personaId, hidden } = options;
   const tClient = performance.now();
   const client = await getClient();
   const request: Parameters<typeof client.newSession>[0] = {
@@ -407,10 +413,11 @@ export async function newSession(
     mcpServers: [],
   };
 
-  const meta: Record<string, string> = {};
+  const meta: Record<string, string | boolean> = {};
   if (providerId) meta.provider = toWireProviderId(providerId);
   if (projectId) meta.projectId = projectId;
   if (personaId) meta.personaId = personaId;
+  if (hidden) meta.hidden = true;
   if (Object.keys(meta).length > 0) request._meta = meta;
 
   const tCall = performance.now();

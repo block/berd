@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const acpMocks = vi.hoisted(() => ({
-  archiveSession: vi.fn(),
   deleteSession: vi.fn(),
   newSession: vi.fn(),
   promptForText: vi.fn(),
@@ -26,7 +25,6 @@ describe("security explanation inference", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     acpMocks.newSession.mockResolvedValue({ sessionId: "inference-session" });
-    acpMocks.archiveSession.mockResolvedValue(undefined);
     acpMocks.setSessionSystemPrompt.mockResolvedValue(undefined);
     acpMocks.deleteSession.mockResolvedValue(undefined);
     acpMocks.promptForText.mockResolvedValue(
@@ -56,12 +54,11 @@ describe("security explanation inference", () => {
     });
   });
 
-  it("archives, sets system prompt, then prompts and deletes", async () => {
+  it("sets system prompt, then prompts and deletes", async () => {
     await expect(
       inferSecurityExplanation("python3 -c 'exec(payload)'", 0.95),
     ).resolves.toBe("The encoded payload resembles obfuscated execution.");
 
-    expect(acpMocks.archiveSession).toHaveBeenCalledWith("inference-session");
     expect(acpMocks.setSessionSystemPrompt).toHaveBeenCalledWith(
       "inference-session",
       expect.stringContaining("IMPORTANT SECURITY NOTICE"),
@@ -72,10 +69,7 @@ describe("security explanation inference", () => {
       20000,
     );
     expect(acpMocks.deleteSession).toHaveBeenCalledWith("inference-session");
-    // Verify ordering: archive → system prompt → prompt → delete
-    expect(acpMocks.archiveSession.mock.invocationCallOrder[0]).toBeLessThan(
-      acpMocks.setSessionSystemPrompt.mock.invocationCallOrder[0],
-    );
+    // Verify ordering: system prompt → prompt → delete
     expect(
       acpMocks.setSessionSystemPrompt.mock.invocationCallOrder[0],
     ).toBeLessThan(acpMocks.promptForText.mock.invocationCallOrder[0]);
@@ -84,16 +78,10 @@ describe("security explanation inference", () => {
     );
   });
 
-  it("does not prompt if the session cannot be archived", async () => {
-    acpMocks.archiveSession.mockRejectedValue(new Error("archive failed"));
+  it("creates the inference session as a hidden session so it is never listed", async () => {
+    await inferSecurityExplanation("python3 -c 'exec(payload)'", 0.95);
 
-    await expect(
-      inferSecurityExplanation("python3 -c 'exec(payload)'", 0.95),
-    ).resolves.toBeNull();
-
-    expect(acpMocks.setSessionSystemPrompt).not.toHaveBeenCalled();
-    expect(acpMocks.promptForText).not.toHaveBeenCalled();
-    expect(acpMocks.deleteSession).toHaveBeenCalledWith("inference-session");
+    expect(acpMocks.newSession).toHaveBeenCalledWith("/tmp", { hidden: true });
   });
 
   it("removes all session extensions to create a tool-free environment", async () => {

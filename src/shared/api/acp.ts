@@ -317,12 +317,11 @@ export async function acpCreateSession(
     options.deferProviderSetup === true &&
     !options.modelId &&
     providerId === "goose";
-  const response = await directAcp.newSession(
-    workingDir,
-    deferProviderSetup ? undefined : providerId,
-    options.projectId,
-    options.personaId,
-  );
+  const response = await directAcp.newSession(workingDir, {
+    providerId: deferProviderSetup ? undefined : providerId,
+    projectId: options.projectId,
+    personaId: options.personaId,
+  });
   const sessionId = response.sessionId;
   let configOptionsSnapshot = readSessionConfigOptionsSnapshots(response);
   logReasoningEffortInfo("acpCreateSession newSession response", {

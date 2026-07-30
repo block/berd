@@ -447,12 +447,11 @@ describe("acpCreateSession", () => {
       },
     });
 
-    expect(mockNewSession).toHaveBeenCalledWith(
-      "/tmp/project",
-      "openai",
-      "project-1",
-      "persona-1",
-    );
+    expect(mockNewSession).toHaveBeenCalledWith("/tmp/project", {
+      providerId: "openai",
+      projectId: "project-1",
+      personaId: "persona-1",
+    });
     expect(mockLoadSession).not.toHaveBeenCalled();
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
     expect(mockSetModel).toHaveBeenCalledWith("acp-session-1", "gpt-4.1");
@@ -469,12 +468,11 @@ describe("acpCreateSession", () => {
       deferProviderSetup: true,
     });
 
-    expect(mockNewSession).toHaveBeenCalledWith(
-      "/tmp/project",
-      "openai",
-      undefined,
-      undefined,
-    );
+    expect(mockNewSession).toHaveBeenCalledWith("/tmp/project", {
+      providerId: "openai",
+      projectId: undefined,
+      personaId: undefined,
+    });
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
@@ -497,12 +495,11 @@ describe("acpCreateSession", () => {
       },
     });
 
-    expect(mockNewSession).toHaveBeenCalledWith(
-      "/tmp/project",
-      undefined,
-      undefined,
-      undefined,
-    );
+    expect(mockNewSession).toHaveBeenCalledWith("/tmp/project", {
+      providerId: undefined,
+      projectId: undefined,
+      personaId: undefined,
+    });
     expect(mockSetProvider).not.toHaveBeenCalled();
     expect(mockSetModel).not.toHaveBeenCalled();
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(false);
@@ -519,12 +516,11 @@ describe("acpCreateSession", () => {
       deferProviderSetup: true,
     });
 
-    expect(mockNewSession).toHaveBeenCalledWith(
-      "/tmp/project",
-      "anthropic",
-      undefined,
-      undefined,
-    );
+    expect(mockNewSession).toHaveBeenCalledWith("/tmp/project", {
+      providerId: "anthropic",
+      projectId: undefined,
+      personaId: undefined,
+    });
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "anthropic");
     expect(mockSetModel).toHaveBeenCalledWith(
       "acp-session-1",

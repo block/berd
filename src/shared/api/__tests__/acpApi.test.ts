@@ -602,7 +602,7 @@ describe("provider wire translation", () => {
   it("sends the default model provider when newSession is given the goose sentinel", async () => {
     const { newSession } = await import("../acpApi");
 
-    await newSession("/tmp/project", "goose");
+    await newSession("/tmp/project", { providerId: "goose" });
 
     expect(mocks.newSession).toHaveBeenCalledWith({
       cwd: "/tmp/project",
@@ -614,12 +614,27 @@ describe("provider wire translation", () => {
   it("passes a real provider id through newSession unchanged", async () => {
     const { newSession } = await import("../acpApi");
 
-    await newSession("/tmp/project", "claude-acp", "project-1");
+    await newSession("/tmp/project", {
+      providerId: "claude-acp",
+      projectId: "project-1",
+    });
 
     expect(mocks.newSession).toHaveBeenCalledWith({
       cwd: "/tmp/project",
       mcpServers: [],
       _meta: { provider: "claude-acp", projectId: "project-1" },
+    });
+  });
+
+  it("marks the session hidden with a boolean _meta.hidden when requested", async () => {
+    const { newSession } = await import("../acpApi");
+
+    await newSession("/tmp", { hidden: true });
+
+    expect(mocks.newSession).toHaveBeenCalledWith({
+      cwd: "/tmp",
+      mcpServers: [],
+      _meta: { hidden: true },
     });
   });
 

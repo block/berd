@@ -1,5 +1,4 @@
 import {
-  archiveSession,
   deleteSession,
   newSession,
   promptForText,
@@ -51,16 +50,11 @@ export async function inferSecurityExplanation(
 }
 
 async function runInference(userPrompt: string): Promise<string | null> {
-  // Create a temporary session for the one-shot inference.
-  const session = await newSession("/tmp");
+  // Create a temporary session for the one-shot inference, hidden so it never
+  // surfaces in the session list.
+  const session = await newSession("/tmp", { hidden: true });
 
   try {
-    // Archive before the first message is added. ACP session lists only surface
-    // sessions after they have messages, so this keeps the inference session
-    // out of the normal chat UI for its entire lifetime. Deletion below remains
-    // the final cleanup; if that fails, the session stays archived.
-    await archiveSession(session.sessionId);
-
     // Remove ALL extensions from this session so the model has zero tools.
     // Even if the adversarial command contains prompt injection that
     // manipulates the model, it cannot take any action without tools.
@@ -78,7 +72,7 @@ async function runInference(userPrompt: string): Promise<string | null> {
     );
   } finally {
     try {
-      // ACP does not support ephemeral sessions, so remove this archived
+      // ACP does not support ephemeral sessions, so remove this Hidden
       // one-shot chat after inference to keep security explanations out of
       // session history and avoid accumulating invisible backend sessions.
       await deleteSession(session.sessionId);

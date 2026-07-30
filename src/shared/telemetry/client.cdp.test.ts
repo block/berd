@@ -104,7 +104,13 @@ describe("telemetry CDP payload", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     telemetry.trackAppLaunched();
 
-    await waitFor(() => expect(batchBodies).toHaveLength(1));
+    // The batch only lands after the mocked whoami promise settles and the
+    // buffer flushes through the real-timer telemetry client; a loaded CI
+    // worker can delay those timers well past waitFor's 1s default, so give it
+    // headroom (with a matching test timeout below) instead of a flaky timeout.
+    await waitFor(() => expect(batchBodies).toHaveLength(1), {
+      timeout: 10_000,
+    });
 
     const batch = JSON.parse(batchBodies[0]) as UnifiedEventingBatch;
     const message = batch.ue_messages[0];
@@ -125,5 +131,5 @@ describe("telemetry CDP payload", () => {
     expect(message.context.page.url).toBeUndefined();
     expect(JSON.stringify(message.context.page)).not.toContain("localhost");
     expect(JSON.stringify(message.context.page)).not.toContain("/renderer");
-  });
+  }, 15_000);
 });
