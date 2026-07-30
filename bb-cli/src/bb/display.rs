@@ -4,7 +4,11 @@
 //! Color is suppressed by `--no-color`, `--json`, the `NO_COLOR` environment
 //! variable, or when stdout is not a terminal.
 
+use std::fmt::Write as _;
 use std::io::IsTerminal;
+
+use anyhow::{Context, Result};
+use serde::Serialize;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -98,4 +102,71 @@ impl Style {
 /// may prompt for confirmation instead of requiring `--yes`.
 pub fn stdin_is_tty() -> bool {
     std::io::stdin().is_terminal()
+}
+
+pub fn print_json<T: Serialize>(value: &T) -> Result<()> {
+    let json = serde_json::to_string_pretty(value).context("serialize JSON output")?;
+    println!("{}", json_with_escaped_bidi_controls(&json));
+    Ok(())
+}
+
+pub fn terminal_safe_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if character.is_control() || is_bidi_control(character) {
+            escaped.extend(character.escape_default());
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+fn json_with_escaped_bidi_controls(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if is_bidi_control(character) {
+            write!(escaped, "\\u{:04x}", character as u32)
+                .expect("writing to a String cannot fail");
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+fn is_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061c}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+
+    #[test]
+    fn terminal_safe_text_escapes_controls_and_preserves_unicode() {
+        assert_eq!(
+            terminal_safe_text("Workspace\u{1b}]52;c;secret\u{7}\n\u{202e}fake\u{2066}日本語"),
+            "Workspace\\u{1b}]52;c;secret\\u{7}\\n\\u{202e}fake\\u{2066}日本語"
+        );
+    }
+
+    #[test]
+    fn json_with_escaped_bidi_controls_remains_valid_json() {
+        let input = format!(r#"{{"name":"safe{}fake{}日本語"}}"#, '\u{202e}', '\u{2066}');
+        let escaped = json_with_escaped_bidi_controls(&input);
+
+        assert_eq!(escaped, r#"{"name":"safe\u202efake\u2066日本語"}"#);
+        let parsed: Value = serde_json::from_str(&escaped).expect("valid escaped JSON");
+        assert_eq!(parsed["name"], "safe\u{202e}fake\u{2066}日本語");
+    }
 }

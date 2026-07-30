@@ -4,21 +4,21 @@
 //! the marketplace client, local package state, and target linking together.
 
 use std::collections::BTreeMap;
-use std::fmt::Write as FmtWrite;
 use std::io::Write as IoWrite;
 
 use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::auth_login::{
     logout_stored_session, run_browser_login, verify_stored_session, BrowserLoginCredentialSource,
 };
 use super::auth_storage::default_session_storage;
-use super::display::{stdin_is_tty, Style};
+use super::description::describe_command_tree;
+use super::display::{print_json, stdin_is_tty, terminal_safe_text, Style};
 use super::org_routing::{normalize_org, resolve_org_kgoose_base_url};
-use super::skills_api::{exit_codes, failure, failure_info, MarketplaceClient, SilentJsonExit};
+use super::runner::{self, ensure_org_configured, missing_org_error};
+use super::skills_api::{exit_codes, failure, MarketplaceClient};
 use super::skills_archive::validate_preview_path;
 use super::skills_config::SkillsConfig;
 use super::skills_doctor::{run_doctor, CheckStatus};
@@ -458,53 +458,17 @@ pub fn skills_global_args(command: Command) -> Command {
 }
 
 pub fn run(matches: &ArgMatches) -> Result<()> {
-    run_with(matches, dispatch)
+    runner::run(matches, dispatch)
 }
 
 /// Entry point for the top-level `bb auth` command.
 pub fn run_auth(matches: &ArgMatches) -> Result<()> {
-    run_with(matches, dispatch_auth)
+    runner::run(matches, dispatch_auth)
 }
 
 /// Entry point for the top-level `bb config` command.
 pub fn run_config(matches: &ArgMatches) -> Result<()> {
-    run_with_config(matches, preferences)
-}
-
-fn run_with(
-    matches: &ArgMatches,
-    dispatch: fn(&SkillsConfig, &ArgMatches) -> Result<()>,
-) -> Result<()> {
-    let config = SkillsConfig::resolve(matches)?;
-    run_resolved(&config, matches, dispatch)
-}
-
-fn run_with_config(
-    matches: &ArgMatches,
-    dispatch: fn(&SkillsConfig, &ArgMatches) -> Result<()>,
-) -> Result<()> {
-    let config = SkillsConfig::resolve_for_config(matches)?;
-    run_resolved(&config, matches, dispatch)
-}
-
-fn run_resolved(
-    config: &SkillsConfig,
-    matches: &ArgMatches,
-    dispatch: fn(&SkillsConfig, &ArgMatches) -> Result<()>,
-) -> Result<()> {
-    match dispatch(config, matches) {
-        Ok(()) => Ok(()),
-        Err(err) => {
-            if config.json {
-                // Keep stderr machine-readable in JSON mode: one structured
-                // error object instead of human prose.
-                let (exit_code, payload) = failure_info(&err);
-                eprintln!("{payload}");
-                return Err(anyhow::Error::new(SilentJsonExit(exit_code)));
-            }
-            Err(err)
-        }
-    }
+    runner::run_for_config(matches, preferences)
 }
 
 fn dispatch_auth(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
@@ -574,21 +538,6 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Some(("config", config_matches)) => preferences(config, config_matches),
         _ => anyhow::bail!("expected a skills subcommand"),
     }
-}
-
-fn ensure_org_configured(config: &SkillsConfig) -> Result<()> {
-    if config.local_dev || config.org.is_some() {
-        return Ok(());
-    }
-    Err(missing_org_error())
-}
-
-fn missing_org_error() -> anyhow::Error {
-    failure(
-        exit_codes::AUTH_REQUIRED,
-        "org_required",
-        "bb org is not configured; run `bb auth login` or `bb config set org <org>`",
-    )
 }
 
 fn config_with_login_org(config: &SkillsConfig) -> Result<SkillsConfig> {
@@ -1720,51 +1669,6 @@ fn preferences(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// output
-
-fn print_json<T: Serialize>(value: &T) -> Result<()> {
-    let json = serde_json::to_string_pretty(value).context("serialize JSON output")?;
-    println!("{}", json_with_escaped_bidi_controls(&json));
-    Ok(())
-}
-
-fn json_with_escaped_bidi_controls(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        if is_bidi_control(character) {
-            write!(escaped, "\\u{:04x}", character as u32)
-                .expect("writing to a String cannot fail");
-        } else {
-            escaped.push(character);
-        }
-    }
-    escaped
-}
-
-fn terminal_safe_text(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        if character.is_control() || is_bidi_control(character) {
-            escaped.extend(character.escape_default());
-        } else {
-            escaped.push(character);
-        }
-    }
-    escaped
-}
-
-fn is_bidi_control(character: char) -> bool {
-    matches!(
-        character,
-        '\u{061c}'
-            | '\u{200e}'
-            | '\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2066}'..='\u{2069}'
-    )
-}
-
 fn report_plan(config: &SkillsConfig, plan: &InstallPlanResponse, dry_run: bool) -> Result<()> {
     if config.json {
         return print_json(&json!({
@@ -2115,25 +2019,6 @@ fn yes_no(value: bool) -> &'static str {
     }
 }
 
-fn describe_command_tree(command: &Command) -> Value {
-    let commands = command
-        .get_subcommands()
-        .filter(|subcommand| !subcommand.is_hide_set())
-        .map(describe_command_tree)
-        .collect::<Vec<_>>();
-    let mut value = json!({
-        "name": command.get_name(),
-        "summary": command
-            .get_about()
-            .map(|about| about.to_string())
-            .unwrap_or_default(),
-    });
-    if !commands.is_empty() {
-        value["commands"] = json!(commands);
-    }
-    value
-}
-
 /// Returns a machine-readable description of the `bb skills` command tree
 /// for `bb --describe-commands`.
 pub fn describe_commands() -> Value {
@@ -2176,24 +2061,6 @@ mod tests {
             provenance_suffix("bundle:frontend"),
             "  (from bundle frontend)"
         );
-    }
-
-    #[test]
-    fn terminal_safe_text_escapes_controls_and_preserves_unicode() {
-        assert_eq!(
-            terminal_safe_text("Workspace\u{1b}]52;c;secret\u{7}\n\u{202e}fake\u{2066}日本語"),
-            "Workspace\\u{1b}]52;c;secret\\u{7}\\n\\u{202e}fake\\u{2066}日本語"
-        );
-    }
-
-    #[test]
-    fn json_with_escaped_bidi_controls_remains_valid_json() {
-        let input = format!(r#"{{"name":"safe{}fake{}日本語"}}"#, '\u{202e}', '\u{2066}');
-        let escaped = json_with_escaped_bidi_controls(&input);
-
-        assert_eq!(escaped, r#"{"name":"safe\u202efake\u2066日本語"}"#);
-        let parsed: Value = serde_json::from_str(&escaped).expect("valid escaped JSON");
-        assert_eq!(parsed["name"], "safe\u{202e}fake\u{2066}日本語");
     }
 
     #[test]
