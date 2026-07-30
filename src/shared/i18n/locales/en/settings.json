@@ -7,7 +7,17 @@
     "logoutSuccess": "Logged out.",
     "organization": "Organization",
     "signedInAs": "Signed in as",
-    "title": "Account"
+    "title": "Account",
+    "workspace": {
+      "description": "The BuilderBot workspace used by Berd.",
+      "label": "Workspace",
+      "loadError": "Couldn't load workspaces.",
+      "loading": "Loading...",
+      "retry": "Retry",
+      "switchError": "Couldn't switch workspace. Try again.",
+      "switchSuccess": "Switched to {{workspace}}.",
+      "unavailable": "No workspaces"
+    }
   },
   "about": {
     "buildModes": {

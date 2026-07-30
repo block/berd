@@ -13,6 +13,22 @@ export interface AuthStatus {
   userId?: string | null;
 }
 
+export interface AuthWorkspace {
+  workspaceIdentifier?: string | null;
+  displayName?: string | null;
+  roles: string[];
+}
+
+export interface AuthWorkspaceList {
+  workspaces: AuthWorkspace[];
+  activeWorkspaceIdentifier?: string | null;
+}
+
+export interface AuthWorkspaceSwitchResult {
+  workspace: AuthWorkspace;
+  switched: boolean;
+}
+
 export async function getAuthStatus(): Promise<AuthStatus> {
   return invoke<AuthStatus>("auth_status");
 }
@@ -27,4 +43,16 @@ export async function cancelLogin(): Promise<void> {
 
 export async function logout(): Promise<AuthStatus> {
   return invoke<AuthStatus>("logout");
+}
+
+export async function listAuthWorkspaces(): Promise<AuthWorkspaceList> {
+  return invoke<AuthWorkspaceList>("list_auth_workspaces");
+}
+
+export async function switchAuthWorkspace(
+  workspaceIdentifier: string,
+): Promise<AuthWorkspaceSwitchResult> {
+  return invoke<AuthWorkspaceSwitchResult>("switch_auth_workspace", {
+    workspaceIdentifier,
+  });
 }

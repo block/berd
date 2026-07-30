@@ -31,18 +31,26 @@ import { trustDomain } from "@/shared/lib/trustedDomains";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
-const { mockGetPlatform, mockLogout, mockOpenDialog, mockRuntimeConfigApi } =
-  vi.hoisted(() => ({
-    mockGetPlatform: vi.fn(() => "mac"),
-    mockLogout: vi.fn(),
-    mockOpenDialog: vi.fn(),
-    mockRuntimeConfigApi: {
-      clearFakeRuntimeConfig: vi.fn(),
-      getRuntimeConfig: vi.fn(),
-      refreshRuntimeConfig: vi.fn(),
-      setFakeRuntimeConfig: vi.fn(),
-    },
-  }));
+const {
+  mockGetPlatform,
+  mockListAuthWorkspaces,
+  mockLogout,
+  mockOpenDialog,
+  mockRuntimeConfigApi,
+  mockSwitchAuthWorkspace,
+} = vi.hoisted(() => ({
+  mockGetPlatform: vi.fn(() => "mac"),
+  mockListAuthWorkspaces: vi.fn(),
+  mockLogout: vi.fn(),
+  mockOpenDialog: vi.fn(),
+  mockSwitchAuthWorkspace: vi.fn(),
+  mockRuntimeConfigApi: {
+    clearFakeRuntimeConfig: vi.fn(),
+    getRuntimeConfig: vi.fn(),
+    refreshRuntimeConfig: vi.fn(),
+    setFakeRuntimeConfig: vi.fn(),
+  },
+}));
 
 vi.mock("@/shared/lib/platform", () => ({
   getPlatform: mockGetPlatform,
@@ -53,7 +61,9 @@ vi.mock("@/shared/api/localMediaCaches", () => ({
 }));
 
 vi.mock("@/features/auth/api/auth", () => ({
+  listAuthWorkspaces: mockListAuthWorkspaces,
   logout: mockLogout,
+  switchAuthWorkspace: mockSwitchAuthWorkspace,
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -161,6 +171,10 @@ describe("GeneralSettings appearance section", () => {
     mockRuntimeConfigApi.clearFakeRuntimeConfig.mockResolvedValue(
       INITIAL_RUNTIME_CONFIG_RESULT,
     );
+    mockListAuthWorkspaces.mockResolvedValue({
+      workspaces: [],
+      activeWorkspaceIdentifier: null,
+    });
   });
 
   it("hides account details when no logged-in auth status is available", () => {
@@ -210,6 +224,57 @@ describe("GeneralSettings appearance section", () => {
       expect(mockLogout).toHaveBeenCalledTimes(1);
       expect(toastSuccessMock).toHaveBeenCalledWith("Logged out.");
       expect(onLoggedOut).toHaveBeenCalledWith(nextStatus);
+    });
+  });
+
+  it("lists and switches the active workspace", async () => {
+    const user = userEvent.setup();
+    mockListAuthWorkspaces.mockResolvedValueOnce({
+      workspaces: [
+        {
+          workspaceIdentifier: "workspace-alpha",
+          displayName: "Alpha",
+          roles: ["member"],
+        },
+        {
+          workspaceIdentifier: "workspace-beta",
+          displayName: "Beta",
+          roles: ["member"],
+        },
+      ],
+      activeWorkspaceIdentifier: "workspace-alpha",
+    });
+    mockSwitchAuthWorkspace.mockResolvedValueOnce({
+      workspace: {
+        workspaceIdentifier: "workspace-beta",
+        displayName: "Beta",
+        roles: ["member"],
+      },
+      switched: true,
+    });
+
+    renderGeneralSettings({
+      authStatus: {
+        loggedIn: true,
+        requiresOrg: false,
+        org: "test",
+        profile: "default",
+        kgooseBaseUrl: "https://test.blockstaging.build",
+      },
+    });
+
+    const workspaceSelect = await screen.findByRole("combobox", {
+      name: "Workspace",
+    });
+    await waitFor(() => expect(workspaceSelect).toHaveTextContent("Alpha"));
+
+    await user.click(workspaceSelect);
+    await user.click(screen.getByRole("option", { name: "Beta" }));
+
+    await waitFor(() => {
+      expect(mockSwitchAuthWorkspace).toHaveBeenCalledWith("workspace-beta");
+      expect(toastSuccessMock).toHaveBeenCalledWith("Switched to Beta.");
+      expect(workspaceSelect).toHaveTextContent("Beta");
     });
   });
 

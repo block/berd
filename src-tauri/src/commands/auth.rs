@@ -13,16 +13,21 @@ use builderbot_auth::auth_login::{
 };
 use builderbot_auth::auth_storage::{
     default_session_storage_for_bb_home,
-    stored_session_credential_header_value_for_kgoose_base_url, SessionStorageKey,
-    StoredSessionCredential,
+    stored_session_credential_header_value_for_kgoose_base_url, SessionCredentialStorage,
+    SessionStorageKey, StoredSessionCredential,
 };
 use builderbot_auth::config::{
-    default_bb_home, default_preferences_path, kgoose_service_url,
-    normalize_kgoose_base_url_with_service_path, normalize_kgoose_service_path, read_optional_env,
-    read_preferences_file, write_preferences_file, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR,
-    DEFAULT_KGOOSE_SERVICE_PATH, DEFAULT_PROFILE_NAME, KGOOSE_SERVICE_PATH_ENV_VAR,
+    default_bb_home, default_kgoose_service_path, default_preferences_path,
+    is_loopback_kgoose_base_url, kgoose_service_url, normalize_kgoose_base_url_with_service_path,
+    normalize_kgoose_service_path, read_optional_env, read_preferences_file,
+    write_preferences_file, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_PROFILE_NAME,
+    KGOOSE_SERVICE_PATH_ENV_VAR,
 };
 use builderbot_auth::org_routing::{normalize_org, resolve_org_kgoose_base_url};
+use builderbot_auth::workspace::{
+    list_workspaces as request_workspaces, switch_workspace as request_workspace_switch, Workspace,
+};
+use reqwest::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
@@ -58,6 +63,38 @@ pub struct AuthStatus {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub user_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthWorkspace {
+    pub workspace_identifier: Option<String>,
+    pub display_name: Option<String>,
+    pub roles: Vec<String>,
+}
+
+impl From<Workspace> for AuthWorkspace {
+    fn from(workspace: Workspace) -> Self {
+        Self {
+            workspace_identifier: workspace.workspace_identifier,
+            display_name: workspace.display_name,
+            roles: workspace.roles,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListAuthWorkspacesResult {
+    pub workspaces: Vec<AuthWorkspace>,
+    pub active_workspace_identifier: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchWorkspaceResult {
+    pub workspace: AuthWorkspace,
+    pub switched: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +169,26 @@ pub async fn logout() -> Result<AuthStatus, String> {
         .await
         .map_err(|error| format!("BuilderBot auth logout task failed: {error}"))?
         .map_err(auth_error)
+}
+
+#[tauri::command]
+pub async fn list_auth_workspaces() -> Result<ListAuthWorkspacesResult, String> {
+    tauri::async_runtime::spawn_blocking(list_auth_workspaces_blocking)
+        .await
+        .map_err(|error| format!("BuilderBot workspace list task failed: {error}"))?
+        .map_err(auth_error)
+}
+
+#[tauri::command]
+pub async fn switch_auth_workspace(
+    workspace_identifier: String,
+) -> Result<SwitchWorkspaceResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        switch_auth_workspace_blocking(&workspace_identifier)
+    })
+    .await
+    .map_err(|error| format!("BuilderBot workspace switch task failed: {error}"))?
+    .map_err(auth_error)
 }
 
 pub(crate) async fn verified_auth_context() -> Result<VerifiedAuthContext, String> {
@@ -327,6 +384,95 @@ fn logout_blocking() -> Result<AuthStatus> {
     Ok(AuthStatus::logged_out(&context, false))
 }
 
+struct WorkspaceSession {
+    context: AuthContext,
+    storage: Box<dyn SessionCredentialStorage>,
+    storage_key: SessionStorageKey,
+    credential: StoredSessionCredential,
+}
+
+fn load_workspace_session() -> Result<WorkspaceSession> {
+    let context = resolve_auth_context(None, false)?;
+    context
+        .org
+        .as_ref()
+        .ok_or_else(|| anyhow!("org is not configured; log in and try again"))?;
+    let storage = default_session_storage_for_bb_home(context.bb_home.clone())?;
+    let storage_key = session_storage_key(&context);
+    let credential = storage
+        .get(&storage_key)?
+        .ok_or_else(|| anyhow!("BuilderBot session is missing; log in and try again"))?;
+    credential
+        .session_credential_header_value()
+        .ok_or_else(|| anyhow!("BuilderBot session credential is empty; log in again"))?;
+
+    Ok(WorkspaceSession {
+        context,
+        storage,
+        storage_key,
+        credential,
+    })
+}
+
+fn list_auth_workspaces_blocking() -> Result<ListAuthWorkspacesResult> {
+    let session = load_workspace_session()?;
+    let client = build_auth_http_client(AUTH_HTTP_TIMEOUT)?;
+    let response = request_workspaces(
+        &client,
+        session.context.playpen.as_deref(),
+        &session.context.kgoose_service_url,
+        &session.credential,
+    )?;
+    Ok(ListAuthWorkspacesResult {
+        workspaces: response.workspaces.into_iter().map(Into::into).collect(),
+        active_workspace_identifier: response.active_workspace_identifier,
+    })
+}
+
+fn switch_auth_workspace_blocking(workspace_identifier: &str) -> Result<SwitchWorkspaceResult> {
+    let workspace_identifier = workspace_identifier.trim();
+    if workspace_identifier.is_empty() {
+        return Err(anyhow!("workspace identifier must not be empty"));
+    }
+
+    let session = load_workspace_session()?;
+    let client = build_auth_http_client(AUTH_HTTP_TIMEOUT)?;
+    let response = request_workspace_switch(
+        &client,
+        session.context.playpen.as_deref(),
+        &session.context.kgoose_service_url,
+        &session.credential,
+        workspace_identifier,
+    )?;
+    let switched = if let Some(new_credential) = response.session_credential {
+        if new_credential.trim().is_empty() {
+            return Err(anyhow!(
+                "workspace switch returned an empty replacement credential"
+            ));
+        }
+        HeaderValue::from_str(&new_credential)
+            .context("workspace switch returned an invalid replacement credential")?;
+        session.storage.set(
+            &session.storage_key,
+            &StoredSessionCredential {
+                session_credential: new_credential,
+                expires_at: session.credential.expires_at,
+            },
+        )?;
+        true
+    } else {
+        false
+    };
+    let workspace = response
+        .workspace
+        .context("workspace switch returned no workspace")?;
+
+    Ok(SwitchWorkspaceResult {
+        workspace: workspace.into(),
+        switched,
+    })
+}
+
 fn status_for_context(context: &AuthContext) -> Result<AuthStatus> {
     if context.org.is_none() {
         return Ok(AuthStatus::logged_out(context, true));
@@ -387,7 +533,7 @@ pub(crate) fn route_kgoose_base_url_for_shared_org(base_url: &str) -> Result<Str
         .unwrap_or_else(default_bb_home);
     let preferences = read_preferences_file(&default_preferences_path(&bb_home))?;
     let org = preferences.org.as_deref().map(normalize_org).transpose()?;
-    let kgoose_service_path = resolve_kgoose_service_path()?;
+    let kgoose_service_path = resolve_kgoose_service_path(base_url)?;
 
     resolve_org_kgoose_base_url(base_url, org.as_deref(), false, &kgoose_service_path)
 }
@@ -431,8 +577,13 @@ fn resolve_auth_context(org_override: Option<&str>, persist_org: bool) -> Result
 
     let org = preferences.org.as_deref().map(normalize_org).transpose()?;
     let profile = resolve_profile(&bb_home)?;
-    let kgoose_service_path = resolve_kgoose_service_path()?;
-    let raw_kgoose_base_url = resolve_raw_kgoose_base_url(&kgoose_service_path)?;
+    let configured_kgoose_base_url = read_trimmed_env(KGOOSE_BASE_URL_ENV_VAR)?
+        .unwrap_or_else(|| DEFAULT_KGOOSE_BASE_URL.to_string());
+    let kgoose_service_path = resolve_kgoose_service_path(&configured_kgoose_base_url)?;
+    let raw_kgoose_base_url = normalize_kgoose_base_url_with_service_path(
+        &configured_kgoose_base_url,
+        &kgoose_service_path,
+    );
     let kgoose_base_url = resolve_org_kgoose_base_url(
         &raw_kgoose_base_url,
         org.as_deref(),
@@ -476,17 +627,18 @@ fn resolve_profile(bb_home: &Path) -> Result<String> {
         .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string()))
 }
 
-fn resolve_raw_kgoose_base_url(kgoose_service_path: &str) -> Result<String> {
-    Ok(read_trimmed_env(KGOOSE_BASE_URL_ENV_VAR)?
-        .map(|value| normalize_kgoose_base_url_with_service_path(&value, kgoose_service_path))
-        .unwrap_or_else(|| DEFAULT_KGOOSE_BASE_URL.to_string()))
-}
-
-fn resolve_kgoose_service_path() -> Result<String> {
+fn resolve_kgoose_service_path(base_url: &str) -> Result<String> {
     read_trimmed_env(KGOOSE_SERVICE_PATH_ENV_VAR)?
         .map(|value| normalize_kgoose_service_path(&value))
         .transpose()
-        .map(|path| path.unwrap_or_else(|| DEFAULT_KGOOSE_SERVICE_PATH.to_string()))
+        .map(|path| {
+            path.unwrap_or_else(|| {
+                // The GUI has no `--local-dev` flag, so a loopback base URL is
+                // the signal that it is calling KGoose directly.
+                default_kgoose_service_path(is_loopback_kgoose_base_url(base_url), base_url)
+                    .to_string()
+            })
+        })
 }
 
 fn resolve_playpen() -> Result<Option<String>> {
@@ -694,6 +846,7 @@ mod tests {
         FileSessionCredentialStorage, SessionCredentialStorage, BB_AUTH_STORAGE_ENV_VAR,
         BB_AUTH_STORAGE_FILE_ENV_VAR,
     };
+    use builderbot_auth::config::DEFAULT_KGOOSE_SERVICE_PATH;
     use builderbot_auth::preferences::BuilderBotPreferences;
     use tempfile::tempdir;
 
@@ -775,7 +928,10 @@ mod tests {
         clear_auth_env();
         let dir = tempdir().expect("tempdir");
         env::set_var(BB_HOME_ENV_VAR, dir.path());
-        env::set_var(KGOOSE_BASE_URL_ENV_VAR, "https://blockstaging.build");
+        env::set_var(
+            KGOOSE_BASE_URL_ENV_VAR,
+            "https://blockstaging.build/cash-app/goose",
+        );
 
         let context = resolve_auth_context(Some(" Test "), true).expect("resolve auth context");
         let preferences =
@@ -785,7 +941,7 @@ mod tests {
         assert_eq!(context.kgoose_base_url, "https://test.blockstaging.build");
         assert_eq!(
             context.kgoose_service_url,
-            "https://test.blockstaging.build/cash-app/goose"
+            "https://test.blockstaging.build/api/goose"
         );
         assert_eq!(preferences.org.as_deref(), Some("test"));
 

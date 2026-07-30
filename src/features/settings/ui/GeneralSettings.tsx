@@ -1,5 +1,12 @@
 import { ColorPicker } from "@/shared/ui/color-picker";
-import { logout, type AuthStatus } from "@/features/auth/api/auth";
+import {
+  listAuthWorkspaces,
+  logout,
+  switchAuthWorkspace,
+  type AuthStatus,
+  type AuthWorkspaceList,
+} from "@/features/auth/api/auth";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -143,6 +150,7 @@ export function GeneralSettings({
   onLoggedOut,
 }: GeneralSettingsProps) {
   const { t } = useTranslation(["settings", "shortcuts"]);
+  const queryClient = useQueryClient();
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const [bbCliStatus, setBbCliStatus] = useState<BbCliStatus | null>(null);
@@ -151,6 +159,12 @@ export function GeneralSettings({
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [workspaceList, setWorkspaceList] = useState<AuthWorkspaceList | null>(
+    null,
+  );
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState(false);
+  const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
   const [trustedDomainsDialogOpen, setTrustedDomainsDialogOpen] =
     useState(false);
   const [trustedDomains, setTrustedDomains] = useState<string[]>(() =>
@@ -314,6 +328,60 @@ export function GeneralSettings({
     }
   }
 
+  const loadWorkspaces = useCallback(async () => {
+    if (authStatus?.loggedIn !== true) return;
+
+    setWorkspaceLoading(true);
+    setWorkspaceError(false);
+    try {
+      setWorkspaceList(await listAuthWorkspaces());
+    } catch (error) {
+      console.warn("Failed to list workspaces:", error);
+      setWorkspaceError(true);
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }, [authStatus?.loggedIn]);
+
+  useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
+
+  async function handleWorkspaceSwitch(workspaceIdentifier: string) {
+    if (
+      workspaceSwitching ||
+      workspaceIdentifier === workspaceList?.activeWorkspaceIdentifier
+    ) {
+      return;
+    }
+
+    setWorkspaceSwitching(true);
+    try {
+      const result = await switchAuthWorkspace(workspaceIdentifier);
+      const activeWorkspaceIdentifier =
+        result.workspace.workspaceIdentifier ?? workspaceIdentifier;
+      setWorkspaceList((current) =>
+        current
+          ? {
+              ...current,
+              activeWorkspaceIdentifier,
+            }
+          : current,
+      );
+      await queryClient.invalidateQueries();
+      toast.success(
+        t("account.workspace.switchSuccess", {
+          workspace: result.workspace.displayName ?? activeWorkspaceIdentifier,
+        }),
+      );
+    } catch (error) {
+      console.warn("Failed to switch workspace:", error);
+      toast.error(t("account.workspace.switchError"));
+    } finally {
+      setWorkspaceSwitching(false);
+    }
+  }
+
   function handleStyleGuidelinesPromptSave() {
     const didSave = styleGuidelinesPreference.setPrompt(
       styleGuidelinesPromptDraft,
@@ -419,6 +487,10 @@ export function GeneralSettings({
     authStatus?.email ?? authStatus?.name ?? authStatus?.user ?? aboutFallback;
   const organization = authStatus?.org ?? aboutFallback;
   const showAccountSection = authStatus?.loggedIn === true;
+  const selectableWorkspaces =
+    workspaceList?.workspaces.filter(
+      (workspace) => workspace.workspaceIdentifier,
+    ) ?? [];
 
   return (
     <SettingsPage contentClassName="space-y-8">
@@ -445,6 +517,59 @@ export function GeneralSettings({
             label={t("account.organization")}
             value={organization}
           />
+          <SettingRow
+            label={t("account.workspace.label")}
+            description={
+              workspaceError
+                ? t("account.workspace.loadError")
+                : t("account.workspace.description")
+            }
+          >
+            {workspaceError ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={workspaceLoading}
+                onClick={() => void loadWorkspaces()}
+              >
+                {t("account.workspace.retry")}
+              </Button>
+            ) : (
+              <Select
+                value={workspaceList?.activeWorkspaceIdentifier ?? undefined}
+                disabled={
+                  workspaceLoading ||
+                  workspaceSwitching ||
+                  selectableWorkspaces.length === 0
+                }
+                onValueChange={(value) => void handleWorkspaceSwitch(value)}
+              >
+                <SelectTrigger
+                  className="w-52"
+                  aria-label={t("account.workspace.label")}
+                >
+                  <SelectValue
+                    placeholder={
+                      workspaceLoading
+                        ? t("account.workspace.loading")
+                        : t("account.workspace.unavailable")
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectableWorkspaces.map((workspace) => (
+                    <SelectItem
+                      key={workspace.workspaceIdentifier}
+                      value={workspace.workspaceIdentifier ?? ""}
+                    >
+                      {workspace.displayName ?? workspace.workspaceIdentifier}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </SettingRow>
         </SettingsSection>
       ) : null}
 

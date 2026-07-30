@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 pub use builderbot_auth::config::{
-    default_bb_home, default_preferences_path, kgoose_service_url,
+    default_bb_home, default_kgoose_service_path, default_preferences_path, kgoose_service_url,
     normalize_kgoose_base_url_with_service_path, normalize_kgoose_service_path, read_optional_env,
     read_preferences_file, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_KGOOSE_SERVICE_PATH,
     DEFAULT_PROFILE_NAME, KGOOSE_SERVICE_PATH_ENV_VAR,
@@ -34,13 +34,6 @@ pub const BB_KGOOSE_PLAYPEN_ENV_VAR: &str = "BB_KGOOSE_PLAYPEN";
 pub const KGOOSE_PLAYPEN_ENV_VAR: &str = "KGOOSE_PLAYPEN";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "skills.yaml";
 pub const META_FILE_NAME: &str = ".bb-skills-meta.json";
-/// Public BuilderBot BFF prefix used by production and staging hosts.
-///
-/// The BFF rewrites this to kgoose's internal `/cash-app/goose` path. Keep
-/// direct local development on the internal path so it can call a locally
-/// running kgoose without a proxy.
-pub const DEFAULT_BUILDERBOT_SERVICE_PATH: &str = "/api/goose";
-
 #[derive(Debug, Clone, Default)]
 pub struct SkillsProfileResolveOptions {
     pub local_dev: bool,
@@ -225,34 +218,6 @@ impl SkillsConfig {
     }
 }
 
-fn is_direct_kgoose_host(base_url: &str) -> bool {
-    let host = base_url
-        .trim()
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .unwrap_or_default()
-        .split(':')
-        .next()
-        .unwrap_or_default();
-    matches!(
-        host,
-        "kgoose.sqprod.co"
-            | "kgoose.stage.sqprod.co"
-            | "kgoose.cashappservices.com"
-            | "kgoose.cashappservicesstaging.com"
-    )
-}
-
-fn default_kgoose_service_path(local_dev: bool, base_url: &str) -> &'static str {
-    if local_dev || is_direct_kgoose_host(base_url) {
-        DEFAULT_KGOOSE_SERVICE_PATH
-    } else {
-        DEFAULT_BUILDERBOT_SERVICE_PATH
-    }
-}
-
 pub fn resolve_skills_profile_context(
     options: SkillsProfileResolveOptions,
 ) -> Result<SkillsProfileContext> {
@@ -365,31 +330,4 @@ pub fn default_agents_skills_dir() -> PathBuf {
     env::var("HOME")
         .map(|home| PathBuf::from(home).join(".agents").join("skills"))
         .unwrap_or_else(|_| PathBuf::from(".agents/skills"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        default_kgoose_service_path, DEFAULT_BUILDERBOT_SERVICE_PATH, DEFAULT_KGOOSE_SERVICE_PATH,
-    };
-
-    #[test]
-    fn default_service_path_uses_the_matching_endpoint_type() {
-        assert_eq!(
-            default_kgoose_service_path(false, "https://kgoose.sqprod.co"),
-            DEFAULT_KGOOSE_SERVICE_PATH
-        );
-        assert_eq!(
-            default_kgoose_service_path(false, "https://kgoose.stage.sqprod.co"),
-            DEFAULT_KGOOSE_SERVICE_PATH
-        );
-        assert_eq!(
-            default_kgoose_service_path(false, "https://test.blockstaging.build"),
-            DEFAULT_BUILDERBOT_SERVICE_PATH
-        );
-        assert_eq!(
-            default_kgoose_service_path(true, "https://test.blockstaging.build"),
-            DEFAULT_KGOOSE_SERVICE_PATH
-        );
-    }
 }

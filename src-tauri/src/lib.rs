@@ -380,6 +380,8 @@ pub fn run() {
             commands::auth::login,
             commands::auth::cancel_login,
             commands::auth::logout,
+            commands::auth::list_auth_workspaces,
+            commands::auth::switch_auth_workspace,
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::get_cached_avatars_for_refs,

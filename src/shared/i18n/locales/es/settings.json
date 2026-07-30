@@ -7,7 +7,17 @@
     "logoutSuccess": "Sesión cerrada.",
     "organization": "Organización",
     "signedInAs": "Sesión iniciada como",
-    "title": "Cuenta"
+    "title": "Cuenta",
+    "workspace": {
+      "description": "El espacio de trabajo de BuilderBot que utiliza Berd.",
+      "label": "Espacio de trabajo",
+      "loadError": "No se pudieron cargar los espacios de trabajo.",
+      "loading": "Cargando...",
+      "retry": "Reintentar",
+      "switchError": "No se pudo cambiar de espacio de trabajo. Inténtalo de nuevo.",
+      "switchSuccess": "Se cambió a {{workspace}}.",
+      "unavailable": "No hay espacios de trabajo"
+    }
   },
   "about": {
     "buildModes": {
