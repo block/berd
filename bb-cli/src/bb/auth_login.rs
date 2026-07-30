@@ -19,6 +19,14 @@ use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 const CALLBACK_PATH: &str = "/callback";
 
+#[derive(Clone, Copy)]
+enum AuthCallbackPage {
+    Success,
+    Failure,
+}
+
+const AUTH_CALLBACK_PAGE_TEMPLATE: &str = include_str!("auth_callback.html");
+
 #[derive(Debug, Serialize)]
 pub struct BrowserLoginSummary {
     pub kgoose_base_url: String,
@@ -192,11 +200,7 @@ fn receive_exchange_code(server: Server) -> Result<String> {
             .find(|(key, _)| key == "error")
             .map(|(_, value)| value.into_owned());
         if let Some(error) = error {
-            respond_text(
-                request,
-                StatusCode(400),
-                "BuilderBot CLI auth failed. Return to the terminal.",
-            )?;
+            respond_auth_page(request, StatusCode(400), AuthCallbackPage::Failure)?;
             return Err(anyhow!("auth callback returned error: {error}"));
         }
 
@@ -206,11 +210,7 @@ fn receive_exchange_code(server: Server) -> Result<String> {
             .map(|(_, value)| value.into_owned())
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| anyhow!("auth callback did not include an exchange code"))?;
-        respond_text(
-            request,
-            StatusCode(200),
-            "BuilderBot CLI auth complete. Return to the terminal.",
-        )?;
+        respond_auth_page(request, StatusCode(200), AuthCallbackPage::Success)?;
         return Ok(code);
     }
 
@@ -231,6 +231,60 @@ fn respond_text(request: tiny_http::Request, status: StatusCode, body: &str) -> 
         .map_err(|error| anyhow!("write loopback callback response: {error}"))
 }
 
+fn respond_auth_page(
+    request: tiny_http::Request,
+    status: StatusCode,
+    page: AuthCallbackPage,
+) -> Result<()> {
+    request
+        .respond(
+            Response::from_string(auth_callback_page(page))
+                .with_status_code(status)
+                .with_header(
+                    Header::from_bytes("content-type", "text/html; charset=utf-8").unwrap(),
+                )
+                .with_header(Header::from_bytes("cache-control", "no-store").unwrap())
+                .with_header(
+                    Header::from_bytes(
+                        "content-security-policy",
+                        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'",
+                    )
+                    .unwrap(),
+                )
+                .with_header(Header::from_bytes("x-content-type-options", "nosniff").unwrap()),
+        )
+        .map_err(|error| anyhow!("write loopback callback response: {error}"))
+}
+
+fn auth_callback_page(page: AuthCallbackPage) -> String {
+    let (title, class_name, icon, heading, message, terminal_message) = match page {
+        AuthCallbackPage::Success => (
+            "Signed in · BuilderBot CLI",
+            "success",
+            r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4.25 4.25L19 6.5"/></svg>"#,
+            "You’re signed in",
+            "BuilderBot CLI authentication is complete. You can safely close this tab.",
+            "Return to your terminal",
+        ),
+        AuthCallbackPage::Failure => (
+            "Sign-in failed · BuilderBot CLI",
+            "failure",
+            r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>"#,
+            "Sign-in didn’t finish",
+            "BuilderBot CLI couldn’t complete authentication. Return to your terminal for details.",
+            "Check your terminal",
+        ),
+    };
+
+    AUTH_CALLBACK_PAGE_TEMPLATE
+        .replace("__PAGE_TITLE__", title)
+        .replace("__PAGE_CLASS__", class_name)
+        .replace("__STATUS_ICON__", icon)
+        .replace("__HEADING__", heading)
+        .replace("__MESSAGE__", message)
+        .replace("__TERMINAL_MESSAGE__", terminal_message)
+}
+
 fn safe_prefix(value: &str) -> String {
     value.chars().take(8).collect()
 }
@@ -249,5 +303,41 @@ fn auth_info(config: &SkillsConfig, message: &str) {
         eprintln!("info: {message}");
     } else {
         config.style.info(message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{auth_callback_page, AuthCallbackPage};
+
+    #[test]
+    fn callback_pages_are_self_contained_and_themed() {
+        for page in [AuthCallbackPage::Success, AuthCallbackPage::Failure] {
+            let html = auth_callback_page(page);
+
+            assert!(html.starts_with("<!doctype html>"));
+            assert!(html.contains("prefers-color-scheme: dark"));
+            assert!(html.contains("prefers-reduced-motion: no-preference"));
+            assert!(html.contains(">Berd</div>"));
+            assert!(!html.contains("src="));
+            assert!(!html.contains("href="));
+            assert!(!html.contains("@import"));
+            assert!(!html.contains("__PAGE_"));
+            assert!(!html.contains("__STATUS_"));
+            assert!(!html.contains("__HEADING__"));
+            assert!(!html.contains("__MESSAGE__"));
+            assert!(!html.contains("__TERMINAL_"));
+        }
+    }
+
+    #[test]
+    fn callback_pages_have_distinct_outcomes() {
+        let success = auth_callback_page(AuthCallbackPage::Success);
+        let failure = auth_callback_page(AuthCallbackPage::Failure);
+
+        assert!(success.contains("You’re signed in"));
+        assert!(success.contains(r#"class="success""#));
+        assert!(failure.contains("Sign-in didn’t finish"));
+        assert!(failure.contains(r#"class="failure""#));
     }
 }

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>__PAGE_TITLE__</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #f5f5f5;
+        --foreground: #242424;
+        --card: rgba(255, 255, 255, 0.88);
+        --muted-foreground: #737373;
+        --border: #e5e5e5;
+        --mark: #171717;
+        --mark-foreground: #ffffff;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.09);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --background: #1f1f1f;
+          --foreground: #ffffff;
+          --card: rgba(38, 38, 38, 0.9);
+          --muted-foreground: #a3a3a3;
+          --border: #404040;
+          --mark: #ffffff;
+          --mark-foreground: #171717;
+          --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 18% 20%, rgba(87, 185, 175, 0.12), transparent 30rem),
+          radial-gradient(circle at 82% 78%, rgba(236, 93, 42, 0.1), transparent 28rem),
+          var(--background);
+        color: var(--foreground);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      @supports (min-height: 100dvh) {
+        body {
+          min-height: 100dvh;
+        }
+      }
+
+      main {
+        width: min(100% - 2rem, 30rem);
+        padding: 3rem;
+        border: 1px solid var(--border);
+        border-radius: 1.5rem;
+        background: var(--card);
+        box-shadow: var(--shadow);
+        text-align: center;
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        margin-bottom: 2.25rem;
+        color: var(--muted-foreground);
+        font-size: 0.75rem;
+        font-weight: 650;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 1.75rem;
+        height: 1.75rem;
+        place-items: center;
+        border-radius: 0.5rem;
+        background: var(--foreground);
+        color: var(--background);
+        font-size: 0.8rem;
+        font-weight: 750;
+        letter-spacing: -0.04em;
+      }
+
+      .status-mark {
+        display: grid;
+        width: 4rem;
+        height: 4rem;
+        margin: 0 auto 1.5rem;
+        place-items: center;
+        border-radius: 1.125rem;
+        background: var(--mark);
+        color: var(--mark-foreground);
+      }
+
+      .status-mark svg {
+        width: 1.75rem;
+        height: 1.75rem;
+      }
+
+      .failure .status-mark {
+        background: #dc2626;
+        color: #ffffff;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.75rem, 6vw, 2.25rem);
+        font-weight: 650;
+        letter-spacing: -0.04em;
+        line-height: 1.08;
+      }
+
+      p {
+        max-width: 22rem;
+        margin: 1rem auto 0;
+        color: var(--muted-foreground);
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+
+      .terminal {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 2rem;
+        padding: 0.55rem 0.8rem;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        color: var(--foreground);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.75rem;
+      }
+
+      .terminal::before {
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 999px;
+        background: #57b9af;
+        content: "";
+      }
+
+      .failure .terminal::before {
+        background: #ec5d2a;
+      }
+
+      @media (max-width: 32rem) {
+        main {
+          padding: 2.5rem 1.5rem;
+        }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        main {
+          animation: arrive 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+        }
+
+        @keyframes arrive {
+          from {
+            opacity: 0;
+            transform: translateY(0.5rem) scale(0.985);
+          }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="__PAGE_CLASS__">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">B</span>Berd</div>
+      <div class="status-mark" aria-hidden="true">__STATUS_ICON__</div>
+      <h1>__HEADING__</h1>
+      <p>__MESSAGE__</p>
+      <div class="terminal">__TERMINAL_MESSAGE__</div>
+    </main>
+  </body>
+</html>
