@@ -9,7 +9,7 @@ export function useSkillImportExport() {
   const { t } = useTranslation(["skills"]);
 
   const handleExport = async (skill: SkillInfo) => {
-    if (skill.sourceKind === "builtin") {
+    if (skill.readonly) {
       return;
     }
 

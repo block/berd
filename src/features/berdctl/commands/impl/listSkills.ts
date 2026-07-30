@@ -16,7 +16,7 @@ interface ListSkillsResult {
     skill_id: string;
     name: string;
     description: string;
-    source: "global" | "project" | "builtin";
+    source: "app" | "global" | "project" | "builtin";
   }>;
 }
 
@@ -34,7 +34,7 @@ export const listSkillsCommand = defineCommand({
 Result:
   {"skills": [{"skill_id": "...", "name": "...",
                "description": "...",
-               "source": "builtin"|"global"|"project"}, ...]}
+               "source": "app"|"builtin"|"global"|"project"}, ...]}
   Read a skill's full content with \`berdctl skill get\`.`,
   schema: listSkillsSchema,
   execute: async (args): Promise<ListSkillsResult> => {

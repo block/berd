@@ -160,6 +160,7 @@ pub fn run() {
             // runtime-config readiness both depend on it). Seeding its bundled
             // skills/agents is filesystem work and is deferred below.
             app.manage(DistroBundleState::new(app.handle()));
+            app.manage(bundled_skills::BundledSkillsState::default());
             app.manage(commands::automations::AutomationStreamState::default());
             app.manage(commands::terminal::TerminalState::default());
             app.manage(commands::window_session::WindowSessionRegistry::default());
@@ -239,16 +240,25 @@ pub fn run() {
             let mut bundled_avatar_refs: Vec<String> = Vec::new();
             {
                 let distro_state = app.state::<DistroBundleState>();
+                let bundled_skills_state = app
+                    .state::<bundled_skills::BundledSkillsState>()
+                    .inner()
+                    .clone();
                 if let Some(bundle) = distro_state.bundle() {
                     let skills_bundle = bundle.clone();
+                    let skills_app_data_dir = app_data_dir.clone();
                     tauri::async_runtime::spawn(async move {
-                        match bundled_skills::seed_bundled_skills(&skills_bundle) {
+                        match bundled_skills::seed_bundled_skills(
+                            &skills_bundle,
+                            &skills_app_data_dir,
+                        ) {
                             Ok(count) if count > 0 => {
                                 log::info!("Seeded {count} bundled skill(s)");
                             }
                             Ok(_) => {}
                             Err(error) => log::warn!("Failed to seed bundled skills: {error}"),
                         }
+                        bundled_skills_state.mark_ready();
                     });
 
                     match bundled_agents::seed_bundled_agents(bundle) {
@@ -260,6 +270,8 @@ pub fn run() {
                         }
                         Err(error) => log::warn!("Failed to seed bundled agents: {error}"),
                     }
+                } else {
+                    bundled_skills_state.mark_ready();
                 }
             }
             app.manage(commands::global_shortcut::GlobalShortcutHandlerState::default());
@@ -497,6 +509,7 @@ pub fn run() {
             commands::window_session::focus_session_window,
             commands::window_session::list_session_windows,
             commands::agent_skills::list_agent_skills,
+            commands::agent_skills::list_berd_app_skills,
             commands::skill_marketplace::skill_cli_status,
             commands::skill_marketplace::list_remote_skills,
             commands::skill_marketplace::show_remote_skill,

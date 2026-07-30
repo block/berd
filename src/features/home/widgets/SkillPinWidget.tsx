@@ -2,6 +2,7 @@ import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import { areSkillPinIdsEquivalent } from "@/features/home/lib/skillPinIdentity";
 import {
   resolveSkillPillTone,
   skillPillToneClass,
@@ -22,6 +23,7 @@ function findSkillById(
   if (!skills || !id) return undefined;
   const pinnedKeys = skillKeySet(id);
   return skills.find((skill) => {
+    if (areSkillPinIdsEquivalent(id, skill.id, skill.legacyPinId)) return true;
     const candidateKeys = skillKeySet(
       skill.id,
       skill.path,

@@ -126,12 +126,12 @@
         "list": {
           "action": "list",
           "about": "List the user's skills (name and description only)",
-          "afterHelp": "Example:\n  berdctl skill list --json\n\nResult:\n  {\"skills\": [{\"skill_id\": \"...\", \"name\": \"...\",\n               \"description\": \"...\",\n               \"source\": \"builtin\"|\"global\"|\"project\"}, ...]}\n  Read a skill's full content with `berdctl skill get`."
+          "afterHelp": "Example:\n  berdctl skill list --json\n\nResult:\n  {\"skills\": [{\"skill_id\": \"...\", \"name\": \"...\",\n               \"description\": \"...\",\n               \"source\": \"app\"|\"builtin\"|\"global\"|\"project\"}, ...]}\n  Read a skill's full content with `berdctl skill get`."
         },
         "get": {
           "action": "get",
           "about": "Read one skill including its SKILL.md instructions",
-          "afterHelp": "Example:\n  berdctl skill get --skill-id <skill-id> --json\n\nResult:\n  {\"skill_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"source\": \"builtin\"|\"global\"|\"project\", \"instructions\": \"...\"}"
+          "afterHelp": "Example:\n  berdctl skill get --skill-id <skill-id> --json\n\nResult:\n  {\"skill_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"source\": \"app\"|\"builtin\"|\"global\"|\"project\", \"instructions\": \"...\"}"
         }
       }
     },

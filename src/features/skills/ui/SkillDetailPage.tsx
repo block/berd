@@ -54,7 +54,11 @@ export function SkillDetailPage({
     isPinning: isPinningToHome,
     pinToHome,
     unpinFromHome,
-  } = usePinToHomeWidget({ kind: "skill", id: skill?.id });
+  } = usePinToHomeWidget({
+    kind: "skill",
+    id: skill?.id,
+    legacyId: skill?.legacyPinId,
+  });
 
   if (!skill) {
     return (

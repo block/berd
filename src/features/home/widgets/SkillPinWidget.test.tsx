@@ -107,6 +107,38 @@ describe("SkillPinWidget", () => {
     );
   });
 
+  it("resolves a legacy bundled-skill pin to its migrated Berd app skill", async () => {
+    state.skills = [
+      skill({
+        id: "app:/Users/tulsi/Library/Application Support/xyz.block.berd/skills/agent-builder",
+        name: "agent-builder",
+        path: "/Users/tulsi/Library/Application Support/xyz.block.berd/skills/agent-builder",
+        fileLocation:
+          "/Users/tulsi/Library/Application Support/xyz.block.berd/skills/agent-builder/SKILL.md",
+        sourceKind: "app",
+        sourceLabel: "Berd app",
+        readonly: true,
+        legacyPinId: "global:/Users/tulsi/.agents/skills/agent-builder",
+      }),
+    ];
+    const { onOpenSkill } = renderPin(
+      "global:/Users/tulsi/.agents/skills/agent-builder",
+    );
+
+    const button = await screen.findByRole("button", {
+      name: "Start chat with agent-builder",
+    });
+    fireEvent.click(button);
+
+    expect(onOpenSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "agent-builder",
+        sourceKind: "app",
+        sourceLabel: "Berd app",
+      }),
+    );
+  });
+
   it("falls back to persisted skill path data when the skills list misses", async () => {
     state.skills = [];
     const { onOpenSkill } = renderPin(

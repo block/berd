@@ -12,7 +12,7 @@ interface GetSkillResult {
   skill_id: string;
   name: string;
   description: string;
-  source: "global" | "project" | "builtin";
+  source: "app" | "global" | "project" | "builtin";
   instructions: string;
 }
 
@@ -29,7 +29,7 @@ export const getSkillCommand = defineCommand({
 
 Result:
   {"skill_id": "...", "name": "...", "description": "...",
-   "source": "builtin"|"global"|"project", "instructions": "..."}`,
+   "source": "app"|"builtin"|"global"|"project", "instructions": "..."}`,
   schema: getSkillSchema,
   execute: async (args): Promise<GetSkillResult> => {
     const { findSkillOrThrow } = await import("../runtime/skills");

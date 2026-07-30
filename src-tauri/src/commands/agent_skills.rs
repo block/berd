@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use tauri::{AppHandle, Manager, State};
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const MAX_SKILL_FILE_BYTES: u64 = 262_144;
@@ -23,6 +24,8 @@ pub struct AgentSkillEntry {
     pub file_location: String,
     pub source_kind: String,
     pub source_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_pin_id: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -39,6 +42,7 @@ struct SkillFrontmatter {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SkillRootScope {
+    App,
     User,
     Workspace,
 }
@@ -138,7 +142,7 @@ fn skill_frontmatter(contents: &str) -> Option<(&str, &str)> {
 fn read_skill(skill_dir: &Path, root: &SkillRoot) -> Option<AgentSkillEntry> {
     let skill_file = skill_dir.join(SKILL_FILE_NAME);
     let metadata = match root.scope {
-        SkillRootScope::User => std::fs::metadata(&skill_file).ok()?,
+        SkillRootScope::App | SkillRootScope::User => std::fs::metadata(&skill_file).ok()?,
         SkillRootScope::Workspace => std::fs::symlink_metadata(&skill_file).ok()?,
     };
     if !metadata.file_type().is_file() || metadata.len() > MAX_SKILL_FILE_BYTES {
@@ -164,11 +168,13 @@ fn read_skill(skill_dir: &Path, root: &SkillRoot) -> Option<AgentSkillEntry> {
         path: canonical_skill_dir.to_string_lossy().into_owned(),
         file_location: canonical_skill_file.to_string_lossy().into_owned(),
         source_kind: match root.scope {
+            SkillRootScope::App => "app",
             SkillRootScope::User => "global",
             SkillRootScope::Workspace => "project",
         }
         .to_string(),
         source_label: root.source_label.clone(),
+        legacy_pin_id: None,
     })
 }
 
@@ -181,7 +187,7 @@ fn add_skill_root(
     workspace_root: Option<&Path>,
 ) {
     let metadata = match scope {
-        SkillRootScope::User => std::fs::metadata(&root_path),
+        SkillRootScope::App | SkillRootScope::User => std::fs::metadata(&root_path),
         SkillRootScope::Workspace => std::fs::symlink_metadata(&root_path),
     };
     let Ok(metadata) = metadata else {
@@ -210,7 +216,11 @@ fn add_skill_root(
     });
 }
 
-fn collect_skill_roots(provider_id: Option<&str>, workspace_paths: Vec<String>) -> Vec<SkillRoot> {
+fn collect_skill_roots(
+    provider_id: Option<&str>,
+    workspace_paths: Vec<String>,
+    app_skills_root: Option<&Path>,
+) -> Vec<SkillRoot> {
     let provider_dirs = provider_skill_dirs(provider_id);
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
@@ -226,6 +236,19 @@ fn collect_skill_roots(provider_id: Option<&str>, workspace_paths: Vec<String>) 
                 None,
             );
         }
+    }
+    // Keep Personal roots ahead of Berd-owned app skills so any bare-name
+    // activation chooses the user's skill while exact selection remains
+    // path-based and can still target either entry.
+    if let Some(app_skills_root) = app_skills_root {
+        add_skill_root(
+            &mut roots,
+            &mut seen_roots,
+            app_skills_root.to_path_buf(),
+            SkillRootScope::App,
+            "Berd app".to_string(),
+            None,
+        );
     }
     if provider_family(provider_id) == SkillProviderFamily::Codex {
         add_skill_root(
@@ -269,11 +292,19 @@ fn collect_skill_roots(provider_id: Option<&str>, workspace_paths: Vec<String>) 
     roots
 }
 
-fn collect_agent_skills(
-    provider_id: Option<String>,
-    workspace_paths: Vec<String>,
+fn skill_source_priority(source_kind: &str) -> u8 {
+    match source_kind {
+        "project" => 0,
+        "global" => 1,
+        "app" => 2,
+        _ => 3,
+    }
+}
+
+fn collect_skills_from_roots(
+    roots: Vec<SkillRoot>,
+    provider_id: Option<&str>,
 ) -> Vec<AgentSkillEntry> {
-    let roots = collect_skill_roots(provider_id.as_deref(), workspace_paths);
     let mut seen_skill_paths = HashSet::new();
     let mut skills = Vec::new();
 
@@ -286,7 +317,7 @@ fn collect_agent_skills(
             for entry in entries.flatten() {
                 let path = entry.path();
                 let metadata = match root.scope {
-                    SkillRootScope::User => std::fs::metadata(&path),
+                    SkillRootScope::App | SkillRootScope::User => std::fs::metadata(&path),
                     SkillRootScope::Workspace => std::fs::symlink_metadata(&path),
                 };
                 let Ok(metadata) = metadata else {
@@ -314,15 +345,28 @@ fn collect_agent_skills(
         }
     }
 
-    if provider_family(provider_id.as_deref()) == SkillProviderFamily::Gemini {
+    if provider_family(provider_id) == SkillProviderFamily::Gemini {
+        // Discovery order carries workspace specificity: roots are visited from
+        // repository root toward the active nested workspace, so a later skill
+        // of the same source tier is the nearer one. A higher-priority source
+        // (project, then Personal, then app) wins regardless of order.
         let mut order = Vec::new();
         let mut skills_by_name = HashMap::new();
         for skill in skills {
             let key = skill.name.to_ascii_lowercase();
+            let replace = skills_by_name
+                .get(&key)
+                .map(|existing: &AgentSkillEntry| {
+                    skill_source_priority(&skill.source_kind)
+                        <= skill_source_priority(&existing.source_kind)
+                })
+                .unwrap_or(true);
             if !skills_by_name.contains_key(&key) {
                 order.push(key.clone());
             }
-            skills_by_name.insert(key, skill);
+            if replace {
+                skills_by_name.insert(key, skill);
+            }
         }
         skills = order
             .into_iter()
@@ -334,17 +378,88 @@ fn collect_agent_skills(
         a.name
             .to_ascii_lowercase()
             .cmp(&b.name.to_ascii_lowercase())
+            .then_with(|| {
+                skill_source_priority(&a.source_kind).cmp(&skill_source_priority(&b.source_kind))
+            })
             .then_with(|| a.file_location.cmp(&b.file_location))
     });
     skills
 }
 
+fn collect_agent_skills(
+    provider_id: Option<String>,
+    workspace_paths: Vec<String>,
+    app_skills_root: Option<&Path>,
+) -> Vec<AgentSkillEntry> {
+    let roots = collect_skill_roots(provider_id.as_deref(), workspace_paths, app_skills_root);
+    collect_skills_from_roots(roots, provider_id.as_deref())
+}
+
+#[tauri::command]
+pub async fn list_berd_app_skills(
+    app: AppHandle,
+    bundled_skills_state: State<'_, crate::services::bundled_skills::BundledSkillsState>,
+) -> Result<ListAgentSkillsResponse, String> {
+    bundled_skills_state.wait_until_ready().await;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Failed to resolve Berd app data directory: {err}"))?;
+    let app_skills_root = app_data_dir.join("skills");
+    let legacy_pin_aliases =
+        crate::services::bundled_skills::migrated_legacy_skill_aliases(&app_data_dir)
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+    let skills = tokio::task::spawn_blocking(move || {
+        let mut roots = Vec::new();
+        let mut seen_roots = HashSet::new();
+        add_skill_root(
+            &mut roots,
+            &mut seen_roots,
+            app_skills_root,
+            SkillRootScope::App,
+            "Berd app".to_string(),
+            None,
+        );
+        let mut skills = collect_skills_from_roots(roots, None);
+        for skill in &mut skills {
+            skill.legacy_pin_id = legacy_pin_aliases.get(&skill.name).cloned();
+        }
+        skills
+    })
+    .await
+    .map_err(|err| format!("Failed to list Berd app skills: {err}"))?;
+    Ok(ListAgentSkillsResponse { skills })
+}
+
 #[tauri::command]
 pub async fn list_agent_skills(
+    app: AppHandle,
+    bundled_skills_state: State<'_, crate::services::bundled_skills::BundledSkillsState>,
     request: ListAgentSkillsRequest,
 ) -> Result<ListAgentSkillsResponse, String> {
+    bundled_skills_state.wait_until_ready().await;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Failed to resolve Berd app data directory: {err}"))?;
+    let app_skills_root = app_data_dir.join("skills");
+    let legacy_pin_aliases =
+        crate::services::bundled_skills::migrated_legacy_skill_aliases(&app_data_dir)
+            .into_iter()
+            .collect::<HashMap<_, _>>();
     let skills = tokio::task::spawn_blocking(move || {
-        collect_agent_skills(request.provider_id, request.workspace_paths)
+        let mut skills = collect_agent_skills(
+            request.provider_id,
+            request.workspace_paths,
+            Some(&app_skills_root),
+        );
+        for skill in &mut skills {
+            if skill.source_kind == "app" {
+                skill.legacy_pin_id = legacy_pin_aliases.get(&skill.name).cloned();
+            }
+        }
+        skills
     })
     .await
     .map_err(|err| format!("Failed to list agent skills: {err}"))?;
@@ -353,7 +468,10 @@ pub async fn list_agent_skills(
 
 #[cfg(test)]
 mod tests {
-    use super::collect_agent_skills;
+    use super::{
+        collect_agent_skills, collect_skills_from_roots, skill_source_priority, SkillRoot,
+        SkillRootScope,
+    };
     use std::fs;
     use tempfile::TempDir;
 
@@ -365,6 +483,31 @@ mod tests {
             format!("---\nname: {name}\ndescription: {description}\n---\n\nUse it."),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn personal_skills_sort_before_same_named_app_skills() {
+        assert!(skill_source_priority("global") < skill_source_priority("app"));
+    }
+
+    #[test]
+    fn lists_berd_app_skills_with_distinct_ownership() {
+        let tmp = TempDir::new().unwrap();
+        let app_root = tmp.path().join(".berd").join("skills");
+        write_skill(&app_root, "goose-help", "Help with Berd");
+
+        let skills = collect_skills_from_roots(
+            vec![SkillRoot {
+                path: app_root,
+                source_label: "Berd app".to_string(),
+                scope: SkillRootScope::App,
+            }],
+            None,
+        );
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].source_kind, "app");
+        assert_eq!(skills[0].source_label, "Berd app");
     }
 
     #[test]
@@ -389,6 +532,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("codex-acp".to_string()),
             vec![package.to_string_lossy().into_owned()],
+            None,
         );
 
         let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
@@ -410,6 +554,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("claude-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
         );
 
         assert!(skills
@@ -437,6 +582,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("gemini-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
         );
 
         let matching_skills: Vec<&super::AgentSkillEntry> = skills
@@ -466,6 +612,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("codex-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
         );
 
         assert!(skills.iter().all(|skill| skill.name != "leaked"));
@@ -486,6 +633,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("codex-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
         );
 
         assert!(skills.iter().all(|skill| skill.name != "outside"));
@@ -507,6 +655,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("codex-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
         );
 
         assert!(skills.iter().all(|skill| skill.name != "outside"));

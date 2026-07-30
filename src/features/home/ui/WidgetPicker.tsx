@@ -22,6 +22,7 @@ import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import { areSkillPinIdsEquivalent } from "@/features/home/lib/skillPinIdentity";
 import {
   resolveSkillPillTone,
   skillPillToneClass,
@@ -254,7 +255,9 @@ function skillOptions(
     .map((skill) => ({
       id: skill.id,
       title: skill.name,
-      pinned: pinnedIds.has(skill.id),
+      pinned: [...pinnedIds].some((pinnedId) =>
+        areSkillPinIdsEquivalent(pinnedId, skill.id, skill.legacyPinId),
+      ),
       leading: { kind: "skillPill", name: skill.name, color: skill.color },
     }));
 }

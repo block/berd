@@ -202,6 +202,38 @@ describe("usePinToHomeWidget", () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
+  it("treats a migrated Berd app skill as the existing legacy skill pin", () => {
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "skill-pin-1",
+          type: "skillPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: {
+            skillId: "global:/Users/test/.agents/skills/agent-builder",
+          },
+        },
+      ],
+      loadStatus: "ready",
+      itemRevision: 1,
+      cameraRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      constraints: layout().constraints,
+    });
+
+    const { result } = renderHook(() =>
+      usePinToHomeWidget({
+        kind: "skill",
+        id: "app:/Users/test/Library/Application Support/xyz.block.berd/skills/agent-builder",
+        legacyId: "global:/Users/test/.agents/skills/agent-builder",
+      }),
+    );
+
+    expect(result.current.isPinned).toBe(true);
+  });
+
   it("removes the matching home pin when unpinning", async () => {
     useHomeWidgetStore.setState({
       instances: [

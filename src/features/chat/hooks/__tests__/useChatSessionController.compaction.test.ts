@@ -323,6 +323,9 @@ describe("useChatSessionController compaction behavior", () => {
     );
 
     await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
       await result.current.handleSend("hello");
     });
 
@@ -351,6 +354,9 @@ describe("useChatSessionController compaction behavior", () => {
     expect(result.current.supportsAutoCompactContext).toBe(true);
     expect(result.current.supportsCompactionControls).toBe(true);
 
+    await act(async () => {
+      await Promise.resolve();
+    });
     await act(async () => {
       await result.current.handleSend("hello");
     });

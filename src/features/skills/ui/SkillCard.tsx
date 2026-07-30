@@ -47,15 +47,19 @@ export function SkillCard({
     skill.color && isPillTone(skill.color) ? skill.color : null;
   const tone = storedTone ?? resolveSkillPillTone(skill.name);
   const [menuOpen, setMenuOpen] = useExclusiveMenu();
-  const isEditable = skill.sourceKind !== "builtin";
-  const isDeletable = skill.sourceKind !== "builtin";
+  const isEditable = !skill.readonly;
+  const isDeletable = !skill.readonly;
   const showMenu = true;
   const {
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
     unpinFromHome,
-  } = usePinToHomeWidget({ kind: "skill", id: skill.id });
+  } = usePinToHomeWidget({
+    kind: "skill",
+    id: skill.id,
+    legacyId: skill.legacyPinId,
+  });
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || menuOpen) {

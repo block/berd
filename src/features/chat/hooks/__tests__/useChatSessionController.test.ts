@@ -36,6 +36,7 @@ const mockUseChatRuntime = {
   isRunCancellationPending: false,
 };
 const mockListSkills = vi.fn();
+const mockListBerdAppSkills = vi.fn();
 const mockLoadWorkspaceInstructionFiles = vi.fn();
 const mockPickerState = {
   selectedAgentId: "goose",
@@ -65,6 +66,27 @@ const modelFixtures: Record<
     providerId: "openai",
   },
 };
+
+class ImmediatelyResolved<T> implements PromiseLike<T> {
+  constructor(private readonly value: T) {}
+
+  // biome-ignore lint/suspicious/noThenProperty: this test helper intentionally models immediate PromiseLike resolution.
+  then<TResult1 = T, TResult2 = never>(
+    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+    _onrejected?:
+      | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+      | null,
+  ): PromiseLike<TResult1 | TResult2> {
+    if (!onfulfilled) {
+      return Promise.resolve(this.value as unknown as TResult1);
+    }
+    return Promise.resolve(onfulfilled(this.value));
+  }
+}
+
+function immediatelyResolved<T>(value: T): Promise<T> {
+  return new ImmediatelyResolved(value) as unknown as Promise<T>;
+}
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -153,6 +175,7 @@ vi.mock("@/shared/api/agents", () => ({
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
+  listBerdAppSkills: (...args: unknown[]) => mockListBerdAppSkills(...args),
   listSkills: (...args: unknown[]) => mockListSkills(...args),
 }));
 
@@ -265,7 +288,10 @@ describe("useChatSessionController", () => {
       dismiss: vi.fn(),
     }));
     mockDeletePersonaSource.mockResolvedValue(undefined);
-    mockListSkills.mockResolvedValue([]);
+    mockListSkills.mockReset().mockResolvedValue([]);
+    mockListBerdAppSkills
+      .mockReset()
+      .mockImplementation(() => immediatelyResolved([]));
     mockLoadWorkspaceInstructionFiles.mockResolvedValue([]);
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
@@ -855,9 +881,39 @@ describe("useChatSessionController", () => {
     expect(systemPrompt).not.toContain("repo-only instructions");
     expect(systemPrompt).not.toContain("/tmp/project-worktrees/phase-3");
     expect(mockListSkills).not.toHaveBeenCalled();
+    expect(mockListBerdAppSkills).toHaveBeenCalled();
     expect(mockLoadWorkspaceInstructionFiles).not.toHaveBeenCalled();
     expect(result.current.skillProjectDirs).toBeUndefined();
     expect(result.current.fileMentionProjectDirs).toEqual(["/tmp/project"]);
+  });
+
+  it("passes Berd app skills to normal single-workspace chats", async () => {
+    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+    mockListBerdAppSkills.mockResolvedValue([
+      {
+        id: "app:/app-data/skills/goose-help",
+        name: "goose-help",
+        description: "Help with Berd",
+        instructions: "Use Berd help.",
+        path: "/app-data/skills/goose-help",
+        fileLocation: "/app-data/skills/goose-help/SKILL.md",
+        sourceKind: "app",
+        sourceLabel: "Berd app",
+        projectLinks: [],
+        readonly: true,
+        color: null,
+      },
+    ]);
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+      expect(systemPrompt).toContain("<available-skills>");
+      expect(systemPrompt).toContain("goose-help: Help with Berd");
+    });
+    expect(mockListBerdAppSkills).toHaveBeenCalled();
+    expect(mockListSkills).not.toHaveBeenCalled();
   });
 
   it("passes an available skills catalog to the agent system prompt", async () => {
@@ -1235,6 +1291,40 @@ describe("useChatSessionController", () => {
       undefined,
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("waits for app skill discovery before accepting a normal chat send", async () => {
+    const appSkillsDeferred = deferred<[]>();
+    const enqueue = vi.fn();
+    mockListBerdAppSkills.mockReturnValue(appSkillsDeferred.promise);
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      enqueue,
+      dismiss: vi.fn(),
+    }));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(latestMessageQueueArgs()[1]).toBe("thinking");
+    act(() => {
+      expect(result.current.handleSend("help me with Berd")).toBe(true);
+    });
+    expect(enqueue).toHaveBeenCalledWith(
+      "help me with Berd",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      appSkillsDeferred.resolve([]);
+      await appSkillsDeferred.promise;
+    });
+
+    await waitFor(() => expect(latestMessageQueueArgs()[1]).toBe("idle"));
   });
 
   it("waits for workspace context discovery before accepting workspace sends", async () => {

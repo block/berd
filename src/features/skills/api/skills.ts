@@ -23,7 +23,7 @@ export interface SkillProjectLink {
   fileLocation: string;
 }
 
-export type SkillSourceKind = "global" | "project" | "builtin";
+export type SkillSourceKind = "app" | "global" | "project" | "builtin";
 
 export interface SkillInfo {
   id: string;
@@ -36,6 +36,7 @@ export interface SkillInfo {
   sourceLabel: string;
   projectLinks: SkillProjectLink[];
   readonly: boolean;
+  legacyPinId?: string;
   /** User-chosen pill tone or custom pastel hex, persisted to frontmatter as `color`. Null for
    *  legacy skills created before the picker existed — consumers fall back
    *  to the deterministic hash-from-name tone in that case. */
@@ -63,6 +64,7 @@ interface AgentSkillEntry {
   fileLocation: string;
   sourceKind: SkillSourceKind;
   sourceLabel: string;
+  legacyPinId?: string;
 }
 
 interface ListAgentSkillsResponse {
@@ -274,7 +276,10 @@ function toAgentSkillInfo(
   const projectName = projectRoot ? basename(projectRoot) : source.sourceLabel;
 
   return {
-    id: `agent:${providerId ?? "unknown"}:${source.path}`,
+    id:
+      source.sourceKind === "app"
+        ? `app:${source.path}`
+        : `agent:${providerId ?? "unknown"}:${source.path}`,
     name: source.name,
     description: source.description,
     instructions: source.content,
@@ -282,7 +287,7 @@ function toAgentSkillInfo(
     fileLocation: source.fileLocation,
     sourceKind: source.sourceKind,
     sourceLabel:
-      source.sourceKind === "global" ? source.sourceLabel : projectName,
+      source.sourceKind === "project" ? projectName : source.sourceLabel,
     projectLinks: projectRoot
       ? [
           {
@@ -295,6 +300,7 @@ function toAgentSkillInfo(
         ]
       : [],
     readonly: true,
+    ...(source.legacyPinId ? { legacyPinId: source.legacyPinId } : {}),
     color: null,
   };
 }
@@ -331,6 +337,16 @@ export async function createSkill(
   const skill = toSkillInfo(response.source);
   emitSkillsChanged();
   return skill;
+}
+
+export async function listBerdAppSkills(): Promise<SkillInfo[]> {
+  if (!isDesktopRuntime()) {
+    return [];
+  }
+  const response = await invoke<ListAgentSkillsResponse>(
+    "list_berd_app_skills",
+  );
+  return response.skills.map((skill) => toAgentSkillInfo(skill, null));
 }
 
 async function listAgentFileSkills(
@@ -421,7 +437,14 @@ export async function listSkills(
     return listAgentFileSkills(projectDirs, options.providerId);
   }
 
-  return listGooseSourceSkills(projectDirs);
+  const [gooseSkills, appSkills] = await Promise.all([
+    listGooseSourceSkills(projectDirs),
+    listBerdAppSkills(),
+  ]);
+  // Goose already orders project and Personal sources by its own precedence.
+  // Append Berd app skills so a same-named Personal skill wins bare-name
+  // activation while exact selection can still target either source by id.
+  return [...gooseSkills, ...appSkills];
 }
 
 export async function deleteSkill(path: string): Promise<void> {

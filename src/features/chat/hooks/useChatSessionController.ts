@@ -29,7 +29,7 @@ import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepositor
 import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
 import { formatWorkspaceInstructionsPrompt } from "@/features/chat/lib/workspaceContextPrompt";
 import { getSkillProviderCapabilities } from "@/features/chat/lib/skillProviderCapabilities";
-import { listSkills } from "@/features/skills/api/skills";
+import { listBerdAppSkills, listSkills } from "@/features/skills/api/skills";
 import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillChatPrompt";
 import { setStoredModelPreference } from "../lib/modelPreferences";
 import { saveDefaultReasoningEffort } from "../lib/reasoningEffortPreferences";
@@ -468,14 +468,19 @@ export function useChatSessionController({
     useState(EMPTY_PROMPT_STATE);
   const [availableSkillsCatalogState, setAvailableSkillsCatalogState] =
     useState(EMPTY_PROMPT_STATE);
+  const [appSkillsCatalogState, setAppSkillsCatalogState] =
+    useState(EMPTY_PROMPT_STATE);
   const workspaceInstructionsReady =
     !hasIncludedWorkspacePaths ||
     workspaceInstructionsState.key === workspaceContextKey;
+  const appSkillsCatalogReady = appSkillsCatalogState.key === "app";
   const availableSkillsCatalogReady =
     !hasIncludedWorkspacePaths ||
     availableSkillsCatalogState.key === skillsCatalogKey;
   const workspaceContextReady =
-    workspaceInstructionsReady && availableSkillsCatalogReady;
+    workspaceInstructionsReady &&
+    appSkillsCatalogReady &&
+    availableSkillsCatalogReady;
   const skillProjectDirs =
     workspaceRepository.mode === "multi" ? includedWorkspacePaths : undefined;
   const fileMentionProjectDirs =
@@ -491,6 +496,10 @@ export function useChatSessionController({
   const availableSkillsCatalogPrompt =
     availableSkillsCatalogState.key === skillsCatalogKey
       ? availableSkillsCatalogState.prompt
+      : undefined;
+  const appSkillsCatalogPrompt =
+    appSkillsCatalogState.key === "app"
+      ? appSkillsCatalogState.prompt
       : undefined;
   const artifactFolderInstructions = useMemo(() => {
     if (project) return undefined;
@@ -537,7 +546,35 @@ export function useChatSessionController({
   useEffect(() => {
     let cancelled = false;
 
-    if (includedWorkspacePaths.length === 0) {
+    void listBerdAppSkills()
+      .then((skills) => {
+        if (cancelled) return;
+        setAppSkillsCatalogState((current) =>
+          nextPromptState(current, {
+            key: "app",
+            prompt: formatAvailableSkillsCatalogPrompt(skills),
+          }),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load Berd app skills catalog:", error);
+        setAppSkillsCatalogState((current) =>
+          nextPromptState(current, {
+            key: "app",
+            prompt: undefined,
+          }),
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!hasIncludedWorkspacePaths) {
       setAvailableSkillsCatalogState((current) =>
         nextPromptState(current, {
           key: skillsCatalogKey,
@@ -553,7 +590,9 @@ export function useChatSessionController({
         setAvailableSkillsCatalogState((current) =>
           nextPromptState(current, {
             key: skillsCatalogKey,
-            prompt: formatAvailableSkillsCatalogPrompt(skills),
+            prompt: formatAvailableSkillsCatalogPrompt(
+              skills.filter((skill) => skill.sourceKind !== "app"),
+            ),
           }),
         );
       })
@@ -571,19 +610,26 @@ export function useChatSessionController({
     return () => {
       cancelled = true;
     };
-  }, [includedWorkspacePaths, skillProviderId, skillsCatalogKey]);
+  }, [
+    hasIncludedWorkspacePaths,
+    includedWorkspacePaths,
+    skillProviderId,
+    skillsCatalogKey,
+  ]);
   const effectiveSystemPrompt = useMemo(
     () =>
       composeSystemPrompt(
         formatPersonaSystemPrompt(selectedPersona),
         includedWorkspacesPrompt,
         workspaceInstructionsPrompt,
+        appSkillsCatalogPrompt,
         availableSkillsCatalogPrompt,
       ),
     [
       selectedPersona,
       includedWorkspacesPrompt,
       workspaceInstructionsPrompt,
+      appSkillsCatalogPrompt,
       availableSkillsCatalogPrompt,
     ],
   );

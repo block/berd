@@ -49,11 +49,11 @@ When bundled defaults are present, the Tauri shell:
 - adds `distro/config.yaml` to `GOOSE_ADDITIONAL_CONFIG_FILES` when present
 - sets `GOOSE_DISTRO_DIR` to the resolved distro root
 - uses `kgoose` as the generic default endpoint for KGoose-backed features
-- installs `distro/skills/<name>/` entries into `~/.agents/skills/<name>/`
+- installs Berd-owned `distro/skills/<name>/` entries into the platform app-data `skills/<name>/` directory; Personal skills remain in `~/.agents/skills`
 - installs `distro/agents/<name>.md` entries into `~/.agents/agents/<name>.md`
 - warms installed bundled agent `app-avatar:` media when network access is available
 
-Bundled skills reinstall existing copies only when the installed `SKILL.md` frontmatter has the `metadata.berdBundled: true` marker. For existing installs, the app still recognizes the legacy `metadata.gooseInternalBundled: true` marker. Existing unmarked user skills are left untouched.
+Bundled skills reinstall existing copies only when the installed `SKILL.md` frontmatter has the `metadata.berdBundled: true` marker. For existing installs, the app still recognizes the legacy `metadata.gooseInternalBundled: true` marker. After the new Berd-owned copy is verified, marker-owned legacy copies under `~/.agents/skills` move to the platform app-data `recovery/skills-migration-v1` directory; existing recovery data and all unmarked Personal skills are left untouched.
 
 Bundled agents use the `metadata.berdBundled: true` marker. The app records seeded files in `.berd-bundled-agents.json` so deleted starter agents do not reappear on later launches, and migrates the legacy `.goose-internal-bundled-agents.json` marker when present. For existing installs, the app still recognizes legacy `metadata.gooseInternalBundled: true` agent frontmatter. Existing unmarked user agents are left untouched.
 

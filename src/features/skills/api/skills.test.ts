@@ -6,6 +6,11 @@ const mockGooseSourcesCreate = vi.fn();
 const mockGooseSourcesDelete = vi.fn();
 const mockGooseSourcesUpdate = vi.fn();
 const mockGooseSourcesImport = vi.fn();
+const mockInvoke = vi.fn();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
@@ -232,6 +237,7 @@ describe("listSkills", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    mockInvoke.mockResolvedValue({ skills: [] });
   });
 
   it("aggregates project skill listings and recognizes .agents skill paths", async () => {
@@ -524,6 +530,80 @@ describe("listSkills", () => {
       "code-review",
       "test-writer",
     ]);
+  });
+
+  it("merges Berd app skills into Goose skill discovery", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    mockInvoke.mockResolvedValueOnce({
+      skills: [
+        {
+          name: "goose-help",
+          description: "Help with Berd",
+          content: "Use Berd help",
+          path: "/Users/test/Library/Application Support/xyz.block.berd/skills/goose-help",
+          fileLocation:
+            "/Users/test/Library/Application Support/xyz.block.berd/skills/goose-help/SKILL.md",
+          sourceKind: "app",
+          sourceLabel: "Berd app",
+        },
+      ],
+    });
+    mockGooseSourcesList
+      .mockResolvedValueOnce({ sources: [] })
+      .mockResolvedValueOnce({ sources: [] });
+
+    const { listSkills } = await import("./skills");
+    const skills = await listSkills();
+
+    expect(mockInvoke).toHaveBeenCalledWith("list_berd_app_skills");
+    expect(skills).toEqual([
+      expect.objectContaining({
+        id: "app:/Users/test/Library/Application Support/xyz.block.berd/skills/goose-help",
+        name: "goose-help",
+        sourceKind: "app",
+        sourceLabel: "Berd app",
+        readonly: true,
+      }),
+    ]);
+    delete window.__TAURI_INTERNALS__;
+  });
+
+  it("orders Personal skills before same-named Berd app skills", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    mockInvoke.mockResolvedValueOnce({
+      skills: [
+        {
+          name: "agent-builder",
+          description: "Berd app builder",
+          content: "Use the app builder",
+          path: "/Users/test/Library/Application Support/xyz.block.berd/skills/agent-builder",
+          fileLocation:
+            "/Users/test/Library/Application Support/xyz.block.berd/skills/agent-builder/SKILL.md",
+          sourceKind: "app",
+          sourceLabel: "Berd app",
+        },
+      ],
+    });
+    mockGooseSourcesList
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            type: "skill",
+            name: "agent-builder",
+            description: "Personal builder",
+            content: "Use my builder",
+            path: "/Users/test/.agents/skills/agent-builder",
+            global: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ sources: [] });
+
+    const { listSkills } = await import("./skills");
+    const skills = await listSkills();
+
+    expect(skills.map((skill) => skill.sourceKind)).toEqual(["global", "app"]);
+    delete window.__TAURI_INTERNALS__;
   });
 
   it("fetches and maps built-in skills without filesystem project/global metadata", async () => {
