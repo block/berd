@@ -183,6 +183,7 @@ impl GooseServeProcess {
 
         command
             .arg("serve")
+            .arg("--enable-scheduler")
             .arg("--host")
             .arg(LOCALHOST)
             .arg("--port")
