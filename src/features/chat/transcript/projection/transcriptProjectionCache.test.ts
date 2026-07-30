@@ -403,6 +403,193 @@ describe("transcript projection cache", () => {
     expect(snapshot.wholeMessageFallbackRowCount).toBe(0);
   });
 
+  it("places trailing reasoning before the final answer", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-trailing-reasoning",
+      "assistant",
+      [
+        { type: "text", text: "Here is the final answer." },
+        {
+          type: "thinking",
+          text: "I should summarize the recommendation for the user.",
+        },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-trailing-reasoning",
+      "message:assistant-trailing-reasoning:agent-work",
+      "message:assistant-trailing-reasoning:answer",
+    ]);
+    expect(
+      rowById(snapshot, "message:assistant-trailing-reasoning:agent-work")
+        .agentWork?.hasFinalAnswer,
+    ).toBe(true);
+  });
+
+  it("keeps the final answer before an earlier companion", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-companion-trailing-reasoning",
+      "assistant",
+      [
+        { type: "text", text: "Here is the final answer." },
+        { type: "image", data: "cHJldmlldw==", mimeType: "image/png" },
+        { type: "thinking", text: "I should inspect the preview." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-companion-trailing-reasoning",
+      "message:assistant-companion-trailing-reasoning:agent-work",
+      "message:assistant-companion-trailing-reasoning:answer",
+      expect.stringMatching(
+        /^message:assistant-companion-trailing-reasoning:companion-image-/,
+      ),
+    ]);
+  });
+
+  it("keeps a later companion after the final answer", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-trailing-reasoning-companion",
+      "assistant",
+      [
+        { type: "text", text: "Here is the final answer." },
+        { type: "thinking", text: "I should inspect the preview." },
+        { type: "image", data: "cHJldmlldw==", mimeType: "image/png" },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-trailing-reasoning-companion",
+      "message:assistant-trailing-reasoning-companion:agent-work",
+      "message:assistant-trailing-reasoning-companion:answer",
+      expect.stringMatching(
+        /^message:assistant-trailing-reasoning-companion:companion-image-/,
+      ),
+    ]);
+  });
+
+  it("keeps trailing reasoning inside active work until settling", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-streaming-trailing-reasoning",
+      "assistant",
+      [
+        { type: "text", text: "Here is the final answer." },
+        { type: "thinking", text: "I should summarize the result." },
+      ],
+      utc(2026, 6, 4, 10),
+      { completionStatus: "inProgress" },
+    );
+
+    const streaming = update(cache, [assistant], assistant.id);
+    expect(streaming.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-streaming-trailing-reasoning",
+      "message:assistant-streaming-trailing-reasoning:agent-work",
+    ]);
+
+    const completed = update(cache, [
+      {
+        ...assistant,
+        metadata: { ...assistant.metadata, completionStatus: "completed" },
+      },
+    ]);
+    expect(completed.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-streaming-trailing-reasoning",
+      "message:assistant-streaming-trailing-reasoning:agent-work",
+      "message:assistant-streaming-trailing-reasoning:answer",
+    ]);
+  });
+
+  it("keeps multiple trailing work groups in order before the final answer", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-multi-trailing-work",
+      "assistant",
+      [
+        { type: "text", text: "Here is the final answer." },
+        { type: "thinking", text: "I should double-check the preview." },
+        { type: "image", data: "cHJldmlldw==", mimeType: "image/png" },
+        { type: "thinking", text: "I should summarize the recommendation." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-multi-trailing-work",
+      "message:assistant-multi-trailing-work:agent-work-0",
+      "message:assistant-multi-trailing-work:agent-work-1",
+      "message:assistant-multi-trailing-work:answer",
+      expect.stringMatching(
+        /^message:assistant-multi-trailing-work:companion-image-/,
+      ),
+    ]);
+    expect(
+      rowById(snapshot, "message:assistant-multi-trailing-work:agent-work-0")
+        .agentWork?.content,
+    ).toContainEqual({
+      type: "thinking",
+      text: "I should double-check the preview.",
+    });
+    expect(
+      rowById(snapshot, "message:assistant-multi-trailing-work:agent-work-1")
+        .agentWork?.content,
+    ).toContainEqual({
+      type: "thinking",
+      text: "I should summarize the recommendation.",
+    });
+  });
+
+  it("places leading and trailing work before the final answer", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-leading-and-trailing-work",
+      "assistant",
+      [
+        { type: "thinking", text: "I should inspect the files." },
+        toolRequest("tool-1"),
+        { type: "text", text: "Here is the final answer." },
+        { type: "thinking", text: "I should summarize the result." },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+
+    expect(snapshot.rows.map((row) => row.rowId)).toEqual([
+      "date:2026-06-04:before:assistant-leading-and-trailing-work",
+      "message:assistant-leading-and-trailing-work:agent-work-0",
+      "message:assistant-leading-and-trailing-work:agent-work-1",
+      "message:assistant-leading-and-trailing-work:answer",
+    ]);
+    expect(
+      rowById(
+        snapshot,
+        "message:assistant-leading-and-trailing-work:agent-work-0",
+      ).agentWork?.hasFinalAnswer,
+    ).toBe(false);
+    expect(
+      rowById(
+        snapshot,
+        "message:assistant-leading-and-trailing-work:agent-work-1",
+      ).agentWork?.hasFinalAnswer,
+    ).toBe(true);
+  });
+
   it("dedupes adjacent duplicate reasoning-only assistant messages", () => {
     const cache = createTranscriptProjectionCache();
     const firstThought = messageWithContent(

@@ -1200,10 +1200,20 @@ function buildAgentWorkItems({
     }
   }
 
+  const finalAnswerIndex = answerEntries[0]?.index;
+
   workEntryGroups.forEach((entries, groupIndex) => {
     const content = compactWorkContent(entries.map(({ block }) => block));
+    const sourceIndex = entries[0]?.index ?? 0;
+    // Some providers persist reasoning summaries after their final text. Move
+    // that work directly before the answer so the answer keeps its source-order
+    // relationship with companion content such as images and MCP apps. Groups
+    // are built in ascending source order and the sort below is stable, so
+    // sharing one position keeps multiple trailing groups in sequence.
+    const isTrailingWork =
+      finalAnswerIndex !== undefined && sourceIndex > finalAnswerIndex;
     positionedItems.push({
-      index: entries[0]?.index ?? 0,
+      index: isTrailingWork ? finalAnswerIndex - 0.5 : sourceIndex,
       item: buildAgentWorkItem({
         message,
         content,
