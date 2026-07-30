@@ -9,6 +9,12 @@ import {
   SECURITY_ALERT_MARKER,
   useSecurityConfirmationStore,
 } from "@/features/security/stores/securityConfirmationStore";
+import {
+  alertLacksExplanation,
+  extractConfidence,
+  inferSecurityExplanation,
+} from "@/features/security/lib/inferExplanation";
+import { readDefaultProviderReadiness } from "@/features/providers/defaultProviderReadiness";
 
 function textFromContentBlock(block: ContentBlock): string | null {
   if (block.type === "text") {
@@ -66,6 +72,10 @@ function isSecurityRequest(alertText: string): boolean {
  * "🔒 Security Alert" marker) are surfaced to the user via a confirmation
  * modal; all other permission requests are auto-approved to preserve Berd's
  * existing no-friction tool behavior.
+ *
+ * When the alert lacks a human-readable explanation (ML-only detections),
+ * a lightweight LLM call infers a likely reason for the flag and surfaces it
+ * in the modal alongside the detection confidence.
  */
 export function handleSecurityPermissionRequest(
   request: RequestPermissionRequest,
@@ -78,13 +88,53 @@ export function handleSecurityPermissionRequest(
     });
   }
 
-  return new Promise<RequestPermissionResponse>((resolve) => {
+  const command = stringifyCommand(request.toolCall.rawInput);
+
+  // Show the modal immediately — inference runs in the background
+  const promise = new Promise<RequestPermissionResponse>((resolve) => {
     useSecurityConfirmationStore.getState().enqueue({
       request,
       title: request.toolCall.title ?? "Tool call",
-      command: stringifyCommand(request.toolCall.rawInput),
+      command,
       alertText,
       resolve,
     });
   });
+
+  // If the alert only has confidence (no explanation), infer one
+  if (command && alertLacksExplanation(alertText)) {
+    const store = useSecurityConfirmationStore.getState();
+    store.setInferredExplanation({ status: "loading" });
+
+    const confidence = extractConfidence(alertText);
+    readDefaultProviderReadiness()
+      .then(async (readiness) => {
+        if (readiness.status === "needs_setup") {
+          return { status: "needs_setup" as const };
+        }
+
+        // If readiness could not be confirmed, still try the inference. The
+        // actual Goose request is the most reliable availability check and
+        // preserves explanations during transient readiness-check failures.
+        const text = await inferSecurityExplanation(command, confidence);
+        return text
+          ? { status: "done" as const, text }
+          : { status: "failed" as const };
+      })
+      .then((result) => {
+        const current = useSecurityConfirmationStore.getState();
+        // Only update if the same alert is still pending
+        if (current.pending?.request === request) {
+          current.setInferredExplanation(result);
+        }
+      })
+      .catch(() => {
+        const current = useSecurityConfirmationStore.getState();
+        if (current.pending?.request === request) {
+          current.setInferredExplanation({ status: "failed" });
+        }
+      });
+  }
+
+  return promise;
 }

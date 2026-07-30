@@ -16,13 +16,31 @@ import { createWebSocketStream } from "./createWebSocketStream";
 import { perfLog } from "@/shared/lib/perfLog";
 
 let notificationHandler: AcpNotificationHandler | null = null;
+const sessionNotificationInterceptors =
+  new Set<SessionNotificationInterceptor>();
 
 export interface AcpNotificationHandler {
   handleSessionNotification(notification: SessionNotification): Promise<void>;
 }
 
+export type SessionNotificationInterceptor = (
+  notification: SessionNotification,
+) => boolean;
+
 export function setNotificationHandler(handler: AcpNotificationHandler): void {
   notificationHandler = handler;
+}
+
+/**
+ * Registers a short-lived interceptor for private/background ACP sessions.
+ * Returning true consumes the notification so it is not added to the visible
+ * chat store.
+ */
+export function interceptSessionNotifications(
+  interceptor: SessionNotificationInterceptor,
+): () => void {
+  sessionNotificationInterceptors.add(interceptor);
+  return () => sessionNotificationInterceptors.delete(interceptor);
 }
 
 /**
@@ -61,6 +79,11 @@ function createClientCallbacks(): () => Client {
     },
 
     sessionUpdate: async (notification: SessionNotification): Promise<void> => {
+      for (const interceptor of sessionNotificationInterceptors) {
+        if (interceptor(notification)) {
+          return;
+        }
+      }
       if (notificationHandler) {
         await notificationHandler.handleSessionNotification(notification);
       }

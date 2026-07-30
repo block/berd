@@ -14,9 +14,18 @@ export interface PendingSecurityConfirmation {
   resolve: (response: RequestPermissionResponse) => void;
 }
 
+export type InferredExplanationState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "done"; text: string }
+  | { status: "needs_setup" }
+  | { status: "failed" };
+
 interface SecurityConfirmationState {
   pending: PendingSecurityConfirmation | null;
+  inferredExplanation: InferredExplanationState;
   enqueue: (pending: PendingSecurityConfirmation) => void;
+  setInferredExplanation: (state: InferredExplanationState) => void;
   resolveWith: (optionId: string) => void;
   cancel: () => void;
 }
@@ -33,9 +42,14 @@ function optionId(
 export const useSecurityConfirmationStore = create<SecurityConfirmationState>(
   (set, get) => ({
     pending: null,
+    inferredExplanation: { status: "idle" },
 
     enqueue: (pending) => {
-      set({ pending });
+      set({ pending, inferredExplanation: { status: "idle" } });
+    },
+
+    setInferredExplanation: (inferredExplanation) => {
+      set({ inferredExplanation });
     },
 
     resolveWith: (selectedOptionId) => {
@@ -46,7 +60,7 @@ export const useSecurityConfirmationStore = create<SecurityConfirmationState>(
       pending.resolve({
         outcome: { outcome: "selected", optionId: selectedOptionId },
       });
-      set({ pending: null });
+      set({ pending: null, inferredExplanation: { status: "idle" } });
     },
 
     cancel: () => {
@@ -55,7 +69,7 @@ export const useSecurityConfirmationStore = create<SecurityConfirmationState>(
         return;
       }
       pending.resolve({ outcome: { outcome: "cancelled" } });
-      set({ pending: null });
+      set({ pending: null, inferredExplanation: { status: "idle" } });
     },
   }),
 );

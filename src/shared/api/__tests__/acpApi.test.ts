@@ -6,6 +6,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
+  interceptSessionNotifications: vi.fn(),
   listSessions: vi.fn(),
   unstableForkSession: vi.fn(),
   newSession: vi.fn(),
@@ -58,7 +59,99 @@ function createConfigOptionsResponse() {
 
 vi.mock("../acpConnection", () => ({
   getClient: (...args: unknown[]) => mocks.getClient(...args),
+  interceptSessionNotifications: (...args: unknown[]) =>
+    mocks.interceptSessionNotifications(...args),
 }));
+
+describe("promptForText", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("collects streamed text from only the private session", async () => {
+    let intercept:
+      | ((notification: {
+          sessionId: string;
+          update: {
+            sessionUpdate: "agent_message_chunk";
+            content: { type: "text"; text: string };
+          };
+        }) => boolean)
+      | undefined;
+    const stopIntercepting = vi.fn();
+    mocks.interceptSessionNotifications.mockImplementation((callback) => {
+      intercept = callback;
+      return stopIntercepting;
+    });
+
+    const prompt = vi.fn(async () => {
+      expect(
+        intercept?.({
+          sessionId: "visible-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "ignore me" },
+          },
+        }),
+      ).toBe(false);
+      expect(
+        intercept?.({
+          sessionId: "private-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Encoded payload " },
+          },
+        }),
+      ).toBe(true);
+      intercept?.({
+        sessionId: "private-session",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "could conceal instructions." },
+        },
+      });
+      return { stopReason: "end_turn" };
+    });
+    const cancel = vi.fn();
+    mocks.getClient.mockResolvedValue({ prompt, cancel });
+
+    const { promptForText } = await import("../acpApi");
+    await expect(
+      promptForText(
+        "private-session",
+        [{ type: "text", text: "Explain this command" }],
+        1000,
+      ),
+    ).resolves.toBe("Encoded payload could conceal instructions.");
+
+    expect(stopIntercepting).toHaveBeenCalledOnce();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels a private prompt that exceeds its timeout", async () => {
+    vi.useFakeTimers();
+    const stopIntercepting = vi.fn();
+    mocks.interceptSessionNotifications.mockReturnValue(stopIntercepting);
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    mocks.getClient.mockResolvedValue({
+      prompt: vi.fn(() => new Promise(() => {})),
+      cancel,
+    });
+
+    const { promptForText } = await import("../acpApi");
+    const result = promptForText(
+      "private-session",
+      [{ type: "text", text: "Explain this command" }],
+      1000,
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(result).resolves.toBeNull();
+    expect(cancel).toHaveBeenCalledWith({ sessionId: "private-session" });
+    expect(stopIntercepting).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+});
 
 describe("listSessionsPage", () => {
   beforeEach(() => {

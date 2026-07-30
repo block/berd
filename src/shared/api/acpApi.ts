@@ -10,7 +10,7 @@ import type {
 import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { toWireProviderId } from "./acpPersonaHandoff";
-import { getClient } from "./acpConnection";
+import { getClient, interceptSessionNotifications } from "./acpConnection";
 import {
   applySessionConfigOptionsSnapshot,
   readSessionConfigOptionsSnapshots,
@@ -371,6 +371,11 @@ export async function archiveSession(sessionId: string): Promise<void> {
   await client.goose.GooseUnstableSessionArchive({ sessionId });
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  const client = await getClient();
+  await client.goose.sessionDelete({ sessionId });
+}
+
 export async function unarchiveSession(sessionId: string): Promise<void> {
   const client = await getClient();
   await client.goose.GooseUnstableSessionUnarchive({ sessionId });
@@ -452,6 +457,67 @@ export async function prompt(
 ): Promise<PromptResponse> {
   const client = await getClient();
   return client.prompt({ sessionId, prompt: content, _meta: meta });
+}
+
+/**
+ * Runs a prompt in a private/background session and returns its streamed text.
+ * Notifications for that session are consumed here instead of entering the
+ * visible chat store.
+ */
+export async function promptForText(
+  sessionId: string,
+  content: ContentBlock[],
+  timeoutMs: number,
+): Promise<string | null> {
+  const textChunks: string[] = [];
+  let didTimeOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const stopIntercepting = interceptSessionNotifications((notification) => {
+    if (notification.sessionId !== sessionId) {
+      return false;
+    }
+
+    const { update } = notification;
+    if (
+      update.sessionUpdate === "agent_message_chunk" &&
+      update.content.type === "text"
+    ) {
+      textChunks.push(update.content.text);
+    }
+    return true;
+  });
+
+  try {
+    const promptCompleted = prompt(sessionId, content).then(() => true);
+    const completed = await Promise.race([
+      promptCompleted,
+      new Promise<false>((resolve) => {
+        timeoutId = setTimeout(() => {
+          didTimeOut = true;
+          resolve(false);
+        }, timeoutMs);
+      }),
+    ]);
+
+    if (!completed) {
+      return null;
+    }
+
+    return textChunks.join("").trim() || null;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+    if (didTimeOut) {
+      try {
+        await cancelSession(sessionId);
+      } catch {
+        // Best-effort cancellation; the caller still owns session cleanup.
+      }
+    }
+    stopIntercepting();
+  }
 }
 
 const UNKNOWN_EXPECTED_RUN_ID = "__berd_unknown_active_run__";

@@ -727,10 +727,16 @@
   },
   "securityConfirmation": {
     "title": "Security alert",
-    "description": "This action was flagged as a potential security risk. Review it before allowing it to run.",
+    "description": "This action was flagged as a potential security risk. Review the details below before deciding whether to allow it.",
+    "detectionConfidence": "Detection confidence",
     "commandLabel": "Flagged command",
+    "inferring": "Analyzing why this was flagged…",
+    "inferredLabel": "Why this may have been flagged (inferred)",
+    "inferenceFailed": "An explanation could not be generated. Review the command carefully before allowing it.",
+    "connectGooseDescription": "Connect Goose to get AI-generated explanations for future security alerts.",
+    "connectGoose": "Connect Goose",
     "findingId": "Finding ID: {{id}}",
-    "allow": "Allow",
+    "allow": "Allow once",
     "block": "Block"
   }
 }
