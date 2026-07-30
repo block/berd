@@ -121,6 +121,7 @@ fn run_bb() -> Result<()> {
             "summary": BB_SUMMARY,
             "commands": [
                 bb::skills::describe_auth_commands(),
+                bb::workspace::describe_commands(),
                 bb::skills::describe_config_commands(),
                 bb::skills::describe_commands(),
                 { "name": TOOLS_COMMAND_NAME, "summary": ROOT_SUMMARY },
@@ -139,6 +140,7 @@ fn run_bb() -> Result<()> {
     match matches.subcommand() {
         Some(("skills", skills_matches)) => bb::skills::run(skills_matches),
         Some(("auth", auth_matches)) => bb::skills::run_auth(auth_matches),
+        Some(("workspace", workspace_matches)) => bb::workspace::run(workspace_matches),
         Some(("config", config_matches)) => bb::skills::run_config(config_matches),
         Some(("completions", completions_matches)) => {
             let shell = completions_matches
@@ -163,6 +165,7 @@ fn build_bb_command() -> Command {
         .arg_required_else_help(true)
         .disable_help_subcommand(true)
         .subcommand(bb::skills::auth_command())
+        .subcommand(bb::workspace::command())
         .subcommand(bb::skills::config_command())
         .subcommand(bb::skills::skills_command())
         .subcommand(

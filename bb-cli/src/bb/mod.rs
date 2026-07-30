@@ -13,3 +13,4 @@ pub mod skills_doctor;
 pub mod skills_install;
 pub mod skills_models;
 pub mod skills_targets;
+pub mod workspace;

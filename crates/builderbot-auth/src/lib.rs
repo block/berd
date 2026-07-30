@@ -9,5 +9,7 @@ pub mod config;
 pub mod keychain;
 pub mod org_routing;
 pub mod preferences;
+#[cfg(feature = "blocking-client")]
+pub mod workspace;
 
 pub use auth::SESSION_CREDENTIAL_HEADER;

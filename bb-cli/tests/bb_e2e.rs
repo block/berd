@@ -1063,6 +1063,381 @@ fn bb_auth_logout_removes_stored_file_session() {
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
+#[test]
+fn bb_workspace_list_prints_accessible_workspaces_as_json() {
+    let temp = temp_test_dir("bb-workspace-list");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "workspaces": [
+            {
+                "workspace_identifier": "workspace-one",
+                "display_name": "Workspace One",
+                "roles": ["ROLE_USER"]
+            },
+            {
+                "workspace_identifier": "workspace-two",
+                "display_name": "Workspace Two",
+                "roles": ["ROLE_USER", "ROLE_ADMIN"]
+            }
+        ],
+        "active_workspace_identifier": "workspace-one"
+    }))]);
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["workspace", "list", "--json"])
+        .output()
+        .expect("run bb workspace list");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse workspace list output");
+    assert_eq!(
+        response["active_workspace_identifier"],
+        json!("workspace-one")
+    );
+    assert_eq!(response["workspaces"][1]["display_name"], "Workspace Two");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/api/goose/v1/workspaces/list");
+    assert_eq!(requests[0].body, json!({}));
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-cli-session")
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_workspace_switch_flag_skips_list_and_stores_rotated_credential() {
+    let temp = temp_test_dir("bb-workspace-switch");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "workspace": {
+            "workspace_identifier": "workspace-two",
+            "display_name": "Workspace Two",
+            "roles": ["ROLE_USER"]
+        },
+        "session_credential": "rotated-cli-session"
+    }))]);
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "workspace",
+            "switch",
+            "--workspace",
+            "workspace-two",
+            "--json",
+        ])
+        .output()
+        .expect("run bb workspace switch");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse workspace switch output");
+    assert_eq!(
+        response["workspace"]["workspace_identifier"],
+        "workspace-two"
+    );
+    assert_eq!(response["switched"], true);
+    assert!(
+        !stdout.contains("rotated-cli-session"),
+        "credential leaked to stdout: {stdout}"
+    );
+    assert_eq!(
+        requests.len(),
+        1,
+        "direct switch should skip workspace list"
+    );
+    assert_eq!(requests[0].path, "/api/goose/v1/workspaces/switch");
+    assert_eq!(
+        requests[0].body,
+        json!({"workspace_identifier": "workspace-two"})
+    );
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-cli-session")
+    );
+    let storage: Value = serde_json::from_str(
+        &fs::read_to_string(&storage_path).expect("read rotated auth storage"),
+    )
+    .expect("parse rotated auth storage");
+    let stored = storage
+        .as_object()
+        .expect("storage object")
+        .values()
+        .next()
+        .expect("stored session");
+    assert_eq!(stored["sessionCredential"], "rotated-cli-session");
+    assert_eq!(stored["expiresAt"], "2026-06-15T00:00:00Z");
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_workspace_switch_current_workspace_keeps_stored_credential() {
+    let temp = temp_test_dir("bb-workspace-switch-current");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "workspace": {
+            "workspace_identifier": "workspace-one",
+            "display_name": "Workspace One",
+            "roles": ["ROLE_USER"]
+        }
+    }))]);
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "workspace",
+            "switch",
+            "--workspace",
+            "workspace-one",
+            "--json",
+        ])
+        .output()
+        .expect("run bb workspace switch current");
+    let _requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse workspace switch output");
+    assert_eq!(response["switched"], false);
+    let storage = fs::read_to_string(&storage_path).expect("read auth storage");
+    assert!(storage.contains("stored-cli-session"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_workspace_switch_persists_rotated_credential_before_validating_workspace() {
+    let temp = temp_test_dir("bb-workspace-switch-missing-workspace");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "session_credential": "rotated-cli-session"
+    }))]);
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "workspace",
+            "switch",
+            "--workspace",
+            "workspace-two",
+            "--json",
+        ])
+        .output()
+        .expect("run bb workspace switch with malformed response");
+    let _requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("returned no workspace"));
+    let storage = fs::read_to_string(&storage_path).expect("read auth storage");
+    assert!(storage.contains("rotated-cli-session"));
+    assert!(!storage.contains("stored-cli-session"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_workspace_switch_rejects_invalid_rotated_credential_before_storage() {
+    let temp = temp_test_dir("bb-workspace-switch-invalid-credential");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "workspace": {
+            "workspace_identifier": "workspace-two",
+            "display_name": "Workspace Two",
+            "roles": ["ROLE_USER"]
+        },
+        "session_credential": "invalid\ncredential"
+    }))]);
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "workspace",
+            "switch",
+            "--workspace",
+            "workspace-two",
+            "--json",
+        ])
+        .output()
+        .expect("run bb workspace switch with invalid credential");
+    let _requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("invalid replacement credential"));
+    let storage = fs::read_to_string(&storage_path).expect("read auth storage");
+    assert!(storage.contains("stored-cli-session"));
+    assert!(!storage.contains("invalid"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_workspace_errors_escape_untrusted_server_text() {
+    let temp = temp_test_dir("bb-workspace-error-safety");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![MockResponse::text(
+        403,
+        "denied\u{1b}[2J\u{202e}spoofed",
+    )]);
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["workspace", "list", "--json"])
+        .output()
+        .expect("run forbidden bb workspace list");
+    let _requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(!stderr.contains('\u{1b}'), "raw escape leaked: {stderr:?}");
+    assert!(
+        !stderr.contains('\u{202e}'),
+        "raw bidi control leaked: {stderr:?}"
+    );
+    assert!(
+        stderr.contains(r"\\u{1b}"),
+        "escaped control missing: {stderr}"
+    );
+    assert!(
+        stderr.contains(r"\\u{202e}"),
+        "escaped bidi control missing: {stderr}"
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_workspace_switch_requires_flag_outside_a_tty() {
+    let temp = temp_test_dir("bb-workspace-switch-noninteractive");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        "http://127.0.0.1:9",
+        "stored-cli-session",
+        "2026-06-15T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
+        .args(["workspace", "switch", "--json"])
+        .output()
+        .expect("run non-interactive bb workspace switch");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    let payload = parse_stderr_error(&stderr);
+    assert_eq!(payload["error"]["code"], "workspace_required");
+    assert!(payload["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .contains("--workspace <ID>"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+fn write_browser_auth_session(
+    storage_path: &Path,
+    base_url: &str,
+    session_credential: &str,
+    expires_at: &str,
+) {
+    let storage_key = browser_auth_storage_key("default", &format!("{}/api/goose", base_url));
+    fs::write(
+        storage_path,
+        serde_json::to_string_pretty(&json!({
+            storage_key: {
+                "sessionCredential": session_credential,
+                "expiresAt": expires_at
+            }
+        }))
+        .expect("serialize auth storage"),
+    )
+    .expect("write auth storage");
+}
+
 fn browser_auth_storage_key(profile: &str, server_url: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(profile.as_bytes());
