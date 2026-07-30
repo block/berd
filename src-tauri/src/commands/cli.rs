@@ -326,7 +326,7 @@ mod macos {
     #[repr(C)]
     struct AuthorizationItem {
         name: *const c_char,
-        value_length: u32,
+        value_length: usize,
         value: *mut c_void,
         flags: u32,
     }
