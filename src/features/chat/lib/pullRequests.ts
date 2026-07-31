@@ -8,6 +8,20 @@ export interface DetectedPullRequest {
   number: number;
 }
 
+export interface RelatedPullRequestScan {
+  initialized: boolean;
+  processedMessageCount: number;
+  lastProcessedMessageId: string | null;
+  pullRequests: DetectedPullRequest[];
+}
+
+export const EMPTY_RELATED_PULL_REQUEST_SCAN: RelatedPullRequestScan = {
+  initialized: false,
+  processedMessageCount: 0,
+  lastProcessedMessageId: null,
+  pullRequests: [],
+};
+
 const PULL_REQUEST_URL_PATTERN =
   /https?:\/\/(?:github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)|app\.graphite\.(?:com|dev)\/github\/pr\/([\w.-]+)\/([\w.-]+)\/(\d+))/gi;
 
@@ -63,4 +77,68 @@ export function findRelatedPullRequests(
   }
 
   return results;
+}
+
+function mergePullRequests(
+  existing: DetectedPullRequest[],
+  additions: DetectedPullRequest[],
+  limit: number,
+): DetectedPullRequest[] {
+  if (existing.length >= limit || additions.length === 0) return existing;
+
+  const merged = [...existing];
+  const seen = new Set(
+    existing.map(
+      (pullRequest) =>
+        `${pullRequest.repoSlug.toLowerCase()}#${pullRequest.number}`,
+    ),
+  );
+
+  for (const pullRequest of additions) {
+    const key = `${pullRequest.repoSlug.toLowerCase()}#${pullRequest.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(pullRequest);
+    if (merged.length >= limit) break;
+  }
+
+  return merged;
+}
+
+export function advanceRelatedPullRequestScan(
+  scan: RelatedPullRequestScan,
+  messages: Message[],
+  streamingMessageId: string | null,
+  isLoading: boolean,
+  limit = MAX_RELATED_PULL_REQUESTS,
+): RelatedPullRequestScan {
+  if (isLoading) return EMPTY_RELATED_PULL_REQUEST_SCAN;
+
+  const prefixChanged =
+    scan.processedMessageCount > messages.length ||
+    (scan.processedMessageCount > 0 &&
+      messages[scan.processedMessageCount - 1]?.id !==
+        scan.lastProcessedMessageId);
+  const start =
+    !scan.initialized || prefixChanged ? 0 : scan.processedMessageCount;
+
+  let end = start;
+  while (end < messages.length && messages[end]?.id !== streamingMessageId) {
+    end += 1;
+  }
+
+  if (scan.initialized && !prefixChanged && end === start) return scan;
+
+  const additions = findRelatedPullRequests(messages.slice(start, end), limit);
+  const pullRequests =
+    start === 0
+      ? additions
+      : mergePullRequests(scan.pullRequests, additions, limit);
+
+  return {
+    initialized: true,
+    processedMessageCount: end,
+    lastProcessedMessageId: end > 0 ? (messages[end - 1]?.id ?? null) : null,
+    pullRequests,
+  };
 }

@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   IconExternalLink,
@@ -8,8 +8,9 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
 import {
-  findRelatedPullRequests,
+  advanceRelatedPullRequestScan,
   type DetectedPullRequest,
+  EMPTY_RELATED_PULL_REQUEST_SCAN,
 } from "../../lib/pullRequests";
 import { useChatStore } from "../../stores/chatStore";
 import type { Message } from "@/shared/types/messages";
@@ -51,12 +52,41 @@ export function SessionPullRequestsWidget({
   sessionId,
   ...props
 }: SessionPullRequestsWidgetProps) {
-  const messages = useChatStore((state) => state.messagesBySession[sessionId]);
-  const deferredMessages = useDeferredValue(messages ?? EMPTY_MESSAGES);
-  const pullRequests = useMemo(
-    () => findRelatedPullRequests(deferredMessages),
-    [deferredMessages],
+  const messages = useChatStore(
+    (state) => state.messagesBySession[sessionId] ?? EMPTY_MESSAGES,
   );
+  const streamingMessageId = useChatStore(
+    (state) => state.sessionStateById[sessionId]?.streamingMessageId ?? null,
+  );
+  const isLoading = useChatStore((state) =>
+    state.loadingSessionIds.has(sessionId),
+  );
+  const [sessionScan, setSessionScan] = useState(() => ({
+    sessionId,
+    scan: EMPTY_RELATED_PULL_REQUEST_SCAN,
+  }));
+
+  useEffect(() => {
+    setSessionScan((current) => {
+      const scan = advanceRelatedPullRequestScan(
+        current.sessionId === sessionId
+          ? current.scan
+          : EMPTY_RELATED_PULL_REQUEST_SCAN,
+        messages,
+        streamingMessageId,
+        isLoading,
+      );
+      if (current.sessionId === sessionId && scan === current.scan) {
+        return current;
+      }
+      return { sessionId, scan };
+    });
+  }, [isLoading, messages, sessionId, streamingMessageId]);
+
+  const pullRequests =
+    !isLoading && sessionScan.sessionId === sessionId
+      ? sessionScan.scan.pullRequests
+      : EMPTY_RELATED_PULL_REQUEST_SCAN.pullRequests;
 
   return <PullRequestsWidget pullRequests={pullRequests} {...props} />;
 }

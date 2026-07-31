@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/shared/types/messages";
-import { findRelatedPullRequests } from "./pullRequests";
+import {
+  advanceRelatedPullRequestScan,
+  EMPTY_RELATED_PULL_REQUEST_SCAN,
+  findRelatedPullRequests,
+} from "./pullRequests";
 
 function message(role: Message["role"], content: Message["content"]): Message {
   return { id: crypto.randomUUID(), role, created: 1, content };
+}
+
+function textMessage(id: string, text: string): Message {
+  return {
+    id,
+    role: "assistant",
+    created: 1,
+    content: [{ type: "text", text }],
+  };
 }
 
 describe("findRelatedPullRequests", () => {
@@ -85,5 +98,83 @@ describe("findRelatedPullRequests", () => {
         number: 42,
       },
     ]);
+  });
+});
+
+describe("advanceRelatedPullRequestScan", () => {
+  it("bootstraps after replay and only scans newly completed messages", () => {
+    const historical = textMessage(
+      "historical",
+      "https://github.com/squareup/berd/pull/10",
+    );
+    const streaming = textMessage(
+      "streaming",
+      "https://github.com/squareup/berd/pull/20",
+    );
+
+    const loading = advanceRelatedPullRequestScan(
+      EMPTY_RELATED_PULL_REQUEST_SCAN,
+      [historical],
+      null,
+      true,
+    );
+    expect(loading).toBe(EMPTY_RELATED_PULL_REQUEST_SCAN);
+
+    const bootstrapped = advanceRelatedPullRequestScan(
+      loading,
+      [historical, streaming],
+      streaming.id,
+      false,
+    );
+    expect(bootstrapped.pullRequests.map((pr) => pr.number)).toEqual([10]);
+    expect(bootstrapped.processedMessageCount).toBe(1);
+
+    const streamingUpdate = textMessage(
+      "streaming",
+      "https://github.com/squareup/berd/pull/21",
+    );
+    expect(
+      advanceRelatedPullRequestScan(
+        bootstrapped,
+        [historical, streamingUpdate],
+        streamingUpdate.id,
+        false,
+      ),
+    ).toBe(bootstrapped);
+
+    const completed = advanceRelatedPullRequestScan(
+      bootstrapped,
+      [historical, streamingUpdate],
+      null,
+      false,
+    );
+    expect(completed.pullRequests.map((pr) => pr.number)).toEqual([10, 21]);
+    expect(completed.processedMessageCount).toBe(2);
+  });
+
+  it("rebuilds the index when processed history is replaced", () => {
+    const original = textMessage(
+      "original",
+      "https://github.com/squareup/berd/pull/10",
+    );
+    const initial = advanceRelatedPullRequestScan(
+      EMPTY_RELATED_PULL_REQUEST_SCAN,
+      [original],
+      null,
+      false,
+    );
+    const replacement = textMessage(
+      "replacement",
+      "https://github.com/squareup/berd/pull/30",
+    );
+
+    const rebuilt = advanceRelatedPullRequestScan(
+      initial,
+      [replacement],
+      null,
+      false,
+    );
+
+    expect(rebuilt.pullRequests.map((pr) => pr.number)).toEqual([30]);
   });
 });
