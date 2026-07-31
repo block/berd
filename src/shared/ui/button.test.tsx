@@ -169,6 +169,19 @@ describe("Button", () => {
     );
   });
 
+  it("disables active feedback animation for reduced motion", () => {
+    render(
+      <ComposerActionButton visualState="active">
+        Listening
+      </ComposerActionButton>,
+    );
+
+    expect(screen.getByRole("button", { name: "Listening" })).toHaveClass(
+      "animate-pulse",
+      "motion-reduce:animate-none",
+    );
+  });
+
   it("renders the alert variant inheriting the surrounding alert color", () => {
     render(<Button variant="alert">Edit project</Button>);
 

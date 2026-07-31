@@ -58,6 +58,26 @@ export type ChatInputSendHandler = (
   options?: ChatSendOptions,
 ) => boolean | Promise<boolean>;
 
+export interface ChatInputVoiceConversation {
+  visible: boolean;
+  state:
+    | "off"
+    | "starting"
+    | "stopping"
+    | "listening"
+    | "user-speaking"
+    | "agent-working"
+    | "agent-speaking"
+    | "error";
+  boundSessionId: string | null;
+  active: boolean;
+  microphoneMuted: boolean;
+  error?: string | null;
+  disabled?: boolean;
+  onToggle: () => void | Promise<void>;
+  onMicrophoneMuteToggle: () => void | Promise<void>;
+}
+
 export interface ChatInputComposerActions {
   onSend: ChatInputSendHandler;
   onSteerMessage?: ChatInputSendHandler;
@@ -76,6 +96,7 @@ export interface ChatInputComposerActions {
     sendOptions?: ChatSendOptions;
   } | null;
   onDismissQueue?: () => void;
+  voiceConversation?: ChatInputVoiceConversation;
 }
 
 export interface ChatInputPersonaPicker {

@@ -1,6 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, FileText, FolderClosed, ImageIcon } from "lucide-react";
+import {
+  Check,
+  FileText,
+  FolderClosed,
+  ImageIcon,
+  Volume2,
+} from "lucide-react";
 import { IconRobot } from "@tabler/icons-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
@@ -489,6 +495,11 @@ function renderContentBlock(
   options: {
     defaultImageAlt: string;
     redactedThinking: string;
+    voiceSpeechSpeakingLabel: string;
+    voiceSpeechSpokenLabel: string;
+    voiceSpeechInterruptedLabel: string;
+    voiceSpeechNotSpokenLabel: string;
+    voiceSpeechFailedLabel: string;
     contentBlocks: readonly MessageContent[];
     onSendMcpAppMessage?: McpAppMessageHandler;
     onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
@@ -516,18 +527,47 @@ function renderContentBlock(
       const providerErrorNotice =
         options.resolveProviderErrorNotice?.(tc.text) ?? null;
       const displayText = providerErrorNotice ?? tc.text;
+      const speechStatus = tc.speech?.status;
+      const speechLabel = speechStatus
+        ? {
+            speaking: options.voiceSpeechSpeakingLabel,
+            spoken: options.voiceSpeechSpokenLabel,
+            interrupted: options.voiceSpeechInterruptedLabel,
+            notSpoken: options.voiceSpeechNotSpokenLabel,
+            failed: options.voiceSpeechFailedLabel,
+          }[speechStatus]
+        : null;
       return (
-        <MessageResponse
+        <div
           key={`text-${index}`}
-          isAnimating={isStreamingMsg}
-          mode={isStreamingMsg ? "streaming" : "static"}
-          codeRenderers={
-            options.onRunShellCommand ? options.runItCodeRenderers : undefined
-          }
-          imageRenderer={MarkdownImage}
+          data-voice-speech-status={speechStatus}
+          className={cn(
+            speechStatus === "interrupted" && "line-through opacity-70",
+          )}
         >
-          {displayText}
-        </MessageResponse>
+          {speechLabel ? (
+            <div
+              className={cn(
+                "mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground",
+                speechStatus === "failed" && "text-destructive",
+                speechStatus === "interrupted" && "text-warning",
+              )}
+            >
+              <Volume2 aria-hidden="true" className="size-3.5" />
+              <span>{speechLabel}</span>
+            </div>
+          ) : null}
+          <MessageResponse
+            isAnimating={isStreamingMsg}
+            mode={isStreamingMsg ? "streaming" : "static"}
+            codeRenderers={
+              options.onRunShellCommand ? options.runItCodeRenderers : undefined
+            }
+            imageRenderer={MarkdownImage}
+          >
+            {displayText}
+          </MessageResponse>
+        </div>
       );
     }
     case "image": {
@@ -783,6 +823,13 @@ export const MessageBubble = memo(function MessageBubble({
             renderContentBlock(c, i, {
               defaultImageAlt: t("message.defaultImageAlt"),
               redactedThinking: t("message.redactedThinking"),
+              voiceSpeechSpeakingLabel: t("message.voiceSpeechSpeakingLabel"),
+              voiceSpeechSpokenLabel: t("message.voiceSpeechSpokenLabel"),
+              voiceSpeechInterruptedLabel: t(
+                "message.voiceSpeechInterruptedLabel",
+              ),
+              voiceSpeechNotSpokenLabel: t("message.voiceSpeechNotSpokenLabel"),
+              voiceSpeechFailedLabel: t("message.voiceSpeechFailedLabel"),
               contentBlocks: renderingContext,
               onEditProject,
               onOpenContextPanel,
@@ -999,6 +1046,17 @@ export const MessageBubble = memo(function MessageBubble({
                   {
                     defaultImageAlt: t("message.defaultImageAlt"),
                     redactedThinking: t("message.redactedThinking"),
+                    voiceSpeechSpeakingLabel: t(
+                      "message.voiceSpeechSpeakingLabel",
+                    ),
+                    voiceSpeechSpokenLabel: t("message.voiceSpeechSpokenLabel"),
+                    voiceSpeechInterruptedLabel: t(
+                      "message.voiceSpeechInterruptedLabel",
+                    ),
+                    voiceSpeechNotSpokenLabel: t(
+                      "message.voiceSpeechNotSpokenLabel",
+                    ),
+                    voiceSpeechFailedLabel: t("message.voiceSpeechFailedLabel"),
                     contentBlocks: renderingContext,
                     onSendMcpAppMessage,
                     onMcpAppAutoScroll,

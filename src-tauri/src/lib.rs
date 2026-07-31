@@ -166,6 +166,9 @@ pub fn run() {
             app.manage(commands::window_session::WindowSessionRegistry::default());
             app.manage(commands::agent_setup::AgentSetupRegistry::default());
             app.manage(commands::model_setup::ModelSetupRegistry::default());
+            app.manage(commands::pocket_voice::PocketVoiceState::default());
+            app.manage(commands::native_voice::NativeVoiceState::default());
+            app.manage(commands::voice_capture::VoiceCaptureState::default());
 
             // `LayoutState::new` opens (and creates) the layout database, so the
             // one-time legacy app-data migration must run first to copy any
@@ -466,6 +469,8 @@ pub fn run() {
             commands::notifications::show_completion_notification,
             commands::openai_realtime::get_openai_realtime_status,
             commands::openai_realtime::create_openai_realtime_session,
+            commands::openai_realtime::claim_voice_dictation_microphone,
+            commands::openai_realtime::release_voice_dictation_microphone,
             commands::agent_setup::start_agent_setup,
             commands::agent_setup::get_agent_setup_status,
             commands::agent_setup::list_agent_setup_status,
@@ -498,6 +503,22 @@ pub fn run() {
             commands::terminal::resize_terminal,
             commands::terminal::stop_terminal,
             commands::updates::finalize_update_relaunch,
+            commands::pocket_voice::get_pocket_voice_status,
+            commands::pocket_voice::install_voice_model,
+            commands::pocket_voice::select_pocket_voice,
+            commands::pocket_voice::set_pocket_playback_speed,
+            commands::pocket_voice::preview_pocket_voice,
+            commands::pocket_voice::speak_pocket_voice,
+            commands::pocket_voice::stop_pocket_voice,
+            commands::pocket_voice::remove_voice_model,
+            commands::native_voice::get_native_voice_conversation_status,
+            commands::native_voice::drain_native_voice_conversation_transcripts,
+            commands::native_voice::acknowledge_native_voice_conversation_transcript,
+            commands::native_voice::reject_native_voice_conversation_transcript,
+            commands::native_voice::start_native_voice_conversation,
+            commands::native_voice::stop_native_voice_conversation,
+            commands::native_voice::push_native_voice_audio,
+            commands::voice_capture::register_voice_renderer_instance,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,
             commands::window_session::release_session,
@@ -525,6 +546,8 @@ pub fn run() {
                 app.state::<commands::global_shortcut::GlobalShortcutHandlerState>()
                     .stop();
                 app.state::<commands::terminal::TerminalState>().stop_all();
+                app.state::<commands::native_voice::NativeVoiceState>()
+                    .stop_for_app_exit();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
             #[cfg(target_os = "macos")]

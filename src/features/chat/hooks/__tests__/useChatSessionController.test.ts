@@ -522,6 +522,21 @@ describe("useChatSessionController", () => {
     }
   });
 
+  it("accepts ordinary idle sends before chat completion", () => {
+    const completion = deferred<void>();
+    mockUseChatSendMessage.mockReturnValueOnce(completion.promise);
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    let sendResult!: ReturnType<typeof result.current.handleSend>;
+    act(() => {
+      sendResult = result.current.handleSend("hello");
+    });
+
+    expect(sendResult).toBe(true);
+  });
+
   it("preserves a newer draft when an older send is accepted later", async () => {
     vi.useFakeTimers();
     try {

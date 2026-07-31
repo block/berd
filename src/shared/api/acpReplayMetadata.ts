@@ -9,7 +9,14 @@ export type ReplayAssistantMetadata = Pick<
   MessageMetadata,
   "personaId" | "personaName"
 >;
-export type ReplayUserMetadata = Pick<MessageMetadata, "delivery" | "origin">;
+export type ReplayUserMetadata = Pick<
+  MessageMetadata,
+  | "delivery"
+  | "origin"
+  | "voiceUtteranceId"
+  | "voiceConversationLifecycleId"
+  | "voiceConversationRevision"
+>;
 
 export function getReplayMessageId(
   source: ReplayMetadataSource,
@@ -65,6 +72,23 @@ export function getReplayUserMetadata(
   const origin =
     goose.origin === "berdctl_cross_session"
       ? "berdctl_cross_session"
+      : goose.origin === "voice_conversation"
+        ? "voice_conversation"
+        : undefined;
+  const voiceUtteranceId =
+    origin === "voice_conversation"
+      ? nonEmptyString(goose.voiceUtteranceId)
+      : undefined;
+  const voiceConversationLifecycleId =
+    origin === "voice_conversation"
+      ? nonEmptyString(goose.voiceConversationLifecycleId)
+      : undefined;
+  const voiceConversationRevision =
+    origin === "voice_conversation" &&
+    typeof goose.voiceConversationRevision === "number" &&
+    Number.isSafeInteger(goose.voiceConversationRevision) &&
+    goose.voiceConversationRevision >= 0
+      ? goose.voiceConversationRevision
       : undefined;
   if (!delivery && !origin) {
     return undefined;
@@ -73,6 +97,11 @@ export function getReplayUserMetadata(
   return {
     ...(delivery ? { delivery } : {}),
     ...(origin ? { origin } : {}),
+    ...(voiceUtteranceId ? { voiceUtteranceId } : {}),
+    ...(voiceConversationLifecycleId ? { voiceConversationLifecycleId } : {}),
+    ...(voiceConversationRevision !== undefined
+      ? { voiceConversationRevision }
+      : {}),
   };
 }
 

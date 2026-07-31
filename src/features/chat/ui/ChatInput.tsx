@@ -1535,34 +1535,36 @@ export function ChatInput({
               >
                 {mentionStatusText}
               </div>
-              <PopoverAnchor asChild>
-                <textarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={handleInput}
-                  onKeyDown={handleKeyDown}
-                  onPaste={handlePaste}
-                  placeholder={inputPlaceholder}
-                  disabled={disabled}
-                  rows={1}
-                  className={cn(
-                    "mb-2 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer placeholder:opacity-100 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
-                    // Backstop for the JS auto-resize cap.
-                    surface === "bare"
-                      ? "max-h-[clamp(140px,24dvh,300px)]"
-                      : "max-h-[200px]",
-                    "scrollbar-subtle overscroll-contain",
-                  )}
-                  aria-label={t("input.ariaLabel")}
-                  aria-controls={mentionOpen ? mentionListboxId : undefined}
-                  aria-describedby={mentionOpen ? mentionStatusId : undefined}
-                  // Lets the global archive-session shortcut (default mod+e)
-                  // fire while the composer is focused; other editable fields
-                  // keep blocking it (see isArchiveShortcutBlockedTarget).
-                  data-chat-composer=""
-                  data-testid="chat-composer"
-                />
-              </PopoverAnchor>
+              <div className="relative mb-2 min-h-[36px]">
+                <PopoverAnchor asChild>
+                  <textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={handleInput}
+                    onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
+                    placeholder={inputPlaceholder}
+                    disabled={disabled}
+                    rows={1}
+                    className={cn(
+                      "min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer placeholder:opacity-100 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
+                      // Backstop for the JS auto-resize cap.
+                      surface === "bare"
+                        ? "max-h-[clamp(140px,24dvh,300px)]"
+                        : "max-h-[200px]",
+                      "scrollbar-subtle overscroll-contain",
+                    )}
+                    aria-label={t("input.ariaLabel")}
+                    aria-controls={mentionOpen ? mentionListboxId : undefined}
+                    aria-describedby={mentionOpen ? mentionStatusId : undefined}
+                    // Lets the global archive-session shortcut (default mod+e)
+                    // fire while the composer is focused; other editable fields
+                    // keep blocking it (see isArchiveShortcutBlockedTarget).
+                    data-chat-composer=""
+                    data-testid="chat-composer"
+                  />
+                </PopoverAnchor>
+              </div>
 
               <ChatInputToolbar
                 agentModelPicker={{
@@ -1610,6 +1612,7 @@ export function ChatInput({
                   onSend: handleSend,
                   onStop,
                   voiceEnabled: scopedControls.voice && dictation.isEnabled,
+                  voiceStarting: scopedControls.voice && dictation.isStarting(),
                   voiceRecording: scopedControls.voice && dictation.isRecording,
                   voiceTranscribing:
                     scopedControls.voice && dictation.isTranscribing,
@@ -1617,6 +1620,7 @@ export function ChatInput({
                   onVoiceToggle: scopedControls.voice
                     ? dictation.toggleRecording
                     : undefined,
+                  voiceConversation: composerActions.voiceConversation,
                 }}
                 isCompact={isCompact}
               />

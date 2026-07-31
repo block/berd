@@ -137,6 +137,26 @@ describe("getReplayUserMetadata", () => {
     ).toEqual({ origin: "berdctl_cross_session" });
   });
 
+  it("restores voice conversation origin metadata", () => {
+    expect(
+      getReplayUserMetadata({
+        _meta: {
+          goose: {
+            origin: "voice_conversation",
+            voiceUtteranceId: "7",
+            voiceConversationLifecycleId: "lifecycle-1",
+            voiceConversationRevision: 3,
+          },
+        },
+      }),
+    ).toEqual({
+      origin: "voice_conversation",
+      voiceUtteranceId: "7",
+      voiceConversationLifecycleId: "lifecycle-1",
+      voiceConversationRevision: 3,
+    });
+  });
+
   it("ignores unknown origins", () => {
     expect(
       getReplayUserMetadata({

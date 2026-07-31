@@ -26,20 +26,36 @@ import { Button, type ButtonProps } from "@/shared/ui/button";
  */
 const COMPOSER_ACTION_RECIPE =
   "bg-surface-composer-action text-foreground shadow-none hover:bg-surface-composer-action-hover hover:text-foreground active:bg-surface-composer-action-active active:text-foreground data-[state=open]:bg-surface-composer-action-hover data-[state=open]:text-foreground aria-expanded:bg-surface-composer-action-hover aria-expanded:text-foreground";
+const COMPOSER_ACTION_FEEDBACK_RECIPE = {
+  active:
+    "bg-info text-info-foreground hover:bg-info/90 hover:text-info-foreground active:bg-info/90 active:text-info-foreground",
+  error:
+    "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive/90 active:text-destructive-foreground",
+} as const;
+
+export type ComposerActionVisualState =
+  keyof typeof COMPOSER_ACTION_FEEDBACK_RECIPE;
 
 export type ComposerActionButtonProps = Omit<
   ButtonProps,
   "variant" | "flush" | "destructive"
->;
+> & {
+  visualState?: ComposerActionVisualState;
+};
 
 export const ComposerActionButton = React.forwardRef<
   HTMLButtonElement,
   ComposerActionButtonProps
->(({ className, ...props }, ref) => (
+>(({ className, visualState, ...props }, ref) => (
   <Button
     ref={ref}
     variant="subtle"
-    className={cn(COMPOSER_ACTION_RECIPE, className)}
+    className={cn(
+      COMPOSER_ACTION_RECIPE,
+      visualState && COMPOSER_ACTION_FEEDBACK_RECIPE[visualState],
+      visualState === "active" && "animate-pulse motion-reduce:animate-none",
+      className,
+    )}
     {...props}
   />
 ));

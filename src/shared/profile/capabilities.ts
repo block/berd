@@ -1,5 +1,8 @@
 import { useMemo } from "react";
-import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  VOICE_CONVERSATION_EXPERIMENT_ID,
+} from "@/features/experiments/experimentDefinitions";
 import {
   type ExperimentState,
   useExperimentList,
@@ -15,6 +18,7 @@ export type ProfileCapabilityId =
   | "agentToolsTip"
   | "telemetry"
   | "voiceDictation"
+  | "voiceConversation"
   | "kgooseConnections"
   | "updates"
   | "feedback"
@@ -61,6 +65,12 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     kind: "runtimeFeature",
     feature: "voiceDictation",
     toggle: "voiceDictation",
+  },
+  voiceConversation: {
+    kind: "runtimeFeature",
+    feature: "voiceDictation",
+    toggle: "voiceDictation",
+    experiment: VOICE_CONVERSATION_EXPERIMENT_ID,
   },
   kgooseConnections: {
     kind: "runtimeFeature",

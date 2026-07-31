@@ -74,6 +74,16 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
       },
     },
+    {
+      name: "voice-conversation",
+      testMatch: ["**/voice-conversation.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+      },
+    },
   ],
   webServer: {
     // Opt-in reuse only. Reusing arbitrary local processes makes the suite

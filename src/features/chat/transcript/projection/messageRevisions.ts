@@ -57,10 +57,12 @@ function buildSingleTextMessageRevisions(
     message.created,
   )}:${renderMetadataRevision(message.metadata)}:text:${revision}:${annotationsRevision(
     content.annotations,
-  )}`;
+  )}:${content.speech?.status ?? ""}`;
   const heightRevision = `message-height:${message.id}:${
     message.role
-  }:${heightMetadataRevision(message.metadata)}:text-height:${revision}`;
+  }:${heightMetadataRevision(message.metadata)}:text-height:${revision}:${
+    content.speech?.status ?? ""
+  }`;
 
   return {
     renderRevision,
@@ -104,8 +106,13 @@ function buildSingleContentRevisionParts(
           "text",
           revision,
           annotationsRevision(content.annotations),
+          content.speech?.status ?? "",
         ].join(":"),
-        heightRevision: ["text-height", revision].join(":"),
+        heightRevision: [
+          "text-height",
+          revision,
+          content.speech?.status ?? "",
+        ].join(":"),
       };
     }
     case "image":

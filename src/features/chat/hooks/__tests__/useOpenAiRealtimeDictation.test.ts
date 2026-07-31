@@ -8,12 +8,18 @@ import type { OpenAiRealtimeTranscriptEvent } from "../../lib/openaiRealtimeAudi
 
 const mockGetOpenAiRealtimeStatus = vi.fn();
 const mockCreateOpenAiRealtimeSession = vi.fn();
+const mockClaimVoiceDictationMicrophone = vi.fn();
+const mockReleaseVoiceDictationMicrophone = vi.fn();
 
 vi.mock("@/shared/api/openaiRealtime", () => ({
   getOpenAiRealtimeStatus: (...args: unknown[]) =>
     mockGetOpenAiRealtimeStatus(...args),
   createOpenAiRealtimeSession: (...args: unknown[]) =>
     mockCreateOpenAiRealtimeSession(...args),
+  claimVoiceDictationMicrophone: (...args: unknown[]) =>
+    mockClaimVoiceDictationMicrophone(...args),
+  releaseVoiceDictationMicrophone: (...args: unknown[]) =>
+    mockReleaseVoiceDictationMicrophone(...args),
 }));
 
 const mockConnectOpenAiRealtimePeerConnection = vi.fn();
@@ -97,6 +103,8 @@ function setupMocks() {
   });
 
   mockGetOpenAiRealtimeStatus.mockResolvedValue({ configured: true });
+  mockClaimVoiceDictationMicrophone.mockResolvedValue(undefined);
+  mockReleaseVoiceDictationMicrophone.mockResolvedValue(undefined);
   mockCreateOpenAiRealtimeSession.mockResolvedValue({
     clientSecret: "secret",
     transcriptionModel: "whisper-1",
@@ -252,6 +260,7 @@ describe("useOpenAiRealtimeDictation", () => {
 
       expect(result.current.isRecording).toBe(true);
       expect(onRecordingStart).toHaveBeenCalled();
+      expect(mockClaimVoiceDictationMicrophone).toHaveBeenCalledOnce();
     });
 
     it("clears isStarting after connection completes", async () => {
@@ -279,6 +288,7 @@ describe("useOpenAiRealtimeDictation", () => {
       });
 
       expect(result.current.isRecording).toBe(false);
+      expect(mockReleaseVoiceDictationMicrophone).toHaveBeenCalledOnce();
       expect(mockToastError).toHaveBeenCalledWith(
         "Microphone access is blocked",
         {
@@ -344,6 +354,43 @@ describe("useOpenAiRealtimeDictation", () => {
       expect(result.current.isTranscribing).toBe(false);
       expect(mockPeerConnection.close).toHaveBeenCalled();
       expect(mockDataChannel.close).toHaveBeenCalled();
+      expect(mockReleaseVoiceDictationMicrophone).toHaveBeenCalledOnce();
+    });
+
+    it("does not request the OS microphone when another window owns it", async () => {
+      const { result } = await renderDictationHook();
+      mockClaimVoiceDictationMicrophone.mockRejectedValue(
+        new Error("A voice conversation is already using the microphone"),
+      );
+
+      await act(async () => {
+        await result.current.startRecording();
+      });
+
+      expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+      expect(result.current.isRecording).toBe(false);
+    });
+
+    it("retries a failed microphone release before clearing ownership", async () => {
+      const { result } = await renderDictationHook();
+      await act(async () => {
+        await result.current.startRecording();
+      });
+      mockReleaseVoiceDictationMicrophone
+        .mockRejectedValueOnce(new Error("invoke dropped"))
+        .mockResolvedValue(undefined);
+
+      act(() => {
+        result.current.stopRecording();
+      });
+      await act(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(resolve, 75);
+          }),
+      );
+
+      expect(mockReleaseVoiceDictationMicrophone).toHaveBeenCalledTimes(2);
     });
   });
 });

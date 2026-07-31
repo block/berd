@@ -387,7 +387,12 @@
       "anthropicThinkingHistory": "This chat can't continue with a Claude model because its earlier reasoning history is no longer in a form Claude will accept. Start a new chat, or switch this chat to a non-Claude model to keep going."
     },
     "berdctlCrossSessionLabel": "Sent by Berd from another session",
-    "steerLabel": "Steered"
+    "steerLabel": "Steered",
+    "voiceSpeechSpeakingLabel": "Speaking",
+    "voiceSpeechSpokenLabel": "Spoken",
+    "voiceSpeechInterruptedLabel": "Interrupted",
+    "voiceSpeechNotSpokenLabel": "Not spoken",
+    "voiceSpeechFailedLabel": "Failed"
   },
   "persona": {
     "chooseAssistant": "Choose assistant",
@@ -407,7 +412,11 @@
   "globalPill": {
     "ariaLabel": "Quick compose",
     "expand": "Expand to full chat",
-    "placeholder": "Start a conversation"
+    "placeholder": "Start a conversation",
+    "setupVoiceConversation": "Set up Voice Conversation",
+    "startVoiceConversation": "Start Voice Conversation",
+    "voiceConversationStartFailed": "Voice Conversation could not start. Your draft is still here.",
+    "voiceConversationRequiresGoose": "Voice Conversation requires Goose"
   },
   "emptyState": {
     "buildAgentPrompt": "What do you want your agent to do?",
@@ -491,7 +500,23 @@
     "voiceInputDisabled": "Set OPENAI_API_KEY to enable dictation",
     "voiceInputRecording": "Listening...",
     "voiceInputTranscribing": "Transcribing...",
-    "voiceInputAutoSubmitHint": "Say \"submit\" to send"
+    "voiceInputAutoSubmitHint": "Say \"submit\" to send",
+    "voiceConversation": {
+      "start": "Start Voice Conversation",
+      "muteMicrophone": "Mute microphone",
+      "unmuteMicrophone": "Unmute microphone",
+      "states": {
+        "off": "Start Voice Conversation",
+        "starting": "Starting voice conversation…",
+        "stopping": "Stopping voice conversation…",
+        "listening": "Voice conversation is listening for session {{sessionId}}",
+        "muted": "Voice conversation microphone is muted for session {{sessionId}}",
+        "user-speaking": "Receiving voice input…",
+        "agent-working": "Agent is working…",
+        "agent-speaking": "Agent is speaking…",
+        "error": "Voice conversation error: {{error}}"
+      }
+    }
   },
   "tools": {
     "content": "Content",

@@ -1420,6 +1420,29 @@ describe("transcript projection cache", () => {
     expect(second.heightRevision).toBe(first.heightRevision);
   });
 
+  it("invalidates measured height when speech status appears", () => {
+    const original = message(
+      "assistant-1",
+      "assistant",
+      "same",
+      utc(2026, 6, 4, 10),
+    );
+    const spoken = {
+      ...original,
+      content: original.content.map((content) =>
+        content.type === "text"
+          ? { ...content, speech: { status: "spoken" as const } }
+          : content,
+      ),
+    };
+
+    const first = buildMessageRevisions(original);
+    const second = buildMessageRevisions(spoken);
+
+    expect(second.renderRevision).not.toBe(first.renderRevision);
+    expect(second.heightRevision).not.toBe(first.heightRevision);
+  });
+
   it("includes user message origin in render and height revisions", () => {
     const original = message("user-1", "user", "same", utc(2026, 6, 4, 10));
     const withOrigin = {

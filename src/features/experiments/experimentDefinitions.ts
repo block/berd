@@ -46,6 +46,7 @@ export interface ExperimentDefinition {
 
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
+export const VOICE_CONVERSATION_EXPERIMENT_ID = "voice-conversation";
 export const MULTI_WORKSPACE_EXPERIMENT_ID = "multi-workspace";
 
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
@@ -101,5 +102,11 @@ export const EXPERIMENT_DEFINITIONS = [
     // Skill discovery is an opt-in surface because it requires the optional
     // sq-agents CLI and can make remote catalog requests.
     defaultEnabled: false,
+  },
+  {
+    id: VOICE_CONVERSATION_EXPERIMENT_ID,
+    titleKey: "experiments.voiceConversation.title",
+    descriptionKey: "experiments.voiceConversation.description",
+    defaultEnabled: true,
   },
 ] as const satisfies readonly ExperimentDefinition[];

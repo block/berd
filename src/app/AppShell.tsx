@@ -203,6 +203,15 @@ import {
   SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
+import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
+import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
+import {
+  cancelPendingVoiceStart,
+  continuePendingVoiceStart,
+  deferPendingVoiceStart,
+  type DeferredPendingVoiceStart,
+} from "@/features/voice-conversation/lib/pendingVoiceStart";
 import { usePaneDockingLayout } from "./layout/panes/usePaneDockingLayout";
 import {
   getStackedNavigationPaneWidth,
@@ -364,6 +373,26 @@ export function getPrototypeSecondaryWidthForDockedLayout({
   return Math.max(
     0,
     Math.min(requestedSecondaryWidth, availableSecondaryWidth),
+  );
+}
+
+export function shouldStopVoiceConversationOnSessionChange({
+  previousSessionId,
+  nextSessionId,
+  boundSessionId,
+  lifecycle,
+}: {
+  previousSessionId: string | null;
+  nextSessionId: string | null;
+  boundSessionId: string | null;
+  lifecycle: string;
+}): boolean {
+  return (
+    previousSessionId !== null &&
+    previousSessionId !== nextSessionId &&
+    boundSessionId === previousSessionId &&
+    lifecycle !== "stopped" &&
+    lifecycle !== "unavailable"
   );
 }
 
@@ -669,6 +698,16 @@ function getTopBarChromeInsets(
   return { leading: "compact" };
 }
 
+export function shouldStopVoiceConversationOnExperimentChange({
+  wasEnabled,
+  isEnabled,
+}: {
+  wasEnabled: boolean;
+  isEnabled: boolean;
+}): boolean {
+  return wasEnabled && !isEnabled;
+}
+
 export function AppShell({
   authStatus,
   children,
@@ -755,6 +794,38 @@ export function AppShell({
   const navigationChatsUnderProjectsExperiment = useExperiment(
     NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
   );
+  const stopVoiceConversation = useVoiceConversationStore(
+    (state) => state.stop,
+  );
+  const requestVoiceConversationStart = useVoiceConversationStore(
+    (state) => state.requestStart,
+  );
+  const globalPocketVoiceSetup = usePocketVoiceSetup(
+    capabilities.voiceConversation,
+  );
+  const [globalPocketVoiceSetupOpen, setGlobalPocketVoiceSetupOpen] =
+    useState(false);
+  const pendingGlobalVoiceStartRef =
+    useRef<DeferredPendingVoiceStart<GlobalComposerExpandPayload> | null>(null);
+  const voiceConversationWasEnabledRef = useRef(capabilities.voiceConversation);
+  useEffect(() => {
+    const wasEnabled = voiceConversationWasEnabledRef.current;
+    voiceConversationWasEnabledRef.current = capabilities.voiceConversation;
+    if (
+      !shouldStopVoiceConversationOnExperimentChange({
+        wasEnabled,
+        isEnabled: capabilities.voiceConversation,
+      })
+    ) {
+      return;
+    }
+    // The native process survives renderer reloads and may be owned by another
+    // window, so an explicit on-to-off transition must clean up active use.
+    // Mounting with the experiment already off performs no Voice native work.
+    cancelPendingVoiceStart(pendingGlobalVoiceStartRef);
+    setGlobalPocketVoiceSetupOpen(false);
+    void stopVoiceConversation().catch(() => undefined);
+  }, [capabilities.voiceConversation, stopVoiceConversation]);
   const isNavigationRefreshEnabled = Boolean(
     navigationRefreshExperiment?.enabled,
   );
@@ -766,6 +837,30 @@ export function AppShell({
   const navigationPrototypeMode = getNavigationPrototypeMode();
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
+  const previousActiveSessionIdRef = useRef(activeSessionId);
+  useEffect(() => {
+    const previousSessionId = previousActiveSessionIdRef.current;
+    previousActiveSessionIdRef.current = activeSessionId;
+    const voice = useVoiceConversationStore.getState();
+    if (
+      previousSessionId !== null &&
+      previousSessionId !== activeSessionId &&
+      voice.requestedStartSessionId === previousSessionId
+    ) {
+      voice.clearRequestedStart(previousSessionId);
+    }
+    if (
+      !shouldStopVoiceConversationOnSessionChange({
+        previousSessionId,
+        nextSessionId: activeSessionId,
+        boundSessionId: voice.status.sessionId,
+        lifecycle: voice.status.lifecycle,
+      })
+    ) {
+      return;
+    }
+    void stopVoiceConversation().catch(() => undefined);
+  }, [activeSessionId, stopVoiceConversation]);
   const [navigationSecondaryTarget, setNavigationSecondaryTarget] =
     useState<NavigationSecondaryTarget>(null);
   const [navigationSecondaryPreview, setNavigationSecondaryPreview] =
@@ -2192,6 +2287,7 @@ export function AppShell({
       project?: ProjectInfo,
       options: {
         activate?: boolean;
+        reuseExistingDraft?: boolean;
         providerId?: string;
         modelId?: string;
         modelName?: string;
@@ -2245,6 +2341,7 @@ export function AppShell({
           modelId: sessionModelPreference.modelId,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
+        allowDraftReuse: options.reuseExistingDraft !== false,
       });
 
       if (existingDraft) {
@@ -3278,6 +3375,129 @@ export function AppShell({
       resetGlobalComposerTransition,
     ],
   );
+
+  const handleGlobalVoiceConversationStart = useCallback(
+    (
+      payload: GlobalComposerExpandPayload,
+      setupComplete = false,
+    ): Promise<boolean> => {
+      if (!capabilities.voiceConversation) return Promise.resolve(false);
+      if (!setupComplete && globalPocketVoiceSetup.status?.installed !== true) {
+        const pending = deferPendingVoiceStart(
+          pendingGlobalVoiceStartRef,
+          payload,
+        );
+        setGlobalPocketVoiceSetupOpen(true);
+        return pending;
+      }
+
+      const options = payload.options;
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
+      const chatOptions = {
+        activate: false,
+        reuseExistingDraft: false,
+        providerId: options?.providerId,
+        modelId: options?.modelId,
+        modelName: options?.modelName,
+        reasoningEffort: options?.reasoningEffort,
+      };
+
+      const createAndStart = async () => {
+        const voice = useVoiceConversationStore.getState();
+        if (
+          voice.status.lifecycle === "starting" ||
+          voice.status.lifecycle === "running" ||
+          voice.status.lifecycle === "stopping"
+        ) {
+          await stopVoiceConversation();
+        }
+        const session = await createNewTab(
+          DEFAULT_CHAT_TITLE,
+          project,
+          chatOptions,
+        );
+        if (!session) {
+          toast.error(t("chat:globalPill.voiceConversationStartFailed"));
+          return false;
+        }
+
+        const sessionId = resolveLiveSessionId(session.id) ?? session.id;
+        if (options?.personaId) {
+          patchSession(sessionId, { personaId: options.personaId });
+        }
+        if (options?.reasoningEffort) {
+          try {
+            await applyReasoningEffortToSession(
+              sessionId,
+              options.reasoningEffort,
+            );
+          } catch (error) {
+            console.error(
+              "Failed to apply reasoning effort for voice conversation:",
+              error,
+            );
+          }
+        }
+
+        const chatState = useChatStore.getState();
+        chatState.setDraft(sessionId, payload.text);
+        chatState.setSkillDrafts(sessionId, payload.selectedSkills);
+        chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
+        handleNavigateToSession(sessionId);
+        requestVoiceConversationStart(sessionId);
+        resetGlobalComposerTransition();
+        return true;
+      };
+
+      return new Promise<boolean>((resolve) => {
+        guardAppNavigation(
+          () => {
+            void createAndStart()
+              .then(resolve)
+              .catch((error) => {
+                console.error(
+                  "Failed to create chat for voice conversation:",
+                  error,
+                );
+                toast.error(t("chat:globalPill.voiceConversationStartFailed"));
+                resolve(false);
+              });
+          },
+          () => resolve(false),
+        );
+      });
+    },
+    [
+      capabilities.voiceConversation,
+      createNewTab,
+      globalPocketVoiceSetup.status?.installed,
+      guardAppNavigation,
+      handleNavigateToSession,
+      patchSession,
+      projects,
+      requestVoiceConversationStart,
+      resetGlobalComposerTransition,
+      stopVoiceConversation,
+      t,
+    ],
+  );
+  const handleGlobalPocketVoiceSetupOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        cancelPendingVoiceStart(pendingGlobalVoiceStartRef);
+      }
+      setGlobalPocketVoiceSetupOpen(open);
+    },
+    [],
+  );
+  const handleGlobalPocketVoiceUseSelected = useCallback(() => {
+    setGlobalPocketVoiceSetupOpen(false);
+    void continuePendingVoiceStart(pendingGlobalVoiceStartRef, (payload) =>
+      handleGlobalVoiceConversationStart(payload, true),
+    );
+  }, [handleGlobalVoiceConversationStart]);
 
   const handleStartProviderTroubleshootingChat = useCallback(
     (request: AgentSetupTroubleshootingRequest) => {
@@ -5085,6 +5305,16 @@ export function AppShell({
                 onModelSelectionChange={
                   handleGlobalComposerModelSelectionChange
                 }
+                voiceConversation={
+                  capabilities.voiceConversation
+                    ? {
+                        enabled: true,
+                        ready:
+                          globalPocketVoiceSetup.status?.installed === true,
+                        onStart: handleGlobalVoiceConversationStart,
+                      }
+                    : undefined
+                }
                 suggestedPersonaId={
                   renderedLocation.view === "agents"
                     ? renderedLocation.personaId
@@ -5095,6 +5325,12 @@ export function AppShell({
           </>
         )}
       </AppShellLayout>
+      <PocketVoiceSetupDialog
+        open={globalPocketVoiceSetupOpen}
+        onOpenChange={handleGlobalPocketVoiceSetupOpenChange}
+        onUseSelected={handleGlobalPocketVoiceUseSelected}
+        setup={globalPocketVoiceSetup}
+      />
       <SessionWorkspaceCleanupDialog
         open={Boolean(pendingWorkspaceCleanupConfirmation)}
         worktreeCount={pendingWorkspaceCleanupConfirmation?.worktreeCount ?? 0}

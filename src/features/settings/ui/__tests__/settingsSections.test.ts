@@ -17,6 +17,7 @@ const enabledCapabilities: ProfileCapabilityState = {
   feedback: true,
   telemetry: true,
   voiceDictation: true,
+  voiceConversation: true,
   kgooseConnections: true,
   updates: true,
 };

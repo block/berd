@@ -21,8 +21,22 @@ import type {
 export type { Annotations, Role, ToolKind };
 export type ToolCallLocation = AcpToolCallLocation;
 
-/** ACP TextContent with discriminator. */
-export type TextContent = AcpTextContent & { type: "text" };
+export type VoiceSpeechStatus =
+  | "speaking"
+  | "spoken"
+  | "interrupted"
+  | "notSpoken"
+  | "failed";
+
+export interface VoiceSpeechState {
+  status: VoiceSpeechStatus;
+}
+
+/** ACP TextContent with discriminator and local voice playback state. */
+export type TextContent = AcpTextContent & {
+  type: "text";
+  speech?: VoiceSpeechState;
+};
 
 /** ACP ImageContent with discriminator. */
 export type ImageContent = AcpImageContent & { type: "image" };
@@ -226,7 +240,10 @@ export interface MessageMetadata {
   agentVisible?: boolean;
   delivery?: "steering" | "steer";
   steeringRequestId?: string;
-  origin?: "berdctl_cross_session";
+  origin?: "berdctl_cross_session" | "voice_conversation";
+  voiceUtteranceId?: string;
+  voiceConversationLifecycleId?: string;
+  voiceConversationRevision?: number;
   attachments?: MessageAttachment[];
   chips?: MessageChip[];
   personaId?: string;

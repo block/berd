@@ -25,6 +25,8 @@ anyhow = "1"
 base64 = "0.22"
 builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 bytes = "1"
+bzip2 = "0.6"
+buzz-voice = { git = "https://github.com/block/buzz", rev = "b1426cac2dcc24cfd1f62abe4652ff414c3dbf14", features = ["static"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 doctor = { git = "https://github.com/block/builderbot", rev = "f049fa2b559c860ebc1e7b83771023961930099e" }
@@ -40,6 +42,13 @@ percent-encoding = "2"
 plist = "1"
 portable-pty = "0.9.0"
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "multipart", "rustls", "stream"] }
+rodio = { version = "0.22", default-features = false }
+audioadapter-buffers = "3.0"
+earshot = "1.0"
+rubato = "3.0"
+tar = "0.4"
+sherpa-onnx = "1.12"
+ssstretch = "0.1.0"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -71,6 +80,7 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
 objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
 objc2-user-notifications = "0.3.2"
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 
 [features]

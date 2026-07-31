@@ -7,7 +7,12 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
+import {
+  IconArrowUp,
+  IconHeadphones,
+  IconMicrophone,
+  IconPlus,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -27,6 +32,7 @@ import { AgentModelPicker } from "@/features/chat/ui/AgentModelPicker";
 import { ProjectInputSelector } from "@/features/chat/ui/ProjectInputSelector";
 import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { makeRemountSafeDraftAttachments } from "@/features/chat/lib/draftAttachments";
 import type {
@@ -115,6 +121,11 @@ interface GlobalComposerPillProps {
   handoffTargetRect?: GlobalComposerHandoffRect | null;
   starterRequest?: GlobalComposerStarterRequest | null;
   onStarterRequestConsumed?: (requestId: number) => void;
+  voiceConversation?: {
+    enabled: boolean;
+    ready: boolean;
+    onStart: (payload: GlobalComposerExpandPayload) => Promise<boolean>;
+  };
 }
 
 interface ModelSelection {
@@ -199,6 +210,7 @@ export function GlobalComposerPill({
   handoffTargetRect,
   starterRequest = null,
   onStarterRequestConsumed,
+  voiceConversation,
 }: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
   const { providers, providersLoading, selectedProvider, setSelectedProvider } =
@@ -222,6 +234,7 @@ export function GlobalComposerPill({
   );
   const [selectedSkills, setSelectedSkills] = useState<ChatSkillDraft[]>([]);
   const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
+  const [voiceStartPending, setVoiceStartPending] = useState(false);
   const personas = useAgentStore(selectPersonas);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -917,6 +930,14 @@ export function GlobalComposerPill({
     text,
   ]);
 
+  const nativeVoiceLifecycle = useVoiceConversationStore(
+    (state) => state.status.lifecycle,
+  );
+  const nativeVoiceOwnsMicrophone =
+    nativeVoiceLifecycle === "starting" ||
+    nativeVoiceLifecycle === "running" ||
+    nativeVoiceLifecycle === "stopping";
+
   const dictation = useVoiceDictation({
     text,
     setText,
@@ -928,6 +949,8 @@ export function GlobalComposerPill({
     resetTextarea,
     isSendLocked: attachmentWorkPending,
   });
+  const dictationOwnsMicrophone =
+    dictation.isRecording || dictation.isTranscribing || dictation.isStarting();
 
   const handleVoiceDictationShortcut = useVoiceDictationShortcutTarget(
     textareaRef,
@@ -1026,6 +1049,74 @@ export function GlobalComposerPill({
 
     submitCompose(text);
   }, [canSend, dictation, submitCompose, text]);
+
+  const handleStartVoiceConversation = useCallback(async () => {
+    if (
+      !voiceConversation?.enabled ||
+      selectedAgentId !== "goose" ||
+      voiceStartPending ||
+      handoffActive ||
+      attachmentWorkPending ||
+      dictationOwnsMicrophone
+    ) {
+      return;
+    }
+
+    const options: GlobalComposeOptions = {};
+    const remountSafeAttachments = makeRemountSafeDraftAttachments(attachments);
+    if (remountSafeAttachments.length > 0) {
+      options.attachments = remountSafeAttachments;
+    }
+    const selectedGooseModel = effectiveModelSelection;
+    // `selectedAgentId === "goose"` is the ACP route. Model options may carry
+    // a concrete catalog provider for filtering, but using that as the session
+    // provider creates a non-Goose chat whose voice controller cannot bind.
+    options.providerId = "goose";
+    if (selectedGooseModel) {
+      options.modelId = selectedGooseModel.modelId;
+      options.modelName = selectedGooseModel.modelName;
+    }
+    if (selectedProjectId) options.projectId = selectedProjectId;
+    if (selectedPersonaId) options.personaId = selectedPersonaId;
+    if (activeReasoningEffort?.config) {
+      options.reasoningEffort = {
+        configId: activeReasoningEffort.config.configId,
+        value: activeReasoningEffort.config.currentValue,
+      };
+    }
+
+    setVoiceStartPending(true);
+    try {
+      const accepted = await voiceConversation.onStart({
+        text,
+        selectedSkills,
+        options: Object.keys(options).length > 0 ? options : undefined,
+      });
+      if (!accepted) return;
+      clearSentContent();
+      clearComposerSelections();
+    } catch (error) {
+      console.error("Failed to start voice conversation:", error);
+    } finally {
+      setVoiceStartPending(false);
+    }
+  }, [
+    activeReasoningEffort?.config,
+    attachmentWorkPending,
+    attachments,
+    clearComposerSelections,
+    clearSentContent,
+    dictationOwnsMicrophone,
+    handoffActive,
+    effectiveModelSelection,
+    selectedAgentId,
+    selectedPersonaId,
+    selectedProjectId,
+    selectedSkills,
+    text,
+    voiceConversation,
+    voiceStartPending,
+  ]);
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1386,10 +1477,35 @@ export function GlobalComposerPill({
         </div>
 
         <div className="pointer-events-auto absolute inset-y-0 right-0 z-10 flex items-center gap-2">
+          {voiceConversation?.enabled ? (
+            <ComposerActionButton
+              type="button"
+              disabled={
+                selectedAgentId !== "goose" ||
+                voiceStartPending ||
+                handoffActive ||
+                attachmentWorkPending ||
+                dictationOwnsMicrophone
+              }
+              onClick={() => void handleStartVoiceConversation()}
+              size="icon-pill-sm"
+              aria-label={t("globalPill.startVoiceConversation")}
+              title={
+                selectedAgentId === "goose"
+                  ? t("globalPill.startVoiceConversation")
+                  : t("globalPill.voiceConversationRequiresGoose")
+              }
+            >
+              <IconHeadphones aria-hidden="true" />
+            </ComposerActionButton>
+          ) : null}
           {(dictation.isEnabled || dictation.isRecording) && (
             <ComposerActionButton
               type="button"
-              disabled={!dictation.isRecording && !dictation.isEnabled}
+              disabled={
+                (!dictation.isRecording && !dictation.isEnabled) ||
+                nativeVoiceOwnsMicrophone
+              }
               onClick={dictation.toggleRecording}
               size="icon-pill-sm"
               className={cn(

@@ -1,8 +1,18 @@
 import { useMemo, useState } from "react";
-import { Mic, ArrowUp, File, FolderOpen, Settings2, Plus } from "lucide-react";
+import {
+  Mic,
+  Headphones,
+  ArrowUp,
+  File,
+  FolderOpen,
+  Settings2,
+  Plus,
+  Volume2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
+import { useAnyVoiceDictationActive } from "@/features/chat/hooks/useVoiceDictation";
 import { IconPlayerStopFilled } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { ContextRing } from "./ContextRing";
@@ -31,6 +41,7 @@ import type {
   ChatInputContextUsage,
   ChatInputProjectPicker,
   ChatInputReasoningEffort,
+  ChatInputVoiceConversation,
 } from "../types";
 
 interface ChatInputToolbarComposerActions {
@@ -44,10 +55,41 @@ interface ChatInputToolbarComposerActions {
   disabled?: boolean;
   sendDisabledReason?: string;
   voiceEnabled?: boolean;
+  voiceStarting?: boolean;
   voiceRecording?: boolean;
   voiceTranscribing?: boolean;
   voiceShortcutDisplayParts?: string[];
   onVoiceToggle?: () => void;
+  voiceConversation?: ChatInputVoiceConversation;
+}
+
+function UserVoiceActivityIndicator() {
+  return (
+    <span
+      data-role="voice-activity-indicator"
+      data-activity="user-speaking"
+      aria-hidden="true"
+      className="flex size-4 items-center justify-center gap-0.5"
+    >
+      <span className="voice-waveform-bar h-2 w-0.5 rounded-full bg-current motion-reduce:animate-none" />
+      <span className="voice-waveform-bar h-3 w-0.5 rounded-full bg-current [animation-delay:-480ms] motion-reduce:animate-none" />
+      <span className="voice-waveform-bar h-2.5 w-0.5 rounded-full bg-current [animation-delay:-240ms] motion-reduce:animate-none" />
+    </span>
+  );
+}
+
+function AgentVoiceActivityIndicator() {
+  return (
+    <span
+      data-role="agent-voice-activity-indicator"
+      data-activity="agent-speaking"
+      aria-hidden="true"
+      className="relative flex size-4 items-center justify-center"
+    >
+      <Volume2 className="size-4" strokeWidth={2.25} />
+      <span className="absolute -right-0.5 size-1 animate-ping rounded-full bg-current motion-reduce:animate-none" />
+    </span>
+  );
 }
 
 interface ChatInputToolbarProps {
@@ -69,6 +111,7 @@ export function ChatInputToolbar({
 }: ChatInputToolbarProps) {
   const { t } = useTranslation("chat");
   const { formatNumber } = useLocaleFormatting();
+  const anyVoiceDictationActive = useAnyVoiceDictationActive();
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const [isContextPopoverOpen, setIsContextPopoverOpen] = useState(false);
   const {
@@ -114,10 +157,12 @@ export function ChatInputToolbar({
     disabled = false,
     sendDisabledReason,
     voiceEnabled = false,
+    voiceStarting = false,
     voiceRecording = false,
     voiceTranscribing = false,
     voiceShortcutDisplayParts,
     onVoiceToggle,
+    voiceConversation,
   } = composerActions;
   const compactionControlsSupported =
     supportsCompactionControls ??
@@ -125,6 +170,35 @@ export function ChatInputToolbar({
   const sendButtonTooltip = canSend
     ? t("toolbar.sendMessage")
     : sendDisabledReason;
+  const voiceConversationState = voiceConversation?.state ?? "off";
+  const voiceConversationRunning = voiceConversation?.active === true;
+  const voiceConversationMicrophoneMuted =
+    voiceConversation?.microphoneMuted ?? false;
+  const voiceConversationTooltip =
+    voiceConversationRunning && voiceConversationMicrophoneMuted
+      ? t("toolbar.voiceConversation.states.muted", {
+          sessionId: voiceConversation?.boundSessionId ?? "",
+        })
+      : voiceConversationState !== "off"
+        ? t(`toolbar.voiceConversation.states.${voiceConversationState}`, {
+            sessionId: voiceConversation?.boundSessionId ?? "",
+            error: voiceConversation?.error ?? "",
+          })
+        : t("toolbar.voiceConversation.start");
+  const voiceConversationFeedbackState =
+    voiceConversationState === "error"
+      ? "error"
+      : voiceConversationRunning
+        ? "active"
+        : undefined;
+  const nativeVoiceOwnsMicrophone =
+    voiceConversationState === "starting" ||
+    voiceConversationState === "stopping";
+  const dictationOwnsMicrophone =
+    anyVoiceDictationActive ||
+    voiceStarting ||
+    voiceRecording ||
+    voiceTranscribing;
 
   const agentProviders = useMemo(() => {
     const seen = new Set<string>();
@@ -402,21 +476,71 @@ export function ChatInputToolbar({
             </Popover>
           )}
 
-          {(voiceEnabled || voiceRecording) && (
+          {voiceConversation?.visible ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span>
                   <ComposerActionButton
                     type="button"
                     size="icon-pill-sm"
-                    disabled={!voiceRecording && (!voiceEnabled || disabled)}
-                    onClick={onVoiceToggle}
+                    disabled={
+                      voiceConversation.disabled || dictationOwnsMicrophone
+                    }
+                    onClick={() => void voiceConversation.onToggle()}
+                    aria-label={voiceConversationTooltip}
+                    aria-pressed={voiceConversationRunning}
+                    visualState={voiceConversationFeedbackState}
+                  >
+                    {voiceConversationState === "user-speaking" ? (
+                      <UserVoiceActivityIndicator />
+                    ) : voiceConversationState === "agent-speaking" ? (
+                      <AgentVoiceActivityIndicator />
+                    ) : (
+                      <Headphones aria-hidden="true" />
+                    )}
+                  </ComposerActionButton>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{voiceConversationTooltip}</TooltipContent>
+            </Tooltip>
+          ) : null}
+
+          {(voiceEnabled || voiceRecording || voiceConversationRunning) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <ComposerActionButton
+                    type="button"
+                    size="icon-pill-sm"
+                    disabled={
+                      nativeVoiceOwnsMicrophone ||
+                      (!voiceConversationRunning &&
+                        !voiceRecording &&
+                        (!voiceEnabled || disabled))
+                    }
+                    onClick={
+                      voiceConversationRunning
+                        ? () => void voiceConversation?.onMicrophoneMuteToggle()
+                        : onVoiceToggle
+                    }
                     aria-label={
-                      voiceRecording
-                        ? t("toolbar.voiceInputRecording")
-                        : t("toolbar.voiceInput")
+                      voiceConversationRunning
+                        ? voiceConversationMicrophoneMuted
+                          ? t("toolbar.voiceConversation.unmuteMicrophone")
+                          : t("toolbar.voiceConversation.muteMicrophone")
+                        : voiceRecording
+                          ? t("toolbar.voiceInputRecording")
+                          : t("toolbar.voiceInput")
+                    }
+                    aria-pressed={
+                      voiceConversationRunning
+                        ? voiceConversationMicrophoneMuted
+                        : voiceRecording
                     }
                     className={cn(
+                      voiceConversationRunning &&
+                        !voiceConversationMicrophoneMuted &&
+                        "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
                       voiceRecording &&
                         "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
                       voiceTranscribing && "animate-pulse",
@@ -427,7 +551,13 @@ export function ChatInputToolbar({
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                {voiceRecording ? (
+                {voiceConversationRunning ? (
+                  voiceConversationMicrophoneMuted ? (
+                    t("toolbar.voiceConversation.unmuteMicrophone")
+                  ) : (
+                    t("toolbar.voiceConversation.muteMicrophone")
+                  )
+                ) : voiceRecording ? (
                   t("toolbar.voiceInputRecording")
                 ) : voiceTranscribing ? (
                   t("toolbar.voiceInputTranscribing")

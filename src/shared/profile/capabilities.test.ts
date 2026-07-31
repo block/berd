@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  VOICE_CONVERSATION_EXPERIMENT_ID,
+} from "@/features/experiments/experimentDefinitions";
 import {
   PROFILE_CAPABILITY_REGISTRY,
   resolveProfileCapabilities,
@@ -118,6 +121,24 @@ describe("profile capabilities", () => {
         runtimeConfig: null,
       }).voiceDictation,
     ).toBe(true);
+  });
+
+  it("exposes native voice settings only when its experiment is enabled", () => {
+    expect(resolve().voiceConversation).toBe(false);
+    expect(
+      resolve({
+        experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
+      }).voiceConversation,
+    ).toBe(true);
+    expect(
+      resolve({
+        buildFeatures: {
+          ...enabledBuildFeatures,
+          voiceDictation: false,
+        },
+        experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
+      }).voiceConversation,
+    ).toBe(false);
   });
 
   it("AND-gates telemetry across its build feature and runtime toggle", () => {

@@ -310,6 +310,98 @@ describe("GlobalComposerPill", () => {
     expect(input).toHaveValue("keep this draft");
   });
 
+  it("starts one selected Goose voice config and preserves its draft in the handoff payload", async () => {
+    const user = userEvent.setup();
+    const start = deferred<boolean>();
+    const onStart = vi.fn(() => start.promise);
+    renderGlobalComposer(vi.fn(), {
+      voiceConversation: { enabled: true, ready: true, onStart },
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "keep this draft");
+    const button = screen.getByRole("button", {
+      name: "Start Voice Conversation",
+    });
+    await user.click(button);
+    await user.click(button);
+
+    expect(onStart).toHaveBeenCalledOnce();
+    expect(onStart).toHaveBeenCalledWith({
+      text: "keep this draft",
+      selectedSkills: [],
+      options: { providerId: "goose" },
+    });
+    expect(input).toHaveValue("keep this draft");
+
+    start.resolve(true);
+    await waitFor(() => expect(input).toHaveValue(""));
+  });
+
+  it("blocks Voice Conversation while dictation owns the microphone", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn().mockResolvedValue(true);
+    mockVoiceDictation.isRecording = true;
+    renderGlobalComposer(vi.fn(), {
+      voiceConversation: { enabled: true, ready: true, onStart },
+    });
+
+    const button = screen.getByRole("button", {
+      name: "Start Voice Conversation",
+    });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it("keeps the global draft when voice chat creation is cancelled", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn().mockResolvedValue(false);
+    renderGlobalComposer(vi.fn(), {
+      voiceConversation: { enabled: true, ready: true, onStart },
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "do not lose me");
+    await user.click(
+      screen.getByRole("button", { name: "Start Voice Conversation" }),
+    );
+
+    await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
+    expect(input).toHaveValue("do not lose me");
+  });
+
+  it("hides voice chat when gated off and disables it for non-Goose agents", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn().mockResolvedValue(true);
+    const { rerender } = render(
+      <GlobalComposerPill
+        onSend={vi.fn()}
+        voiceConversation={{ enabled: false, ready: true, onStart }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Start Voice Conversation" }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <GlobalComposerPill
+        onSend={vi.fn()}
+        voiceConversation={{ enabled: true, ready: true, onStart }}
+      />,
+    );
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claude Code" }));
+
+    expect(
+      screen.getByRole("button", { name: "Start Voice Conversation" }),
+    ).toBeDisabled();
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
   it("focuses and toggles dictation once from the body without sending or mutating the draft", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();

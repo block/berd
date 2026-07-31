@@ -192,6 +192,8 @@ export function useChat(
           assistantPrompt: sendOptions?.assistantPrompt,
           displayText: sendOptions?.displayText,
           chips: sendOptions?.chips,
+          userMessageMetadata: sendOptions?.userMessageMetadata,
+          acpGooseMetadata: sendOptions?.acpGooseMetadata,
           providerId,
           systemPrompt,
           signal: abort.signal,

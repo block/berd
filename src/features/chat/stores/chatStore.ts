@@ -93,6 +93,41 @@ function replaceRecentMessageSessionId(
   ).slice(0, MESSAGE_SESSION_CACHE_LIMIT);
 }
 
+function preserveLocalSpeechState(
+  currentMessages: readonly Message[] | undefined,
+  nextMessages: readonly Message[],
+): Message[] {
+  const mergedMessages = nextMessages.map((message) => ({
+    ...message,
+    content: [...message.content],
+  }));
+  if (!currentMessages?.length) return mergedMessages;
+
+  const nextById = new Map(
+    mergedMessages.map((message) => [message.id, message]),
+  );
+
+  for (const current of currentMessages) {
+    const replayedById = nextById.get(current.id);
+    if (replayedById) {
+      replayedById.content = replayedById.content.map((content, index) => {
+        const currentContent = current.content[index];
+        if (
+          content.type !== "text" ||
+          currentContent?.type !== "text" ||
+          content.text !== currentContent.text ||
+          !currentContent.speech
+        ) {
+          return content;
+        }
+        return { ...content, speech: currentContent.speech };
+      });
+    }
+  }
+
+  return mergedMessages;
+}
+
 function buildNonEmptyDraftSessionIds(
   draftsBySession: Record<string, string>,
 ): Set<string> {
@@ -561,9 +596,13 @@ const createChatStore: StateCreator<
               sessionId,
             )
           : state.recentMessageSessionIds;
+      const nextMessagesWithLocalVoice = preserveLocalSpeechState(
+        state.messagesBySession[sessionId],
+        messages,
+      );
       const nextMessagesBySession = {
         ...state.messagesBySession,
-        [sessionId]: messages,
+        [sessionId]: nextMessagesWithLocalVoice,
       };
       const trimmedCache = trimMessageSessionCache(
         { ...state, messagesBySession: nextMessagesBySession },

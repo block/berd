@@ -202,6 +202,10 @@
       "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
       "title": "Chats con varios espacios de trabajo"
     },
+    "voiceConversation": {
+      "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
+      "title": "Conversaciones de voz"
+    },
     "navigationRefresh": {
       "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
       "title": "Navegación renovada"
@@ -413,7 +417,8 @@
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",
     "shortcuts": "Atajos de teclado",
-    "updates": "Actualizaciones"
+    "updates": "Actualizaciones",
+    "voice": "Voz"
   },
   "notifications": {
     "title": "Notificaciones",
@@ -706,6 +711,38 @@
       "openProviders": "Abrir proveedores de IA",
       "toast": "Elige un proveedor de IA antes de iniciar un chat."
     }
+  },
+  "voice": {
+    "title": "Conversación por voz",
+    "description": "Instala Pocket TTS y Parakeet STT para usar Conversación por voz.",
+    "settingsDescription": "Instala Pocket TTS, elige entre 12 voces y escúchalas en el dispositivo de salida seleccionado.",
+    "useSelected": "Usar la voz seleccionada",
+    "notNow": "Ahora no",
+    "downloadProgress": "{{downloaded}} de {{total}}",
+    "retryDownload": "Reintentar descarga del modelo",
+    "download": "Descargar modelo",
+    "modelInstalled": "Instalado",
+    "modelNotInstalled": "No instalado",
+    "modelInstalledSize": "Instalado · {{size}} en disco",
+    "modelMissingSize": "No instalado · descarga de {{size}}",
+    "downloadPhase": {
+      "queued": "En cola",
+      "downloading": "Descargando",
+      "extracting": "Preparando modelo",
+      "verifying": "Verificando modelo",
+      "publishing": "Instalando modelo",
+      "complete": "Instalado"
+    },
+    "removeModel": "Eliminar modelo",
+    "removeModelQueued": "En cola para eliminar…",
+    "removingModel": "Eliminando modelo…",
+    "removeModelTitle": "¿Eliminar {{model}}?",
+    "removeModelDescription": "La conversación por voz se detendrá antes de eliminar {{model}}. Puedes volver a descargar el modelo más tarde.",
+    "playbackSpeed": "Velocidad de reproducción",
+    "voiceLabel": "Voz de Pocket TTS",
+    "previewVoice": "Escuchar {{voice}}",
+    "playing": "Reproduciendo",
+    "preview": "Escuchar"
   },
   "title": "Configuración"
 }

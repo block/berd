@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
+  claimVoiceDictationMicrophone,
   createOpenAiRealtimeSession,
   getOpenAiRealtimeStatus,
+  releaseVoiceDictationMicrophone,
 } from "@/shared/api/openaiRealtime";
 import {
   type AudioBufferCapture,
@@ -36,6 +38,7 @@ const LOGGED_REALTIME_EVENT_TYPES = new Set([
   "input_audio_buffer.speech_stopped",
   "input_audio_buffer.committed",
 ]);
+const MICROPHONE_RELEASE_ATTEMPTS = 3;
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -132,6 +135,8 @@ export function useOpenAiRealtimeDictation({
   const audioCaptureRef = useRef<AudioBufferCapture | null>(null);
   const transcriptRef = useRef("");
   const activeRunIdRef = useRef(0);
+  const microphoneOwnerRef = useRef<string | null>(null);
+  const dictationInstanceId = useId();
   const recordingStartTimeRef = useRef(0);
   const onRecordingStartRef = useRef(onRecordingStart);
   const onTranscriptTextRef = useRef(onTranscriptText);
@@ -159,6 +164,31 @@ export function useOpenAiRealtimeDictation({
     };
   }, []);
 
+  const releaseMicrophone = useCallback(async (ownerId: string) => {
+    for (
+      let attempt = 1;
+      attempt <= MICROPHONE_RELEASE_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        await releaseVoiceDictationMicrophone(ownerId);
+        if (microphoneOwnerRef.current === ownerId) {
+          microphoneOwnerRef.current = null;
+        }
+        return true;
+      } catch (error) {
+        if (attempt === MICROPHONE_RELEASE_ATTEMPTS) {
+          console.warn("Failed to release voice dictation microphone", error);
+          return false;
+        }
+        await new Promise((resolve) => {
+          setTimeout(resolve, attempt * 50);
+        });
+      }
+    }
+    return false;
+  }, []);
+
   const cleanupResources = useCallback(() => {
     activeRunIdRef.current += 1;
     closeRealtimeResources({
@@ -171,7 +201,11 @@ export function useOpenAiRealtimeDictation({
     dataChannelRef.current = null;
     peerConnectionRef.current = null;
     streamRef.current = null;
-  }, []);
+    const microphoneOwner = microphoneOwnerRef.current;
+    if (microphoneOwner) {
+      void releaseMicrophone(microphoneOwner);
+    }
+  }, [releaseMicrophone]);
 
   const cleanup = useCallback(() => {
     cleanupResources();
@@ -257,6 +291,7 @@ export function useOpenAiRealtimeDictation({
     let audioCapture: AudioBufferCapture | null = null;
     let peerConnection: RTCPeerConnection | null = null;
     let dataChannel: RTCDataChannel | null = null;
+    const microphoneOwner = `${dictationInstanceId}:${runId}`;
 
     setIsStarting(true);
     transcriptRef.current = "";
@@ -267,6 +302,22 @@ export function useOpenAiRealtimeDictation({
     const elapsed = () => `${(performance.now() - t0).toFixed(0)}ms`;
 
     try {
+      // Coordinate microphone ownership in the backend before asking the OS.
+      // The backend is shared by every Tauri window, unlike renderer state.
+      const previousMicrophoneOwner = microphoneOwnerRef.current;
+      if (
+        previousMicrophoneOwner &&
+        !(await releaseMicrophone(previousMicrophoneOwner))
+      ) {
+        throw new Error("Could not release the previous microphone session");
+      }
+      await claimVoiceDictationMicrophone(microphoneOwner);
+      microphoneOwnerRef.current = microphoneOwner;
+      if (isStaleRun()) {
+        void releaseMicrophone(microphoneOwner);
+        return;
+      }
+
       // 1. Capture mic immediately so the user gets instant feedback.
       console.debug(`[dictation ${elapsed()}] requesting mic...`);
       stream = await navigator.mediaDevices.getUserMedia({
@@ -354,6 +405,7 @@ export function useOpenAiRealtimeDictation({
         return;
       }
     } catch (error) {
+      void releaseMicrophone(microphoneOwner);
       closeRealtimeResources({
         audioCapture,
         dataChannel,
@@ -378,7 +430,15 @@ export function useOpenAiRealtimeDictation({
         setIsStarting(false);
       }
     }
-  }, [handleRealtimeEvent, isEnabled, isRecording, isStarting, t]);
+  }, [
+    dictationInstanceId,
+    handleRealtimeEvent,
+    isEnabled,
+    isRecording,
+    isStarting,
+    releaseMicrophone,
+    t,
+  ]);
 
   const stopRecording = useCallback(() => {
     cleanup();

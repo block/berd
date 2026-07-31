@@ -32,6 +32,7 @@ const mockVoiceDictation = {
 };
 
 vi.mock("../../hooks/useVoiceDictation", () => ({
+  useAnyVoiceDictationActive: () => false,
   useVoiceDictation: () => mockVoiceDictation,
 }));
 
@@ -827,6 +828,161 @@ describe("ChatInput", () => {
     expect(
       screen.queryByRole("button", { name: /context usage/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows a distinct voice conversation control", async () => {
+    const onToggle = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "off",
+          boundSessionId: null,
+          active: false,
+          microphoneMuted: false,
+          onToggle,
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Start Voice Conversation" }),
+    );
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows voice conversation as pressed with high-contrast active styling", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "listening",
+          boundSessionId: "session-1",
+          active: true,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: /voice conversation is listening/i,
+    });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toHaveClass("bg-info", "text-info-foreground");
+  });
+
+  it("reports the muted microphone state on the voice conversation control", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "listening",
+          boundSessionId: "session-1",
+          active: true,
+          microphoneMuted: true,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Voice conversation microphone is muted for session session-1",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: "Unmute microphone" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each([
+    "starting",
+    "listening",
+    "user-speaking",
+    "agent-working",
+    "agent-speaking",
+  ] as const)("keeps the voice control active in the %s state", (state) => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state,
+          boundSessionId: "session-1",
+          active: true,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { pressed: true })).toHaveClass(
+      "bg-info",
+      "text-info-foreground",
+    );
+  });
+
+  it("shows an animated activity indicator while voice is detected", () => {
+    const { container } = render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "user-speaking",
+          boundSessionId: "session-1",
+          active: true,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    const indicator = container.querySelector(
+      '[data-role="voice-activity-indicator"]',
+    );
+    expect(indicator).toBeInTheDocument();
+    expect(indicator).toHaveAttribute("data-activity", "user-speaking");
+    expect(indicator?.querySelectorAll(".voice-waveform-bar")).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: "Receiving voice input…" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows a distinct speaker indicator while the agent is speaking", () => {
+    const { container } = render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "agent-speaking",
+          boundSessionId: "session-1",
+          active: true,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-role="agent-voice-activity-indicator"]'),
+    ).toHaveAttribute("data-activity", "agent-speaking");
+    expect(
+      container.querySelector('[data-role="voice-activity-indicator"]'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Agent is speaking…" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("shows stop button when streaming", () => {
@@ -2786,6 +2942,62 @@ describe("ChatInput", () => {
     expect(
       screen.queryByRole("button", { name: "Voice dictation" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("repurposes the existing dictation mic as voice-call mute without reordering controls", async () => {
+    const onMicrophoneMuteToggle = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [],
+        }}
+        projectPicker={{
+          selectedProjectId: null,
+          availableProjects: [],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          onSend: vi.fn(),
+          voiceEnabled: true,
+          voiceConversation: {
+            visible: true,
+            state: "listening",
+            boundSessionId: "session-1",
+            active: true,
+            microphoneMuted: false,
+            onToggle: vi.fn(),
+            onMicrophoneMuteToggle,
+          },
+        }}
+        isCompact={false}
+      />,
+    );
+
+    const callButton = screen.getByRole("button", {
+      name: /voice conversation is listening/i,
+    });
+    const muteButton = screen.getByRole("button", {
+      name: "Mute microphone",
+    });
+
+    expect(
+      callButton.compareDocumentPosition(muteButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(muteButton).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(muteButton);
+    expect(onMicrophoneMuteToggle).toHaveBeenCalledOnce();
   });
 
   it("shows and updates reasoning effort from the model picker", async () => {

@@ -3,6 +3,9 @@ use crate::services::kgoose;
 use serde::Serialize;
 #[cfg(not(feature = "no-voice-dictation"))]
 use serde_json::json;
+use tauri::{State, WebviewWindow};
+
+use super::voice_capture::VoiceCaptureState;
 
 #[cfg(not(feature = "no-voice-dictation"))]
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
@@ -71,6 +74,41 @@ pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, S
             transcription_model,
         })
     }
+}
+
+#[tauri::command]
+pub fn claim_voice_dictation_microphone(
+    state: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    renderer_id: String,
+    renderer_epoch: u64,
+    owner_id: String,
+) -> Result<(), String> {
+    state
+        .claim_microphone(
+            webview_window.label().to_string(),
+            renderer_id,
+            renderer_epoch,
+            owner_id,
+        )
+        .map(|_| ())
+}
+
+#[tauri::command]
+pub fn release_voice_dictation_microphone(
+    state: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    renderer_id: String,
+    renderer_epoch: u64,
+    owner_id: String,
+) -> Result<(), String> {
+    state.release_microphone(
+        webview_window.label(),
+        &renderer_id,
+        renderer_epoch,
+        &owner_id,
+    );
+    Ok(())
 }
 
 #[cfg(not(feature = "no-voice-dictation"))]

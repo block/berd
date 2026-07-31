@@ -386,7 +386,12 @@
       "anthropicThinkingHistory": "Este chat no puede continuar con un modelo Claude porque su historial de razonamiento previo ya no tiene una forma que Claude acepte. Inicia un chat nuevo o cambia este chat a un modelo que no sea Claude para continuar."
     },
     "berdctlCrossSessionLabel": "Enviado por Berd desde otra sesión",
-    "steerLabel": "Guiado"
+    "steerLabel": "Guiado",
+    "voiceSpeechSpeakingLabel": "Hablando",
+    "voiceSpeechSpokenLabel": "Hablado",
+    "voiceSpeechInterruptedLabel": "Interrumpido",
+    "voiceSpeechNotSpokenLabel": "No hablado",
+    "voiceSpeechFailedLabel": "Fallido"
   },
   "persona": {
     "chooseAssistant": "Elegir asistente",
@@ -406,7 +411,11 @@
   "globalPill": {
     "ariaLabel": "Redacción rápida",
     "expand": "Expandir a chat completo",
-    "placeholder": "Inicia una conversación"
+    "placeholder": "Inicia una conversación",
+    "setupVoiceConversation": "Configurar conversación por voz",
+    "startVoiceConversation": "Iniciar conversación por voz",
+    "voiceConversationStartFailed": "No se pudo iniciar la conversación por voz. Tu borrador sigue aquí.",
+    "voiceConversationRequiresGoose": "La conversación por voz requiere Goose"
   },
   "emptyState": {
     "buildAgentPrompt": "¿Qué quieres que haga tu agente?",
@@ -488,7 +497,23 @@
     "voiceInputDisabled": "Configura OPENAI_API_KEY para activar el dictado",
     "voiceInputRecording": "Escuchando...",
     "voiceInputTranscribing": "Transcribiendo...",
-    "voiceInputAutoSubmitHint": "Di \"submit\" para enviar"
+    "voiceInputAutoSubmitHint": "Di \"submit\" para enviar",
+    "voiceConversation": {
+      "start": "Iniciar conversación de voz",
+      "muteMicrophone": "Silenciar micrófono",
+      "unmuteMicrophone": "Activar micrófono",
+      "states": {
+        "off": "Iniciar conversación de voz",
+        "starting": "Iniciando conversación de voz…",
+        "stopping": "Deteniendo conversación de voz…",
+        "listening": "La conversación de voz escucha la sesión {{sessionId}}",
+        "muted": "El micrófono de la conversación de voz está silenciado para la sesión {{sessionId}}",
+        "user-speaking": "Recibiendo entrada de voz…",
+        "agent-working": "El agente está trabajando…",
+        "agent-speaking": "El agente está hablando…",
+        "error": "Error de conversación de voz: {{error}}"
+      }
+    }
   },
   "tools": {
     "content": "Contenido",

@@ -11,6 +11,7 @@ import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings"
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
+import { VoiceSettings } from "@/features/voice-conversation/ui/VoiceSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { PageShell } from "@/shared/ui/page-shell";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
@@ -38,6 +39,7 @@ export function SettingsView({
   const queryClient = useQueryClient();
   const doctorEnabled = useProfileCapability("doctor");
   const updatesEnabled = useProfileCapability("updates");
+  const voiceConversationEnabled = useProfileCapability("voiceConversation");
   const securityMlEnabled = getBuildFeatureState().securityMl;
 
   // Warm the shared doctor report once per Settings visit. SettingsView mounts
@@ -78,6 +80,9 @@ export function SettingsView({
         <SecuritySettings />
       )}
       {activeSection === "notifications" && <NotificationSettings />}
+      {activeSection === "voice" && voiceConversationEnabled && (
+        <VoiceSettings />
+      )}
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}
       {activeSection === "updates" && updatesEnabled && <UpdatesSettings />}

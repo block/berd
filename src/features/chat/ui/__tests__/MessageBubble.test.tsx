@@ -438,6 +438,37 @@ describe("MessageBubble", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    ["speaking", "Speaking"],
+    ["spoken", "Spoken"],
+    ["interrupted", "Interrupted"],
+    ["notSpoken", "Not spoken"],
+    ["failed", "Failed"],
+  ] as const)("decorates one assistant text block with %s speech state", (status, label) => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "One visible assistant response.",
+            speech: { status },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      `[data-voice-speech-status="${status}"]`,
+    );
+    expect(block).toHaveTextContent(label);
+    expect(screen.getAllByText("One visible assistant response.")).toHaveLength(
+      1,
+    );
+    if (status === "interrupted") {
+      expect(block).toHaveClass("line-through");
+    }
+  });
+
   it("renders multiple content blocks", () => {
     const msg = assistantMessage([
       { type: "text", text: "first block" },

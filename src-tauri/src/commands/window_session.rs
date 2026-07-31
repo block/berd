@@ -677,6 +677,17 @@ pub fn open_session_window(
     let label_for_close = label.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
+            app_for_close
+                .state::<crate::commands::voice_capture::VoiceCaptureState>()
+                .release_window(&label_for_close);
+            let stopped_native_voice = app_for_close
+                .state::<crate::commands::native_voice::NativeVoiceState>()
+                .stop_for_window_destroyed(&label_for_close);
+            if stopped_native_voice {
+                app_for_close
+                    .state::<crate::commands::pocket_voice::PocketVoiceState>()
+                    .stop_for_window_destroyed();
+            }
             reg_for_close.release_label(&label_for_close);
             let _ = emit_snapshot(&app_for_close, &reg_for_close);
         }

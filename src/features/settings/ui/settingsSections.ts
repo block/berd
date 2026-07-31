@@ -3,6 +3,7 @@ import {
   Archive,
   Bell,
   FlaskConical,
+  Headphones,
   Keyboard,
   RefreshCw,
   Settings2,
@@ -29,6 +30,12 @@ export const SETTINGS_SECTIONS = [
   { id: "providers", labelKey: "nav.providers", icon: IconServer },
   { id: "notifications", labelKey: "nav.notifications", icon: Bell },
   { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
+  {
+    id: "voice",
+    labelKey: "nav.voice",
+    icon: Headphones,
+    capability: "voiceConversation",
+  },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
   ...(getBuildFeatureState().securityMl
     ? ([{ id: "security", labelKey: "nav.security", icon: Shield }] as const)
@@ -56,7 +63,6 @@ const LEGACY_SECTION_REDIRECTS: Record<string, SectionId> = {
   projects: "archive",
   chats: "archive",
   extensions: "connections",
-  voice: "general",
 };
 
 export function isSettingsSection(section: string): section is SectionId {

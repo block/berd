@@ -1,0 +1,1117 @@
+//! Native Parakeet speech recognition for Desktop voice conversations.
+
+use std::{
+    collections::VecDeque,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
+        Arc, Mutex,
+    },
+    thread,
+    time::Duration,
+};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tokio::sync::mpsc as tokio_mpsc;
+
+use super::{pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState};
+
+const EVENT_NAME: &str = "voice-conversation:event";
+const MAX_AUDIO_BATCH_BYTES: usize = 100 * 1024;
+const AUDIO_QUEUE_DEPTH: usize = 50;
+const MAX_PENDING_TRANSCRIPTS: usize = 64;
+const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
+const MAX_SPEECH_SAMPLES: usize = 16_000 * 30;
+const VAD_FRAME_SAMPLES: usize = 256;
+const VAD_THRESHOLD: f32 = 0.5;
+// Keep ordinary pauses between words inside one offline recognition request.
+// At 16 kHz with 256-sample frames this is 1.2 seconds.
+const SILENCE_FLUSH_FRAMES: usize = 75;
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Lifecycle {
+    #[default]
+    Stopped,
+    Running,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeVoiceStatus {
+    available: bool,
+    unavailable_reason: Option<String>,
+    lifecycle: Lifecycle,
+    session_id: Option<String>,
+    owner_window_label: Option<String>,
+    revision: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingTranscript {
+    session_id: String,
+    lifecycle_id: String,
+    id: String,
+    text: String,
+    revision: u64,
+    delivery_attempts: u8,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptRejection {
+    attempts: u8,
+    terminal: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum NativeVoiceEvent {
+    Startup {
+        session_id: String,
+        owner_window_label: String,
+        line: String,
+        revision: u64,
+    },
+    User {
+        session_id: String,
+        lifecycle_id: String,
+        id: String,
+        text: String,
+        revision: u64,
+        delivery_attempts: u8,
+    },
+    Activity {
+        session_id: String,
+        activity: &'static str,
+        revision: u64,
+    },
+    CleanShutdown {
+        session_id: String,
+        revision: u64,
+    },
+    Error {
+        session_id: Option<String>,
+        message: String,
+        revision: u64,
+        terminal: bool,
+    },
+}
+
+#[derive(Default)]
+struct Runtime {
+    session_id: Option<String>,
+    lifecycle_id: Option<String>,
+    revision: u64,
+    owner: Option<RuntimeOwner>,
+    pipeline: Option<SttPipeline>,
+}
+
+#[derive(Clone)]
+struct RuntimeOwner {
+    window_label: String,
+}
+
+#[derive(Clone, Default)]
+pub struct NativeVoiceState {
+    runtime: Arc<Mutex<Runtime>>,
+    pending: Arc<Mutex<VecDeque<PendingTranscript>>>,
+    capture_suppressions: Arc<AtomicUsize>,
+}
+
+#[must_use = "capture suppression ends when the guard is dropped"]
+pub struct CaptureSuppressionGuard {
+    capture_suppressions: Arc<AtomicUsize>,
+}
+
+impl Drop for CaptureSuppressionGuard {
+    fn drop(&mut self) {
+        let previous = self.capture_suppressions.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0, "capture suppression guard underflow");
+        log::info!(
+            "[voice-echo-guard] capture resumed suppression_count={}",
+            previous.saturating_sub(1)
+        );
+    }
+}
+
+impl NativeVoiceState {
+    pub fn suppress_capture(&self) -> CaptureSuppressionGuard {
+        let previous = self.capture_suppressions.fetch_add(1, Ordering::SeqCst);
+        log::info!(
+            "[voice-echo-guard] capture suppressed suppression_count={}",
+            previous + 1
+        );
+        CaptureSuppressionGuard {
+            capture_suppressions: Arc::clone(&self.capture_suppressions),
+        }
+    }
+
+    fn capture_is_suppressed(&self) -> bool {
+        self.capture_suppressions.load(Ordering::SeqCst) > 0
+    }
+}
+
+enum SttMessage {
+    Speaking(bool),
+    Final {
+        text: String,
+        delivered: Option<SyncSender<()>>,
+    },
+    Failed(String),
+}
+
+struct SttPipeline {
+    audio_tx: SyncSender<Vec<u8>>,
+    audio_seen: AtomicBool,
+    shutdown: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl SttPipeline {
+    fn new(model_dir: PathBuf) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
+        let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
+        let (event_tx, event_rx) = tokio_mpsc::channel(64);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let thread = thread::Builder::new()
+            .name("berd-native-stt".into())
+            .spawn(move || stt_worker(model_dir, audio_rx, event_tx, worker_shutdown))
+            .map_err(|error| format!("start native transcription: {error}"))?;
+        Ok((
+            Self {
+                audio_tx,
+                audio_seen: AtomicBool::new(false),
+                shutdown,
+                thread: Some(thread),
+            },
+            event_rx,
+        ))
+    }
+
+    fn push(&self, bytes: Vec<u8>) -> Result<(), String> {
+        if bytes.len() > MAX_AUDIO_BATCH_BYTES {
+            return Err(format!(
+                "audio batch is {} bytes; maximum is {MAX_AUDIO_BATCH_BYTES}",
+                bytes.len()
+            ));
+        }
+        if !bytes.len().is_multiple_of(4) {
+            return Err("audio batch must contain complete f32 samples".to_string());
+        }
+        if !self.audio_seen.swap(true, Ordering::AcqRel) {
+            log::info!(
+                "Native Parakeet received its first audio batch ({} bytes)",
+                bytes.len()
+            );
+        }
+        match self.audio_tx.try_send(bytes) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(
+                "Native voice audio overrun: transcription could not keep up with microphone input."
+                    .to_string(),
+            ),
+            Err(TrySendError::Disconnected(_)) => {
+                Err("Native voice transcription is no longer running.".to_string())
+            }
+        }
+    }
+
+    fn begin_shutdown(&mut self) -> Option<thread::JoinHandle<()>> {
+        self.shutdown.store(true, Ordering::Release);
+        self.thread.take()
+    }
+}
+
+impl Drop for SttPipeline {
+    fn drop(&mut self) {
+        if let Some(worker) = self.begin_shutdown() {
+            let _ = thread::Builder::new()
+                .name("berd-native-stt-reaper".into())
+                .spawn(move || {
+                    let _ = worker.join();
+                });
+        }
+    }
+}
+
+async fn shutdown_pipeline(mut pipeline: SttPipeline) {
+    let worker = pipeline.begin_shutdown();
+    drop(pipeline);
+    if let Some(worker) = worker {
+        let _ = tauri::async_runtime::spawn_blocking(move || worker.join()).await;
+    }
+}
+
+fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
+    let model = parakeet_model_dir(app);
+    let runtime = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    NativeVoiceStatus {
+        available: model.is_ok(),
+        unavailable_reason: model
+            .err()
+            .map(|_| "Download native voice before starting a call.".to_string()),
+        lifecycle: if runtime.session_id.is_some() {
+            Lifecycle::Running
+        } else {
+            Lifecycle::Stopped
+        },
+        session_id: runtime.session_id.clone(),
+        owner_window_label: runtime
+            .owner
+            .as_ref()
+            .map(|owner| owner.window_label.clone()),
+        revision: runtime.revision,
+    }
+}
+
+#[tauri::command]
+pub fn get_native_voice_conversation_status(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+) -> NativeVoiceStatus {
+    status(&app, &state)
+}
+
+#[tauri::command]
+pub fn drain_native_voice_conversation_transcripts(
+    state: State<'_, NativeVoiceState>,
+    session_id: String,
+) -> Result<Vec<PendingTranscript>, String> {
+    Ok(state
+        .pending
+        .lock()
+        .map_err(|_| "native transcript queue lock was poisoned".to_string())?
+        .iter()
+        .filter(|item| item.session_id == session_id)
+        .cloned()
+        .collect())
+}
+
+#[tauri::command]
+pub fn acknowledge_native_voice_conversation_transcript(
+    state: State<'_, NativeVoiceState>,
+    session_id: String,
+    id: String,
+    revision: u64,
+) -> Result<(), String> {
+    state
+        .pending
+        .lock()
+        .map_err(|_| "native transcript queue lock was poisoned".to_string())?
+        .retain(|item| {
+            !(item.session_id == session_id && item.id == id && item.revision == revision)
+        });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reject_native_voice_conversation_transcript(
+    state: State<'_, NativeVoiceState>,
+    session_id: String,
+    id: String,
+    revision: u64,
+) -> Result<TranscriptRejection, String> {
+    let mut pending = state
+        .pending
+        .lock()
+        .map_err(|_| "native transcript queue lock was poisoned".to_string())?;
+    Ok(reject_pending_transcript(
+        &mut pending,
+        &session_id,
+        &id,
+        revision,
+    ))
+}
+
+fn reject_pending_transcript(
+    pending: &mut VecDeque<PendingTranscript>,
+    session_id: &str,
+    id: &str,
+    revision: u64,
+) -> TranscriptRejection {
+    let Some(index) = pending.iter().position(|item| {
+        item.session_id == session_id && item.id == id && item.revision == revision
+    }) else {
+        return TranscriptRejection {
+            attempts: MAX_TRANSCRIPT_DELIVERY_ATTEMPTS,
+            terminal: true,
+        };
+    };
+    let attempts = pending[index].delivery_attempts.saturating_add(1);
+    let terminal = attempts >= MAX_TRANSCRIPT_DELIVERY_ATTEMPTS;
+    if terminal {
+        pending.remove(index);
+    } else {
+        pending[index].delivery_attempts = attempts;
+    }
+    TranscriptRejection { attempts, terminal }
+}
+
+#[tauri::command]
+pub async fn start_native_voice_conversation(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    session_id: String,
+    renderer_id: String,
+    renderer_epoch: u64,
+) -> Result<NativeVoiceStatus, String> {
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() || session_id.len() > 256 {
+        return Err("session id must be between 1 and 256 bytes".to_string());
+    }
+    let window_label = webview_window.label().to_string();
+    let owner_id = native_owner_id(&session_id);
+    let microphone_claimed = capture.claim_microphone(
+        window_label.clone(),
+        renderer_id.clone(),
+        renderer_epoch,
+        owner_id.clone(),
+    )?;
+    let model_dir = match parakeet_model_dir(&app) {
+        Ok(model_dir) => model_dir,
+        Err(error) => {
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err(error);
+        }
+    };
+    let (pipeline, mut events) = match SttPipeline::new(model_dir) {
+        Ok(result) => result,
+        Err(error) => {
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err(error);
+        }
+    };
+    let (revision, lifecycle_id) = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.is_some() {
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err("A native voice conversation is already active.".to_string());
+        }
+        runtime.revision = runtime.revision.wrapping_add(1);
+        runtime.session_id = Some(session_id.clone());
+        runtime.lifecycle_id = Some(uuid::Uuid::new_v4().to_string());
+        runtime.owner = Some(RuntimeOwner {
+            window_label: window_label.clone(),
+        });
+        runtime.pipeline = Some(pipeline);
+        (
+            runtime.revision,
+            runtime.lifecycle_id.clone().unwrap_or_default(),
+        )
+    };
+    let _ = webview_window.emit(
+        EVENT_NAME,
+        NativeVoiceEvent::Startup {
+            session_id: session_id.clone(),
+            owner_window_label: window_label.clone(),
+            line: "Native Parakeet voice conversation is on".to_string(),
+            revision,
+        },
+    );
+
+    let event_app = app.clone();
+    let event_window = webview_window.clone();
+    let runtime = Arc::clone(&state.runtime);
+    let pending = Arc::clone(&state.pending);
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let active = runtime.lock().ok().is_some_and(|current| {
+                current.session_id.as_deref() == Some(session_id.as_str())
+                    && current.revision == revision
+            });
+            if !active {
+                break;
+            }
+            match event {
+                SttMessage::Speaking(speaking) => {
+                    let _ = event_window.emit(
+                        EVENT_NAME,
+                        NativeVoiceEvent::Activity {
+                            session_id: session_id.clone(),
+                            activity: if speaking {
+                                "user-speaking"
+                            } else {
+                                "user-idle"
+                            },
+                            revision,
+                        },
+                    );
+                }
+                SttMessage::Final { text, delivered } => {
+                    let transcript = PendingTranscript {
+                        session_id: session_id.clone(),
+                        lifecycle_id: lifecycle_id.clone(),
+                        id: uuid::Uuid::new_v4().to_string(),
+                        text,
+                        revision,
+                        delivery_attempts: 0,
+                    };
+                    let evicted = pending.lock().ok().and_then(|mut queue| {
+                        enqueue_pending_transcript(&mut queue, transcript.clone())
+                    });
+                    if evicted.is_some() {
+                        let _ = event_window.emit(
+                            EVENT_NAME,
+                            NativeVoiceEvent::Error {
+                                session_id: Some(session_id.clone()),
+                                message: "Voice transcript recovery queue was full; the oldest retained transcript was discarded.".to_string(),
+                                revision,
+                                terminal: false,
+                            },
+                        );
+                    }
+                    let _ = event_window.emit(
+                        EVENT_NAME,
+                        NativeVoiceEvent::User {
+                            session_id: transcript.session_id,
+                            lifecycle_id: transcript.lifecycle_id,
+                            id: transcript.id,
+                            text: transcript.text,
+                            revision,
+                            delivery_attempts: transcript.delivery_attempts,
+                        },
+                    );
+                    if let Some(delivered) = delivered {
+                        let _ = delivered.send(());
+                    }
+                }
+                SttMessage::Failed(message) => {
+                    let pipeline = {
+                        let Ok(mut current) = runtime.lock() else {
+                            break;
+                        };
+                        if current.session_id.as_deref() != Some(session_id.as_str())
+                            || current.revision != revision
+                        {
+                            break;
+                        }
+                        current.session_id = None;
+                        current.lifecycle_id = None;
+                        current.owner = None;
+                        current.revision = current.revision.wrapping_add(1);
+                        current.pipeline.take()
+                    };
+                    if let Some(pipeline) = pipeline {
+                        shutdown_pipeline(pipeline).await;
+                    }
+                    event_app
+                        .state::<VoiceCaptureState>()
+                        .release_owner(&window_label, &owner_id);
+                    let _ = event_window.emit(
+                        EVENT_NAME,
+                        NativeVoiceEvent::Error {
+                            session_id: Some(session_id.clone()),
+                            message,
+                            revision: revision.wrapping_add(1),
+                            terminal: true,
+                        },
+                    );
+                    break;
+                }
+            }
+        }
+    });
+    Ok(status(&app, &state))
+}
+
+#[tauri::command]
+pub async fn stop_native_voice_conversation(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    renderer_id: String,
+    renderer_epoch: u64,
+) -> Result<NativeVoiceStatus, String> {
+    capture.activate_renderer(webview_window.label(), &renderer_id, renderer_epoch)?;
+    let (session_id, revision, pipeline, owner) = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        let owner = runtime.owner.clone();
+        let session_id = runtime.session_id.clone();
+        let owner_id = session_id.as_deref().map(native_owner_id);
+        let revision = runtime.revision;
+        (
+            session_id,
+            revision,
+            runtime.pipeline.take(),
+            owner.zip(owner_id),
+        )
+    };
+    // Keep the lifecycle current while the worker flushes its final buffered
+    // utterance into the durable pending queue.
+    if let Some(pipeline) = pipeline {
+        shutdown_pipeline(pipeline).await;
+    }
+    let revision = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.revision == revision && runtime.session_id == session_id {
+            runtime.session_id = None;
+            runtime.lifecycle_id = None;
+            runtime.owner = None;
+            runtime.revision = runtime.revision.wrapping_add(1);
+        }
+        runtime.revision
+    };
+    if let Some((owner, owner_id)) = owner.as_ref() {
+        capture.release_owner(&owner.window_label, owner_id);
+    }
+    if let Some(session_id) = session_id {
+        let target = owner
+            .as_ref()
+            .and_then(|(owner, _)| app.get_webview_window(&owner.window_label))
+            .unwrap_or(webview_window);
+        let _ = target.emit(
+            EVENT_NAME,
+            NativeVoiceEvent::CleanShutdown {
+                session_id,
+                revision,
+            },
+        );
+    }
+    Ok(status(&app, &state))
+}
+
+fn native_owner_id(session_id: &str) -> String {
+    format!("native-voice:{session_id}")
+}
+
+impl NativeVoiceState {
+    pub async fn stop_for_model_removal(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+    ) -> Result<(), String> {
+        let (session_id, revision, pipeline, owner) = {
+            let mut runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            (
+                runtime.session_id.clone(),
+                runtime.revision,
+                runtime.pipeline.take(),
+                runtime.owner.clone(),
+            )
+        };
+        if let Some(pipeline) = pipeline {
+            shutdown_pipeline(pipeline).await;
+        }
+        let next_revision = {
+            let mut runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            if runtime.revision == revision && runtime.session_id == session_id {
+                runtime.session_id = None;
+                runtime.lifecycle_id = None;
+                runtime.owner = None;
+                runtime.revision = runtime.revision.wrapping_add(1);
+            }
+            runtime.revision
+        };
+        if let (Some(owner), Some(session_id)) = (owner, session_id) {
+            capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
+            if let Some(window) = app.get_webview_window(&owner.window_label) {
+                let _ = window.emit(
+                    EVENT_NAME,
+                    NativeVoiceEvent::CleanShutdown {
+                        session_id,
+                        revision: next_revision,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub fn stop_for_window_destroyed(&self, window_label: &str) -> bool {
+        let (session_id, revision, pipeline) = {
+            let Ok(mut runtime) = self.runtime.lock() else {
+                return false;
+            };
+            if runtime
+                .owner
+                .as_ref()
+                .is_none_or(|owner| owner.window_label != window_label)
+            {
+                return false;
+            }
+            (
+                runtime.session_id.clone(),
+                runtime.revision,
+                runtime.pipeline.take(),
+            )
+        };
+        if pipeline.is_none() {
+            if let Ok(mut runtime) = self.runtime.lock() {
+                if runtime.revision == revision && runtime.session_id == session_id {
+                    runtime.session_id = None;
+                    runtime.lifecycle_id = None;
+                    runtime.owner = None;
+                    runtime.revision = runtime.revision.wrapping_add(1);
+                }
+            }
+            return true;
+        }
+        let runtime = Arc::clone(&self.runtime);
+        tauri::async_runtime::spawn(async move {
+            shutdown_pipeline(pipeline.expect("pipeline checked above")).await;
+            if let Ok(mut runtime) = runtime.lock() {
+                if runtime.revision == revision && runtime.session_id == session_id {
+                    runtime.session_id = None;
+                    runtime.lifecycle_id = None;
+                    runtime.owner = None;
+                    runtime.revision = runtime.revision.wrapping_add(1);
+                }
+            }
+        });
+        true
+    }
+
+    pub fn stop_for_app_exit(&self) {
+        let (session_id, revision, pipeline) = {
+            let Ok(mut runtime) = self.runtime.lock() else {
+                return;
+            };
+            (
+                runtime.session_id.clone(),
+                runtime.revision,
+                runtime.pipeline.take(),
+            )
+        };
+        drop(pipeline);
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.revision == revision && runtime.session_id == session_id {
+                runtime.session_id = None;
+                runtime.lifecycle_id = None;
+                runtime.owner = None;
+                runtime.revision = runtime.revision.wrapping_add(1);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn push_native_voice_audio(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, NativeVoiceState>,
+    webview_window: WebviewWindow,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("native voice audio requires a raw binary body".to_string());
+    };
+    push_audio_for_window(&state, webview_window.label(), bytes.to_vec())
+}
+
+fn push_audio_for_window(
+    state: &NativeVoiceState,
+    window_label: &str,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "native voice state lock was poisoned".to_string())?;
+    if runtime
+        .owner
+        .as_ref()
+        .is_none_or(|owner| owner.window_label != window_label)
+    {
+        return Err("Only the owning window may send native voice audio.".to_string());
+    }
+    if state.capture_is_suppressed() {
+        return Ok(());
+    }
+    if let Some(pipeline) = runtime.pipeline.as_ref() {
+        pipeline.push(bytes)?;
+    }
+    Ok(())
+}
+
+fn enqueue_pending_transcript(
+    queue: &mut VecDeque<PendingTranscript>,
+    transcript: PendingTranscript,
+) -> Option<PendingTranscript> {
+    let evicted = (queue.len() >= MAX_PENDING_TRANSCRIPTS)
+        .then(|| queue.pop_front())
+        .flatten();
+    queue.push_back(transcript);
+    evicted
+}
+
+fn stt_worker(
+    model_dir: PathBuf,
+    audio_rx: Receiver<Vec<u8>>,
+    event_tx: tokio_mpsc::Sender<SttMessage>,
+    shutdown: Arc<AtomicBool>,
+) {
+    use rubato::{Fft, FixedSync, Resampler};
+    use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
+
+    let mut resampler = match Fft::<f32>::new(48_000, 16_000, 1024, 2, 1, FixedSync::Input) {
+        Ok(resampler) => resampler,
+        Err(error) => {
+            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
+                "Could not initialize native audio resampling: {error}"
+            )));
+            return;
+        }
+    };
+    let chunk_in = resampler.input_frames_next();
+    let mut vad = earshot::Detector::new(earshot::DefaultPredictor::new());
+
+    let mut config = OfflineRecognizerConfig::default();
+    config.model_config.nemo_ctc.model = Some(
+        model_dir
+            .join("model.int8.onnx")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    config.model_config.tokens = Some(model_dir.join("tokens.txt").to_string_lossy().into_owned());
+    config.model_config.num_threads = 1;
+    config.model_config.debug = false;
+    let Some(recognizer) = OfflineRecognizer::create(&config) else {
+        let _ = event_tx.blocking_send(SttMessage::Failed(
+            "Could not load the Parakeet speech model.".to_string(),
+        ));
+        return;
+    };
+
+    let mut input_48k = Vec::new();
+    let mut leftover_16k = Vec::new();
+    let mut speech = Vec::new();
+    let mut silence_frames = 0_usize;
+    let mut in_speech = false;
+    while !shutdown.load(Ordering::Acquire) {
+        let bytes = match audio_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(bytes) => bytes,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        input_48k.extend(
+            bytes
+                .chunks_exact(4)
+                .map(|sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]])),
+        );
+        while input_48k.len() >= chunk_in {
+            let chunk: Vec<f32> = input_48k.drain(..chunk_in).collect();
+            let resampled = resample(&mut resampler, &chunk);
+            leftover_16k.extend_from_slice(&resampled);
+            while leftover_16k.len() >= VAD_FRAME_SAMPLES {
+                let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
+                let clamped: Vec<f32> =
+                    frame.iter().map(|sample| sample.clamp(-1.0, 1.0)).collect();
+                let speaking = vad.predict_f32(&clamped) > VAD_THRESHOLD;
+                if speaking {
+                    if !in_speech {
+                        in_speech = true;
+                        log::info!("Native Parakeet detected speech");
+                        let _ = event_tx.blocking_send(SttMessage::Speaking(true));
+                    }
+                    silence_frames = 0;
+                    speech.extend_from_slice(&frame);
+                    if speech.len() >= MAX_SPEECH_SAMPLES {
+                        flush_speech(&speech, &recognizer, &event_tx, None);
+                        speech.clear();
+                        in_speech = false;
+                        let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+                    }
+                } else if in_speech {
+                    speech.extend_from_slice(&frame);
+                    silence_frames += 1;
+                    if silence_frames >= SILENCE_FLUSH_FRAMES {
+                        flush_speech(&speech, &recognizer, &event_tx, None);
+                        speech.clear();
+                        silence_frames = 0;
+                        in_speech = false;
+                        let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+                    }
+                }
+            }
+        }
+    }
+    if !speech.is_empty() {
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(0);
+        flush_speech(&speech, &recognizer, &event_tx, Some(delivered_tx));
+        let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
+    }
+}
+
+fn resample(resampler: &mut rubato::Fft<f32>, samples: &[f32]) -> Vec<f32> {
+    use audioadapter_buffers::direct::InterleavedSlice;
+    use rubato::Resampler;
+    let Ok(input) = InterleavedSlice::new(samples, 1, samples.len()) else {
+        return Vec::new();
+    };
+    resampler
+        .process(&input, 0, None)
+        .map(|output| output.take_data())
+        .unwrap_or_default()
+}
+
+fn flush_speech(
+    speech: &[f32],
+    recognizer: &sherpa_onnx::OfflineRecognizer,
+    event_tx: &tokio_mpsc::Sender<SttMessage>,
+    delivered: Option<SyncSender<()>>,
+) {
+    if speech.is_empty() {
+        return;
+    }
+    let stream = recognizer.create_stream();
+    stream.accept_waveform(16_000, speech);
+    recognizer.decode(&stream);
+    let text = stream
+        .get_result()
+        .map(|result| result.text.trim().to_string())
+        .unwrap_or_default();
+    log::info!(
+        "Native Parakeet finalized {} samples into {} text characters",
+        speech.len(),
+        text.chars().count()
+    );
+    deliver_recognition_result(text, event_tx, delivered);
+}
+
+fn deliver_recognition_result(
+    text: String,
+    event_tx: &tokio_mpsc::Sender<SttMessage>,
+    delivered: Option<SyncSender<()>>,
+) {
+    if text.is_empty() {
+        if let Some(delivered) = delivered {
+            let _ = delivered.send(());
+        }
+        return;
+    }
+    let _ = event_tx.blocking_send(SttMessage::Final { text, delivered });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speaker_playback_blocks_vad_ingestion_until_all_guards_finish() {
+        let state = NativeVoiceState::default();
+        assert!(!state.capture_is_suppressed());
+
+        let first = state.suppress_capture();
+        assert!(state.capture_is_suppressed());
+        {
+            let second = state.suppress_capture();
+            assert!(state.capture_is_suppressed());
+            drop(second);
+            assert!(state.capture_is_suppressed());
+        }
+
+        drop(first);
+        assert!(!state.capture_is_suppressed());
+    }
+
+    #[test]
+    fn window_destroy_stops_only_its_owned_voice_lifecycle() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.lifecycle_id = Some("lifecycle-1".to_string());
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "session-window".to_string(),
+            });
+        }
+
+        assert!(!state.stop_for_window_destroyed("other-window"));
+        assert_eq!(
+            state
+                .runtime
+                .lock()
+                .expect("lock native runtime")
+                .session_id
+                .as_deref(),
+            Some("session-1")
+        );
+
+        assert!(state.stop_for_window_destroyed("session-window"));
+        let runtime = state.runtime.lock().expect("lock native runtime");
+        assert!(runtime.session_id.is_none());
+        assert!(runtime.owner.is_none());
+    }
+
+    #[test]
+    fn audio_push_rejects_malformed_batches() {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let pipeline = SttPipeline {
+            audio_tx: sender,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            audio_seen: AtomicBool::new(false),
+            thread: None,
+        };
+        assert!(pipeline.push(vec![0; 3]).is_err());
+        assert!(pipeline.push(vec![0; MAX_AUDIO_BATCH_BYTES + 4]).is_err());
+    }
+
+    #[test]
+    fn audio_push_reports_bounded_queue_overrun() {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let pipeline = SttPipeline {
+            audio_tx: sender,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            audio_seen: AtomicBool::new(false),
+            thread: None,
+        };
+
+        pipeline.push(vec![0; 4]).expect("first batch fits");
+        assert!(pipeline
+            .push(vec![0; 4])
+            .expect_err("full queue must report overrun")
+            .contains("overrun"));
+    }
+
+    #[test]
+    fn only_owning_window_can_inject_audio() {
+        let state = NativeVoiceState::default();
+        let (sender, receiver) = mpsc::sync_channel(2);
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "owner-window".to_string(),
+            });
+            runtime.pipeline = Some(SttPipeline {
+                audio_tx: sender,
+                shutdown: Arc::new(AtomicBool::new(false)),
+                audio_seen: AtomicBool::new(false),
+                thread: None,
+            });
+        }
+
+        assert!(push_audio_for_window(&state, "other-window", vec![0; 4]).is_err());
+        assert!(receiver.try_recv().is_err());
+        push_audio_for_window(&state, "owner-window", vec![0; 4]).expect("owner can send audio");
+        assert_eq!(receiver.try_recv().expect("owner audio queued"), vec![0; 4]);
+    }
+
+    #[tokio::test]
+    async fn window_destroy_schedules_blocked_worker_join_off_callback() {
+        let state = NativeVoiceState::default();
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let worker = thread::spawn(|| thread::sleep(Duration::from_millis(250)));
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "owner-window".to_string(),
+            });
+            runtime.pipeline = Some(SttPipeline {
+                audio_tx: sender,
+                shutdown: Arc::new(AtomicBool::new(false)),
+                audio_seen: AtomicBool::new(false),
+                thread: Some(worker),
+            });
+        }
+
+        let started = std::time::Instant::now();
+        assert!(state.stop_for_window_destroyed("owner-window"));
+        assert!(started.elapsed() < Duration::from_millis(50));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(state
+            .runtime
+            .lock()
+            .expect("lock native runtime")
+            .session_id
+            .is_none());
+    }
+
+    #[test]
+    fn retained_transcripts_are_capped_and_fail_terminally() {
+        let mut pending = VecDeque::new();
+        for index in 0..=MAX_PENDING_TRANSCRIPTS {
+            enqueue_pending_transcript(
+                &mut pending,
+                PendingTranscript {
+                    session_id: "session-1".to_string(),
+                    lifecycle_id: "lifecycle-1".to_string(),
+                    id: index.to_string(),
+                    text: "hello".to_string(),
+                    revision: 2,
+                    delivery_attempts: 0,
+                },
+            );
+        }
+        assert_eq!(pending.len(), MAX_PENDING_TRANSCRIPTS);
+        assert_eq!(pending.front().map(|item| item.id.as_str()), Some("1"));
+
+        let id = pending.front().expect("retained transcript").id.clone();
+        for attempts in 1..MAX_TRANSCRIPT_DELIVERY_ATTEMPTS {
+            let outcome = reject_pending_transcript(&mut pending, "session-1", &id, 2);
+            assert_eq!(outcome.attempts, attempts);
+            assert!(!outcome.terminal);
+        }
+        let outcome = reject_pending_transcript(&mut pending, "session-1", &id, 2);
+        assert!(outcome.terminal);
+        assert!(!pending.iter().any(|item| item.id == id));
+    }
+
+    #[test]
+    fn empty_recognition_result_releases_stop_waiter() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel(1);
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(1);
+
+        deliver_recognition_result(String::new(), &event_tx, Some(delivered_tx));
+
+        assert!(delivered_rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn native_voice_events_use_renderer_field_names() {
+        let event = NativeVoiceEvent::User {
+            session_id: "session-1".to_string(),
+            lifecycle_id: "lifecycle-1".to_string(),
+            id: "utterance-1".to_string(),
+            text: "hello".to_string(),
+            revision: 2,
+            delivery_attempts: 0,
+        };
+
+        assert_eq!(
+            serde_json::to_value(event).expect("serialize native voice event"),
+            serde_json::json!({
+                "type": "user",
+                "sessionId": "session-1",
+                "lifecycleId": "lifecycle-1",
+                "id": "utterance-1",
+                "text": "hello",
+                "revision": 2,
+                "deliveryAttempts": 0,
+            }),
+        );
+    }
+}

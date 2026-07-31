@@ -202,6 +202,10 @@
       "description": "Enable multiple chat and project workspaces, project workspace startup policies, and multi-workspace agent context.",
       "title": "Multi-workspace chats"
     },
+    "voiceConversation": {
+      "description": "Try continuous two-way voice conversations in Goose chats.",
+      "title": "Voice conversations"
+    },
     "navigationRefresh": {
       "description": "Try the refreshed primary and secondary navigation for projects, chats, and settings.",
       "title": "Refreshed navigation"
@@ -416,6 +420,7 @@
     "providersUpdateAvailable": "Update available",
     "shortcuts": "Keyboard shortcuts",
     "updates": "Updates",
+    "voice": "Voice",
     "security": "Security"
   },
   "notifications": {
@@ -709,6 +714,38 @@
       "openProviders": "Open AI Providers",
       "toast": "Choose an AI provider before starting a chat."
     }
+  },
+  "voice": {
+    "title": "Voice Conversation",
+    "description": "Install both Pocket TTS and Parakeet STT to use Voice Conversation.",
+    "settingsDescription": "Install Pocket TTS, choose from 12 voices, and preview them through your selected output device.",
+    "useSelected": "Use selected voice",
+    "notNow": "Not now",
+    "downloadProgress": "{{downloaded}} of {{total}}",
+    "retryDownload": "Retry model download",
+    "download": "Download model",
+    "modelInstalled": "Installed",
+    "modelNotInstalled": "Not installed",
+    "modelInstalledSize": "Installed · {{size}} on disk",
+    "modelMissingSize": "Not installed · {{size}} download",
+    "downloadPhase": {
+      "queued": "Queued",
+      "downloading": "Downloading",
+      "extracting": "Preparing model",
+      "verifying": "Verifying model",
+      "publishing": "Installing model",
+      "complete": "Installed"
+    },
+    "removeModel": "Remove model",
+    "removeModelQueued": "Queued for removal…",
+    "removingModel": "Removing model…",
+    "removeModelTitle": "Remove {{model}}?",
+    "removeModelDescription": "Voice Conversation will stop before {{model}} is removed. You can download the model again later.",
+    "playbackSpeed": "Playback speed",
+    "voiceLabel": "Pocket TTS voice",
+    "previewVoice": "Preview {{voice}}",
+    "playing": "Playing",
+    "preview": "Preview"
   },
   "title": "Settings",
   "security": {

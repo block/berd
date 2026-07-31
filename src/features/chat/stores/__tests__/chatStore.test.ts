@@ -58,6 +58,28 @@ describe("chatStore", () => {
     expect(useChatStore.getState().messagesBySession.s2).toEqual([second]);
   });
 
+  it("preserves local text speech state when replay replaces the message", () => {
+    const withSpeech = makeMessage({
+      id: "assistant-1",
+      content: [
+        {
+          type: "text",
+          text: "hello",
+          speech: { status: "interrupted" },
+        },
+      ],
+    });
+    const replayed = makeMessage({ id: "assistant-1" });
+
+    const store = useChatStore.getState();
+    store.setMessages("s1", [withSpeech]);
+    store.setMessages("s1", [replayed]);
+
+    expect(useChatStore.getState().messagesBySession.s1?.[0]?.content).toEqual(
+      withSpeech.content,
+    );
+  });
+
   it("keeps the 10 most recently active message sessions", () => {
     for (let index = 1; index <= 11; index += 1) {
       const sessionId = `s${index}`;

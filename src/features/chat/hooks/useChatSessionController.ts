@@ -2537,6 +2537,7 @@ export function useChatSessionController({
     scrollTarget,
     handleScrollTargetHandled,
     projectMetadataPending,
+    workspaceContextReady,
     personas: displayedPersonas,
     selectedPersonaId,
     selectedPersona,

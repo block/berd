@@ -1471,6 +1471,33 @@
   }
 }
 
+@keyframes voice-waveform {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  25% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.55);
+  }
+  75% {
+    transform: scaleY(0.85);
+  }
+}
+
+.voice-waveform-bar {
+  animation: voice-waveform 720ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-waveform-bar {
+    animation: none;
+    transform: scaleY(0.65);
+  }
+}
 @keyframes text-shimmer {
   0% {
     background-position:

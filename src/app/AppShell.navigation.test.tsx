@@ -48,6 +48,8 @@ import {
 import {
   AppShell,
   getPrototypeSecondaryWidthForDockedLayout,
+  shouldStopVoiceConversationOnExperimentChange,
+  shouldStopVoiceConversationOnSessionChange,
 } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -776,6 +778,68 @@ function enableBuilderbotExperiment() {
 }
 
 describe("AppShell global navigation", () => {
+  it("does no Voice native cleanup on startup-off and cleans up an on-to-off transition", () => {
+    expect(
+      shouldStopVoiceConversationOnExperimentChange({
+        wasEnabled: false,
+        isEnabled: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStopVoiceConversationOnExperimentChange({
+        wasEnabled: true,
+        isEnabled: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldStopVoiceConversationOnExperimentChange({
+        wasEnabled: true,
+        isEnabled: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stops voice only when navigation leaves its bound chat", () => {
+    const base = {
+      previousSessionId: "session-1",
+      boundSessionId: "session-1",
+      lifecycle: "running",
+    };
+
+    expect(
+      shouldStopVoiceConversationOnSessionChange({
+        ...base,
+        nextSessionId: "session-2",
+      }),
+    ).toBe(true);
+    expect(
+      shouldStopVoiceConversationOnSessionChange({
+        ...base,
+        nextSessionId: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldStopVoiceConversationOnSessionChange({
+        ...base,
+        nextSessionId: "session-1",
+      }),
+    ).toBe(false);
+    expect(
+      shouldStopVoiceConversationOnSessionChange({
+        ...base,
+        nextSessionId: "session-2",
+        boundSessionId: "session-elsewhere",
+      }),
+    ).toBe(false);
+    expect(
+      shouldStopVoiceConversationOnSessionChange({
+        ...base,
+        nextSessionId: "session-2",
+        lifecycle: "stopped",
+      }),
+    ).toBe(false);
+  });
+
   it("clamps pushed prototype secondary width to available viewport space", () => {
     expect(
       getPrototypeSecondaryWidthForDockedLayout({

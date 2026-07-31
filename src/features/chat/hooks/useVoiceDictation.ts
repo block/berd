@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef } from "react";
+import { create } from "zustand";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
@@ -9,6 +10,28 @@ import {
   parseAutoSubmitPhrases,
   replaceTrailingTranscribedText,
 } from "../lib/voiceInput";
+
+interface DictationOwnershipState {
+  activeInstanceIds: Set<string>;
+  setActive: (instanceId: string, active: boolean) => void;
+}
+
+const useDictationOwnershipStore = create<DictationOwnershipState>((set) => ({
+  activeInstanceIds: new Set(),
+  setActive: (instanceId, active) =>
+    set((state) => {
+      const activeInstanceIds = new Set(state.activeInstanceIds);
+      if (active) activeInstanceIds.add(instanceId);
+      else activeInstanceIds.delete(instanceId);
+      return { activeInstanceIds };
+    }),
+}));
+
+export function useAnyVoiceDictationActive(): boolean {
+  return useDictationOwnershipStore(
+    (state) => state.activeInstanceIds.size > 0,
+  );
+}
 
 interface UseVoiceDictationOptions {
   text: string;
@@ -162,6 +185,17 @@ export function useVoiceDictation({
     onTranscriptText: handleRealtimeTranscript,
   });
   stopRecordingRef.current = dictation.stopRecording;
+
+  const ownershipInstanceId = useId();
+  const setDictationActive = useDictationOwnershipStore(
+    (state) => state.setActive,
+  );
+  const ownsMicrophone =
+    dictation.isStarting() || dictation.isRecording || dictation.isTranscribing;
+  useEffect(() => {
+    setDictationActive(ownershipInstanceId, ownsMicrophone);
+    return () => setDictationActive(ownershipInstanceId, false);
+  }, [ownershipInstanceId, ownsMicrophone, setDictationActive]);
 
   return {
     ...dictation,

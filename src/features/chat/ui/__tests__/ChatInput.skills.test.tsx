@@ -34,6 +34,7 @@ let lastVoiceDictationOptions: {
 } | null = null;
 
 vi.mock("../../hooks/useVoiceDictation", () => ({
+  useAnyVoiceDictationActive: () => false,
   useVoiceDictation: (options: {
     onAutoSubmit?: (text: string) => boolean | Promise<boolean>;
   }) => {

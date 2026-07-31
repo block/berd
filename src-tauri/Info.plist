@@ -14,6 +14,6 @@
     </dict>
   </array>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Berd uses your microphone to capture voice input for dictation.</string>
+  <string>Berd uses your microphone to capture voice input for dictation and voice conversations.</string>
 </dict>
 </plist>

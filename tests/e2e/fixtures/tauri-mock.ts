@@ -25,6 +25,8 @@ export function buildInitScript(options?: {
   skills?: unknown[];
   projects?: unknown[];
   sessions?: unknown[];
+  voiceConversationStatus?: unknown;
+  enabledExperiments?: string[];
   providerCatalog?: unknown[];
   providerInventory?: unknown[];
   agentSetupFailure?: {
@@ -37,6 +39,16 @@ export function buildInitScript(options?: {
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
   const projects = JSON.stringify(options?.projects ?? MOCK_PROJECTS);
   const sessions = JSON.stringify(options?.sessions ?? []);
+  const voiceConversationStatus = JSON.stringify(
+    options?.voiceConversationStatus ?? {
+      available: false,
+      unavailableReason: "Voice conversation unavailable in browser E2E",
+      lifecycle: "unavailable",
+      sessionId: null,
+      revision: 0,
+    },
+  );
+  const enabledExperiments = JSON.stringify(options?.enabledExperiments ?? []);
   const providerCatalog = JSON.stringify(options?.providerCatalog ?? []);
   const providerInventory = JSON.stringify(
     options?.providerInventory ?? [
@@ -102,11 +114,37 @@ export function buildInitScript(options?: {
       const SKILLS = ${skills};
       const PROJECTS = ${projects};
       const SEED_SESSIONS = ${sessions};
+      const VOICE_CONVERSATION_STATUS = ${voiceConversationStatus};
+      const ENABLED_EXPERIMENTS = ${enabledExperiments};
       const PROVIDER_CATALOG = ${providerCatalog};
       const PROVIDER_INVENTORY = ${providerInventory};
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
       const DISTRO = {
         present: false,
+      };
+      const RUNTIME_CONFIG_RESULT = {
+        status: "ready",
+        source: "appDefault",
+        config: {
+          schemaVersion: 1,
+          goose: {
+            defaultModelProviderId: "openai",
+            defaultModelId: "gpt-4.1",
+            modelProviders: [
+              {
+                id: "openai",
+                displayName: "OpenAI",
+                models: [
+                  {
+                    id: "gpt-4.1",
+                    name: "GPT-4.1",
+                    recommended: true,
+                  },
+                ],
+              },
+            ],
+          },
+        },
       };
       const FAKE_ACP_URL = "ws://127.0.0.1:0/mock-acp";
       const ACP_SESSIONS = SEED_SESSIONS.map((session) => ({
@@ -120,6 +158,7 @@ export function buildInitScript(options?: {
       }));
       const CALLBACKS = new Map();
       const EVENT_LISTENERS = new Map();
+      const ACP_SOCKETS = new Set();
       const LAYOUT_CONSTRAINTS = {
         minCenter: -1000000,
         maxCenter: 1000000,
@@ -146,6 +185,17 @@ export function buildInitScript(options?: {
       let nextEventId = 1;
 
       localStorage.setItem("goose:defaultProvider", "goose");
+      if (ENABLED_EXPERIMENTS.length > 0) {
+        localStorage.setItem(
+          "goose:experimental-features",
+          JSON.stringify({
+            version: 2,
+            experiments: Object.fromEntries(
+              ENABLED_EXPERIMENTS.map((id) => [id, { enabled: true }]),
+            ),
+          }),
+        );
+      }
       localStorage.setItem(
         "goose:preferredModelsByAgent",
         JSON.stringify({
@@ -236,6 +286,7 @@ export function buildInitScript(options?: {
         return PERSONAS.map(personaToSourceEntry);
       })();
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
+      const POCKET_VOICE_SPOKEN_TEXTS = [];
 
       window.__GOOSE_E2E__ = {
         listAgentSources: () => clone(AGENT_SOURCES),
@@ -243,6 +294,22 @@ export function buildInitScript(options?: {
           AGENT_SOURCES = PERSONAS.map(personaToSourceEntry);
           persistAgentSources();
         },
+        emitAcpNotification: (params) => {
+          const notification = {
+            jsonrpc: "2.0",
+            method: "session/update",
+            params,
+          };
+          for (const socket of [...ACP_SOCKETS]) {
+            socket.dispatchEvent(
+              new MessageEvent("message", {
+                data: JSON.stringify(notification),
+              }),
+            );
+          }
+        },
+        emitTauriEvent,
+        pocketVoiceSpokenTexts: () => clone(POCKET_VOICE_SPOKEN_TEXTS),
       };
 
       function nowIso() {
@@ -282,7 +349,7 @@ export function buildInitScript(options?: {
         if (!listeners) {
           return;
         }
-        for (const [eventId, handlerId] of listeners.entries()) {
+        for (const [eventId, handlerId] of [...listeners.entries()]) {
           const callback = CALLBACKS.get(handlerId);
           callback?.({
             id: eventId,
@@ -554,6 +621,7 @@ export function buildInitScript(options?: {
           super();
           this.url = url;
           this.readyState = 0;
+          ACP_SOCKETS.add(this);
           queueMicrotask(() => {
             this.readyState = 1;
             this.dispatchEvent(new Event("open"));
@@ -580,6 +648,7 @@ export function buildInitScript(options?: {
 
         close() {
           this.readyState = 3;
+          ACP_SOCKETS.delete(this);
           this.dispatchEvent(new CloseEvent("close"));
         }
       }
@@ -597,8 +666,41 @@ export function buildInitScript(options?: {
             // ---- ACP transport ----
             case "get_goose_serve_url":
               return Promise.resolve(FAKE_ACP_URL);
+            case "get_voice_conversation_status":
+            case "get_native_voice_conversation_status":
+              return Promise.resolve(clone(VOICE_CONVERSATION_STATUS));
+            case "drain_native_voice_conversation_transcripts":
+              return Promise.resolve([]);
+            case "acknowledge_native_voice_conversation_transcript":
+              return Promise.resolve(null);
+            case "reject_native_voice_conversation_transcript":
+              return Promise.resolve({ attempts: 1, terminal: false });
+            case "get_pocket_voice_status":
+              return Promise.resolve({
+                installed: true,
+                downloading: false,
+                downloadedBytes: 278120564,
+                totalBytes: 278120564,
+                error: null,
+                selectedVoice: "mary",
+                playbackSpeed: 1,
+                voices: [{ id: "mary", name: "Mary" }],
+              });
+            case "speak_pocket_voice":
+              POCKET_VOICE_SPOKEN_TEXTS.push(args?.text);
+              return new Promise((resolve) =>
+                window.setTimeout(() => resolve(null), 50),
+              );
+            case "stop_pocket_voice":
+              return Promise.resolve(null);
             case "get_distro_bundle":
               return Promise.resolve(DISTRO);
+            case "get_runtime_config":
+            case "refresh_runtime_config":
+              return Promise.resolve(clone(RUNTIME_CONFIG_RESULT));
+            case "list_agent_setup_status":
+            case "list_model_setup_status":
+              return Promise.resolve([]);
             case "migration_status":
             case "mark_migration_complete":
             case "dismiss_migration_banner":

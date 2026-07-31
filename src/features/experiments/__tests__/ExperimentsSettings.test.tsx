@@ -202,6 +202,17 @@ describe("ExperimentsSettings", () => {
     ).toBe(true);
   });
 
+  it("does not advertise the retired macOS 26 voice requirement", () => {
+    const description = i18n.t("experiments.voiceConversation.description", {
+      ns: "settings",
+    });
+
+    expect(description).toBe(
+      "Try continuous two-way voice conversations in Goose chats.",
+    );
+    expect(description).not.toMatch(/macOS 26/i);
+  });
+
   it("renders dev default copy on a separate line", () => {
     vi.stubEnv("DEV", true);
     renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
