@@ -14,6 +14,7 @@ import { App } from "@/app/App";
 import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
+import { ReleasedQueuedMessageDrain } from "@/features/chat/ui/ReleasedQueuedMessageDrain";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { initTelemetry, trackAppLaunched } from "@/shared/telemetry/client";
@@ -162,6 +163,7 @@ if (bootError) {
         <QueryClientProvider client={queryClient}>
           <GitStateEvents />
           <LocalMediaCacheEvents />
+          <ReleasedQueuedMessageDrain />
           <OptionalBerdctlBridge />
           <RendererTelemetry />
           <I18nProvider>

@@ -1,6 +1,5 @@
 import { z } from "zod/v4";
 
-import { formatIncludedWorkspacesPrompt } from "@/features/chat/lib/workspaceAttachments";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 
 import { CommandError, defineCommand } from "../types";
@@ -80,10 +79,10 @@ Result:
   schema: createSessionSchema,
   // Backend session create is a real round-trip; everything after it is
   // fire-and-forget.
-  bridgeTimeoutMs: 60_000,
+  bridgeTimeoutMs: 900_000,
   execute: async (args, ctx): Promise<CreateSessionResult> => {
     const [
-      { sendPromptInBackground },
+      { acceptFirstSend },
       { useChatSessionStore },
       { resolveSessionCwd },
       {
@@ -92,15 +91,17 @@ Result:
         projectRequiresStartupWorkspaceName,
         rollbackProjectChatWorkspacePlan,
       },
+      { berdctlCrossSessionSendOptions },
       { GOOSE_PROVIDER_ID },
       { findPersonaOrThrow },
       { findProjectOrThrow },
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
     ] = await Promise.all([
-      import("@/features/chat/lib/backgroundSend"),
+      import("@/features/chat/lib/firstWorkspaceSend"),
       import("@/features/chat/stores/chatSessionStore"),
       import("@/features/projects/lib/sessionCwdSelection"),
       import("@/features/projects/lib/projectChatWorkspaces"),
+      import("../runtime/sessionSend"),
       import("@/shared/api/acpPersonaHandoff"),
       import("../runtime/agents"),
       import("../runtime/projects"),
@@ -143,7 +144,7 @@ Result:
     if (requiresStartupName) {
       if (!project || !startupName) {
         throw new CommandError(
-          "invalid_args",
+          "workspace_name_required",
           `Project "${project?.id}" creates a branch or worktree for each new chat; pass --startup-name <name>.`,
         );
       }
@@ -187,19 +188,20 @@ Result:
       await rollbackProjectChatWorkspacePlan(workspacePlan);
       throw error;
     }
-    sendPromptInBackground(
+    const accepted = acceptFirstSend(
       session.id,
-      args.prompt,
-      // The store stamps the resolved provider on the created session; the
-      // fallback only narrows the optional type and mirrors the store default.
-      session.providerId ?? GOOSE_PROVIDER_ID,
-      persona ?? undefined,
       {
-        systemPrompt: workspacePlan
-          ? formatIncludedWorkspacesPrompt(session)
-          : undefined,
+        text: args.prompt,
+        sendOptions: berdctlCrossSessionSendOptions(),
       },
+      { project, queueReady: true },
     );
+    if (!accepted.accepted) {
+      throw new CommandError(
+        "queue_full",
+        "The new session could not accept its first message.",
+      );
+    }
     return {
       session_id: session.id,
       title: session.title,

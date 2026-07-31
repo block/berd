@@ -22,6 +22,40 @@ import type {
   ProjectWorkspaceStartupMode,
 } from "@/features/projects/api/projects";
 
+export interface ProjectWorkspaceStartupSummary {
+  worktreeCount: number;
+  branchCount: number;
+  exact: boolean;
+}
+
+export function summarizeProjectWorkspaceStartup(
+  workspaces: ProjectWorkspace[],
+): ProjectWorkspaceStartupSummary {
+  const worktreeRepositories = new Set<string>();
+  const branchRepositories = new Set<string>();
+
+  let exact = true;
+
+  for (const workspace of workspaces) {
+    if (workspace.startupMode === "none") continue;
+    exact &&= Boolean(workspace.repositoryPath || workspace.worktreePath);
+    const repositoryKey = normalizedKey(
+      workspace.repositoryPath ?? workspace.worktreePath ?? workspace.path,
+    );
+    const repositories =
+      workspace.startupMode === "worktree"
+        ? worktreeRepositories
+        : branchRepositories;
+    repositories.add(repositoryKey);
+  }
+
+  return {
+    worktreeCount: worktreeRepositories.size,
+    branchCount: branchRepositories.size,
+    exact,
+  };
+}
+
 export interface ProjectChatWorkspacePlan {
   workingDir: string;
   workspaceAttachments: WorkspaceAttachment[];

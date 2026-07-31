@@ -55,6 +55,10 @@ import {
   workspaceAttachmentIdForPath,
   workspaceAttachmentUsesCleanupTarget,
 } from "@/features/chat/lib/workspaceAttachments";
+import {
+  hasDeferredWorkspaceSend,
+  releaseWorkspaceSendAfterUserEdit,
+} from "@/features/chat/lib/firstWorkspaceSend";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import { useChatStore } from "../stores/chatStore";
 import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
@@ -273,6 +277,10 @@ export function ContextPanel({
   const removeWorkspaceAttachment = useChatSessionStore(
     (s) => s.removeWorkspaceAttachment,
   );
+  const releaseHeldSend = useCallback(
+    () => releaseWorkspaceSendAfterUserEdit(sessionId),
+    [sessionId],
+  );
 
   const workspaceSet = workspaceRepository.chatWorkspaces(session, {
     activePath: activeContext?.path,
@@ -426,7 +434,11 @@ export function ContextPanel({
         .sessions.find((candidate) => candidate.id === sessionId);
       if (!session) return;
       const nextWorkspaceId = workspaceAttachmentIdForPath(nextPath);
+      const replacesActiveWorkspace =
+        session.activeWorkspaceId === runtime.workspace.id ||
+        isSameWorkspacePath(activeContext?.path, runtime.workspace.path);
       patchSession(sessionId, {
+        ...(replacesActiveWorkspace ? { workingDir: nextPath } : {}),
         workspaceAttachments: getWorkspaceAttachments(session).map(
           (attachment) =>
             attachment.id === runtime.workspace.id
@@ -450,12 +462,14 @@ export function ContextPanel({
       if (isSameWorkspacePath(activeContext?.path, runtime.workspace.path)) {
         setActiveWorkspace(sessionId, { path: nextPath, branch });
       }
+      releaseHeldSend();
       void refetchAll();
     },
     [
       activeContext?.path,
       patchSession,
       refetchAll,
+      releaseHeldSend,
       sessionId,
       setActiveWorkspace,
     ],
@@ -472,8 +486,9 @@ export function ContextPanel({
         worktreePath: runtime.workspace.worktreePath,
         source: runtime.workspace.source,
       });
+      releaseHeldSend();
     },
-    [attachWorkspace, handleSwitchBranch, sessionId],
+    [attachWorkspace, handleSwitchBranch, releaseHeldSend, sessionId],
   );
 
   const handleWorkspaceStashAndSwitch = useCallback(
@@ -487,8 +502,9 @@ export function ContextPanel({
         worktreePath: runtime.workspace.worktreePath,
         source: runtime.workspace.source,
       });
+      releaseHeldSend();
     },
-    [attachWorkspace, handleStashAndSwitch, sessionId],
+    [attachWorkspace, handleStashAndSwitch, releaseHeldSend, sessionId],
   );
 
   const handleInitRepo = useCallback(
@@ -529,6 +545,7 @@ export function ContextPanel({
           source: "selected",
         });
       }
+      releaseHeldSend();
       await refetchAll();
       toast.success(t("contextPanel.folder.changeSuccess"));
     } catch (error) {
@@ -544,6 +561,7 @@ export function ContextPanel({
     patchSession,
     projectName,
     refetchAll,
+    releaseHeldSend,
     sessionId,
     setActiveWorkspace,
     t,
@@ -559,6 +577,7 @@ export function ContextPanel({
         worktreePath: candidate.classification.worktreePath,
         source: "selected",
       });
+      releaseHeldSend();
       void refetchAll();
       toast.success(
         t("contextPanel.includedWorkspaces.includeSuccess", {
@@ -566,7 +585,7 @@ export function ContextPanel({
         }),
       );
     },
-    [attachWorkspace, refetchAll, sessionId, t],
+    [attachWorkspace, refetchAll, releaseHeldSend, sessionId, t],
   );
 
   const getWorkspaceRemovalPlan = useCallback(
@@ -672,9 +691,16 @@ export function ContextPanel({
     ) => {
       await cleanupWorkspace(workspace, removalPlan);
       removeWorkspaceAttachment(sessionId, workspace.id);
+      releaseHeldSend();
       await refetchAll();
     },
-    [cleanupWorkspace, refetchAll, removeWorkspaceAttachment, sessionId],
+    [
+      cleanupWorkspace,
+      refetchAll,
+      releaseHeldSend,
+      removeWorkspaceAttachment,
+      sessionId,
+    ],
   );
 
   const handleFetch = useCallback(
@@ -743,9 +769,10 @@ export function ContextPanel({
           createdBranch: true,
         },
       });
+      releaseHeldSend();
       await refetchAll();
     },
-    [attachWorkspace, refetchAll, sessionId],
+    [attachWorkspace, refetchAll, releaseHeldSend, sessionId],
   );
 
   const handleLegacyCreateBranch = useCallback(
@@ -819,6 +846,7 @@ export function ContextPanel({
       if (!session) return;
       const nextWorkspaceId = workspaceAttachmentIdForPath(includedPath);
       patchSession(sessionId, {
+        workingDir: includedPath,
         workspaceAttachments: getWorkspaceAttachments(session).map(
           (attachment) =>
             attachment.id === workspace.id
@@ -854,6 +882,7 @@ export function ContextPanel({
         path: includedPath,
         branch: classification.branch,
       });
+      releaseHeldSend();
       void refetchAll();
       toast.success(
         t("contextPanel.includedWorkspaces.includeSuccess", {
@@ -861,7 +890,14 @@ export function ContextPanel({
         }),
       );
     },
-    [patchSession, refetchAll, sessionId, setActiveWorkspace, t],
+    [
+      patchSession,
+      refetchAll,
+      releaseHeldSend,
+      sessionId,
+      setActiveWorkspace,
+      t,
+    ],
   );
 
   const handleIncludeCreatedWorktree = useCallback(
@@ -893,6 +929,7 @@ export function ContextPanel({
           },
         ],
       });
+      const repairsHeldSend = hasDeferredWorkspaceSend(sessionId);
       attachWorkspace(sessionId, {
         path: includedPath,
         branch: classification.branch,
@@ -916,6 +953,14 @@ export function ContextPanel({
           createdBranch: context.createdBranch,
         },
       });
+      if (repairsHeldSend) {
+        patchSession(sessionId, { workingDir: includedPath });
+        setActiveWorkspace(sessionId, {
+          path: includedPath,
+          branch: classification.branch,
+        });
+      }
+      releaseHeldSend();
       void refetchAll();
       toast.success(
         t("contextPanel.includedWorkspaces.includeSuccess", {
@@ -923,7 +968,15 @@ export function ContextPanel({
         }),
       );
     },
-    [attachWorkspace, refetchAll, sessionId, t],
+    [
+      attachWorkspace,
+      patchSession,
+      refetchAll,
+      releaseHeldSend,
+      sessionId,
+      setActiveWorkspace,
+      t,
+    ],
   );
 
   const handleOpenChangedFile = useCallback(

@@ -40,6 +40,17 @@ import {
   supportsContextCompactionControls,
 } from "../lib/autoCompact";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
+import {
+  acceptFirstSend,
+  prepareExistingFirstSend,
+  cancelDeferredWorkspaceNaming,
+  chooseDeferredWorkspaceSetup,
+  createDeferredWorkspaces,
+  releaseDeferredWorkspaceSend,
+  type DeferredWorkspaceSend,
+  type WorkspaceNameRequest,
+} from "../lib/firstWorkspaceSend";
+export type { WorkspaceNameRequest } from "../lib/firstWorkspaceSend";
 import { activateSession } from "../lib/sessionActivation";
 import { useResolvedAgentModelPicker } from "./useResolvedAgentModelPicker";
 import { composeBuilderSendOptions } from "./useBuilderSendInterceptor";
@@ -76,6 +87,7 @@ interface UseChatSessionControllerOptions {
   readOnly?: boolean;
   onMessageAccepted?: (sessionId: string) => void;
   onCreatePersonaRequested?: () => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
 }
 
 const DRAFT_STORE_UPDATE_DEBOUNCE_MS = 300;
@@ -102,13 +114,9 @@ function isAgentBuilderMentionOnlyDraft(text: string): boolean {
   return AGENT_BUILDER_MENTION_INVOCATION.test(text.trim());
 }
 
-function movePendingHomeQueuedMessage(sessionId: string) {
+function movePendingHomeQueuedMessage(sessionId: string): boolean {
   const chatState = useChatStore.getState();
-  const pendingQueue =
-    chatState.queuedMessageBySession[PENDING_HOME_SESSION_ID] ?? null;
-  if (pendingQueue && !chatState.queuedMessageBySession[sessionId]) {
-    chatState.enqueueMessage(sessionId, pendingQueue);
-  }
+  return chatState.moveQueuedMessage(PENDING_HOME_SESSION_ID, sessionId);
 }
 
 type SessionCwdProject = Parameters<typeof resolveSessionCwd>[0];
@@ -293,6 +301,7 @@ export function useChatSessionController({
   readOnly = false,
   onMessageAccepted,
   onCreatePersonaRequested,
+  onWorkspaceNameRequest,
 }: UseChatSessionControllerOptions) {
   const stateSessionId = sessionId ?? PENDING_HOME_SESSION_ID;
   const {
@@ -1848,8 +1857,18 @@ export function useChatSessionController({
     sendOptions?: ChatSendOptions;
     resolve?: (accepted: boolean) => void;
   } | null>(null);
+  const deferredWorkspaceRecord = useChatStore((state) => {
+    const record = state.queuedMessageBySession[stateSessionId];
+    return record?.kind === "deferred" &&
+      (record.state as DeferredWorkspaceSend).type === "workspace-first-send"
+      ? (record as typeof record & { state: DeferredWorkspaceSend })
+      : null;
+  });
   const queueChatState =
-    sessionId && session?.creationState == null && workspaceContextReady
+    sessionId &&
+    session?.creationState == null &&
+    workspaceContextReady &&
+    !deferredWorkspaceRecord
       ? chatState
       : "thinking";
   const sendQueuedMessageWithAutoCompact = useCallback(
@@ -1986,39 +2005,85 @@ export function useChatSessionController({
         return false;
       }
 
-      if (!workspaceContextReady) {
-        if (!queue.queuedMessage) {
-          queue.enqueue(text, personaId, attachments, sendOptions);
-        }
-        return true;
-      }
-
-      if (personaId && personaId !== selectedPersonaId) {
-        handlePersonaChange(personaId);
-        return new Promise<boolean>((resolve) => {
-          deferredSend.current = { text, attachments, sendOptions, resolve };
-        });
-      }
-
       if (
         session?.intent !== "build-agent" &&
         isAgentBuilderSkillSendOptions(sendOptions)
       ) {
         return (async () => {
           const builderSession = await ensureCurrentSessionIsAgentBuilder();
-          if (!builderSession) {
-            return false;
-          }
-
-          if (
-            (chatState !== "idle" || isQueuedSendBlocked) &&
-            !queue.queuedMessage
-          ) {
+          if (!builderSession) return false;
+          const onBuilderWorkspaceNameRequest = onWorkspaceNameRequest
+            ? (request: WorkspaceNameRequest) =>
+                onWorkspaceNameRequest({
+                  ...request,
+                  cancel: () => {
+                    request.cancel();
+                    const liveSession = useChatSessionStore
+                      .getState()
+                      .getSession(sessionId);
+                    if (
+                      liveSession?.intent === "build-agent" &&
+                      liveSession.targetAgentPath ===
+                        builderSession.targetAgentPath
+                    ) {
+                      useChatSessionStore.getState().patchSession(sessionId, {
+                        intent: undefined,
+                        targetAgentPath: undefined,
+                        targetAgentSlug: undefined,
+                      });
+                      if (builderSession.targetAgentPath) {
+                        void deletePersonaSource(
+                          builderSession.targetAgentPath,
+                        ).catch((error) => {
+                          console.error(
+                            "Failed to delete canceled agent draft:",
+                            error,
+                          );
+                        });
+                      }
+                    }
+                  },
+                })
+            : undefined;
+          const deferredSendOptions = composeBuilderSendOptions(
+            builderSession,
+            sendOptions,
+          );
+          const firstSend = acceptFirstSend(
+            sessionId,
+            { text, personaId, attachments, sendOptions: deferredSendOptions },
+            {
+              cancelBuilderDraftPath:
+                builderSession.targetAgentPath ?? undefined,
+              onNeedsName: onBuilderWorkspaceNameRequest,
+            },
+          );
+          if (firstSend.accepted) {
             recordDraftPreservingSubmission(sessionId, text);
-            queue.enqueue(text, personaId, attachments, sendOptions);
+            onMessageAccepted?.(sessionId);
+            if (personaId && personaId !== selectedPersonaId) {
+              handlePersonaChange(personaId);
+            }
             return true;
           }
-
+          if (firstSend.needsName || firstSend.occupied) return false;
+          if (personaId && personaId !== selectedPersonaId) {
+            handlePersonaChange(personaId);
+            return new Promise<boolean>((resolve) => {
+              deferredSend.current = {
+                text,
+                attachments,
+                sendOptions,
+                resolve,
+              };
+            });
+          }
+          if (!workspaceContextReady) {
+            if (!queue.queuedMessage) {
+              queue.enqueue(text, personaId, attachments, sendOptions);
+            }
+            return true;
+          }
           return sendWithAutoCompact(
             text,
             undefined,
@@ -2029,12 +2094,58 @@ export function useChatSessionController({
         })();
       }
 
+      if (personaId && personaId !== selectedPersonaId) {
+        const firstSend = acceptFirstSend(
+          sessionId,
+          { text, personaId, attachments, sendOptions },
+          { onNeedsName: onWorkspaceNameRequest },
+        );
+        if (firstSend.accepted) {
+          recordDraftPreservingSubmission(sessionId, text);
+          onMessageAccepted?.(sessionId);
+          handlePersonaChange(personaId);
+          return true;
+        }
+        if (firstSend.needsName || firstSend.occupied) return false;
+
+        handlePersonaChange(personaId);
+        return new Promise<boolean>((resolve) => {
+          deferredSend.current = { text, attachments, sendOptions, resolve };
+        });
+      }
+
+      const currentSession = useChatSessionStore
+        .getState()
+        .getSession(sessionId);
+      const preparedSendOptions =
+        currentSession?.intent === "build-agent"
+          ? composeBuilderSendOptions(currentSession, sendOptions)
+          : sendOptions;
+      const firstSend = acceptFirstSend(
+        sessionId,
+        { text, personaId, attachments, sendOptions: preparedSendOptions },
+        { onNeedsName: onWorkspaceNameRequest },
+      );
+      if (firstSend.accepted) {
+        recordDraftPreservingSubmission(sessionId, text);
+        onMessageAccepted?.(sessionId);
+        return true;
+      }
+      if (firstSend.needsName || firstSend.occupied) return false;
+
+      if (!workspaceContextReady) {
+        if (!queue.queuedMessage) {
+          queue.enqueue(text, personaId, attachments, preparedSendOptions);
+        }
+        return true;
+      }
+
       if (
         (chatState !== "idle" || isQueuedSendBlocked) &&
         !queue.queuedMessage
       ) {
         recordDraftPreservingSubmission(sessionId, text);
-        queue.enqueue(text, personaId, attachments, sendOptions);
+        queue.enqueue(text, personaId, attachments, preparedSendOptions);
         return true;
       }
 
@@ -2046,7 +2157,7 @@ export function useChatSessionController({
             : { id: personaId }
           : undefined,
         attachments,
-        sendOptions,
+        preparedSendOptions,
       );
     },
     [
@@ -2054,6 +2165,8 @@ export function useChatSessionController({
       ensureCurrentSessionIsAgentBuilder,
       handlePersonaChange,
       isQueuedSendBlocked,
+      onMessageAccepted,
+      onWorkspaceNameRequest,
       queue,
       readOnly,
       recordDraftPreservingSubmission,
@@ -2456,7 +2569,26 @@ export function useChatSessionController({
       });
     }
 
-    movePendingHomeQueuedMessage(sessionId);
+    if (pendingQueuedMessage) {
+      if (!movePendingHomeQueuedMessage(sessionId)) return;
+      const movedRecord =
+        useChatStore.getState().queuedMessageBySession[sessionId];
+      if (
+        !movedRecord ||
+        !prepareExistingFirstSend(sessionId, movedRecord.recordId, {
+          onNeedsName: (request) => {
+            onMessageAccepted?.(sessionId);
+            onWorkspaceNameRequest?.(request);
+          },
+          onChoice: () => onMessageAccepted?.(sessionId),
+        })
+      ) {
+        useChatStore
+          .getState()
+          .moveQueuedMessage(sessionId, PENDING_HOME_SESSION_ID);
+        return;
+      }
+    }
     useChatStore.getState().clearDraft(PENDING_HOME_SESSION_ID);
     useChatStore.getState().clearSkillDrafts(PENDING_HOME_SESSION_ID);
     useChatStore.getState().clearDraftAttachments(PENDING_HOME_SESSION_ID);
@@ -2474,6 +2606,8 @@ export function useChatSessionController({
     pendingPersonaId,
     pendingProjectId,
     pendingProviderId,
+    onWorkspaceNameRequest,
+    onMessageAccepted,
     pendingQueuedMessage,
     prepareCurrentSession,
     recreateSessionForProvider,
@@ -2484,6 +2618,30 @@ export function useChatSessionController({
     session?.projectId,
     sessionId,
   ]);
+
+  const dismissQueuedMessage = useCallback(() => {
+    if (readOnly) return;
+    const cancelBuilderDraftPath =
+      deferredWorkspaceRecord?.state.cancelBuilderDraftPath;
+    queue.dismiss();
+    if (!cancelBuilderDraftPath || !sessionId) return;
+
+    const liveSession = useChatSessionStore.getState().getSession(sessionId);
+    if (
+      liveSession?.intent !== "build-agent" ||
+      liveSession.targetAgentPath !== cancelBuilderDraftPath
+    ) {
+      return;
+    }
+    useChatSessionStore.getState().patchSession(sessionId, {
+      intent: undefined,
+      targetAgentPath: undefined,
+      targetAgentSlug: undefined,
+    });
+    void deletePersonaSource(cancelBuilderDraftPath).catch((error) => {
+      console.error("Failed to delete canceled agent draft:", error);
+    });
+  }, [deferredWorkspaceRecord, queue, readOnly, sessionId]);
 
   return {
     session,
@@ -2506,7 +2664,32 @@ export function useChatSessionController({
     isContextUsageReady:
       hasContextUsageSnapshot && resolvedTokenState.contextLimit > 0,
     isLoadingHistory,
-    queue,
+    queue: { ...queue, dismiss: dismissQueuedMessage },
+    deferredWorkspaceRecord,
+    cancelDeferredWorkspaceName: () =>
+      readOnly ? false : cancelDeferredWorkspaceNaming(stateSessionId),
+    createDeferredWorkspace: () =>
+      readOnly ? false : chooseDeferredWorkspaceSetup(stateSessionId, true),
+    submitDeferredWorkspaceName: (name: string) =>
+      !readOnly && deferredWorkspaceRecord?.state.status === "naming"
+        ? void createDeferredWorkspaces(
+            stateSessionId,
+            deferredWorkspaceRecord.recordId,
+            name,
+          )
+        : undefined,
+    skipDeferredWorkspace: () =>
+      readOnly ? false : chooseDeferredWorkspaceSetup(stateSessionId, false),
+    sendDeferredAnyway: () =>
+      !readOnly &&
+      deferredWorkspaceRecord &&
+      session?.creationState !== "failed"
+        ? releaseDeferredWorkspaceSend(
+            stateSessionId,
+            deferredWorkspaceRecord.recordId,
+            true,
+          )
+        : false,
     handleSend,
     steerDraftMessage,
     canSteerMessage: Boolean(

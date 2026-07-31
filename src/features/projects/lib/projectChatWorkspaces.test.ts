@@ -5,6 +5,7 @@ import {
   planProjectChatWorkspaces,
   projectRequiresStartupWorkspaceName,
   rollbackProjectChatWorkspacePlan,
+  summarizeProjectWorkspaceStartup,
 } from "./projectChatWorkspaces";
 
 const gitMocks = vi.hoisted(() => ({
@@ -82,6 +83,37 @@ describe("project chat workspaces", () => {
     gitMocks.deleteBranch.mockResolvedValue(undefined);
     gitMocks.pathExists.mockResolvedValue(false);
     gitMocks.removeWorktree.mockResolvedValue(undefined);
+  });
+
+  it("summarizes planned Git actions once per repository", () => {
+    expect(
+      summarizeProjectWorkspaceStartup([
+        workspace("/repo/apps/one", "worktree"),
+        workspace("/repo/apps/two", "worktree"),
+        {
+          ...workspace("/other-repo/apps/three", "branch"),
+          repositoryPath: "/other-repo",
+          worktreePath: "/other-repo",
+        },
+      ]),
+    ).toEqual({ worktreeCount: 1, branchCount: 1, exact: true });
+  });
+
+  it("does not claim exact action counts without repository metadata", () => {
+    expect(
+      summarizeProjectWorkspaceStartup([
+        {
+          ...workspace("/repo/apps/one", "worktree"),
+          repositoryPath: null,
+          worktreePath: null,
+        },
+        {
+          ...workspace("/repo/apps/two", "worktree"),
+          repositoryPath: null,
+          worktreePath: null,
+        },
+      ]).exact,
+    ).toBe(false);
   });
 
   it("requires a startup name when any project workspace creates git state", () => {

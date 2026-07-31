@@ -277,6 +277,77 @@ async function stageRecallAttachment() {
 }
 
 describe("ChatInput", () => {
+  it("hides queued-message mutation controls without a dismiss handler", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessage={{ text: "queued follow up" }}
+      />,
+    );
+
+    expect(screen.getByText("Queued: queued follow up")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit queued message" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss queued message" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the queue pill outside and above the composer piggyback", () => {
+    render(
+      <ChatInput
+        surface="bare"
+        innerBareSurface
+        onSend={vi.fn()}
+        queuedMessage={{ text: "queued follow up" }}
+        onDismissQueue={vi.fn()}
+        queuedMessageAccessory={<div>Configure a new worktree?</div>}
+      />,
+    );
+
+    const queue = screen.getByText("Queued: queued follow up");
+    const accessory = screen.getByText("Configure a new worktree?");
+    expect(queue.parentElement).toHaveClass(
+      "mb-2",
+      "flex",
+      "items-center",
+      "gap-2",
+      "rounded-full",
+      "bg-surface-chat-responding-pill-bg",
+      "px-3",
+      "py-1.5",
+      "text-surface-chat-responding-pill-fg",
+      "shadow-[var(--shadow-chat)]",
+    );
+    expect(accessory.parentElement).toHaveClass(
+      "rounded-t-sm",
+      "bg-surface-composer-action",
+      "-mx-4",
+    );
+    expect(accessory.parentElement).toHaveAttribute(
+      "data-slot",
+      "queued-message-accessory",
+    );
+    const composerShell = screen
+      .getByTestId("chat-composer")
+      .closest(".chat-composer-shell");
+    expect(composerShell).toHaveClass(
+      "bg-surface-chat-composer",
+      "[backdrop-filter:var(--backdrop-composer-glass)]",
+    );
+    expect(composerShell?.parentElement).not.toHaveClass(
+      "bg-surface-chat-composer",
+    );
+    expect(queue.parentElement?.parentElement).not.toBe(
+      accessory.parentElement?.parentElement,
+    );
+    expect(
+      queue.compareDocumentPosition(accessory) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   beforeEach(() => {
     resetVoiceDictationShortcutControllerForTests();
     resetShortcutOverride("chat.toggleVoiceDictation");
@@ -2172,6 +2243,19 @@ describe("ChatInput", () => {
     expect(
       screen.getByRole("button", { name: /stop generation/i }),
     ).toBeInTheDocument();
+  });
+
+  it("hides queue edit and dismiss actions when dismissal is disabled", () => {
+    render(
+      <ChatInput onSend={vi.fn()} queuedMessage={{ text: "queued msg" }} />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Edit queued message" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss queued message" }),
+    ).not.toBeInTheDocument();
   });
 
   it("edits a queued message from the queue bar", async () => {

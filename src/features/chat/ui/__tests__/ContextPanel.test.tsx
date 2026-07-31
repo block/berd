@@ -495,6 +495,7 @@ describe("ContextPanel", () => {
         .getState()
         .getSession("test-session-active-worktree-switch"),
     ).toMatchObject({
+      workingDir: "/Users/test/goose2-feature",
       activeWorkspaceId: nextWorkspaceId,
       workspaceAttachments: [
         expect.objectContaining({
@@ -1396,6 +1397,11 @@ describe("ContextPanel", () => {
       true,
       "feat/context-panel",
     );
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession("test-session-linked-worktree-actions")?.workingDir,
+    ).toBe("/Users/test/goose2-worktrees/new-worktree");
   });
 
   it("offers create worktree from a subdirectory in a linked worktree", async () => {
@@ -2516,6 +2522,37 @@ describe("ContextPanel", () => {
       path: "/Users/test/goose2-worktrees/new-worktree",
       branch: "feature/new-worktree",
     });
+    useChatStore.getState().enqueueDeferredMessage(
+      "test-session-8",
+      { text: "repair the workspace" },
+      {
+        type: "workspace-first-send",
+        status: "held",
+        projectId: "project-1",
+        desired: [
+          {
+            id: "workspace-main",
+            path: "/Users/test/goose2",
+            kind: "git-main-worktree",
+            source: "selected",
+            branch: "main",
+            usedByAgent: false,
+            startupMode: "none",
+          },
+          {
+            id: "workspace-new",
+            path: "/Users/test/goose2",
+            kind: "git-main-worktree",
+            source: "selected",
+            branch: "main",
+            repositoryPath: "/Users/test/goose2",
+            worktreePath: "/Users/test/goose2",
+            usedByAgent: false,
+            startupMode: "worktree",
+          },
+        ],
+      },
+    );
 
     renderContextPanel({ sessionId: "test-session-8" });
 
@@ -2542,6 +2579,12 @@ describe("ContextPanel", () => {
       "main",
     );
     const session = useChatSessionStore.getState().getSession("test-session-8");
+    expect(session).toMatchObject({
+      workingDir: "/Users/test/goose2-worktrees/new-worktree",
+      activeWorkspaceId: workspaceAttachmentIdForPath(
+        "/Users/test/goose2-worktrees/new-worktree",
+      ),
+    });
     expect(session?.workspaceAttachments).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2556,6 +2599,9 @@ describe("ContextPanel", () => {
         }),
       ]),
     );
+    expect(
+      useChatStore.getState().queuedMessageBySession["test-session-8"],
+    ).toMatchObject({ kind: "transport-ready", releasedFromDeferred: true });
     expect(
       screen.getByTitle("/Users/test/goose2-worktrees/new-worktree"),
     ).toBeInTheDocument();

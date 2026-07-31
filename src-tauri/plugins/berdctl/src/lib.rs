@@ -106,9 +106,11 @@ mod plugin {
         let Some(state) = app.try_state::<BerdctlState>() else {
             return Err(AppCommandDispatchError::PluginNotInitialized);
         };
-        let timeout = state
-            .timeouts
-            .command_timeout(&command, timeout_override.map(|t| t.as_millis() as u64));
+        let timeout = state.timeouts.command_timeout(
+            &command,
+            args.get("action").and_then(serde_json::Value::as_str),
+            timeout_override.map(|t| t.as_millis() as u64),
+        );
         let req = BridgeRequest {
             id: uuid::Uuid::new_v4().to_string(),
             command,

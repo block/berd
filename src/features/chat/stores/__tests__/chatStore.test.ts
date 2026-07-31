@@ -497,7 +497,7 @@ describe("chatStore", () => {
         path: "/tmp/report.pdf",
       },
     ]);
-    store.enqueueMessage("local-session", {
+    store.enqueueTransportReadyMessage("local-session", {
       text: "@Reviewer queued text",
       personaId: "reviewer",
       attachments: [queuedAttachment],
@@ -528,7 +528,7 @@ describe("chatStore", () => {
       },
     ]);
     expect(state.draftAttachmentsBySession["local-session"]).toBeUndefined();
-    expect(state.queuedMessageBySession["acp-session"]).toEqual({
+    expect(state.queuedMessageBySession["acp-session"]?.payload).toEqual({
       text: "@Reviewer queued text",
       personaId: "reviewer",
       attachments: [queuedAttachment],
@@ -720,14 +720,50 @@ describe("chatStore", () => {
   it("enqueues and dismisses messages per session", () => {
     const store = useChatStore.getState();
 
-    store.enqueueMessage("s1", { text: "follow up" });
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    store.enqueueTransportReadyMessage("s1", { text: "follow up" });
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "follow up",
     });
     expect(useChatStore.getState().queuedMessageBySession.s2).toBeUndefined();
 
     store.dismissQueuedMessage("s1");
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
+  it("rejects occupied slots and stale dismissal", () => {
+    const store = useChatStore.getState();
+
+    expect(store.enqueueTransportReadyMessage("s1", { text: "first" })).toBe(
+      true,
+    );
+    const first = useChatStore.getState().queuedMessageBySession.s1;
+    expect(store.enqueueTransportReadyMessage("s1", { text: "second" })).toBe(
+      false,
+    );
+    store.dismissQueuedMessage("s1", "stale-record");
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBe(first);
+    store.dismissQueuedMessage("s1", first?.recordId);
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
+  it("moves the exact queued record only into an empty slot", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("pending", { text: "first" });
+    const pending = useChatStore.getState().queuedMessageBySession.pending;
+
+    expect(store.moveQueuedMessage("pending", "session-1")).toBe(true);
+    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toBe(
+      pending,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession.pending,
+    ).toBeUndefined();
+
+    store.enqueueTransportReadyMessage("pending", { text: "second" });
+    expect(store.moveQueuedMessage("pending", "session-1")).toBe(false);
+    expect(
+      useChatStore.getState().queuedMessageBySession.pending?.payload,
+    ).toEqual({ text: "second" });
   });
 
   it("persists and clears draft text per session", () => {
@@ -782,7 +818,7 @@ describe("chatStore", () => {
 
     store.addMessage("s1", makeMessage());
     store.setChatState("s1", "streaming");
-    store.enqueueMessage("s1", { text: "queued" });
+    store.enqueueTransportReadyMessage("s1", { text: "queued" });
     store.setDraft("s1", "draft text");
     store.setSkillDrafts("s1", [{ id: "skill-1", name: "code-review" }]);
     store.setDraftAttachments("s1", [

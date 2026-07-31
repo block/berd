@@ -443,7 +443,7 @@ export async function hasAgentBuilderSessionUserContent(
   }
 
   const queuedMessage = chatState.queuedMessageBySession[sessionId];
-  if (queuedMessage?.text.trim()) {
+  if (queuedMessage?.payload.text.trim()) {
     return true;
   }
 

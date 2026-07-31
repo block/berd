@@ -2,14 +2,11 @@ import { useEffect } from "react";
 
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import {
-  isBerdctlCrossSessionQueuedMessage,
-  sendPromptToExistingSessionInBackground,
-} from "@/features/berdctl/commands/runtime/sessionSend";
+import { sendQueuedPromptToExistingSessionInBackground } from "@/features/chat/lib/queuedSessionSend";
 
 const drainingSessionIds = new Set<string>();
 
-function drainQueuedMessage(sessionId: string): void {
+function drainReleasedQueuedMessage(sessionId: string): void {
   if (drainingSessionIds.has(sessionId)) {
     return;
   }
@@ -19,8 +16,7 @@ function drainQueuedMessage(sessionId: string): void {
   const runtime = chatStore.getSessionRuntime(sessionId);
   if (
     queuedMessage?.kind !== "transport-ready" ||
-    !isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
-    queuedMessage.releasedFromDeferred ||
+    !queuedMessage.releasedFromDeferred ||
     isSessionRunning(runtime.chatState) ||
     runtime.isRunCancellationPending
   ) {
@@ -28,9 +24,9 @@ function drainQueuedMessage(sessionId: string): void {
   }
 
   drainingSessionIds.add(sessionId);
-  const send = sendPromptToExistingSessionInBackground(
+  void sendQueuedPromptToExistingSessionInBackground(
     sessionId,
-    queuedMessage.payload.text,
+    queuedMessage,
     () => {
       if (
         useChatStore.getState().queuedMessageBySession[sessionId] !==
@@ -39,8 +35,12 @@ function drainQueuedMessage(sessionId: string): void {
         throw new DOMException("The queued prompt was canceled.", "AbortError");
       }
     },
-  );
-  void send
+    () => {
+      useChatStore
+        .getState()
+        .dismissQueuedMessage(sessionId, queuedMessage.recordId);
+    },
+  )
     .then(() => {
       if (
         useChatStore.getState().queuedMessageBySession[sessionId] ===
@@ -53,7 +53,7 @@ function drainQueuedMessage(sessionId: string): void {
     })
     .catch((error) => {
       console.error(
-        `[berdctl-queue] failed to send queued prompt for session ${sessionId}`,
+        `[released-queue] failed to send queued prompt for session ${sessionId}`,
         error,
       );
     })
@@ -62,23 +62,22 @@ function drainQueuedMessage(sessionId: string): void {
     });
 }
 
-function drainReadyQueuedMessages(): void {
+function drainReadyReleasedMessages(): void {
   const { queuedMessageBySession } = useChatStore.getState();
   for (const sessionId of Object.keys(queuedMessageBySession)) {
-    drainQueuedMessage(sessionId);
+    drainReleasedQueuedMessage(sessionId);
   }
 }
 
-export function useBerdctlQueuedMessageDrain(): void {
+export function useReleasedQueuedMessageDrain(): void {
   useEffect(() => {
-    drainReadyQueuedMessages();
+    drainReadyReleasedMessages();
     return useChatStore.subscribe((state, previousState) => {
       for (const sessionId of Object.keys(state.queuedMessageBySession)) {
         const queuedMessage = state.queuedMessageBySession[sessionId];
         if (
           queuedMessage.kind !== "transport-ready" ||
-          !isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
-          queuedMessage.releasedFromDeferred
+          !queuedMessage.releasedFromDeferred
         ) {
           continue;
         }
@@ -92,17 +91,14 @@ export function useBerdctlQueuedMessageDrain(): void {
         const previousBlocked =
           isSessionRunning(previousRuntime?.chatState ?? "idle") ||
           (previousRuntime?.isRunCancellationPending ?? false);
-        // Match the composer queue: failed/cancelling runs leave the prompt
-        // parked until every blocking runtime signal clears.
         const becameTransportReady =
-          queuedMessage.kind === "transport-ready" &&
           previousState.queuedMessageBySession[sessionId] !== queuedMessage;
         if (
           currentChatState === "idle" &&
           !currentBlocked &&
           (previousBlocked || becameTransportReady)
         ) {
-          drainQueuedMessage(sessionId);
+          drainReleasedQueuedMessage(sessionId);
         }
       }
     });

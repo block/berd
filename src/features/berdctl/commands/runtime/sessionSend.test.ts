@@ -11,7 +11,10 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { getTextContent } from "@/shared/types/messages";
-import { sendPromptToExistingSessionInBackground } from "./sessionSend";
+import {
+  sendPromptToExistingSessionInBackground,
+  sendQueuedPromptToExistingSessionInBackground,
+} from "./sessionSend";
 
 const mocks = vi.hoisted(() => ({
   acpGetSessionInfo: vi.fn(),
@@ -142,5 +145,65 @@ describe("sendPromptToExistingSessionInBackground", () => {
     expect(
       useChatStore.getState().messagesBySession[SESSION_ID].map(getTextContent),
     ).toEqual(["older prompt", "older answer", "new monitor event"]);
+  });
+  it("applies a deferred global-composer persona's provider and model before dispatch", async () => {
+    useAgentStore.setState({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      personas: [
+        {
+          id: "claude-reviewer",
+          displayName: "Claude Reviewer",
+          systemPrompt: "Review with Claude.",
+          provider: "claude-acp",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    useChatSessionStore.getState().patchSession(SESSION_ID, {
+      providerId: "goose",
+      modelId: "old-goose-model",
+      personaId: "claude-reviewer",
+    });
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession.mockResolvedValue(undefined);
+
+    await sendQueuedPromptToExistingSessionInBackground(SESSION_ID, {
+      kind: "transport-ready",
+      recordId: "deferred-global-send",
+      releasedFromDeferred: true,
+      payload: {
+        text: "review this",
+        personaId: "claude-reviewer",
+      },
+    });
+
+    expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      "claude-acp",
+      expect.any(String),
+    );
+    expect(mocks.acpSetModel).toHaveBeenCalledWith(
+      SESSION_ID,
+      "claude-sonnet-4",
+    );
+    expect(mocks.acpSendMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "review this",
+      expect.objectContaining({
+        personaId: "claude-reviewer",
+        systemPrompt: expect.stringContaining("Review with Claude."),
+      }),
+    );
+    expect(useChatSessionStore.getState().getSession(SESSION_ID)).toMatchObject(
+      {
+        providerId: "claude-acp",
+        modelId: "claude-sonnet-4",
+      },
+    );
   });
 });

@@ -67,6 +67,7 @@ export const COMMAND_ERROR_CODES = [
   "unknown_command",
   "unknown_action",
   "invalid_args",
+  "workspace_name_required",
   "target_session_running",
   "queue_full",
   "session_not_found",

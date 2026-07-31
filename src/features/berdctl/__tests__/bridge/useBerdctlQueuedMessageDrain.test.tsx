@@ -1,7 +1,10 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  type QueuedMessageRecord,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { useBerdctlQueuedMessageDrain } from "@/features/berdctl/bridge/useBerdctlQueuedMessageDrain";
 
 const mocks = vi.hoisted(() => ({
@@ -57,10 +60,10 @@ describe("useBerdctlQueuedMessageDrain", () => {
   it("drains berdctl-origin queued messages when the target session becomes idle", async () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
-    chatStore.enqueueMessage("session-1", {
+    chatStore.enqueueTransportReadyMessage("session-1", {
       text: "queued prompt",
       sendOptions: {
-        userMessageMetadata: { origin: "berdctl_cross_session" },
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
         acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
     });
@@ -77,7 +80,11 @@ describe("useBerdctlQueuedMessageDrain", () => {
     await waitFor(() => {
       expect(
         mocks.sendPromptToExistingSessionInBackground,
-      ).toHaveBeenCalledWith("session-1", "queued prompt");
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued prompt",
+        expect.any(Function),
+      );
     });
     expect(
       useChatStore.getState().queuedMessageBySession["session-1"],
@@ -88,10 +95,10 @@ describe("useBerdctlQueuedMessageDrain", () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
     chatStore.setRunCancellationPending("session-1", true);
-    chatStore.enqueueMessage("session-1", {
+    chatStore.enqueueTransportReadyMessage("session-1", {
       text: "queued prompt",
       sendOptions: {
-        userMessageMetadata: { origin: "berdctl_cross_session" },
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
         acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
     });
@@ -111,17 +118,21 @@ describe("useBerdctlQueuedMessageDrain", () => {
     await waitFor(() => {
       expect(
         mocks.sendPromptToExistingSessionInBackground,
-      ).toHaveBeenCalledWith("session-1", "queued prompt");
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued prompt",
+        expect.any(Function),
+      );
     });
   });
 
   it("does not drain a queued prompt when a running session enters error", async () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
-    chatStore.enqueueMessage("session-1", {
+    chatStore.enqueueTransportReadyMessage("session-1", {
       text: "queued prompt",
       sendOptions: {
-        userMessageMetadata: { origin: "berdctl_cross_session" },
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
         acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
     });
@@ -149,10 +160,10 @@ describe("useBerdctlQueuedMessageDrain", () => {
     );
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
-    chatStore.enqueueMessage("session-1", {
+    chatStore.enqueueTransportReadyMessage("session-1", {
       text: "queued prompt",
       sendOptions: {
-        userMessageMetadata: { origin: "berdctl_cross_session" },
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
         acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
     });
@@ -165,7 +176,11 @@ describe("useBerdctlQueuedMessageDrain", () => {
     await waitFor(() => {
       expect(
         mocks.sendPromptToExistingSessionInBackground,
-      ).toHaveBeenCalledWith("session-1", "queued prompt");
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued prompt",
+        expect.any(Function),
+      );
     });
     await waitFor(() => {
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -173,21 +188,119 @@ describe("useBerdctlQueuedMessageDrain", () => {
         sendError,
       );
     });
-    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toEqual(
-      {
-        text: "queued prompt",
-        sendOptions: {
-          userMessageMetadata: { origin: "berdctl_cross_session" },
-          acpGooseMetadata: { origin: "berdctl_cross_session" },
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.payload,
+    ).toEqual({
+      text: "queued prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+        acpGooseMetadata: { origin: "berdctl_cross_session" },
+      },
+    });
+  });
+
+  it("leaves released berdctl records for the released-message drain", () => {
+    useChatStore.setState({
+      queuedMessageBySession: {
+        "session-1": {
+          kind: "transport-ready",
+          recordId: "released-1",
+          releasedFromDeferred: true,
+          payload: {
+            text: "released prompt",
+            sendOptions: {
+              userMessageMetadata: { origin: "berdctl_cross_session" as const },
+            },
+          },
         },
       },
-    );
+    });
+
+    render(<DrainHarness />);
+
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.recordId,
+    ).toBe("released-1");
+  });
+
+  it("leaves deferred records inert", () => {
+    useChatStore.setState({
+      queuedMessageBySession: {
+        "session-1": {
+          kind: "deferred",
+          recordId: "deferred-1",
+          payload: {
+            text: "held prompt",
+            sendOptions: {
+              userMessageMetadata: { origin: "berdctl_cross_session" as const },
+            },
+          },
+          state: { phase: "failed" },
+        },
+      },
+      sessionStateById: {
+        "session-1": {
+          ...useChatStore.getState().getSessionRuntime("session-1"),
+          chatState: "idle",
+        },
+      },
+    });
+
+    render(<DrainHarness />);
+
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.recordId,
+    ).toBe("deferred-1");
+  });
+
+  it("drains when a record becomes transport-ready while already idle", async () => {
+    const deferred: QueuedMessageRecord = {
+      kind: "deferred" as const,
+      recordId: "record-1",
+      payload: {
+        text: "held prompt",
+        sendOptions: {
+          userMessageMetadata: { origin: "berdctl_cross_session" as const },
+        },
+      },
+      state: { phase: "creating" },
+    };
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": deferred },
+    });
+    render(<DrainHarness />);
+
+    act(() => {
+      useChatStore.setState({
+        queuedMessageBySession: {
+          "session-1": {
+            kind: "transport-ready",
+            recordId: deferred.recordId,
+            payload: deferred.payload,
+          },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith("session-1", "held prompt", expect.any(Function));
+    });
   });
 
   it("leaves ordinary queued messages for ChatView-owned queue handling", async () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
-    chatStore.enqueueMessage("session-1", { text: "user queued prompt" });
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      text: "user queued prompt",
+    });
     render(<DrainHarness />);
 
     act(() => {
@@ -197,8 +310,8 @@ describe("useBerdctlQueuedMessageDrain", () => {
     expect(
       mocks.sendPromptToExistingSessionInBackground,
     ).not.toHaveBeenCalled();
-    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toEqual(
-      { text: "user queued prompt" },
-    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.payload,
+    ).toEqual({ text: "user queued prompt" });
   });
 });

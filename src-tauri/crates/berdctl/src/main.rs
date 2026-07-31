@@ -486,11 +486,11 @@ mod tests {
         );
     }
 
-    /// The --timeout-ms help promises 1000-150000; out-of-range values must
+    /// The --timeout-ms help promises 1000-900000; out-of-range values must
     /// be usage errors here, not silent broker-side clamps.
     #[test]
     fn timeout_ms_is_range_checked_client_side() {
-        for out_of_range in ["999", "150001", "0"] {
+        for out_of_range in ["999", "900001", "0"] {
             assert!(
                 try_parse(&["berdctl", "session", "list", "--timeout-ms", out_of_range]).is_err(),
                 "--timeout-ms {out_of_range} must be rejected"
@@ -615,7 +615,7 @@ Options:
           JSON)
 
       --timeout-ms <MS>
-          Give the app this long (in ms, 1000-150000) to run the command before
+          Give the app this long (in ms, 1000-900000) to run the command before
           it reports timed out; defaults to the app's per-command timeout
 
   -h, --help
@@ -677,7 +677,7 @@ Options:
           JSON)
 
       --timeout-ms <MS>
-          Give the app this long (in ms, 1000-150000) to run the command before
+          Give the app this long (in ms, 1000-900000) to run the command before
           it reports timed out; defaults to the app's per-command timeout
 
   -h, --help
@@ -713,7 +713,7 @@ Options:
           JSON)
 
       --timeout-ms <MS>
-          Give the app this long (in ms, 1000-150000) to run the command before
+          Give the app this long (in ms, 1000-900000) to run the command before
           it reports timed out; defaults to the app's per-command timeout
 
   -h, --help
@@ -740,7 +740,7 @@ Options:
           JSON)
 
       --timeout-ms <MS>
-          Give the app this long (in ms, 1000-150000) to run the command before
+          Give the app this long (in ms, 1000-900000) to run the command before
           it reports timed out; defaults to the app's per-command timeout
 
   -h, --help

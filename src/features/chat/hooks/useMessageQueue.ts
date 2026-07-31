@@ -3,44 +3,26 @@ import type { ChatState } from "@/shared/types/chat";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../stores/chatStore";
+import type { QueuedMessageRecord } from "../stores/chatStore";
 import type { ChatSendOptions } from "../types";
 
 const MAX_CONSECUTIVE_SEND_FAILURES = 2;
 
-type QueuedMessage = {
-  text: string;
-  personaId?: string;
-  attachments?: ChatAttachmentDraft[];
-  sendOptions?: ChatSendOptions;
-};
-
 function getQueuedMessageKey(
-  queuedMessage: QueuedMessage | null,
+  queuedMessage: QueuedMessageRecord | null,
 ): string | null {
-  if (!queuedMessage) {
-    return null;
-  }
-
-  return JSON.stringify({
-    text: queuedMessage.text,
-    personaId: queuedMessage.personaId ?? null,
-    sendOptions: queuedMessage.sendOptions ?? null,
-    attachments:
-      queuedMessage.attachments?.map((attachment) => ({
-        id: attachment.id,
-        kind: attachment.kind,
-        name: attachment.name,
-        path: "path" in attachment ? (attachment.path ?? null) : null,
-      })) ?? [],
-  });
+  return queuedMessage?.kind === "transport-ready"
+    ? queuedMessage.recordId
+    : null;
 }
 
 function isBerdctlCrossSessionQueuedMessage(
-  queuedMessage: Pick<QueuedMessage, "sendOptions"> | null,
+  queuedMessage: QueuedMessageRecord | null,
 ): boolean {
   return (
-    queuedMessage?.sendOptions?.userMessageMetadata?.origin ===
-    "berdctl_cross_session"
+    queuedMessage?.kind === "transport-ready" &&
+    queuedMessage.payload.sendOptions?.userMessageMetadata?.origin ===
+      "berdctl_cross_session"
   );
 }
 
@@ -84,9 +66,11 @@ export function useMessageQueue(
   readOnly = false,
   isSendBlocked = false,
 ) {
-  const queuedMessage = useChatStore(
+  const queuedRecord = useChatStore(
     (s) => s.queuedMessageBySession[sessionId] ?? null,
   );
+  const queuedMessage =
+    queuedRecord?.kind === "transport-ready" ? queuedRecord.payload : null;
   const previousChatStateRef = useRef(chatState);
   const idleCycleRef = useRef(0);
   const lastAttemptRef = useRef<{
@@ -100,8 +84,8 @@ export function useMessageQueue(
   const inFlightAttemptKeyRef = useRef<string | null>(null);
   const suppressNextRenderIdleCycleRef = useRef(false);
   const queuedMessageKey = useMemo(
-    () => getQueuedMessageKey(queuedMessage),
-    [queuedMessage],
+    () => getQueuedMessageKey(queuedRecord),
+    [queuedRecord],
   );
 
   // --- Background-safe store subscription ---
@@ -116,14 +100,16 @@ export function useMessageQueue(
   readOnlyRef.current = readOnly;
 
   const tryDrainQueuedMessage = useCallback(
-    (queuedMsg: QueuedMessage | null | undefined) => {
+    (queuedMsg: QueuedMessageRecord | null | undefined) => {
       if (
         readOnlyRef.current ||
-        !queuedMsg ||
+        queuedMsg?.kind !== "transport-ready" ||
+        queuedMsg.releasedFromDeferred ||
         isBerdctlCrossSessionQueuedMessage(queuedMsg)
       ) {
         return false;
       }
+      const { payload } = queuedMsg;
 
       const key = getQueuedMessageKey(queuedMsg);
       if (!key) {
@@ -151,7 +137,7 @@ export function useMessageQueue(
       };
       inFlightAttemptKeyRef.current = key;
 
-      const { text, personaId, attachments, sendOptions } = queuedMsg;
+      const { text, personaId, attachments, sendOptions } = payload;
       const sendFn = sendMessageRef.current;
       const sendResult = sendOptions
         ? sendFn(
@@ -187,7 +173,9 @@ export function useMessageQueue(
 
         failureStateRef.current = null;
         lastAttemptRef.current = null;
-        useChatStore.getState().dismissQueuedMessage(sessionId);
+        useChatStore
+          .getState()
+          .dismissQueuedMessage(sessionId, queuedMsg.recordId);
       };
 
       if (isPromiseLike<boolean>(sendResult)) {
@@ -215,13 +203,20 @@ export function useMessageQueue(
         currentChatState === "idle" && prevChatState !== "idle";
       const becameReadyWhileIdle =
         currentChatState === "idle" && wasSendBlocked && !isLiveSendBlocked;
+      const queuedMessage = state.queuedMessageBySession[sessionId];
+      const previousQueuedMessage =
+        previousState.queuedMessageBySession[sessionId];
+      const becameTransportReady =
+        queuedMessage?.kind === "transport-ready" &&
+        previousQueuedMessage?.kind === "deferred" &&
+        previousQueuedMessage.recordId === queuedMessage.recordId;
 
       if (becameIdle) {
         idleCycleRef.current += 1;
         suppressNextRenderIdleCycleRef.current = true;
       }
 
-      if (!becameIdle && !becameReadyWhileIdle) {
+      if (!becameIdle && !becameReadyWhileIdle && !becameTransportReady) {
         return;
       }
 
@@ -229,7 +224,7 @@ export function useMessageQueue(
         return;
       }
 
-      tryDrainQueuedMessage(state.queuedMessageBySession[sessionId]);
+      tryDrainQueuedMessage(queuedMessage);
     });
   }, [sessionId, tryDrainQueuedMessage]);
 
@@ -258,14 +253,8 @@ export function useMessageQueue(
       return;
     }
 
-    tryDrainQueuedMessage(queuedMessage);
-  }, [
-    chatState,
-    isSendBlocked,
-    queuedMessage,
-    readOnly,
-    tryDrainQueuedMessage,
-  ]);
+    tryDrainQueuedMessage(queuedRecord);
+  }, [chatState, isSendBlocked, queuedRecord, readOnly, tryDrainQueuedMessage]);
 
   const enqueue = useCallback(
     (
@@ -277,7 +266,7 @@ export function useMessageQueue(
       if (readOnly) {
         return;
       }
-      useChatStore.getState().enqueueMessage(sessionId, {
+      useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
         text,
         personaId,
         attachments,
@@ -288,8 +277,12 @@ export function useMessageQueue(
   );
 
   const dismiss = useCallback(() => {
-    useChatStore.getState().dismissQueuedMessage(sessionId);
-  }, [sessionId]);
+    if (queuedRecord) {
+      useChatStore
+        .getState()
+        .dismissQueuedMessage(sessionId, queuedRecord.recordId);
+    }
+  }, [queuedRecord, sessionId]);
 
   return { queuedMessage, enqueue, dismiss } as const;
 }

@@ -104,6 +104,14 @@
               "max": 50000
             },
             {
+              "name": "startup_name",
+              "required": false,
+              "kind": "string",
+              "description": "Branch/worktree name when this is the first send.",
+              "min": 1,
+              "max": 200
+            },
+            {
               "name": "if_running",
               "required": false,
               "kind": "string",
@@ -124,6 +132,12 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50000
+              },
+              "startup_name": {
+                "description": "Branch/worktree name when this is the first send.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
               },
               "if_running": {
                 "description": "What to do if the target session is running: refuse, steer, or queue.",

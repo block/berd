@@ -1,5 +1,9 @@
 import { dispatchPrompt } from "@/features/chat/lib/sendCore";
-import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
+import {
+  composeSystemPrompt,
+  formatPersonaSystemPrompt,
+} from "@/features/projects/lib/chatProjectContext";
+import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import type { Persona } from "@/shared/types/agents";
 import type { ChatSendOptions } from "../types";
 
@@ -21,15 +25,19 @@ export function sendPromptInBackground(
   providerId: string,
   persona?: Pick<Persona, "id" | "displayName" | "systemPrompt">,
   sendOptions: ChatSendOptions = {},
-): void {
+  attachments?: ChatAttachmentDraft[],
+  beforeUserMessageCommitted?: () => void,
+  onUserMessageCommitted?: () => void,
+): Promise<void> {
   const systemPrompt = composeSystemPrompt(
-    persona?.systemPrompt,
+    formatPersonaSystemPrompt(persona),
     sendOptions.systemPrompt,
   );
-  void dispatchPrompt(sessionId, prompt, {
+  return dispatchPrompt(sessionId, prompt, {
     persona: persona
       ? { id: persona.id, name: persona.displayName }
       : undefined,
+    attachments,
     assistantPrompt: sendOptions.assistantPrompt,
     displayText: sendOptions.displayText,
     chips: sendOptions.chips,
@@ -41,6 +49,8 @@ export function sendPromptInBackground(
     // Same isolation rule: the target session's provider, never the
     // foreground active agent's (dispatchPrompt's default).
     providerId,
+    beforeUserMessageCommitted,
+    onUserMessageCommitted,
     background: true,
   }).catch((error) => {
     // dispatchPrompt has already recorded the failure in the session
@@ -49,5 +59,6 @@ export function sendPromptInBackground(
       `[background-send] prompt failed for session ${sessionId}`,
       error,
     );
+    throw error;
   });
 }

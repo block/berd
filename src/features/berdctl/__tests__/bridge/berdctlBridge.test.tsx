@@ -105,21 +105,20 @@ afterEach(async () => {
 });
 
 describe("BerdctlBridge lifecycle", () => {
-  it("starts the broker and pushes the per-group timeouts by default", async () => {
+  it("starts the broker and pushes per-action timeouts by default", async () => {
     renderBridge();
     await flushAsync();
 
     expect(invokeCalls("plugin:berdctl|start")).toHaveLength(1);
-    // Per-group max of the actions' bridge timeouts (sessions.create is 60s).
-    expect(mocks.invoke).toHaveBeenCalledWith("plugin:berdctl|set_timeouts", {
-      timeouts: {
-        sessions: 150_000,
-        projects: 30_000,
-        agents: 30_000,
-        skills: 30_000,
-        info: 30_000,
-      },
-    });
+    const [, { timeouts }] = invokeCalls("plugin:berdctl|set_timeouts")[0] as [
+      string,
+      { timeouts: Record<string, number> },
+    ];
+    expect(timeouts["sessions.create"]).toBe(900_000);
+    expect(timeouts["sessions.send"]).toBe(60_000);
+    expect(timeouts["sessions.list"]).toBe(30_000);
+    expect(timeouts["sessions.archive"]).toBe(150_000);
+    expect(timeouts["projects.list"]).toBe(30_000);
   });
 
   it("starts exactly once under a StrictMode double-mount", async () => {

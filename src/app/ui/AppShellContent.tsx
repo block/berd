@@ -20,6 +20,7 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
 import type { AgentSourceEntry } from "@/shared/api/agents";
@@ -56,6 +57,7 @@ interface AppShellContentProps {
   chatComposerHandoffActive?: boolean;
   chatComposerHandoffInProgress?: boolean;
   onChatComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
   homeViewportLeftOcclusionPx?: number;
   chatViewportLeftOcclusionPx?: number;
   onNavigateSkills: (
@@ -139,6 +141,7 @@ export function AppShellContent({
   chatComposerHandoffActive = false,
   chatComposerHandoffInProgress = false,
   onChatComposerHandoffTarget,
+  onWorkspaceNameRequest,
   homeViewportLeftOcclusionPx = 0,
   chatViewportLeftOcclusionPx = 0,
   onNavigateSkills,
@@ -249,6 +252,7 @@ export function AppShellContent({
     onAutomationsBreadcrumbLabelChange,
     onBuilderbotBreadcrumbLabelChange,
     onChatComposerHandoffTarget,
+    onWorkspaceNameRequest,
     onCreatePersona,
     onCreateProject,
     onExitSearch,
@@ -327,6 +331,7 @@ interface RenderRouteContentOptions {
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
   onBuilderbotBreadcrumbLabelChange?: (label: string | null) => void;
   onChatComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
   onAutomationBuilderLeaveActionChange?: (
     action: AutomationBuilderLeaveAction | null,
   ) => void;
@@ -387,6 +392,7 @@ function renderRouteContent({
   onAutomationsBreadcrumbLabelChange,
   onBuilderbotBreadcrumbLabelChange,
   onChatComposerHandoffTarget,
+  onWorkspaceNameRequest,
   onCloseDesignSystem,
   onCreatePersona,
   onCreateProject,
@@ -522,6 +528,7 @@ function renderRouteContent({
           composerHandoffActive={chatComposerHandoffActive}
           composerHandoffInProgress={chatComposerHandoffInProgress}
           onComposerHandoffTarget={onChatComposerHandoffTarget}
+          onWorkspaceNameRequest={onWorkspaceNameRequest}
         />
       ) : (
         (setupRequiredContent ?? (
@@ -530,6 +537,7 @@ function renderRouteContent({
             onActivateSession={onActivateHomeSession}
             onCreatePersona={onCreatePersona}
             onCreateProject={onCreateProject}
+            onWorkspaceNameRequest={onWorkspaceNameRequest}
           />
         ))
       );

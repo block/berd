@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { HomeComposer } from "./HomeComposer";
+import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 
 function HomeClock() {
   const [time, setTime] = useState(new Date());
@@ -41,6 +42,7 @@ export interface HomeScreenProps {
   sessionId: string | null;
   onActivateSession: (sessionId: string) => void;
   onCreatePersona?: () => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
   onCreateProject?: (options?: {
     onCreated?: (projectId: string) => void;
   }) => void;
@@ -50,6 +52,7 @@ export function HomeScreen({
   sessionId,
   onActivateSession,
   onCreatePersona,
+  onWorkspaceNameRequest,
   onCreateProject,
 }: HomeScreenProps) {
   const { t } = useTranslation("home");
@@ -71,6 +74,7 @@ export function HomeScreen({
             onActivateSession={onActivateSession}
             onCreatePersona={onCreatePersona}
             onCreateProject={onCreateProject}
+            onWorkspaceNameRequest={onWorkspaceNameRequest}
           />
         </div>
       </div>

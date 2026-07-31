@@ -77,6 +77,8 @@ export interface SendCoreOptions {
    */
   prepare?: () => Promise<void>;
   signal?: AbortSignal;
+  /** Fires immediately before the user message is committed to local stores. */
+  beforeUserMessageCommitted?: () => void;
   /**
    * Fires synchronously after the user message and title patch are committed
    * to the stores, before any awaits.
@@ -194,6 +196,7 @@ export async function dispatchPrompt(
     acpGooseMetadata,
     attachments,
     background,
+    beforeUserMessageCommitted,
     chips,
     displayText,
     onUserMessageCommitted,
@@ -230,6 +233,7 @@ export async function dispatchPrompt(
   clearLiveSubtitleUpdate(sessionId);
 
   // Create and add user message.
+  beforeUserMessageCommitted?.();
   const userMessage = createUserMessage(
     displayText ?? text,
     buildMessageAttachments(attachments),

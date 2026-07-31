@@ -593,7 +593,7 @@ describe("command safety metadata", () => {
 });
 
 describe("sessions.create", () => {
-  it("creates the session, sends the prompt in the background, and does not navigate", async () => {
+  it("creates the session and leaves the accepted first prompt in the shared queue", async () => {
     mocks.listPersonas.mockResolvedValue([
       {
         id: "agent-7",
@@ -651,32 +651,13 @@ describe("sessions.create", () => {
       send_status: "dispatched",
     });
 
-    // Fire-and-forget: the user message is recorded and the send dispatched,
-    // but nothing was opened and nothing was queued for a ChatView to flush.
-    const messages = useChatStore.getState().messagesBySession["session-new"];
-    expect(messages).toHaveLength(1);
-    expect(getTextContent(messages[0])).toBe("what is 1+1");
-    expect(controller.openSession).not.toHaveBeenCalled();
-    expect(
-      useChatStore.getState().queuedMessageBySession["session-new"],
-    ).toBeUndefined();
-    // The pending-assistant hint is the new session's provider, not the
-    // foreground active agent's.
-    expect(
-      useChatStore.getState().getSessionRuntime("session-new")
-        .pendingAssistantProviderId,
-    ).toBe("goose");
-    await vi.waitFor(() => {
-      expect(mocks.acpSendMessage).toHaveBeenCalledWith(
-        "session-new",
-        "what is 1+1",
-        expect.objectContaining({
-          personaId: "agent-7",
-          personaName: "Reviewer",
-          systemPrompt: "Review the work carefully.",
-        }),
-      );
+    const queued =
+      useChatStore.getState().queuedMessageBySession["session-new"];
+    expect(queued).toMatchObject({
+      kind: "transport-ready",
+      payload: { text: "what is 1+1" },
     });
+    expect(controller.openSession).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown agent before creating the session", async () => {
@@ -828,159 +809,6 @@ describe("sessions.create", () => {
     );
   });
 
-  it("attaches every project workspace when startup mode is none", async () => {
-    const project = makeProject({
-      id: "project-1",
-      workingDirs: ["~/projects/one", "/projects/two"],
-    });
-    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
-    mocks.listProjects.mockResolvedValue([project]);
-    const attachments = [
-      {
-        id: "ws-one",
-        path: "~/projects/one",
-        kind: "non-git-directory" as const,
-        source: "inferred" as const,
-        branch: null,
-        usedByAgent: true,
-      },
-      {
-        id: "ws-two",
-        path: "/projects/two",
-        kind: "non-git-directory" as const,
-        source: "inferred" as const,
-        branch: null,
-        usedByAgent: true,
-      },
-    ];
-    mocks.planProjectChatWorkspacesAsIs.mockReturnValue({
-      workingDir: "~/projects/one",
-      workspaceAttachments: attachments,
-    });
-
-    await dispatchCommand(
-      "sessions",
-      { action: "create", prompt: "hi", project_id: "project-1" },
-      ctx,
-    );
-
-    expect(mocks.planProjectChatWorkspacesAsIs).toHaveBeenCalledWith(project);
-    expect(mocks.resolveSessionCwd).toHaveBeenCalledWith(project);
-    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
-      "goose",
-      "/resolved/cwd",
-      expect.objectContaining({ projectId: "project-1" }),
-    );
-    expect(
-      useChatSessionStore.getState().getSession("session-new")
-        ?.workspaceAttachments,
-    ).toEqual(attachments);
-    await vi.waitFor(() => {
-      expect(mocks.acpSendMessage).toHaveBeenCalledWith(
-        "session-new",
-        "hi",
-        expect.objectContaining({
-          systemPrompt: expect.stringContaining(
-            "<included-workspaces>\n- path: ~/projects/one",
-          ),
-        }),
-      );
-    });
-  });
-
-  it("creates the session in the project's startup worktree", async () => {
-    const project = makeProject({
-      id: "project-1",
-      projectWorkspaces: [
-        {
-          id: "ws-main",
-          path: "/projects/repo",
-          kind: "git-main-worktree",
-          source: "selected",
-          branch: "main",
-          usedByAgent: false,
-          startupMode: "worktree",
-          repositoryPath: "/projects/repo",
-          worktreePath: "/projects/repo",
-        },
-      ],
-      workingDirs: ["/projects/repo"],
-      useWorktrees: true,
-    });
-    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.projectRequiresStartupWorkspaceName.mockReturnValue(true);
-    const attachments = [
-      {
-        id: "ws-created",
-        path: "/projects/repo-worktrees/my-feature",
-        kind: "git-linked-worktree" as const,
-        source: "created" as const,
-        branch: "my-feature",
-        usedByAgent: true,
-      },
-    ];
-    mocks.planProjectChatWorkspaces.mockResolvedValue({
-      workingDir: "/projects/repo-worktrees/my-feature",
-      workspaceAttachments: attachments,
-    });
-
-    await dispatchCommand(
-      "sessions",
-      {
-        action: "create",
-        prompt: "hi",
-        project_id: "project-1",
-        startup_name: "my-feature",
-      },
-      ctx,
-    );
-
-    expect(mocks.planProjectChatWorkspaces).toHaveBeenCalledWith(
-      project,
-      "my-feature",
-    );
-    expect(mocks.resolveSessionCwd).not.toHaveBeenCalled();
-    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
-      "goose",
-      "/projects/repo-worktrees/my-feature",
-      expect.objectContaining({ projectId: "project-1" }),
-    );
-    expect(
-      useChatSessionStore.getState().getSession("session-new")
-        ?.workspaceAttachments,
-    ).toEqual(attachments);
-  });
-
-  it("rolls back the startup worktree when session creation fails", async () => {
-    const project = makeProject({ id: "project-1" });
-    useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
-    mocks.listProjects.mockResolvedValue([project]);
-    mocks.projectRequiresStartupWorkspaceName.mockReturnValue(true);
-    const workspacePlan = {
-      workingDir: "/projects/repo-worktrees/my-feature",
-      workspaceAttachments: [{ id: "ws-created", path: "/tmp/wt" }],
-    };
-    mocks.planProjectChatWorkspaces.mockResolvedValue(workspacePlan);
-    mocks.acpCreateSession.mockRejectedValueOnce(new Error("backend down"));
-
-    await expect(
-      dispatchCommand(
-        "sessions",
-        {
-          action: "create",
-          prompt: "hi",
-          project_id: "project-1",
-          startup_name: "my-feature",
-        },
-        ctx,
-      ),
-    ).rejects.toThrow("backend down");
-    expect(mocks.rollbackProjectChatWorkspacePlan).toHaveBeenCalledWith(
-      workspacePlan,
-    );
-  });
-
   it("requires startup_name for a project with branch/worktree startup", async () => {
     const project = makeProject({ id: "project-1" });
     useProjectStore.setState({ projects: [project], hasFetchedProjects: true });
@@ -993,7 +821,7 @@ describe("sessions.create", () => {
         { action: "create", prompt: "hi", project_id: "project-1" },
         ctx,
       ),
-      "invalid_args",
+      "workspace_name_required",
     );
     expect(mocks.planProjectChatWorkspaces).not.toHaveBeenCalled();
     expect(mocks.acpCreateSession).not.toHaveBeenCalled();
@@ -1033,36 +861,12 @@ describe("sessions.create", () => {
     expect(mocks.acpCreateSession).not.toHaveBeenCalled();
   });
 
-  it("reports a failed background send on the session instead of rejecting", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    mocks.acpSendMessage.mockRejectedValue(new Error("provider down"));
-
-    const result = (await dispatchCommand(
-      "sessions",
-      { action: "create", prompt: "hi" },
-      ctx,
-    )) as { send_status: string };
-
-    expect(result.send_status).toBe("dispatched");
-    await vi.waitFor(() => {
-      const runtime = useChatStore.getState().getSessionRuntime("session-new");
-      expect(runtime.error).toContain("provider down");
-      expect(runtime.chatState).toBe("idle");
-      // A stale streaming id would make the session's next turn stream into
-      // this turn's assistant message.
-      expect(runtime.streamingMessageId).toBeNull();
-    });
-    consoleError.mockRestore();
-  });
-
   it("does not create when validation stalls past the broker deadline", async () => {
     // findReadyHarnessOrThrow consults the doctor; stall it past the deadline.
     const start = Date.now();
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(start);
     mocks.runDoctor.mockImplementation(async () => {
-      nowSpy.mockReturnValue(start + 120_000);
+      nowSpy.mockReturnValue(start + 901_000);
       return { checks: [] };
     });
 
@@ -1167,7 +971,7 @@ describe("sessions.send", () => {
         expect.objectContaining({
           personaId: "agent-7",
           personaName: "Reviewer",
-          systemPrompt: "Review the work carefully.",
+          systemPrompt: expect.stringContaining("Review the work carefully."),
           goose: { origin: "berdctl_cross_session" },
         }),
       );
@@ -1229,7 +1033,7 @@ describe("sessions.send", () => {
         expect.objectContaining({
           personaId: "agent-refreshed",
           personaName: "Fresh Reviewer",
-          systemPrompt: "Use refreshed instructions.",
+          systemPrompt: expect.stringContaining("Use refreshed instructions."),
         }),
       );
     });
@@ -1359,6 +1163,27 @@ describe("sessions.send", () => {
     expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
   });
 
+  it("queues to a running session without loading its unavailable project", async () => {
+    mockSessionFound({ projectId: "deleted-project" });
+    useChatStore.getState().setChatState("session-1", "streaming");
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "queue despite missing project",
+        if_running: "queue",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(mocks.listProjects).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.payload.text,
+    ).toBe("queue despite missing project");
+  });
+
   it("queues a prompt while cancellation is pending", async () => {
     mockSessionFound();
     useChatStore.getState().setRunCancellationPending("session-1", true);
@@ -1376,7 +1201,7 @@ describe("sessions.send", () => {
 
     expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
     expect(
-      useChatStore.getState().queuedMessageBySession["session-1"]?.text,
+      useChatStore.getState().queuedMessageBySession["session-1"]?.payload.text,
     ).toBe("after cancellation");
   });
 
@@ -1440,15 +1265,15 @@ describe("sessions.send", () => {
       session_id: "session-1",
       send_status: "queued",
     });
-    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toEqual(
-      {
-        text: "next prompt",
-        sendOptions: {
-          userMessageMetadata: { origin: "berdctl_cross_session" },
-          acpGooseMetadata: { origin: "berdctl_cross_session" },
-        },
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.payload,
+    ).toEqual({
+      text: "next prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" },
+        acpGooseMetadata: { origin: "berdctl_cross_session" },
       },
-    );
+    });
 
     mockSessionFound();
     await expectCommandError(

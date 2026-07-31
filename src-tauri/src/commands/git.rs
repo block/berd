@@ -51,12 +51,16 @@ const GIT_STATE_CHANGED_EVENT: &str = "berd:git-state-changed";
 pub(crate) const GIT_READ_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const GIT_STATUS_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const GIT_MUTATING_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+// Large monorepo worktrees can legitimately spend 5–10 minutes in checkout
+// hooks and generated-file setup; keep other Git mutations on the shorter cap.
+const GIT_WORKTREE_CREATE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const GIT_STATE_OPERATION_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn dir_env_capture_timeout(command_timeout: Duration) -> Duration {
     command_timeout
         .checked_add(command_timeout / 2)
         .unwrap_or(command_timeout)
+        .min(GIT_MUTATING_COMMAND_TIMEOUT)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,6 +351,22 @@ fn delete_branch_switch_args(force: bool, target_branch: &str) -> Vec<&str> {
     switch_args
 }
 
+async fn run_git_worktree_add_success(path: &Path, args: &[&str]) -> Result<String, String> {
+    match timeout(
+        GIT_WORKTREE_CREATE_TIMEOUT,
+        run_git_success_async(path, args, GIT_WORKTREE_CREATE_TIMEOUT),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "git {} timed out after {} seconds",
+            args.join(" "),
+            GIT_WORKTREE_CREATE_TIMEOUT.as_secs()
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn git_create_worktree(
     app: AppHandle,
@@ -375,7 +395,7 @@ pub async fn git_create_worktree(
     if create_branch {
         let base_branch =
             require_nonempty(base_branch.as_deref().unwrap_or_default(), "Base branch")?;
-        run_git_success_async(
+        run_git_worktree_add_success(
             &repo_path,
             &[
                 "worktree",
@@ -385,11 +405,10 @@ pub async fn git_create_worktree(
                 target_path_string.as_str(),
                 base_branch.as_str(),
             ],
-            GIT_MUTATING_COMMAND_TIMEOUT,
         )
         .await?;
     } else {
-        run_git_success_async(
+        run_git_worktree_add_success(
             &repo_path,
             &[
                 "worktree",
@@ -397,7 +416,6 @@ pub async fn git_create_worktree(
                 target_path_string.as_str(),
                 branch_name.as_str(),
             ],
-            GIT_MUTATING_COMMAND_TIMEOUT,
         )
         .await?;
     }
@@ -991,10 +1009,14 @@ mod tests {
     }
 
     #[test]
-    fn dir_env_capture_timeout_is_one_and_a_half_times_command_timeout() {
+    fn dir_env_capture_timeout_is_capped_for_extended_commands() {
         assert_eq!(
             dir_env_capture_timeout(Duration::from_secs(10)),
             Duration::from_secs(15)
+        );
+        assert_eq!(
+            dir_env_capture_timeout(GIT_WORKTREE_CREATE_TIMEOUT),
+            GIT_MUTATING_COMMAND_TIMEOUT
         );
     }
 

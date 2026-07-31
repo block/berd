@@ -36,17 +36,14 @@ import {
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
-import {
-  planProjectChatWorkspacesAsIs,
-  planProjectChatWorkspaces,
-  projectRequiresStartupWorkspaceName,
-  rollbackProjectChatWorkspacePlan,
-} from "@/features/projects/lib/projectChatWorkspaces";
+import { acceptFirstSend } from "@/features/chat/lib/firstWorkspaceSend";
+import { planProjectChatWorkspacesAsIs } from "@/features/projects/lib/projectChatWorkspaces";
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
+import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
 import {
   cleanupSessionWorkspaces,
   countSessionWorkspaceCleanupResources,
@@ -281,17 +278,7 @@ type ProjectChatDraftOptions = {
   modelName?: string;
   reuseExistingDraft?: boolean;
   reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
-  startupWorkspaceName?: string;
-  skipProjectWorkspaceStartup?: boolean;
 };
-
-interface PendingProjectChatDraftRequest {
-  title: string;
-  project: ProjectInfo;
-  options: ProjectChatDraftOptions;
-  resolve: (session: ChatSession) => void;
-  reject: (error: unknown) => void;
-}
 
 interface PendingSessionWorkspaceCleanupConfirmation {
   worktreeCount: number;
@@ -306,10 +293,6 @@ const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const GLOBAL_COMPOSER_HANDOFF_MS = 620;
 const GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS = 220;
-const PROJECT_WORKSPACE_STARTUP_CANCELLED =
-  "Project workspace startup cancelled.";
-const PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING =
-  "Project workspace startup already pending.";
 
 function getSessionArchiveInterruptionReason(
   sessionId: string,
@@ -628,18 +611,7 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.(REDUCED_MOTION_QUERY).matches ?? false;
 }
 
-function isProjectWorkspaceStartupCancelled(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.message === PROJECT_WORKSPACE_STARTUP_CANCELLED ||
-      error.message === PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING)
-  );
-}
-
 function logProjectChatStartError(message: string, error: unknown): void {
-  if (isProjectWorkspaceStartupCancelled(error)) {
-    return;
-  }
   console.error(message, error);
   toast.error(formatAcpErrorMessage(error, "Failed to start project chat."));
 }
@@ -1196,12 +1168,12 @@ export function AppShell({
   const [automationLeavePromptOpen, setAutomationLeavePromptOpen] =
     useState(false);
   const [automationLeaveSaving, setAutomationLeaveSaving] = useState(false);
-  const [pendingProjectChatDraftRequest, setPendingProjectChatDraftRequest] =
-    useState<PendingProjectChatDraftRequest | null>(null);
-  const pendingProjectChatDraftRequestRef =
-    useRef<PendingProjectChatDraftRequest | null>(null);
-  const [projectWorkspaceStartupCreating, setProjectWorkspaceStartupCreating] =
-    useState(false);
+  const {
+    workspaceNameRequest: pendingWorkspaceName,
+    enqueueWorkspaceNameRequest,
+    cancelWorkspaceNameRequest,
+    submitWorkspaceNameRequest,
+  } = useWorkspaceNameRequestQueue();
   const workspaceRepository = useWorkspaceRepository();
 
   const homeSessionMessages = useChatStore((s) =>
@@ -2344,7 +2316,10 @@ export function AppShell({
         allowDraftReuse: options.reuseExistingDraft !== false,
       });
 
-      if (existingDraft) {
+      if (
+        existingDraft &&
+        !chatState.queuedMessageBySession[existingDraft.id]
+      ) {
         if (shouldActivate) {
           resetNavigationSecondary();
           clearSettingsSectionUrl();
@@ -2518,7 +2493,6 @@ export function AppShell({
       project: ProjectInfo,
       options: ProjectChatDraftOptions = {},
     ) => {
-      const tStart = performance.now();
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
@@ -2549,17 +2523,11 @@ export function AppShell({
       }
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
-      const isMultiWorkspaceMode = workspaceRepository.mode === "multi";
-      const shouldCreateExplicitProjectWorkspacePlan =
-        isMultiWorkspaceMode && project.projectWorkspaces.length > 0;
-      const shouldApplyProjectWorkspaceStartup =
-        shouldCreateExplicitProjectWorkspacePlan &&
-        options.skipProjectWorkspaceStartup !== true;
-      const shouldUseProjectWorkspaceStartup =
-        shouldApplyProjectWorkspaceStartup &&
-        projectRequiresStartupWorkspaceName(project);
-      // New chats always start at the project default folder; worktree
-      // selections in other chats are per-chat state and do not carry over.
+      const needsStartup =
+        workspaceRepository.mode === "multi" &&
+        project.projectWorkspaces.some(
+          (workspace) => workspace.startupMode !== "none",
+        );
       const existingDraft = findExistingDraft({
         sessions: sessionState.sessions,
         activeSessionId: sessionState.activeSessionId,
@@ -2573,86 +2541,53 @@ export function AppShell({
           modelId: sessionModelPreference.modelId,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
-        allowDraftReuse:
-          options.reuseExistingDraft !== false &&
-          !shouldUseProjectWorkspaceStartup,
+        allowDraftReuse: options.reuseExistingDraft !== false && !needsStartup,
       });
-
-      if (existingDraft) {
+      if (
+        existingDraft &&
+        !chatState.queuedMessageBySession[existingDraft.id]
+      ) {
         resetNavigationSecondary();
         clearSettingsSectionUrl();
         setActiveSession(existingDraft.id);
         setActiveView("chat");
         setChatActiveSession(existingDraft.id);
-        perfLog(
-          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
-        );
         return existingDraft;
       }
-
-      const startupWorkspaceName = options.startupWorkspaceName?.trim();
-      if (shouldUseProjectWorkspaceStartup && !startupWorkspaceName) {
-        if (pendingProjectChatDraftRequestRef.current) {
-          return Promise.reject(
-            new Error(PROJECT_WORKSPACE_STARTUP_ALREADY_PENDING),
-          );
-        }
-        return new Promise<ChatSession>((resolve, reject) => {
-          const request = {
-            title,
-            project,
-            options,
-            resolve,
-            reject,
-          };
-          pendingProjectChatDraftRequestRef.current = request;
-          setPendingProjectChatDraftRequest(request);
-        });
-      }
-
-      const workspacePlan = shouldCreateExplicitProjectWorkspacePlan
-        ? shouldApplyProjectWorkspaceStartup
-          ? await planProjectChatWorkspaces(project, startupWorkspaceName)
-          : planProjectChatWorkspacesAsIs(project)
-        : null;
-      const optimisticWorkingDir =
-        workspacePlan?.workingDir ?? getOptimisticSessionCwd(project);
-      try {
-        const session = createDraftSession({
-          title,
-          projectId: project.id,
-          providerId: sessionModelPreference.providerId,
-          workingDir: optimisticWorkingDir,
-          modelId: sessionModelPreference.modelId,
-          modelName: sessionModelPreference.modelName,
-          workspaceAttachments: workspacePlan?.workspaceAttachments,
-        });
-        resetNavigationSecondary();
-        clearSettingsSectionUrl();
-        setActiveSession(session.id);
-        setActiveView("chat");
-        setChatActiveSession(session.id);
-        perfLog(
-          `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
-        );
-        startDraftSessionCreation({
-          session,
-          sessionModelPreference,
-          workingDir: workspacePlan?.workingDir ?? resolveSessionCwd(project),
-          projectId: project.id,
-          onReady: applyReasoningEffortAfterDraftCreation(
-            session.id,
-            options.reasoningEffort,
-          ),
-          onCreationFailed: workspacePlan
-            ? () => rollbackProjectChatWorkspacePlan(workspacePlan)
-            : undefined,
-        });
-        return session;
-      } catch (error) {
-        await rollbackProjectChatWorkspacePlan(workspacePlan);
-        throw error;
-      }
+      const asIs =
+        workspaceRepository.mode === "multi"
+          ? planProjectChatWorkspacesAsIs(project)
+          : null;
+      const session = createDraftSession({
+        title,
+        projectId: project.id,
+        providerId: sessionModelPreference.providerId,
+        workingDir: getOptimisticSessionCwd(project),
+        modelId: sessionModelPreference.modelId,
+        modelName: sessionModelPreference.modelName,
+        workspaceAttachments: needsStartup
+          ? asIs?.workspaceAttachments.filter(
+              (_, index) =>
+                project.projectWorkspaces[index]?.startupMode === "none",
+            )
+          : asIs?.workspaceAttachments,
+      });
+      resetNavigationSecondary();
+      clearSettingsSectionUrl();
+      setActiveSession(session.id);
+      setActiveView("chat");
+      setChatActiveSession(session.id);
+      startDraftSessionCreation({
+        session,
+        sessionModelPreference,
+        workingDir: resolveSessionCwd(project),
+        projectId: project.id,
+        onReady: applyReasoningEffortAfterDraftCreation(
+          session.id,
+          options.reasoningEffort,
+        ),
+      });
+      return session;
     },
     [
       selectedProvider,
@@ -2661,8 +2596,8 @@ export function AppShell({
       setChatActiveSession,
       startDraftSessionCreation,
       t,
-      workspaceRepository,
       resetNavigationSecondary,
+      workspaceRepository.mode,
     ],
   );
 
@@ -2723,7 +2658,10 @@ export function AppShell({
         },
       });
 
-      if (existingDraft) {
+      if (
+        existingDraft &&
+        !chatState.queuedMessageBySession[existingDraft.id]
+      ) {
         perfLog(
           `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
         );
@@ -2774,88 +2712,8 @@ export function AppShell({
     [resetNavigationSecondary, setActiveSession, setChatActiveSession],
   );
 
-  const handleProjectWorkspaceStartupNameCancel = useCallback(() => {
-    const request = pendingProjectChatDraftRequest;
-    if (!request || projectWorkspaceStartupCreating) {
-      return;
-    }
-    pendingProjectChatDraftRequestRef.current = null;
-    setPendingProjectChatDraftRequest(null);
-    request.reject(new Error(PROJECT_WORKSPACE_STARTUP_CANCELLED));
-  }, [pendingProjectChatDraftRequest, projectWorkspaceStartupCreating]);
-
-  const handleProjectWorkspaceStartupNameSubmit = useCallback(
-    (startupWorkspaceName: string) => {
-      const request = pendingProjectChatDraftRequest;
-      if (!request || projectWorkspaceStartupCreating) {
-        return;
-      }
-
-      setProjectWorkspaceStartupCreating(true);
-      void createNewProjectDraft(request.title, request.project, {
-        ...request.options,
-        startupWorkspaceName,
-      })
-        .then((session) => {
-          if (session) {
-            request.resolve(session);
-          } else {
-            request.reject(
-              new Error(t("settings:providers.setupRequired.toast")),
-            );
-          }
-        }, request.reject)
-        .finally(() => {
-          setProjectWorkspaceStartupCreating(false);
-          setPendingProjectChatDraftRequest((current) => {
-            const nextRequest = current === request ? null : current;
-            pendingProjectChatDraftRequestRef.current = nextRequest;
-            return nextRequest;
-          });
-        });
-    },
-    [
-      createNewProjectDraft,
-      pendingProjectChatDraftRequest,
-      projectWorkspaceStartupCreating,
-      t,
-    ],
-  );
-
-  const handleProjectWorkspaceStartupNameSkip = useCallback(() => {
-    const request = pendingProjectChatDraftRequest;
-    if (!request || projectWorkspaceStartupCreating) {
-      return;
-    }
-
-    setProjectWorkspaceStartupCreating(true);
-    void createNewProjectDraft(request.title, request.project, {
-      ...request.options,
-      skipProjectWorkspaceStartup: true,
-    })
-      .then((session) => {
-        if (session) {
-          request.resolve(session);
-        } else {
-          request.reject(
-            new Error(t("settings:providers.setupRequired.toast")),
-          );
-        }
-      }, request.reject)
-      .finally(() => {
-        setProjectWorkspaceStartupCreating(false);
-        setPendingProjectChatDraftRequest((current) => {
-          const nextRequest = current === request ? null : current;
-          pendingProjectChatDraftRequestRef.current = nextRequest;
-          return nextRequest;
-        });
-      });
-  }, [
-    createNewProjectDraft,
-    pendingProjectChatDraftRequest,
-    projectWorkspaceStartupCreating,
-    t,
-  ]);
+  const closeWorkspaceName = cancelWorkspaceNameRequest;
+  const submitWorkspaceName = submitWorkspaceNameRequest;
 
   const handleStartChatFromProject = useCallback(
     (project: ProjectInfo) => {
@@ -3165,7 +3023,7 @@ export function AppShell({
         modelName: options?.modelName,
         reasoningEffort: options?.reasoningEffort,
       };
-      const enqueueMessage = async (session: ChatSession) => {
+      const acceptGlobalFirstSend = async (session: ChatSession) => {
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
 
         if (options?.providerId || options?.modelId) {
@@ -3195,12 +3053,18 @@ export function AppShell({
             );
           }
         }
-        useChatStore.getState().enqueueMessage(sessionId, {
-          text,
-          ...(options?.personaId ? { personaId: options.personaId } : {}),
-          attachments: options?.attachments,
-          ...(options?.sendOptions ? { sendOptions: options.sendOptions } : {}),
-        });
+        acceptFirstSend(
+          sessionId,
+          {
+            text,
+            ...(options?.personaId ? { personaId: options.personaId } : {}),
+            attachments: options?.attachments,
+            ...(options?.sendOptions
+              ? { sendOptions: options.sendOptions }
+              : {}),
+          },
+          { queueReady: true, onNeedsName: enqueueWorkspaceNameRequest },
+        );
       };
 
       const startChat = () => {
@@ -3211,7 +3075,7 @@ export function AppShell({
         void createChat
           .then((session) => {
             if (session) {
-              return enqueueMessage(session);
+              return acceptGlobalFirstSend(session);
             }
           })
           .catch((error) => {
@@ -3231,7 +3095,7 @@ export function AppShell({
               return;
             }
             setChatComposerHandoffSessionId(session.id);
-            void enqueueMessage(session);
+            void acceptGlobalFirstSend(session);
             clearGlobalComposerRouteSwapTimer();
             if (prefersReducedMotion()) {
               activateDeferredChatSession(session.id);
@@ -3277,6 +3141,7 @@ export function AppShell({
       guardAppNavigation,
       resetGlobalComposerTransition,
       workspaceRepository,
+      enqueueWorkspaceNameRequest,
     ],
   );
 
@@ -3505,7 +3370,7 @@ export function AppShell({
         void createNewTab(request.title, undefined, { providerId: "goose" })
           .then((session) => {
             if (!session) return;
-            useChatStore.getState().enqueueMessage(session.id, {
+            useChatStore.getState().enqueueTransportReadyMessage(session.id, {
               text: request.prompt,
             });
           })
@@ -5213,6 +5078,7 @@ export function AppShell({
               chatComposerHandoffActive={isGlobalComposerHandoff}
               chatComposerHandoffInProgress={isGlobalComposerHandoff}
               onChatComposerHandoffTarget={handleChatComposerHandoffTarget}
+              onWorkspaceNameRequest={enqueueWorkspaceNameRequest}
               homeViewportLeftOcclusionPx={
                 renderedLocation.view === "home" ? sidebarDockedOuterWidth : 0
               }
@@ -5339,19 +5205,18 @@ export function AppShell({
         onConfirm={() => settleWorkspaceCleanupConfirmation(true)}
       />
       <ProjectWorkspaceStartupNameDialog
-        open={Boolean(pendingProjectChatDraftRequest)}
-        creating={projectWorkspaceStartupCreating}
-        workspaces={
-          pendingProjectChatDraftRequest?.project.projectWorkspaces ?? []
-        }
+        open={Boolean(pendingWorkspaceName)}
+        creating={false}
+        requestIdentity={pendingWorkspaceName ?? undefined}
+        workspaces={pendingWorkspaceName?.workspaces ?? []}
         requiresWorktreeSafeName={Boolean(
-          pendingProjectChatDraftRequest?.project.projectWorkspaces.some(
+          pendingWorkspaceName?.workspaces.some(
             (workspace) => workspace.startupMode === "worktree",
           ),
         )}
-        onCancel={handleProjectWorkspaceStartupNameCancel}
-        onSkip={handleProjectWorkspaceStartupNameSkip}
-        onSubmit={handleProjectWorkspaceStartupNameSubmit}
+        onCancel={closeWorkspaceName}
+        onSkip={() => submitWorkspaceName(null)}
+        onSubmit={submitWorkspaceName}
       />
       <Dialog open={searchDialogOpen} onOpenChange={setSearchDialogOpen}>
         <DialogContent

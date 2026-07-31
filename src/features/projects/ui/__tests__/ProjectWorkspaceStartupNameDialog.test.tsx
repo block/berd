@@ -22,6 +22,38 @@ function projectWorkspace(
 }
 
 describe("ProjectWorkspaceStartupNameDialog", () => {
+  it("clears input when an open dialog advances to another request", async () => {
+    const user = userEvent.setup();
+    const firstRequest = {};
+    const secondRequest = {};
+    const props = {
+      open: true,
+      requestIdentity: firstRequest,
+      workspaces: [projectWorkspace("/repo/builderbot")],
+      onCancel: vi.fn(),
+      onSkip: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+    const { rerender } = render(
+      <ProjectWorkspaceStartupNameDialog {...props} />,
+    );
+
+    const input = screen.getByRole("textbox", {
+      name: "Worktree/branch name",
+    });
+    await user.type(input, "first-name");
+    expect(input).toHaveValue("first-name");
+
+    rerender(
+      <ProjectWorkspaceStartupNameDialog
+        {...props}
+        requestIdentity={secondRequest}
+      />,
+    );
+
+    expect(input).toHaveValue("");
+  });
+
   it.each([
     "feature/foo",
     "feature\\foo",

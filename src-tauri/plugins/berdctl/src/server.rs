@@ -28,7 +28,7 @@ pub const IN_FLIGHT_LIMIT: usize = 4;
 
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
-const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(150);
+const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// Resolve the bridge timeout for a call: a request `timeout_ms` wins
 /// (clamped to [`MIN_REQUEST_TIMEOUT`]..=[`MAX_COMMAND_TIMEOUT`]); otherwise
@@ -95,8 +95,16 @@ impl TimeoutStore {
         self.timeouts.read().unwrap().get(command).copied()
     }
 
-    pub fn command_timeout(&self, command: &str, request_timeout_ms: Option<u64>) -> Duration {
-        command_timeout(request_timeout_ms, self.timeout_for(command))
+    pub fn command_timeout(
+        &self,
+        command: &str,
+        action: Option<&str>,
+        request_timeout_ms: Option<u64>,
+    ) -> Duration {
+        let configured = action
+            .and_then(|action| self.timeout_for(&format!("{command}.{action}")))
+            .or_else(|| self.timeout_for(command));
+        command_timeout(request_timeout_ms, configured)
     }
 }
 
@@ -266,7 +274,10 @@ async fn handle_call<D: CommandDispatcher>(
         );
     };
 
-    let timeout = command_timeout(call.timeout_ms, ctx.timeouts.timeout_for(&command));
+    let action = call.args.get("action").and_then(Value::as_str);
+    let timeout = ctx
+        .timeouts
+        .command_timeout(&command, action, call.timeout_ms);
     let request = BridgeRequest {
         id: uuid::Uuid::new_v4().to_string(),
         command: command.clone(),
@@ -719,7 +730,7 @@ mod tests {
         )
         .await;
 
-        // Request override wins over the store and is clamped to 1s..150s.
+        // Request override wins over the store and is clamped to 1s..900s.
         assert_resolved_timeout(
             &server,
             &json!({ "command": "sessions", "args": { "action": "list" }, "timeout_ms": 500 }),
@@ -729,7 +740,7 @@ mod tests {
         assert_resolved_timeout(
             &server,
             &json!({ "command": "sessions", "args": { "action": "list" }, "timeout_ms": 999_000 }),
-            150_000,
+            900_000,
         )
         .await;
     }
@@ -743,10 +754,10 @@ mod tests {
         );
         // Override clamped at both ends.
         assert_eq!(command_timeout(Some(10), None), MIN_REQUEST_TIMEOUT);
-        assert_eq!(command_timeout(Some(600_000), None), MAX_COMMAND_TIMEOUT);
+        assert_eq!(command_timeout(Some(999_000), None), MAX_COMMAND_TIMEOUT);
         // Configured value clamped to the ceiling.
         assert_eq!(
-            command_timeout(None, Some(Duration::from_secs(600))),
+            command_timeout(None, Some(Duration::from_secs(999))),
             MAX_COMMAND_TIMEOUT
         );
         // Neither: default.
@@ -758,11 +769,16 @@ mod tests {
         let store = TimeoutStore::new();
         store.set(HashMap::from([
             ("sessions".to_string(), 60_000),
+            ("sessions.create".to_string(), 900_000),
             ("projects".to_string(), 999_000),
         ]));
         assert_eq!(
-            store.timeout_for("sessions"),
-            Some(Duration::from_millis(60_000))
+            store.command_timeout("sessions", Some("create"), None),
+            Duration::from_millis(900_000)
+        );
+        assert_eq!(
+            store.command_timeout("sessions", Some("list"), None),
+            Duration::from_millis(60_000)
         );
         assert_eq!(store.timeout_for("projects"), Some(MAX_COMMAND_TIMEOUT));
         assert_eq!(store.timeout_for("missing"), None);

@@ -100,10 +100,10 @@ pub fn build_cli(contract: &Contract) -> Command {
                 .long("timeout-ms")
                 .global(true)
                 .value_name("MS")
-                .value_parser(clap::value_parser!(u64).range(1000..=150_000))
+                .value_parser(clap::value_parser!(u64).range(1000..=900_000))
                 .display_order(901)
                 .help(
-                    "Give the app this long (in ms, 1000-150000) to run the command \
+                    "Give the app this long (in ms, 1000-900000) to run the command \
                      before it reports timed out; defaults to the app's per-command timeout",
                 ),
         );

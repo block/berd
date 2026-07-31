@@ -338,12 +338,26 @@ function findLatestInterventionMessageId(messages: Message[]): string | null {
   return null;
 }
 
-export interface QueuedMessage {
+export interface QueuedMessagePayload {
   text: string;
   personaId?: string;
   attachments?: ChatAttachmentDraft[];
   sendOptions?: ChatSendOptions;
 }
+
+export type QueuedMessageRecord =
+  | {
+      kind: "transport-ready";
+      recordId: string;
+      payload: QueuedMessagePayload;
+      releasedFromDeferred?: boolean;
+    }
+  | {
+      kind: "deferred";
+      recordId: string;
+      payload: QueuedMessagePayload;
+      state: unknown;
+    };
 
 export interface ScrollTargetMessage {
   messageId: string;
@@ -369,7 +383,7 @@ export type StreamingMessageUpdateMode = "active-stream" | "settled-stream";
 interface ChatStoreState {
   messagesBySession: Record<string, Message[]>;
   sessionStateById: Record<string, SessionChatRuntime>;
-  queuedMessageBySession: Record<string, QueuedMessage>;
+  queuedMessageBySession: Record<string, QueuedMessageRecord>;
   draftsBySession: Record<string, string>;
   nonEmptyDraftSessionIds: Set<string>;
   skillDraftsBySession: Record<string, ChatSkillDraft[]>;
@@ -442,8 +456,31 @@ interface ChatStoreActions {
     hasUsageSnapshot?: boolean,
   ) => void;
   resetTokenState: (sessionId: string) => void;
-  enqueueMessage: (sessionId: string, message: QueuedMessage) => void;
-  dismissQueuedMessage: (sessionId: string) => void;
+  enqueueDeferredMessage: (
+    sessionId: string,
+    payload: QueuedMessagePayload,
+    state: unknown,
+  ) => QueuedMessageRecord | null;
+  updateDeferredMessage: (
+    sessionId: string,
+    recordId: string,
+    state: unknown,
+  ) => boolean;
+  deferTransportReadyMessage: (
+    sessionId: string,
+    recordId: string,
+    state: unknown,
+  ) => boolean;
+  releaseDeferredMessage: (sessionId: string, recordId: string) => boolean;
+  enqueueTransportReadyMessage: (
+    sessionId: string,
+    payload: QueuedMessagePayload,
+  ) => boolean;
+  dismissQueuedMessage: (sessionId: string, expectedRecordId?: string) => void;
+  moveQueuedMessage: (
+    sourceSessionId: string,
+    destinationSessionId: string,
+  ) => boolean;
   setDraft: (sessionId: string, text: string) => void;
   clearDraft: (sessionId: string) => void;
   setSkillDrafts: (sessionId: string, skills: ChatSkillDraft[]) => void;
@@ -1338,19 +1375,105 @@ const createChatStore: StateCreator<
     })),
 
   // Message queue
-  enqueueMessage: (sessionId, message) =>
+  enqueueDeferredMessage: (sessionId, payload, deferredState) => {
+    if (get().queuedMessageBySession[sessionId]) return null;
+    const record: QueuedMessageRecord = {
+      kind: "deferred",
+      recordId: crypto.randomUUID(),
+      payload,
+      state: deferredState,
+    };
     set((state) => ({
       queuedMessageBySession: {
         ...state.queuedMessageBySession,
-        [sessionId]: message,
+        [sessionId]: record,
       },
-    })),
+    }));
+    return record;
+  },
 
-  dismissQueuedMessage: (sessionId) =>
+  updateDeferredMessage: (sessionId, recordId, deferredState) => {
+    const record = get().queuedMessageBySession[sessionId];
+    if (record?.kind !== "deferred" || record.recordId !== recordId)
+      return false;
+    set((state) => ({
+      queuedMessageBySession: {
+        ...state.queuedMessageBySession,
+        [sessionId]: { ...record, state: deferredState },
+      },
+    }));
+    return true;
+  },
+
+  deferTransportReadyMessage: (sessionId, recordId, deferredState) => {
+    const record = get().queuedMessageBySession[sessionId];
+    if (record?.kind !== "transport-ready" || record.recordId !== recordId)
+      return false;
+    set((state) => ({
+      queuedMessageBySession: {
+        ...state.queuedMessageBySession,
+        [sessionId]: { ...record, kind: "deferred", state: deferredState },
+      },
+    }));
+    return true;
+  },
+
+  releaseDeferredMessage: (sessionId, recordId) => {
+    const record = get().queuedMessageBySession[sessionId];
+    if (record?.kind !== "deferred" || record.recordId !== recordId)
+      return false;
+    set((state) => ({
+      queuedMessageBySession: {
+        ...state.queuedMessageBySession,
+        [sessionId]: {
+          kind: "transport-ready",
+          recordId,
+          payload: record.payload,
+          releasedFromDeferred: true,
+        },
+      },
+    }));
+    return true;
+  },
+
+  enqueueTransportReadyMessage: (sessionId, payload) => {
+    if (get().queuedMessageBySession[sessionId]) return false;
+    const record: QueuedMessageRecord = {
+      kind: "transport-ready",
+      recordId: crypto.randomUUID(),
+      payload,
+    };
+    set((state) => ({
+      queuedMessageBySession: {
+        ...state.queuedMessageBySession,
+        [sessionId]: record,
+      },
+    }));
+    return true;
+  },
+
+  dismissQueuedMessage: (sessionId, expectedRecordId) =>
     set((state) => {
+      const current = state.queuedMessageBySession[sessionId];
+      if (expectedRecordId && current?.recordId !== expectedRecordId)
+        return state;
       const { [sessionId]: _, ...rest } = state.queuedMessageBySession;
       return { queuedMessageBySession: rest };
     }),
+
+  moveQueuedMessage: (sourceSessionId, destinationSessionId) => {
+    const state = get();
+    const record = state.queuedMessageBySession[sourceSessionId];
+    if (!record || state.queuedMessageBySession[destinationSessionId])
+      return false;
+    set(({ queuedMessageBySession }) => {
+      const { [sourceSessionId]: _, ...rest } = queuedMessageBySession;
+      return {
+        queuedMessageBySession: { ...rest, [destinationSessionId]: record },
+      };
+    });
+    return true;
+  },
 
   // Drafts
   setDraft: (sessionId, text) => {

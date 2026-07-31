@@ -31,7 +31,11 @@ import {
   type SessionWindowEntry,
   type SessionWindowHandoff,
 } from "@/features/chat/stores/sessionWindowStore";
+import { useBerdctlQueuedMessageDrain } from "@/features/berdctl/bridge/useBerdctlQueuedMessageDrain";
 import { ChatView } from "@/features/chat/ui/ChatView";
+import { ReleasedQueuedMessageDrain } from "@/features/chat/ui/ReleasedQueuedMessageDrain";
+import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
+import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { Button } from "@/shared/ui/button";
 
@@ -125,12 +129,19 @@ export function SessionWindowApp({
   currentWindowLabel: currentWindowLabelOverride,
 }: SessionWindowAppProps) {
   const { t } = useTranslation("chat");
+  useBerdctlQueuedMessageDrain();
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<ChatSession | null>(null);
   const [currentWindowLabel, setCurrentWindowLabel] = useState<string | null>(
     currentWindowLabelOverride ?? null,
   );
   const [initialMirrorVersion, setInitialMirrorVersion] = useState(0);
+  const {
+    workspaceNameRequest: workspaceName,
+    enqueueWorkspaceNameRequest,
+    cancelWorkspaceNameRequest,
+    submitWorkspaceNameRequest,
+  } = useWorkspaceNameRequestQueue();
   const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
   const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
 
@@ -380,6 +391,7 @@ export function SessionWindowApp({
                   ? t("sessionWindow.readOnlyStatus")
                   : undefined
               }
+              onWorkspaceNameRequest={enqueueWorkspaceNameRequest}
             />
           </div>
         ) : null}
@@ -389,7 +401,22 @@ export function SessionWindowApp({
 
   return (
     <>
+      <ReleasedQueuedMessageDrain />
       {content}
+      <ProjectWorkspaceStartupNameDialog
+        open={Boolean(workspaceName)}
+        creating={false}
+        requestIdentity={workspaceName ?? undefined}
+        workspaces={workspaceName?.workspaces ?? []}
+        requiresWorktreeSafeName={Boolean(
+          workspaceName?.workspaces.some(
+            (workspace) => workspace.startupMode === "worktree",
+          ),
+        )}
+        onCancel={cancelWorkspaceNameRequest}
+        onSkip={() => submitWorkspaceNameRequest(null)}
+        onSubmit={submitWorkspaceNameRequest}
+      />
       {securityMlEnabled ? <SecurityConfirmationModal /> : null}
     </>
   );

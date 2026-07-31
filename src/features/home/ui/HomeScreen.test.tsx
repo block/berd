@@ -12,6 +12,10 @@ const mockController = {
   handleSend: vi.fn(),
   projectMetadataPending: false,
   queue: { queuedMessage: null, dismiss: vi.fn() },
+  deferredWorkspaceRecord: null as {
+    payload: { text: string };
+    state: { status: "naming" | "creating" };
+  } | null,
   stopStreaming: vi.fn(),
   chatState: "idle" as const,
   personas: [
@@ -203,6 +207,8 @@ describe("HomeScreen", () => {
     setSelectedProvider.mockReset();
     setSelectedProviderWithoutPersist.mockReset();
     mockController.handleSend.mockReset();
+    mockController.queue.dismiss.mockReset();
+    mockController.deferredWorkspaceRecord = null;
     mockOpenDialog.mockReset();
     mockOpenDialog.mockResolvedValue(null);
     mockInspectAttachmentPaths.mockReset();
@@ -212,6 +218,36 @@ describe("HomeScreen", () => {
       base64: "home-image",
       mimeType: "image/png",
     });
+  });
+
+  it("hides a deferred message while its naming dialog owns it", () => {
+    mockController.deferredWorkspaceRecord = {
+      payload: { text: "name this workspace" },
+      state: { status: "naming" },
+    };
+
+    renderHome();
+
+    expect(screen.queryByText(/name this workspace/)).not.toBeInTheDocument();
+  });
+
+  it("does not allow editing a deferred message while creating workspaces", () => {
+    mockController.deferredWorkspaceRecord = {
+      payload: { text: "create this workspace" },
+      state: { status: "creating" },
+    };
+
+    renderHome();
+
+    expect(
+      screen.getByText("Creating project workspaces…"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss queued message" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the clock", () => {

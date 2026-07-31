@@ -27,6 +27,8 @@ interface ProjectWorkspaceStartupNameDialogProps {
   creating?: boolean;
   requiresWorktreeSafeName?: boolean;
   workspaces?: ProjectWorkspace[];
+  /** Changes when an already-open dialog advances to a different naming request. */
+  requestIdentity?: object;
   onCancel: () => void;
   onSkip: () => void;
   onSubmit: (name: string) => void;
@@ -64,6 +66,7 @@ export function ProjectWorkspaceStartupNameDialog({
   creating = false,
   requiresWorktreeSafeName = false,
   workspaces = [],
+  requestIdentity,
   onCancel,
   onSkip,
   onSubmit,
@@ -78,11 +81,12 @@ export function ProjectWorkspaceStartupNameDialog({
       : null;
 
   useEffect(() => {
+    void requestIdentity;
     if (open) {
       setName("");
       setShowSkipPreview(false);
     }
-  }, [open]);
+  }, [open, requestIdentity]);
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onCancel()}>

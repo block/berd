@@ -90,22 +90,15 @@ function reconcile(): Promise<void> {
   return reconcilePromise;
 }
 
-/**
- * Per-group bridge timeout map pushed to the broker at start: the max of each
- * group's action timeouts, keyed by the wire command (group) name. This is
- * the broker's only per-command timeout source; it clamps each value to its
- * own MAX_COMMAND_TIMEOUT and falls back to its default for unknown commands.
- */
-function groupTimeoutsMs(): Record<string, number> {
+/** Per-action bridge timeout map keyed by `<group>.<action>`. */
+function actionTimeoutsMs(): Record<string, number> {
   return Object.fromEntries(
-    Object.entries(TOOL_GROUPS).map(([group, { actions }]) => [
-      group,
-      Math.max(
-        ...Object.values(actions).map((command) =>
-          commandBridgeTimeoutMs(command),
-        ),
-      ),
-    ]),
+    Object.entries(TOOL_GROUPS).flatMap(([group, { actions }]) =>
+      Object.entries(actions).map(([action, command]) => [
+        `${group}.${action}`,
+        commandBridgeTimeoutMs(command),
+      ]),
+    ),
   );
 }
 
@@ -117,7 +110,7 @@ async function doStart(): Promise<void> {
   try {
     await startBerdctlServer();
     started = true;
-    await setBerdctlTimeouts(groupTimeoutsMs());
+    await setBerdctlTimeouts(actionTimeoutsMs());
     state.running = true;
   } catch (error) {
     if (started) {

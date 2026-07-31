@@ -15,9 +15,9 @@ pub const EXIT_TRANSPORT: u8 = 2;
 pub const EXIT_ENV: u8 = 3;
 
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
-/// Above the broker's 150s command-timeout ceiling, so the broker's
+/// Above the broker's 900s command-timeout ceiling, so the broker's
 /// structured 504 always arrives before this client-side timeout fires.
-const CALL_TIMEOUT: Duration = Duration::from_secs(160);
+const CALL_TIMEOUT: Duration = Duration::from_secs(910);
 
 const APP_UPDATED: &str = "app updated — restart Berd";
 const CONTROL_REMEDIATION: &str = "confirm Berd is running, app control is enabled, and this command is running inside a Berd-started agent session.";

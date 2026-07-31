@@ -200,6 +200,7 @@ export function ChatInput({
   skillProviderId,
   attachmentsEnabled = true,
   className,
+  queuedMessageAccessory,
   personaPicker,
   agentModelPicker,
   reasoningEffort,
@@ -209,6 +210,7 @@ export function ChatInput({
   onRecallLastUserMessage,
   attachmentDropTargetRef,
   onAttachmentDragOverChange,
+  innerBareSurface = false,
   surface = "pill",
 }: ChatInputProps) {
   const voiceDictationBindings = useShortcutBindings(
@@ -232,6 +234,8 @@ export function ChatInput({
     sendDisabled = false,
     sendDisabledReason,
     queuedMessage = null,
+    queuedMessageStatus,
+    onSendQueue,
     onDismissQueue,
   } = composerActions;
   const {
@@ -1417,6 +1421,57 @@ export function ChatInput({
               : "mx-auto max-w-[var(--chat-composer-max-width)]",
           )}
         >
+          {queuedMessage && (
+            <div className="mb-2 flex items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 py-1.5 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]">
+              <span className="flex-1 truncate text-xs opacity-75">
+                {queuedMessageStatus ??
+                  t("queue.label", { text: queuedMessage.text })}
+              </span>
+              {isStreaming && canSteerQueuedMessage ? (
+                <button
+                  type="button"
+                  onClick={handleSteerQueuedMessage}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
+                  aria-label={t("toolbar.steer")}
+                  title={t("toolbar.steerQueued")}
+                >
+                  <IconCornerDownLeft className="size-3" aria-hidden="true" />
+                  {t("toolbar.steer")}
+                </button>
+              ) : null}
+              {onSendQueue ? (
+                <button
+                  type="button"
+                  onClick={() => void onSendQueue()}
+                  className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium opacity-75 hover:opacity-100"
+                >
+                  {t("queue.sendAnyway")}
+                </button>
+              ) : null}
+              {onDismissQueue ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleEditQueuedMessage}
+                    className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                    aria-label={t("queue.edit")}
+                    title={t("queue.edit")}
+                  >
+                    <Pencil className="size-3.5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDismissQueue}
+                    className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                    aria-label={t("queue.dismiss")}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </>
+              ) : null}
+            </div>
+          )}
+
           <Popover open={mentionOpen}>
             {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for file attachments */}
             <div
@@ -1424,7 +1479,13 @@ export function ChatInput({
               className={cn(
                 "relative transition-colors",
                 "chat-composer-shell",
-                surface === "bare" ? "px-4 pb-2.5 pt-3" : "px-5 pb-3 pt-4",
+                surface === "bare"
+                  ? cn(
+                      "px-4 pb-2.5 pt-3",
+                      innerBareSurface &&
+                        "bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]",
+                    )
+                  : "px-5 pb-3 pt-4",
                 composerRadius,
                 surface === "pill" && "bg-surface-composer backdrop-blur-md",
                 isAttachmentDragOver &&
@@ -1485,46 +1546,18 @@ export function ChatInput({
                 onRemoveSkill={handleRemoveSkill}
               />
 
-              {queuedMessage && (
-                <div className="mb-2 flex items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 py-1.5 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]">
-                  <span className="flex-1 truncate text-xs opacity-75">
-                    {t("queue.label", { text: queuedMessage.text })}
-                  </span>
-                  {isStreaming && canSteerQueuedMessage ? (
-                    <button
-                      type="button"
-                      onClick={handleSteerQueuedMessage}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
-                      aria-label={t("toolbar.steer")}
-                      title={t("toolbar.steerQueued")}
-                    >
-                      <IconCornerDownLeft
-                        className="size-3"
-                        aria-hidden="true"
-                      />
-                      {t("toolbar.steer")}
-                    </button>
-                  ) : null}
-                  {onDismissQueue ? (
-                    <button
-                      type="button"
-                      onClick={handleEditQueuedMessage}
-                      className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
-                      aria-label={t("queue.edit")}
-                      title={t("queue.edit")}
-                    >
-                      <Pencil className="size-3.5" aria-hidden="true" />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={onDismissQueue}
-                    className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
-                    aria-label={t("queue.dismiss")}
-                  >
-                    <X className="size-3.5" />
-                  </button>
+              {queuedMessage && queuedMessageAccessory ? (
+                <div
+                  data-slot="queued-message-accessory"
+                  className={cn(
+                    "mb-3 overflow-hidden rounded-t-sm bg-surface-composer-action",
+                    surface === "bare" ? "-mx-4" : "-mx-5",
+                  )}
+                >
+                  {queuedMessageAccessory}
                 </div>
+              ) : (
+                queuedMessageAccessory
               )}
 
               <div

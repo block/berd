@@ -18,6 +18,13 @@ const sendSessionSchema = z
       .min(1)
       .max(50_000)
       .describe("The message to send in the existing session (1-50000 chars)."),
+    startup_name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe("Branch/worktree name when this is the first send."),
     if_running: z
       .enum(["refuse", "steer", "queue"])
       .default("refuse")
@@ -58,18 +65,34 @@ Result:
   bridgeTimeoutMs: 60_000,
   execute: async (args): Promise<SendSessionResult> => {
     const [
+      { acceptFirstSend },
       { loadSessionForBerdctl, requireSession },
+      { findProjectOrThrow },
       {
         berdctlCrossSessionSendOptions,
         sendPromptToExistingSessionInBackground,
       },
     ] = await Promise.all([
+      import("@/features/chat/lib/firstWorkspaceSend"),
       import("../runtime/sessions"),
+      import("../runtime/projects"),
       import("../runtime/sessionSend"),
     ]);
 
     await loadSessionForBerdctl(args.session_id);
     const session = requireSession(args.session_id);
+    if (
+      args.startup_name &&
+      (session.messageCount > 0 ||
+        (useChatStore.getState().messagesBySession[args.session_id] ?? []).some(
+          (message) => message.role !== "system",
+        ))
+    ) {
+      throw new CommandError(
+        "invalid_args",
+        "--startup-name applies only while preparing a session's first send.",
+      );
+    }
 
     if (useSessionWindowStore.getState().isOpenInWindow(args.session_id)) {
       throw new CommandError(
@@ -114,7 +137,7 @@ Result:
               `Session "${args.session_id}" already has a queued message; wait for it to send or ask the user to dismiss it.`,
             );
           }
-          chatStore.enqueueMessage(args.session_id, {
+          chatStore.enqueueTransportReadyMessage(args.session_id, {
             text: args.prompt,
             sendOptions: berdctlCrossSessionSendOptions(),
           });
@@ -125,6 +148,45 @@ Result:
             `Unhandled if_running mode: ${String(args.if_running satisfies never)}`,
           );
       }
+    }
+
+    const project = session.projectId
+      ? await findProjectOrThrow(session.projectId)
+      : null;
+    const firstSend = acceptFirstSend(
+      args.session_id,
+      {
+        text: args.prompt,
+        sendOptions: berdctlCrossSessionSendOptions(),
+      },
+      { startupName: args.startup_name, project },
+    );
+    if (firstSend.needsName) {
+      throw new CommandError(
+        "workspace_name_required",
+        "This session needs a workspace startup name before its first send.",
+      );
+    }
+    if (firstSend.accepted) {
+      return { session_id: session.id, send_status: "queued" };
+    }
+    if (firstSend.occupied) {
+      throw new CommandError(
+        "queue_full",
+        `Session "${args.session_id}" already has a queued message; wait for it to send or ask the user to dismiss it.`,
+      );
+    }
+    if (args.startup_name) {
+      throw new CommandError(
+        "invalid_args",
+        "--startup-name applies only while preparing a session's first send.",
+      );
+    }
+    if (useChatStore.getState().queuedMessageBySession[args.session_id]) {
+      throw new CommandError(
+        "queue_full",
+        `Session "${args.session_id}" already has a queued message; wait for it to send or ask the user to dismiss it.`,
+      );
     }
 
     try {

@@ -48,6 +48,20 @@ describe("berdctl command schema bounds", () => {
       }).success,
     ).toBe(false);
     expect(
+      sendSessionSchema.safeParse({
+        session_id: "s1",
+        prompt: "hi",
+        startup_name: "   ",
+      }).success,
+    ).toBe(false);
+    expect(
+      sendSessionSchema.parse({
+        session_id: "s1",
+        prompt: "hi",
+        startup_name: " feature ",
+      }).startup_name,
+    ).toBe("feature");
+    expect(
       sendSessionSchema.parse({ session_id: "s1", prompt: "hi" }).if_running,
     ).toBe("refuse");
     expect(

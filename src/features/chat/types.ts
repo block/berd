@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { Persona } from "@/shared/types/agents";
@@ -95,6 +95,8 @@ export interface ChatInputComposerActions {
     attachments?: ChatAttachmentDraft[];
     sendOptions?: ChatSendOptions;
   } | null;
+  queuedMessageStatus?: string;
+  onSendQueue?: () => boolean | Promise<boolean>;
   onDismissQueue?: () => void;
   voiceConversation?: ChatInputVoiceConversation;
 }
@@ -179,6 +181,8 @@ export interface ChatInputProps {
   skillProviderId?: string | null;
   attachmentsEnabled?: boolean;
   className?: string;
+  /** Renders after the queued-message pill and before the composer controls. */
+  queuedMessageAccessory?: ReactNode;
   personaPicker?: ChatInputPersonaPicker;
   agentModelPicker?: ChatInputAgentModelPicker;
   reasoningEffort?: ChatInputReasoningEffort;
@@ -191,6 +195,8 @@ export interface ChatInputProps {
   attachmentDropTargetRef?: RefObject<HTMLDivElement | null>;
   /** Mirrors attachment drag-over state when the drop target is rendered outside the composer. */
   onAttachmentDragOverChange?: (isDragOver: boolean) => void;
+  /** Applies the docked chat surface to the inner shell, leaving queue chrome outside. */
+  innerBareSurface?: boolean;
   /**
    * Visual surface for the composer.
    * - "pill" (default): translucent glass pill — used by the Home composer.

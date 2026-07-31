@@ -11,6 +11,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
+import { WorkspaceSetupChoice } from "./WorkspaceSetupChoice";
+import { summarizeProjectWorkspaceStartup } from "@/features/projects/lib/projectChatWorkspaces";
 import { ChatInput } from "./ChatInput";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
@@ -29,7 +31,10 @@ import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
-import { useChatSessionController } from "../hooks/useChatSessionController";
+import {
+  useChatSessionController,
+  type WorkspaceNameRequest,
+} from "../hooks/useChatSessionController";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import {
   useChatSessionStore,
@@ -61,8 +66,6 @@ import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketV
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { consumePendingVoiceStart } from "@/features/voice-conversation/lib/pendingVoiceStart";
 
-const CHAT_COMPOSER_SHELL_CLASS =
-  "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
 const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] [--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]";
 const CLOSED_RIGHT_RAIL_DOCK_TARGET_WIDTH_PX = 48;
@@ -91,6 +94,7 @@ interface ChatViewProps {
   composerHandoffActive?: boolean;
   composerHandoffInProgress?: boolean;
   onComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
 }
 
 export function ChatView({
@@ -109,6 +113,7 @@ export function ChatView({
   composerHandoffActive = false,
   composerHandoffInProgress = false,
   onComposerHandoffTarget,
+  onWorkspaceNameRequest,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
@@ -131,6 +136,7 @@ export function ChatView({
     sessionId,
     readOnly: Boolean(readOnlyStatus),
     onCreatePersonaRequested: onCreatePersona,
+    onWorkspaceNameRequest,
   });
   const activeSessionClientSessionId = activeSession?.clientSessionId ?? null;
 
@@ -591,18 +597,42 @@ export function ChatView({
     return null;
   }, [controller.messages]);
 
+  const deferredWorkspaceStartup = summarizeProjectWorkspaceStartup(
+    controller.deferredWorkspaceRecord?.state.desired ?? [],
+  );
+
   const composerFooter = (
     <div className="px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-inline)]">
       <div
         ref={composerShellRef}
         className={cn(
           "pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)]",
-          CHAT_COMPOSER_SHELL_CLASS,
           composerHandoffActive && "invisible pointer-events-none",
         )}
       >
         <ChatInput
           surface="bare"
+          innerBareSurface
+          queuedMessageAccessory={
+            !isReadOnly &&
+            deferredWorkspaceStartup.worktreeCount > 0 &&
+            (controller.deferredWorkspaceRecord?.state.status === "choice" ||
+              controller.deferredWorkspaceRecord?.state.status === "naming" ||
+              controller.deferredWorkspaceRecord?.state.status ===
+                "creating") ? (
+              <WorkspaceSetupChoice
+                state={controller.deferredWorkspaceRecord.state.status}
+                worktreeCount={deferredWorkspaceStartup.worktreeCount}
+                branchCount={deferredWorkspaceStartup.branchCount}
+                exactCounts={deferredWorkspaceStartup.exact}
+                workspaces={controller.deferredWorkspaceRecord.state.desired}
+                onCancelName={controller.cancelDeferredWorkspaceName}
+                onCreate={controller.createDeferredWorkspace}
+                onSubmitName={controller.submitDeferredWorkspaceName}
+                onSkip={controller.skipDeferredWorkspace}
+              />
+            ) : null
+          }
           placeholder={
             isAgentBuilderSession ? agentBuilderComposerPlaceholder : undefined
           }
@@ -627,10 +657,31 @@ export function ChatView({
             sendDisabledReason,
             queuedMessage: composerHandoffInProgress
               ? null
-              : controller.queue.queuedMessage,
-            onDismissQueue: composerHandoffInProgress
-              ? undefined
-              : controller.queue.dismiss,
+              : (controller.queue.queuedMessage ??
+                controller.deferredWorkspaceRecord?.payload ??
+                null),
+            queuedMessageStatus:
+              controller.deferredWorkspaceRecord?.state.status === "failed" ||
+              controller.deferredWorkspaceRecord?.state.status === "held"
+                ? t("queue.workspaceFailed")
+                : controller.deferredWorkspaceRecord?.state.status ===
+                      "creating" && deferredWorkspaceStartup.worktreeCount === 0
+                  ? t("queue.workspaceCreating")
+                  : undefined,
+            onSendQueue:
+              !isReadOnly &&
+              (controller.deferredWorkspaceRecord?.state.status === "failed" ||
+                controller.deferredWorkspaceRecord?.state.status === "held") &&
+              effectiveSession?.creationState !== "failed"
+                ? controller.sendDeferredAnyway
+                : undefined,
+            onDismissQueue:
+              composerHandoffInProgress ||
+              isReadOnly ||
+              controller.deferredWorkspaceRecord?.state.status === "creating" ||
+              controller.deferredWorkspaceRecord?.state.status === "naming"
+                ? undefined
+                : controller.queue.dismiss,
             onStop: isReadOnly ? undefined : controller.stopStreaming,
             isStreaming:
               !isReadOnly &&

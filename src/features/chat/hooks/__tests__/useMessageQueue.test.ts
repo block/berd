@@ -24,8 +24,9 @@ describe("useMessageQueue", () => {
     expect(result.current.queuedMessage).toBeNull();
   });
 
-  it("enqueue stores a message in the Zustand store", () => {
+  it("enqueue stores a message in the Zustand store while the runtime is busy", () => {
     const sendMessage = vi.fn();
+    useChatStore.getState().setChatState("s1", "streaming");
     const { result } = renderHook(() =>
       useMessageQueue("s1", "streaming", sendMessage),
     );
@@ -33,15 +34,89 @@ describe("useMessageQueue", () => {
     act(() => result.current.enqueue("follow up"));
 
     expect(result.current.queuedMessage).toEqual({ text: "follow up" });
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "follow up",
     });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not drain a newly enqueued transport-ready message from the store subscription while rendered readiness is blocked", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    renderHook(() => useMessageQueue("s1", "thinking", sendMessage));
+
+    act(() => {
+      useChatStore
+        .getState()
+        .enqueueTransportReadyMessage("s1", { text: "not ready yet" });
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
+      text: "not ready yet",
+    });
+  });
+
+  it("leaves a released deferred record for the app-level background drain", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    const record = useChatStore.getState().enqueueDeferredMessage(
+      "s1",
+      { text: "prepared first message" },
+      {
+        type: "workspace-first-send",
+        status: "creating",
+        projectId: "project-1",
+        desired: [],
+      },
+    );
+    expect(record).not.toBeNull();
+
+    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore
+        .getState()
+        .releaseDeferredMessage("s1", record?.recordId ?? "missing");
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession.s1).toMatchObject({
+      kind: "transport-ready",
+      recordId: record?.recordId,
+      releasedFromDeferred: true,
+    });
+  });
+
+  it("does not expose or drain deferred records", () => {
+    const sendMessage = vi.fn();
+    useChatStore.setState({
+      queuedMessageBySession: {
+        s1: {
+          kind: "deferred",
+          recordId: "deferred-1",
+          payload: { text: "held" },
+          state: { phase: "failed" },
+        },
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useMessageQueue("s1", "idle", sendMessage),
+    );
+
+    expect(result.current.queuedMessage).toBeNull();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession.s1?.recordId).toBe(
+      "deferred-1",
+    );
   });
 
   it("auto-sends queued message when chatState transitions to idle", () => {
     const sendMessage = vi.fn();
     // Start streaming with a queued message
-    useChatStore.getState().enqueueMessage("s1", { text: "queued msg" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "queued msg" });
 
     const { rerender } = renderHook(
       ({ chatState }: { chatState: ChatState }) =>
@@ -64,7 +139,9 @@ describe("useMessageQueue", () => {
 
   it("does not auto-send when chatState is not idle", () => {
     const sendMessage = vi.fn();
-    useChatStore.getState().enqueueMessage("s1", { text: "queued" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "queued" });
 
     renderHook(() => useMessageQueue("s1", "streaming", sendMessage));
 
@@ -74,7 +151,9 @@ describe("useMessageQueue", () => {
 
   it("waits to auto-send while sending is blocked", () => {
     const sendMessage = vi.fn();
-    useChatStore.getState().enqueueMessage("s1", { text: "queued" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "queued" });
 
     const { rerender } = renderHook(
       ({ isSendBlocked }: { isSendBlocked: boolean }) =>
@@ -83,7 +162,7 @@ describe("useMessageQueue", () => {
     );
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "queued",
     });
 
@@ -95,7 +174,7 @@ describe("useMessageQueue", () => {
 
   it("leaves berdctl-origin queued messages for the berdctl drain", () => {
     const sendMessage = vi.fn();
-    useChatStore.getState().enqueueMessage("s1", {
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
       text: "queued from berdctl",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" },
@@ -112,7 +191,7 @@ describe("useMessageQueue", () => {
     rerender({ chatState: "idle" as const });
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "queued from berdctl",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" },
@@ -123,7 +202,9 @@ describe("useMessageQueue", () => {
 
   it("dismiss clears the queued message without sending", () => {
     const sendMessage = vi.fn();
-    useChatStore.getState().enqueueMessage("s1", { text: "queued" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "queued" });
 
     const { result } = renderHook(() =>
       useMessageQueue("s1", "streaming", sendMessage),
@@ -137,7 +218,9 @@ describe("useMessageQueue", () => {
 
   it("queued messages are scoped to session", () => {
     const sendMessage = vi.fn();
-    useChatStore.getState().enqueueMessage("s2", { text: "other session" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s2", { text: "other session" });
 
     const { result } = renderHook(() =>
       useMessageQueue("s1", "idle", sendMessage),
@@ -159,7 +242,7 @@ describe("useMessageQueue", () => {
         previewUrl: "blob:image",
       },
     ];
-    useChatStore.getState().enqueueMessage("s1", {
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
       text: "with image",
       attachments,
     });
@@ -179,7 +262,7 @@ describe("useMessageQueue", () => {
 
   it("preserves personaId when auto-sending", () => {
     const sendMessage = vi.fn();
-    useChatStore.getState().enqueueMessage("s1", {
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
       text: "for persona A",
       personaId: "persona-a",
     });
@@ -220,7 +303,7 @@ describe("useMessageQueue", () => {
         { label: "code-review", type: "skill" as const },
       ],
     };
-    useChatStore.getState().enqueueMessage("s1", {
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
       text: "@Reviewer check this diff",
       personaId: "reviewer",
       attachments,
@@ -247,7 +330,9 @@ describe("useMessageQueue", () => {
       .fn()
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
-    useChatStore.getState().enqueueMessage("s1", { text: "queued" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "queued" });
 
     const { rerender } = renderHook(
       ({ chatState }: { chatState: ChatState }) =>
@@ -256,7 +341,7 @@ describe("useMessageQueue", () => {
     );
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "queued",
     });
 
@@ -269,7 +354,9 @@ describe("useMessageQueue", () => {
 
   it("stops auto-retrying the same queued message after repeated failures", () => {
     const sendMessage = vi.fn().mockReturnValue(false);
-    useChatStore.getState().enqueueMessage("s1", { text: "queued" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "queued" });
 
     const { rerender } = renderHook(
       ({ chatState }: { chatState: ChatState }) =>
@@ -283,14 +370,16 @@ describe("useMessageQueue", () => {
     rerender({ chatState: "idle" as const });
 
     expect(sendMessage).toHaveBeenCalledTimes(2);
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "queued",
     });
   });
 
   it("drains queued message via store subscription when chatState transitions to idle (background-safe path)", () => {
     const sendMessage = vi.fn().mockReturnValue(true);
-    useChatStore.getState().enqueueMessage("s1", { text: "background msg" });
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("s1", { text: "background msg" });
 
     // Set up the store with a non-idle chatState so the subscription can
     // detect the transition.
@@ -320,7 +409,7 @@ describe("useMessageQueue", () => {
   it("reads live blocked state before draining via store subscription", () => {
     const sendMessage = vi.fn().mockReturnValue(true);
     const chatStore = useChatStore.getState();
-    chatStore.enqueueMessage("s1", { text: "background msg" });
+    chatStore.enqueueTransportReadyMessage("s1", { text: "background msg" });
     chatStore.setChatState("s1", "streaming");
     chatStore.setActiveRunId("s1", "run-1");
 
@@ -349,7 +438,7 @@ describe("useMessageQueue", () => {
   it("drains when a run clears after chatState is already idle", () => {
     const sendMessage = vi.fn().mockReturnValue(true);
     const chatStore = useChatStore.getState();
-    chatStore.enqueueMessage("s1", { text: "background msg" });
+    chatStore.enqueueTransportReadyMessage("s1", { text: "background msg" });
     chatStore.setChatState("s1", "streaming");
     chatStore.setActiveRunId("s1", "run-1");
 
@@ -385,7 +474,7 @@ describe("useMessageQueue", () => {
         }),
     );
     const chatStore = useChatStore.getState();
-    chatStore.enqueueMessage("s1", { text: "background msg" });
+    chatStore.enqueueTransportReadyMessage("s1", { text: "background msg" });
     chatStore.setChatState("s1", "streaming");
 
     renderHook(() => useMessageQueue("s1", "streaming", sendMessage));
@@ -395,7 +484,7 @@ describe("useMessageQueue", () => {
     });
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
       text: "background msg",
     });
 

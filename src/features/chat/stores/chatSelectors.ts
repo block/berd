@@ -7,20 +7,33 @@ import type { ChatStore } from "./chatStore";
 // per-subscriber O(sessions) recompute into one shared O(sessions) pass per
 // store update and a stable reference downstream.
 let cachedMessagesBySession: ChatStore["messagesBySession"] | null = null;
+let cachedQueuedMessageBySession: ChatStore["queuedMessageBySession"] | null =
+  null;
 let cachedCounts: Record<string, number> = {};
 
 export const selectLocalMessageCountsBySession = (
   state: ChatStore,
 ): Record<string, number> => {
   const messagesBySession = state.messagesBySession;
-  if (messagesBySession === cachedMessagesBySession) {
+  const queuedMessageBySession = state.queuedMessageBySession ?? {};
+  if (
+    messagesBySession === cachedMessagesBySession &&
+    queuedMessageBySession === cachedQueuedMessageBySession
+  ) {
     return cachedCounts;
   }
 
   const next: Record<string, number> = {};
   let changed = false;
-  for (const sessionId of Object.keys(messagesBySession)) {
-    const count = messagesBySession[sessionId]?.length ?? 0;
+  const sessionIds = new Set([
+    ...Object.keys(messagesBySession),
+    ...Object.keys(queuedMessageBySession),
+  ]);
+  for (const sessionId of sessionIds) {
+    const count = Math.max(
+      messagesBySession[sessionId]?.length ?? 0,
+      queuedMessageBySession[sessionId] ? 1 : 0,
+    );
     next[sessionId] = count;
     if (cachedCounts[sessionId] !== count) {
       changed = true;
@@ -31,6 +44,7 @@ export const selectLocalMessageCountsBySession = (
   }
 
   cachedMessagesBySession = messagesBySession;
+  cachedQueuedMessageBySession = queuedMessageBySession;
   if (changed) {
     cachedCounts = next;
   }
