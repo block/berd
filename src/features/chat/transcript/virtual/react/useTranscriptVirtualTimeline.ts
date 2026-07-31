@@ -1599,7 +1599,7 @@ function createController({
   footerHeight: number;
   protectedRowIds: readonly string[];
   state?: TranscriptVirtualControllerState;
-}) {
+}): TranscriptVirtualEngine {
   const engine = createTranscriptTanStackVirtualAdapter(
     {
       sessionId,
@@ -1617,9 +1617,7 @@ function createController({
       protectedRowIds,
       overscanBeforePx: TANSTACK_UI_OVERSCAN_BEFORE_PX,
       overscanAfterPx: TANSTACK_UI_OVERSCAN_AFTER_PX,
-      scrollElement: container,
       viewportWidth: container?.clientWidth,
-      scrollWritesSuspended: container !== null,
     },
   );
 

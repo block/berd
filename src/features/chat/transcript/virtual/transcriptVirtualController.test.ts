@@ -18,11 +18,13 @@ describe("transcript virtual controller", () => {
 
     expect(initial.correction?.nextScrollTop).toBe(1500);
     expect(controller.getState().anchor).toEqual({ type: "bottom" });
+    acknowledge(controller, initial.correction);
 
     const appended = controller.setRows([...rows, row("new", 120)]);
 
     expect(appended.correction?.nextScrollTop).toBe(1620);
-    expect(controller.getState().scrollTop).toBe(1620);
+    expect(controller.getState().scrollTop).toBe(1500);
+    acknowledge(controller, appended.correction);
 
     const footer = controller.syncViewport({
       scrollTop: controller.getState().scrollTop,
@@ -32,6 +34,7 @@ describe("transcript virtual controller", () => {
     });
 
     expect(footer.correction?.nextScrollTop).toBe(1700);
+    acknowledge(controller, footer.correction, { footerHeight: 80 });
     expect(controller.getState()).toMatchObject({
       scrollTop: 1700,
       footerHeight: 80,
@@ -42,7 +45,7 @@ describe("transcript virtual controller", () => {
 
   it("keeps the bottom anchored when the viewport shrinks while following", () => {
     const controller = createController({ viewportHeight: 500 });
-    controller.setRows(makeRows(20, 100));
+    acknowledge(controller, controller.setRows(makeRows(20, 100)).correction);
 
     expect(controller.getState()).toMatchObject({
       scrollTop: 1500,
@@ -66,6 +69,7 @@ describe("transcript virtual controller", () => {
       reason: "bottom-anchor",
       nextScrollTop: 1700,
     });
+    acknowledge(controller, resized.correction, { viewportHeight: 300 });
     expect(controller.getState()).toMatchObject({
       scrollTop: 1700,
       anchor: { type: "bottom" },
@@ -142,7 +146,7 @@ describe("transcript virtual controller", () => {
   it("pauses bottom follow on upward scroll before idle measurements flush", () => {
     const controller = createController({ viewportHeight: 300 });
     const rows = makeRows(10, 100);
-    controller.setRows(rows);
+    acknowledge(controller, controller.setRows(rows).correction);
 
     expect(controller.getState().scrollTop).toBe(700);
 
@@ -174,6 +178,7 @@ describe("transcript virtual controller", () => {
       nextScrollTop: 720,
       delta: 100,
     });
+    acknowledge(controller, measured.correction);
     expect(controller.getState().scrollTop).toBe(720);
     expect(controller.getState().bottomScrollTop).toBe(800);
     expect(controller.getDiagnostics().bottomFollowExits).toBe(1);
@@ -181,7 +186,7 @@ describe("transcript virtual controller", () => {
 
   it("captures a row anchor while preserving browser-owned scroll", () => {
     const controller = createController({ viewportHeight: 300 });
-    controller.setRows(makeRows(10, 100));
+    acknowledge(controller, controller.setRows(makeRows(10, 100)).correction);
 
     expect(controller.getState()).toMatchObject({
       scrollTop: 700,
@@ -224,6 +229,7 @@ describe("transcript virtual controller", () => {
       nextScrollTop: 600,
       delta: 100,
     });
+    acknowledge(controller, measured.correction);
     expect(controller.getState()).toMatchObject({
       scrollTop: 600,
       anchor: {
@@ -423,6 +429,15 @@ describe("transcript virtual controller", () => {
       nextScrollTop: 750,
       delta: 50,
     });
+    controller.syncViewport(
+      {
+        scrollTop: measured.correction?.nextScrollTop ?? 0,
+        viewportHeight: 200,
+        widthScope: WIDTH_SCOPE,
+        browserScrollHeight: 1200,
+      },
+      { source: "browser" },
+    );
     expect(controller.getState()).toMatchObject({
       scrollTop: 750,
       distanceFromBottom: 250,
@@ -668,9 +683,29 @@ describe("transcript virtual controller", () => {
       reason: "scroll-to-row",
       nextScrollTop: 7800,
     });
+    acknowledge(controller, result.correction);
     expect(controller.getRange().visibleRowIds).toContain("row-80");
   });
 });
+
+function acknowledge(
+  controller: ReturnType<typeof createTranscriptVirtualController>,
+  correction: { nextScrollTop: number } | null | undefined,
+  geometry: Partial<{ viewportHeight: number; footerHeight: number }> = {},
+): void {
+  if (!correction) return;
+  const state = controller.getState();
+  controller.syncViewport(
+    {
+      scrollTop: correction.nextScrollTop,
+      viewportHeight: geometry.viewportHeight ?? state.viewportHeight,
+      footerHeight: geometry.footerHeight ?? state.footerHeight,
+      widthScope: state.widthScope,
+      browserScrollHeight: state.virtualScrollHeight,
+    },
+    { source: "browser" },
+  );
+}
 
 function createController(
   geometry: Partial<{

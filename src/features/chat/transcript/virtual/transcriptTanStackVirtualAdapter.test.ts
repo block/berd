@@ -4,6 +4,7 @@ import {
   createTranscriptTanStackVirtualAdapter,
   type TranscriptTanStackVirtualAdapterOptions,
 } from "./index";
+import { TranscriptViewportCoordinator } from "./transcriptViewportCoordinator";
 import type { TranscriptVirtualMeasurementToken } from "./transcriptVirtualTypes";
 
 const SESSION_ID = "session-a";
@@ -35,9 +36,40 @@ describe("TranscriptTanStackVirtualAdapter", () => {
     expect(adapter.isAtEnd()).toBe(true);
   });
 
+  it("keeps proposals non-authoritative until the coordinator observes browser clamping", () => {
+    const container = document.createElement("div");
+    let scrollTop = 100;
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 400 },
+      clientWidth: { configurable: true, value: 720 },
+      scrollHeight: { configurable: true, value: 2000 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = Math.min(1600, Math.max(0, value));
+        },
+      },
+    });
+    container.getBoundingClientRect = () =>
+      ({ top: 0, width: 720, height: 400 }) as DOMRect;
+
+    const adapter = createAdapter({ viewportHeight: 400, scrollTop: 100 });
+    const coordinator = new TranscriptViewportCoordinator({
+      container,
+      engine: adapter,
+      getFooterHeight: () => 0,
+    });
+
+    expect(adapter.getState().scrollTop).toBe(100);
+    coordinator.writeScrollTop(4000);
+    expect(container.scrollTop).toBe(1600);
+    expect(adapter.getState().scrollTop).toBe(1600);
+  });
+
   it("keeps the bottom anchored through a viewport resize while following", () => {
     const adapter = createAdapter({ viewportHeight: 500 });
-    adapter.setRows(makeRows(20, 100));
+    acknowledge(adapter, adapter.setRows(makeRows(20, 100)).correction);
 
     expect(adapter.getScrollTop()).toBe(1500);
     expect(adapter.getState().anchor).toEqual({ type: "bottom" });
@@ -45,7 +77,7 @@ describe("TranscriptTanStackVirtualAdapter", () => {
     // Shrinking the viewport leaves the browser scrollTop above the new
     // bottom; the intent-less geometry sync must restore bottom follow
     // instead of treating the drift as a user scroll away from the end.
-    adapter.syncViewport(
+    const resized = adapter.syncViewport(
       {
         scrollTop: 1500,
         viewportHeight: 300,
@@ -53,6 +85,7 @@ describe("TranscriptTanStackVirtualAdapter", () => {
       },
       { source: "browser" },
     );
+    acknowledge(adapter, resized.correction);
 
     expect(adapter.getScrollTop()).toBe(1700);
     expect(adapter.getState()).toMatchObject({
@@ -185,7 +218,7 @@ describe("TranscriptTanStackVirtualAdapter", () => {
         protectedRowIds: ["row-2", "row-90"],
       },
     );
-    adapter.setRows(makeRows(100, 20));
+    acknowledge(adapter, adapter.setRows(makeRows(100, 20)).correction);
     adapter.syncViewport({
       scrollTop: 1000,
       viewportHeight: 100,
@@ -243,6 +276,75 @@ describe("TranscriptTanStackVirtualAdapter", () => {
     });
   });
 
+  it("keeps the rendered range on the acknowledged viewport while a measurement correction is suspended", () => {
+    const container = document.createElement("div");
+    let scrollTop = 620;
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 300 },
+      clientWidth: { configurable: true, value: 720 },
+      scrollHeight: { configurable: true, value: 1100 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          // Model a browser that accepts the write only up to its live limit.
+          scrollTop = Math.min(700, Math.max(0, value));
+        },
+      },
+    });
+    container.getBoundingClientRect = () =>
+      ({ top: 0, width: 720, height: 300 }) as DOMRect;
+
+    const adapter = createAdapter({ viewportHeight: 300, scrollTop: 620 });
+    adapter.setRows(makeRows(10, 100));
+    adapter.syncViewport(
+      {
+        scrollTop: 620,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+    const coordinator = new TranscriptViewportCoordinator({
+      container,
+      engine: adapter,
+      getFooterHeight: () => 0,
+    });
+
+    coordinator.setScrollWritesSuspended(true);
+    const measured = coordinator.applyMeasuredHeight({
+      token: tokenFor(adapter, "row-2"),
+      height: 200,
+    });
+
+    expect(measured).toMatchObject({
+      accepted: true,
+      correction: { previousScrollTop: 620, nextScrollTop: 720 },
+    });
+    expect(container.scrollTop).toBe(620);
+    expect(adapter.getScrollTop()).toBe(620);
+    expect(coordinator.getRange().visibleRowIds).toEqual([
+      "row-5",
+      "row-6",
+      "row-7",
+      "row-8",
+    ]);
+
+    coordinator.setScrollWritesSuspended(false);
+    coordinator.writeScrollTop(measured.correction?.nextScrollTop ?? 0, {
+      source: "correction",
+    });
+
+    expect(container.scrollTop).toBe(700);
+    expect(adapter.getScrollTop()).toBe(700);
+    expect(adapter.getState().scrollTop).toBe(700);
+    expect(coordinator.getRange().visibleRowIds).toEqual([
+      "row-6",
+      "row-7",
+      "row-8",
+    ]);
+  });
+
   it("keeps Goose row anchors when upward scroll detaches before idle measurement flush", () => {
     const adapter = createAdapter({ viewportHeight: 300 });
     adapter.setRows(makeRows(10, 100));
@@ -277,7 +379,16 @@ describe("TranscriptTanStackVirtualAdapter", () => {
       },
     });
     expect(adapter.getScrollTop()).toBe(720);
-    expect(adapter.getDiagnostics().bottomFollowExits).toBe(1);
+    expect(adapter.getState().scrollTop).toBe(620);
+    acknowledge(adapter, measured.correction);
+    expect(adapter.getState()).toMatchObject({
+      scrollTop: 720,
+      anchor: {
+        type: "row",
+        rowId: "row-6",
+        offsetWithinRow: 20,
+      },
+    });
   });
 
   it("keeps active streaming row virtual heights from shrinking until stable", () => {
@@ -492,6 +603,24 @@ function createAdapter(
       scrollEndThresholdPx: 5,
       ...options,
     },
+  );
+}
+
+function acknowledge(
+  adapter: ReturnType<typeof createTranscriptTanStackVirtualAdapter>,
+  correction: { nextScrollTop: number } | null | undefined,
+): void {
+  if (!correction) return;
+  const state = adapter.getState();
+  adapter.syncViewport(
+    {
+      scrollTop: correction.nextScrollTop,
+      viewportHeight: state.viewportHeight,
+      footerHeight: state.footerHeight,
+      widthScope: state.widthScope,
+      browserScrollHeight: state.virtualScrollHeight,
+    },
+    { source: "browser" },
   );
 }
 

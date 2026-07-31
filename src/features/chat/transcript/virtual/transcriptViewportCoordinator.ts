@@ -43,9 +43,9 @@ export interface TranscriptViewportWriteOptions {
  * Sole normal-path owner of transcript browser geometry and scroll writes.
  *
  * Every engine mutation runs as one reconciliation transaction: read live
- * browser geometry, apply the queued engine mutation with engine DOM writes
- * suspended, coalesce its correction to one browser write, read the accepted
- * browser position, and publish that accepted geometry back to the engine.
+ * browser geometry, apply the pure geometry mutation, coalesce its proposal to
+ * one browser write, read the accepted browser position, and publish that
+ * accepted geometry back to the engine.
  */
 export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
   readonly engineKind: string;
@@ -64,14 +64,11 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
       options.transcriptRoot ?? options.container,
     );
     this.getFooterHeight = options.getFooterHeight;
-    // TanStack remains the geometry decision adapter, but never writes the
-    // live transcript element. The coordinator commits its decisions.
-    this.engine.setScrollWritesSuspended?.(true);
+    // The wrapped engine is geometry-only. The coordinator commits proposals.
   }
 
   reset(input: TranscriptSessionGeometry): void {
     this.engine.reset(input);
-    this.engine.setScrollWritesSuspended?.(true);
     this.reconcile(() => null);
   }
 
@@ -203,7 +200,13 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
     this.transactionWriteSuspensionDepth = suspended
       ? this.transactionWriteSuspensionDepth + 1
       : Math.max(0, this.transactionWriteSuspensionDepth - 1);
-    this.engine.setScrollWritesSuspended?.(true);
+    this.engine.setScrollWritesSuspended?.(
+      this.transactionWriteSuspensionDepth > 0,
+    );
+  }
+
+  getPendingScrollCorrection(): TranscriptScrollCorrection | null {
+    return this.engine.getPendingScrollCorrection();
   }
 
   getRange(): TranscriptVirtualRangeSnapshot {
@@ -224,19 +227,31 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
     syncBeforeMutation = true,
   ): TranscriptBrowserViewportSnapshot {
     const before = this.browser.read();
+    let syncCorrection: TranscriptScrollCorrection | null = null;
     if (syncBeforeMutation) {
-      this.engine.syncViewport(this.toGeometry(before), {
+      syncCorrection = this.engine.syncViewport(this.toGeometry(before), {
         source: options.source ?? "programmatic",
         userScrollIntent: options.userScrollIntent,
         preserveScrollPosition: options.preserveScrollPosition,
-      });
+      }).correction;
     }
 
-    const correction = mutate();
+    const mutationCorrection = mutate();
+    const correction =
+      mutationCorrection ??
+      (this.engine.getPendingScrollCorrection() ? syncCorrection : null);
     const acceptedEngineScrollTop = this.engine.getState().scrollTop;
+    const proposedScrollTop =
+      correction?.nextScrollTop ?? acceptedEngineScrollTop;
+    const browserBottomScrollTop = Math.max(
+      0,
+      before.scrollHeight - before.viewportHeight,
+    );
     const nextScrollTop = options.preserveScrollPosition
       ? before.scrollTop
-      : (correction?.nextScrollTop ?? acceptedEngineScrollTop);
+      : before.scrollHeight > before.viewportHeight
+        ? Math.min(proposedScrollTop, browserBottomScrollTop)
+        : proposedScrollTop;
     if (
       this.transactionWriteSuspensionDepth === 0 &&
       options.preserveScrollPosition !== true &&

@@ -49,13 +49,10 @@ type TanStackFollowOnAppend = NonNullable<
 
 export interface TranscriptTanStackVirtualAdapterOptions
   extends TranscriptVirtualControllerOptions {
-  scrollElement?: HTMLElement | null;
   viewportWidth?: number;
   anchorTo?: TanStackAnchorTo;
   followOnAppend?: TanStackFollowOnAppend;
   scrollEndThresholdPx?: number;
-  /** Prevent this geometry adapter from writing its scroll element. */
-  scrollWritesSuspended?: boolean;
 }
 
 interface MeasurementEntry {
@@ -92,10 +89,7 @@ export class TranscriptTanStackVirtualAdapter
   private offsetCallback: OffsetCallback | null = null;
   private rectCallback: ((rect: Rect) => void) | null = null;
   private lastRangeSelection: TranscriptPixelRangeSelection | null = null;
-  // While true, setScrollOffset skips the DOM scrollTop write but still tracks
-  // the live offset, so internal measurement replay can warm the engine without
-  // moving the browser-owned viewport.
-  private scrollWritesSuspended = false;
+  private correctionWritesSuspended = false;
 
   constructor(
     input: TranscriptSessionGeometry,
@@ -116,10 +110,10 @@ export class TranscriptTanStackVirtualAdapter
     this.overscanAfterRows =
       options.overscanAfterRows ?? TRANSCRIPT_DEFAULT_OVERSCAN_AFTER_ROWS;
     this.protectedRowIds = options.protectedRowIds ?? [];
-    this.scrollWritesSuspended = options.scrollWritesSuspended ?? false;
-    this.scrollElement =
-      options.scrollElement ??
-      createInMemoryScrollElement(input.viewportHeight, input.scrollTop ?? 0);
+    this.scrollElement = createInMemoryScrollElement(
+      input.viewportHeight,
+      input.scrollTop ?? 0,
+    );
     this.controller = new TranscriptVirtualController(
       input,
       this.controllerOptions,
@@ -205,15 +199,6 @@ export class TranscriptTanStackVirtualAdapter
       this.virtualizer._willUpdate();
     }
     return result;
-  }
-
-  // Suspend/resume DOM scrollTop writes. The engine still ingests viewport syncs
-  // and computes corrections while suspended; it just stops asserting scrollTop,
-  // so callers can replay internal measurements without moving the live viewport.
-  // Resuming does not replay a write — the caller drives the next viewport sync,
-  // which reconciles the anchor against wherever the viewport now sits.
-  setScrollWritesSuspended(suspended: boolean): void {
-    this.scrollWritesSuspended = suspended;
   }
 
   applyMeasuredHeight(input: {
@@ -351,6 +336,14 @@ export class TranscriptTanStackVirtualAdapter
     this.applyCorrection(result.correction);
     this.syncScrollElementToController();
     this.syncVirtualizerOffset();
+  }
+
+  setScrollWritesSuspended(suspended: boolean): void {
+    this.correctionWritesSuspended = suspended;
+  }
+
+  getPendingScrollCorrection(): TranscriptScrollCorrection | null {
+    return this.controller.getPendingScrollCorrection();
   }
 
   getRange(): TranscriptVirtualRangeSnapshot {
@@ -570,7 +563,7 @@ export class TranscriptTanStackVirtualAdapter
   private applyCorrection(
     correction: TranscriptScrollCorrection | null | undefined,
   ): void {
-    if (!correction) {
+    if (!correction || this.correctionWritesSuspended) {
       return;
     }
     this.setScrollOffset(correction.nextScrollTop, false);
@@ -598,12 +591,7 @@ export class TranscriptTanStackVirtualAdapter
   }
 
   private setScrollOffset(offset: number, isScrolling: boolean): void {
-    // When scroll writes are suspended, skip the DOM write but still notify with
-    // the live offset so the virtualizer keeps tracking native movement and
-    // renders the right rows.
-    if (!this.scrollWritesSuspended) {
-      setElementNumber(this.scrollElement, "scrollTop", Math.max(0, offset));
-    }
+    setElementNumber(this.scrollElement, "scrollTop", Math.max(0, offset));
     this.offsetCallback?.(getElementScrollTop(this.scrollElement), isScrolling);
   }
 

@@ -3,6 +3,10 @@ import {
   type TranscriptRowDescriptor,
 } from "../projection/transcriptItemTypes";
 import {
+  transitionTranscriptGeometryViewport,
+  type TranscriptGeometryViewportState,
+} from "./transcriptGeometryTransition";
+import {
   computeTranscriptVirtualRange,
   type TranscriptRangeInput,
 } from "./transcriptVirtualRange";
@@ -97,7 +101,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   private sessionId: string;
   private sessionEpoch: number;
   private widthScope: string;
-  private scrollTop: number;
+  private viewport: TranscriptGeometryViewportState;
   private viewportHeight: number;
   private footerHeight: number;
   private browserScrollHeight: number | null;
@@ -121,7 +125,10 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.sessionId = input.sessionId;
     this.sessionEpoch = input.sessionEpoch;
     this.widthScope = input.widthScope;
-    this.scrollTop = Math.max(0, input.scrollTop ?? 0);
+    this.viewport = {
+      observedScrollTop: Math.max(0, input.scrollTop ?? 0),
+      pendingScroll: null,
+    };
     this.viewportHeight = Math.max(0, input.viewportHeight);
     this.footerHeight = Math.max(0, input.footerHeight ?? 0);
     this.browserScrollHeight =
@@ -150,7 +157,10 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.sessionId = input.sessionId;
     this.sessionEpoch = input.sessionEpoch;
     this.widthScope = input.widthScope;
-    this.scrollTop = Math.max(0, input.scrollTop ?? 0);
+    this.viewport = {
+      observedScrollTop: Math.max(0, input.scrollTop ?? 0),
+      pendingScroll: null,
+    };
     this.viewportHeight = Math.max(0, input.viewportHeight);
     this.footerHeight = Math.max(0, input.footerHeight ?? 0);
     this.browserScrollHeight =
@@ -191,7 +201,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       preserveScrollPosition?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
-    const previousScrollTop = this.scrollTop;
+    const previousScrollTop = this.observedScrollTop;
     const nextViewportHeight = Math.max(0, geometry.viewportHeight);
     const nextFooterHeight = Math.max(0, geometry.footerHeight ?? 0);
     // Viewport geometry changes (window resize, side-rail animation, footer
@@ -212,13 +222,22 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       geometry.browserScrollHeight === undefined
         ? null
         : Math.max(0, geometry.browserScrollHeight);
-    this.scrollTop = this.clampScrollTop(geometry.scrollTop);
+    this.viewport = transitionTranscriptGeometryViewport(this.viewport, {
+      type: "observe",
+      scrollTop: geometry.scrollTop,
+      maxScrollTop: this.getBottomScrollTop(),
+    }).state;
     this.lastRange = null;
     this.diagnostics.viewportUpdates += 1;
 
-    const direction = getScrollDirection(previousScrollTop, this.scrollTop);
+    const direction = getScrollDirection(
+      previousScrollTop,
+      this.observedScrollTop,
+    );
     const source = options.source ?? "browser";
-    const distanceFromBottom = this.getDistanceFromBottom(this.scrollTop);
+    const distanceFromBottom = this.getDistanceFromBottom(
+      this.observedScrollTop,
+    );
     // Explicit user intent (wheel/touch) wins even mid-resize so a user can
     // still scroll away while a rail animation is changing geometry.
     const treatAsUserScroll =
@@ -360,11 +379,6 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       reason: "scroll-to-row",
       nextScrollTop: target,
     });
-    this.setScrollAnchor({
-      type: "row",
-      rowId: row.rowId,
-      offsetWithinRow: this.scrollTop - this.getRowTop(row.rowId),
-    });
     return { found: true, correction };
   }
 
@@ -376,7 +390,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.diagnostics.rangeCalculations += 1;
     const rangeInput: TranscriptRangeInput = {
       rows: this.rows,
-      scrollTop: this.scrollTop,
+      scrollTop: this.observedScrollTop,
       viewportHeight: this.viewportHeight,
       footerHeight: this.footerHeight,
       overscanBeforePx: this.overscanBeforePx,
@@ -392,14 +406,21 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     return this.lastRange;
   }
 
+  getPendingScrollCorrection(): TranscriptScrollCorrection | null {
+    return this.viewport.pendingScroll;
+  }
+
   getState(): TranscriptVirtualControllerState {
     const bottomScrollTop = this.getBottomScrollTop();
-    const distanceFromBottom = Math.max(0, bottomScrollTop - this.scrollTop);
+    const distanceFromBottom = Math.max(
+      0,
+      bottomScrollTop - this.observedScrollTop,
+    );
     return {
       sessionId: this.sessionId,
       sessionEpoch: this.sessionEpoch,
       widthScope: this.widthScope,
-      scrollTop: this.scrollTop,
+      scrollTop: this.observedScrollTop,
       viewportHeight: this.viewportHeight,
       footerHeight: this.footerHeight,
       virtualScrollHeight: this.getVirtualScrollHeight(),
@@ -450,7 +471,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       return null;
     }
 
-    const current = this.scrollTop;
+    const current = this.observedScrollTop;
     const viewportEnd = current + this.viewportHeight;
     let nextScrollTop: number;
 
@@ -544,7 +565,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
         this.diagnostics.missingAnchorsDropped += 1;
       }
 
-      const clamped = this.clampScrollTop(this.scrollTop);
+      const clamped = this.clampScrollTop(this.observedScrollTop);
       const correction = this.applyScrollCorrection({
         reason: resolution.stale
           ? "stale-anchor-clamp"
@@ -611,7 +632,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   private captureViewportAnchor(
     options: { fallback?: "bottom" | "scroll-position" } = {},
   ): void {
-    const viewportEnd = this.scrollTop + this.viewportHeight;
+    const viewportEnd = this.observedScrollTop + this.viewportHeight;
     const stable = this.findAnchorableRow("stable", viewportEnd);
     const streaming = this.findAnchorableRow("streaming", viewportEnd);
     const nearestStable = this.findNearestAnchorableRow("stable", viewportEnd);
@@ -624,7 +645,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     if (!selected) {
       this.setScrollAnchor(
         options.fallback === "scroll-position"
-          ? { type: "scroll-position", scrollTop: this.scrollTop }
+          ? { type: "scroll-position", scrollTop: this.observedScrollTop }
           : { type: "bottom" },
       );
       return;
@@ -633,7 +654,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.setScrollAnchor({
       type: "row",
       rowId: selected.row.rowId,
-      offsetWithinRow: this.scrollTop - selected.position.top,
+      offsetWithinRow: this.observedScrollTop - selected.position.top,
     });
     this.diagnostics.recapturedAnchors += 1;
   }
@@ -656,7 +677,10 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
         continue;
       }
 
-      if (position.bottom > this.scrollTop && position.top < viewportEnd) {
+      if (
+        position.bottom > this.observedScrollTop &&
+        position.top < viewportEnd
+      ) {
         return { row, position };
       }
     }
@@ -691,7 +715,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
         continue;
       }
 
-      if (position.bottom <= this.scrollTop) {
+      if (position.bottom <= this.observedScrollTop) {
         nearestBefore = { row, position };
         continue;
       }
@@ -744,24 +768,22 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     reason: TranscriptCorrectionReason;
     nextScrollTop: number;
   }): TranscriptScrollCorrection | null {
-    const clampedNextScrollTop = this.clampScrollTop(nextScrollTop);
-    const delta = clampedNextScrollTop - this.scrollTop;
-
-    if (Math.abs(delta) <= this.measurementEpsilonPx) {
-      this.scrollTop = clampedNextScrollTop;
-      return null;
-    }
-
-    const correction: TranscriptScrollCorrection = {
+    const transition = transitionTranscriptGeometryViewport(this.viewport, {
+      type: "propose",
       reason,
-      previousScrollTop: this.scrollTop,
-      nextScrollTop: clampedNextScrollTop,
-      delta,
-    };
-    this.scrollTop = clampedNextScrollTop;
-    this.lastRange = null;
-    this.recordCorrection(correction);
-    return correction;
+      scrollTop: nextScrollTop,
+      maxScrollTop: this.getBottomScrollTop(),
+      epsilon: this.measurementEpsilonPx,
+    });
+    this.viewport = transition.state;
+    if (transition.effect) {
+      this.recordCorrection(transition.effect);
+    }
+    return transition.effect;
+  }
+
+  private get observedScrollTop(): number {
+    return this.viewport.observedScrollTop;
   }
 
   private recordCorrection(correction: TranscriptScrollCorrection): void {

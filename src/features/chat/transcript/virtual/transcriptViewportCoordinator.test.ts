@@ -32,33 +32,44 @@ function createHarness() {
     footerHeight: 0,
     bottomScrollTop: 1600,
   } as TranscriptVirtualControllerState;
-  const syncViewport = vi.fn((geometry) => {
-    state.scrollTop = geometry.scrollTop;
-    return { correction: null };
-  });
-  const setRows = vi.fn(() => ({
-    correction: {
-      previousScrollTop: 100,
-      nextScrollTop: 900,
-      delta: 800,
-      reason: "row-anchor" as const,
+  const syncViewport = vi.fn(
+    (geometry): ReturnType<TranscriptVirtualEngine["syncViewport"]> => {
+      state.scrollTop = geometry.scrollTop;
+      return { correction: null };
     },
-  }));
+  );
+  const setRows = vi.fn(
+    (): ReturnType<TranscriptVirtualEngine["setRows"]> => ({
+      correction: {
+        previousScrollTop: 100,
+        nextScrollTop: 900,
+        delta: 800,
+        reason: "row-anchor" as const,
+      },
+    }),
+  );
+  let pendingCorrection: ReturnType<
+    NonNullable<TranscriptVirtualEngine["getPendingScrollCorrection"]>
+  > = null;
+  const getPendingScrollCorrection = vi.fn(() => pendingCorrection);
   const engine = {
     engineKind: "fake",
-    setScrollWritesSuspended: vi.fn(),
     reset: vi.fn(),
     setRows,
     syncViewport,
     applyMeasuredHeight: vi.fn(() => ({ accepted: false, correction: null })),
     scrollToRow: vi.fn(() => ({ found: false, correction: null })),
     getRange: vi.fn(() => ({}) as TranscriptVirtualRangeSnapshot),
+    getPendingScrollCorrection,
     getState: () => state,
     getDiagnostics: vi.fn(() => ({}) as TranscriptVirtualDiagnostics),
   } satisfies TranscriptVirtualEngine;
   return {
     container,
     engine,
+    setPendingCorrection: (correction: typeof pendingCorrection) => {
+      pendingCorrection = correction;
+    },
     coordinator: new TranscriptViewportCoordinator({
       container,
       engine,
@@ -88,6 +99,78 @@ describe("TranscriptViewportCoordinator", () => {
       expect.objectContaining({ scrollTop: 900 }),
       expect.objectContaining({ source: "browser" }),
     );
+  });
+
+  it("clamps a proposal to the live browser scroll range before publishing", () => {
+    const { container, coordinator, engine } = createHarness();
+    engine.setRows.mockReturnValueOnce({
+      correction: {
+        previousScrollTop: 100,
+        nextScrollTop: 2400,
+        delta: 2300,
+        reason: "row-anchor",
+      },
+    });
+
+    coordinator.setRows([]);
+
+    expect(container.scrollTop).toBe(1600);
+    expect(engine.syncViewport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scrollTop: 1600 }),
+      expect.objectContaining({ source: "browser" }),
+    );
+  });
+
+  it("commits a pre-sync proposal when the mutation repeats the pending target", () => {
+    const { container, coordinator, engine, setPendingCorrection } =
+      createHarness();
+    engine.syncViewport.mockImplementationOnce(() => {
+      const previousScrollTop = engine.getState().scrollTop;
+      return {
+        correction: {
+          previousScrollTop,
+          nextScrollTop: 900,
+          delta: 900 - previousScrollTop,
+          reason: "row-anchor",
+        },
+      };
+    });
+    engine.setRows.mockImplementationOnce(() => {
+      setPendingCorrection({
+        previousScrollTop: 100,
+        nextScrollTop: 900,
+        delta: 800,
+        reason: "row-anchor",
+      });
+      return { correction: null };
+    });
+
+    coordinator.setRows([]);
+
+    expect(container.scrollTop).toBe(900);
+    expect(engine.syncViewport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scrollTop: 900 }),
+      expect.objectContaining({ source: "browser" }),
+    );
+  });
+
+  it("drops a pre-sync proposal when the mutation cancels it", () => {
+    const { container, coordinator, engine, setPendingCorrection } =
+      createHarness();
+    engine.syncViewport.mockImplementationOnce(() => ({
+      correction: {
+        previousScrollTop: 100,
+        nextScrollTop: 900,
+        delta: 800,
+        reason: "row-anchor",
+      },
+    }));
+    engine.setRows.mockReturnValueOnce({ correction: null });
+    setPendingCorrection(null);
+
+    coordinator.setRows([]);
+
+    expect(container.scrollTop).toBe(100);
   });
 
   it("reads browser clamping back into the engine", () => {

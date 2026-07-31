@@ -78,6 +78,8 @@ export interface TranscriptVirtualEngine {
   // element.
   setScrollWritesSuspended?(suspended: boolean): void;
   getRange(): TranscriptVirtualRangeSnapshot;
+  /** Current unacknowledged geometry proposal. */
+  getPendingScrollCorrection(): TranscriptScrollCorrection | null;
   getState(): TranscriptVirtualControllerState;
   getDiagnostics(): TranscriptVirtualDiagnostics;
 }

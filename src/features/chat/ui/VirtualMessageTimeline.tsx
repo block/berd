@@ -3618,7 +3618,7 @@ export function VirtualMessageTimeline({
       return;
     }
 
-    const recoveryKey = `${sessionId}:${sessionEpoch}:${virtualRangeRevision}`;
+    const recoveryKey = `${sessionId}:${sessionEpoch}:${stableRows.length}:${virtualRangeRevision}`;
     if (blankViewportRecoveryStateRef.current?.key !== recoveryKey) {
       blankViewportRecoveryStateRef.current = { key: recoveryKey, attempts: 0 };
     }

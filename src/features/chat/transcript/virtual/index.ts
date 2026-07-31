@@ -10,6 +10,12 @@ export {
   TRANSCRIPT_SELECTION_SURFACE_VALUE,
 } from "./transcriptSelectionSurface";
 export {
+  transitionTranscriptGeometryViewport,
+  type TranscriptGeometryViewportEvent,
+  type TranscriptGeometryViewportState,
+  type TranscriptGeometryViewportTransition,
+} from "./transcriptGeometryTransition";
+export {
   TranscriptVirtualController,
   createTranscriptVirtualController,
 } from "./transcriptVirtualController";
