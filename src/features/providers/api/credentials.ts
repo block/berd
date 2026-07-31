@@ -2,6 +2,7 @@ import type {
   ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse,
   ProviderConfigFieldUpdate,
   ProviderConfigStatusDto,
+  ProviderSecretDto,
 } from "@aaif/goose-sdk";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 import { getClient } from "@/shared/api/acpConnection";
@@ -49,6 +50,12 @@ export async function deleteProviderConfig(
     providerId,
   });
   return response;
+}
+
+export async function listProviderSecrets(): Promise<ProviderSecretDto[]> {
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableProvidersSecretsList({});
+  return response.secrets;
 }
 
 export async function checkAllProviderStatus(): Promise<ProviderStatus[]> {

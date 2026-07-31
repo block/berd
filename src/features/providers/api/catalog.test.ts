@@ -3,7 +3,7 @@ import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import {
   listProviderSetupCatalog,
   mapProviderSetupCatalogEntryDto,
-  selectByoKeyProviders,
+  selectSetupCatalogModelProviders,
   selectDatabricksHostConfigProvider,
 } from "./catalog";
 
@@ -47,6 +47,8 @@ describe("provider setup catalog API", () => {
       id: "claude-acp",
       displayName: "Claude Code",
       category: "agent",
+      catalogSource: "setup",
+      setupCatalogProvider: true,
       description: "Anthropic's agentic coding tool",
       setupMethod: "cli_auth",
       binaryName: "claude-agent-acp",
@@ -91,6 +93,8 @@ describe("provider setup catalog API", () => {
         id: "ollama",
         displayName: "Ollama",
         category: "model",
+        catalogSource: "setup",
+        setupCatalogProvider: true,
         description: "Run local models",
         setupMethod: "config_fields",
         fields: [
@@ -112,7 +116,7 @@ describe("provider setup catalog API", () => {
   });
 });
 
-describe("selectByoKeyProviders", () => {
+describe("selectSetupCatalogModelProviders", () => {
   function entry(id: string, withFields = true): ProviderCatalogEntry {
     return {
       id,
@@ -121,6 +125,7 @@ describe("selectByoKeyProviders", () => {
       description: id,
       setupMethod: "single_api_key",
       group: "default",
+      catalogSource: "setup",
       ...(withFields
         ? {
             fields: [
@@ -136,17 +141,16 @@ describe("selectByoKeyProviders", () => {
     };
   }
 
-  it("keeps only the bring-your-own-key model providers", () => {
+  it("keeps every model provider and excludes agent providers", () => {
     expect(
-      selectByoKeyProviders([
+      selectSetupCatalogModelProviders([
         entry("openai"),
         entry("databricks"),
         entry("anthropic"),
-        entry("google"),
-        entry("ollama"),
-        entry("openai", false),
+        { ...entry("claude-acp"), category: "agent" },
+        entry("ollama", false),
       ]).map((provider) => provider.id),
-    ).toEqual(["openai", "anthropic", "google"]);
+    ).toEqual(["openai", "databricks", "anthropic", "ollama"]);
   });
 
   it("selects only the editable Databricks host field", () => {

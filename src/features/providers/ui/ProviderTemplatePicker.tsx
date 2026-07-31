@@ -1,48 +1,36 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  searchProviderChoices,
+  type ProviderDirectoryChoice,
+} from "@/features/providers/lib/providerDirectory";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { EdgeFade } from "@/shared/ui/EdgeFade";
 import { RowButton } from "@/shared/ui/row-button";
-import type { ProviderTemplate } from "./CustomProviderForm";
+import { Spinner } from "@/shared/ui/spinner";
 
 interface ProviderTemplatePickerProps {
-  templates: ProviderTemplate[];
-  onSelect: (templateId: string) => void;
-  /** Start a blank, fully-custom provider instead of picking a template. */
+  choices: ProviderDirectoryChoice[];
+  onSelect: (choice: ProviderDirectoryChoice) => void;
+  /** Start a blank, fully-custom provider instead of picking a known provider. */
   onStartManual?: () => void;
   disabled?: boolean;
-}
-
-function matchesTemplateSearch(template: ProviderTemplate, query: string) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return true;
-  }
-
-  return [
-    template.displayName,
-    template.description ?? "",
-    template.engine,
-    template.id,
-    ...template.models,
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(needle);
+  loading?: boolean;
 }
 
 export function ProviderTemplatePicker({
-  templates,
+  choices,
   onSelect,
   onStartManual,
   disabled = false,
+  loading = false,
 }: ProviderTemplatePickerProps) {
   const { t } = useTranslation("settings");
   const [query, setQuery] = useState("");
-  const filteredTemplates = useMemo(
-    () => templates.filter((t) => matchesTemplateSearch(t, query)),
-    [query, templates],
+  const filteredChoices = useMemo(
+    () => searchProviderChoices(choices, query),
+    [choices, query],
   );
 
   return (
@@ -59,24 +47,30 @@ export function ProviderTemplatePicker({
       <div className="relative mt-3 min-h-0 flex-1">
         <ScrollArea className="h-full">
           <div className="space-y-0.5 pr-1 pt-2">
-            {filteredTemplates.map((template) => (
+            {filteredChoices.map((choice) => (
               <RowButton
-                key={template.id}
+                key={`${choice.kind}:${choice.id}`}
                 variant="menu"
-                onClick={() => onSelect(template.id)}
+                onClick={() => onSelect(choice)}
                 disabled={disabled}
-                label={template.displayName}
+                label={choice.displayName}
                 description={
-                  template.models.length > 0
+                  choice.kind === "template" &&
+                  choice.template.models.length > 0
                     ? t("providers.custom.modelCount", {
-                        count: template.models.length,
+                        count: choice.template.models.length,
                       })
-                    : undefined
+                    : choice.description
                 }
               />
             ))}
 
-            {filteredTemplates.length === 0 ? (
+            {loading ? (
+              <div className="flex items-center justify-center gap-2 px-2 py-6 text-xs text-muted-foreground">
+                <Spinner className="size-3" />
+                {t("providers.custom.templates.loading")}
+              </div>
+            ) : filteredChoices.length === 0 ? (
               <p className="px-2 py-6 text-center text-xs text-muted-foreground">
                 {t("providers.custom.templates.empty")}
               </p>

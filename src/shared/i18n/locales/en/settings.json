@@ -576,10 +576,10 @@
         "showApiKey": "Show API key"
       },
       "addButton": "Add provider",
-      "addTitle": "Add custom provider",
+      "addTitle": "Add model provider",
       "confirmDelete": "This removes {{name}} and its saved API key.",
       "confirmDeleteTitle": "Delete {{name}}?",
-      "description": "Connect a model provider using its API endpoint and key.",
+      "description": "Choose a model provider to connect to Goose.",
       "editTitle": "Edit custom provider",
       "emptyHeaders": "No custom headers.",
       "emptyModels": "Add at least one model.",
@@ -638,11 +638,12 @@
         "compatibility": {
           "all": "All types"
         },
-        "empty": "No templates available yet.",
+        "empty": "No providers match your search.",
+        "loading": "Loading providers...",
         "manual": "Add a custom provider",
         "manualDescription": "Start from a blank provider configuration.",
         "manualLead": "Provider not in the list?",
-        "searchPlaceholder": "Search templates",
+        "searchPlaceholder": "Search providers",
         "useTemplate": "Use a template",
         "useTemplateDescription": "Start with endpoint and model defaults for a known provider."
       }
@@ -653,6 +654,7 @@
     "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
     "models": {
       "active": "Active",
+      "configured": "Configured",
       "connectPrompt": "Connect a model provider",
       "description": "Goose requires an AI model to run.",
       "summaryLabel": "Model provider",

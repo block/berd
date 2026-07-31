@@ -4,7 +4,7 @@ import type {
 } from "@/shared/runtime-config/schema";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
-import { isByoKeyProvider } from "./api/catalog";
+import { isSetupCatalogModelProvider } from "./api/catalog";
 import {
   getAgentProviders,
   getAgentProvidersFromEntries,
@@ -19,14 +19,19 @@ export function getModelCacheRefreshProviderIds(
     defaultModelInventoryMode?: RuntimeModelInventoryMode;
     byoKeyProvidersEnabled?: boolean;
     catalogEntries?: ProviderCatalogEntry[];
+    configuredProviderIds?: ReadonlySet<string> | readonly string[];
   } = {},
 ): string[] {
   const {
     defaultModelInventoryMode,
     byoKeyProvidersEnabled = getBuildFeatureState().byoKeyProviders,
     catalogEntries,
+    configuredProviderIds,
   } = options;
   const ids = new Set<string>();
+  const configuredIds = configuredProviderIds
+    ? new Set(configuredProviderIds)
+    : null;
 
   for (const providerId of runtimeRefreshableModelProviderIds(
     runtimeConfig,
@@ -40,7 +45,11 @@ export function getModelCacheRefreshProviderIds(
     : getModelProviders();
   if (byoKeyProvidersEnabled) {
     for (const provider of modelProviders) {
-      if (isByoKeyProvider(provider) || provider.customProvider === true) {
+      if (
+        (configuredIds === null || configuredIds.has(provider.id)) &&
+        (isSetupCatalogModelProvider(provider) ||
+          provider.customProvider === true)
+      ) {
         ids.add(provider.id);
       }
     }

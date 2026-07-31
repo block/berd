@@ -13,13 +13,17 @@ import {
 } from "@/features/providers/runtimeProviderConfig";
 import {
   listProviderSetupCatalog,
-  selectByoKeyProviders,
+  selectSetupCatalogModelProviders,
   selectDatabricksHostConfigProvider,
 } from "@/features/providers/api/catalog";
 import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import { saveDefaultProviderSelectionFromConfiguredProvider } from "@/features/providers/defaultProviderConfig";
+import {
+  getIntentionalConfiguredProviderIds,
+  saveDefaultProviderSelectionFromConfiguredProvider,
+} from "@/features/providers/defaultProviderConfig";
+import { checkAllProviderStatus } from "@/features/providers/api/credentials";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
@@ -145,10 +149,9 @@ export async function runChatRuntimeStartup(): Promise<void> {
     try {
       const setupCatalog = await listProviderSetupCatalog();
       const databricks = selectDatabricksHostConfigProvider(setupCatalog);
-      const providers = [
-        ...selectByoKeyProviders(setupCatalog),
-        ...(databricks ? [databricks] : []),
-      ];
+      const providers = selectSetupCatalogModelProviders(setupCatalog).map(
+        (provider) => (provider.id === databricks?.id ? databricks : provider),
+      );
       if (providers.length > 0) {
         const runtimeConfigResult = useRuntimeConfigStore.getState().result;
         useProviderCatalogStore.getState().mergeEntries(providers);
@@ -190,10 +193,14 @@ export async function runChatRuntimeStartup(): Promise<void> {
 
   const refreshProviderModels = async () => {
     const runtimeConfigResult = useRuntimeConfigStore.getState().result;
+    const configuredProviderIds = await getIntentionalConfiguredProviderIds(
+      await checkAllProviderStatus(),
+    );
     await modelCacheStore.refreshAllModelProviders(
       getModelCacheRefreshProviderIds(useRuntimeConfigStore.getState().config, {
         defaultModelInventoryMode:
           defaultModelInventoryModeForLoadResult(runtimeConfigResult),
+        configuredProviderIds,
       }),
     );
   };

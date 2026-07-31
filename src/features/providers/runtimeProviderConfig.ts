@@ -1,4 +1,4 @@
-import { isByoKeyProvider } from "@/features/providers/api/catalog";
+import { isSetupCatalogModelProvider } from "@/features/providers/api/catalog";
 import { syncRuntimeCustomProviders } from "@/features/providers/api/customProviders";
 import type { ModelOption } from "@/features/chat/types";
 import { CURATED_PROVIDER_CATALOG } from "@/features/providers/curatedProviders";
@@ -49,6 +49,7 @@ function runtimeProviderToCatalogEntry(
     supportsInstall: false,
     supportsAuth: false,
     supportsAuthStatus: false,
+    catalogSource: "runtime",
   };
 }
 
@@ -75,23 +76,41 @@ export function mergeRuntimeProviderCatalog(
 
   const preserved = existingEntries.filter(
     (entry) =>
-      (isByoKeyProvider(entry) || entry.customProvider === true) &&
+      (isSetupCatalogModelProvider(entry) || entry.customProvider === true) &&
       !runtimeIds.has(entry.id),
   );
+  const setupEntriesById = new Map(
+    existingEntries
+      .filter(isSetupCatalogModelProvider)
+      .map((entry) => [entry.id, entry]),
+  );
+  for (const runtimeEntry of runtimeCatalog) {
+    const setupEntry = setupEntriesById.get(runtimeEntry.id);
+    if (!setupEntry) continue;
+    runtimeEntry.setupCatalogProvider = true;
+    runtimeEntry.setupMethod = setupEntry.setupMethod;
+    runtimeEntry.fields = setupEntry.fields;
+    runtimeEntry.docsUrl = setupEntry.docsUrl;
+    runtimeEntry.nativeConnectQuery ??= setupEntry.nativeConnectQuery;
+    runtimeEntry.aliases ??= setupEntry.aliases;
+  }
+
   const databricks = runtimeConfig.goose.modelProviders.find(
     (provider) => provider.id === DATABRICKS_PROVIDER_ID,
   );
   const databricksSetupEntry = existingEntries.find(
     (entry) => entry.id === DATABRICKS_PROVIDER_ID,
   );
-  if (databricks && !databricks.endpointEnv && databricksSetupEntry?.fields) {
+  if (databricks && databricksSetupEntry?.fields) {
     const databricksCatalogEntry = runtimeCatalog.find(
       (entry) => entry.id === DATABRICKS_PROVIDER_ID,
     );
     if (databricksCatalogEntry) {
-      databricksCatalogEntry.fields = databricksSetupEntry.fields.filter(
-        (field) => field.key === DATABRICKS_HOST_FIELD_KEY,
-      );
+      databricksCatalogEntry.fields = databricks.endpointEnv
+        ? undefined
+        : databricksSetupEntry.fields.filter(
+            (field) => field.key === DATABRICKS_HOST_FIELD_KEY,
+          );
     }
   }
 

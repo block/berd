@@ -12,7 +12,7 @@ import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
-import { ModelProviderRow } from "../ModelProviderRow";
+import { ModelProviderRow } from "@/features/providers/ui/ModelProviderRow";
 
 // The native sign-in is backend-owned; the row is a pure view over the store.
 // Mock the command bindings so the store's actions don't hit Tauri, and drive

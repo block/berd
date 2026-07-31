@@ -34,14 +34,25 @@ export function useProviderModels() {
       ).map((p) => p.id),
     [catalogEntries, runtimeConfig],
   );
+  const customProviderIds = useMemo(
+    () =>
+      getModelProvidersFromEntries(catalogEntries)
+        .filter((provider) => provider.customProvider === true)
+        .map((provider) => provider.id),
+    [catalogEntries],
+  );
   const modelCacheRefreshProviderIds = useMemo(
     () =>
       getModelCacheRefreshProviderIds(runtimeConfig, {
         defaultModelInventoryMode:
           defaultModelInventoryModeForLoadResult(runtimeConfigResult),
         catalogEntries,
+        // Connected first-class providers refresh at startup and immediately
+        // after setup. Picker-open refreshes must not probe unconfigured OAuth
+        // providers, which can launch external sign-in flows.
+        configuredProviderIds: customProviderIds,
       }),
-    [catalogEntries, runtimeConfig, runtimeConfigResult],
+    [catalogEntries, customProviderIds, runtimeConfig, runtimeConfigResult],
   );
 
   const getModelsForProvider = useCallback(

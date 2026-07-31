@@ -32,6 +32,7 @@ function modelProvider(
     description: id,
     setupMethod: fields ? "config_fields" : "none",
     group: "default",
+    catalogSource: "setup",
     fields,
   };
 }
@@ -53,6 +54,24 @@ describe("useProviderModels", () => {
       refreshingProviderIds: new Set(),
       runtimeManagedProviderIds: new Set(),
     });
+  });
+
+  it("does not refresh unconfigured first-class providers from the picker", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        ...modelProvider("github_copilot"),
+        nativeConnectQuery: "GitHub Copilot",
+      },
+    ]);
+
+    const { result } = renderHook(() => useProviderModels());
+
+    expect(result.current.configuredModelProviderIds).toContain(
+      "github_copilot",
+    );
+    expect(result.current.modelCacheRefreshProviderIds).not.toContain(
+      "github_copilot",
+    );
   });
 
   it("recomputes configured and refreshable model providers when the catalog changes", () => {
@@ -88,7 +107,6 @@ describe("useProviderModels", () => {
     ]);
     expect(result.current.modelCacheRefreshProviderIds).toEqual([
       "databricks_v2",
-      "anthropic",
       "claude-acp",
       "codex-acp",
       "copilot-acp",

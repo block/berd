@@ -100,6 +100,7 @@ describe("mergeRuntimeProviderCatalog", () => {
     const existing: ProviderCatalogEntry[] = [
       {
         id: "openai",
+        catalogSource: "setup",
         displayName: "OpenAI",
         category: "model",
         description: "GPT models",
@@ -150,23 +151,84 @@ describe("mergeRuntimeProviderCatalog", () => {
     );
   });
 
-  it("lets the runtime config win for ids it also defines", () => {
+  it("combines runtime inventory with same-id setup behavior", () => {
+    const config: RuntimeConfig = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        modelProviders: [
+          {
+            id: "openai",
+            displayName: "Managed OpenAI",
+            models: [{ id: "gpt-5", name: "GPT-5" }],
+          },
+        ],
+      },
+    };
     const existing: ProviderCatalogEntry[] = [
       {
-        ...catalogEntry("databricks_v2", "model"),
-        displayName: "Stale Databricks",
-        fields: [{ key: "X", label: "X", secret: false, required: false }],
+        ...catalogEntry("openai", "model"),
+        catalogSource: "setup",
+        setupCatalogProvider: true,
+        setupMethod: "config_fields",
+        fields: [
+          {
+            key: "OPENAI_API_KEY",
+            label: "API Key",
+            secret: true,
+            required: false,
+          },
+        ],
+        docsUrl: "https://platform.openai.com",
       },
     ];
 
-    const databricks = mergeRuntimeProviderCatalog(
+    const [openai] = mergeRuntimeProviderCatalog(existing, config).filter(
+      (entry) => entry.id === "openai",
+    );
+
+    expect(openai).toMatchObject({
+      displayName: "Managed OpenAI",
+      catalogSource: "runtime",
+      setupCatalogProvider: true,
+      setupMethod: "config_fields",
+      docsUrl: "https://platform.openai.com",
+    });
+    expect(openai.fields?.map((field) => field.key)).toEqual([
+      "OPENAI_API_KEY",
+    ]);
+  });
+
+  it("keeps managed Databricks setup fields hidden", () => {
+    const existing: ProviderCatalogEntry[] = [
+      {
+        ...catalogEntry("databricks_v2", "model"),
+        catalogSource: "setup",
+        setupCatalogProvider: true,
+        fields: [
+          {
+            key: "DATABRICKS_HOST",
+            label: "Host",
+            secret: false,
+            required: true,
+          },
+          {
+            key: "DATABRICKS_TOKEN",
+            label: "Token",
+            secret: true,
+            required: false,
+          },
+        ],
+      },
+    ];
+
+    const [databricks] = mergeRuntimeProviderCatalog(
       existing,
       DEFAULT_RUNTIME_CONFIG,
     ).filter((entry) => entry.id === "databricks_v2");
 
-    expect(databricks).toHaveLength(1);
-    expect(databricks[0].fields).toBeUndefined();
-    expect(databricks[0].displayName).toBe("Databricks AI Gateway");
+    expect(databricks.fields).toBeUndefined();
+    expect(databricks.displayName).toBe("Databricks AI Gateway");
   });
 
   it("keeps only the Databricks host field when runtime config has no endpoint env", () => {
@@ -218,6 +280,7 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
     useProviderCatalogStore.getState().setEntries([
       {
         id: "openai",
+        catalogSource: "setup",
         displayName: "OpenAI",
         category: "model",
         description: "GPT models",
@@ -357,10 +420,11 @@ describe("getModelCacheRefreshProviderIds", () => {
     ).toEqual(["databricks_v2", "codex-acp"]);
   });
 
-  it("includes explicit BYO setup providers when bring-your-own-key is on", () => {
+  it("includes configured BYO setup providers when bring-your-own-key is on", () => {
     useProviderCatalogStore.getState().mergeEntries([
       {
         ...catalogEntry("anthropic", "model"),
+        catalogSource: "setup",
         fields: [
           {
             key: "ANTHROPIC_API_KEY",
@@ -375,11 +439,34 @@ describe("getModelCacheRefreshProviderIds", () => {
     expect(
       getModelCacheRefreshProviderIds(DEFAULT_RUNTIME_CONFIG, {
         byoKeyProvidersEnabled: true,
+        configuredProviderIds: ["anthropic"],
       }),
     ).toEqual(["anthropic", "codex-acp"]);
   });
 
-  it("does not include fields-bearing non-BYO providers when bring-your-own-key is on", () => {
+  it("does not refresh unconfigured setup providers at startup", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        ...catalogEntry("anthropic", "model"),
+        catalogSource: "setup",
+        setupCatalogProvider: true,
+      },
+      {
+        ...catalogEntry("openrouter", "model"),
+        catalogSource: "setup",
+        setupCatalogProvider: true,
+      },
+    ]);
+
+    expect(
+      getModelCacheRefreshProviderIds(DEFAULT_RUNTIME_CONFIG, {
+        byoKeyProvidersEnabled: true,
+        configuredProviderIds: ["anthropic"],
+      }),
+    ).toEqual(["anthropic", "codex-acp"]);
+  });
+
+  it("does not include unconfigured providers when bring-your-own-key is on", () => {
     useProviderCatalogStore.getState().mergeEntries([
       {
         ...catalogEntry("ollama", "model"),

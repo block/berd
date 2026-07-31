@@ -573,10 +573,10 @@
         "showApiKey": "Mostrar clave API"
       },
       "addButton": "Agregar proveedor",
-      "addTitle": "Agregar proveedor personalizado",
+      "addTitle": "Agregar proveedor de modelos",
       "confirmDelete": "Esto elimina {{name}} y cualquier clave API que le pertenezca.",
       "confirmDeleteTitle": "¿Eliminar {{name}}?",
-      "description": "Conecta un proveedor de modelos usando su endpoint y clave de API.",
+      "description": "Elige un proveedor de modelos para conectarlo a Goose.",
       "editTitle": "Editar proveedor personalizado",
       "emptyHeaders": "No hay encabezados personalizados.",
       "emptyModels": "Agrega al menos un modelo.",
@@ -635,11 +635,12 @@
         "compatibility": {
           "all": "Todos los tipos"
         },
-        "empty": "Todavía no hay plantillas disponibles.",
+        "empty": "No hay proveedores que coincidan con tu búsqueda.",
+        "loading": "Cargando proveedores...",
         "manual": "Agregar un proveedor personalizado",
         "manualDescription": "Comienza con una configuración de proveedor en blanco.",
         "manualLead": "¿Tu proveedor no está en la lista?",
-        "searchPlaceholder": "Buscar plantillas",
+        "searchPlaceholder": "Buscar proveedores",
         "useTemplate": "Usar una plantilla",
         "useTemplateDescription": "Comienza con valores predeterminados de endpoint y modelos para un proveedor conocido."
       }
@@ -650,6 +651,7 @@
     "modelRefreshWarning": "Credenciales guardadas. La actualización de modelos necesita atención: {{message}}",
     "models": {
       "active": "Activo",
+      "configured": "Configurado",
       "connectPrompt": "Conectar un proveedor de modelos",
       "description": "Goose requiere un modelo de IA para ejecutarse.",
       "summaryLabel": "Proveedor de modelos",

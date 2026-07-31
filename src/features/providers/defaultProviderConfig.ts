@@ -1,43 +1,55 @@
 import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { getClient } from "@/shared/api/acpConnection";
-import { SETUP_CATALOG_BYO_KEY_PROVIDER_IDS } from "./api/catalog";
-import { checkAllProviderStatus } from "./api/credentials";
+import { checkAllProviderStatus, listProviderSecrets } from "./api/credentials";
+import { getModelProviders } from "./providerCatalog";
+import {
+  getCredentialedProviderIds,
+  isCredentialedProvider,
+} from "./lib/providerConnectionPolicy";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 
-const BYO_KEY_PROVIDER_ID_SET = new Set<string>(
-  SETUP_CATALOG_BYO_KEY_PROVIDER_IDS,
-);
-
 /**
- * Configured bring-your-own-key providers usable for default-provider
- * recovery. Only BYO key providers count: the provider readiness gate exists
- * to require a user-provided key, so providers preconfigured by runtime
- * config (e.g. databricks_v2 via endpointEnv) must not satisfy it.
+ * Providers eligible for default-provider recovery: Goose reports them
+ * configured AND either a stored Goose credential exists (API key or OAuth
+ * token) or the provider is a user-created custom provider. Merely
+ * "Configured" non-secret endpoints and runtime-managed providers (e.g.
+ * databricks_v2 via runtime config) never satisfy the readiness gate.
  */
-function getConfiguredByoKeyProviderIdsFromStatuses(
+export async function getIntentionalConfiguredProviderIds(
   statuses: Awaited<ReturnType<typeof checkAllProviderStatus>>,
-): string[] {
-  return statuses.flatMap((status) =>
-    status.isConfigured && BYO_KEY_PROVIDER_ID_SET.has(status.providerId)
-      ? [status.providerId]
-      : [],
+): Promise<string[]> {
+  const configuredIds = new Set(
+    statuses
+      .filter((status) => status.isConfigured)
+      .map((status) => status.providerId),
   );
+  const credentialedIds = getCredentialedProviderIds(
+    await listProviderSecrets(),
+  );
+  return getModelProviders()
+    .filter(
+      (provider) =>
+        configuredIds.has(provider.id) &&
+        (isCredentialedProvider(provider, credentialedIds) ||
+          provider.customProvider === true),
+    )
+    .map((provider) => provider.id);
 }
 
 /**
- * Recovery path for installs where a BYO key provider is configured but no
- * backend default is saved (e.g. credentials retained across a reset). Saves
- * the first configured BYO provider as the backend default so the readiness
- * gate clears with defaults properly persisted. Returns null when no
- * configured BYO provider exists.
+ * Recovery path for installs where a credential-backed provider is configured
+ * but no backend default is saved (e.g. credentials retained across a reset).
+ * Saves the first eligible provider as the backend default so the readiness
+ * gate clears with defaults properly persisted. Returns null when no eligible
+ * provider exists.
  */
 export async function saveDefaultProviderSelectionFromConfiguredProvider(): Promise<{
   providerId: string;
   modelId?: string;
   modelName?: string;
 } | null> {
-  const providerIds = getConfiguredByoKeyProviderIdsFromStatuses(
+  const providerIds = await getIntentionalConfiguredProviderIds(
     await checkAllProviderStatus(),
   );
   let lastError: unknown;

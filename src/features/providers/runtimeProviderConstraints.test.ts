@@ -69,6 +69,7 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     ...providers,
     {
       id: "anthropic",
+      catalogSource: "setup",
       displayName: "Anthropic",
       category: "model",
       description: "Claude models",

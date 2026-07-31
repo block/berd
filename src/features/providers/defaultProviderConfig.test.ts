@@ -8,6 +8,7 @@ import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { getClient } from "@/shared/api/acpConnection";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
+import { useProviderCatalogStore } from "./stores/providerCatalogStore";
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: vi.fn(),
@@ -90,7 +91,25 @@ describe("saveDefaultProviderSelection", () => {
 });
 
 describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
-  function mockClientWithStatuses(statuses: ProviderConfigStatusDto[]) {
+  function secret(provider: string) {
+    return {
+      id: `secret_store:${provider}:KEY`,
+      provider,
+      providerDisplayName: provider,
+      name: "KEY",
+      storage: "secret_store",
+      status: "unknown",
+      configured: true,
+      hasSecret: true,
+      canDelete: true,
+      canConfigure: false,
+    };
+  }
+
+  function mockClientWithStatuses(
+    statuses: ProviderConfigStatusDto[],
+    secrets: unknown[] = [],
+  ) {
     mockGetClient.mockResolvedValue({
       goose: {
         GooseUnstableDefaultsSave: defaultsSave,
@@ -100,12 +119,52 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
         GooseUnstableProvidersConfigStatus: vi
           .fn()
           .mockResolvedValue({ statuses }),
+        GooseUnstableProvidersSecretsList: vi
+          .fn()
+          .mockResolvedValue({ secrets }),
       },
     } as never);
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "openai",
+        displayName: "OpenAI",
+        category: "model",
+        description: "OpenAI models",
+        setupMethod: "single_api_key",
+        group: "default",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "OPENAI_API_KEY",
+            label: "API key",
+            secret: true,
+            required: true,
+          },
+        ],
+      },
+      {
+        id: "lmstudio",
+        displayName: "LM Studio",
+        category: "model",
+        description: "Local models",
+        setupMethod: "config_fields",
+        group: "additional",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "LMSTUDIO_HOST",
+            label: "Host URL",
+            secret: false,
+            required: false,
+            defaultValue: "http://localhost:1234",
+          },
+        ],
+      },
+    ]);
     const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
       useProviderModelCacheStore.setState({
         providers: new Map([
@@ -123,11 +182,15 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     useProviderModelCacheStore.setState({ refreshProviderModels });
   });
 
-  it("saves the first configured BYO key provider as the default", async () => {
-    mockClientWithStatuses([
-      status("databricks_v2", true),
-      status("openai", true),
-    ]);
+  it("restores a provider with a stored Goose credential and skips the rest", async () => {
+    mockClientWithStatuses(
+      [
+        status("lmstudio", true),
+        status("databricks_v2", true),
+        status("openai", true),
+      ],
+      [secret("openai")],
+    );
 
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
@@ -142,8 +205,29 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     });
   });
 
-  it("returns null when no BYO key provider is configured", async () => {
-    mockClientWithStatuses([status("databricks_v2", true)]);
+  it("does not recover a credentialless provider even with changed settings", async () => {
+    mockClientWithStatuses([status("lmstudio", true)], []);
+
+    await expect(
+      saveDefaultProviderSelectionFromConfiguredProvider(),
+    ).resolves.toBeNull();
+    expect(defaultsSave).not.toHaveBeenCalled();
+  });
+
+  it("ignores stored credentials for providers Goose does not report configured", async () => {
+    mockClientWithStatuses([status("lmstudio", true)], [secret("openai")]);
+
+    await expect(
+      saveDefaultProviderSelectionFromConfiguredProvider(),
+    ).resolves.toBeNull();
+    expect(defaultsSave).not.toHaveBeenCalled();
+  });
+
+  it("returns null when only ambient or runtime providers are configured", async () => {
+    mockClientWithStatuses(
+      [status("lmstudio", true), status("databricks_v2", true)],
+      [],
+    );
 
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),

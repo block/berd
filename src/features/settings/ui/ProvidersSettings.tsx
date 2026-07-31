@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconCheck } from "@tabler/icons-react";
 import {
   rerunDoctorReport,
   useDoctorReport,
@@ -22,9 +22,16 @@ import {
   type CustomProviderSummary,
 } from "@/features/providers/api/customProviders";
 import {
-  listProviderSetupCatalog,
-  selectByoKeyProviders,
-} from "@/features/providers/api/catalog";
+  mergeProviderChoices,
+  PROMOTED_PROVIDER_IDS,
+  providerDisplayName,
+} from "@/features/providers/lib/providerDirectory";
+import {
+  getCredentialedProviderIds,
+  hasMeaningfulSavedSettings,
+  isCredentialedProvider,
+} from "@/features/providers/lib/providerConnectionPolicy";
+import { listProviderSecrets } from "@/features/providers/api/credentials";
 import {
   CustomProviderChoice,
   type CustomProviderChoiceInfo,
@@ -49,7 +56,7 @@ import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { filterModelProvidersForRuntimeConfig } from "@/features/providers/runtimeProviderConstraints";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { AgentProviderCard } from "./AgentProviderCard";
-import { ModelProviderRow } from "./ModelProviderRow";
+import { ModelProviderRow } from "@/features/providers/ui/ModelProviderRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
@@ -59,25 +66,67 @@ import type {
   ProviderCatalogEntry,
 } from "@/shared/types/providers";
 
+export function isExplicitlyConnectedModelProvider(
+  entry: ProviderCatalogEntry,
+  configuredIds: ReadonlySet<string>,
+  runtimeProviderIds: ReadonlySet<string>,
+  credentialedIds: ReadonlySet<string>,
+): boolean {
+  // A stored Goose credential (API key or OAuth token) is authoritative
+  // Active evidence on its own; Goose only stores one after a deliberate
+  // user action.
+  if (isCredentialedProvider(entry, credentialedIds)) return true;
+  if (!configuredIds.has(entry.id)) return false;
+
+  // Runtime providers are deliberately supplied by the distribution, and a
+  // custom provider exists only after the user creates it. Both are explicit
+  // connections once Goose reports them configured.
+  return runtimeProviderIds.has(entry.id) || entry.customProvider === true;
+}
+
 function resolveStatus(
   entry: ProviderCatalogEntry,
   configuredIds: Set<string>,
+  runtimeProviderIds: ReadonlySet<string>,
+  credentialedIds: ReadonlySet<string>,
+  configuredBySavedValueIds: ReadonlySet<string>,
 ): ProviderSetupStatus {
   if (entry.id === "goose") return "built_in";
   if (entry.category === "agent") {
     return entry.setupMethod === "none" ? "built_in" : "not_installed";
   }
-  if (configuredIds.has(entry.id)) return "connected";
+  if (
+    isExplicitlyConnectedModelProvider(
+      entry,
+      configuredIds,
+      runtimeProviderIds,
+      credentialedIds,
+    )
+  ) {
+    return "connected";
+  }
+  if (configuredIds.has(entry.id) && configuredBySavedValueIds.has(entry.id)) {
+    return "configured";
+  }
   return "not_configured";
 }
 
 function toDisplayInfo(
   entries: ProviderCatalogEntry[],
   configuredIds: Set<string>,
+  runtimeProviderIds: ReadonlySet<string>,
+  credentialedIds: ReadonlySet<string> = new Set(),
+  configuredBySavedValueIds: ReadonlySet<string> = new Set(),
 ): ProviderDisplayInfo[] {
   return entries.map((entry) => ({
     ...entry,
-    status: resolveStatus(entry, configuredIds),
+    status: resolveStatus(
+      entry,
+      configuredIds,
+      runtimeProviderIds,
+      credentialedIds,
+      configuredBySavedValueIds,
+    ),
   }));
 }
 
@@ -92,6 +141,7 @@ function customProviderSummaryToCatalogEntry(
     setupMethod: "config_fields",
     group: "additional",
     customProvider: true,
+    catalogSource: "custom",
     supportsInstall: false,
     supportsAuth: false,
     supportsAuthStatus: false,
@@ -128,12 +178,20 @@ export function ProvidersSettings({
 }: ProvidersSettingsProps) {
   const { t } = useTranslation(["settings", "common"]);
   const runtimeConfig = useRuntimeConfigStore((state) => state.config);
-  const [showAllModels, setShowAllModels] = useState(false);
-  const [modelOrder, setModelOrder] = useState<string[] | null>(null);
+  const [selectedSetupProviderId, setSelectedSetupProviderId] = useState<
+    string | null
+  >(null);
   const [setupDetourReadyProviderId, setSetupDetourReadyProviderId] = useState<
     string | null
   >(null);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
+  const runtimeProviderIds = useMemo(
+    () =>
+      new Set(
+        runtimeConfig.goose.modelProviders.map((provider) => provider.id),
+      ),
+    [runtimeConfig],
+  );
   const queryClient = useQueryClient();
 
   // Custom ("Add a provider") state. The whole surface is BYO-gated: with the
@@ -174,23 +232,6 @@ export function ProvidersSettings({
   useEffect(() => {
     void refreshCustomProviders();
   }, [refreshCustomProviders]);
-
-  useEffect(() => {
-    if (!byoEnabled) {
-      return;
-    }
-    void (async () => {
-      try {
-        useProviderCatalogStore
-          .getState()
-          .mergeEntries(
-            selectByoKeyProviders(await listProviderSetupCatalog()),
-          );
-      } catch (error) {
-        console.warn("Failed to load BYO model providers:", error);
-      }
-    })();
-  }, [byoEnabled]);
 
   const loadCustomProviderTemplates = useCallback(async () => {
     try {
@@ -293,6 +334,7 @@ export function ProvidersSettings({
     save,
     remove,
     completeNativeSetup,
+    credentialRevision,
   } = useCredentials();
 
   // Agent install/auth status comes from the shared doctor report (the same
@@ -320,9 +362,81 @@ export function ProvidersSettings({
       toDisplayInfo(
         getAgentProvidersFromEntries(catalogEntries),
         configuredIds,
+        runtimeProviderIds,
       ),
-    [configuredIds, catalogEntries],
+    [configuredIds, catalogEntries, runtimeProviderIds],
   );
+
+  // Stored Goose credentials (API keys / OAuth tokens) are the authoritative
+  // Active evidence: one secrets-list call, no per-provider probing.
+  const [credentialedIds, setCredentialedIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const revisionAtRequest = credentialRevision;
+    setCredentialedIds(new Set());
+    void listProviderSecrets()
+      .then((secrets) => {
+        if (!cancelled && revisionAtRequest === credentialRevision) {
+          setCredentialedIds(getCredentialedProviderIds(secrets));
+        }
+      })
+      .catch(() => {
+        // Without secret evidence, stay conservative: no Active promotion.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [credentialRevision]);
+
+  // A provider without a stored credential can still earn "Configured" when
+  // the user saved a meaningful non-secret setting. Untouched defaults or
+  // ambient-only readiness never count.
+  const [configuredBySavedValueIds, setConfiguredBySavedValueIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const configStatusRunId = useRef(0);
+  const nonCredentialConfiguredProviders = useMemo(
+    () =>
+      getModelProvidersFromEntries(catalogEntries).filter(
+        (entry) =>
+          configuredIds.has(entry.id) &&
+          !isExplicitlyConnectedModelProvider(
+            entry,
+            configuredIds,
+            runtimeProviderIds,
+            credentialedIds,
+          ) &&
+          (entry.fields?.length ?? 0) > 0,
+      ),
+    [catalogEntries, configuredIds, runtimeProviderIds, credentialedIds],
+  );
+  useEffect(() => {
+    const runId = configStatusRunId.current + 1;
+    configStatusRunId.current = runId;
+    const currentIds = new Set(
+      nonCredentialConfiguredProviders.map((provider) => provider.id),
+    );
+    setConfiguredBySavedValueIds(
+      (previous) => new Set([...previous].filter((id) => currentIds.has(id))),
+    );
+
+    for (const entry of nonCredentialConfiguredProviders) {
+      void getConfig(entry.id)
+        .then((values) => hasMeaningfulSavedSettings(entry, values))
+        .catch(() => false)
+        .then((configured) => {
+          if (configStatusRunId.current !== runId) return;
+          setConfiguredBySavedValueIds((previous) => {
+            const next = new Set(previous);
+            if (configured) next.add(entry.id);
+            else next.delete(entry.id);
+            return next;
+          });
+        });
+    }
+  }, [nonCredentialConfiguredProviders, getConfig]);
 
   const allModels = useMemo(
     () =>
@@ -332,58 +446,61 @@ export function ProvidersSettings({
           runtimeConfig,
         ).filter((provider) => provider.customProvider !== true),
         configuredIds,
+        runtimeProviderIds,
+        credentialedIds,
+        configuredBySavedValueIds,
       ),
-    [configuredIds, runtimeConfig, catalogEntries],
+    [
+      configuredIds,
+      runtimeConfig,
+      catalogEntries,
+      runtimeProviderIds,
+      credentialedIds,
+      configuredBySavedValueIds,
+    ],
   );
 
-  const sortedModels = useMemo(() => {
-    return [...allModels].sort((a, b) => {
-      const connected = (p: ProviderDisplayInfo) =>
-        p.status === "connected" || p.status === "built_in";
-      if (connected(a) && !connected(b)) return -1;
-      if (!connected(a) && connected(b)) return 1;
-      return 0;
-    });
-  }, [allModels]);
-
-  useEffect(() => {
-    if (!loading && modelOrder === null) {
-      setModelOrder(sortedModels.map((model) => model.id));
-    }
-  }, [loading, modelOrder, sortedModels]);
-
-  const orderedModels = useMemo(() => {
-    if (!modelOrder) {
-      return sortedModels;
-    }
-
-    const orderIndex = new Map(
-      modelOrder.map((modelId, index) => [modelId, index]),
-    );
-
-    return [...allModels].sort((a, b) => {
-      const aIndex = orderIndex.get(a.id);
-      const bIndex = orderIndex.get(b.id);
-
-      if (aIndex !== undefined && bIndex !== undefined) {
-        return aIndex - bIndex;
-      }
-      if (aIndex !== undefined) {
-        return -1;
-      }
-      if (bIndex !== undefined) {
-        return 1;
-      }
-      return a.displayName.localeCompare(b.displayName);
-    });
-  }, [allModels, modelOrder, sortedModels]);
-
-  const defaultModels = orderedModels.filter((m) => m.group === "default");
-  const additionalModels = orderedModels.filter(
-    (m) => m.group === "additional",
+  const namedModels = allModels.map((model) => ({
+    ...model,
+    displayName: providerDisplayName(model.id, model.displayName),
+  }));
+  const modelById = new Map(namedModels.map((model) => [model.id, model]));
+  const promotedModels = PROMOTED_PROVIDER_IDS.flatMap((id) => {
+    const model = modelById.get(id);
+    return model ? [model] : [];
+  });
+  const promotedIds = new Set<string>(PROMOTED_PROVIDER_IDS);
+  const visibleUnpromotedModels = namedModels.filter(
+    (model) =>
+      !promotedIds.has(model.id) &&
+      (model.status === "connected" ||
+        model.status === "built_in" ||
+        model.status === "configured"),
   );
-  const visibleModels = showAllModels ? orderedModels : defaultModels;
-  const connectedModels = orderedModels.filter(
+  const selectedSetupModel = selectedSetupProviderId
+    ? namedModels.find((model) => model.id === selectedSetupProviderId)
+    : undefined;
+  const visibleModels = [...promotedModels, ...visibleUnpromotedModels];
+  const mainPageModels = visibleModels.filter(
+    (model) => model.id !== selectedSetupProviderId,
+  );
+  const activeModels = mainPageModels.filter(
+    (model) => model.status === "connected" || model.status === "built_in",
+  );
+  const inactiveModels = mainPageModels.filter(
+    (model) => model.status !== "connected" && model.status !== "built_in",
+  );
+  const activeCustomProviders = customProviders.filter(
+    (provider) => provider.configured,
+  );
+  const inactiveCustomProviders = customProviders.filter(
+    (provider) => !provider.configured,
+  );
+  const directoryChoices = mergeProviderChoices(
+    namedModels,
+    customProviderTemplates,
+  );
+  const connectedModels = namedModels.filter(
     (model) => model.status === "connected" || model.status === "built_in",
   );
   const connectedModelNames = connectedModels
@@ -412,6 +529,41 @@ export function ProvidersSettings({
         {t("providers.models.connectPrompt")}
       </span>
     );
+
+  function renderModelProvider(model: ProviderDisplayInfo) {
+    return (
+      <ModelProviderRow
+        key={model.id}
+        provider={model}
+        defaultExpanded={model.id === selectedSetupProviderId}
+        onGetConfig={getConfig}
+        onSaveFields={(fields) => save(model.id, fields)}
+        onRemoveConfig={() => remove(model.id)}
+        onCompleteNativeSetup={completeNativeSetup}
+        onProviderConnected={handleProviderConnected}
+        saving={savingProviderIds.has(model.id)}
+        modelSyncing={syncingProviderIds.has(model.id)}
+        modelWarning={modelWarnings.get(model.id)}
+      />
+    );
+  }
+
+  function renderCustomProvider(provider: CustomProviderSummary) {
+    return (
+      <CustomProviderChoice
+        key={provider.providerId}
+        provider={toChoiceInfo(provider)}
+        onEdit={() => void openEditCustomProvider(provider.providerId)}
+        onDelete={() =>
+          setPendingCustomProviderDelete({
+            providerId: provider.providerId,
+            displayName: provider.displayName,
+          })
+        }
+        deleting={customProvidersApi.saving}
+      />
+    );
+  }
 
   const gooseCollapsedSupplement = connectedModelNames ? (
     <div className="rounded-b-md bg-foreground px-3 pt-8 pb-2.5 text-background">
@@ -459,36 +611,10 @@ export function ProvidersSettings({
       ) : null}
 
       <div className="mt-3 space-y-2">
-        {visibleModels.map((model) => (
-          <ModelProviderRow
-            key={model.id}
-            provider={model}
-            onGetConfig={getConfig}
-            onSaveFields={(fields) => save(model.id, fields)}
-            onRemoveConfig={() => remove(model.id)}
-            onCompleteNativeSetup={completeNativeSetup}
-            onProviderConnected={handleProviderConnected}
-            saving={savingProviderIds.has(model.id)}
-            modelSyncing={syncingProviderIds.has(model.id)}
-            modelWarning={modelWarnings.get(model.id)}
-          />
-        ))}
-        {byoEnabled
-          ? customProviders.map((provider) => (
-              <CustomProviderChoice
-                key={provider.providerId}
-                provider={toChoiceInfo(provider)}
-                onEdit={() => void openEditCustomProvider(provider.providerId)}
-                onDelete={() =>
-                  setPendingCustomProviderDelete({
-                    providerId: provider.providerId,
-                    displayName: provider.displayName,
-                  })
-                }
-                deleting={customProvidersApi.saving}
-              />
-            ))
-          : null}
+        {activeModels.map(renderModelProvider)}
+        {byoEnabled ? activeCustomProviders.map(renderCustomProvider) : null}
+        {inactiveModels.map(renderModelProvider)}
+        {byoEnabled ? inactiveCustomProviders.map(renderCustomProvider) : null}
       </div>
 
       {byoEnabled ? (
@@ -503,31 +629,6 @@ export function ProvidersSettings({
           {t("providers.custom.addButton")}
         </Button>
       ) : null}
-
-      {!showAllModels && additionalModels.length > 0 && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowAllModels(true)}
-          className="mt-2 w-full text-muted-foreground"
-        >
-          {t("providers.showMore", { count: additionalModels.length })}
-          <IconChevronDown className="size-3" />
-        </Button>
-      )}
-
-      {showAllModels && additionalModels.length > 0 && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowAllModels(false)}
-          className="mt-2 w-full text-muted-foreground"
-        >
-          {t("providers.showFewer")}
-        </Button>
-      )}
     </div>
   );
 
@@ -610,7 +711,30 @@ export function ProvidersSettings({
             mode={customDialogMode}
             provider={customProviderDraft}
             templates={customProviderTemplates}
-            onOpenChange={setCustomDialogOpen}
+            choices={directoryChoices}
+            onSelectSetupProvider={setSelectedSetupProviderId}
+            directoryLoading={customProvidersApi.catalogLoading}
+            setupProviderContent={
+              selectedSetupModel ? (
+                <ModelProviderRow
+                  key={selectedSetupModel.id}
+                  provider={selectedSetupModel}
+                  defaultExpanded
+                  onGetConfig={getConfig}
+                  onSaveFields={(fields) => save(selectedSetupModel.id, fields)}
+                  onRemoveConfig={() => remove(selectedSetupModel.id)}
+                  onCompleteNativeSetup={completeNativeSetup}
+                  onProviderConnected={handleProviderConnected}
+                  saving={savingProviderIds.has(selectedSetupModel.id)}
+                  modelSyncing={syncingProviderIds.has(selectedSetupModel.id)}
+                  modelWarning={modelWarnings.get(selectedSetupModel.id)}
+                />
+              ) : null
+            }
+            onOpenChange={(open) => {
+              setCustomDialogOpen(open);
+              if (!open) setSelectedSetupProviderId(null);
+            }}
             onCreate={handleCreateCustomProvider}
             onUpdate={handleUpdateCustomProvider}
             onDelete={async (providerId) => {

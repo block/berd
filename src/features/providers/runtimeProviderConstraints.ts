@@ -1,4 +1,4 @@
-import { isByoKeyProvider } from "@/features/providers/api/catalog";
+import { isSetupCatalogModelProvider } from "@/features/providers/api/catalog";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
@@ -37,7 +37,8 @@ export function filterModelProvidersForRuntimeConfig(
     (provider) =>
       allowlist.has(provider.id) ||
       (byoKeyProvidersEnabled &&
-        (isByoKeyProvider(provider) || provider.customProvider === true)),
+        (isSetupCatalogModelProvider(provider) ||
+          provider.customProvider === true)),
   );
 }
 

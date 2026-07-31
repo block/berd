@@ -33,6 +33,7 @@ interface UseCredentialsReturn {
     providerId: string,
     result?: ProviderConfigChangeResponse,
   ) => Promise<void>;
+  credentialRevision: number;
 }
 
 export function useCredentials(): UseCredentialsReturn {
@@ -47,6 +48,7 @@ export function useCredentials(): UseCredentialsReturn {
   const [modelWarnings, setModelWarnings] = useState<Map<string, string>>(
     () => new Map(),
   );
+  const [credentialRevision, setCredentialRevision] = useState(0);
   const modelRefreshRunIds = useRef(new Map<string, number>());
 
   const refreshStatuses = useCallback(async () => {
@@ -182,6 +184,7 @@ export function useCredentials(): UseCredentialsReturn {
           fields.map(({ key, value }) => ({ key, value })),
         );
         updateProviderStatus(result.status);
+        setCredentialRevision((revision) => revision + 1);
         useProviderModelCacheStore.getState().invalidateProvider(providerId);
         if (
           result.status.isConfigured &&
@@ -214,6 +217,7 @@ export function useCredentials(): UseCredentialsReturn {
       try {
         const result = await deleteProviderConfig(providerId);
         updateProviderStatus(result.status);
+        setCredentialRevision((revision) => revision + 1);
         useProviderModelCacheStore.getState().invalidateProvider(providerId);
         cancelProviderModelRefresh(providerId);
         try {
@@ -239,6 +243,7 @@ export function useCredentials(): UseCredentialsReturn {
       if (result) {
         updateProviderStatus(result.status);
       }
+      setCredentialRevision((revision) => revision + 1);
       useProviderModelCacheStore.getState().invalidateProvider(providerId);
       const isConfigured =
         result?.status.isConfigured ??
@@ -278,5 +283,6 @@ export function useCredentials(): UseCredentialsReturn {
     save,
     remove,
     completeNativeSetup,
+    credentialRevision,
   };
 }

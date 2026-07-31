@@ -24,38 +24,33 @@ export function mapProviderSetupCatalogEntryDto(
     supportsInstall: dto.supportsInstall,
     supportsAuth: dto.supportsAuth,
     supportsAuthStatus: dto.supportsAuthStatus,
+    catalogSource: "setup",
+    setupCatalogProvider: true,
   };
 }
 
-// Model providers berd surfaces from goose's setup catalog so users can bring
-// their own API key. goose serves these with their own secret API-key `fields`
-// (OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY); the runtime-config
-// catalog does not, so they are merged into the catalog store at startup.
-export const SETUP_CATALOG_BYO_KEY_PROVIDER_IDS = [
-  "openai",
-  "anthropic",
-  "google",
-] as const;
+// Public/dev builds surface every model provider Goose exposes through its
+// setup catalog. The catalog owns setup fields and behavior; Berd only curates
+// which entries are promoted on the main page.
+export function selectSetupCatalogModelProviders(
+  entries: ProviderCatalogEntry[],
+): ProviderCatalogEntry[] {
+  return entries.filter((entry) => entry.category === "model");
+}
 
-const SETUP_CATALOG_BYO_KEY_PROVIDER_ID_SET = new Set<string>(
-  SETUP_CATALOG_BYO_KEY_PROVIDER_IDS,
-);
 const SETUP_CATALOG_DATABRICKS_PROVIDER_ID = "databricks_v2";
 const SETUP_CATALOG_DATABRICKS_HOST_FIELD_KEY = "DATABRICKS_HOST";
 
-export function isByoKeyProvider(
-  entry: Pick<ProviderCatalogEntry, "id" | "fields">,
+export function isSetupCatalogModelProvider(
+  entry: Pick<
+    ProviderCatalogEntry,
+    "category" | "catalogSource" | "setupCatalogProvider"
+  >,
 ): boolean {
   return (
-    SETUP_CATALOG_BYO_KEY_PROVIDER_ID_SET.has(entry.id) &&
-    (entry.fields?.length ?? 0) > 0
+    entry.category === "model" &&
+    (entry.catalogSource === "setup" || entry.setupCatalogProvider === true)
   );
-}
-
-export function selectByoKeyProviders(
-  entries: ProviderCatalogEntry[],
-): ProviderCatalogEntry[] {
-  return entries.filter(isByoKeyProvider);
 }
 
 export function selectDatabricksHostConfigProvider(

@@ -70,6 +70,7 @@ function customProviderCatalogEntry(input: {
     setupMethod: "config_fields",
     group: "additional",
     customProvider: true,
+    catalogSource: "custom",
     supportsInstall: false,
     supportsAuth: false,
     supportsAuthStatus: false,

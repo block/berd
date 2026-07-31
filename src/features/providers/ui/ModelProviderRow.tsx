@@ -37,13 +37,13 @@ import {
   getNativeConnectDescription,
   getFieldSetupDescription,
   renderSetupMessage,
-} from "./modelProviderHelpers";
+} from "@/features/settings/ui/modelProviderHelpers";
 import {
   ConnectedFieldsPanel,
   ModelRefreshMessage,
   SetupFieldsPanel,
-} from "./ModelProviderPanels";
-import { ProviderSetupOutput } from "./ProviderSetupOutput";
+} from "@/features/settings/ui/ModelProviderPanels";
+import { ProviderSetupOutput } from "@/features/settings/ui/ProviderSetupOutput";
 
 const INTERNAL_DATABRICKS_PROVIDER_ID = "databricks_v2";
 const DATABRICKS_HOST_ENV_KEY = "DATABRICKS_HOST";
@@ -81,6 +81,7 @@ interface ModelProviderRowProps {
   saving?: boolean;
   modelSyncing?: boolean;
   modelWarning?: string | null;
+  defaultExpanded?: boolean;
 }
 
 function InternalDatabricksDetails({
@@ -110,9 +111,10 @@ export function ModelProviderRow({
   saving = false,
   modelSyncing = false,
   modelWarning = null,
+  defaultExpanded = false,
 }: ModelProviderRowProps) {
   const { t } = useTranslation("settings");
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [configValues, setConfigValues] = useState<ProviderFieldValue[]>([]);
   const [draftValues, setDraftValues] = useState<Record<string, string>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -584,6 +586,10 @@ export function ModelProviderRow({
             {isConnected ? (
               <span className="shrink-0 text-muted-foreground/60">
                 {t("providers.models.active")}
+              </span>
+            ) : provider.status === "configured" ? (
+              <span className="shrink-0 text-muted-foreground/60">
+                {t("providers.models.configured")}
               </span>
             ) : null}
           </span>

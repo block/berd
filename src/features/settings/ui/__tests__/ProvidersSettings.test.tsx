@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,41 @@ const mocks = vi.hoisted(() => ({
   listAgentSetupStatus: vi.fn(),
   onAgentSetupState: vi.fn(),
   useAgentProviderStatus: vi.fn(),
+  listProviderSetupCatalog: vi.fn(),
+  listCustomProviders: vi.fn(),
+  listProviderSecrets: vi.fn(),
 }));
+
+vi.mock("@/features/providers/api/catalog", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/features/providers/api/catalog")>();
+  return {
+    ...actual,
+    listProviderSetupCatalog: mocks.listProviderSetupCatalog,
+  };
+});
+
+vi.mock("@/features/providers/api/customProviders", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/providers/api/customProviders")
+    >();
+  return {
+    ...actual,
+    listCustomProviders: mocks.listCustomProviders,
+  };
+});
+
+vi.mock("@/features/providers/api/credentials", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/providers/api/credentials")
+    >();
+  return {
+    ...actual,
+    listProviderSecrets: mocks.listProviderSecrets,
+  };
+});
 
 vi.mock("@/features/providers/hooks/useCredentials", () => ({
   useCredentials: () => mocks.useCredentials(),
@@ -147,6 +181,7 @@ const allModelProvidersConfig: RuntimeConfig = {
 
 describe("ProvidersSettings", () => {
   beforeEach(() => {
+    mocks.listProviderSecrets.mockResolvedValue([]);
     vi.restoreAllMocks();
     vi.clearAllMocks();
     useProviderCatalogStore.getState().setEntries(providerCatalog);
@@ -161,6 +196,8 @@ describe("ProvidersSettings", () => {
     });
     useAgentSetupStore.setState({ operations: new Map() });
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
+    mocks.listProviderSetupCatalog.mockResolvedValue([]);
+    mocks.listCustomProviders.mockResolvedValue([]);
     mocks.clearAgentSetupStatus.mockResolvedValue(undefined);
     mocks.listAgentSetupStatus.mockResolvedValue([]);
     mocks.onAgentSetupState.mockResolvedValue(vi.fn());
@@ -189,11 +226,59 @@ describe("ProvidersSettings", () => {
       savingProviderIds: new Set<string>(),
       syncingProviderIds: new Set<string>(),
       modelWarnings: new Map<string, string>(),
-      getConfig: vi.fn(),
+      getConfig: vi.fn().mockResolvedValue([]),
       save: vi.fn(),
       remove: vi.fn(),
       completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
     });
+  });
+
+  it("does not refetch or overwrite the reconciled provider catalog", async () => {
+    const databricks = providerCatalog.find(
+      (provider) => provider.id === "databricks_v2",
+    );
+    if (!databricks) throw new Error("Databricks fixture is missing");
+    const runtimeDatabricks: ProviderCatalogEntry = {
+      ...databricks,
+      catalogSource: "runtime",
+      fields: [
+        {
+          key: "DATABRICKS_HOST",
+          label: "Host URL",
+          secret: false,
+          required: true,
+        },
+      ],
+    };
+    useProviderCatalogStore.getState().mergeEntries([runtimeDatabricks]);
+    mocks.listProviderSetupCatalog.mockResolvedValue([
+      {
+        ...runtimeDatabricks,
+        catalogSource: "setup",
+        fields: [
+          ...(runtimeDatabricks.fields ?? []),
+          {
+            key: "DATABRICKS_TOKEN",
+            label: "Access Token",
+            secret: true,
+            required: false,
+          },
+        ],
+      },
+    ]);
+
+    renderProviders(<ProvidersSettings />);
+
+    await waitFor(() => {
+      expect(mocks.listCustomProviders).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.listProviderSetupCatalog).not.toHaveBeenCalled();
+    expect(
+      useProviderCatalogStore
+        .getState()
+        .entries.find((provider) => provider.id === "databricks_v2"),
+    ).toEqual(runtimeDatabricks);
   });
 
   it("does not show the restart banner for provider credential changes", () => {
@@ -216,10 +301,11 @@ describe("ProvidersSettings", () => {
       savingProviderIds: new Set<string>(),
       syncingProviderIds: new Set<string>(),
       modelWarnings: new Map<string, string>(),
-      getConfig: vi.fn(),
+      getConfig: vi.fn().mockResolvedValue([]),
       save: vi.fn(),
       remove: vi.fn(),
       completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
     });
 
     renderProviders(<ProvidersSettings />);
@@ -230,7 +316,243 @@ describe("ProvidersSettings", () => {
     expect(screen.getByText("Checking provider status...")).toBeInTheDocument();
   });
 
-  it("matches main by ordering connected model providers first after status loads", async () => {
+  it("does not summarize default-ready providers as connected", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "aws_bedrock",
+        displayName: "AWS Bedrock",
+        category: "model",
+        description: "Models on AWS",
+        setupMethod: "cloud_credentials",
+        group: "additional",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "AWS_REGION",
+            label: "AWS Region",
+            secret: false,
+            required: true,
+            defaultValue: "us-east-1",
+          },
+        ],
+      },
+      {
+        id: "lmstudio",
+        displayName: "LM Studio",
+        category: "model",
+        description: "Run local models",
+        setupMethod: "config_fields",
+        group: "additional",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "LMSTUDIO_HOST",
+            label: "Host URL",
+            secret: false,
+            required: false,
+            defaultValue: "http://localhost:1234",
+          },
+        ],
+      },
+      {
+        id: "atomic_chat",
+        displayName: "Atomic Chat",
+        category: "model",
+        description: "Run local models",
+        setupMethod: "config_fields",
+        group: "additional",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "ATOMIC_CHAT_HOST",
+            label: "Host URL",
+            secret: false,
+            required: false,
+            defaultValue: "http://localhost:1337",
+          },
+        ],
+      },
+    ]);
+    mocks.useCredentials.mockReturnValue({
+      configuredIds: new Set<string>([
+        "databricks_v2",
+        "aws_bedrock",
+        "lmstudio",
+        "atomic_chat",
+      ]),
+      loading: false,
+      saving: false,
+      savingProviderIds: new Set<string>(),
+      syncingProviderIds: new Set<string>(),
+      modelWarnings: new Map<string, string>(),
+      getConfig: vi.fn().mockResolvedValue([]),
+      save: vi.fn(),
+      remove: vi.fn(),
+      completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
+    });
+
+    renderProviders(<ProvidersSettings />);
+
+    expect(screen.getByText("Databricks")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/AWS Bedrock, LM Studio, Atomic Chat/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("tags a provider Configured when a non-secret endpoint is saved without a credential", async () => {
+    const user = userEvent.setup();
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "lmstudio",
+        displayName: "LM Studio",
+        category: "model",
+        description: "Run local models",
+        setupMethod: "config_fields",
+        group: "additional",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "LMSTUDIO_API_KEY",
+            label: "API key",
+            secret: true,
+            required: false,
+          },
+          {
+            key: "LMSTUDIO_HOST",
+            label: "Host URL",
+            secret: false,
+            required: false,
+            defaultValue: "http://localhost:1234",
+          },
+        ],
+      },
+      {
+        id: "ollama",
+        displayName: "Ollama",
+        category: "model",
+        description: "Run local models",
+        setupMethod: "config_fields",
+        group: "additional",
+        catalogSource: "setup",
+        fields: [
+          {
+            key: "OLLAMA_HOST",
+            label: "Host URL",
+            secret: false,
+            required: false,
+            defaultValue: "http://localhost:11434",
+          },
+        ],
+      },
+    ]);
+    const getConfig = vi.fn(async (providerId: string) => {
+      if (providerId === "lmstudio") {
+        return [
+          {
+            key: "LMSTUDIO_HOST",
+            value: "http://my-box:9999",
+            isSet: true,
+            isSecret: false,
+            required: false,
+          },
+        ];
+      }
+      // Leave Ollama pending to prove one slow provider cannot block another
+      // provider's Configured result.
+      return await new Promise<never>(() => {});
+    });
+    mocks.useCredentials.mockReturnValue({
+      configuredIds: new Set<string>(["lmstudio", "ollama"]),
+      loading: false,
+      saving: false,
+      savingProviderIds: new Set<string>(),
+      syncingProviderIds: new Set<string>(),
+      modelWarnings: new Map<string, string>(),
+      getConfig,
+      save: vi.fn(),
+      remove: vi.fn(),
+      completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
+    });
+
+    renderProviders(<ProvidersSettings />);
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+
+    // The user-touched provider earns the Configured tag but stays out of
+    // the Active summary; the default-only provider stays out of the main page.
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    const lmStudioRow = screen
+      .getByText("LM Studio")
+      .closest("button") as HTMLElement;
+    expect(within(lmStudioRow).getByText("Configured")).toBeInTheDocument();
+    expect(within(lmStudioRow).queryByText("Active")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
+  });
+
+  it("clears stale Active evidence when credential refresh fails", async () => {
+    const user = userEvent.setup();
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "github_copilot",
+        displayName: "GitHub Copilot",
+        category: "model",
+        description: "GitHub models",
+        setupMethod: "oauth_device_code",
+        group: "additional",
+        catalogSource: "setup",
+      },
+    ]);
+    mocks.listProviderSecrets.mockResolvedValueOnce([
+      {
+        id: "provider_cache:github_copilot",
+        provider: "github_copilot",
+        providerDisplayName: "GitHub Copilot",
+        name: "OAuth token",
+        storage: "provider_cache",
+        status: "valid",
+        configured: true,
+        hasSecret: true,
+        canDelete: true,
+        canConfigure: false,
+      },
+    ]);
+    const credentials = {
+      configuredIds: new Set<string>(),
+      loading: false,
+      saving: false,
+      savingProviderIds: new Set<string>(),
+      syncingProviderIds: new Set<string>(),
+      modelWarnings: new Map<string, string>(),
+      getConfig: vi.fn().mockResolvedValue([]),
+      save: vi.fn(),
+      remove: vi.fn(),
+      completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
+    };
+    mocks.useCredentials.mockReturnValue(credentials);
+
+    const rendered = renderProviders(<ProvidersSettings />);
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+    expect(await screen.findByText("GitHub Copilot")).toBeInTheDocument();
+
+    mocks.listProviderSecrets.mockRejectedValueOnce(new Error("offline"));
+    mocks.useCredentials.mockReturnValue({
+      ...credentials,
+      credentialRevision: 1,
+    });
+    rendered.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProvidersSettings />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows active providers first while preserving order within each group", async () => {
     const user = userEvent.setup();
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(["openai", "databricks_v2"]),
@@ -239,10 +561,11 @@ describe("ProvidersSettings", () => {
       savingProviderIds: new Set<string>(),
       syncingProviderIds: new Set<string>(),
       modelWarnings: new Map<string, string>(),
-      getConfig: vi.fn(),
+      getConfig: vi.fn().mockResolvedValue([]),
       save: vi.fn(),
       remove: vi.fn(),
       completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
     });
 
     renderProviders(<ProvidersSettings />);
@@ -264,6 +587,37 @@ describe("ProvidersSettings", () => {
       databricks.compareDocumentPosition(anthropic) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("mounts only one provider row while its setup is open in the modal", async () => {
+    const user = userEvent.setup();
+    renderProviders(<ProvidersSettings />);
+
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+    expect(screen.getAllByRole("button", { name: "OpenAI" })).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /add provider/i }));
+    await user.click(screen.getByRole("button", { name: /openai/i }));
+
+    expect(screen.getAllByRole("button", { name: "OpenAI" })).toHaveLength(1);
+  });
+
+  it("loads existing custom providers through the provider API", async () => {
+    const user = userEvent.setup();
+    mocks.listCustomProviders.mockResolvedValue([
+      {
+        providerId: "my-provider",
+        displayName: "My Provider",
+        configured: true,
+        modelCount: 1,
+      },
+    ]);
+
+    renderProviders(<ProvidersSettings />);
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+
+    expect(await screen.findByText("My Provider")).toBeInTheDocument();
+    expect(mocks.listCustomProviders).toHaveBeenCalledTimes(1);
   });
 
   it("shows the custom provider creation entry point (BYO default-on)", async () => {
@@ -320,7 +674,7 @@ describe("ProvidersSettings", () => {
 
     await user.click(screen.getByRole("button", { name: /goose/i }));
 
-    expect(screen.getByText("Databricks")).toBeInTheDocument();
+    expect(screen.queryByText("Databricks")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
     expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
@@ -344,7 +698,7 @@ describe("ProvidersSettings", () => {
 
     await user.click(screen.getByRole("button", { name: /goose/i }));
 
-    expect(screen.getByText("Databricks")).toBeInTheDocument();
+    expect(screen.queryByText("Databricks")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
   });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -21,6 +21,7 @@ import {
   type ProviderTemplate,
 } from "./CustomProviderForm";
 import { ProviderTemplatePicker } from "./ProviderTemplatePicker";
+import type { ProviderDirectoryChoice } from "@/features/providers/lib/providerDirectory";
 
 export type CustomProviderMutationInput = Omit<
   CustomProviderFormValues,
@@ -34,6 +35,10 @@ interface CustomProviderDialogProps {
   mode: "create" | "edit";
   provider?: CustomProviderFormValues | null;
   templates?: ProviderTemplate[];
+  choices?: ProviderDirectoryChoice[];
+  onSelectSetupProvider?: (providerId: string) => void;
+  setupProviderContent?: ReactNode;
+  directoryLoading?: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (input: CustomProviderMutationInput) => Promise<void>;
   onUpdate: (
@@ -57,9 +62,9 @@ const EMPTY_FORM: CustomProviderFormValues = {
   headers: [],
 };
 
-// Create opens straight onto the template list ("template"); "Fully custom"
-// is a secondary action inside that step, not an upfront fork.
-type CreateStep = "template" | "form";
+// Create opens straight onto the provider directory. Known providers continue
+// to native setup; compatible templates and blank setup continue to the form.
+type CreateStep = "template" | "setup" | "form";
 
 const CUSTOM_PROVIDER_FORM_ID = "custom-provider-form";
 
@@ -86,6 +91,10 @@ export function CustomProviderDialog({
   mode,
   provider,
   templates = [],
+  choices = [],
+  onSelectSetupProvider,
+  setupProviderContent,
+  directoryLoading = false,
   onOpenChange,
   onCreate,
   onUpdate,
@@ -126,9 +135,14 @@ export function CustomProviderDialog({
     setCreateStep("form");
   }
 
-  function handleSelectTemplate(templateId: string) {
-    const template = templateById.get(templateId);
-    setValue(template ? valueFromTemplate(template) : EMPTY_FORM);
+  function handleSelectChoice(choice: ProviderDirectoryChoice) {
+    if (choice.kind === "setup") {
+      onSelectSetupProvider?.(choice.id);
+      setCreateStep("setup");
+      return;
+    }
+    const template = templateById.get(choice.id) ?? choice.template;
+    setValue(valueFromTemplate(template));
     setCreateStep("form");
   }
 
@@ -189,13 +203,18 @@ export function CustomProviderDialog({
       return (
         <DialogBody className="flex flex-col space-y-0 overflow-hidden">
           <ProviderTemplatePicker
-            templates={templates}
-            onSelect={handleSelectTemplate}
+            choices={choices}
+            onSelect={handleSelectChoice}
             onStartManual={handleStartManual}
             disabled={saving || deleting}
+            loading={directoryLoading}
           />
         </DialogBody>
       );
+    }
+
+    if (mode === "create" && createStep === "setup") {
+      return <DialogBody>{setupProviderContent}</DialogBody>;
     }
 
     return (
@@ -220,6 +239,23 @@ export function CustomProviderDialog({
   function renderFooter() {
     if (mode === "create" && createStep === "template") {
       return null;
+    }
+
+    if (mode === "create" && createStep === "setup") {
+      return (
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={handleBack}
+            leftIcon={<IconArrowLeft />}
+            flush
+            className="sm:mr-auto"
+          >
+            {t("providers.custom.actions.back")}
+          </Button>
+        </DialogFooter>
+      );
     }
 
     return (
