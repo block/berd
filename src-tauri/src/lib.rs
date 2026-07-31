@@ -545,6 +545,7 @@ pub fn run() {
             commands::git::git_delete_branch,
             commands::git::git_create_worktree,
             commands::git::git_remove_worktree,
+            commands::pull_requests::get_pull_request_summaries,
             commands::home_widget_media::import_home_widget_photo,
             commands::installation::get_installation_cohort,
             commands::layout::get_layout,

@@ -282,6 +282,21 @@
       "changes_one": "{{count}} change",
       "changes_other": "{{count}} changes"
     },
+    "pullRequests": {
+      "fallbackTitle": "Pull request #{{number}}",
+      "open": "Open {{repo}} pull request #{{number}} on GitHub",
+      "state": {
+        "OPEN": "Open",
+        "CLOSED": "Closed",
+        "MERGED": "Merged",
+        "DRAFT": "Draft"
+      },
+      "checks": {
+        "SUCCESS": "Checks passed",
+        "PENDING": "Checks running",
+        "FAILURE": "Checks failed"
+      }
+    },
     "tabs": {
       "details": "Context",
       "changes": "Changes",
@@ -292,6 +307,7 @@
       "changes": "Changes",
       "changesOnBranch": "on",
       "includedWorkspaces": "Included workspaces",
+      "pullRequests": "Pull requests",
       "workspace": "Active worktree"
     }
   },

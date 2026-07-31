@@ -40,6 +40,7 @@ pub mod path_resolver;
 mod pocket_playback_speed_dsp;
 pub mod pocket_voice;
 pub mod project_icons;
+pub mod pull_requests;
 pub mod renderer;
 pub mod runtime_config;
 pub mod security_threshold;

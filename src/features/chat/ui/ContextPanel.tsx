@@ -68,6 +68,7 @@ import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepositor
 import { useChangeSessionFolder } from "@/features/chat/hooks/useChangeSessionFolder";
 import { supersedePendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import { useChatStore } from "../stores/chatStore";
+import { SessionPullRequestsWidget } from "./widgets/PullRequestsWidget";
 import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
 import type { WorkspaceRemovalPlan } from "./widgets/WorkspaceRowActionsMenu";
 
@@ -96,7 +97,11 @@ interface PendingCreatedWorktree {
 }
 
 type ContextPanelTab = "details" | "changes" | "files";
-type ContextPanelSection = "workspace" | "changes" | "artifacts";
+type ContextPanelSection =
+  | "workspace"
+  | "pullRequests"
+  | "changes"
+  | "artifacts";
 const TAB_CONTENT_CLASS =
   "scrollbar-none w-full min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4";
 type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
@@ -104,6 +109,7 @@ type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:context-panel:section-visibility";
 const DEFAULT_SECTION_VISIBILITY: ContextPanelSectionVisibility = {
   workspace: true,
+  pullRequests: true,
   changes: true,
   artifacts: true,
 };
@@ -119,6 +125,10 @@ function validateSectionVisibility(
       typeof parsed.workspace === "boolean"
         ? parsed.workspace
         : defaults.workspace,
+    pullRequests:
+      typeof parsed.pullRequests === "boolean"
+        ? parsed.pullRequests
+        : defaults.pullRequests,
     changes:
       typeof parsed.changes === "boolean" ? parsed.changes : defaults.changes,
     artifacts:
@@ -1126,6 +1136,12 @@ export function ContextPanel({
               onToggleTerminal={onToggleTerminal}
             />
           )}
+          <SessionPullRequestsWidget
+            sessionId={sessionId}
+            workspacePath={gitTargetPath}
+            isOpen={sectionVisibility.pullRequests}
+            onToggleOpen={() => toggleSection("pullRequests")}
+          />
           {shouldShowArtifacts && (
             <ArtifactsWidget
               isOpen={sectionVisibility.artifacts}
