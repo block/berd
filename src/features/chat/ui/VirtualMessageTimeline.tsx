@@ -90,7 +90,6 @@ import {
 } from "./timelineScrollIntent";
 import { getVirtualTranscriptRowSpacingBlockSize } from "./virtualTranscriptRowSpacing";
 import {
-  createTranscriptBrowserViewport,
   MAX_BLANK_VIEWPORT_RECOVERY_ATTEMPTS,
   type TranscriptBrowserRowCoverage,
 } from "../transcript/virtual/browserViewport";
@@ -1231,6 +1230,8 @@ export function VirtualMessageTimeline({
     measureOffscreenRealElement,
     scrollToRow: scrollVirtualToRow,
     syncViewportFromDom,
+    writeScrollTop: writeVirtualScrollTop,
+    readRealRowCoverage,
   } = virtualTimeline;
   useEffect(() => {
     if (!virtualTimelineControlsRef) {
@@ -1814,16 +1815,13 @@ export function VirtualMessageTimeline({
       }
 
       const bottomScrollTop = getBottomScrollTop(container);
-      if (typeof container.scrollTo === "function") {
-        container.scrollTo({ top: bottomScrollTop, behavior });
-        lastScrollTopRef.current = container.scrollTop;
-        return;
-      }
-
-      container.scrollTop = bottomScrollTop;
+      writeVirtualScrollTop(bottomScrollTop, {
+        behavior,
+        source: "programmatic",
+      });
       lastScrollTopRef.current = container.scrollTop;
     },
-    [getBottomScrollTop, scrollVirtualToBottom],
+    [getBottomScrollTop, scrollVirtualToBottom, writeVirtualScrollTop],
   );
 
   useLayoutEffect(() => {
@@ -1921,7 +1919,10 @@ export function VirtualMessageTimeline({
         Math.abs(targetScrollTop - startScrollTop) <= 1 ||
         window.matchMedia(REDUCED_MOTION_QUERY).matches
       ) {
-        container.scrollTop = targetScrollTop;
+        writeVirtualScrollTop(targetScrollTop, {
+          source: "programmatic",
+          userScrollIntent: true,
+        });
         settle();
         return;
       }
@@ -1939,9 +1940,11 @@ export function VirtualMessageTimeline({
           1,
           (now - startTime) / JUMP_TO_LATEST_SCROLL_MS,
         );
-        nextContainer.scrollTop =
+        writeVirtualScrollTop(
           startScrollTop +
-          (targetScrollTop - startScrollTop) * easeOutCubic(progress);
+            (targetScrollTop - startScrollTop) * easeOutCubic(progress),
+          { source: "programmatic", userScrollIntent: true },
+        );
         lastScrollTopRef.current = nextContainer.scrollTop;
 
         if (progress < 1) {
@@ -1949,7 +1952,10 @@ export function VirtualMessageTimeline({
           return;
         }
 
-        nextContainer.scrollTop = targetScrollTop;
+        writeVirtualScrollTop(targetScrollTop, {
+          source: "programmatic",
+          userScrollIntent: true,
+        });
         lastScrollTopRef.current = nextContainer.scrollTop;
         jumpToLatestFrameRef.current = null;
         if (syncVirtualViewport) {
@@ -1959,7 +1965,7 @@ export function VirtualMessageTimeline({
 
       jumpToLatestFrameRef.current = requestAnimationFrame(animate);
     },
-    [cancelJumpToLatestAnimation, syncViewportFromDom],
+    [cancelJumpToLatestAnimation, syncViewportFromDom, writeVirtualScrollTop],
   );
 
   const requestBottomScroll = useCallback(() => {
@@ -2248,7 +2254,7 @@ export function VirtualMessageTimeline({
         container.scrollTop +
           Math.min(distanceFromBottom, STREAMING_BOTTOM_FOLLOW_MAX_STEP_PX),
       );
-      container.scrollTop = nextScrollTop;
+      writeVirtualScrollTop(nextScrollTop, { source: "programmatic" });
       lastScrollTopRef.current = container.scrollTop;
 
       if (bottomScrollTop - container.scrollTop > 1) {
@@ -2259,7 +2265,7 @@ export function VirtualMessageTimeline({
     };
 
     streamingBottomFollowFrameRef.current = requestAnimationFrame(step);
-  }, [getBottomScrollTop]);
+  }, [getBottomScrollTop, writeVirtualScrollTop]);
 
   useLayoutEffect(() => {
     if (lastAutoScrollMessagesRef.current === messages) {
@@ -2371,7 +2377,10 @@ export function VirtualMessageTimeline({
         // The user detached through wheel intent before the controller
         // captured a row anchor, so bottom reconciliation dragged them along.
         // Restore the detached position and capture a row anchor there.
-        container.scrollTop = scrollTopBeforeResize;
+        writeVirtualScrollTop(scrollTopBeforeResize, {
+          source: "browser",
+          userScrollIntent: true,
+        });
         virtualState =
           syncViewportFromDom({
             source: "browser",
@@ -2422,6 +2431,7 @@ export function VirtualMessageTimeline({
     syncJumpToLatestVisibility,
     syncScrollState,
     syncViewportFromDom,
+    writeVirtualScrollTop,
   ]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: footerHeightPx is the resize signal for this effect.
@@ -2836,15 +2846,6 @@ export function VirtualMessageTimeline({
       if (!target) {
         return false;
       }
-      if (typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({
-          behavior: "auto",
-          block: "center",
-          inline: "nearest",
-        });
-        return true;
-      }
-
       const container = containerRef.current;
       if (!container) {
         return false;
@@ -2855,9 +2856,9 @@ export function VirtualMessageTimeline({
         targetRect.top -
         containerRect.top -
         (container.clientHeight - targetRect.height) / 2;
-      container.scrollTop = Math.max(
-        0,
-        container.scrollTop + targetCenterOffset,
+      writeVirtualScrollTop(
+        Math.max(0, container.scrollTop + targetCenterOffset),
+        { source: "programmatic" },
       );
       return true;
     };
@@ -2920,6 +2921,7 @@ export function VirtualMessageTimeline({
     scrollVirtualToRow,
     setDetachedFromLatest,
     snapshot.rowByMessageId,
+    writeVirtualScrollTop,
   ]);
   useEffect(() => {
     if (!pulsingMessageId) {
@@ -3023,9 +3025,8 @@ export function VirtualMessageTimeline({
         const delta = elementRect.bottom - visibleBottom + 16;
 
         if (delta > 0) {
-          nextContainer.scrollBy({
-            top: delta,
-            behavior: "auto",
+          writeVirtualScrollTop(nextContainer.scrollTop + delta, {
+            source: "correction",
           });
           syncViewportFromDom({ source: "correction" });
         }
@@ -3034,7 +3035,7 @@ export function VirtualMessageTimeline({
       alignElementBottom();
       requestAnimationFrame(alignElementBottom);
     },
-    [syncViewportFromDom],
+    [syncViewportFromDom, writeVirtualScrollTop],
   );
 
   const handleReactCommit = useCallback<ProfilerOnRenderCallback>(
@@ -3258,9 +3259,11 @@ export function VirtualMessageTimeline({
         (now - startTime) / JUMP_TO_LATEST_SCROLL_MS,
       );
       const bottomScrollTop = getBottomScrollTop(nextContainer);
-      nextContainer.scrollTop =
+      writeVirtualScrollTop(
         startScrollTop +
-        (bottomScrollTop - startScrollTop) * easeOutCubic(progress);
+          (bottomScrollTop - startScrollTop) * easeOutCubic(progress),
+        { source: "programmatic" },
+      );
       if (progress < 1) {
         jumpToLatestFrameRef.current = requestAnimationFrame(animate);
         return;
@@ -3648,11 +3651,10 @@ export function VirtualMessageTimeline({
         return;
       }
 
-      const browserViewport = createTranscriptBrowserViewport(
-        container,
-        transcriptRoot,
-      );
-      const coverage = browserViewport.readRealRowCoverage();
+      const coverage = readRealRowCoverage?.(transcriptRoot);
+      if (!coverage) {
+        return;
+      }
       setBrowserRowCoverage((current) =>
         current?.blankViewportPixels === coverage.blankViewportPixels &&
         current.intersectingRealRowCount ===
@@ -3673,8 +3675,10 @@ export function VirtualMessageTimeline({
       // it back makes clamping/browser behavior authoritative without moving a
       // viewport owned by the user.
       remeasureVisibleRowsSync();
-      const liveViewport = browserViewport.read();
-      browserViewport.writeScrollTop(liveViewport.scrollTop);
+      writeVirtualScrollTop(container.scrollTop, {
+        source: "browser",
+        preserveScrollPosition: true,
+      });
       syncViewportFromDom({
         source: "browser",
         preserveScrollPosition: true,
@@ -3707,7 +3711,9 @@ export function VirtualMessageTimeline({
     showPlaceholderContent,
     stableRows.length,
     syncViewportFromDom,
+    readRealRowCoverage,
     virtualRangeRevision,
+    writeVirtualScrollTop,
   ]);
 
   useLayoutEffect(() => {
@@ -3757,7 +3763,7 @@ export function VirtualMessageTimeline({
       ? nextBottomScrollTop
       : Math.min(nextBottomScrollTop, Math.max(0, handoff.scrollTop));
     if (Math.abs(container.scrollTop - nextScrollTop) > 1) {
-      container.scrollTop = nextScrollTop;
+      writeVirtualScrollTop(nextScrollTop, { source: "programmatic" });
     }
     const distanceFromBottom = Math.max(
       0,
@@ -3789,6 +3795,7 @@ export function VirtualMessageTimeline({
     streamingMessageId,
     syncJumpToLatestVisibility,
     syncViewportFromDom,
+    writeVirtualScrollTop,
   ]);
 
   useLayoutEffect(() => {

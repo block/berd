@@ -44,6 +44,8 @@ export interface TranscriptVirtualEngine {
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
       preserveScrollPosition?: boolean;
+      /** Recovery-only escape hatch that invalidates and recomputes a stale range. */
+      forceRangeRefresh?: boolean;
     },
   ): TranscriptViewportUpdateResult;
   applyMeasuredHeight(input: {
@@ -61,6 +63,16 @@ export interface TranscriptVirtualEngine {
     align?: TranscriptScrollAlign,
   ): TranscriptScrollToRowResult;
   scrollToEnd?(options?: { behavior?: ScrollBehavior }): void;
+  /** Commit a product scroll through the viewport transaction owner. */
+  writeScrollTop?(
+    scrollTop: number,
+    options?: {
+      behavior?: ScrollBehavior;
+      source?: "browser" | "programmatic" | "correction";
+      userScrollIntent?: boolean;
+      preserveScrollPosition?: boolean;
+    },
+  ): unknown;
   // Suspend/resume DOM scrollTop writes. When suspended the engine still
   // computes ranges/anchors; it just does not assert scrollTop on the scroll
   // element.

@@ -1183,60 +1183,32 @@ describe("VirtualMessageTimeline", () => {
 
   it("falls back to the mounted live tail element for active streaming scroll targets", async () => {
     mockTranscriptElementMeasurements();
-    const originalScrollIntoView = Element.prototype.scrollIntoView;
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      writable: true,
-      value: scrollIntoView,
-    });
+    const onScrollTargetHandled = vi.fn();
 
-    try {
-      renderWithProviders(
-        <VirtualMessageTimeline
-          sessionId="session-1"
-          messages={[
-            textMessage("user-1", "user", "Question"),
-            textMessage(
-              "assistant-1",
-              "assistant",
-              `${longText("streaming target", 120)}\n[height:650]`,
-            ),
-          ]}
-          streamingMessageId="assistant-1"
-          scrollTargetMessageId="assistant-1"
-        />,
-      );
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          textMessage("user-1", "user", "Question"),
+          textMessage(
+            "assistant-1",
+            "assistant",
+            `${longText("streaming target", 120)}\n[height:650]`,
+          ),
+        ]}
+        streamingMessageId="assistant-1"
+        scrollTargetMessageId="assistant-1"
+        onScrollTargetHandled={onScrollTargetHandled}
+      />,
+    );
 
-      const streamingRow = await screen.findByTestId(
-        "virtual-transcript-row-message:assistant-1",
-      );
-      expect(
-        screen.getByTestId("virtual-message-timeline-live-tail"),
-      ).toContainElement(streamingRow);
-
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          behavior: "auto",
-          block: "center",
-          inline: "nearest",
-        }),
-      );
-    } finally {
-      if (originalScrollIntoView) {
-        Object.defineProperty(Element.prototype, "scrollIntoView", {
-          configurable: true,
-          writable: true,
-          value: originalScrollIntoView,
-        });
-      } else {
-        delete (
-          Element.prototype as {
-            scrollIntoView?: Element["scrollIntoView"];
-          }
-        ).scrollIntoView;
-      }
-    }
+    const streamingRow = await screen.findByTestId(
+      "virtual-transcript-row-message:assistant-1",
+    );
+    expect(
+      screen.getByTestId("virtual-message-timeline-live-tail"),
+    ).toContainElement(streamingRow);
+    expect(onScrollTargetHandled).not.toHaveBeenCalled();
   });
 
   it("shows the response-start hint when a completed assistant appears without an observed streaming transition", async () => {

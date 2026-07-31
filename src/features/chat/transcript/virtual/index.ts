@@ -17,6 +17,11 @@ export {
   TranscriptTanStackVirtualAdapter,
   createTranscriptTanStackVirtualAdapter,
 } from "./transcriptTanStackVirtualAdapter";
+export {
+  TranscriptViewportCoordinator,
+  type TranscriptViewportCoordinatorOptions,
+  type TranscriptViewportWriteOptions,
+} from "./transcriptViewportCoordinator";
 export type {
   TranscriptMeasurementResult,
   TranscriptRowsUpdateResult,

@@ -23,6 +23,7 @@ import {
 } from "../../row-state";
 import {
   createTranscriptTanStackVirtualAdapter,
+  TranscriptViewportCoordinator,
   type TranscriptScrollAlign,
   type TranscriptScrollAnchor,
   type TranscriptScrollCorrection,
@@ -359,32 +360,11 @@ export function useTranscriptVirtualTimeline({
         return;
       }
 
-      container.scrollTop = correction.nextScrollTop;
-      if (Math.abs(container.scrollTop - correction.nextScrollTop) <= 1) {
-        return;
-      }
-      const clampedViewport = readViewportGeometry(container, footerHeight);
-      const syncResult = controllerRef.current?.syncViewport(clampedViewport, {
-        source: "browser",
-        userScrollIntent: true,
+      controllerRef.current?.writeScrollTop?.(correction.nextScrollTop, {
+        source: "correction",
       });
-      if (syncResult?.correction) {
-        container.scrollTop = syncResult.correction.nextScrollTop;
-        if (
-          Math.abs(container.scrollTop - syncResult.correction.nextScrollTop) >
-          1
-        ) {
-          controllerRef.current?.syncViewport(
-            readViewportGeometry(container, footerHeight),
-            {
-              source: "browser",
-              userScrollIntent: true,
-            },
-          );
-        }
-      }
     },
-    [containerRef, footerHeight],
+    [containerRef],
   );
 
   const invalidateWidthScopedMeasurementReplay = useCallback(() => {
@@ -672,13 +652,14 @@ export function useTranscriptVirtualTimeline({
           preserveScrollPosition: true,
         });
       }
-      const rowsResult = replacement.setRows(rowsRef.current);
-      if (
+      const shouldRestoreLiveViewport =
         preserveLiveViewport ||
         state.anchor.type === "row" ||
         !state.nearBottom ||
-        liveDistanceFromBottom > 1
-      ) {
+        liveDistanceFromBottom > 1;
+      replacement.setScrollWritesSuspended?.(shouldRestoreLiveViewport);
+      const rowsResult = replacement.setRows(rowsRef.current);
+      if (shouldRestoreLiveViewport) {
         replacement.syncViewport(liveViewportBeforeRows, {
           source: "browser",
           userScrollIntent: true,
@@ -687,6 +668,7 @@ export function useTranscriptVirtualTimeline({
       } else {
         applyCorrection(rowsResult.correction, "protected-rows-setRows");
       }
+      replacement.setScrollWritesSuspended?.(false);
       protectedRowKeyRef.current = nextProtectedRowKey;
       cachedMeasurementReplayRef.current = null;
       cachedHeightAppliedByTokenRef.current.clear();
@@ -694,6 +676,12 @@ export function useTranscriptVirtualTimeline({
       queueCachedMeasurementsForController(replacement, {
         preserveLiveViewport: true,
       });
+      if (shouldRestoreLiveViewport) {
+        replacement.writeScrollTop?.(liveViewportBeforeRows.scrollTop, {
+          source: "browser",
+          userScrollIntent: true,
+        });
+      }
       nextSnapshot = buildSnapshot({
         controller: replacement,
         registry,
@@ -744,8 +732,7 @@ export function useTranscriptVirtualTimeline({
       }
 
       const previousWidthScope = controller.getState().widthScope;
-      const { forceRangeRefresh: _, ...syncOptions } = options;
-      const result = controller.syncViewport(liveViewport, syncOptions);
+      const result = controller.syncViewport(liveViewport, options);
       if (controller.getState().widthScope !== previousWidthScope) {
         invalidateWidthScopedMeasurementReplay();
       }
@@ -1154,12 +1141,14 @@ export function useTranscriptVirtualTimeline({
     // then apply the final correction against the new layout.
     deferDomCorrectionsRef.current = true;
     deferredCorrectionRef.current = null;
+    controllerRef.current?.setScrollWritesSuspended?.(true);
     try {
       flushSync(() => {
         flushPendingMeasurementsInner();
       });
     } finally {
       deferDomCorrectionsRef.current = false;
+      controllerRef.current?.setScrollWritesSuspended?.(false);
     }
 
     const deferredCorrection = takeDeferredCorrection();
@@ -1309,13 +1298,11 @@ export function useTranscriptVirtualTimeline({
         controller.scrollToEnd({ behavior });
       }
 
-      if (behavior === "auto") {
-        container.scrollTop = nextScrollTop;
-      } else if (typeof container.scrollTo === "function") {
-        container.scrollTo({ top: nextScrollTop, behavior });
-      } else {
-        container.scrollTop = nextScrollTop;
-      }
+      controller.writeScrollTop?.(nextScrollTop, {
+        behavior,
+        source: "programmatic",
+        userScrollIntent: true,
+      });
       const nextLiveViewport = readViewportGeometry(container, footerHeight);
       const targetReachableInCurrentDom =
         nextScrollTop <= getBrowserBottomScrollTop(liveViewport) + 1;
@@ -1333,6 +1320,37 @@ export function useTranscriptVirtualTimeline({
       return true;
     },
     [applyCorrection, commitSnapshot, containerRef, footerHeight],
+  );
+
+  const writeScrollTop = useCallback(
+    (
+      scrollTop: number,
+      options: {
+        behavior?: ScrollBehavior;
+        source?: "browser" | "programmatic" | "correction";
+        userScrollIntent?: boolean;
+        preserveScrollPosition?: boolean;
+      } = {},
+    ) => {
+      const controller = controllerRef.current;
+      if (!controller?.writeScrollTop) {
+        return null;
+      }
+      const accepted = controller.writeScrollTop(scrollTop, options);
+      commitSnapshot();
+      return accepted;
+    },
+    [commitSnapshot],
+  );
+
+  const readRealRowCoverage = useCallback(
+    (transcriptRoot?: HTMLElement | null) => {
+      const controller = controllerRef.current;
+      return controller instanceof TranscriptViewportCoordinator
+        ? controller.readRealRowCoverage(transcriptRoot)
+        : null;
+    },
+    [],
   );
 
   const setRowFocused = useCallback<
@@ -1452,6 +1470,8 @@ export function useTranscriptVirtualTimeline({
     syncViewportFromDom,
     scrollToRow,
     scrollToBottom,
+    writeScrollTop,
+    readRealRowCoverage,
     setRowFocused,
     markRowInteracted,
   };
@@ -1580,7 +1600,7 @@ function createController({
   protectedRowIds: readonly string[];
   state?: TranscriptVirtualControllerState;
 }) {
-  return createTranscriptTanStackVirtualAdapter(
+  const engine = createTranscriptTanStackVirtualAdapter(
     {
       sessionId,
       sessionEpoch,
@@ -1599,8 +1619,17 @@ function createController({
       overscanAfterPx: TANSTACK_UI_OVERSCAN_AFTER_PX,
       scrollElement: container,
       viewportWidth: container?.clientWidth,
+      scrollWritesSuspended: container !== null,
     },
   );
+
+  return container
+    ? new TranscriptViewportCoordinator({
+        container,
+        engine,
+        getFooterHeight: () => footerHeight,
+      })
+    : engine;
 }
 
 function readViewportGeometry(

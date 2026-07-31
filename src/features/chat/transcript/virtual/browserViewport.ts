@@ -2,6 +2,7 @@ export interface TranscriptBrowserViewportSnapshot {
   scrollTop: number;
   scrollHeight: number;
   viewportHeight: number;
+  viewportWidth: number;
   viewportTop: number;
   viewportBottom: number;
 }
@@ -24,6 +25,10 @@ const MAX_INTENTIONAL_EDGE_GAP_PX = 96;
  * DOM reads and writes behind this adapter so controller state cannot be
  * mistaken for what the user can actually see.
  */
+export type TranscriptBrowserViewport = ReturnType<
+  typeof createTranscriptBrowserViewport
+>;
+
 export function createTranscriptBrowserViewport(
   container: HTMLDivElement,
   transcriptRoot: HTMLElement,
@@ -35,15 +40,18 @@ export function createTranscriptBrowserViewport(
       scrollTop: container.scrollTop,
       scrollHeight: container.scrollHeight,
       viewportHeight,
+      viewportWidth: Math.max(0, container.clientWidth || rect.width),
       viewportTop: rect.top,
       viewportBottom: rect.top + viewportHeight,
     };
   };
 
-  const readRealRowCoverage = (): TranscriptBrowserRowCoverage => {
+  const readRealRowCoverage = (
+    coverageRoot: HTMLElement = transcriptRoot,
+  ): TranscriptBrowserRowCoverage => {
     const viewport = read();
     const intervals: Array<[number, number]> = [];
-    const rows = transcriptRoot.querySelectorAll<HTMLElement>(
+    const rows = coverageRoot.querySelectorAll<HTMLElement>(
       REAL_TRANSCRIPT_ROW_SELECTOR,
     );
 
@@ -99,8 +107,15 @@ export function createTranscriptBrowserViewport(
     };
   };
 
-  const writeScrollTop = (scrollTop: number) => {
-    container.scrollTop = scrollTop;
+  const writeScrollTop = (
+    scrollTop: number,
+    behavior: ScrollBehavior = "auto",
+  ) => {
+    if (behavior !== "auto" && typeof container.scrollTo === "function") {
+      container.scrollTo({ top: scrollTop, behavior });
+    } else {
+      container.scrollTop = scrollTop;
+    }
     return read();
   };
 

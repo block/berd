@@ -54,6 +54,8 @@ export interface TranscriptTanStackVirtualAdapterOptions
   anchorTo?: TanStackAnchorTo;
   followOnAppend?: TanStackFollowOnAppend;
   scrollEndThresholdPx?: number;
+  /** Prevent this geometry adapter from writing its scroll element. */
+  scrollWritesSuspended?: boolean;
 }
 
 interface MeasurementEntry {
@@ -114,6 +116,7 @@ export class TranscriptTanStackVirtualAdapter
     this.overscanAfterRows =
       options.overscanAfterRows ?? TRANSCRIPT_DEFAULT_OVERSCAN_AFTER_ROWS;
     this.protectedRowIds = options.protectedRowIds ?? [];
+    this.scrollWritesSuspended = options.scrollWritesSuspended ?? false;
     this.scrollElement =
       options.scrollElement ??
       createInMemoryScrollElement(input.viewportHeight, input.scrollTop ?? 0);
@@ -317,6 +320,18 @@ export class TranscriptTanStackVirtualAdapter
     this.syncScrollElementToController();
     this.syncVirtualizerOffset();
     return result;
+  }
+
+  writeScrollTop(
+    scrollTop: number,
+    options: {
+      behavior?: ScrollBehavior;
+      source?: "browser" | "programmatic" | "correction";
+      userScrollIntent?: boolean;
+      preserveScrollPosition?: boolean;
+    } = {},
+  ): void {
+    this.setScrollOffset(scrollTop, options.behavior !== "auto");
   }
 
   scrollToEnd(options: { behavior?: ScrollBehavior } = {}): void {
