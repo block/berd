@@ -1152,52 +1152,100 @@ export function ContextPanel({
       </TabsContent>
 
       <TabsContent value="changes" className={TAB_CONTENT_CLASS}>
-        {shouldShowChanges ? (
-          hasWorkspaceAttachments ? (
-            <WorkspaceChangesWidget
-              groups={workspaceChangedFileRuntimes}
-              onOpenFile={handleOpenWorkspaceChangedFile}
-              probeErrorMessage={
-                changesProbeError
-                  ? changesProbeError.message ||
-                    t("contextPanel.errors.gitChangesRead")
-                  : null
+        <div className="w-full pb-4">
+          <SessionPullRequestsWidget
+            sessionId={sessionId}
+            workspacePath={gitTargetPath}
+            isOpen={sectionVisibility.pullRequests}
+            onToggleOpen={() => toggleSection("pullRequests")}
+          />
+          {shouldShowChanges ? (
+            hasWorkspaceAttachments ? (
+              <WorkspaceChangesWidget
+                groups={workspaceChangedFileRuntimes}
+                onOpenFile={handleOpenWorkspaceChangedFile}
+                probeErrorMessage={
+                  changesProbeError
+                    ? changesProbeError.message ||
+                      t("contextPanel.errors.gitChangesRead")
+                    : null
+                }
+              />
+            ) : (
+              <ChangesWidget
+                files={fallbackChangedFiles}
+                isLoading={isFallbackFilesLoading}
+                error={
+                  fallbackChangedFilesError instanceof Error
+                    ? fallbackChangedFilesError
+                    : null
+                }
+                isLoadingError={isFallbackChangedFilesLoadingError}
+                currentBranch={fallbackGitState?.currentBranch ?? null}
+                dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
+                repoPath={gitTargetPath ?? ""}
+                onOpenFile={handleOpenChangedFile}
+                isOpen={sectionVisibility.changes}
+                onToggleOpen={() => toggleSection("changes")}
+              />
+            )
+          ) : isChangesProbeLoading ? (
+            <ChangesLoadingState />
+          ) : changesProbeError ? (
+            <ChangesErrorState
+              message={
+                changesProbeError.message ||
+                t("contextPanel.errors.gitChangesRead")
               }
             />
           ) : (
-            <ChangesWidget
-              files={fallbackChangedFiles}
-              isLoading={isFallbackFilesLoading}
-              error={
-                fallbackChangedFilesError instanceof Error
-                  ? fallbackChangedFilesError
-                  : null
-              }
-              isLoadingError={isFallbackChangedFilesLoadingError}
-              currentBranch={fallbackGitState?.currentBranch ?? null}
-              dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
-              repoPath={gitTargetPath ?? ""}
-              onOpenFile={handleOpenChangedFile}
-              isOpen={sectionVisibility.changes}
-              onToggleOpen={() => toggleSection("changes")}
-            />
-          )
-        ) : isChangesProbeLoading ? (
-          <ChangesLoadingState />
-        ) : changesProbeError ? (
-          <ChangesErrorState
-            message={
-              changesProbeError.message ||
-              t("contextPanel.errors.gitChangesRead")
-            }
-          />
-        ) : (
-          <ChangesEmptyState message={changesUnavailableMessage} />
-        )}
+            <ChangesEmptyState message={changesUnavailableMessage} />
+          )}
+        </div>
       </TabsContent>
 
       <TabsContent value="files" className={TAB_CONTENT_CLASS}>
+        <div className="w-full pb-4">
+          <SessionPullRequestsWidget
+            sessionId={sessionId}
+            workspacePath={gitTargetPath}
+            isOpen={sectionVisibility.pullRequests}
+            onToggleOpen={() => toggleSection("pullRequests")}
+          />
+          <FilesList projectWorkingDirs={fileBrowserRoots} />
+        </div>
+              }
+            />
+          ) : (
+            <ChangesEmptyState message={changesUnavailableMessage} />
+          )}
+        </div>
+      </TabsContent>
+
+<<<<<<< HEAD
+      <TabsContent value="files" className={TAB_CONTENT_CLASS}>
         <FilesList projectWorkingDirs={fileBrowserRoots} />
+||||||| parent of ca0943ec (Keep related pull requests visible across context tabs)
+      <TabsContent
+        value="files"
+        className="scrollbar-none w-full overflow-y-auto"
+      >
+        <FilesList projectWorkingDirs={fileBrowserRoots} />
+=======
+      <TabsContent
+        value="files"
+        className="scrollbar-none w-full overflow-y-auto"
+      >
+        <div className="w-full pb-4">
+          <SessionPullRequestsWidget
+            sessionId={sessionId}
+            workspacePath={gitTargetPath}
+            isOpen={sectionVisibility.pullRequests}
+            onToggleOpen={() => toggleSection("pullRequests")}
+          />
+          <FilesList projectWorkingDirs={fileBrowserRoots} />
+        </div>
+>>>>>>> ca0943ec (Keep related pull requests visible across context tabs)
       </TabsContent>
     </Tabs>
   );

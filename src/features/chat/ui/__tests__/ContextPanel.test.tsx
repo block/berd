@@ -124,6 +124,10 @@ vi.mock("@/shared/api/git", () => ({
   listenGitStateChanged: mockListenGitStateChanged,
 }));
 
+vi.mock("@/shared/api/pullRequests", () => ({
+  getPullRequestSummaries: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
     openResolvedPath: vi.fn(),
@@ -343,7 +347,7 @@ describe("ContextPanel", () => {
     gitStateChangedHandlers.length = 0;
     window.localStorage.clear();
     setMultiWorkspaceEnabled(true);
-    useChatStore.setState({ sessionStateById: {} });
+    useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
     useChatSessionStore.setState({
       sessions: [],
       activeSessionId: null,
@@ -781,6 +785,38 @@ describe("ContextPanel", () => {
     await user.click(screen.getByRole("tab", { name: /files/i }));
 
     expect(screen.getAllByText("goose2").length).toBeGreaterThan(0);
+  });
+
+  it("keeps session pull requests visible across context panel tabs", async () => {
+    const user = userEvent.setup();
+    const sessionId = "test-session-related-pr";
+    useChatStore.setState({
+      messagesBySession: {
+        [sessionId]: [
+          {
+            id: "assistant-pr-link",
+            role: "assistant",
+            created: 1,
+            content: [
+              {
+                type: "text",
+                text: "https://github.com/squareup/berd/pull/891",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    renderContextPanel({ sessionId });
+
+    expect(await screen.findByText("Pull requests")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+    expect(screen.getByText("Pull requests")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /files/i }));
+    expect(screen.getByText("Pull requests")).toBeInTheDocument();
   });
 
   it("renders repo-relative titles for project subdirectories", () => {
