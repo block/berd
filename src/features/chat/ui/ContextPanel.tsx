@@ -1136,12 +1136,6 @@ export function ContextPanel({
               onToggleTerminal={onToggleTerminal}
             />
           )}
-          <SessionPullRequestsWidget
-            sessionId={sessionId}
-            workspacePath={gitTargetPath}
-            isOpen={sectionVisibility.pullRequests}
-            onToggleOpen={() => toggleSection("pullRequests")}
-          />
           {shouldShowArtifacts && (
             <ArtifactsWidget
               isOpen={sectionVisibility.artifacts}

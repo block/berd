@@ -787,7 +787,7 @@ describe("ContextPanel", () => {
     expect(screen.getAllByText("goose2").length).toBeGreaterThan(0);
   });
 
-  it("keeps session pull requests visible across context panel tabs", async () => {
+  it("shows session pull requests outside the context tab", async () => {
     const user = userEvent.setup();
     const sessionId = "test-session-related-pr";
     useChatStore.setState({
@@ -810,13 +810,16 @@ describe("ContextPanel", () => {
 
     renderContextPanel({ sessionId });
 
-    expect(await screen.findByText("Pull requests")).toBeInTheDocument();
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /changes/i }));
-    expect(screen.getByText("Pull requests")).toBeInTheDocument();
+    expect(await screen.findByText("Pull requests")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /files/i }));
     expect(screen.getByText("Pull requests")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /context/i }));
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
   });
 
   it("renders repo-relative titles for project subdirectories", () => {
