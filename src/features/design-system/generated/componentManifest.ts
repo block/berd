@@ -2544,7 +2544,7 @@ export const designSystemComponentManifest = [
     ],
     slots: ["active-chat-pulse-dot"],
     cva: [],
-    tokenClasses: ["bg-success"],
+    tokenClasses: ["bg-info", "bg-success"],
     stateClasses: [],
     sourceTokenClasses: [],
   },

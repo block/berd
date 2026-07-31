@@ -106,4 +106,21 @@ describe("AutomationBuilderView", () => {
       });
     });
   });
+
+  it("keeps the default loading shimmer while streaming", () => {
+    mockUseAutomationBuilderSession.mockReturnValue({
+      ...builderSession(),
+      isStreaming: true,
+    });
+
+    render(<AutomationBuilderView />);
+
+    const shimmer = screen.getByRole("status").querySelector(".shimmer-text");
+    expect(shimmer).toBeInTheDocument();
+    expect(shimmer).not.toHaveClass("shimmer-text-continuous");
+    expect(shimmer).toHaveStyle({
+      "--bg":
+        "linear-gradient(90deg, #0000 calc(50% - var(--spread)), var(--shimmer-highlight), #0000 calc(50% + var(--spread)))",
+    });
+  });
 });

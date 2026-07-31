@@ -253,6 +253,7 @@
 
   /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
   --sidebar: rgba(255, 255, 255, 0.8);
+  --sidebar-navigation-panel-bg: rgba(255, 255, 255, 0.8);
   --backdrop-sidebar-panel: blur(18px) saturate(180%) brightness(1.02);
   --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
@@ -680,6 +681,7 @@
   );
 
   --sidebar: rgba(0, 0, 0, 0.62);
+  --sidebar-navigation-panel-bg: rgba(0, 0, 0, 0.5);
   --backdrop-sidebar-panel: blur(18px) saturate(160%) brightness(1.08);
   --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
@@ -1143,6 +1145,7 @@
 
   /* Sidebar */
   --color-sidebar: var(--sidebar);
+  --color-sidebar-navigation-panel-bg: var(--sidebar-navigation-panel-bg);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
@@ -1502,9 +1505,26 @@
   }
 }
 
+@keyframes text-shimmer-continuous {
+  0% {
+    background-position:
+      130% center,
+      0 0;
+  }
+  100% {
+    background-position:
+      -30% center,
+      0 0;
+  }
+}
+
 .shimmer-text {
   animation: text-shimmer var(--shimmer-duration) linear var(--shimmer-delay)
     infinite;
+}
+
+.shimmer-text-continuous {
+  animation-name: text-shimmer-continuous;
 }
 
 @media (prefers-reduced-motion: reduce) {

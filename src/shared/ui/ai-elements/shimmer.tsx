@@ -28,6 +28,8 @@ export interface TextShimmerProps {
   duration?: number;
   spread?: number;
   delay?: number;
+  angle?: number;
+  continuous?: boolean;
   tone?: "default" | "soft" | "strong" | "current";
   baseColor?: string;
   highlightColor?: string;
@@ -35,13 +37,15 @@ export interface TextShimmerProps {
 
 /** Shared motion recipe used by Responding… and running sidebar chats. */
 export const RESPONDING_SHIMMER_PROPS = {
+  angle: 100,
+  continuous: true,
   delay: 0.35,
   duration: 2.2,
-  spread: 5,
+  spread: 2.5,
   tone: "current",
 } as const satisfies Pick<
   TextShimmerProps,
-  "delay" | "duration" | "spread" | "tone"
+  "angle" | "continuous" | "delay" | "duration" | "spread" | "tone"
 >;
 
 const ShimmerComponent = ({
@@ -51,6 +55,8 @@ const ShimmerComponent = ({
   duration = 2,
   spread = 2,
   delay = 0,
+  angle = 90,
+  continuous = false,
   tone = "default",
   baseColor,
   highlightColor,
@@ -100,13 +106,13 @@ const ShimmerComponent = ({
         "shimmer-text",
         "relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent",
         "[background-repeat:no-repeat,padding-box]",
+        continuous && "shimmer-text-continuous",
         className,
       )}
       style={
         {
           "--spread": `${dynamicSpread}px`,
-          "--bg":
-            "linear-gradient(90deg, #0000 calc(50% - var(--spread)), var(--shimmer-highlight), #0000 calc(50% + var(--spread)))",
+          "--bg": `linear-gradient(${angle}deg, #0000 calc(50% - var(--spread)), var(--shimmer-highlight), #0000 calc(50% + var(--spread)))`,
           "--shimmer-delay": `${delay}s`,
           "--shimmer-duration": `${duration}s`,
           "--shimmer-base": baseColor ?? shimmerColors.base,

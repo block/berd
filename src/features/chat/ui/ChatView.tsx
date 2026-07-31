@@ -579,6 +579,7 @@ export function ChatView({
           key="loading-indicator"
           chatState={loadingChatState}
           className="mb-0 px-0"
+          motionPreset="responding"
         />
       </div>
     </AnimatePresence>

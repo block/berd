@@ -16,9 +16,16 @@ export type LoadingChatState =
 interface LoadingBerdProps {
   chatState?: LoadingChatState;
   className?: string;
+  motionPreset?: "default" | "responding";
 }
 
 const LOADING_FADE_S = 0.45;
+const DEFAULT_LOADING_SHIMMER_PROPS = {
+  delay: 0.35,
+  duration: 2.2,
+  spread: 5,
+  tone: "current",
+} as const;
 
 const MESSAGE_KEY_BY_STATE: Record<
   Exclude<LoadingChatState, "idle">,
@@ -33,6 +40,7 @@ const MESSAGE_KEY_BY_STATE: Record<
 export function LoadingBerd({
   chatState = "idle",
   className,
+  motionPreset = "default",
 }: LoadingBerdProps) {
   const { t } = useTranslation("chat");
   const shouldReduceMotion = useReducedMotion();
@@ -58,7 +66,13 @@ export function LoadingBerd({
       {shouldReduceMotion ? (
         <span>{message}</span>
       ) : (
-        <Shimmer as="span" className="text-xs" {...RESPONDING_SHIMMER_PROPS}>
+        <Shimmer
+          as="span"
+          className="text-xs"
+          {...(motionPreset === "responding"
+            ? RESPONDING_SHIMMER_PROPS
+            : DEFAULT_LOADING_SHIMMER_PROPS)}
+        >
           {message}
         </Shimmer>
       )}

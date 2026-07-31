@@ -35,6 +35,7 @@ This follows the shadcn theming model: core tokens describe component anatomy an
 | Need | Use | Tailwind examples |
 | --- | --- | --- |
 | Sidebar shell | `sidebar` | `bg-sidebar text-sidebar-foreground` |
+| Navigation panel shell | `sidebar-navigation-panel-bg` | `bg-sidebar-navigation-panel-bg` |
 | Sidebar hover or selected row | `sidebar-accent` | `hover:bg-sidebar-accent` |
 | Sidebar selected/hover text | `sidebar-accent-foreground` | `text-sidebar-accent-foreground` |
 | Sidebar divider | `sidebar-border` | `border-sidebar-border` |

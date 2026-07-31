@@ -103,6 +103,7 @@ const allowedBridgeNames = new Set([
 const allowedBridgePatterns = [
   /^canvas-(?:base|project-tint)$/,
   /^app-top-bar-control-fg(?:-disabled)?$/,
+  /^sidebar-navigation-panel-bg$/,
   /^sidebar-section-action-(?:bg|fg)(?:-hover)?$/,
   /^surface-(?:composer(?:-(?:glass|hover|action(?:-(?:hover|active))?)?)?|chat-(?:composer(?:-hover)?|responding-pill-(?:bg|fg))|editor-panel|glass-(?:subtle|strong(?:-(?:hover|fg))?)|agent-tile-action-(?:bg|fg)(?:-hover)?)$/,
   /^surface-agent-profile-(?:bg|fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,

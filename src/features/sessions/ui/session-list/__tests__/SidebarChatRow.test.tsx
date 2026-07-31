@@ -212,9 +212,12 @@ describe("SidebarChatRow", () => {
     );
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
-    expect(
-      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
-    ).toBeInTheDocument();
+    const pulseDot = container.querySelector(
+      '[data-slot="active-chat-pulse-dot"]',
+    );
+    expect(pulseDot).toHaveClass("bg-info");
+    expect(pulseDot).toHaveStyle({ animationDuration: "2.2s" });
+    expect((pulseDot as HTMLElement).style.animationDelay).toBe("");
     expect(
       container.querySelector('[data-slot="berd-loader-inline"]'),
     ).not.toBeInTheDocument();
@@ -222,9 +225,16 @@ describe("SidebarChatRow", () => {
     expect(
       container.querySelector("[data-sidebar-chat-status]"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Busy Chat").closest(".shimmer-text"),
-    ).toBeInTheDocument();
+    const shimmer = screen.getByText("Busy Chat").closest(".shimmer-text");
+    expect(shimmer).toBeInTheDocument();
+    expect(shimmer).toHaveStyle({
+      "--shimmer-base": "var(--color-sidebar-foreground)",
+      "--shimmer-highlight":
+        "color-mix(in srgb, var(--color-sidebar-foreground) 25%, var(--color-background))",
+      "--spread": "22.5px",
+      "--shimmer-delay": "0.35s",
+      backgroundPosition: "130% center, 0 0",
+    });
   });
 
   it("shows static running status when sidebar animation is disabled", () => {

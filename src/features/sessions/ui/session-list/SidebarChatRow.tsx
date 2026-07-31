@@ -423,7 +423,7 @@ export function SidebarChatRow({
       as="span"
       {...RESPONDING_SHIMMER_PROPS}
       baseColor="var(--color-sidebar-foreground)"
-      highlightColor="color-mix(in srgb, var(--color-sidebar-foreground) 55%, var(--color-background))"
+      highlightColor="color-mix(in srgb, var(--color-sidebar-foreground) 25%, var(--color-background))"
       className="!inline leading-[inherit] [--shimmer-ink:var(--color-sidebar-foreground)]"
     >
       {displayTitle}

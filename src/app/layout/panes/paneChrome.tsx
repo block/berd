@@ -30,7 +30,9 @@ export const PaneSurface = forwardRef<
       data-testid={testId}
       className={cn(
         "relative flex flex-shrink-0 flex-col overflow-hidden rounded-md",
-        glass ? "bg-sidebar backdrop-blur-md" : "bg-transparent",
+        glass
+          ? "bg-sidebar-navigation-panel-bg backdrop-blur-md"
+          : "bg-transparent",
         fullHeight && "h-full",
         className,
       )}

@@ -16,9 +16,9 @@
       --shimmer-duration: 2.2s;
       --shimmer-delay: .35s;
       --dot-duration: 2.2s;
-      --spread: 165px;
-      --base: #242424;
-      --highlight: #8e8e8e;
+      --spread: 82.5px;
+      --base: #ffffff;
+      --highlight: #404040;
       --dot-min: .88;
       --dot-max: 1;
       --dot-opacity: .55;
@@ -26,11 +26,12 @@
       --canvas: #1f1f1f;
       --foreground: #ffffff;
       --muted-foreground: #999999;
-      --sidebar: rgba(0, 0, 0, .62);
+      --sidebar: rgba(0, 0, 0, .5);
       --sidebar-row-hover: color-mix(in srgb, var(--foreground) 5%, transparent);
       --sidebar-row-active: color-mix(in srgb, var(--foreground) 7%, transparent);
       --border: #333333;
       --success: #a3d795;
+      --info: #60a5fa;
       --control: #232323;
       --control-hover: #333333;
       --code-bg: #111111;
@@ -47,6 +48,7 @@
       --sidebar-row-active: color-mix(in srgb, var(--foreground) 4%, transparent);
       --border: #e8e8e8;
       --success: #15803d;
+      --info: #2563eb;
       --control: #f0f0f0;
       --control-hover: #e8e8e8;
       --code-bg: #ffffff;
@@ -146,7 +148,7 @@
       color: transparent;
       line-height: inherit;
       background-image:
-        linear-gradient(90deg, transparent calc(50% - var(--spread)), var(--highlight), transparent calc(50% + var(--spread))),
+        linear-gradient(100deg, transparent calc(50% - var(--spread)), var(--highlight), transparent calc(50% + var(--spread))),
         linear-gradient(var(--base), var(--base));
       background-size: 250% 100%, auto;
       background-repeat: no-repeat, padding-box;
@@ -160,14 +162,14 @@
       width: 8px;
       height: 8px;
       border-radius: 999px;
-      background: color-mix(in srgb, var(--foreground) 70%, transparent);
+      background: var(--info);
       animation: pulse var(--dot-duration) ease-in-out infinite;
     }
     .ready { width: 7px; height: 7px; background: var(--success); animation: none; transform: none; }
     .project-space { height: 8px; }
     @keyframes shimmer {
       0% { background-position: 130% center, 0 0; }
-      70%, 100% { background-position: -30% center, 0 0; }
+      100% { background-position: -30% center, 0 0; }
     }
     @keyframes pulse {
       0%, 100% { opacity: var(--dot-opacity); transform: scale(var(--dot-min)); }
@@ -209,12 +211,12 @@
 
   <main class="panel">
     <h1>Sidebar shimmer tuner</h1>
-    <p class="lede">Tune the loading title and synchronized status dot in the live sidebar geometry.</p>
+    <p class="lede">Tune the loading title and status dot in the live sidebar geometry.</p>
     <label>Shimmer speed <input id="shimmerDuration" type="range" min=".5" max="6" step=".1" value="2.2"><output>2.2s</output></label>
     <label>Dot pulse speed <input id="dotDuration" type="range" min=".5" max="6" step=".1" value="2.2"><output>2.2s</output></label>
-    <label>Highlight width <input id="spread" type="range" min="10" max="220" step="1" value="165"><output>165px</output></label>
-    <label>Base color <input id="base" type="color" value="#242424"><output>#242424</output></label>
-    <label>Shimmer color <input id="highlight" type="color" value="#8e8e8e"><output>#8e8e8e</output></label>
+    <label>Highlight width <input id="spread" type="range" min="10" max="220" step="0.5" value="82.5"><output>82.5px</output></label>
+    <label>Base color <input id="base" type="color" value="#ffffff"><output>#ffffff</output></label>
+    <label>Shimmer color <input id="highlight" type="color" value="#404040"><output>#404040</output></label>
     <label>Dot min scale <input id="dotMin" type="range" min=".5" max="1" step=".01" value=".88"><output>0.88</output></label>
     <label>Dot max scale <input id="dotMax" type="range" min="1" max="1.6" step=".01" value="1"><output>1</output></label>
     <label>Dot min opacity <input id="dotOpacity" type="range" min=".1" max="1" step=".01" value=".55"><output>0.55</output></label>
@@ -224,15 +226,15 @@
 <script>
   const root = document.documentElement;
   const themeColors = {
-    dark: { base: '#ffffff', highlight: '#ffffff' },
-    light: { base: '#242424', highlight: '#8e8e8e' }
+    dark: { base: '#ffffff', highlight: '#404040' },
+    light: { base: '#242424', highlight: '#c8c8c8' }
   };
   const config = {
     shimmerDuration: { css: '--shimmer-duration', unit: 's', initial: 2.2 },
     dotDuration: { css: '--dot-duration', unit: 's', initial: 2.2 },
-    spread: { css: '--spread', unit: 'px', initial: 165 },
-    base: { css: '--base', unit: '', initial: '#242424' },
-    highlight: { css: '--highlight', unit: '', initial: '#8e8e8e' },
+    spread: { css: '--spread', unit: 'px', initial: 82.5 },
+    base: { css: '--base', unit: '', initial: '#ffffff' },
+    highlight: { css: '--highlight', unit: '', initial: '#404040' },
     dotMin: { css: '--dot-min', unit: '', initial: .88 },
     dotMax: { css: '--dot-max', unit: '', initial: 1 },
     dotOpacity: { css: '--dot-opacity', unit: '', initial: .55 }
@@ -243,7 +245,7 @@
       root.style.setProperty(c.css, value + c.unit);
       el.nextElementSibling.value = value + c.unit;
     }
-    values.textContent = `shimmer duration={${shimmerDuration.value}}\ndot duration={${dotDuration.value}}\nspread={5} (≈ ${spread.value}px for this title)\ntone="current"\ndelay={0.35}\nbase: ${base.value}\nhighlight: ${highlight.value}\ndot scale: ${dotMin.value} → ${dotMax.value}\ndot opacity: ${dotOpacity.value} → 1`;
+    values.textContent = `shimmer duration={${shimmerDuration.value}}\ndot duration={${dotDuration.value}}\nspread={2.5} (≈ ${spread.value}px for this title)\ntone="current"\ndelay={0.35}\nbase: ${base.value}\nhighlight: ${highlight.value}\ndot scale: ${dotMin.value} → ${dotMax.value}\ndot opacity: ${dotOpacity.value} → 1`;
   }
   Object.keys(config).forEach(id => { document.getElementById(id).addEventListener('input', update); });
   theme.onclick = () => {

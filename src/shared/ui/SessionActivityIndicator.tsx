@@ -55,13 +55,15 @@ export function ActiveChatPulseDot({ className }: { className?: string }) {
       aria-hidden="true"
       data-slot="active-chat-pulse-dot"
       className={cn(
-        "size-[7px] rounded-full bg-[color-mix(in_srgb,var(--color-sidebar-foreground)_55%,white)]",
+        "size-[7px] rounded-full bg-info",
         motionEnabled && "animate-[active-chat-dot-pulse_ease-in-out_infinite]",
         className,
       )}
       style={
         motionEnabled
-          ? { animationDuration: `${RESPONDING_SHIMMER_PROPS.duration}s` }
+          ? {
+              animationDuration: `${RESPONDING_SHIMMER_PROPS.duration}s`,
+            }
           : undefined
       }
     />
