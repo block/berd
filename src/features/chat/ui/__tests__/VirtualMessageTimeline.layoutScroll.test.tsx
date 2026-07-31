@@ -9,7 +9,12 @@ import {
 } from "@/features/chat/transcript/testing/virtualTimelineSnapshotFixture";
 
 const timelineMocks = vi.hoisted(() => ({
+  remeasureVisibleRowsSync: vi.fn(),
   scrollToBottom: vi.fn(() => true),
+  syncViewportFromDom: vi.fn(() => ({
+    sessionId: "session-1",
+    sessionEpoch: 0,
+  })),
 }));
 
 vi.mock("../MessageBubble", () => ({
@@ -46,21 +51,9 @@ vi.mock("../../transcript/virtual/react/useTranscriptVirtualTimeline", () => ({
     rowStateProvider: null,
     measureRowElement: vi.fn(),
     measureOffscreenShellElement: vi.fn(),
-    syncViewportFromDom: vi.fn(() => ({
-      anchor: { type: "bottom" },
-      bottomScrollTop: 0,
-      distanceFromBottom: 0,
-      footerHeight,
-      nearBottom: true,
-      pinnedToBottom: true,
-      rowCount: rows.length,
-      scrollTop: 0,
-      sessionEpoch,
-      sessionId,
-      viewportHeight: 500,
-      virtualScrollHeight: rows.length * 120 + footerHeight,
-      widthScope: "w:800",
-    })),
+    measureOffscreenRealElement: vi.fn(),
+    remeasureVisibleRowsSync: timelineMocks.remeasureVisibleRowsSync,
+    syncViewportFromDom: timelineMocks.syncViewportFromDom,
     scrollToRow: vi.fn(() => true),
     scrollToBottom: timelineMocks.scrollToBottom,
     setRowFocused: vi.fn(),

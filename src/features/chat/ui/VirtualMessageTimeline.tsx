@@ -89,6 +89,11 @@ import {
   type TimelineScrollIntent,
 } from "./timelineScrollIntent";
 import { getVirtualTranscriptRowSpacingBlockSize } from "./virtualTranscriptRowSpacing";
+import {
+  createTranscriptBrowserViewport,
+  MAX_BLANK_VIEWPORT_RECOVERY_ATTEMPTS,
+  type TranscriptBrowserRowCoverage,
+} from "../transcript/virtual/browserViewport";
 
 const RESIZE_SCROLL_SUPPRESSION_MS = 250;
 const DOCKED_FOOTER_BOTTOM_PADDING_PX = 44;
@@ -144,6 +149,9 @@ export interface VirtualMessageTimelineDiagnostics {
   projectionP95Ms: number;
   descriptorChurnPercent: number;
   blankViewportPixels: number;
+  browserIntersectingRealRows: number;
+  browserRealRows: number;
+  blankViewportRecoveryAttempts: number;
   timeToFirstVisibleTailMs: number;
   restoreReplayDrainMs: number;
   heapGrowthMb: number;
@@ -1027,6 +1035,17 @@ export function VirtualMessageTimeline({
   const [liveTailScrollHeightFloorPx, setLiveTailScrollHeightFloorPx] =
     useState(0);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
+  const [browserRowCoverage, setBrowserRowCoverage] =
+    useState<TranscriptBrowserRowCoverage | null>(null);
+  const [blankViewportRecoveryAttempts, setBlankViewportRecoveryAttempts] =
+    useState(0);
+  const blankViewportRecoveryStateRef = useRef<{
+    key: string;
+    attempts: number;
+  } | null>(null);
+  const blankViewportRecoveryFrameRef = useRef<number | null>(null);
+  const browserScrollOwnershipUntilRef = useRef(0);
+  const requestBlankViewportInspectionRef = useRef<() => void>(() => undefined);
   const [transientStateSessionId, setTransientStateSessionId] =
     useState(sessionId);
 
@@ -1070,6 +1089,7 @@ export function VirtualMessageTimeline({
     }
     diagnosticsStartMsRef.current = getDiagnosticsNowMs();
     diagnosticsAccumulatorRef.current = createTimelineDiagnosticsAccumulator();
+    blankViewportRecoveryStateRef.current = null;
   }
 
   // Reset transient timeline UI state inline when the session changes, using a
@@ -1083,6 +1103,8 @@ export function VirtualMessageTimeline({
     setResponseStartHintMessageId(null);
     setLiveTailScrollHeightFloorPx(0);
     setPulsingMessageId(null);
+    setBrowserRowCoverage(null);
+    setBlankViewportRecoveryAttempts(0);
   }
 
   const sessionEpoch = sessionLifecycleRef.current.sessionEpoch;
@@ -1450,7 +1472,11 @@ export function VirtualMessageTimeline({
           projectionDurationMs: snapshot.projectionDurationMs,
           projectionP95Ms: 0,
           descriptorChurnPercent: 0,
-          blankViewportPixels: 0,
+          blankViewportPixels: browserRowCoverage?.blankViewportPixels ?? 0,
+          browserIntersectingRealRows:
+            browserRowCoverage?.intersectingRealRowCount ?? 0,
+          browserRealRows: browserRowCoverage?.realRowCount ?? 0,
+          blankViewportRecoveryAttempts,
           timeToFirstVisibleTailMs: 0,
           restoreReplayDrainMs: 0,
           heapGrowthMb: 0,
@@ -1575,6 +1601,8 @@ export function VirtualMessageTimeline({
       ),
     [
       isBoundedVirtualMode,
+      browserRowCoverage,
+      blankViewportRecoveryAttempts,
       hasLiveStreamingTail,
       liveStreamingTailRows,
       mountedRows,
@@ -1846,6 +1874,7 @@ export function VirtualMessageTimeline({
         userScrollIntentExpiryFrameRef.current = null;
         userScrollIntentRef.current = false;
         userScrollDirectionRef.current = null;
+        requestBlankViewportInspectionRef.current();
       });
     },
     [],
@@ -2322,6 +2351,7 @@ export function VirtualMessageTimeline({
       if (wasPinnedToLatest) {
         scrollToBottom("auto");
         syncScrollState();
+        requestBlankViewportInspectionRef.current();
         return;
       }
 
@@ -2350,6 +2380,7 @@ export function VirtualMessageTimeline({
       }
       if (!virtualState) {
         syncScrollState();
+        requestBlankViewportInspectionRef.current();
         return;
       }
 
@@ -2367,6 +2398,7 @@ export function VirtualMessageTimeline({
       }
       lastScrollTopRef.current = virtualState.scrollTop;
       clearUserScrollIntent();
+      requestBlankViewportInspectionRef.current();
     };
 
     // ResizeObserver callbacks run after layout and before paint, so the
@@ -3026,6 +3058,8 @@ export function VirtualMessageTimeline({
 
   const handleScroll = () => {
     const startedAt = getDiagnosticsNowMs();
+    browserScrollOwnershipUntilRef.current = startedAt + 100;
+    requestBlankViewportInspectionRef.current();
     try {
       syncScrollState();
     } finally {
@@ -3081,6 +3115,7 @@ export function VirtualMessageTimeline({
       return;
     }
 
+    browserScrollOwnershipUntilRef.current = getDiagnosticsNowMs() + 100;
     markUserScrollIntent(
       event.deltaY < 0
         ? "away-from-latest"
@@ -3115,6 +3150,7 @@ export function VirtualMessageTimeline({
       return;
     }
     const container = containerRef.current;
+    browserScrollOwnershipUntilRef.current = getDiagnosticsNowMs() + 100;
     if (event.type === "pointerdown" && container) {
       pointerScrollIntentActiveRef.current = true;
     }
@@ -3164,6 +3200,7 @@ export function VirtualMessageTimeline({
       }
 
       pointerScrollIntentActiveRef.current = false;
+      requestBlankViewportInspectionRef.current();
     };
 
     document.addEventListener("pointerup", endPointerScrollIntent);
@@ -3563,6 +3600,115 @@ export function VirtualMessageTimeline({
   const renderedLiveStreamingTailRows = liveStreamingTailRows.map(
     (row, tailIndex) => renderRow(row, liveStreamingTailStartIndex + tailIndex),
   );
+  const showPlaceholderContent = showPlaceholder || !hasMessageRows;
+  const virtualRangeRevision = `${virtualTimelineSnapshot.range.renderRange.startIndex}:${virtualTimelineSnapshot.range.renderRange.endIndex}:${virtualTimelineSnapshot.range.virtualItems
+    .map((item) => `${item.key}:${item.start}:${item.size}`)
+    .join("|")}`;
+
+  useLayoutEffect(() => {
+    if (
+      !isBoundedVirtualMode ||
+      stableRows.length === 0 ||
+      showPlaceholderContent
+    ) {
+      setBrowserRowCoverage(null);
+      return;
+    }
+
+    const recoveryKey = `${sessionId}:${sessionEpoch}:${virtualRangeRevision}`;
+    if (blankViewportRecoveryStateRef.current?.key !== recoveryKey) {
+      blankViewportRecoveryStateRef.current = { key: recoveryKey, attempts: 0 };
+    }
+    setBlankViewportRecoveryAttempts(
+      blankViewportRecoveryStateRef.current.attempts,
+    );
+
+    const inspectAndRecover = () => {
+      blankViewportRecoveryFrameRef.current = null;
+      const container = containerRef.current;
+      const transcriptRoot = searchListRootRef.current;
+      if (!container || !transcriptRoot) {
+        return;
+      }
+
+      const recoveryState = blankViewportRecoveryStateRef.current;
+      if (!recoveryState || recoveryState.key !== recoveryKey) {
+        return;
+      }
+      if (
+        pointerScrollIntentActiveRef.current ||
+        userScrollIntentRef.current ||
+        recoveryState.attempts >= MAX_BLANK_VIEWPORT_RECOVERY_ATTEMPTS
+      ) {
+        return;
+      }
+      if (getDiagnosticsNowMs() < browserScrollOwnershipUntilRef.current) {
+        blankViewportRecoveryFrameRef.current =
+          requestAnimationFrame(inspectAndRecover);
+        return;
+      }
+
+      const browserViewport = createTranscriptBrowserViewport(
+        container,
+        transcriptRoot,
+      );
+      const coverage = browserViewport.readRealRowCoverage();
+      setBrowserRowCoverage((current) =>
+        current?.blankViewportPixels === coverage.blankViewportPixels &&
+        current.intersectingRealRowCount ===
+          coverage.intersectingRealRowCount &&
+        current.realRowCount === coverage.realRowCount
+          ? current
+          : coverage,
+      );
+      if (coverage.intersectingRealRowCount > 0) {
+        return;
+      }
+
+      recoveryState.attempts += 1;
+      setBlankViewportRecoveryAttempts(recoveryState.attempts);
+
+      // Refresh row geometry first, then reconcile from the browser's actual
+      // viewport. Writing its current scrollTop through the adapter and reading
+      // it back makes clamping/browser behavior authoritative without moving a
+      // viewport owned by the user.
+      remeasureVisibleRowsSync();
+      const liveViewport = browserViewport.read();
+      browserViewport.writeScrollTop(liveViewport.scrollTop);
+      syncViewportFromDom({
+        source: "browser",
+        preserveScrollPosition: true,
+        forceRangeRefresh: true,
+      });
+      blankViewportRecoveryFrameRef.current =
+        requestAnimationFrame(inspectAndRecover);
+    };
+
+    const requestInspection = () => {
+      if (blankViewportRecoveryFrameRef.current == null) {
+        blankViewportRecoveryFrameRef.current =
+          requestAnimationFrame(inspectAndRecover);
+      }
+    };
+    requestBlankViewportInspectionRef.current = requestInspection;
+    requestInspection();
+    return () => {
+      requestBlankViewportInspectionRef.current = () => undefined;
+      if (blankViewportRecoveryFrameRef.current != null) {
+        cancelAnimationFrame(blankViewportRecoveryFrameRef.current);
+        blankViewportRecoveryFrameRef.current = null;
+      }
+    };
+  }, [
+    isBoundedVirtualMode,
+    remeasureVisibleRowsSync,
+    sessionEpoch,
+    sessionId,
+    showPlaceholderContent,
+    stableRows.length,
+    syncViewportFromDom,
+    virtualRangeRevision,
+  ]);
 
   useLayoutEffect(() => {
     if (!isBoundedVirtualMode) {
@@ -3694,6 +3840,15 @@ export function VirtualMessageTimeline({
         snapshot.wholeMessageFallbackRowCount
       }
       data-virtual-mounted-rows={mountedRows}
+      data-virtual-blank-viewport-pixels={
+        browserRowCoverage?.blankViewportPixels ?? 0
+      }
+      data-virtual-browser-intersecting-real-rows={
+        browserRowCoverage?.intersectingRealRowCount ?? 0
+      }
+      data-virtual-blank-viewport-recovery-attempts={
+        blankViewportRecoveryAttempts
+      }
       data-virtual-range-mounted-rows={virtualRangeMountedRows}
       data-virtual-offscreen-real-mounted-rows={offscreenRealMountedRows}
       data-virtual-offscreen-shell-mounted-rows={offscreenShellMountedRows}
@@ -3754,7 +3909,6 @@ export function VirtualMessageTimeline({
     </div>
   );
 
-  const showPlaceholderContent = showPlaceholder || !hasMessageRows;
   const content = showPlaceholderContent ? (
     <TranscriptSearchSkip>
       {placeholder ?? <MessageTimelineEmptyState />}

@@ -116,6 +116,118 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(result.current.snapshot).toBe(initialSnapshot);
   });
 
+  it("force-refreshes the virtual range when DOM geometry is unchanged", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 20 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+    const initialSnapshot = result.current.snapshot;
+    const expectedRenderedRowIds = [...initialSnapshot.range.renderedRowIds];
+    const initialViewportUpdates =
+      initialSnapshot.controllerDiagnostics.viewportUpdates;
+    // Model the failure under recovery: React still holds a stale published
+    // range while browser and controller viewport geometry agree.
+    (
+      initialSnapshot.range as {
+        renderedRowIds: readonly string[];
+      }
+    ).renderedRowIds = ["stale-row"];
+
+    await act(async () => {
+      result.current.syncViewportFromDom({ source: "browser" });
+    });
+    expect(result.current.snapshot).toBe(initialSnapshot);
+    expect(result.current.snapshot.range.renderedRowIds).toEqual(["stale-row"]);
+    expect(result.current.snapshot.controllerDiagnostics.viewportUpdates).toBe(
+      initialViewportUpdates,
+    );
+
+    await act(async () => {
+      result.current.syncViewportFromDom({
+        source: "browser",
+        forceRangeRefresh: true,
+      });
+    });
+
+    // A real engine sync clears both the controller's last range and the
+    // adapter's range selection before rebuilding and committing the snapshot.
+    expect(result.current.snapshot).not.toBe(initialSnapshot);
+    expect(
+      result.current.snapshot.controllerDiagnostics.viewportUpdates,
+    ).toBeGreaterThan(initialViewportUpdates);
+    expect(result.current.snapshot.range.renderedRowIds).toEqual(
+      expectedRenderedRowIds,
+    );
+  });
+
+  it("publishes a forced range refresh from a keepalive replacement controller", async () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 20 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      result.current.rowStateControls.markRowInteracted("row-19", {
+        nowMs: 1_000,
+        ttlMs: 100,
+      });
+    });
+    expect(result.current.snapshot.range.protectedRowIds).toContain("row-19");
+
+    const protectedSnapshot = result.current.snapshot;
+    (
+      protectedSnapshot.range as {
+        renderedRowIds: readonly string[];
+      }
+    ).renderedRowIds = ["stale-row"];
+    now.mockReturnValue(1_200);
+
+    await act(async () => {
+      result.current.syncViewportFromDom({
+        source: "browser",
+        forceRangeRefresh: true,
+      });
+    });
+
+    // Expiring the keepalive makes commitSnapshot replace the controller. The
+    // forced rebuild must use that retained replacement, not the captured
+    // controller that still protects row-19.
+    expect(result.current.snapshot).not.toBe(protectedSnapshot);
+    expect(result.current.snapshot.range.renderedRowIds).not.toContain(
+      "stale-row",
+    );
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "row-19",
+    );
+  });
+
   it("stabilizes repeated layout-effect bottom syncs", async () => {
     const container = createContainer();
     const containerRef = {

@@ -154,6 +154,8 @@ interface SyncViewportOptions {
   source?: "browser" | "programmatic" | "correction";
   userScrollIntent?: boolean;
   preserveScrollPosition?: boolean;
+  /** Recovery-only escape hatch that invalidates and recomputes a stale range. */
+  forceRangeRefresh?: boolean;
 }
 
 interface DeferredTranscriptCorrection {
@@ -734,17 +736,37 @@ export function useTranscriptVirtualTimeline({
         containerRef.current,
         footerHeight,
       );
-      if (!shouldSyncViewport(controller.getState(), liveViewport)) {
+      if (
+        !options.forceRangeRefresh &&
+        !shouldSyncViewport(controller.getState(), liveViewport)
+      ) {
         return controller.getState();
       }
 
       const previousWidthScope = controller.getState().widthScope;
-      const result = controller.syncViewport(liveViewport, options);
+      const { forceRangeRefresh: _, ...syncOptions } = options;
+      const result = controller.syncViewport(liveViewport, syncOptions);
       if (controller.getState().widthScope !== previousWidthScope) {
         invalidateWidthScopedMeasurementReplay();
       }
       applyCorrection(result.correction, "sync-viewport-from-dom");
-      return commitSnapshot();
+      const controllerState = commitSnapshot();
+      if (options.forceRangeRefresh) {
+        const refreshedSnapshot = buildSnapshot({
+          controller: controllerRef.current ?? controller,
+          registry: rowStateRegistryRef.current,
+          rows: rowsRef.current,
+          sessionId,
+          sessionEpoch,
+          measurementStats: getMeasurementStats(
+            measurementSchedulerRef.current?.getDiagnostics(),
+            localMeasurementCountersRef.current,
+          ),
+        });
+        snapshotRef.current = refreshedSnapshot;
+        setSnapshot(refreshedSnapshot);
+      }
+      return controllerState;
     },
     [
       applyCorrection,
@@ -752,6 +774,8 @@ export function useTranscriptVirtualTimeline({
       containerRef,
       footerHeight,
       invalidateWidthScopedMeasurementReplay,
+      sessionEpoch,
+      sessionId,
     ],
   );
 

@@ -195,7 +195,9 @@ function multiParagraphText(
   ).join("\n\n");
 }
 
-function mockTranscriptElementMeasurements() {
+function mockTranscriptElementMeasurements(options?: {
+  realRowsOffscreen?: () => boolean;
+}) {
   return vi
     .spyOn(HTMLElement.prototype, "getBoundingClientRect")
     .mockImplementation(function getMockRect(this: HTMLElement) {
@@ -229,9 +231,14 @@ function mockTranscriptElementMeasurements() {
         this.getAttribute("data-testid")?.startsWith("virtual-transcript-row-")
       ) {
         const measuredDescendant = this.querySelector("[data-mock-row-height]");
-        return createDomRect(
-          readNumericAttribute(measuredDescendant, "data-mock-row-height", 144),
+        const height = readNumericAttribute(
+          measuredDescendant,
+          "data-mock-row-height",
+          144,
         );
+        return options?.realRowsOffscreen?.()
+          ? createPositionedDomRect(height, 2_000)
+          : createDomRect(height);
       }
 
       return createDomRect(0);
@@ -283,15 +290,19 @@ function readPixelStyleValue(element: HTMLElement, property: "height"): number {
 }
 
 function createDomRect(height: number): DOMRect {
+  return createPositionedDomRect(height, 0);
+}
+
+function createPositionedDomRect(height: number, top: number): DOMRect {
   return {
-    bottom: height,
+    bottom: top + height,
     height,
     left: 0,
     right: 800,
-    top: 0,
+    top,
     width: 800,
     x: 0,
-    y: 0,
+    y: top,
     toJSON: () => ({}),
   } as DOMRect;
 }
@@ -2211,6 +2222,151 @@ describe("VirtualMessageTimeline", () => {
     window.removeEventListener(
       TRANSCRIPT_DIAGNOSTICS_EVENT,
       handleTranscriptDiagnosticsEvent,
+    );
+  });
+
+  it("inspects a blank viewport after ordinary scroll ownership expires without a range change", async () => {
+    let now = 0;
+    let realRowsOffscreen = false;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const animationFrame = mockRequestAnimationFrame();
+    mockTranscriptElementMeasurements({
+      realRowsOffscreen: () => realRowsOffscreen,
+    });
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    setScrollMetrics(scroller, { scrollTop: 0, clientHeight: 500 });
+    animationFrame.runAll(now);
+    expect(list).toHaveAttribute(
+      "data-virtual-blank-viewport-recovery-attempts",
+      "0",
+    );
+    const realRowCoverageReadSpy = vi.spyOn(
+      screen.getByRole("log"),
+      "querySelectorAll",
+    );
+
+    realRowsOffscreen = true;
+    now = 10;
+    fireEvent.scroll(scroller);
+    animationFrame.runAll(now);
+    expect(realRowCoverageReadSpy).not.toHaveBeenCalledWith(
+      "[data-virtual-row-id]",
+    );
+    expect(list).toHaveAttribute(
+      "data-virtual-blank-viewport-recovery-attempts",
+      "0",
+    );
+
+    now = 111;
+    animationFrame.runAll(now);
+    expect(realRowCoverageReadSpy).toHaveBeenCalledWith(
+      "[data-virtual-row-id]",
+    );
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-blank-viewport-recovery-attempts",
+        "2",
+      ),
+    );
+  });
+
+  it("inspects and recovers a blank viewport after resize with an unchanged range", async () => {
+    vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const animationFrame = mockRequestAnimationFrame();
+    let realRowsOffscreen = false;
+    mockTranscriptElementMeasurements({
+      realRowsOffscreen: () => realRowsOffscreen,
+    });
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    setScrollMetrics(scroller, { scrollTop: 0, clientHeight: 500 });
+    animationFrame.runAll(1_000);
+    expect(list).toHaveAttribute(
+      "data-virtual-blank-viewport-recovery-attempts",
+      "0",
+    );
+    const renderedRowIdsBeforeResize = Array.from(
+      list.querySelectorAll("[data-virtual-row-id]"),
+      (row) => row.getAttribute("data-virtual-row-id"),
+    );
+
+    realRowsOffscreen = true;
+    triggerResizeObservers();
+    animationFrame.runAll(1_000);
+
+    expect(
+      Array.from(list.querySelectorAll("[data-virtual-row-id]"), (row) =>
+        row.getAttribute("data-virtual-row-id"),
+      ),
+    ).toEqual(renderedRowIdsBeforeResize);
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-blank-viewport-recovery-attempts",
+        "2",
+      ),
+    );
+  });
+
+  it("resets blank viewport recovery attempts across distinct range revisions", async () => {
+    vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const animationFrame = mockRequestAnimationFrame();
+    mockTranscriptElementMeasurements({ realRowsOffscreen: () => true });
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(scroller, { scrollTop: 0, clientHeight: 500 });
+    animationFrame.runAll(1_000);
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-blank-viewport-recovery-attempts",
+        "2",
+      ),
+    );
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          ...messages,
+          textMessage("message-80", "assistant", "Message 80"),
+        ]}
+      />,
+    );
+
+    expect(list).toHaveAttribute(
+      "data-virtual-blank-viewport-recovery-attempts",
+      "0",
+    );
+    animationFrame.runAll(1_000);
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-blank-viewport-recovery-attempts",
+        "2",
+      ),
     );
   });
 

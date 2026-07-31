@@ -53,6 +53,7 @@ vi.mock("../../transcript/virtual/react/useTranscriptVirtualTimeline", () => ({
     }),
     rowStateProvider: null,
     measureRowElement: vi.fn(),
+    remeasureVisibleRowsSync: vi.fn(),
     measureOffscreenShellElement: vi.fn(),
     syncViewportFromDom: vi.fn(() => ({
       anchor: { type: "bottom" },
