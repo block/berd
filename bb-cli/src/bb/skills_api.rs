@@ -7,6 +7,11 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::agents_models::{
+    AgentCatalogPage, AgentDetail, AgentInstallPlan, AgentInstallPlanRequest,
+    AgentInstallResolution, AgentOperationError, AgentVersion, InstalledAgentRequest,
+    AGENT_OPERATION_KIND,
+};
 use super::auth::SESSION_CREDENTIAL_HEADER;
 use super::auth_storage::stored_session_credential_header_value;
 use super::display::Style;
@@ -290,6 +295,10 @@ impl MarketplaceClient {
         Ok(items)
     }
 
+    pub fn agents(&self) -> AgentMarketplace<'_> {
+        AgentMarketplace { client: self }
+    }
+
     fn url(&self, path: &str) -> String {
         if path.starts_with('/') {
             format!("{}{}", self.base_url, path)
@@ -340,6 +349,105 @@ impl MarketplaceClient {
                 .and_then(|value| value.get("error").cloned()),
         }))
     }
+}
+
+pub struct AgentMarketplace<'a> {
+    client: &'a MarketplaceClient,
+}
+
+impl AgentMarketplace<'_> {
+    pub fn list_all(&self, query: Option<&str>) -> Result<Vec<super::agents_models::AgentSummary>> {
+        let mut items = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let mut path = format!("/v1/marketplace/agents?limit={LIST_PAGE_LIMIT}");
+            if let Some(query) = query {
+                path.push_str(&format!("&query={}", url_encode(query)));
+            }
+            if let Some(cursor_value) = &cursor {
+                path.push_str(&format!("&cursor={}", url_encode(cursor_value)));
+            }
+            let page = self.client.get_json::<AgentCatalogPage>(&path)?;
+            items.extend(page.items);
+            match page.next_cursor.filter(|value| !value.is_empty()) {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        Ok(items)
+    }
+
+    pub fn show(&self, slug: &str) -> Result<AgentDetail> {
+        self.client
+            .get_json::<AgentDetail>(&format!("/v1/marketplace/agents/{}", url_encode(slug)))
+    }
+
+    pub fn version(&self, slug: &str, version_id: &str) -> Result<AgentVersion> {
+        self.client.get_json::<AgentVersion>(&format!(
+            "/v1/marketplace/agents/{}/versions/{}",
+            url_encode(slug),
+            url_encode(version_id)
+        ))
+    }
+
+    pub fn resolve_install(
+        &self,
+        slug: &str,
+        version_id: Option<String>,
+        installed: Vec<InstalledAgentRequest>,
+    ) -> Result<AgentInstallResolution> {
+        let agent = self.show(slug)?;
+        let requested_version_id = version_id.clone();
+        let plan = self.client.post_json::<AgentInstallPlan, _>(
+            "/v1/marketplace/install-plan",
+            &AgentInstallPlanRequest::for_agent(slug, version_id, installed),
+        )?;
+        let operation = plan
+            .operations
+            .into_iter()
+            .find(|operation| operation.skill.slug == slug)
+            .ok_or_else(|| {
+                invalid_agent_operation(AgentOperationError::Missing {
+                    slug: slug.to_string(),
+                })
+            })?;
+        if operation.kind != AGENT_OPERATION_KIND {
+            return Err(invalid_agent_operation(AgentOperationError::WrongKind {
+                slug: slug.to_string(),
+                actual: operation.kind,
+            }));
+        }
+        if let Some(requested_version_id) = requested_version_id {
+            if operation.skill.version_id != requested_version_id {
+                return Err(failure(
+                    exit_codes::PLAN_BLOCKED,
+                    "version_pin_unresolved",
+                    format!(
+                        "requested version `{requested_version_id}` but the server resolved `{}`; the marketplace currently serves only the latest stable version",
+                        operation.skill.version_id
+                    ),
+                ));
+            }
+        }
+        let version = self.version(slug, &operation.skill.version_id)?;
+        Ok(AgentInstallResolution {
+            action: operation.action,
+            reason: operation.reason,
+            agent,
+            version,
+            plan: operation.skill,
+            artifact: operation.artifact,
+            installed_via: operation.installed_via,
+        })
+    }
+}
+
+fn invalid_agent_operation(error: AgentOperationError) -> anyhow::Error {
+    failure(
+        exit_codes::VERIFICATION,
+        "invalid_agent_operation_kind",
+        error.to_string(),
+    )
 }
 
 pub const LIST_PAGE_LIMIT: u32 = 5000;
@@ -494,7 +602,188 @@ pub fn truncate(value: &str, max_len: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
     use super::*;
+    use serde_json::json;
+
+    type RecordedRequest = (String, String, Value);
+
+    struct TestServer {
+        base_url: String,
+        requests: Arc<Mutex<Vec<RecordedRequest>>>,
+        handle: thread::JoinHandle<()>,
+    }
+
+    impl TestServer {
+        fn start(responses: Vec<Value>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+            let base_url = format!("http://{}", listener.local_addr().expect("server address"));
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let thread_requests = Arc::clone(&requests);
+            let handle = thread::spawn(move || {
+                for response in responses {
+                    let (stream, _) = listener.accept().expect("accept client request");
+                    record_and_respond(stream, &thread_requests, response);
+                }
+            });
+            Self {
+                base_url,
+                requests,
+                handle,
+            }
+        }
+
+        fn client(&self) -> MarketplaceClient {
+            MarketplaceClient {
+                base_url: self.base_url.clone(),
+                client: Client::new(),
+                has_auth: false,
+                style: Style::new(true, true, false),
+            }
+        }
+
+        fn finish(self) -> Vec<RecordedRequest> {
+            self.handle.join().expect("join test server");
+            self.requests.lock().expect("lock requests").clone()
+        }
+    }
+
+    fn record_and_respond(
+        stream: TcpStream,
+        requests: &Arc<Mutex<Vec<RecordedRequest>>>,
+        response: Value,
+    ) {
+        let mut reader = BufReader::new(stream.try_clone().expect("clone test stream"));
+        let mut request_line = String::new();
+        reader
+            .read_line(&mut request_line)
+            .expect("read request line");
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().expect("request method").to_string();
+        let path = parts.next().expect("request path").to_string();
+        let mut content_length = 0usize;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read request header");
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().expect("content length");
+                }
+            }
+        }
+        let mut body = vec![0; content_length];
+        reader.read_exact(&mut body).expect("read request body");
+        let body = if body.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&body).expect("parse request JSON")
+        };
+        requests
+            .lock()
+            .expect("lock requests")
+            .push((method, path, body));
+
+        let body = serde_json::to_vec(&response).expect("serialize test response");
+        let mut stream = stream;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .expect("write response headers");
+        stream.write_all(&body).expect("write response body");
+    }
+
+    fn read_artifact() -> Value {
+        json!({
+            "id": "art_release_notes",
+            "sha256": "artifact-sha",
+            "size_bytes": 123,
+            "media_type": "application/zip"
+        })
+    }
+
+    fn install_plan_artifact() -> Value {
+        let mut artifact = read_artifact();
+        artifact
+            .as_object_mut()
+            .expect("read artifact object")
+            .insert(
+                "download_url".to_string(),
+                json!("/v1/marketplace/artifacts/art_release_notes/download"),
+            );
+        artifact
+    }
+
+    fn version(slug: &str, version_id: &str) -> Value {
+        json!({
+            "id": version_id,
+            "slug": slug,
+            "name": "Release Notes",
+            "status": "stable",
+            "content_sha256": "content-sha",
+            "persona_body": "Agent body.",
+            "artifact": read_artifact(),
+            "frontmatter": {"name": "Release Notes", "description": "Writes release notes."},
+            "normalized": {},
+            "files": [],
+            "source": {
+                "source_id": "src_builtin_agents",
+                "snapshot_id": "snap_123",
+                "revision": "main@abc123",
+                "path": "agents/release-notes.md"
+            },
+            "created_at": "2026-07-29T00:00:00Z"
+        })
+    }
+
+    fn agent_detail(slug: &str, version_id: &str) -> Value {
+        json!({
+            "slug": slug,
+            "name": "Release Notes",
+            "description": "Writes release notes.",
+            "status": "stable",
+            "visibility": "public",
+            "enabled": true,
+            "latest_version_id": version_id,
+            "latest_content_sha256": "content-sha",
+            "source_id": "src_builtin_agents",
+            "source_revision": "main@abc123",
+            "source_path": "agents/release-notes.md",
+            "source_enabled": true,
+            "tags": ["release"],
+            "updated_at": "2026-07-29T00:00:00Z",
+            "source_type": "builtin",
+            "risk_level": "low",
+            "latest_version": version(slug, version_id),
+            "versions": [{
+                "id": version_id,
+                "status": "stable",
+                "content_sha256": "content-sha",
+                "created_at": "2026-07-29T00:00:00Z"
+            }]
+        })
+    }
+
+    fn agent_summary(slug: &str, version_id: &str) -> Value {
+        let mut detail = agent_detail(slug, version_id);
+        detail
+            .as_object_mut()
+            .expect("agent detail object")
+            .remove("latest_version");
+        detail
+            .as_object_mut()
+            .expect("agent detail object")
+            .remove("versions");
+        detail
+    }
 
     #[test]
     fn marketplace_error_envelope_formats_stably() {
@@ -536,6 +825,215 @@ mod tests {
             ),
             "GET /v1/marketplace/skills failed with 500 Internal Server Error: plain failure"
         );
+    }
+
+    #[test]
+    fn invalid_agent_operation_uses_the_structured_verification_error() {
+        let error = invalid_agent_operation(AgentOperationError::WrongKind {
+            slug: "release-notes".to_string(),
+            actual: "skill".to_string(),
+        });
+        let (exit_code, payload) = failure_info(&error);
+
+        assert_eq!(exit_code, exit_codes::VERIFICATION);
+        assert_eq!(payload["error"]["code"], "invalid_agent_operation_kind");
+    }
+
+    #[test]
+    fn agent_marketplace_uses_authoritative_read_and_install_plan_contracts() {
+        let server = TestServer::start(vec![
+            json!({"items": [agent_summary("release-notes", "agent-v1")], "next_cursor": "next cursor"}),
+            json!({"items": [agent_summary("security-review", "agent-v2")], "next_cursor": ""}),
+            agent_detail("release-notes", "agent-v1"),
+            json!({
+                "plan_id": "plan_release_notes",
+                "expires_at": "2026-07-29T01:00:00Z",
+                "operations": [{
+                    "action": "install",
+                    "reason": "Install latest stable marketplace agent artifact.",
+                    "kind": "agent",
+                    "skill": {
+                        "slug": "release-notes",
+                        "version_id": "agent-v2",
+                        "content_sha256": "content-sha-v2"
+                    },
+                    "artifact": install_plan_artifact(),
+                    "installed_via": "explicit"
+                }],
+                "warnings": []
+            }),
+            version("release-notes", "agent-v2"),
+        ]);
+        let client = server.client();
+        let marketplace = client.agents();
+
+        let agents = marketplace
+            .list_all(Some("release notes"))
+            .expect("list agent catalog");
+        let resolution = marketplace
+            .resolve_install(
+                "release-notes",
+                Some("agent-v2".to_string()),
+                vec![InstalledAgentRequest {
+                    slug: "release-notes".to_string(),
+                    version_id: Some("agent-v1".to_string()),
+                    content_sha256: Some("content-sha".to_string()),
+                    scope: Some("global".to_string()),
+                    targets: Vec::new(),
+                    installed_via: Some("explicit".to_string()),
+                    local_source: false,
+                }],
+            )
+            .expect("resolve agent install");
+
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].source_path, "agents/release-notes.md");
+        assert_eq!(resolution.plan.version_id, "agent-v2");
+        assert_eq!(resolution.agent.source_revision, "main@abc123");
+        assert_eq!(resolution.version.source.snapshot_id, "snap_123");
+        assert_eq!(resolution.version.source.path, "agents/release-notes.md");
+        assert_eq!(
+            resolution.artifact.expect("install artifact").media_type,
+            "application/zip"
+        );
+
+        let requests = server.finish();
+        assert_eq!(requests[0].0, "GET");
+        assert_eq!(
+            requests[0].1,
+            "/v1/marketplace/agents?limit=5000&query=release%20notes"
+        );
+        assert_eq!(
+            requests[1].1,
+            "/v1/marketplace/agents?limit=5000&query=release%20notes&cursor=next%20cursor"
+        );
+        assert_eq!(requests[2].1, "/v1/marketplace/agents/release-notes");
+        assert_eq!(requests[3].0, "POST");
+        assert_eq!(requests[3].1, "/v1/marketplace/install-plan");
+        assert_eq!(
+            requests[3].2,
+            json!({
+                "scope": "global",
+                "targets": [{"type": "agent", "slug": "release-notes", "version_id": "agent-v2"}],
+                "installed": [{
+                    "slug": "release-notes",
+                    "version_id": "agent-v1",
+                    "content_sha256": "content-sha",
+                    "scope": "global",
+                    "targets": [],
+                    "installed_via": "explicit",
+                    "local_source": false
+                }],
+                "client": {},
+                "include_dependencies": false,
+                "allow_removals": false,
+                "dry_run": false
+            })
+        );
+        assert_eq!(
+            requests[4].1,
+            "/v1/marketplace/agents/release-notes/versions/agent-v2"
+        );
+    }
+
+    #[test]
+    fn agent_install_plan_rejects_missing_or_non_agent_operations() {
+        for operations in [
+            json!([]),
+            json!([{
+                "action": "install",
+                "reason": "Wrong content type.",
+                "kind": "skill",
+                "skill": {"slug": "release-notes", "version_id": "agent-v1", "content_sha256": "content-sha"},
+                "artifact": null,
+                "installed_via": "explicit"
+            }]),
+        ] {
+            let server = TestServer::start(vec![
+                agent_detail("release-notes", "agent-v1"),
+                json!({"operations": operations}),
+            ]);
+            let client = server.client();
+            let error = client
+                .agents()
+                .resolve_install("release-notes", None, Vec::new())
+                .expect_err("invalid agent operation must fail");
+            let (exit_code, payload) = failure_info(&error);
+            assert_eq!(exit_code, exit_codes::VERIFICATION);
+            assert_eq!(payload["error"]["code"], "invalid_agent_operation_kind");
+            server.finish();
+        }
+    }
+
+    #[test]
+    fn agent_install_plan_rejects_unresolved_version_pin() {
+        let server = TestServer::start(vec![
+            agent_detail("release-notes", "agent-v2"),
+            json!({
+                "operations": [{
+                    "action": "install",
+                    "reason": "Install latest stable marketplace agent artifact.",
+                    "kind": "agent",
+                    "skill": {
+                        "slug": "release-notes",
+                        "version_id": "agent-v2",
+                        "content_sha256": "content-sha-v2"
+                    },
+                    "artifact": install_plan_artifact(),
+                    "installed_via": "explicit"
+                }]
+            }),
+        ]);
+
+        let error = server
+            .client()
+            .agents()
+            .resolve_install("release-notes", Some("agent-v1".to_string()), Vec::new())
+            .expect_err("unresolved version pin must fail");
+        let (exit_code, payload) = failure_info(&error);
+
+        assert_eq!(exit_code, exit_codes::PLAN_BLOCKED);
+        assert_eq!(payload["error"]["code"], "version_pin_unresolved");
+        assert_eq!(
+            payload["error"]["message"],
+            "requested version `agent-v1` but the server resolved `agent-v2`; the marketplace currently serves only the latest stable version"
+        );
+        server.finish();
+    }
+
+    #[test]
+    fn agent_install_plan_resolves_noop_without_an_artifact() {
+        let server = TestServer::start(vec![
+            agent_detail("release-notes", "agent-v1"),
+            json!({
+                "operations": [{
+                    "action": "noop",
+                    "reason": "Already at the requested version.",
+                    "kind": "agent",
+                    "skill": {
+                        "slug": "release-notes",
+                        "version_id": "agent-v1",
+                        "content_sha256": "content-sha"
+                    },
+                    "artifact": null,
+                    "installed_via": "explicit"
+                }]
+            }),
+            version("release-notes", "agent-v1"),
+        ]);
+
+        let resolution = server
+            .client()
+            .agents()
+            .resolve_install("release-notes", None, Vec::new())
+            .expect("resolve agent noop");
+
+        assert_eq!(resolution.action, "noop");
+        assert_eq!(resolution.reason, "Already at the requested version.");
+        assert_eq!(resolution.plan.version_id, "agent-v1");
+        assert!(resolution.artifact.is_none());
+        assert_eq!(resolution.installed_via, "explicit");
+        server.finish();
     }
 
     #[test]

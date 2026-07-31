@@ -6,7 +6,7 @@ mod common;
 
 use std::fs;
 use std::io::{Cursor, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -106,6 +106,947 @@ fn skill_detail_response() -> MockResponse {
         "dependencies": [],
         "latest_version": null
     }))
+}
+
+fn agent_document(name: &str, body: &str) -> String {
+    format!("---\nname: {name}\ndescription: Writes release notes.\n---\n{body}\n")
+}
+
+fn marketplace_agent_version(slug: &str, version_id: &str, content_sha256: &str) -> Value {
+    json!({
+        "id": version_id,
+        "slug": slug,
+        "name": "Release Notes",
+        "status": "stable",
+        "content_sha256": content_sha256,
+        "artifact": {
+            "id": format!("art_{version_id}"),
+            "sha256": "read-artifact-sha",
+            "size_bytes": 1,
+            "media_type": "application/zip"
+        },
+        "source": {
+            "source_id": "src_builtin_agents",
+            "snapshot_id": "snap_123",
+            "revision": "main@abc123",
+            "path": "agents/release-notes.md"
+        },
+        "created_at": "2026-07-29T00:00:00Z"
+    })
+}
+
+fn marketplace_agent_detail(slug: &str, version_id: &str, content_sha256: &str) -> Value {
+    json!({
+        "slug": slug,
+        "name": "Release Notes",
+        "description": "Writes release notes.",
+        "status": "stable",
+        "enabled": true,
+        "latest_version_id": version_id,
+        "latest_content_sha256": content_sha256,
+        "source_id": "src_builtin_agents",
+        "source_revision": "main@abc123",
+        "source_path": "agents/release-notes.md",
+        "tags": ["release"],
+        "latest_version": marketplace_agent_version(slug, version_id, content_sha256),
+        "versions": [{
+            "id": version_id,
+            "status": "stable",
+            "content_sha256": content_sha256,
+            "created_at": "2026-07-29T00:00:00Z"
+        }]
+    })
+}
+
+fn marketplace_agent_summary(slug: &str, version_id: &str, content_sha256: &str) -> Value {
+    let mut summary = marketplace_agent_detail(slug, version_id, content_sha256);
+    let fields = summary.as_object_mut().expect("agent detail object");
+    fields.remove("latest_version");
+    fields.remove("versions");
+    summary
+}
+
+fn agent_install_plan(
+    slug: &str,
+    version_id: &str,
+    content_sha256: &str,
+    action: &str,
+    artifact: Option<Value>,
+) -> MockResponse {
+    MockResponse::json(json!({
+        "operations": [{
+            "action": action,
+            "reason": if action == "noop" { "Already at the requested version." } else { "Install marketplace agent." },
+            "kind": "agent",
+            "skill": {
+                "slug": slug,
+                "version_id": version_id,
+                "content_sha256": content_sha256
+            },
+            "artifact": artifact,
+            "installed_via": "explicit"
+        }]
+    }))
+}
+
+fn agent_artifact(slug: &str, version_id: &str, bytes: Vec<u8>) -> (Value, MockResponse) {
+    let sha256 = sha256_hex(&bytes);
+    (
+        json!({
+            "id": format!("art_{version_id}"),
+            "download_url": format!("/v1/marketplace/artifacts/{slug}-{version_id}/download"),
+            "sha256": sha256,
+            "size_bytes": bytes.len(),
+            "media_type": "application/zip"
+        }),
+        MockResponse::bytes(200, bytes, &[]),
+    )
+}
+
+fn agent_target(home: &Path, slug: &str) -> PathBuf {
+    home.join(".agents")
+        .join("agents")
+        .join(format!("{slug}.md"))
+}
+
+fn agent_state(bb_home: &Path, slug: &str) -> PathBuf {
+    bb_home
+        .join("agents")
+        .join("installed")
+        .join(format!("{slug}.json"))
+}
+
+fn managed_agent_metadata(slug: &str, document: &[u8]) -> Value {
+    json!({
+        "schema_version": "bb-agent-install/v1",
+        "kind": "agent",
+        "slug": slug,
+        "version_id": "agent-v1",
+        "content_sha256": "content-v1",
+        "installed_file_sha256": sha256_hex(document),
+        "artifact_id": "art_agent-v1",
+        "artifact_sha256": "artifact-sha",
+        "artifact_size_bytes": 42,
+        "artifact_media_type": "application/zip",
+        "source_id": "src_builtin_agents",
+        "source_snapshot_id": "snap_123",
+        "source_revision": "main@abc123",
+        "source_path": format!("agents/{slug}.md"),
+        "server_url": "http://example.test/api/goose",
+        "installed_at": "2026-07-29T00:00:00Z",
+        "installed_via": "explicit"
+    })
+}
+
+fn write_managed_agent(bb_home: &Path, home: &Path, slug: &str, document: &[u8]) {
+    let target = agent_target(home, slug);
+    let state = agent_state(bb_home, slug);
+    fs::create_dir_all(target.parent().expect("target parent")).expect("create target parent");
+    fs::create_dir_all(state.parent().expect("state parent")).expect("create state parent");
+    fs::write(&target, document).expect("write managed target");
+    fs::write(
+        &state,
+        serde_json::to_vec(&managed_agent_metadata(slug, document)).expect("serialize state"),
+    )
+    .expect("write managed state");
+}
+
+fn snapshot_agent_target(path: &Path) -> (bool, bool, Option<Vec<u8>>) {
+    let metadata = fs::symlink_metadata(path).expect("stat agent target");
+    let file_type = metadata.file_type();
+    let bytes = (file_type.is_file() || file_type.is_symlink())
+        .then(|| fs::read(path).expect("read agent target"));
+    (file_type.is_dir(), file_type.is_symlink(), bytes)
+}
+
+fn assert_agent_pair_unchanged(
+    target: &Path,
+    state: &Path,
+    target_before: &(bool, bool, Option<Vec<u8>>),
+    state_before: &Option<Vec<u8>>,
+) {
+    assert_eq!(snapshot_agent_target(target), *target_before);
+    let state_after = fs::read(state).ok();
+    assert_eq!(state_after, *state_before);
+}
+
+fn assert_agent_failure(
+    output: &std::process::Output,
+    target: &Path,
+    state: &Path,
+    target_before: &(bool, bool, Option<Vec<u8>>),
+    state_before: &Option<Vec<u8>>,
+    exit_code: i32,
+    error_code: &str,
+) {
+    let (stdout, stderr) = output_text(output);
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert_eq!(
+        output.status.code(),
+        Some(exit_code),
+        "stderr was: {stderr}"
+    );
+    let error = parse_stderr_error(&stderr);
+    assert_eq!(error["error"]["code"], error_code);
+    assert_eq!(error["error"]["exit_code"], exit_code);
+    assert_agent_pair_unchanged(target, state, target_before, state_before);
+}
+
+#[test]
+fn bb_agents_are_discoverable_and_install_requires_a_slug_without_network() {
+    let output = bb_command().arg("--help").output().expect("run bb help");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert!(stdout.contains("agents"), "stdout was: {stdout}");
+
+    let server = MockServer::start(vec![]);
+    let output = bb_command()
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .arg("--describe-commands")
+        .output()
+        .expect("run bb describe-commands");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let description = serde_json::from_str::<Value>(&stdout).expect("parse describe output");
+    let agents = description["commands"]
+        .as_array()
+        .expect("root commands array")
+        .iter()
+        .find(|command| command["name"] == "agents")
+        .expect("agents command in public description");
+    assert_eq!(
+        agents["commands"]
+            .as_array()
+            .expect("agents commands array")
+            .iter()
+            .map(|command| command["name"].as_str().expect("command name"))
+            .collect::<Vec<_>>(),
+        [
+            "list",
+            "search",
+            "show",
+            "install",
+            "update",
+            "installed",
+            "which",
+            "remove",
+        ]
+    );
+    assert!(requests.is_empty(), "requests were: {requests:#?}");
+
+    let server = MockServer::start(vec![]);
+    let bb_home = temp_test_dir("bb-agents-install-missing-slug");
+    write_bb_org_config(&bb_home, "test");
+    let mut before = fs::read_dir(&bb_home)
+        .expect("read bb home before parsing")
+        .map(|entry| entry.expect("read bb home entry").file_name())
+        .collect::<Vec<_>>();
+    before.sort();
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["agents", "install"])
+        .output()
+        .expect("run bb agents install without slug");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert_eq!(output.status.code(), Some(2), "stderr was: {stderr}");
+    assert!(stderr.contains("<slug>"), "stderr was: {stderr}");
+    assert!(requests.is_empty(), "requests were: {requests:#?}");
+    let mut after = fs::read_dir(&bb_home)
+        .expect("read bb home after parsing")
+        .map(|entry| entry.expect("read bb home entry").file_name())
+        .collect::<Vec<_>>();
+    after.sort();
+    assert_eq!(
+        after, before,
+        "missing-slug parsing must not mutate BB_HOME"
+    );
+    fs::remove_dir_all(bb_home).expect("remove bb home");
+}
+
+#[test]
+fn bb_agents_update_requires_a_managed_install() {
+    let sandbox = temp_test_dir("bb-agents-update-absent");
+    let bb_home = sandbox.join("bb-home");
+    let home = sandbox.join("home");
+    write_bb_org_config(&bb_home, "test");
+    let server = MockServer::start(vec![]);
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("HOME", &home)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["agents", "update", "release-notes", "--json"])
+        .output()
+        .expect("run bb agents update");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert_eq!(output.status.code(), Some(1), "stderr was: {stderr}");
+    let error = parse_stderr_error(&stderr);
+    assert_eq!(error["error"]["code"], "not_installed");
+    assert_eq!(error["error"]["exit_code"], 1);
+    assert!(requests.is_empty(), "absent update must stay local");
+    assert!(!agent_target(&home, "release-notes").exists());
+    assert!(!agent_state(&bb_home, "release-notes").exists());
+
+    fs::remove_dir_all(sandbox).expect("remove absent update sandbox");
+}
+
+#[test]
+fn bb_agents_use_agent_routes_and_stable_catalog_output() {
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "items": [marketplace_agent_summary("release-notes", "agent-v1", "content-v1")],
+        "next_cursor": null
+    }))]);
+    let output = bb_command()
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["agents", "list"])
+        .output()
+        .expect("run bb agents list");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert!(
+        stdout.contains("release-notes Release Notes"),
+        "stdout was: {stdout}"
+    );
+    assert!(stdout.contains("status: stable"), "stdout was: {stdout}");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(
+        requests[0].path,
+        "/api/goose/v1/marketplace/agents?limit=5000"
+    );
+
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "items": [marketplace_agent_summary("release-notes", "agent-v1", "content-v1")],
+        "next_cursor": null
+    }))]);
+    let output = bb_command()
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["agents", "search", "release notes", "--json"])
+        .output()
+        .expect("run bb agents search");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse search JSON");
+    assert_eq!(response["items"][0]["slug"], "release-notes");
+    assert_eq!(response["items"][0]["source"]["id"], "src_builtin_agents");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(
+        requests[0].path,
+        "/api/goose/v1/marketplace/agents?limit=5000&query=release%20notes"
+    );
+
+    let server = MockServer::start(vec![MockResponse::json(marketplace_agent_detail(
+        "release-notes",
+        "agent-v1",
+        "content-v1",
+    ))]);
+    let output = bb_command()
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["agents", "show", "release-notes", "--json"])
+        .output()
+        .expect("run bb agents show");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse show JSON");
+    assert_eq!(response["latest_version"]["id"], "agent-v1");
+    assert_eq!(response["versions"][0]["content_sha256"], "content-v1");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(
+        requests[0].path,
+        "/api/goose/v1/marketplace/agents/release-notes"
+    );
+}
+
+#[test]
+fn bb_agents_lifecycle_is_idempotent_and_local_queries_stay_offline() {
+    let sandbox = temp_test_dir("bb-agents-lifecycle");
+    let bb_home = sandbox.join("bb-home");
+    let home = sandbox.join("home");
+    write_bb_org_config(&bb_home, "test");
+
+    let v1_document = agent_document("Release Notes", "Write version one.");
+    let v2_document = agent_document("Release Notes", "Write version two.");
+    let (v1_artifact, v1_response) = agent_artifact(
+        "release-notes",
+        "agent-v1",
+        skill_zip(&[("agent.md", &v1_document)]),
+    );
+    let (v2_artifact, v2_response) = agent_artifact(
+        "release-notes",
+        "agent-v2",
+        skill_zip(&[("agent.md", &v2_document)]),
+    );
+    let server = MockServer::start(vec![
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v1",
+            "content-v1",
+        )),
+        agent_install_plan(
+            "release-notes",
+            "agent-v1",
+            "content-v1",
+            "install",
+            Some(v1_artifact),
+        ),
+        MockResponse::json(marketplace_agent_version(
+            "release-notes",
+            "agent-v1",
+            "content-v1",
+        )),
+        v1_response,
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        agent_install_plan(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+            "update",
+            Some(v2_artifact),
+        ),
+        MockResponse::json(marketplace_agent_version(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        v2_response,
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        agent_install_plan("release-notes", "agent-v2", "content-v2", "noop", None),
+        MockResponse::json(marketplace_agent_version(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+    ]);
+
+    let run = |arguments: &[&str]| {
+        bb_command()
+            .env("BB_HOME", &bb_home)
+            .env("HOME", &home)
+            .env("KGOOSE_BASE_URL", &server.base_url)
+            .args(arguments)
+            .output()
+            .expect("run bb agents lifecycle command")
+    };
+
+    let install = run(&["agents", "install", "release-notes", "--json"]);
+    let (stdout, stderr) = output_text(&install);
+    assert!(install.status.success(), "stderr was: {stderr}");
+    let install = serde_json::from_str::<Value>(&stdout).expect("parse install JSON");
+    assert_eq!(install["status"], "installed");
+    assert_eq!(install["version_id"], "agent-v1");
+    assert_eq!(install["source"]["snapshot_id"], "snap_123");
+
+    let update = run(&["agents", "update", "release-notes", "--json"]);
+    let (stdout, stderr) = output_text(&update);
+    assert!(update.status.success(), "stderr was: {stderr}");
+    let update = serde_json::from_str::<Value>(&stdout).expect("parse update JSON");
+    assert_eq!(update["status"], "updated");
+    assert_eq!(update["version_id"], "agent-v2");
+
+    let target = agent_target(&home, "release-notes");
+    let state = agent_state(&bb_home, "release-notes");
+    assert_eq!(
+        fs::read(&target).expect("read installed agent"),
+        v2_document.as_bytes()
+    );
+    let persisted = serde_json::from_slice::<Value>(&fs::read(&state).expect("read state"))
+        .expect("parse persisted state");
+    assert_eq!(persisted["schema_version"], "bb-agent-install/v1");
+    assert_eq!(persisted["kind"], "agent");
+    assert_eq!(persisted["slug"], "release-notes");
+    assert_eq!(persisted["version_id"], "agent-v2");
+    assert_eq!(persisted["content_sha256"], "content-v2");
+    assert_eq!(
+        persisted["installed_file_sha256"],
+        sha256_hex(v2_document.as_bytes())
+    );
+    assert_eq!(persisted["artifact_id"], "art_agent-v2");
+    assert_eq!(persisted["source_id"], "src_builtin_agents");
+    assert_eq!(persisted["source_snapshot_id"], "snap_123");
+    assert_eq!(persisted["source_revision"], "main@abc123");
+    assert_eq!(persisted["source_path"], "agents/release-notes.md");
+    let target_before_noop = fs::read(&target).expect("snapshot target before noop");
+    let state_before_noop = fs::read(&state).expect("snapshot state before noop");
+    let target_mtime_before_noop = fs::metadata(&target)
+        .expect("stat target before noop")
+        .modified()
+        .expect("read target mtime before noop");
+    let state_mtime_before_noop = fs::metadata(&state)
+        .expect("stat state before noop")
+        .modified()
+        .expect("read state mtime before noop");
+
+    let noop = run(&["agents", "update", "release-notes", "--json"]);
+    let (stdout, stderr) = output_text(&noop);
+    assert!(noop.status.success(), "stderr was: {stderr}");
+    let noop = serde_json::from_str::<Value>(&stdout).expect("parse noop JSON");
+    assert_eq!(noop["status"], "up_to_date");
+    assert_eq!(
+        fs::read(&target).expect("read target after noop"),
+        target_before_noop,
+        "up-to-date must not rewrite the managed document"
+    );
+    assert_eq!(
+        fs::read(&state).expect("read state after noop"),
+        state_before_noop,
+        "up-to-date must not rewrite the managed state"
+    );
+    assert_eq!(
+        fs::metadata(&target)
+            .expect("stat target after noop")
+            .modified()
+            .expect("read target mtime after noop"),
+        target_mtime_before_noop,
+        "up-to-date must preserve the managed document modification time"
+    );
+    assert_eq!(
+        fs::metadata(&state)
+            .expect("stat state after noop")
+            .modified()
+            .expect("read state mtime after noop"),
+        state_mtime_before_noop,
+        "up-to-date must preserve the managed state modification time"
+    );
+
+    let requests = server.finish();
+    assert_eq!(requests.len(), 11, "noop must not download an artifact");
+    assert_eq!(
+        requests[0].path,
+        "/api/goose/v1/marketplace/agents/release-notes"
+    );
+    assert_eq!(requests[1].method, "POST");
+    assert_eq!(requests[1].path, "/api/goose/v1/marketplace/install-plan");
+    assert_eq!(
+        requests[1].body["targets"],
+        json!([{"type": "agent", "slug": "release-notes"}])
+    );
+    assert_eq!(
+        requests[2].path,
+        "/api/goose/v1/marketplace/agents/release-notes/versions/agent-v1"
+    );
+    assert_eq!(
+        requests[3].path,
+        "/api/goose/v1/marketplace/artifacts/release-notes-agent-v1/download"
+    );
+    assert_eq!(requests[5].body["installed"][0]["version_id"], "agent-v1");
+    assert_eq!(requests[9].body["installed"][0]["version_id"], "agent-v2");
+
+    let server = MockServer::start(vec![]);
+    let run_offline = |arguments: &[&str]| {
+        bb_command()
+            .env("BB_HOME", &bb_home)
+            .env("HOME", &home)
+            .env("KGOOSE_BASE_URL", &server.base_url)
+            .args(arguments)
+            .output()
+            .expect("run local bb agents command")
+    };
+    let installed = run_offline(&["agents", "installed", "--json"]);
+    let (stdout, stderr) = output_text(&installed);
+    assert!(installed.status.success(), "stderr was: {stderr}");
+    let installed = serde_json::from_str::<Value>(&stdout).expect("parse installed JSON");
+    assert_eq!(installed["items"][0]["status"], "installed");
+    assert_eq!(
+        installed["items"][0]["path"],
+        target.to_string_lossy().as_ref()
+    );
+
+    let installed_human = run_offline(&["agents", "installed"]);
+    let (stdout, stderr) = output_text(&installed_human);
+    assert!(installed_human.status.success(), "stderr was: {stderr}");
+    assert!(stdout.contains("release-notes"), "stdout was: {stdout}");
+    assert!(stdout.contains("version: agent-v2"), "stdout was: {stdout}");
+
+    let which = run_offline(&["agents", "which", "release-notes", "--json"]);
+    let (stdout, stderr) = output_text(&which);
+    assert!(which.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse which JSON")["version_id"],
+        "agent-v2"
+    );
+
+    let removed = run_offline(&["agents", "remove", "release-notes", "--json"]);
+    let (stdout, stderr) = output_text(&removed);
+    assert!(removed.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse remove JSON")["status"],
+        "removed"
+    );
+    assert!(!target.exists());
+    assert!(!state.exists());
+
+    let absent = run_offline(&["agents", "remove", "release-notes", "--json"]);
+    let (stdout, stderr) = output_text(&absent);
+    assert!(absent.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse absent JSON")["status"],
+        "already_absent"
+    );
+    let requests = server.finish();
+    assert!(
+        requests.is_empty(),
+        "local ownership queries must not use the network"
+    );
+    fs::remove_dir_all(sandbox).expect("remove lifecycle sandbox");
+}
+
+#[test]
+fn bb_agents_report_local_ownership_conflicts_without_modifying_user_content() {
+    let sandbox = temp_test_dir("bb-agents-conflicts");
+    let bb_home = sandbox.join("bb-home");
+    let home = sandbox.join("home");
+    write_bb_org_config(&bb_home, "test");
+    let document = agent_document("Release Notes", "Managed content.");
+
+    write_managed_agent(&bb_home, &home, "alpha", document.as_bytes());
+    write_managed_agent(&bb_home, &home, "bravo", document.as_bytes());
+    fs::remove_file(agent_target(&home, "bravo")).expect("remove managed target for missing case");
+
+    let malformed_state = agent_state(&bb_home, "invalid!");
+    fs::create_dir_all(malformed_state.parent().expect("state parent"))
+        .expect("create state parent");
+    fs::write(&malformed_state, "not json").expect("write malformed state");
+
+    let target_only = agent_target(&home, "target-only");
+    fs::create_dir_all(target_only.parent().expect("target parent")).expect("create target parent");
+    fs::write(&target_only, "local target only").expect("write target-only agent");
+
+    write_managed_agent(&bb_home, &home, "changed", document.as_bytes());
+    let changed_target = agent_target(&home, "changed");
+    fs::write(&changed_target, "local changes").expect("change managed target");
+
+    let mismatched_target = agent_target(&home, "mismatched");
+    let mismatched_state = agent_state(&bb_home, "mismatched");
+    fs::create_dir_all(mismatched_target.parent().expect("target parent"))
+        .expect("create target parent");
+    fs::create_dir_all(mismatched_state.parent().expect("state parent"))
+        .expect("create state parent");
+    fs::write(&mismatched_target, document.as_bytes()).expect("write mismatched target");
+    let mut mismatched_metadata = managed_agent_metadata("another-agent", document.as_bytes());
+    mismatched_metadata["slug"] = json!("another-agent");
+    fs::write(
+        &mismatched_state,
+        serde_json::to_vec(&mismatched_metadata).expect("serialize mismatched state"),
+    )
+    .expect("write mismatched state");
+
+    let directory_target = agent_target(&home, "directory");
+    fs::create_dir_all(&directory_target).expect("create directory target");
+    let directory_state = agent_state(&bb_home, "directory");
+    fs::create_dir_all(directory_state.parent().expect("state parent"))
+        .expect("create state parent");
+    fs::write(
+        &directory_state,
+        serde_json::to_vec(&managed_agent_metadata("directory", document.as_bytes()))
+            .expect("serialize directory state"),
+    )
+    .expect("write directory state");
+
+    #[cfg(unix)]
+    let symlink_target = {
+        let target = agent_target(&home, "symlink");
+        let destination = sandbox.join("local-agent.md");
+        fs::write(&destination, "linked local content").expect("write symlink destination");
+        std::os::unix::fs::symlink(&destination, &target).expect("create agent symlink");
+        let state = agent_state(&bb_home, "symlink");
+        fs::create_dir_all(state.parent().expect("state parent")).expect("create state parent");
+        fs::write(
+            &state,
+            serde_json::to_vec(&managed_agent_metadata("symlink", document.as_bytes()))
+                .expect("serialize symlink state"),
+        )
+        .expect("write symlink state");
+        target
+    };
+
+    let server = MockServer::start(vec![]);
+    let run = |arguments: &[&str]| {
+        bb_command()
+            .env("BB_HOME", &bb_home)
+            .env("HOME", &home)
+            .env("KGOOSE_BASE_URL", &server.base_url)
+            .args(arguments)
+            .output()
+            .expect("run local ownership command")
+    };
+
+    let installed = run(&["agents", "installed", "--json"]);
+    let (stdout, stderr) = output_text(&installed);
+    assert!(installed.status.success(), "stderr was: {stderr}");
+    let installed = serde_json::from_str::<Value>(&stdout).expect("parse installed JSON");
+    let items = installed["items"].as_array().expect("installed items");
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item["slug"].as_str().expect("slug"))
+            .collect::<Vec<_>>(),
+        [
+            "alpha",
+            "bravo",
+            "changed",
+            "directory",
+            "invalid!",
+            "mismatched",
+            "symlink"
+        ],
+        "installed records must be sorted by slug"
+    );
+    assert_eq!(items[0]["status"], "installed");
+    assert_eq!(items[1]["status"], "missing");
+    assert!(items
+        .iter()
+        .any(|item| item["slug"] == "invalid!" && item["status"] == "conflict"));
+
+    let missing = run(&["agents", "which", "bravo", "--json"]);
+    let (stdout, stderr) = output_text(&missing);
+    assert!(missing.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse missing JSON")["status"],
+        "missing"
+    );
+
+    for (slug, preserved_path) in [
+        ("target-only", &target_only),
+        ("changed", &changed_target),
+        ("mismatched", &mismatched_target),
+        ("directory", &directory_target),
+        #[cfg(unix)]
+        ("symlink", &symlink_target),
+    ] {
+        let state = agent_state(&bb_home, slug);
+        let target_before = snapshot_agent_target(preserved_path);
+        let state_before = fs::read(&state).ok();
+        for command in ["install", "update", "remove"] {
+            let output = run(&["agents", command, slug, "--json"]);
+            let (_stdout, stderr) = output_text(&output);
+            assert_eq!(output.status.code(), Some(7), "stderr was: {stderr}");
+            let error = parse_stderr_error(&stderr);
+            assert_eq!(error["error"]["code"], "agent_conflict");
+            assert_eq!(error["error"]["details"]["slug"], slug);
+            assert_agent_pair_unchanged(preserved_path, &state, &target_before, &state_before);
+        }
+    }
+
+    let requests = server.finish();
+    assert!(
+        requests.is_empty(),
+        "protected local content must not trigger marketplace requests"
+    );
+    fs::remove_dir_all(sandbox).expect("remove conflict sandbox");
+}
+
+#[test]
+fn bb_agents_preserve_managed_pairs_for_failure_envelopes() {
+    let sandbox = temp_test_dir("bb-agents-failure-envelopes");
+    let bb_home = sandbox.join("bb-home");
+    let home = sandbox.join("home");
+    let document = agent_document("Release Notes", "Managed content.");
+    write_bb_org_config(&bb_home, "test");
+    write_managed_agent(&bb_home, &home, "release-notes", document.as_bytes());
+    let target = agent_target(&home, "release-notes");
+    let state = agent_state(&bb_home, "release-notes");
+    let target_before = snapshot_agent_target(&target);
+    let state_before = fs::read(&state).ok();
+    let run = |server: &MockServer, arguments: &[&str]| {
+        bb_command()
+            .env("BB_HOME", &bb_home)
+            .env("HOME", &home)
+            .env("KGOOSE_BASE_URL", &server.base_url)
+            .args(arguments)
+            .output()
+            .expect("run bb agents failure command")
+    };
+
+    let server = MockServer::start(vec![marketplace_error_response(
+        404,
+        "agent_not_found",
+        "Agent was not found.",
+        "req_agent_marketplace",
+    )]);
+    let output = run(&server, &["agents", "list", "--json"]);
+    let requests = server.finish();
+    assert_agent_failure(
+        &output,
+        &target,
+        &state,
+        &target_before,
+        &state_before,
+        1,
+        "agent_not_found",
+    );
+    assert_eq!(
+        requests[0].path,
+        "/api/goose/v1/marketplace/agents?limit=5000"
+    );
+
+    let server = MockServer::start(vec![marketplace_error_response(
+        401,
+        "authentication_required",
+        "Sign in before using marketplace agents.",
+        "req_agent_auth",
+    )]);
+    let output = run(&server, &["agents", "list", "--json"]);
+    let requests = server.finish();
+    assert_agent_failure(
+        &output,
+        &target,
+        &state,
+        &target_before,
+        &state_before,
+        3,
+        "authentication_required",
+    );
+    assert_eq!(
+        requests[0].path,
+        "/api/goose/v1/marketplace/agents?limit=5000"
+    );
+
+    let server = MockServer::start(vec![
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        marketplace_error_response(
+            422,
+            "agent_plan_blocked",
+            "Agent install plan is blocked.",
+            "req_agent_plan",
+        ),
+    ]);
+    let output = run(&server, &["agents", "update", "release-notes", "--json"]);
+    let requests = server.finish();
+    assert_agent_failure(
+        &output,
+        &target,
+        &state,
+        &target_before,
+        &state_before,
+        6,
+        "agent_plan_blocked",
+    );
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].path, "/api/goose/v1/marketplace/install-plan");
+
+    let server = MockServer::start(vec![
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        MockResponse::json(json!({
+            "operations": [{
+                "action": "update",
+                "reason": "Invalid operation kind.",
+                "kind": "skill",
+                "skill": {
+                    "slug": "release-notes",
+                    "version_id": "agent-v2",
+                    "content_sha256": "content-v2"
+                },
+                "artifact": null,
+                "installed_via": "explicit"
+            }]
+        })),
+    ]);
+    let output = run(&server, &["agents", "update", "release-notes", "--json"]);
+    let _requests = server.finish();
+    assert_agent_failure(
+        &output,
+        &target,
+        &state,
+        &target_before,
+        &state_before,
+        8,
+        "invalid_agent_operation_kind",
+    );
+
+    let zip = skill_zip(&[("agent.md", &document)]);
+    let (artifact, _response) = agent_artifact("release-notes", "agent-v2", zip);
+    let server = MockServer::start(vec![
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        agent_install_plan(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+            "update",
+            Some(artifact),
+        ),
+        MockResponse::json(marketplace_agent_version(
+            "release-notes",
+            "agent-v2",
+            "content-v2",
+        )),
+        marketplace_error_response(
+            403,
+            "agent_artifact_forbidden",
+            "Agent artifact is not authorized.",
+            "req_agent_artifact",
+        ),
+    ]);
+    let output = run(&server, &["agents", "update", "release-notes", "--json"]);
+    let requests = server.finish();
+    assert_agent_failure(
+        &output,
+        &target,
+        &state,
+        &target_before,
+        &state_before,
+        4,
+        "agent_artifact_forbidden",
+    );
+    assert_eq!(requests.len(), 4);
+
+    let lock = bb_home
+        .join("agents")
+        .join("locks")
+        .join("release-notes.lock");
+    fs::create_dir_all(lock.parent().expect("lock parent")).expect("create lock parent");
+    fs::write(&lock, "locked").expect("write active lock");
+    let server = MockServer::start(vec![]);
+    let output = run(&server, &["agents", "update", "release-notes", "--json"]);
+    let requests = server.finish();
+    assert_agent_failure(
+        &output,
+        &target,
+        &state,
+        &target_before,
+        &state_before,
+        7,
+        "agent_locked",
+    );
+    assert!(requests.is_empty(), "filesystem failure must stay local");
+
+    fs::remove_dir_all(sandbox).expect("remove failure sandbox");
 }
 
 /// Server capabilities pointing the `agents` target at a directory we control,
@@ -321,6 +1262,25 @@ fn bb_completions_emit_shell_script() {
 
     assert!(output.status.success(), "stderr was: {stderr}");
     assert!(stdout.contains("bb"), "stdout was: {stdout}");
+    assert!(
+        stdout.contains("bb,agents)"),
+        "completion script missing agents root transition: {stdout}"
+    );
+    for subcommand in [
+        "list",
+        "search",
+        "show",
+        "install",
+        "update",
+        "installed",
+        "which",
+        "remove",
+    ] {
+        assert!(
+            stdout.contains(&format!("bb__subcmd__agents,{subcommand})")),
+            "completion script missing agents transition for {subcommand}: {stdout}"
+        );
+    }
     assert!(
         stdout.len() > 100,
         "completion script looks empty: {stdout}"

@@ -331,3 +331,10 @@ pub fn default_agents_skills_dir() -> PathBuf {
         .map(|home| PathBuf::from(home).join(".agents").join("skills"))
         .unwrap_or_else(|_| PathBuf::from(".agents/skills"))
 }
+
+#[allow(dead_code)]
+pub fn default_agents_agents_dir() -> PathBuf {
+    env::var("HOME")
+        .map(|home| PathBuf::from(home).join(".agents").join("agents"))
+        .unwrap_or_else(|_| PathBuf::from(".agents/agents"))
+}

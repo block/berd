@@ -6,6 +6,9 @@ mod kgoose;
 mod proto;
 mod runtime;
 
+pub use bb::agents_models;
+pub use bb::skills_api::{AgentMarketplace, MarketplaceClient};
+
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
@@ -124,6 +127,7 @@ fn run_bb() -> Result<()> {
                 bb::workspace::describe_commands(),
                 bb::skills::describe_config_commands(),
                 bb::skills::describe_commands(),
+                bb::agents::describe_commands(),
                 { "name": TOOLS_COMMAND_NAME, "summary": ROOT_SUMMARY },
             ],
         });
@@ -138,6 +142,7 @@ fn run_bb() -> Result<()> {
     let command = build_bb_command();
     let matches = clap_matches(command, argv)?;
     match matches.subcommand() {
+        Some(("agents", agents_matches)) => bb::agents::run(agents_matches),
         Some(("skills", skills_matches)) => bb::skills::run(skills_matches),
         Some(("auth", auth_matches)) => bb::skills::run_auth(auth_matches),
         Some(("workspace", workspace_matches)) => bb::workspace::run(workspace_matches),
@@ -168,6 +173,7 @@ fn build_bb_command() -> Command {
         .subcommand(bb::workspace::command())
         .subcommand(bb::skills::config_command())
         .subcommand(bb::skills::skills_command())
+        .subcommand(bb::agents::agents_command())
         .subcommand(
             Command::new("completions")
                 .about("Generate shell completions")

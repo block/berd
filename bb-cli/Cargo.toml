@@ -39,3 +39,6 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 pbjson-build = "0.9"
 protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
+
+[dev-dependencies]
+tempfile = "3"

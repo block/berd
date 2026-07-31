@@ -1739,6 +1739,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "tempfile",
  "tiny_http",
  "tonic",
  "tonic-prost",

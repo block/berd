@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
+use super::agents_models::AgentInstallArtifact;
 use super::skills_api::{exit_codes, failure, DownloadedArtifact};
 use super::skills_models::PlanArtifact;
 
@@ -18,49 +19,86 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 pub fn verify_artifact(download: &DownloadedArtifact, artifact: &PlanArtifact) -> Result<()> {
+    verify_artifact_parts(
+        download,
+        &artifact.id,
+        artifact.size_bytes,
+        &artifact.sha256,
+    )
+}
+
+#[allow(dead_code)]
+pub fn verify_agent_artifact(
+    download: &DownloadedArtifact,
+    artifact: &AgentInstallArtifact,
+) -> Result<()> {
+    if artifact.media_type != "application/zip" {
+        return Err(failure(
+            exit_codes::VERIFICATION,
+            "unsupported_agent_artifact_media_type",
+            format!(
+                "agent artifact {} has media type {}; expected application/zip",
+                artifact.id, artifact.media_type
+            ),
+        ));
+    }
+    verify_artifact_parts(
+        download,
+        &artifact.id,
+        artifact.size_bytes,
+        &artifact.sha256,
+    )
+}
+
+fn verify_artifact_parts(
+    download: &DownloadedArtifact,
+    artifact_id: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<()> {
     let size = download.bytes.len() as u64;
-    if size != artifact.size_bytes {
+    if size != expected_size {
         return Err(failure(
             exit_codes::VERIFICATION,
             "artifact_size_mismatch",
             format!(
                 "artifact size mismatch for {}: expected {}, got {}",
-                artifact.id, artifact.size_bytes, size
+                artifact_id, expected_size, size
             ),
         ));
     }
     if let Some(header_size) = download.header_size {
-        if header_size != artifact.size_bytes {
+        if header_size != expected_size {
             return Err(failure(
                 exit_codes::VERIFICATION,
                 "artifact_header_size_mismatch",
                 format!(
                     "artifact header size mismatch for {}: expected {}, got {}",
-                    artifact.id, artifact.size_bytes, header_size
+                    artifact_id, expected_size, header_size
                 ),
             ));
         }
     }
 
     let sha = sha256_hex(&download.bytes);
-    if sha != artifact.sha256 {
+    if sha != expected_sha256 {
         return Err(failure(
             exit_codes::VERIFICATION,
             "artifact_checksum_mismatch",
             format!(
                 "artifact checksum mismatch for {}: expected {}, got {}",
-                artifact.id, artifact.sha256, sha
+                artifact_id, expected_sha256, sha
             ),
         ));
     }
     if let Some(header_sha256) = &download.header_sha256 {
-        if header_sha256 != &artifact.sha256 {
+        if header_sha256 != expected_sha256 {
             return Err(failure(
                 exit_codes::VERIFICATION,
                 "artifact_header_checksum_mismatch",
                 format!(
                     "artifact header checksum mismatch for {}: expected {}, got {}",
-                    artifact.id, artifact.sha256, header_sha256
+                    artifact_id, expected_sha256, header_sha256
                 ),
             ));
         }
@@ -149,5 +187,23 @@ mod tests {
     fn validate_preview_path_rejects_escapes() {
         assert!(validate_preview_path("../../secret").is_err());
         assert!(validate_preview_path("references/setup.md").is_ok());
+    }
+
+    #[test]
+    fn rejects_non_zip_agent_artifacts_before_extraction() {
+        let download = DownloadedArtifact {
+            bytes: b"not a zip".to_vec(),
+            header_sha256: None,
+            header_size: None,
+        };
+        let artifact = AgentInstallArtifact {
+            id: "agent-artifact".to_string(),
+            download_url: "/artifact".to_string(),
+            sha256: sha256_hex(&download.bytes),
+            size_bytes: download.bytes.len() as u64,
+            media_type: "text/plain".to_string(),
+        };
+
+        assert!(verify_agent_artifact(&download, &artifact).is_err());
     }
 }

@@ -33,7 +33,7 @@ use super::skills_models::{
 };
 use super::skills_targets::{inspect_link, LinkState, ResolvedTarget, Scope, TargetRegistry};
 
-const EXIT_CODES_HELP: &str = "EXIT CODES:\n  \
+pub(crate) const EXIT_CODES_HELP: &str = "EXIT CODES:\n  \
 0  success\n  \
 1  general failure\n  \
 2  invalid CLI usage\n  \
