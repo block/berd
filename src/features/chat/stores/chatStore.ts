@@ -253,6 +253,64 @@ function createAssistantContinuationMessage(
   };
 }
 
+function appendTextToMessage(message: Message, text: string): Message {
+  if (text.length === 0) return message;
+
+  const lastContent = message.content[message.content.length - 1];
+  if (lastContent?.type === "text") {
+    const nextContent = [...message.content];
+    nextContent[nextContent.length - 1] = {
+      ...lastContent,
+      text: lastContent.text + text,
+    };
+    return { ...message, content: nextContent };
+  }
+
+  return {
+    ...message,
+    content: [...message.content, { type: "text" as const, text }],
+  };
+}
+
+function appendThinkingChunksToMessage(
+  message: Message,
+  chunks: readonly string[],
+): Message {
+  let nextContent = message.content;
+  let changed = false;
+
+  for (const text of chunks) {
+    const lastContent = nextContent[nextContent.length - 1];
+    if (lastContent?.type !== "thinking") {
+      nextContent = [...nextContent, { type: "thinking" as const, text }];
+      changed = true;
+      continue;
+    }
+
+    // Goose Core can emit thought updates either as deltas or as repeated /
+    // cumulative snapshots depending on provider and replay path.
+    let nextText: string;
+    if (text === lastContent.text) {
+      continue;
+    }
+    if (text.startsWith(lastContent.text)) {
+      nextText = text;
+    } else {
+      nextText = lastContent.text + text;
+    }
+
+    const updatedContent = [...nextContent];
+    updatedContent[updatedContent.length - 1] = {
+      type: "thinking" as const,
+      text: nextText,
+    };
+    nextContent = updatedContent;
+    changed = true;
+  }
+
+  return changed ? { ...message, content: nextContent } : message;
+}
+
 function insertMessageAfter(
   messages: Message[],
   afterMessageId: string,
@@ -291,6 +349,22 @@ export interface ScrollTargetMessage {
   messageId: string;
   query?: string;
 }
+
+export type StreamingMessageUpdate =
+  | {
+      kind: "text";
+      sessionId: string;
+      messageId: string;
+      text: string;
+    }
+  | {
+      kind: "thinking";
+      sessionId: string;
+      messageId: string;
+      chunks: string[];
+    };
+
+export type StreamingMessageUpdateMode = "active-stream" | "settled-stream";
 
 interface ChatStoreState {
   messagesBySession: Record<string, Message[]>;
@@ -348,6 +422,10 @@ interface ChatStoreActions {
     sessionId: string,
     messageId: string,
     text: string,
+  ) => void;
+  appendStreamingMessageUpdates: (
+    updates: StreamingMessageUpdate[],
+    options: { mode: StreamingMessageUpdateMode },
   ) => void;
   updateStreamingText: (sessionId: string, text: string) => void;
   updateStreamingThinking: (sessionId: string, text: string) => void;
@@ -844,25 +922,7 @@ const createChatStore: StateCreator<
       const message = messages[messageIndex];
       if (!message) return state;
 
-      let updatedMessage = message;
-      if (text.length > 0) {
-        const lastContent = message.content[message.content.length - 1];
-        if (lastContent?.type === "text") {
-          const nextContent = [...message.content];
-          nextContent[nextContent.length - 1] = {
-            ...lastContent,
-            text: lastContent.text + text,
-          };
-          updatedMessage = { ...message, content: nextContent };
-        } else {
-          // Start a new text segment after non-text content so streamed tool
-          // calls stay inline between text blocks.
-          updatedMessage = {
-            ...message,
-            content: [...message.content, { type: "text" as const, text }],
-          };
-        }
-      }
+      const updatedMessage = appendTextToMessage(message, text);
 
       const current =
         state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
@@ -914,6 +974,85 @@ const createChatStore: StateCreator<
     }
   },
 
+  appendStreamingMessageUpdates: (updates, { mode }) => {
+    if (updates.length === 0) return;
+
+    const isActiveStream = mode === "active-stream";
+    const previousSessionStateById = get().sessionStateById;
+    let didUnreadStateChange = false;
+    set((state) => {
+      let messagesBySession = state.messagesBySession;
+      let sessionStateById = state.sessionStateById;
+
+      for (const update of updates) {
+        const messages = messagesBySession[update.sessionId];
+        if (!messages) continue;
+
+        const messageIndex = messages.findLastIndex(
+          (message) => message.id === update.messageId,
+        );
+        const message = messages[messageIndex];
+        if (!message) continue;
+
+        const updatedMessage =
+          update.kind === "text"
+            ? appendTextToMessage(message, update.text)
+            : appendThinkingChunksToMessage(message, update.chunks);
+        const shouldUpdateMessage = updatedMessage !== message;
+        const current =
+          sessionStateById[update.sessionId] ?? createInitialSessionRuntime();
+        const shouldMarkUnread =
+          shouldUpdateMessage &&
+          (update.kind === "text" || mode === "settled-stream") &&
+          shouldMarkSessionUnread(state, update.sessionId, updatedMessage);
+        const nextHasUnread = current.hasUnread || shouldMarkUnread;
+        didUnreadStateChange ||= current.hasUnread !== nextHasUnread;
+        const shouldUpdateRuntime =
+          (isActiveStream && current.streamingMessageId !== update.messageId) ||
+          current.hasUnread !== nextHasUnread;
+
+        if (!shouldUpdateMessage && !shouldUpdateRuntime) continue;
+
+        if (shouldUpdateMessage) {
+          const nextMessages = [...messages];
+          nextMessages[messageIndex] = updatedMessage;
+          messagesBySession = {
+            ...messagesBySession,
+            [update.sessionId]: nextMessages,
+          };
+        }
+
+        if (shouldUpdateRuntime) {
+          sessionStateById = {
+            ...sessionStateById,
+            [update.sessionId]: {
+              ...current,
+              streamingMessageId: isActiveStream
+                ? update.messageId
+                : current.streamingMessageId,
+              hasUnread: nextHasUnread,
+            },
+          };
+        }
+      }
+
+      if (
+        messagesBySession === state.messagesBySession &&
+        sessionStateById === state.sessionStateById
+      ) {
+        return state;
+      }
+      return { messagesBySession, sessionStateById };
+    });
+
+    if (didUnreadStateChange) {
+      persistUnreadStateIfChanged(
+        previousSessionStateById,
+        get().sessionStateById,
+      );
+    }
+  },
+
   updateStreamingText: (sessionId, text) => {
     const streamingMessageId =
       get().sessionStateById[sessionId]?.streamingMessageId ?? null;
@@ -932,37 +1071,9 @@ const createChatStore: StateCreator<
       let changed = false;
       const updatedMessages = messages.map((message) => {
         if (message.id !== streamingMessageId) return message;
-
-        const lastContent = message.content[message.content.length - 1];
-        if (lastContent?.type !== "thinking") {
-          changed = true;
-          return {
-            ...message,
-            content: [...message.content, { type: "thinking" as const, text }],
-          };
-        }
-
-        // Goose Core can emit thought updates either as deltas or as repeated /
-        // cumulative snapshots depending on provider and replay path. Treat an
-        // exact repeat as a no-op and a cumulative snapshot as replacement;
-        // otherwise append the delta.
-        let nextText: string;
-        if (text === lastContent.text) {
-          return message;
-        }
-        if (text.startsWith(lastContent.text)) {
-          nextText = text;
-        } else {
-          nextText = lastContent.text + text;
-        }
-
-        changed = true;
-        const newContent = [...message.content];
-        newContent[newContent.length - 1] = {
-          type: "thinking" as const,
-          text: nextText,
-        };
-        return { ...message, content: newContent };
+        const updatedMessage = appendThinkingChunksToMessage(message, [text]);
+        changed ||= updatedMessage !== message;
+        return updatedMessage;
       });
 
       if (!changed) return state;

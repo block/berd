@@ -317,7 +317,9 @@ describe("chatStore", () => {
     useChatStore.getState().setMessages("s1", [streaming]);
     useChatStore.getState().setStreamingMessageId("s1", "stream-1");
     useChatStore.getState().updateStreamingThinking("s1", "Plan");
-    useChatStore.getState().updateStreamingThinking("s1", " next step");
+    useChatStore.getState().updateStreamingThinking("s1", "Plan next");
+    useChatStore.getState().updateStreamingThinking("s1", "Plan next");
+    useChatStore.getState().updateStreamingThinking("s1", " step");
 
     const updated = useChatStore.getState().messagesBySession.s1[0];
     expect(updated.content).toEqual([

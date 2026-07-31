@@ -1,6 +1,10 @@
 import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  type StreamingMessageUpdate,
+  type StreamingMessageUpdateMode,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { isTextContent } from "@/shared/types/messages";
 import { getSessionPromptOwner } from "@/features/chat/lib/sessionPromptOwnership";
 
@@ -288,103 +292,50 @@ export function enqueueStreamingThinkingUpdate(
   scheduleBufferedFlush();
 }
 
-function appendBufferedTextWithoutRuntime(
-  sessionId: string,
-  messageId: string,
-  text: string,
-): void {
-  useChatStore.getState().updateMessage(sessionId, messageId, (message) => {
-    const lastContent = message.content.at(-1);
-    if (lastContent?.type === "text") {
-      return {
-        ...message,
-        content: [
-          ...message.content.slice(0, -1),
-          { ...lastContent, text: lastContent.text + text },
-        ],
-      };
-    }
-    return {
-      ...message,
-      content: [...message.content, { type: "text", text }],
-    };
-  });
-}
-
-function appendBufferedThinkingWithoutRuntime(
-  sessionId: string,
-  messageId: string,
-  text: string,
-): void {
-  useChatStore.getState().updateMessage(sessionId, messageId, (message) => {
-    const lastContent = message.content.at(-1);
-    if (lastContent?.type !== "thinking") {
-      return {
-        ...message,
-        content: [...message.content, { type: "thinking", text }],
-      };
-    }
-    if (text === lastContent.text) return message;
-    const nextText = text.startsWith(lastContent.text)
-      ? text
-      : lastContent.text + text;
-    return {
-      ...message,
-      content: [
-        ...message.content.slice(0, -1),
-        { type: "thinking", text: nextText },
-      ],
-    };
-  });
-}
-
-function applyBufferedUpdate(
+function toStoreUpdate(
   update: BufferedStreamingUpdate,
-  expectedOwner = getSessionPromptOwner(update.sessionId),
-): void {
-  if (update.owner !== expectedOwner) {
-    return;
-  }
-
-  const store = useChatStore.getState();
-  const ownerIsCurrent =
-    update.owner === getSessionPromptOwner(update.sessionId);
-  if (update.kind === "text") {
-    if (ownerIsCurrent) {
-      store.appendStreamingText(
-        update.sessionId,
-        update.messageId,
-        update.text,
-      );
-      const accumulatedText = getAccumulatedAssistantText(
-        update.sessionId,
-        update.messageId,
-      );
-      if (accumulatedText !== null) {
-        scheduleLiveSubtitleUpdate(update.sessionId, accumulatedText);
+): StreamingMessageUpdate {
+  return update.kind === "text"
+    ? {
+        kind: "text",
+        sessionId: update.sessionId,
+        messageId: update.messageId,
+        text: update.text,
       }
-    } else {
-      appendBufferedTextWithoutRuntime(
-        update.sessionId,
-        update.messageId,
-        update.text,
-      );
+    : {
+        kind: "thinking",
+        sessionId: update.sessionId,
+        messageId: update.messageId,
+        chunks: update.chunks,
+      };
+}
+
+function applyBufferedUpdates(
+  updates: readonly BufferedStreamingUpdate[],
+  mode: StreamingMessageUpdateMode,
+): void {
+  const storeUpdates = updates.map(toStoreUpdate);
+  const latestTextUpdateBySession = new Map<string, BufferedTextUpdate>();
+
+  if (mode === "active-stream") {
+    for (const update of updates) {
+      if (update.kind !== "text") continue;
+      latestTextUpdateBySession.set(update.sessionId, update);
     }
-    return;
   }
 
-  if (ownerIsCurrent) {
-    store.setStreamingMessageId(update.sessionId, update.messageId);
-    for (const chunk of update.chunks) {
-      store.updateStreamingThinking(update.sessionId, chunk);
-    }
-  } else {
-    for (const chunk of update.chunks) {
-      appendBufferedThinkingWithoutRuntime(
-        update.sessionId,
-        update.messageId,
-        chunk,
-      );
+  if (storeUpdates.length === 0) return;
+  useChatStore.getState().appendStreamingMessageUpdates(storeUpdates, {
+    mode,
+  });
+
+  for (const update of latestTextUpdateBySession.values()) {
+    const accumulatedText = getAccumulatedAssistantText(
+      update.sessionId,
+      update.messageId,
+    );
+    if (accumulatedText !== null) {
+      scheduleLiveSubtitleUpdate(update.sessionId, accumulatedText);
     }
   }
 }
@@ -405,9 +356,7 @@ export function flushAllBufferedStreamingUpdates(): void {
     }
   }
 
-  for (const update of currentUpdates) {
-    applyBufferedUpdate(update);
-  }
+  applyBufferedUpdates(currentUpdates, "active-stream");
 }
 
 export function flushBufferedStreamingUpdatesForSession(
@@ -446,13 +395,11 @@ export function flushBufferedStreamingUpdatesForSession(
     cancelScheduledFrame();
   }
 
-  for (const update of sessionUpdates) {
-    if ("owner" in options) {
-      applyBufferedUpdate(update, options.owner);
-    } else {
-      applyBufferedUpdate(update);
-    }
-  }
+  const mode: StreamingMessageUpdateMode =
+    !("owner" in options) || options.owner === getSessionPromptOwner(sessionId)
+      ? "active-stream"
+      : "settled-stream";
+  applyBufferedUpdates(sessionUpdates, mode);
 
   if (
     options.flushSubtitle &&
