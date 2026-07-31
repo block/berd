@@ -88,6 +88,24 @@ release_build_kind() {
   esac
 }
 
+default_bundled_agents() {
+  local build_kind="${1:-}"
+  [[ -n "$build_kind" ]] || build_kind="$(release_build_kind)"
+
+  case "$build_kind" in
+    official)
+      printf '%s' "block,builderbot"
+      ;;
+    custom)
+      printf '%s' "builderbot"
+      ;;
+    *)
+      echo "invalid build_kind '${build_kind}' (expected official or custom)" >&2
+      return 1
+      ;;
+  esac
+}
+
 custom_build_name() {
   local custom_name
   custom_name="$(meta custom_name 2>/dev/null || true)"

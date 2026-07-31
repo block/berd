@@ -46,7 +46,7 @@ CUSTOM_CONFIG="$(meta custom_config 2>/dev/null || true)"
 [[ -n "$CUSTOM_CONFIG" ]] || CUSTOM_CONFIG="{}"
 CUSTOM_BUILD_ENV="$(meta custom_vite_env 2>/dev/null || true)"
 [[ -n "$CUSTOM_BUILD_ENV" ]] || CUSTOM_BUILD_ENV="{}"
-CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-block,builderbot}"
+CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-$(default_bundled_agents "$BUILD_KIND")}"
 DISABLE_BB_CLI="$(meta disable_bb_cli 2>/dev/null || echo false)"
 
 # In-app updates are an official-build-only feature. A custom build that embeds
@@ -350,7 +350,8 @@ if [[ "$BUILD_KIND" == "custom" && "$VITE_SECURITY_ML_VALUE" == "0" ]]; then
 fi
 
 # Stage the selected bundled agents into distro/agents/ for the Tauri resource
-# bundle. Official builds use the default block,builderbot selection.
+# bundle. Official builds use block,builderbot; custom builds default to the
+# public-safe builderbot-only selection.
 stage_custom_bundled_agents
 
 # Generate release config. For official builds this bakes the updater endpoint
