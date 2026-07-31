@@ -206,26 +206,11 @@
       "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
       "title": "Conversaciones de voz"
     },
-    "navigationRefresh": {
-      "description": "Prueba la navegación primaria y secundaria renovada para proyectos, chats y configuración.",
-      "title": "Navegación renovada"
-    },
-    "navigationChatsUnderProjects": {
-      "description": "Muestra chats recientes debajo de la lista de proyectos, con Ver todo para abrir el panel completo de chats.",
-      "title": "Chats debajo de proyectos"
-    },
-    "navigationExperiments": {
-      "title": "Experimentos de navegación"
-    },
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "defaultLabel": "predeterminado",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
-    "sidebarDetachableChats": {
-      "description": "Permite separar el área de chats de la barra lateral de la navegación principal y acoplarla al lado mientras se prueba este diseño.",
-      "title": "Chats separables en la barra lateral"
-    },
     "skillDiscovery": {
       "description": "Agrega una pestaña Descubrir a Skills para explorar e instalar skills del catálogo de Block sin salir de la app. Requiere la CLI sq-agents.",
       "title": "Descubrimiento de skills"

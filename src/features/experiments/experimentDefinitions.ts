@@ -52,13 +52,6 @@ export const MULTI_WORKSPACE_EXPERIMENT_ID = "multi-workspace";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
-export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
-  "sidebar-detachable-chats";
-
-export const NAVIGATION_REFRESH_EXPERIMENT_ID = "navigation-refresh";
-export const NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID =
-  "navigation-chats-under-projects";
-
 export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
 export const EXPERIMENT_DEFINITIONS = [
@@ -77,23 +70,6 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.transcriptVirtualRenderer.title",
     descriptionKey: "experiments.transcriptVirtualRenderer.description",
     defaultEnabled: true,
-  },
-  {
-    id: SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
-    titleKey: "experiments.sidebarDetachableChats.title",
-    descriptionKey: "experiments.sidebarDetachableChats.description",
-    defaultEnabled: false,
-  },
-  {
-    id: NAVIGATION_REFRESH_EXPERIMENT_ID,
-    titleKey: "experiments.navigationRefresh.title",
-    descriptionKey: "experiments.navigationRefresh.description",
-  },
-  {
-    id: NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-    titleKey: "experiments.navigationChatsUnderProjects.title",
-    descriptionKey: "experiments.navigationChatsUnderProjects.description",
-    defaultEnabled: false,
   },
   {
     id: SKILL_DISCOVERY_EXPERIMENT_ID,

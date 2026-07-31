@@ -4,8 +4,6 @@ import { toast } from "sonner";
 
 import {
   EXPERIMENT_DEFINITIONS,
-  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-  NAVIGATION_REFRESH_EXPERIMENT_ID,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
@@ -33,15 +31,6 @@ interface RenderExperimentControlsOptions {
   toggleDisabled?: boolean;
 }
 
-const NAVIGATION_EXPERIMENT_IDS = new Set([
-  NAVIGATION_REFRESH_EXPERIMENT_ID,
-  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-]);
-
-function isNavigationExperiment(definition: ExperimentDefinition) {
-  return NAVIGATION_EXPERIMENT_IDS.has(definition.id);
-}
-
 export function ExperimentsSettings({
   registry = EXPERIMENT_DEFINITIONS,
 }: ExperimentsSettingsProps) {
@@ -55,25 +44,6 @@ export function ExperimentsSettings({
     () => new Map(experiments.map((experiment) => [experiment.id, experiment])),
     [experiments],
   );
-  const navigationRefreshDefinition = useMemo(
-    () =>
-      visibleRegistry.find(
-        (definition) => definition.id === NAVIGATION_REFRESH_EXPERIMENT_ID,
-      ),
-    [visibleRegistry],
-  );
-  const navigationChatsUnderProjectsDefinition = useMemo(
-    () =>
-      visibleRegistry.find(
-        (definition) =>
-          definition.id === NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-      ),
-    [visibleRegistry],
-  );
-  const isNavigationRefreshEnabled = Boolean(
-    experimentsById.get(NAVIGATION_REFRESH_EXPERIMENT_ID)?.enabled,
-  );
-
   const handleExperimentEnabledChange = (
     definition: ExperimentDefinition,
     enabled: boolean,
@@ -183,50 +153,7 @@ export function ExperimentsSettings({
     </section>
   );
 
-  let didRenderNavigationSection = false;
-  const experimentCards = visibleRegistry.map((definition) => {
-    if (isNavigationExperiment(definition)) {
-      if (didRenderNavigationSection) return null;
-      didRenderNavigationSection = true;
-
-      return (
-        <section
-          key="navigation-experiments"
-          aria-labelledby="navigation-experiments-title"
-          className="overflow-hidden rounded-md border bg-background"
-        >
-          <div className="px-4 py-4">
-            <h4
-              id="navigation-experiments-title"
-              className="text-sm font-medium text-foreground"
-            >
-              {t("experiments.navigationExperiments.title")}
-            </h4>
-          </div>
-          {navigationRefreshDefinition
-            ? renderExperimentControls(
-                navigationRefreshDefinition,
-                "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']",
-                { showResetToAuto: false },
-              )
-            : null}
-          {navigationChatsUnderProjectsDefinition
-            ? renderExperimentControls(
-                navigationChatsUnderProjectsDefinition,
-                "relative before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-[''] before:opacity-60 pl-4",
-                {
-                  configDisabled: !isNavigationRefreshEnabled,
-                  showResetToAuto: false,
-                  toggleDisabled: !isNavigationRefreshEnabled,
-                },
-              )
-            : null}
-        </section>
-      );
-    }
-
-    return renderExperimentCard(definition);
-  });
+  const experimentCards = visibleRegistry.map(renderExperimentCard);
 
   return (
     <SettingsPage contentClassName="space-y-3">

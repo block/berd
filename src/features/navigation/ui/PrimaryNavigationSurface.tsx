@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconSearch, IconServer } from "@tabler/icons-react";
-import { ArrowUpCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUpCircle } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { PaneSurface } from "@/app/layout/panes/paneChrome";
 import {
@@ -22,7 +22,6 @@ import {
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
-  SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS,
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
   SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
 } from "@/shared/ui/sidebar-tokens";
@@ -47,33 +46,25 @@ interface PrimaryNavigationSurfaceProps {
   bottomMaskStyle: CSSProperties;
   topMaskStyle: CSSProperties;
   bothEdgeMaskStyle: CSSProperties;
-  detachable: boolean;
   elevatedShadow?: boolean;
-  fullHeight: boolean;
   isSecondarySurface: boolean;
   labelTransition: string;
   mainNavRef: Ref<HTMLElement>;
   navCollapsed: boolean;
   navLabelVisible: boolean;
-  navPanelCompact: boolean;
   onKeyDown: KeyboardEventHandler<HTMLElement>;
   onNavigate?: (view: AppView) => void;
-  onPrimaryNavWidthToggle: () => void;
   onSettingsBack?: () => void;
   onSettingsClick?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
   renderInlineSessionList?: (searchQuery: string) => ReactNode;
-  renderPrimaryNavResizeRail?: () => ReactNode;
-  renderUnifiedResizeRail?: () => ReactNode;
   secondaryNavRef: Ref<HTMLElement>;
   settingsSections: readonly (typeof SETTINGS_SECTIONS)[number][];
   showBottomMask: boolean;
   showTopMask: boolean;
   showAutomationsSurface: boolean;
   showBuilderbotSurface: boolean;
-  showPrimaryNavWidthToggle: boolean;
   showSecondaryBottomMask: boolean;
-  stackedDetachedLayout: boolean;
   width: number;
 }
 
@@ -88,33 +79,25 @@ export const PrimaryNavigationSurface = forwardRef<
     bottomMaskStyle,
     topMaskStyle,
     bothEdgeMaskStyle,
-    detachable,
     elevatedShadow = false,
-    fullHeight,
     isSecondarySurface,
     labelTransition,
     mainNavRef,
     navCollapsed,
     navLabelVisible,
-    navPanelCompact,
     onKeyDown,
     onNavigate,
-    onPrimaryNavWidthToggle,
     onSettingsBack,
     onSettingsClick,
     onSettingsSectionChange,
     renderInlineSessionList,
-    renderPrimaryNavResizeRail,
-    renderUnifiedResizeRail,
     secondaryNavRef,
     settingsSections,
     showBottomMask,
     showTopMask,
     showAutomationsSurface,
     showBuilderbotSurface,
-    showPrimaryNavWidthToggle,
     showSecondaryBottomMask,
-    stackedDetachedLayout,
     width,
   },
   ref,
@@ -170,49 +153,26 @@ export const PrimaryNavigationSurface = forwardRef<
       : []),
   ];
 
-  const primaryNavWidthToggleLabel = navPanelCompact
-    ? t("actions.expandNavigationPanel")
-    : t("actions.collapseNavigationPanel");
-  const PrimaryNavWidthToggleIcon = navPanelCompact
-    ? ChevronRight
-    : ChevronLeft;
-
   return (
     <PaneSurface
       ref={ref}
       testId="sidebar-primary-nav-panel"
       className={cn(
         "transition-[height,box-shadow] duration-200 ease-out",
-        detachable
-          ? SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS
-          : elevatedShadow && SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
-        stackedDetachedLayout && isSecondarySurface && "max-h-full",
+        elevatedShadow && SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
       )}
-      fullHeight={fullHeight}
+      fullHeight
       width={width}
     >
       <div className="flex-shrink-0 pt-1.5" aria-hidden="true" />
 
-      <div
-        className={cn(
-          "relative",
-          stackedDetachedLayout && isSecondarySurface
-            ? "min-h-0 flex-1 overflow-hidden"
-            : stackedDetachedLayout
-              ? "flex-none overflow-visible"
-              : "flex-1 min-h-0 overflow-hidden",
-        )}
-      >
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <div
           className={cn(
-            stackedDetachedLayout
-              ? "flex flex-col"
-              : "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
-            stackedDetachedLayout && isSecondarySurface && "hidden",
-            !stackedDetachedLayout &&
-              (isSecondarySurface
-                ? "pointer-events-none -translate-x-full opacity-0"
-                : "translate-x-0 opacity-100"),
+            "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
+            isSecondarySurface
+              ? "pointer-events-none -translate-x-full opacity-0"
+              : "translate-x-0 opacity-100",
           )}
           inert={isSecondarySurface ? true : undefined}
           aria-hidden={isSecondarySurface}
@@ -250,12 +210,7 @@ export const PrimaryNavigationSurface = forwardRef<
           <nav
             ref={mainNavRef}
             onKeyDown={onKeyDown}
-            className={cn(
-              "min-h-0 overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none",
-              stackedDetachedLayout
-                ? "flex-none overflow-y-visible"
-                : "flex-1 overflow-y-auto",
-            )}
+            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 py-1 pb-1 scrollbar-none"
             style={
               showTopMask && showBottomMask
                 ? bothEdgeMaskStyle
@@ -326,19 +281,14 @@ export const PrimaryNavigationSurface = forwardRef<
               />
             </div>
           )}
-          {renderUnifiedResizeRail?.()}
         </div>
 
         <div
           className={cn(
-            stackedDetachedLayout
-              ? "flex flex-col"
-              : "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
-            stackedDetachedLayout && !isSecondarySurface && "hidden",
-            !stackedDetachedLayout &&
-              (isSecondarySurface
-                ? "translate-x-0 opacity-100"
-                : "pointer-events-none translate-x-full opacity-0"),
+            "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
+            isSecondarySurface
+              ? "translate-x-0 opacity-100"
+              : "pointer-events-none translate-x-full opacity-0",
           )}
           inert={!isSecondarySurface ? true : undefined}
           aria-hidden={!isSecondarySurface}
@@ -357,12 +307,7 @@ export const PrimaryNavigationSurface = forwardRef<
           <nav
             ref={secondaryNavRef}
             onKeyDown={onKeyDown}
-            className={cn(
-              "min-h-0 overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none",
-              stackedDetachedLayout && !isSecondarySurface
-                ? "flex-none overflow-y-visible"
-                : "flex-1 overflow-y-auto",
-            )}
+            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 py-1 pb-1 scrollbar-none"
             style={showSecondaryBottomMask ? bottomMaskStyle : undefined}
             aria-label={t("settings:navigationLabel")}
           >
@@ -400,21 +345,6 @@ export const PrimaryNavigationSurface = forwardRef<
           </nav>
         </div>
       </div>
-      {showPrimaryNavWidthToggle && (
-        <div className="flex-shrink-0 px-1.5 py-1.5">
-          <SidebarNavItem
-            testId="sidebar-primary-nav-width-toggle"
-            icon={PrimaryNavWidthToggleIcon}
-            label={primaryNavWidthToggleLabel}
-            collapsed={navCollapsed}
-            labelTransition={labelTransition}
-            labelVisible={navLabelVisible}
-            isActive={false}
-            onClick={onPrimaryNavWidthToggle}
-          />
-        </div>
-      )}
-      {renderPrimaryNavResizeRail?.()}
     </PaneSurface>
   );
 });

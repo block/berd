@@ -17,12 +17,7 @@ import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
-import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
-import {
-  MULTI_WORKSPACE_EXPERIMENT_ID,
-  NAVIGATION_REFRESH_EXPERIMENT_ID,
-  SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
-} from "@/features/experiments/experimentDefinitions";
+import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
@@ -41,16 +36,17 @@ import {
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+
 import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
 } from "@/shared/runtime-config/schema";
 import {
   AppShell,
-  getPrototypeSecondaryWidthForDockedLayout,
   shouldStopVoiceConversationOnExperimentChange,
   shouldStopVoiceConversationOnSessionChange,
 } from "./AppShell";
+import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
@@ -291,105 +287,20 @@ vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
 }));
 
 vi.mock("@/app/views/NavigationPanesView", () => ({
-  NAV_PROTOTYPE_PANEL_GAP_PX: 0,
-  NAV_PROTOTYPE_PANEL_OVERLAP_PX: 1,
-  NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX: 48,
-  NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX: 230,
-  NAV_PROTOTYPE_SECONDARY_WIDTH_PX: 230,
   NavigationPanesView: ({
     collapsed,
-    detachableSessionListEnabled,
     onNavigate,
     onNewChat,
     onNewChatInProject,
     onSettingsClick,
     onSettingsSectionChange,
-    onPrototypeCycleRowsChange,
-    onPrototypeSecondaryTargetChange,
-    prototypeSecondaryTarget,
     width,
-  }: {
-    collapsed?: boolean;
-    detachableSessionListEnabled?: boolean;
-    onNavigate?: (view: string) => void;
-    onNewChat?: () => void;
-    onNewChatInProject?: (projectId: string) => void;
-    onSettingsClick?: () => void;
-    onSettingsSectionChange?: (section: "providers") => void;
-    onPrototypeCycleRowsChange?: (
-      target: { kind: "chats" } | { kind: "project"; projectId: string },
-      rows: Array<{
-        id: string;
-        groupId: string | null;
-        item: ChatSession;
-        selectable: boolean;
-        visible: boolean;
-      }>,
-    ) => void;
-    onPrototypeSecondaryTargetChange?: (
-      target: { kind: "chats" } | { kind: "project"; projectId: string },
-    ) => void;
-    prototypeSecondaryTarget?: unknown;
-    width?: number;
-  }) => (
+  }: NavigationPanesViewProps) => (
     <nav aria-label="mock sidebar">
       <div data-testid="mock-sidebar-collapsed">{String(collapsed)}</div>
       <div data-testid="mock-sidebar-width">{String(width)}</div>
-      <div data-testid="mock-sidebar-detachable-enabled">
-        {String(detachableSessionListEnabled)}
-      </div>
-      <div data-testid="mock-sidebar-prototype-secondary-target">
-        {JSON.stringify(prototypeSecondaryTarget)}
-      </div>
       <button type="button" onClick={onNewChat}>
         Sidebar new chat
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onPrototypeCycleRowsChange?.(
-            { kind: "project", projectId: "berd" },
-            useChatSessionStore
-              .getState()
-              .sessions.filter((session) => session.projectId === "berd")
-              .sort(
-                (a, b) =>
-                  ["oldest", "session-2", "newest-message"].indexOf(a.id) -
-                  ["oldest", "session-2", "newest-message"].indexOf(b.id),
-              )
-              .map((session) => ({
-                id: session.id,
-                groupId: session.id === "newest-message" ? null : "priority",
-                item: session,
-                selectable: true,
-                visible: session.id !== "oldest",
-              })),
-          )
-        }
-      >
-        Seed Berd cycle rows
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onPrototypeCycleRowsChange?.(
-            { kind: "chats" },
-            useChatSessionStore
-              .getState()
-              .sessions.filter((session) =>
-                ["session-2", "loose"].includes(session.id),
-              )
-              .map((session) => ({
-                id: session.id,
-                groupId: null,
-                item: session,
-                selectable: true,
-                visible: true,
-              })),
-          )
-        }
-      >
-        Seed chats cycle rows
       </button>
       <button type="button" onClick={() => onNewChatInProject?.("project-2")}>
         Sidebar new project 2 chat
@@ -405,23 +316,6 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
       </button>
       <button type="button" onClick={() => onNavigate?.("agents")}>
         Sidebar agents
-      </button>
-      <button
-        type="button"
-        onClick={() => onPrototypeSecondaryTargetChange?.({ kind: "chats" })}
-      >
-        Sidebar chats
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onPrototypeSecondaryTargetChange?.({
-            kind: "project",
-            projectId: "project-2",
-          })
-        }
-      >
-        Sidebar project 2
       </button>
       <button type="button" onClick={onSettingsClick}>
         Sidebar settings
@@ -839,27 +733,6 @@ describe("AppShell global navigation", () => {
       }),
     ).toBe(false);
   });
-
-  it("clamps pushed prototype secondary width to available viewport space", () => {
-    expect(
-      getPrototypeSecondaryWidthForDockedLayout({
-        dockedPrimaryWidth: 48,
-        requestedSecondaryWidth: 420,
-        secondaryPush: true,
-        viewportWidth: 1000,
-      }),
-    ).toBe(393);
-
-    expect(
-      getPrototypeSecondaryWidthForDockedLayout({
-        dockedPrimaryWidth: 48,
-        requestedSecondaryWidth: 420,
-        secondaryPush: false,
-        viewportWidth: 1000,
-      }),
-    ).toBe(420);
-  });
-
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
     window.history.replaceState(null, "", "/");
@@ -1019,142 +892,6 @@ describe("AppShell global navigation", () => {
         "--project-tint",
       ),
     ).toBe("transparent");
-  });
-
-  it("keeps the default sidebar expanded for empty default-title chats", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID, true);
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: DEFAULT_CHAT_TITLE,
-          providerId: "goose",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 0,
-        },
-      ],
-      activeSessionId: null,
-    });
-
-    renderAppShell();
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    expect(screen.getByTestId("mock-sidebar-collapsed")).toHaveTextContent(
-      "false",
-    );
-    expect(
-      screen.getByTestId("mock-sidebar-detachable-enabled"),
-    ).toHaveTextContent("true");
-  });
-
-  it("opens navigation from an empty chat without carrying it to new chats", async () => {
-    const user = userEvent.setup();
-    useProjectStore.setState({
-      projects: [
-        {
-          id: "project-2",
-          path: "/tmp/project-2.yaml",
-          name: "Project Two",
-          description: "",
-          prompt: "",
-          icon: "",
-          color: "",
-          workingDirs: ["/workspace/project-2"],
-          projectWorkspaces: [],
-          useWorktrees: false,
-          order: 0,
-          archivedAt: null,
-        },
-      ],
-    });
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: DEFAULT_CHAT_TITLE,
-          projectId: "project-1",
-          providerId: "goose",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 0,
-        },
-      ],
-      activeSessionId: null,
-    });
-
-    renderAppShell();
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent("null");
-
-    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
-
-    await user.click(screen.getByRole("button", { name: "Sidebar project 2" }));
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent(
-      JSON.stringify({ kind: "project", projectId: "project-2" }),
-    );
-
-    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-      ).toHaveTextContent("null");
-    });
-
-    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
-    await user.click(
-      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
-    );
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-      ).toHaveTextContent("null");
-    });
-  });
-
-  it("keeps secondary chat target for default-titled chats with messages", async () => {
-    const user = userEvent.setup();
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: DEFAULT_CHAT_TITLE,
-          providerId: "goose",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 1,
-        },
-      ],
-      activeSessionId: null,
-    });
-
-    renderAppShell();
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
   });
 
   it("does not create a chat when BYO default provider setup is required", async () => {
@@ -1687,135 +1424,6 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(useHomeWidgetStore.getState().instances).toHaveLength(0);
     });
-  });
-
-  it("keeps the active project open after archiving its session in refreshed navigation", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: "Project chat",
-          projectId: "project-1",
-          providerId: "goose",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 1,
-        },
-      ],
-      activeSessionId: null,
-    });
-
-    renderAppShell();
-
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-
-    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
-    });
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent(
-      JSON.stringify({ kind: "project", projectId: "project-1" }),
-    );
-  });
-
-  it("keeps the active project open after archiving a newly started empty session", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    useProjectStore.setState({
-      projects: [
-        {
-          id: "project-2",
-          path: "/tmp/project-2.yaml",
-          name: "Project Two",
-          description: "",
-          prompt: "",
-          icon: "",
-          color: "",
-          workingDirs: ["/workspace/project-2"],
-          projectWorkspaces: [],
-          useWorktrees: false,
-          order: 0,
-          archivedAt: null,
-        },
-      ],
-      loading: false,
-      activeProjectId: null,
-    });
-
-    renderAppShell();
-
-    await user.click(screen.getByRole("button", { name: "Sidebar project 2" }));
-    await user.click(
-      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-        id: "created-session",
-        projectId: "project-2",
-        messageCount: 0,
-      });
-    });
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent("null");
-
-    await user.keyboard("{Meta>}e{/Meta}");
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
-    });
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent(
-      JSON.stringify({ kind: "project", projectId: "project-2" }),
-    );
-  });
-
-  it("keeps an explicitly selected chats panel after archiving a project session", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: "Project chat",
-          projectId: "project-1",
-          providerId: "goose",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 1,
-        },
-      ],
-      activeSessionId: null,
-    });
-
-    renderAppShell();
-
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
-
-    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
-    });
-    expect(
-      screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-    ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
   });
 
   it("archives chats without managed Git resources when session pagination fails", async () => {
@@ -2520,75 +2128,6 @@ describe("AppShell global navigation", () => {
     expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
-  it("starts a new session in the active project with Cmd+N in refreshed navigation", async () => {
-    const project: ProjectInfo = {
-      id: "project-1",
-      path: "/tmp/project.yaml",
-      name: "Project One",
-      description: "",
-      prompt: "",
-      icon: "",
-      color: "",
-      projectWorkspaces: [],
-      workingDirs: ["/workspace/project"],
-      useWorktrees: false,
-      order: 0,
-      archivedAt: null,
-    };
-    useProjectStore.setState({
-      projects: [project],
-      loading: false,
-      activeProjectId: null,
-    });
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: "Project chat",
-          projectId: project.id,
-          providerId: "goose",
-          workingDir: "/workspace/project",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 1,
-        },
-      ],
-      activeSessionId: null,
-    });
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    const user = userEvent.setup();
-    renderAppShell();
-
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    mockAcpCreateSession.mockClear();
-
-    await user.keyboard("{Meta>}n{/Meta}");
-
-    await waitFor(() => {
-      expect(mockAcpCreateSession).toHaveBeenCalledWith(
-        "goose",
-        "/workspace/project",
-        {
-          deferProviderSetup: true,
-          modelId: undefined,
-          projectId: "project-1",
-        },
-      );
-    });
-    expect(useChatSessionStore.getState().activeSessionId).not.toBe(
-      "session-1",
-    );
-    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-      projectId: "project-1",
-    });
-    expect(
-      screen.queryByPlaceholderText("Start a conversation"),
-    ).not.toBeInTheDocument();
-  });
-
   it("dismisses the centered global composer from the backdrop and global Escape", async () => {
     for (const dismiss of ["backdrop", "escape"] as const) {
       const { container, unmount } = renderAppShell();
@@ -2669,75 +2208,6 @@ describe("AppShell global navigation", () => {
         personaId: "persona-1",
       });
     });
-  });
-
-  it("starts centered composer sends on a background draft before the visual handoff changes chat", async () => {
-    vi.useFakeTimers();
-    try {
-      const session: ChatSession = {
-        id: "session-1",
-        title: "Active chat",
-        providerId: "goose",
-        workingDir: "~/goose artifacts",
-        createdAt: "2026-06-09T00:00:00.000Z",
-        updatedAt: "2026-06-09T00:00:00.000Z",
-        messageCount: 1,
-      };
-      useChatSessionStore.setState({
-        sessions: [session],
-        activeSessionId: null,
-      });
-      renderAppShell();
-
-      fireEvent.click(screen.getByRole("button", { name: "Open session 1" }));
-      expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
-      fireEvent.click(screen.getByRole("button", { name: "Sidebar chats" }));
-      expect(
-        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-      ).toHaveTextContent(JSON.stringify({ kind: "chats" }));
-      mockAcpCreateSession.mockClear();
-
-      fireEvent.keyDown(window, { key: "n", metaKey: true });
-      const textbox = screen.getByPlaceholderText("Start a conversation");
-      fireEvent.change(textbox, {
-        target: { value: "send behind the animation" },
-      });
-      fireEvent.keyDown(textbox, { key: "Enter" });
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      const queuedMessages = useChatStore.getState().queuedMessageBySession;
-      const [draftSessionId] = Object.keys(queuedMessages);
-      expect(draftSessionId).toEqual(expect.any(String));
-      expect(draftSessionId).not.toBe("session-1");
-      expect(queuedMessages[draftSessionId]?.payload).toMatchObject({
-        text: "send behind the animation",
-      });
-      expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
-      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-        "session-1",
-      );
-
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
-
-      act(() => {
-        vi.advanceTimersByTime(220);
-      });
-      expect(useChatSessionStore.getState().activeSessionId).not.toBe(
-        "session-1",
-      );
-      expect(
-        screen.getByTestId("mock-sidebar-prototype-secondary-target"),
-      ).toHaveTextContent("null");
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it.each([
@@ -3933,38 +3403,6 @@ describe("AppShell global navigation", () => {
     );
   });
 
-  it("leaves Settings when the active project chat is selected from refreshed navigation", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: "Project chat",
-          projectId: "project-1",
-          providerId: "goose",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 1,
-        },
-      ],
-      activeSessionId: "session-1",
-    });
-
-    renderAppShell();
-
-    await user.click(screen.getByRole("button", { name: "Sidebar settings" }));
-    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
-
-    await user.click(screen.getByRole("button", { name: "Open session 1" }));
-
-    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-      "session-1",
-    );
-  });
-
   it("keeps Settings section navigation in the global stack", async () => {
     const user = userEvent.setup();
     renderAppShell();
@@ -4810,147 +4248,6 @@ describe("AppShell global navigation", () => {
     expect(
       await screen.findByPlaceholderText("Jump to session..."),
     ).toBeInTheDocument();
-  });
-
-  it("matches the refreshed navigation's updatedAt order when cycling", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    const sessionBase = {
-      providerId: "goose",
-      workingDir: "~/goose artifacts",
-      createdAt: "2026-06-09T00:00:00.000Z",
-      messageCount: 1,
-      projectId: "berd",
-    } satisfies Partial<ChatSession>;
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          ...sessionBase,
-          id: "newest-message",
-          title: "Newest message",
-          updatedAt: "2026-06-09T10:00:00.000Z",
-          lastMessageAt: "2026-06-09T15:00:00.000Z",
-        },
-        {
-          ...sessionBase,
-          id: "session-2",
-          title: "Newest update",
-          updatedAt: "2026-06-09T14:00:00.000Z",
-          lastMessageAt: "2026-06-09T09:00:00.000Z",
-        },
-        {
-          ...sessionBase,
-          id: "oldest",
-          title: "Oldest",
-          updatedAt: "2026-06-09T08:00:00.000Z",
-          lastMessageAt: "2026-06-09T08:00:00.000Z",
-        },
-      ] as ChatSession[],
-      activeSessionId: null,
-    });
-    useProjectStore.setState({
-      projects: [
-        {
-          id: "berd",
-          name: "Berd",
-          path: "/tmp/berd.md",
-          description: "",
-          prompt: "",
-          icon: "",
-          color: "blue",
-          workingDirs: ["/repo"],
-          projectWorkspaces: [],
-          useWorktrees: true,
-          order: 0,
-          archivedAt: null,
-          chatGroups: {
-            groups: [
-              {
-                id: "priority",
-                name: "Priority",
-                chatIds: ["oldest", "session-2"],
-              },
-            ],
-          },
-        },
-      ],
-    });
-
-    renderAppShell();
-    await user.click(
-      screen.getByRole("button", { name: "Seed Berd cycle rows" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Open session 2" }));
-    await waitFor(() => {
-      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-        "session-2",
-      );
-    });
-
-    // Forward follows persisted group/chat order, not activity order.
-    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
-    await waitFor(() => {
-      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-        "newest-message",
-      );
-    });
-
-    // Backward skips the collapsed row and wraps to the previous visible row.
-    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true, shiftKey: true });
-    await waitFor(() => {
-      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-        "session-2",
-      );
-    });
-
-    // A collapsed active row enters the cycle at the next visible row.
-    await user.click(screen.getByRole("button", { name: "Open session 2" }));
-    useChatSessionStore.setState({ activeSessionId: "oldest" });
-    useChatStore.setState({ activeSessionId: "oldest" });
-    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
-    await waitFor(() => {
-      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-        "session-2",
-      );
-    });
-  });
-
-  it("uses the explicitly selected Chats context for refreshed cycling", async () => {
-    const user = userEvent.setup();
-    setExperimentEnabled(NAVIGATION_REFRESH_EXPERIMENT_ID, true);
-    const sessionBase = {
-      providerId: "goose",
-      workingDir: "~/goose artifacts",
-      createdAt: "2026-06-09T00:00:00.000Z",
-      updatedAt: "2026-06-09T12:00:00.000Z",
-      messageCount: 1,
-    } satisfies Partial<ChatSession>;
-    useChatSessionStore.setState({
-      sessions: [
-        {
-          ...sessionBase,
-          id: "session-2",
-          title: "Project chat",
-          projectId: "berd",
-        },
-        { ...sessionBase, id: "loose", title: "Loose chat" },
-      ] as ChatSession[],
-      activeSessionId: null,
-    });
-
-    renderAppShell();
-    await user.click(screen.getByRole("button", { name: "Open session 2" }));
-    await user.click(screen.getByRole("button", { name: "Sidebar chats" }));
-    await user.click(
-      screen.getByRole("button", { name: "Seed chats cycle rows" }),
-    );
-
-    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
-    await waitFor(() => {
-      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
-        "loose",
-      );
-    });
   });
 
   it("cycles sessions with Ctrl+Tab and Ctrl+Shift+Tab", async () => {

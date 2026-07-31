@@ -160,9 +160,6 @@ const rawCssColorAllowlist = new Set([
   "sidebar-row-hover",
   "sidebar-row-active",
   // Prototype nav text, applied via arbitrary-value text-[var(...)]
-  "sidebar-prototype-nav-muted-fg",
-  "sidebar-prototype-nav-default-fg",
-  "sidebar-prototype-nav-active-fg",
   // ::highlight(chat-search-match[-active]) Custom Highlight API ranges
   "chat-search-match-bg",
   "chat-search-match-fg",

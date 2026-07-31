@@ -128,6 +128,3 @@ export const SIDEBAR_SECTION_DIVIDER_CLASS = `${SIDEBAR_SECTION_DIVIDER_INSET_CL
 /** Elevated sidebar panel shadow (panel hover); uses --shadow-sidebar-panel-elevated. */
 export const SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS =
   "shadow-sidebar-panel-elevated";
-
-/** Gap between sibling sidebar panels in the detachable chats experiment. */
-export const SIDEBAR_DETACHED_PANEL_GAP_PX = 10;

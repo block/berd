@@ -16,6 +16,7 @@ import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
 } from "@/shared/runtime-config/schema";
+import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -54,18 +55,10 @@ vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
 }));
 
 vi.mock("@/app/views/NavigationPanesView", () => ({
-  NAV_PROTOTYPE_PANEL_GAP_PX: 0,
-  NAV_PROTOTYPE_PANEL_OVERLAP_PX: 1,
-  NAV_PROTOTYPE_PRIMARY_COLLAPSED_WIDTH_PX: 48,
-  NAV_PROTOTYPE_PRIMARY_EXPANDED_WIDTH_PX: 230,
-  NAV_PROTOTYPE_SECONDARY_WIDTH_PX: 230,
   NavigationPanesView: ({
     onNavigate,
     onSettingsClick,
-  }: {
-    onNavigate?: (view: string) => void;
-    onSettingsClick?: () => void;
-  }) => (
+  }: NavigationPanesViewProps) => (
     <nav aria-label="mock sidebar">
       <button type="button" onClick={() => onNavigate?.("skills")}>
         Sidebar skills

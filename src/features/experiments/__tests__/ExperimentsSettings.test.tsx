@@ -1,10 +1,14 @@
-import { screen, within } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID,
-  NAVIGATION_REFRESH_EXPERIMENT_ID,
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  EXPERIMENT_DEFINITIONS,
+  MULTI_WORKSPACE_EXPERIMENT_ID,
+  SKILL_DISCOVERY_EXPERIMENT_ID,
+  TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
+  VOICE_CONVERSATION_EXPERIMENT_ID,
   type ExperimentDefinition,
 } from "../experimentDefinitions";
 import { ExperimentsSettings } from "../ExperimentsSettings";
@@ -95,111 +99,16 @@ describe("ExperimentsSettings", () => {
         i18n.t("experiments.builderbot.description", { ns: "settings" }),
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", {
-        name: i18n.t("experiments.sidebarDetachableChats.title", {
-          ns: "settings",
-        }),
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByText(
-        i18n.t("experiments.sidebarDetachableChats.description", {
-          ns: "settings",
-        }),
-      ),
-    ).toBeInTheDocument();
-    const navigationExperimentsCard = screen.getByRole("region", {
-      name: i18n.t("experiments.navigationExperiments.title", {
-        ns: "settings",
-      }),
-    });
-    expect(navigationExperimentsCard).toBeInTheDocument();
-    expect(
-      within(navigationExperimentsCard).getByRole("switch", {
-        name: i18n.t("experiments.navigationRefresh.title", {
-          ns: "settings",
-        }),
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByText(
-        i18n.t("experiments.navigationRefresh.description", {
-          ns: "settings",
-        }),
-      ),
-    ).toBeInTheDocument();
-    const chatsUnderProjectsSwitch = within(
-      navigationExperimentsCard,
-    ).getByRole("switch", {
-      name: i18n.t("experiments.navigationChatsUnderProjects.title", {
-        ns: "settings",
-      }),
-    });
-    expect(chatsUnderProjectsSwitch).not.toBeChecked();
-    expect(chatsUnderProjectsSwitch).toBeDisabled();
-    expect(
-      screen.getByText(
-        i18n.t("experiments.navigationChatsUnderProjects.description", {
-          ns: "settings",
-        }),
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(navigationExperimentsCard).queryByText(
-        i18n.t("experiments.defaultLabel", { ns: "settings" }),
-      ),
-    ).not.toBeInTheDocument();
   });
 
-  it("keeps the default navigation separate from opt-in nav experiments", async () => {
-    vi.stubEnv("DEV", false);
-    const user = userEvent.setup();
-
-    renderWithProviders(<ExperimentsSettings />);
-
-    const navigationExperimentsCard = screen.getByRole("region", {
-      name: i18n.t("experiments.navigationExperiments.title", {
-        ns: "settings",
-      }),
-    });
-    const navigationRefreshSwitch = screen.getByRole("switch", {
-      name: i18n.t("experiments.navigationRefresh.title", {
-        ns: "settings",
-      }),
-    });
-    const chatsUnderProjectsSwitch = screen.getByRole("switch", {
-      name: i18n.t("experiments.navigationChatsUnderProjects.title", {
-        ns: "settings",
-      }),
-    });
-
-    expect(navigationRefreshSwitch).not.toBeChecked();
-    expect(chatsUnderProjectsSwitch).not.toBeChecked();
-    expect(chatsUnderProjectsSwitch).toBeDisabled();
-    expect(
-      within(navigationExperimentsCard).queryByRole("button", {
-        name: i18n.t("experiments.resetToAuto", { ns: "settings" }),
-      }),
-    ).not.toBeInTheDocument();
-
-    await user.click(navigationRefreshSwitch);
-
-    expect(navigationRefreshSwitch).toBeChecked();
-    expect(chatsUnderProjectsSwitch).not.toBeChecked();
-    expect(chatsUnderProjectsSwitch).not.toBeDisabled();
-
-    await user.click(chatsUnderProjectsSwitch);
-    expect(chatsUnderProjectsSwitch).toBeChecked();
-
-    expect(
-      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
-        .experiments[NAVIGATION_REFRESH_EXPERIMENT_ID].enabled,
-    ).toBe(true);
-    expect(
-      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
-        .experiments[NAVIGATION_CHATS_UNDER_PROJECTS_EXPERIMENT_ID].enabled,
-    ).toBe(true);
+  it("registers only the currently supported experiments", () => {
+    expect(EXPERIMENT_DEFINITIONS.map(({ id }) => id)).toEqual([
+      BUILDERBOT_SURFACE_EXPERIMENT_ID,
+      MULTI_WORKSPACE_EXPERIMENT_ID,
+      TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
+      SKILL_DISCOVERY_EXPERIMENT_ID,
+      VOICE_CONVERSATION_EXPERIMENT_ID,
+    ]);
   });
 
   it("does not advertise the retired macOS 26 voice requirement", () => {

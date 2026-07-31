@@ -272,11 +272,6 @@
     var(--sidebar-foreground) 3%,
     transparent
   );
-  --sidebar-prototype-nav-muted-fg: var(--color-gray-500);
-  --sidebar-prototype-nav-default-fg: var(--color-gray-700);
-  --sidebar-prototype-nav-active-fg: var(--color-gray-900);
-  --sidebar-prototype-nav-row-hover-opacity: 2%;
-  --sidebar-prototype-nav-row-active-opacity: 3%;
   --sidebar-section-action-bg: var(--muted);
   --sidebar-section-action-fg: var(--foreground);
   --sidebar-section-action-bg-hover: var(--foreground);
@@ -704,11 +699,6 @@
     var(--sidebar-foreground) 7%,
     transparent
   );
-  --sidebar-prototype-nav-muted-fg: var(--color-gray-500);
-  --sidebar-prototype-nav-default-fg: var(--color-gray-200);
-  --sidebar-prototype-nav-active-fg: var(--color-white);
-  --sidebar-prototype-nav-row-hover-opacity: 14%;
-  --sidebar-prototype-nav-row-active-opacity: 14%;
   --sidebar-section-action-bg: var(--muted);
   --sidebar-section-action-fg: var(--foreground);
   --sidebar-section-action-bg-hover: var(--foreground);
@@ -1773,25 +1763,6 @@ body,
 }
 
 @layer components {
-  .sidebar-prototype-nav-row-active {
-    background-color: color-mix(
-      in srgb,
-      currentColor var(--sidebar-prototype-nav-row-active-opacity),
-      transparent
-    );
-  }
-
-  .sidebar-prototype-nav-row-hover:is(:hover, :focus-visible),
-  .group\/prototype-project-group:is(:hover, :focus-within)
-    .sidebar-prototype-nav-group-row-hover,
-  .sidebar-prototype-nav-group-row-hover:focus-visible {
-    background-color: color-mix(
-      in srgb,
-      currentColor var(--sidebar-prototype-nav-row-hover-opacity),
-      transparent
-    );
-  }
-
   .chat-composer-shell {
     container: chat-composer / inline-size;
   }

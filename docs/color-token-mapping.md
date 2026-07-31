@@ -154,9 +154,6 @@ The authoritative list of raw-CSS color tokens (kept in sync with the script):
 --sidebar-row-hover
 --sidebar-row-active
 # Prototype nav text (text-[var(...)])
---sidebar-prototype-nav-muted-fg
---sidebar-prototype-nav-default-fg
---sidebar-prototype-nav-active-fg
 # ::highlight(chat-search-match[-active])
 --chat-search-match-bg
 --chat-search-match-fg

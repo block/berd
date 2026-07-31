@@ -2623,8 +2623,14 @@ describe("VirtualMessageTimeline", () => {
 
     await waitFor(() =>
       expect(
-        latestTimelineDiagnostics(diagnosticsSpy)?.descriptorChurnPercent,
-      ).toBeGreaterThan(0),
+        diagnosticsSpy.mock.calls.some(([diagnostics]) => {
+          const sample = diagnostics as VirtualMessageTimelineDiagnostics;
+          return (
+            sample.sessionId === "session-secondary" &&
+            sample.descriptorChurnPercent > 0
+          );
+        }),
+      ).toBe(true),
     );
   });
 

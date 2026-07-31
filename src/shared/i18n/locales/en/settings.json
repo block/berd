@@ -206,26 +206,11 @@
       "description": "Try continuous two-way voice conversations in Goose chats.",
       "title": "Voice conversations"
     },
-    "navigationRefresh": {
-      "description": "Try the refreshed primary and secondary navigation for projects, chats, and settings.",
-      "title": "Refreshed navigation"
-    },
-    "navigationChatsUnderProjects": {
-      "description": "Show recent chats beneath the projects list, with View all opening the full chat list panel.",
-      "title": "Chats under projects"
-    },
-    "navigationExperiments": {
-      "title": "Navigation experiments"
-    },
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "defaultLabel": "default",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
     "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
-    "sidebarDetachableChats": {
-      "description": "Let the sidebar chats area detach from the main navigation and snap beside it while this layout is being tested.",
-      "title": "Detachable sidebar chats"
-    },
     "skillDiscovery": {
       "description": "Add a Discover tab to Skills for browsing and installing skills from the Block catalog without leaving the app. Requires the sq-agents CLI.",
       "title": "Skill discovery"
