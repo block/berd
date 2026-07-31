@@ -162,6 +162,11 @@ bb-cli-lint:
 bb-cli-test:
     cd bb-cli && cargo test --locked
 
+# Build and run the isolated, deterministic Docker acceptance harness for bb skills.
+bb-cli-docker-acceptance:
+    docker build --tag bb-cli-acceptance --file bb-cli/docker/acceptance/Dockerfile .
+    docker run --rm bb-cli-acceptance
+
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
     #!/usr/bin/env bash

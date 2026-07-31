@@ -1,0 +1,12 @@
+**
+!bb-cli/
+!bb-cli/**
+!crates/
+!crates/builderbot-auth/
+!crates/builderbot-auth/**
+
+bb-cli/.hermit/
+bb-cli/bin/
+bb-cli/sqbin/
+bb-cli/target/
+**/node_modules/
