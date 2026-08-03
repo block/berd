@@ -65,6 +65,11 @@ import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePock
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { consumePendingVoiceStart } from "@/features/voice-conversation/lib/pendingVoiceStart";
+import {
+  SecurityConfirmationPanel,
+  useHasPendingSecurityConfirmation,
+  useRegisterSecurityConfirmationSurface,
+} from "@/features/security/ui/SecurityConfirmationPanel";
 
 const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] [--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]";
@@ -116,6 +121,9 @@ export function ChatView({
   onWorkspaceNameRequest,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
+  useRegisterSecurityConfirmationSurface(sessionId);
+  const hasPendingSecurityConfirmation =
+    useHasPendingSecurityConfirmation(sessionId);
   const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
@@ -611,7 +619,9 @@ export function ChatView({
           composerHandoffActive && "invisible pointer-events-none",
         )}
       >
+        <SecurityConfirmationPanel sessionId={sessionId} />
         <ChatInput
+          className={hasPendingSecurityConfirmation ? "hidden" : undefined}
           surface="bare"
           innerBareSurface
           queuedMessageAccessory={

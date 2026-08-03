@@ -762,6 +762,8 @@
   "securityConfirmation": {
     "title": "Security alert",
     "description": "This action was flagged as a potential security risk. Review the details below before deciding whether to allow it.",
+    "backgroundChat": "From chat: {{title}}",
+    "backgroundChatUnknown": "From another chat",
     "detectionConfidence": "Detection confidence",
     "commandLabel": "Flagged command",
     "inferring": "Analyzing why this was flagged…",

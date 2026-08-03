@@ -70,7 +70,8 @@ function isSecurityRequest(alertText: string): boolean {
 /**
  * ACP permission handler. Security findings (identified by the backend's
  * "🔒 Security Alert" marker) are surfaced to the user via a confirmation
- * modal; all other permission requests are auto-approved to preserve Berd's
+ * chat-scoped confirmation panel; all other permission requests are
+ * auto-approved to preserve Berd's
  * existing no-friction tool behavior.
  *
  * When the alert lacks a human-readable explanation (ML-only detections),
@@ -90,7 +91,9 @@ export function handleSecurityPermissionRequest(
 
   const command = stringifyCommand(request.toolCall.rawInput);
 
-  // Show the modal immediately — inference runs in the background
+  // Pause only the requesting session immediately. Its ChatView renders the
+  // decision while inference runs in the background; other sessions remain
+  // interactive.
   const promise = new Promise<RequestPermissionResponse>((resolve) => {
     useSecurityConfirmationStore.getState().enqueue({
       request,
@@ -104,7 +107,9 @@ export function handleSecurityPermissionRequest(
   // If the alert only has confidence (no explanation), infer one
   if (command && alertLacksExplanation(alertText)) {
     const store = useSecurityConfirmationStore.getState();
-    store.setInferredExplanation({ status: "loading" });
+    store.setInferredExplanation(request.sessionId, request, {
+      status: "loading",
+    });
 
     const confidence = extractConfidence(alertText);
     readDefaultProviderReadiness()
@@ -113,26 +118,29 @@ export function handleSecurityPermissionRequest(
           return { status: "needs_setup" as const };
         }
 
-        // If readiness could not be confirmed, still try the inference. The
-        // actual Goose request is the most reliable availability check and
-        // preserves explanations during transient readiness-check failures.
-        const text = await inferSecurityExplanation(command, confidence);
+        if (readiness.status === "unknown") {
+          return { status: "failed" as const };
+        }
+
+        const text = await inferSecurityExplanation(command, confidence, {
+          providerId: readiness.providerId,
+          modelId: readiness.modelId,
+        });
         return text
           ? { status: "done" as const, text }
           : { status: "failed" as const };
       })
       .then((result) => {
-        const current = useSecurityConfirmationStore.getState();
-        // Only update if the same alert is still pending
-        if (current.pending?.request === request) {
-          current.setInferredExplanation(result);
-        }
+        useSecurityConfirmationStore
+          .getState()
+          .setInferredExplanation(request.sessionId, request, result);
       })
       .catch(() => {
-        const current = useSecurityConfirmationStore.getState();
-        if (current.pending?.request === request) {
-          current.setInferredExplanation({ status: "failed" });
-        }
+        useSecurityConfirmationStore
+          .getState()
+          .setInferredExplanation(request.sessionId, request, {
+            status: "failed",
+          });
       });
   }
 

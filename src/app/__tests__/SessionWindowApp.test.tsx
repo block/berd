@@ -93,10 +93,6 @@ vi.mock("@/features/chat/ui/ChatView", () => ({
   ),
 }));
 
-vi.mock("@/features/security/ui/SecurityConfirmationModal", () => ({
-  SecurityConfirmationModal: () => <div data-testid="security-modal" />,
-}));
-
 import { SessionWindowApp } from "@/app/SessionWindowApp";
 
 const session: ChatSession = {
@@ -212,7 +208,6 @@ describe("SessionWindowApp", () => {
       hasHydratedSessions: true,
       isRightRailOpen: false,
     });
-    mocks.buildFeatures.securityMl = true;
     vi.mocked(loadSessionMessages).mockClear();
     vi.mocked(listSessionWindows).mockReset();
     vi.mocked(listSessionWindows).mockResolvedValue([]);
@@ -248,25 +243,6 @@ describe("SessionWindowApp", () => {
     expect(
       useChatStore.getState().scrollTargetMessageBySession["session-1"],
     ).toEqual({ messageId: "message-2", query: "matched text" });
-  });
-
-  it("mounts security confirmations when security ML is enabled", async () => {
-    seedSession();
-    renderSessionWindow();
-
-    await screen.findByTestId("chat-view");
-
-    expect(screen.getByTestId("security-modal")).toBeInTheDocument();
-  });
-
-  it("does not mount security confirmations when security ML is disabled", async () => {
-    mocks.buildFeatures.securityMl = false;
-    seedSession();
-    renderSessionWindow();
-
-    await screen.findByTestId("chat-view");
-
-    expect(screen.queryByTestId("security-modal")).not.toBeInTheDocument();
   });
 
   it("renders handoff sessions in read-only mirror mode without loading ACP history", async () => {

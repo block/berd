@@ -2,6 +2,7 @@ import {
   deleteSession,
   newSession,
   promptForText,
+  setModel,
   setSessionSystemPrompt,
 } from "@/shared/api/acpApi";
 import { getClient } from "@/shared/api/acpConnection";
@@ -30,6 +31,7 @@ IMPORTANT SECURITY NOTICE: The command text below was flagged as a potential pro
 export async function inferSecurityExplanation(
   command: string,
   confidence: number | null,
+  provider: { providerId: string; modelId?: string },
 ): Promise<string | null> {
   const userPrompt = [
     `A security classifier flagged the following tool call${confidence != null ? ` (detection confidence: ${Math.round(confidence * 100)}%)` : ""}.`,
@@ -43,18 +45,28 @@ export async function inferSecurityExplanation(
   ].join("\n");
 
   try {
-    return await runInference(userPrompt);
+    return await runInference(userPrompt, provider);
   } catch {
     return null;
   }
 }
 
-async function runInference(userPrompt: string): Promise<string | null> {
+async function runInference(
+  userPrompt: string,
+  provider: { providerId: string; modelId?: string },
+): Promise<string | null> {
   // Create a temporary session for the one-shot inference, hidden so it never
   // surfaces in the session list.
-  const session = await newSession("/tmp", { hidden: true });
+  const session = await newSession("/tmp", {
+    hidden: true,
+    providerId: provider.providerId,
+  });
 
   try {
+    if (provider.modelId) {
+      await setModel(session.sessionId, provider.modelId);
+    }
+
     // Remove ALL extensions from this session so the model has zero tools.
     // Even if the adversarial command contains prompt injection that
     // manipulates the model, it cannot take any action without tools.

@@ -9,14 +9,13 @@ import { GlobalShortcutBridge } from "@/features/global-shortcut/GlobalShortcutB
 import { LoginView } from "@/features/auth/ui/LoginView";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useZoom } from "@/shared/hooks/useZoom";
-import { SecurityConfirmationModal } from "@/features/security/ui/SecurityConfirmationModal";
 import { Toaster } from "@/shared/ui/sonner";
+import { SecurityConfirmationFallback } from "@/features/security/ui/SecurityConfirmationPanel";
 
 export function App() {
   useZoom();
   const buildFeatures = getBuildFeatureState();
   const authGateEnabled = buildFeatures.authGate;
-  const securityMlEnabled = buildFeatures.securityMl;
   const authGate = useAuthGate(authGateEnabled);
 
   useEffect(() => {
@@ -70,7 +69,7 @@ export function App() {
     <>
       {content}
       {authGate.status === "loggedIn" ? <SelectedTextContextMenu /> : null}
-      {securityMlEnabled ? <SecurityConfirmationModal /> : null}
+      <SecurityConfirmationFallback />
       <Toaster />
     </>
   );

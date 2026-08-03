@@ -23,6 +23,7 @@ import {
 import { mergeAcpSessionPage } from "@/features/chat/lib/acpSessionMapping";
 import { releaseSession } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 import {
   logReasoningEffortInfo,
   reasoningEffortConfigLogFields,
@@ -39,6 +40,7 @@ const LEGACY_CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
 let sessionLoadEpoch = 0;
 let archiveMutationOperationId = 0;
+const inFlightArchiveMutationIdsBySessionId = new Map<string, Set<number>>();
 
 /** Thrown by archiveSession when the id matches no session in the store. */
 export class SessionNotFoundError extends Error {
@@ -350,6 +352,29 @@ function rollbackFailedArchiveMutation(
     ),
     archiveMutationBySessionId,
   };
+}
+
+function trackArchiveMutation(sessionId: string, operationId: number): void {
+  const operations =
+    inFlightArchiveMutationIdsBySessionId.get(sessionId) ?? new Set<number>();
+  operations.add(operationId);
+  inFlightArchiveMutationIdsBySessionId.set(sessionId, operations);
+}
+
+function settleArchiveMutationAndCancelIfArchived(
+  state: ChatSessionStore,
+  sessionId: string,
+  operationId: number,
+): void {
+  const operations = inFlightArchiveMutationIdsBySessionId.get(sessionId);
+  operations?.delete(operationId);
+  if (operations?.size === 0) {
+    inFlightArchiveMutationIdsBySessionId.delete(sessionId);
+  }
+
+  if (!operations?.size && state.getSession(sessionId)?.archivedAt) {
+    useSecurityConfirmationStore.getState().cancelAll(sessionId);
+  }
 }
 
 function loadRightRailOpenPreference(): boolean {
@@ -852,6 +877,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       };
     });
     removePersistedChatWorkspaceMetadata(id);
+    useSecurityConfirmationStore.getState().cancelAll(id);
     releaseWindowedSession(id);
   },
 
@@ -872,6 +898,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       ),
       status: "pending",
     };
+    trackArchiveMutation(id, operationId);
     set((state) => ({
       sessions: state.sessions.map((candidate) =>
         candidate.id === id
@@ -886,10 +913,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     try {
       await acpArchiveSession(session.id);
       set((state) => recordArchiveMutationSuccess(state, id, mutation));
+      settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
     } catch (error) {
       // Roll back only the archive flag; navigation/window cleanup is owned by
       // AppShell's archive transaction.
       set((state) => rollbackFailedArchiveMutation(state, id, operationId));
+      settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
       throw error;
     }
   },
@@ -909,6 +938,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       ),
       status: "pending",
     };
+    trackArchiveMutation(id, operationId);
     set((state) => ({
       sessions: state.sessions.map((candidate) =>
         candidate.id === id
@@ -923,8 +953,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     try {
       await acpUnarchiveSession(session.id);
       set((state) => recordArchiveMutationSuccess(state, id, mutation));
+      settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
     } catch (error) {
       set((state) => rollbackFailedArchiveMutation(state, id, operationId));
+      settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
       throw error;
     }
   },

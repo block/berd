@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 
 import { runChatRuntimeStartup } from "@/app/lib/chatRuntimeStartup";
 import { SessionWindowTopBar } from "@/app/ui/SessionWindowTopBar";
-import { SecurityConfirmationModal } from "@/features/security/ui/SecurityConfirmationModal";
 import {
   listenSessionHandoffSnapshotAvailable,
   type SessionHandoffSnapshotAvailable,
@@ -36,8 +35,9 @@ import { ChatView } from "@/features/chat/ui/ChatView";
 import { ReleasedQueuedMessageDrain } from "@/features/chat/ui/ReleasedQueuedMessageDrain";
 import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
-import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { Button } from "@/shared/ui/button";
+import { SecurityConfirmationFallback } from "@/features/security/ui/SecurityConfirmationPanel";
+import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 
 type Phase = "loading" | "mirror" | "recoverable" | "ready" | "missing";
 
@@ -152,13 +152,22 @@ export function SessionWindowApp({
     },
     [sessionId],
   );
-  const securityMlEnabled = getBuildFeatureState().securityMl;
   const rightRailLabel = isRightRailOpen
     ? t("rightRail.close")
     : t("rightRail.open");
   const handleToggleRightRail = useCallback(() => {
     setRightRailOpen(!isRightRailOpen);
   }, [isRightRailOpen, setRightRailOpen]);
+
+  useEffect(() => {
+    const cancelPendingOnWindowClose = () => {
+      useSecurityConfirmationStore.getState().cancelAll(sessionId);
+    };
+    window.addEventListener("beforeunload", cancelPendingOnWindowClose);
+    return () => {
+      window.removeEventListener("beforeunload", cancelPendingOnWindowClose);
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,7 +426,7 @@ export function SessionWindowApp({
         onSkip={() => submitWorkspaceNameRequest(null)}
         onSubmit={submitWorkspaceNameRequest}
       />
-      {securityMlEnabled ? <SecurityConfirmationModal /> : null}
+      <SecurityConfirmationFallback />
     </>
   );
 }

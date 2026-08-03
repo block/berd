@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   },
   cancelLogin: vi.fn(),
   getAuthStatus: vi.fn(),
+  securityConfirmationFallbackRender: vi.fn(),
   startLogin: vi.fn(),
   toastError: vi.fn(),
   useAvatarImage: vi.fn((avatar: unknown) =>
@@ -56,6 +57,13 @@ vi.mock("@/app/ui/SelectedTextContextMenu", () => ({
 
 vi.mock("@/app/ui/StartupLoadingView", () => ({
   StartupLoadingView: () => "Checking sign-in status",
+}));
+
+vi.mock("@/features/security/ui/SecurityConfirmationPanel", () => ({
+  SecurityConfirmationFallback: () => {
+    mocks.securityConfirmationFallbackRender();
+    return null;
+  },
 }));
 
 vi.mock("@/shared/ui/sonner", () => ({
@@ -175,6 +183,15 @@ describe("App", () => {
     ).toHaveLength(14);
     expect(screen.queryByText("App Shell")).not.toBeInTheDocument();
     expect(mocks.appShellRender).not.toHaveBeenCalled();
+  });
+
+  it("keeps pending security confirmations reachable while logged out", async () => {
+    renderApp();
+
+    expect(
+      await screen.findByRole("heading", { name: "Goose" }),
+    ).toBeInTheDocument();
+    expect(mocks.securityConfirmationFallbackRender).toHaveBeenCalled();
   });
 
   it("passes the org into the login command and mounts the app shell after login", async () => {

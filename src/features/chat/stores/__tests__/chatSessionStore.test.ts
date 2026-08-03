@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionInfo } from "@/shared/api/acp";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 import {
   getIncludedWorkspaceAttachments,
   workspaceAttachmentIdForPath,
@@ -151,6 +152,10 @@ describe("chatSessionStore", () => {
     window.localStorage.removeItem("goose:context-panel-open");
     window.localStorage.removeItem(CHAT_WORKSPACE_METADATA_STORAGE_KEY);
     resetStore();
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {},
+      mountedSurfaceCountBySessionId: {},
+    });
     useSessionWindowStore.getState().setSnapshot([]);
     vi.clearAllMocks();
     mocks.archiveSession.mockResolvedValue(undefined);
@@ -170,6 +175,34 @@ describe("chatSessionStore", () => {
     expect(mocks.releaseSession).toHaveBeenCalledWith("session-1");
   });
 
+  it("cancels pending security decisions when removing a session", () => {
+    const resolve = vi.fn();
+    seedSession({ id: "session-1" });
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {
+        "session-1": [
+          {
+            request: { sessionId: "session-1" } as never,
+            title: "Tool call",
+            command: "command",
+            alertText: "🔒 Security Alert",
+            inferredExplanation: { status: "idle" },
+            resolve,
+          },
+        ],
+      },
+    });
+
+    useChatSessionStore.getState().removeSession("session-1");
+
+    expect(resolve).toHaveBeenCalledWith({
+      outcome: { outcome: "cancelled" },
+    });
+    expect(useSecurityConfirmationStore.getState().pendingBySessionId).toEqual(
+      {},
+    );
+  });
+
   describe("archiveSession", () => {
     it("archives optimistically and awaits the backend call", async () => {
       seedSession({ id: "session-1" });
@@ -183,6 +216,36 @@ describe("chatSessionStore", () => {
         expect.any(String),
       );
       expect(state.activeSessionId).toBe("session-1");
+    });
+
+    it("cancels all pending security decisions after archive succeeds", async () => {
+      const firstResolve = vi.fn();
+      const secondResolve = vi.fn();
+      seedSession({ id: "session-1" });
+      useSecurityConfirmationStore.setState({
+        pendingBySessionId: {
+          "session-1": [firstResolve, secondResolve].map((resolve) => ({
+            request: { sessionId: "session-1" } as never,
+            title: "Tool call",
+            command: "command",
+            alertText: "🔒 Security Alert",
+            inferredExplanation: { status: "idle" } as const,
+            resolve,
+          })),
+        },
+      });
+
+      await useChatSessionStore.getState().archiveSession("session-1");
+
+      expect(firstResolve).toHaveBeenCalledWith({
+        outcome: { outcome: "cancelled" },
+      });
+      expect(secondResolve).toHaveBeenCalledWith({
+        outcome: { outcome: "cancelled" },
+      });
+      expect(
+        useSecurityConfirmationStore.getState().pendingBySessionId,
+      ).toEqual({});
     });
 
     it("rolls back archivedAt to the prior value when the backend fails", async () => {
@@ -397,7 +460,22 @@ describe("chatSessionStore", () => {
     it("uses an older successful archive as rollback base when a newer unarchive fails", async () => {
       const archive = createDeferredPromise<void>();
       const unarchive = createDeferredPromise<void>();
+      const resolve = vi.fn();
       seedSession({ id: "session-1" });
+      useSecurityConfirmationStore.setState({
+        pendingBySessionId: {
+          "session-1": [
+            {
+              request: { sessionId: "session-1" } as never,
+              title: "Tool call",
+              command: "command",
+              alertText: "🔒 Security Alert",
+              inferredExplanation: { status: "idle" },
+              resolve,
+            },
+          ],
+        },
+      });
       mocks.archiveSession.mockReturnValueOnce(archive.promise);
       mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
 
@@ -419,12 +497,70 @@ describe("chatSessionStore", () => {
       expect(
         useChatSessionStore.getState().getSession("session-1")?.archivedAt,
       ).toBe(archivedAt);
+      expect(resolve).toHaveBeenCalledWith({
+        outcome: { outcome: "cancelled" },
+      });
+      expect(
+        useSecurityConfirmationStore.getState().pendingBySessionId,
+      ).toEqual({});
+    });
+
+    it("preserves pending security decisions when overlapping archives both fail", async () => {
+      const firstArchive = createDeferredPromise<void>();
+      const secondArchive = createDeferredPromise<void>();
+      const resolve = vi.fn();
+      const pending = {
+        request: { sessionId: "session-1" } as never,
+        title: "Tool call",
+        command: "command",
+        alertText: "🔒 Security Alert",
+        inferredExplanation: { status: "idle" } as const,
+        resolve,
+      };
+      seedSession({ id: "session-1" });
+      useSecurityConfirmationStore.setState({
+        pendingBySessionId: { "session-1": [pending] },
+      });
+      mocks.archiveSession
+        .mockReturnValueOnce(firstArchive.promise)
+        .mockReturnValueOnce(secondArchive.promise);
+
+      const firstPromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const secondPromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+
+      firstArchive.reject(new Error("first archive failed"));
+      await expect(firstPromise).rejects.toThrow("first archive failed");
+      expect(resolve).not.toHaveBeenCalled();
+
+      secondArchive.reject(new Error("second archive failed"));
+      await expect(secondPromise).rejects.toThrow("second archive failed");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+      expect(resolve).not.toHaveBeenCalled();
+      expect(
+        useSecurityConfirmationStore.getState().pendingBySessionId,
+      ).toEqual({ "session-1": [pending] });
     });
 
     it("applies an older unarchive success after a newer archive failure clears the mutation", async () => {
       const priorArchivedAt = "2026-03-15T00:00:00.000Z";
       const unarchive = createDeferredPromise<void>();
       const archive = createDeferredPromise<void>();
+      const resolve = vi.fn();
+      const pending = {
+        request: { sessionId: "session-1" } as never,
+        title: "Tool call",
+        command: "command",
+        alertText: "🔒 Security Alert",
+        inferredExplanation: { status: "idle" } as const,
+        resolve,
+      };
       seedSession({ id: "session-1", archivedAt: priorArchivedAt });
       mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
       mocks.archiveSession.mockReturnValueOnce(archive.promise);
@@ -435,6 +571,9 @@ describe("chatSessionStore", () => {
       expect(
         useChatSessionStore.getState().getSession("session-1")?.archivedAt,
       ).toBeUndefined();
+      useSecurityConfirmationStore.setState({
+        pendingBySessionId: { "session-1": [pending] },
+      });
 
       const archivePromise = useChatSessionStore
         .getState()
@@ -452,6 +591,7 @@ describe("chatSessionStore", () => {
       expect(
         useChatSessionStore.getState().archiveMutationBySessionId,
       ).not.toHaveProperty("session-1");
+      expect(resolve).not.toHaveBeenCalled();
 
       unarchive.resolve(undefined);
       await unarchivePromise;
@@ -465,6 +605,10 @@ describe("chatSessionStore", () => {
         desiredState: "unarchived",
         status: "succeeded",
       });
+      expect(resolve).not.toHaveBeenCalled();
+      expect(
+        useSecurityConfirmationStore.getState().pendingBySessionId,
+      ).toEqual({ "session-1": [pending] });
     });
   });
 
