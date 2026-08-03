@@ -10,7 +10,12 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { IconArrowLeft, IconSearch, IconServer } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconSearch,
+  IconServer,
+  IconX,
+} from "@tabler/icons-react";
 import { ArrowUpCircle } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { PaneSurface } from "@/app/layout/panes/paneChrome";
@@ -190,7 +195,7 @@ export const PrimaryNavigationSurface = forwardRef<
                 <IconSearch aria-hidden="true" className="!size-4" />
               </Button>
             ) : searchExpanded ? (
-              <label className="group relative block w-full overflow-hidden rounded-sm">
+              <div className="group relative block w-full overflow-hidden rounded-sm">
                 <IconSearch
                   aria-hidden="true"
                   className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground group-focus-within:text-muted-foreground"
@@ -198,13 +203,32 @@ export const PrimaryNavigationSurface = forwardRef<
                 <input
                   ref={searchInputRef}
                   type="search"
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="none"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder={t("search.jumpToChat")}
                   aria-label={t("search.jumpToChat")}
-                  className="h-7 w-full appearance-none rounded-sm border-0 bg-muted/40 pl-9 pr-3 text-sm font-normal text-muted-foreground/50 shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/60 hover:text-muted-foreground focus:bg-muted/60 focus:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:appearance-none"
+                  className="h-7 w-full appearance-none rounded-sm border-0 bg-muted/40 pl-9 pr-8 text-sm font-normal text-muted-foreground/50 shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/60 hover:text-muted-foreground focus:bg-muted/60 focus:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:appearance-none"
                 />
-              </label>
+                {searchQuery && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t("common:actions.clear")}
+                    title={t("common:actions.clear")}
+                    className="absolute right-1 top-1/2 -translate-y-1/2"
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                  >
+                    <IconX aria-hidden="true" />
+                  </Button>
+                )}
+              </div>
             ) : null}
           </div>
           <nav
