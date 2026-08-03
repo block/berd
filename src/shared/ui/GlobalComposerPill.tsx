@@ -6,6 +6,7 @@ import {
   useId,
   useState,
   type CSSProperties,
+  type MouseEvent,
 } from "react";
 import {
   IconArrowUp,
@@ -45,6 +46,7 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { getClient } from "@/shared/api/acpConnection";
 import { cn } from "@/shared/lib/cn";
+import { isInteractiveElement } from "@/shared/lib/isInteractiveElement";
 import {
   logReasoningEffortInfo,
   reasoningEffortConfigLogFields,
@@ -1155,6 +1157,25 @@ export function GlobalComposerPill({
     containerRef.current = node;
     setContainerElement(node);
   }, []);
+  const handleContainerMouseDown = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      if (handoffActive || !(event.target instanceof Element)) {
+        return;
+      }
+
+      if (isInteractiveElement(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+      textareaRef.current?.focus({ preventScroll: true });
+    },
+    [handoffActive],
+  );
   const composerStyle = {
     "--global-composer-main-left": `${mainLeftOffsetPx}px`,
     "--global-composer-from-left": `${handoffSourceRect?.left ?? 0}px`,
@@ -1183,6 +1204,7 @@ export function GlobalComposerPill({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onMouseDown={handleContainerMouseDown}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {

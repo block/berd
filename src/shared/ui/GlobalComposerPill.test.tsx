@@ -281,6 +281,25 @@ describe("GlobalComposerPill", () => {
     expect(input).not.toHaveClass("scrollbar-subtle");
   });
 
+  it("focuses the textarea when clicking the quick compose surface", async () => {
+    const user = userEvent.setup();
+    renderGlobalComposer(vi.fn());
+    const textbox = screen.getByRole("textbox");
+    const region = screen.getByRole("region", { name: "Quick compose" });
+
+    expect(textbox).not.toHaveFocus();
+    expect(
+      screen.queryByRole("button", { name: "Choose files to attach" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(region);
+
+    expect(textbox).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Choose files to attach" }),
+    ).toHaveAttribute("tabindex", "0");
+  });
+
   it("toggles voice dictation with the default platform shortcut without submitting or changing the draft", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
