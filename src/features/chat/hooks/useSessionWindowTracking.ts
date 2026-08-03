@@ -21,6 +21,7 @@ export function useSessionWindowTracking({
 
     let didCancel = false;
     let unlisten: (() => void) | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     async function setupSessionWindowTracking() {
       const { listen } = await import("@tauri-apps/api/event");
@@ -28,15 +29,21 @@ export function useSessionWindowTracking({
         useSessionWindowStore.getState().setSnapshot(entries);
       };
 
-      listSessionWindows()
-        .then((entries) => {
-          if (!didCancel) {
-            setSnapshot(entries);
-          }
-        })
-        .catch((error) => {
-          console.error("Failed to list session windows:", error);
-        });
+      const loadSnapshot = () => {
+        void listSessionWindows()
+          .then((entries) => {
+            if (!didCancel) {
+              setSnapshot(entries);
+            }
+          })
+          .catch((error) => {
+            console.error("Failed to list session windows:", error);
+            if (!didCancel) {
+              retryTimer = setTimeout(loadSnapshot, 1_000);
+            }
+          });
+      };
+      loadSnapshot();
 
       unlisten = await listen<SessionWindowEntry[]>(
         "session-windows-changed",
@@ -56,6 +63,7 @@ export function useSessionWindowTracking({
 
     return () => {
       didCancel = true;
+      if (retryTimer) clearTimeout(retryTimer);
       unlisten?.();
     };
   }, [enabled]);

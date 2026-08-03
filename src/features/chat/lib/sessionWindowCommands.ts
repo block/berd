@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
 import type { SessionWindowEntry } from "@/features/chat/stores/sessionWindowStore";
 import type { SessionChatRuntime } from "@/shared/types/chat";
 import type { Message } from "@/shared/types/messages";
@@ -15,6 +16,7 @@ export interface SessionHandoffPayload {
   toLabel: string;
   messages: Message[];
   sessionState: SessionChatRuntime | undefined;
+  queuedMessages?: QueuedMessageRecord[];
 }
 
 export interface SessionHandoffSnapshot {

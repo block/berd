@@ -106,12 +106,15 @@ function resolveDeferredSessionId(
   );
   if (!recordId) return session?.id ?? null;
   if (session) {
-    const record = useChatStore.getState().queuedMessageBySession[session.id];
+    const record =
+      useChatStore.getState().queuedMessageBySession[session.id]?.[0];
     if (record?.recordId === recordId) return session.id;
   }
   const queuedEntry = Object.entries(
     useChatStore.getState().queuedMessageBySession,
-  ).find(([, record]) => record.recordId === recordId);
+  ).find(([, records]) =>
+    records.some((record) => record.recordId === recordId),
+  );
   return queuedEntry?.[0] ?? null;
 }
 
@@ -175,7 +178,11 @@ function deferredRecord(
 ):
   | (QueuedMessageRecord & { kind: "deferred"; state: DeferredWorkspaceSend })
   | null {
-  const record = useChatStore.getState().queuedMessageBySession[sessionId];
+  const records =
+    useChatStore.getState().queuedMessageBySession[sessionId] ?? [];
+  const record = recordId
+    ? records.find((candidate) => candidate.recordId === recordId)
+    : records[0];
   return record?.kind === "deferred" &&
     (!recordId || record.recordId === recordId) &&
     (record.state as DeferredWorkspaceSend).type === "workspace-first-send"
@@ -506,8 +513,10 @@ export function prepareExistingFirstSend(
   } = {},
 ): boolean {
   const chat = useChatStore.getState();
-  const record = chat.queuedMessageBySession[sessionId];
-  if (record?.kind !== "transport-ready" || record.recordId !== recordId) {
+  const record = chat.queuedMessageBySession[sessionId]?.find(
+    (candidate) => candidate.recordId === recordId,
+  );
+  if (record?.kind !== "transport-ready") {
     return false;
   }
   const session = useChatSessionStore.getState().getSession(sessionId);
@@ -583,7 +592,7 @@ export function acceptFirstSend(
   occupied?: boolean;
 } {
   const chat = useChatStore.getState();
-  if (chat.queuedMessageBySession[sessionId]) {
+  if ((chat.queuedMessageBySession[sessionId]?.length ?? 0) > 0) {
     return {
       accepted: false,
       deferred: false,

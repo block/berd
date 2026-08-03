@@ -37,7 +37,11 @@ export function ChatInput({
   sendDisabled,
   sendDisabledReason,
   queuedMessage,
+  queuedMessages,
   onDismissQueue,
+  onUpdateQueue,
+  onEditQueue,
+  onCancelQueueEdit,
   voiceConversation,
   personas,
   selectedPersonaId,
@@ -83,7 +87,11 @@ export function ChatInput({
         sendDisabled,
         sendDisabledReason,
         queuedMessage,
+        queuedMessages,
         onDismissQueue,
+        onUpdateQueue,
+        onEditQueue,
+        onCancelQueueEdit,
         voiceConversation,
       }}
       personaPicker={{

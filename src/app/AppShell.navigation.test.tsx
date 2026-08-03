@@ -2195,12 +2195,14 @@ describe("AppShell global navigation", () => {
 
     await waitFor(() => {
       expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
-        "created-session": {
-          payload: {
-            text: "ask the tagged agent",
-            personaId: "persona-1",
+        "created-session": [
+          {
+            payload: {
+              text: "ask the tagged agent",
+              personaId: "persona-1",
+            },
           },
-        },
+        ],
       });
       expect(
         useChatSessionStore.getState().getSession("created-session"),
@@ -2319,17 +2321,15 @@ describe("AppShell global navigation", () => {
         })),
     ).toEqual(expectedAttachments);
     expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
-      [draftSessionId as string]: {
-        payload: { text: "send with all folders" },
-      },
+      [draftSessionId as string]: [
+        { payload: { text: "send with all folders" } },
+      ],
     });
 
     createSession.resolve({ sessionId: "created-session" });
     await waitFor(() => {
       expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
-        "created-session": {
-          payload: { text: "send with all folders" },
-        },
+        "created-session": [{ payload: { text: "send with all folders" } }],
       });
     });
   });

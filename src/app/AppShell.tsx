@@ -1905,7 +1905,7 @@ export function AppShell({
 
       if (
         existingDraft &&
-        !chatState.queuedMessageBySession[existingDraft.id]
+        (chatState.queuedMessageBySession[existingDraft.id]?.length ?? 0) === 0
       ) {
         if (shouldActivate) {
           clearSettingsSectionUrl();
@@ -2129,7 +2129,7 @@ export function AppShell({
       });
       if (
         existingDraft &&
-        !chatState.queuedMessageBySession[existingDraft.id]
+        (chatState.queuedMessageBySession[existingDraft.id]?.length ?? 0) === 0
       ) {
         clearSettingsSectionUrl();
         setActiveSession(existingDraft.id);
@@ -2241,7 +2241,7 @@ export function AppShell({
 
       if (
         existingDraft &&
-        !chatState.queuedMessageBySession[existingDraft.id]
+        (chatState.queuedMessageBySession[existingDraft.id]?.length ?? 0) === 0
       ) {
         perfLog(
           `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused background draft in ${(performance.now() - tStart).toFixed(1)}ms`,

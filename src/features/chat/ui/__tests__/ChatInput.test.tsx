@@ -285,7 +285,7 @@ describe("ChatInput", () => {
       />,
     );
 
-    expect(screen.getByText("Queued: queued follow up")).toBeInTheDocument();
+    expect(screen.getByText("queued follow up")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Edit queued message" }),
     ).not.toBeInTheDocument();
@@ -306,10 +306,9 @@ describe("ChatInput", () => {
       />,
     );
 
-    const queue = screen.getByText("Queued: queued follow up");
+    const queue = screen.getByText("queued follow up");
     const accessory = screen.getByText("Configure a new worktree?");
     expect(queue.parentElement).toHaveClass(
-      "mb-2",
       "flex",
       "items-center",
       "gap-2",
@@ -2258,6 +2257,179 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("hides queued-head steering while that record is being edited", async () => {
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessages={[{ recordId: "head", payload: { text: "queued msg" } }]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={vi.fn(() => true)}
+      />,
+    );
+
+    expect(screen.getByTitle("Steer queued message")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+
+    expect(screen.queryByTitle("Steer queued message")).not.toBeInTheDocument();
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  it("pauses a tail record while editing and updates it in place", async () => {
+    const onEditQueue = vi.fn(() => true);
+    const onCancelQueueEdit = vi.fn(() => true);
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[
+          { recordId: "head", payload: { text: "first" } },
+          { recordId: "tail", payload: { text: "second" } },
+        ]}
+        onEditQueue={onEditQueue}
+        onCancelQueueEdit={onCancelQueueEdit}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    expect(screen.getByText("first")).toBeInTheDocument();
+    expect(screen.getByText("second")).toBeInTheDocument();
+    expect(screen.queryByText("1. first")).not.toBeInTheDocument();
+    expect(screen.queryByText("2. second")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getAllByRole("button", { name: "Edit queued message" })[1],
+    );
+    expect(onEditQueue).toHaveBeenCalledWith("tail");
+    expect(screen.getByRole("textbox")).toHaveValue("second");
+
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "updated second");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalledWith("tail", {
+      text: "updated second",
+      personaId: undefined,
+      attachments: undefined,
+      sendOptions: undefined,
+    });
+    expect(onCancelQueueEdit).not.toHaveBeenCalled();
+  });
+
+  it("refreshes display text when updating a queued message in place", async () => {
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: {
+              text: "check this diff",
+              sendOptions: {
+                assistantPrompt: "Use code-review.",
+                displayText: "check this diff",
+              },
+            },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "check carefully");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalledWith(
+      "head",
+      expect.objectContaining({
+        text: "check carefully",
+        sendOptions: expect.objectContaining({
+          assistantPrompt: "Use code-review.",
+          displayText: "check carefully",
+        }),
+      }),
+    );
+  });
+
+  it("resumes an edited queued record when the composer unmounts", async () => {
+    const onEditQueue = vi.fn(() => true);
+    const onCancelQueueEdit = vi.fn(() => true);
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[{ recordId: "head", payload: { text: "queued msg" } }]}
+        onEditQueue={onEditQueue}
+        onCancelQueueEdit={onCancelQueueEdit}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={vi.fn(() => true)}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    expect(onEditQueue).toHaveBeenCalledWith("head");
+
+    unmount();
+    expect(onCancelQueueEdit).toHaveBeenCalledWith("head");
+  });
+
+  it("clears the composer edit state when dismissing the edited record", async () => {
+    const onSend = vi.fn(() => true);
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+
+    function DismissEditedQueueInput() {
+      const [queuedMessages, setQueuedMessages] = useState([
+        { recordId: "head", payload: { text: "queued msg" } },
+      ]);
+      return (
+        <ChatInput
+          onSend={onSend}
+          queuedMessages={queuedMessages}
+          onEditQueue={vi.fn(() => true)}
+          onCancelQueueEdit={vi.fn(() => true)}
+          onDismissQueue={() => setQueuedMessages([])}
+          onUpdateQueue={onUpdateQueue}
+        />
+      );
+    }
+
+    render(<DismissEditedQueueInput />);
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Dismiss queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "new prompt");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("new prompt", undefined, undefined);
+  });
+
   it("edits a queued message from the queue bar", async () => {
     const onDismissQueue = vi.fn();
     const onPersonaChange = vi.fn();
@@ -2573,7 +2745,7 @@ describe("ChatInput", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("does not steer a queued message on enter when the composer has a draft", async () => {
+  it("appends a draft without steering the queued head", async () => {
     const onSend = vi.fn();
     const onSteerQueuedMessage = vi.fn();
     const user = userEvent.setup();
@@ -2591,8 +2763,8 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
-    expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox")).toHaveValue("another draft");
+    expect(onSend).toHaveBeenCalledWith("another draft", undefined, undefined);
+    expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
   it("steers the current draft when a queued message already exists", async () => {
@@ -2623,6 +2795,43 @@ describe("ChatInput", () => {
     );
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("unlocks an edited queued record before steering its composer text", async () => {
+    const onSteerMessage = vi.fn();
+    const onCancelQueueEdit = vi.fn(() => true);
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+        queuedMessages={[
+          { recordId: "head", payload: { text: "queued draft" } },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={onCancelQueueEdit}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={vi.fn(() => true)}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "steer this instead");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerMessage).toHaveBeenCalledWith(
+      "steer this instead",
+      undefined,
+      undefined,
+    );
+    expect(onCancelQueueEdit).toHaveBeenCalledWith("head");
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
@@ -2827,7 +3036,7 @@ describe("ChatInput", () => {
     expect(onDraftAttachmentsChange).not.toHaveBeenCalledWith([]);
   });
 
-  it("does not send or clear the draft when queue is full", async () => {
+  it("allows another draft to append while a message is queued", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();
     render(
@@ -2841,11 +3050,15 @@ describe("ChatInput", () => {
     await user.type(screen.getByRole("textbox"), "another message");
     await user.keyboard("{Enter}");
 
-    expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox")).toHaveValue("another message");
+    expect(onSend).toHaveBeenCalledWith(
+      "another message",
+      undefined,
+      undefined,
+    );
+    expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
-  it("does not stop dictation when send is blocked", async () => {
+  it("stops dictation when appending to the queue", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();
     mockVoiceDictation.isRecording = true;
@@ -2861,8 +3074,12 @@ describe("ChatInput", () => {
     await user.type(screen.getByRole("textbox"), "another message");
     await user.keyboard("{Enter}");
 
-    expect(onSend).not.toHaveBeenCalled();
-    expect(mockVoiceDictation.stopRecording).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith(
+      "another message",
+      undefined,
+      undefined,
+    );
+    expect(mockVoiceDictation.stopRecording).toHaveBeenCalled();
   });
 
   it("uses icon-only picker triggers in compact toolbar layout", () => {

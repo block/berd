@@ -32,7 +32,7 @@ export const selectLocalMessageCountsBySession = (
   for (const sessionId of sessionIds) {
     const count = Math.max(
       messagesBySession[sessionId]?.length ?? 0,
-      queuedMessageBySession[sessionId] ? 1 : 0,
+      queuedMessageBySession[sessionId]?.length ?? 0,
     );
     next[sessionId] = count;
     if (cachedCounts[sessionId] !== count) {

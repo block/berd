@@ -407,10 +407,7 @@
   "queue": {
     "dismiss": "Dismiss queued message",
     "edit": "Edit queued message",
-    "label": "Queued: {{text}}",
     "sendAnyway": "Send anyway",
-    "workspaceCreating": "Creating project workspaces…",
-    "workspaceFailed": "Workspace creation failed. Message held.",
     "configureWorktree": "Configure your new worktree?",
     "configureWorkspaces": "Configure new project workspaces?",
     "configureWorkspacePlan": "Configure {{worktreeLabel}}?",

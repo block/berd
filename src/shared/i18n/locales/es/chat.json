@@ -406,10 +406,7 @@
   "queue": {
     "dismiss": "Descartar mensaje en cola",
     "edit": "Editar mensaje en cola",
-    "label": "En cola: {{text}}",
     "sendAnyway": "Enviar de todos modos",
-    "workspaceCreating": "Creando espacios de trabajo del proyecto…",
-    "workspaceFailed": "Falló la creación del espacio de trabajo. Mensaje retenido.",
     "configureWorktree": "¿Configurar un worktree nuevo?",
     "configureWorkspaces": "¿Configurar espacios de trabajo nuevos para el proyecto?",
     "configureWorkspacePlan": "¿Configurar {{worktreeLabel}}?",

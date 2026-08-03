@@ -7,12 +7,14 @@ describe("selectLocalMessageCountsBySession", () => {
     const state = {
       messagesBySession: {},
       queuedMessageBySession: {
-        draft: {
-          kind: "deferred",
-          recordId: "record",
-          payload: { text: "queued first message" },
-          state: {},
-        },
+        draft: [
+          {
+            kind: "deferred",
+            recordId: "record",
+            payload: { text: "queued first message" },
+            state: {},
+          },
+        ],
       },
     } as unknown as ChatStore;
 

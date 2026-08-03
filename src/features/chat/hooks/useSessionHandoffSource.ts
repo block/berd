@@ -48,6 +48,7 @@ function getSnapshot(
     toLabel: handoff.toLabel,
     messages: getMessages(state, sessionId),
     sessionState: getRuntime(state, sessionId),
+    queuedMessages: state.queuedMessageBySession[sessionId] ?? [],
   };
 }
 
@@ -211,8 +212,15 @@ export function useSessionHandoffSource(
         const previousMessages = getMessages(previousState, sessionId);
         const runtime = getRuntime(state, sessionId);
         const previousRuntime = getRuntime(previousState, sessionId);
+        const queuedMessages = state.queuedMessageBySession[sessionId];
+        const previousQueuedMessages =
+          previousState.queuedMessageBySession[sessionId];
 
-        if (messages === previousMessages && runtime === previousRuntime) {
+        if (
+          messages === previousMessages &&
+          runtime === previousRuntime &&
+          queuedMessages === previousQueuedMessages
+        ) {
           return;
         }
 

@@ -774,7 +774,8 @@ describe("useChatSessionController", () => {
     expect(queueSessionId).toBe("draft-session");
     expect(queueChatState).toBe("thinking");
     expect(
-      useChatStore.getState().queuedMessageBySession["draft-session"]?.payload,
+      useChatStore.getState().queuedMessageBySession["draft-session"]?.[0]
+        ?.payload,
     ).toEqual({ text: "queued from pill" });
   });
 
@@ -1212,7 +1213,7 @@ describe("useChatSessionController", () => {
     expect(queueSessionId).toBe("backend-1");
     expect(queueChatState).toBe("idle");
     expect(
-      useChatStore.getState().queuedMessageBySession["backend-1"]?.payload,
+      useChatStore.getState().queuedMessageBySession["backend-1"]?.[0]?.payload,
     ).toEqual({ text: "queued from pill" });
     expect(
       useChatStore.getState().queuedMessageBySession["draft-session"],
@@ -1247,7 +1248,8 @@ describe("useChatSessionController", () => {
     expect(queueSessionId).toBe("draft-session");
     expect(queueChatState).toBe("thinking");
     expect(
-      useChatStore.getState().queuedMessageBySession["draft-session"]?.payload,
+      useChatStore.getState().queuedMessageBySession["draft-session"]?.[0]
+        ?.payload,
     ).toEqual({ text: "queued from pill" });
   });
 
@@ -1865,6 +1867,36 @@ describe("useChatSessionController", () => {
     expect(sendOptions?.assistantPrompt).toContain("draft-from-chat.md");
   });
 
+  it("activates builder mode before appending an agent-builder send", async () => {
+    useChatStore
+      .getState()
+      .enqueueTransportReadyMessage("session-1", { text: "existing" });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    await act(async () => {
+      expect(
+        await result.current.handleSend("make an agent", undefined, undefined, {
+          chips: [{ label: "agent-builder", type: "skill" }],
+          assistantPrompt: "Use these skills for this request: agent-builder.",
+        }),
+      ).toBe(true);
+    });
+
+    expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({ intent: "build-agent" });
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["existing", "make an agent"]);
+  });
+
   it("activates builder mode for a deferred persona send with the agent-builder chip", async () => {
     useAgentStore.setState({
       personas: [
@@ -1999,7 +2031,7 @@ describe("useChatSessionController", () => {
     expect(onWorkspaceNameRequest).not.toHaveBeenCalled();
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
     expect(
-      useChatStore.getState().queuedMessageBySession["session-1"],
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0],
     ).toMatchObject({
       kind: "deferred",
       payload: {
@@ -3666,7 +3698,8 @@ describe("useChatSessionController", () => {
     });
 
     expect(
-      useChatStore.getState().queuedMessageBySession.__home_pending__?.payload,
+      useChatStore.getState().queuedMessageBySession.__home_pending__?.[0]
+        ?.payload,
     ).toEqual({
       text: "",
       attachments: [imageDraft],
@@ -3692,7 +3725,7 @@ describe("useChatSessionController", () => {
       expect(
         useChatStore.getState().queuedMessageBySession[
           "session-home-attachments"
-        ]?.payload,
+        ]?.[0]?.payload,
       ).toEqual({
         text: "",
         attachments: [imageDraft],
@@ -3703,10 +3736,64 @@ describe("useChatSessionController", () => {
     ).toBeUndefined();
   });
 
-  it("preserves both queued messages when Home promotion finds an occupied destination", async () => {
+  it("unparks restored Home messages after attaching them to a ready session", async () => {
+    useChatStore.setState({
+      queuedMessageBySession: {
+        __home_pending__: [
+          {
+            kind: "transport-ready",
+            recordId: "restored-home",
+            payload: { text: "restored from Home" },
+            restored: true,
+          },
+        ],
+      },
+    });
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "session-restored-home",
+          title: "Chat",
+          providerId: "openai",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+
+    renderHook(() =>
+      useChatSessionController({
+        sessionId: "session-restored-home",
+        isHomeSession: true,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession[
+          "session-restored-home"
+        ]?.[0],
+      ).toMatchObject({
+        recordId: "restored-home",
+        payload: { text: "restored from Home" },
+      });
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession[
+        "session-restored-home"
+      ]?.[0],
+    ).not.toHaveProperty("restored");
+  });
+
+  it("appends pending Home messages to an occupied destination", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("__home_pending__", {
       text: "queued from Home",
+    });
+    chatStore.enqueueTransportReadyMessage("__home_pending__", {
+      text: "Home follow-up",
     });
     chatStore.enqueueTransportReadyMessage("session-occupied", {
       text: "already queued",
@@ -3741,12 +3828,12 @@ describe("useChatSessionController", () => {
     await waitFor(() => {
       expect(
         useChatStore.getState().queuedMessageBySession.__home_pending__,
-      ).toBe(pendingRecord);
+      ).toBeUndefined();
       expect(
         useChatStore.getState().queuedMessageBySession["session-occupied"],
-      ).toBe(destinationRecord);
+      ).toEqual([...destinationRecord, ...pendingRecord]);
     });
-    expect(useChatStore.getState().draftsBySession.__home_pending__).toBe(
+    expect(useChatStore.getState().draftsBySession["session-occupied"]).toBe(
       "pending draft",
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
@@ -3881,7 +3968,7 @@ describe("useChatSessionController", () => {
       expect(
         useChatStore.getState().queuedMessageBySession[
           "session-superseded-home"
-        ]?.payload,
+        ]?.[0]?.payload,
       ).toEqual({
         text: "queued from Home",
         attachments: [queuedImageAttachment],

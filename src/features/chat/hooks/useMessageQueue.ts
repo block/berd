@@ -7,6 +7,7 @@ import type { QueuedMessageRecord } from "../stores/chatStore";
 import type { ChatSendOptions } from "../types";
 
 const MAX_CONSECUTIVE_SEND_FAILURES = 2;
+const EMPTY_QUEUED_RECORDS: QueuedMessageRecord[] = [];
 
 function getQueuedMessageKey(
   queuedMessage: QueuedMessageRecord | null,
@@ -66,9 +67,10 @@ export function useMessageQueue(
   readOnly = false,
   isSendBlocked = false,
 ) {
-  const queuedRecord = useChatStore(
-    (s) => s.queuedMessageBySession[sessionId] ?? null,
+  const queuedRecords = useChatStore(
+    (s) => s.queuedMessageBySession[sessionId] ?? EMPTY_QUEUED_RECORDS,
   );
+  const queuedRecord = queuedRecords[0] ?? null;
   const queuedMessage =
     queuedRecord?.kind === "transport-ready" ? queuedRecord.payload : null;
   const previousChatStateRef = useRef(chatState);
@@ -104,6 +106,8 @@ export function useMessageQueue(
       if (
         readOnlyRef.current ||
         queuedMsg?.kind !== "transport-ready" ||
+        queuedMsg.restored ||
+        queuedMsg.editing ||
         queuedMsg.releasedFromDeferred ||
         isBerdctlCrossSessionQueuedMessage(queuedMsg)
       ) {
@@ -154,8 +158,13 @@ export function useMessageQueue(
         }
 
         const latestQueuedMessage =
-          useChatStore.getState().queuedMessageBySession[sessionId] ?? null;
-        if (getQueuedMessageKey(latestQueuedMessage) !== key) {
+          useChatStore.getState().queuedMessageBySession[sessionId]?.[0] ??
+          null;
+        if (
+          getQueuedMessageKey(latestQueuedMessage) !== key ||
+          latestQueuedMessage?.payload !== payload ||
+          latestQueuedMessage.editing
+        ) {
           return;
         }
 
@@ -203,20 +212,34 @@ export function useMessageQueue(
         currentChatState === "idle" && prevChatState !== "idle";
       const becameReadyWhileIdle =
         currentChatState === "idle" && wasSendBlocked && !isLiveSendBlocked;
-      const queuedMessage = state.queuedMessageBySession[sessionId];
+      const queuedMessage = state.queuedMessageBySession[sessionId]?.[0];
       const previousQueuedMessage =
-        previousState.queuedMessageBySession[sessionId];
+        previousState.queuedMessageBySession[sessionId]?.[0];
       const becameTransportReady =
         queuedMessage?.kind === "transport-ready" &&
         previousQueuedMessage?.kind === "deferred" &&
         previousQueuedMessage.recordId === queuedMessage.recordId;
+      const becameReadyAfterRestore =
+        queuedMessage?.kind === "transport-ready" &&
+        !queuedMessage.restored &&
+        previousQueuedMessage?.recordId === queuedMessage.recordId &&
+        previousQueuedMessage.restored === true;
+      const advancedToNextRecord =
+        queuedMessage?.recordId !== previousQueuedMessage?.recordId &&
+        previousQueuedMessage !== undefined;
 
       if (becameIdle) {
         idleCycleRef.current += 1;
         suppressNextRenderIdleCycleRef.current = true;
       }
 
-      if (!becameIdle && !becameReadyWhileIdle && !becameTransportReady) {
+      if (
+        !becameIdle &&
+        !becameReadyWhileIdle &&
+        !becameTransportReady &&
+        !becameReadyAfterRestore &&
+        !advancedToNextRecord
+      ) {
         return;
       }
 
@@ -264,9 +287,9 @@ export function useMessageQueue(
       sendOptions?: ChatSendOptions,
     ) => {
       if (readOnly) {
-        return;
+        return false;
       }
-      useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
+      return useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
         text,
         personaId,
         attachments,
@@ -276,13 +299,46 @@ export function useMessageQueue(
     [readOnly, sessionId],
   );
 
-  const dismiss = useCallback(() => {
-    if (queuedRecord) {
+  const dismiss = useCallback(
+    (recordId?: string) => {
+      const targetId = recordId ?? queuedRecord?.recordId;
+      if (targetId) {
+        useChatStore.getState().dismissQueuedMessage(sessionId, targetId);
+      }
+    },
+    [queuedRecord, sessionId],
+  );
+
+  const update = useCallback(
+    (recordId: string, payload: QueuedMessageRecord["payload"]) =>
+      useChatStore.getState().updateQueuedMessage(sessionId, recordId, payload),
+    [sessionId],
+  );
+
+  const beginEditing = useCallback(
+    (recordId: string) =>
       useChatStore
         .getState()
-        .dismissQueuedMessage(sessionId, queuedRecord.recordId);
-    }
-  }, [queuedRecord, sessionId]);
+        .setQueuedMessageEditing(sessionId, recordId, true),
+    [sessionId],
+  );
 
-  return { queuedMessage, enqueue, dismiss } as const;
+  const cancelEditing = useCallback(
+    (recordId: string) =>
+      useChatStore
+        .getState()
+        .setQueuedMessageEditing(sessionId, recordId, false),
+    [sessionId],
+  );
+
+  return {
+    queuedMessage,
+    queuedRecord,
+    queuedRecords,
+    enqueue,
+    dismiss,
+    update,
+    beginEditing,
+    cancelEditing,
+  } as const;
 }

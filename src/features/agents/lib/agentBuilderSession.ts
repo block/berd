@@ -442,8 +442,8 @@ export async function hasAgentBuilderSessionUserContent(
     return true;
   }
 
-  const queuedMessage = chatState.queuedMessageBySession[sessionId];
-  if (queuedMessage?.payload.text.trim()) {
+  const queuedMessages = chatState.queuedMessageBySession[sessionId] ?? [];
+  if (queuedMessages.some((record) => record.payload.text.trim())) {
     return true;
   }
 

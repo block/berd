@@ -81,18 +81,6 @@ Result:
 
     await loadSessionForBerdctl(args.session_id);
     const session = requireSession(args.session_id);
-    if (
-      args.startup_name &&
-      (session.messageCount > 0 ||
-        (useChatStore.getState().messagesBySession[args.session_id] ?? []).some(
-          (message) => message.role !== "system",
-        ))
-    ) {
-      throw new CommandError(
-        "invalid_args",
-        "--startup-name applies only while preparing a session's first send.",
-      );
-    }
 
     if (useSessionWindowStore.getState().isOpenInWindow(args.session_id)) {
       throw new CommandError(
@@ -103,6 +91,16 @@ Result:
 
     const chatStore = useChatStore.getState();
     const runtime = chatStore.getSessionRuntime(args.session_id);
+    if (
+      args.startup_name &&
+      ((chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0 ||
+        session.messageCount > 0)
+    ) {
+      throw new CommandError(
+        "invalid_args",
+        "startup_name is only valid for the first send when workspace setup is available.",
+      );
+    }
     if (
       isSessionRunning(runtime.chatState) ||
       runtime.isRunCancellationPending
@@ -131,12 +129,6 @@ Result:
           return { session_id: session.id, send_status: "steered" };
 
         case "queue":
-          if (chatStore.queuedMessageBySession[args.session_id]) {
-            throw new CommandError(
-              "queue_full",
-              `Session "${args.session_id}" already has a queued message; wait for it to send or ask the user to dismiss it.`,
-            );
-          }
           chatStore.enqueueTransportReadyMessage(args.session_id, {
             text: args.prompt,
             sendOptions: berdctlCrossSessionSendOptions(),
@@ -170,23 +162,12 @@ Result:
     if (firstSend.accepted) {
       return { session_id: session.id, send_status: "queued" };
     }
-    if (firstSend.occupied) {
-      throw new CommandError(
-        "queue_full",
-        `Session "${args.session_id}" already has a queued message; wait for it to send or ask the user to dismiss it.`,
-      );
-    }
-    if (args.startup_name) {
-      throw new CommandError(
-        "invalid_args",
-        "--startup-name applies only while preparing a session's first send.",
-      );
-    }
-    if (useChatStore.getState().queuedMessageBySession[args.session_id]) {
-      throw new CommandError(
-        "queue_full",
-        `Session "${args.session_id}" already has a queued message; wait for it to send or ask the user to dismiss it.`,
-      );
+    if ((chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0) {
+      chatStore.enqueueTransportReadyMessage(args.session_id, {
+        text: args.prompt,
+        sendOptions: berdctlCrossSessionSendOptions(),
+      });
+      return { session_id: session.id, send_status: "queued" };
     }
 
     try {

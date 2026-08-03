@@ -94,6 +94,7 @@ describe("useSessionHandoffSource", () => {
           chatState: "streaming",
           streamingMessageId: "m1",
         },
+        queuedMessages: [],
       });
     });
   });

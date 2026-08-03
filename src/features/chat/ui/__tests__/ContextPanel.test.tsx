@@ -2600,7 +2600,7 @@ describe("ContextPanel", () => {
       ]),
     );
     expect(
-      useChatStore.getState().queuedMessageBySession["test-session-8"],
+      useChatStore.getState().queuedMessageBySession["test-session-8"]?.[0],
     ).toMatchObject({ kind: "transport-ready", releasedFromDeferred: true });
     expect(
       screen.getByTitle("/Users/test/goose2-worktrees/new-worktree"),

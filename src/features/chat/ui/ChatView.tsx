@@ -671,14 +671,20 @@ export function ChatView({
               : (controller.queue.queuedMessage ??
                 controller.deferredWorkspaceRecord?.payload ??
                 null),
-            queuedMessageStatus:
-              controller.deferredWorkspaceRecord?.state.status === "failed" ||
-              controller.deferredWorkspaceRecord?.state.status === "held"
-                ? t("queue.workspaceFailed")
-                : controller.deferredWorkspaceRecord?.state.status ===
-                      "creating" && deferredWorkspaceStartup.worktreeCount === 0
-                  ? t("queue.workspaceCreating")
-                  : undefined,
+            queuedMessages: composerHandoffInProgress
+              ? []
+              : (
+                  controller.queue.queuedRecords ??
+                  (controller.queue.queuedRecord
+                    ? [controller.queue.queuedRecord]
+                    : [])
+                ).map((record) => ({
+                  recordId: record.recordId,
+                  payload: record.payload,
+                })),
+            onUpdateQueue: controller.queue.update,
+            onEditQueue: controller.queue.beginEditing,
+            onCancelQueueEdit: controller.queue.cancelEditing,
             onSendQueue:
               !isReadOnly &&
               (controller.deferredWorkspaceRecord?.state.status === "failed" ||

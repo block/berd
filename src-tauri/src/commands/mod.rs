@@ -19,6 +19,7 @@ pub mod git_changes;
 pub mod global_shortcut;
 pub mod home_widget_media;
 pub mod layout;
+pub mod message_queues;
 pub mod migration;
 pub mod model_setup;
 pub mod native_voice;

@@ -23,6 +23,7 @@ function getRuntime(sessionId: string) {
 describe("chatStore", () => {
   beforeEach(() => {
     window.localStorage.removeItem("goose:unread-sessions");
+    window.localStorage.removeItem("goose:chat-message-queues:v1");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -528,7 +529,7 @@ describe("chatStore", () => {
       },
     ]);
     expect(state.draftAttachmentsBySession["local-session"]).toBeUndefined();
-    expect(state.queuedMessageBySession["acp-session"]?.payload).toEqual({
+    expect(state.queuedMessageBySession["acp-session"]?.[0]?.payload).toEqual({
       text: "@Reviewer queued text",
       personaId: "reviewer",
       attachments: [queuedAttachment],
@@ -717,11 +718,225 @@ describe("chatStore", () => {
     expect(loadCachedUnreadSessionIds()).toEqual([]);
   });
 
+  it("updates and removes queue records by stable ID without reordering", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("s1", { text: "first" });
+    store.enqueueTransportReadyMessage("s1", { text: "second" });
+    store.enqueueTransportReadyMessage("s1", { text: "third" });
+    const queue = useChatStore.getState().queuedMessageBySession.s1 ?? [];
+
+    expect(
+      store.updateQueuedMessage("s1", queue[1].recordId, { text: "edited" }),
+    ).toBe(true);
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.map((record) => ({
+        id: record.recordId,
+        text: record.payload.text,
+      })),
+    ).toEqual([
+      { id: queue[0].recordId, text: "first" },
+      { id: queue[1].recordId, text: "edited" },
+      { id: queue[2].recordId, text: "third" },
+    ]);
+
+    store.dismissQueuedMessage("s1", queue[1].recordId);
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession.s1?.map((record) => record.payload.text),
+    ).toEqual(["first", "third"]);
+  });
+
+  it("pauses records while they are edited and resumes them on update", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("s1", { text: "first" });
+    store.enqueueTransportReadyMessage("s1", { text: "second" });
+    const queue = useChatStore.getState().queuedMessageBySession.s1 ?? [];
+
+    expect(store.setQueuedMessageEditing("s1", queue[0].recordId, true)).toBe(
+      true,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({ recordId: queue[0].recordId, editing: true });
+    expect(
+      store.updateQueuedMessage("s1", queue[0].recordId, { text: "edited" }),
+    ).toBe(true);
+    expect(useChatStore.getState().queuedMessageBySession.s1?.[0]).toEqual(
+      expect.objectContaining({
+        recordId: queue[0].recordId,
+        payload: { text: "edited" },
+      }),
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).not.toHaveProperty("editing");
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession.s1?.map((record) => record.payload.text),
+    ).toEqual(["edited", "second"]);
+  });
+
+  it("preserves an edit lock through defer and release", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("s1", { text: "original" });
+    const recordId =
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.recordId ?? "";
+
+    expect(store.setQueuedMessageEditing("s1", recordId, true)).toBe(true);
+    expect(
+      store.deferTransportReadyMessage("s1", recordId, {
+        type: "workspace-first-send",
+        status: "creating",
+      }),
+    ).toBe(true);
+    expect(store.releaseDeferredMessage("s1", recordId)).toBe(true);
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      recordId,
+      payload: { text: "original" },
+      editing: true,
+    });
+  });
+
+  it("preserves an edit lock when a deferred record is released", () => {
+    const store = useChatStore.getState();
+    store.enqueueDeferredMessage(
+      "s1",
+      { text: "original" },
+      { type: "workspace-first-send", status: "creating" },
+    );
+    const recordId =
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.recordId ?? "";
+
+    expect(store.setQueuedMessageEditing("s1", recordId, true)).toBe(true);
+    expect(store.releaseDeferredMessage("s1", recordId)).toBe(true);
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      recordId,
+      payload: { text: "original" },
+      releasedFromDeferred: true,
+      editing: true,
+    });
+
+    expect(store.updateQueuedMessage("s1", recordId, { text: "updated" })).toBe(
+      true,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({
+      payload: { text: "updated" },
+      releasedFromDeferred: true,
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).not.toHaveProperty("editing");
+  });
+
+  it.each([
+    "held",
+    "failed",
+  ] as const)("releases a %s deferred record when its edit is submitted", (status) => {
+    const store = useChatStore.getState();
+    store.enqueueDeferredMessage(
+      "s1",
+      { text: "original" },
+      { type: "workspace-first-send", status },
+    );
+    const recordId =
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.recordId ?? "";
+
+    expect(store.setQueuedMessageEditing("s1", recordId, true)).toBe(true);
+    expect(store.updateQueuedMessage("s1", recordId, { text: "updated" })).toBe(
+      true,
+    );
+    expect(useChatStore.getState().queuedMessageBySession.s1?.[0]).toEqual(
+      expect.objectContaining({
+        kind: "transport-ready",
+        recordId,
+        payload: { text: "updated" },
+        releasedFromDeferred: true,
+      }),
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).not.toHaveProperty("editing");
+  });
+
+  it("parks interrupted workspace creation and clears ephemeral edit locks on hydration", async () => {
+    window.localStorage.setItem(
+      "goose:chat-message-queues:v1",
+      JSON.stringify({
+        s1: [
+          {
+            kind: "deferred",
+            recordId: "workspace",
+            payload: { text: "build it" },
+            editing: true,
+            state: {
+              type: "workspace-first-send",
+              status: "creating",
+              projectId: "project-1",
+              desired: [],
+            },
+          },
+          {
+            kind: "transport-ready",
+            recordId: "tail",
+            payload: { text: "after setup" },
+          },
+        ],
+      }),
+    );
+
+    vi.resetModules();
+    const { useChatStore: freshChatStore } = await import("../chatStore");
+    const queue = freshChatStore.getState().queuedMessageBySession.s1 ?? [];
+
+    expect(queue).toHaveLength(2);
+    expect(queue[0]).not.toHaveProperty("editing");
+    expect(queue[0]).toMatchObject({
+      kind: "deferred",
+      recordId: "workspace",
+      restored: true,
+      state: {
+        type: "workspace-first-send",
+        status: "held",
+      },
+    });
+    expect(queue[1].recordId).toBe("tail");
+  });
+
+  it("persists queue changes for restart recovery", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("s1", { text: "durable" });
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("goose:chat-message-queues:v1") ?? "{}",
+      ),
+    ).toMatchObject({
+      s1: [{ recordId: record?.recordId, payload: { text: "durable" } }],
+    });
+
+    store.dismissQueuedMessage("s1", record?.recordId);
+    expect(
+      window.localStorage.getItem("goose:chat-message-queues:v1"),
+    ).toBeNull();
+  });
+
   it("enqueues and dismisses messages per session", () => {
     const store = useChatStore.getState();
 
     store.enqueueTransportReadyMessage("s1", { text: "follow up" });
-    expect(useChatStore.getState().queuedMessageBySession.s1?.payload).toEqual({
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toEqual({
       text: "follow up",
     });
     expect(useChatStore.getState().queuedMessageBySession.s2).toBeUndefined();
@@ -730,29 +945,59 @@ describe("chatStore", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
   });
 
-  it("rejects occupied slots and stale dismissal", () => {
+  it("appends messages and ignores stale dismissal", () => {
     const store = useChatStore.getState();
 
     expect(store.enqueueTransportReadyMessage("s1", { text: "first" })).toBe(
       true,
     );
     const first = useChatStore.getState().queuedMessageBySession.s1;
+    const firstRecordId = first?.[0]?.recordId;
     expect(store.enqueueTransportReadyMessage("s1", { text: "second" })).toBe(
-      false,
+      true,
     );
+    expect(useChatStore.getState().queuedMessageBySession.s1).toHaveLength(2);
     store.dismissQueuedMessage("s1", "stale-record");
-    expect(useChatStore.getState().queuedMessageBySession.s1).toBe(first);
-    store.dismissQueuedMessage("s1", first?.recordId);
-    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession.s1?.map((record) => record.payload.text),
+    ).toEqual(["first", "second"]);
+    store.dismissQueuedMessage("s1", firstRecordId);
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession.s1?.map((record) => record.payload.text),
+    ).toEqual(["second"]);
   });
 
-  it("moves the exact queued record only into an empty slot", () => {
+  it("appends promoted records after an occupied destination queue", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("acp-session", { text: "existing" });
+    store.enqueueTransportReadyMessage("local-session", { text: "promoted-1" });
+    store.enqueueTransportReadyMessage("local-session", { text: "promoted-2" });
+
+    store.promoteSessionId("local-session", "acp-session");
+
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["acp-session"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["existing", "promoted-1", "promoted-2"]);
+    expect(
+      useChatStore.getState().queuedMessageBySession["local-session"],
+    ).toBeUndefined();
+  });
+
+  it("moves whole queues and appends them to the destination", () => {
     const store = useChatStore.getState();
     store.enqueueTransportReadyMessage("pending", { text: "first" });
     const pending = useChatStore.getState().queuedMessageBySession.pending;
 
     expect(store.moveQueuedMessage("pending", "session-1")).toBe(true);
-    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toBe(
+    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toEqual(
       pending,
     );
     expect(
@@ -760,10 +1005,59 @@ describe("chatStore", () => {
     ).toBeUndefined();
 
     store.enqueueTransportReadyMessage("pending", { text: "second" });
-    expect(store.moveQueuedMessage("pending", "session-1")).toBe(false);
+    expect(store.moveQueuedMessage("pending", "session-1")).toBe(true);
     expect(
-      useChatStore.getState().queuedMessageBySession.pending?.payload,
-    ).toEqual({ text: "second" });
+      useChatStore.getState().queuedMessageBySession.pending,
+    ).toBeUndefined();
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["first", "second"]);
+  });
+
+  it("moves one record without disturbing either queue", () => {
+    const store = useChatStore.getState();
+    store.enqueueTransportReadyMessage("pending", { text: "first" });
+    store.enqueueTransportReadyMessage("pending", { text: "second" });
+    store.enqueueDeferredMessage(
+      "session-1",
+      { text: "existing deferred" },
+      { type: "workspace-first-send", status: "held" },
+    );
+    const movedId =
+      useChatStore.getState().queuedMessageBySession.pending?.[0]?.recordId ??
+      "";
+
+    expect(store.moveQueuedMessage("pending", "session-1", movedId)).toBe(true);
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession.pending?.map((record) => record.payload.text),
+    ).toEqual(["second"]);
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["existing deferred", "first"]);
+
+    expect(store.moveQueuedMessage("session-1", "pending", movedId)).toBe(true);
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["existing deferred"]);
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession.pending?.map((record) => record.payload.text),
+    ).toEqual(["second", "first"]);
   });
 
   it("persists and clears draft text per session", () => {

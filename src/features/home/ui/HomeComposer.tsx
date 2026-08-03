@@ -4,7 +4,6 @@ import {
   type WorkspaceNameRequest,
 } from "@/features/chat/hooks/useChatSessionController";
 import type { HomeScreenProps } from "./HomeScreen";
-import { useTranslation } from "react-i18next";
 
 interface HomeComposerProps {
   sessionId: string | null;
@@ -21,7 +20,6 @@ export function HomeComposer({
   onWorkspaceNameRequest,
   onCreateProject,
 }: HomeComposerProps) {
-  const { t } = useTranslation("chat");
   const controller = useChatSessionController({
     sessionId,
     isHomeSession: true,
@@ -29,6 +27,13 @@ export function HomeComposer({
     onCreatePersonaRequested: onCreatePersona,
     onWorkspaceNameRequest,
   });
+
+  const deferredWorkspaceInFlight =
+    controller.deferredWorkspaceRecord?.state.status === "naming" ||
+    controller.deferredWorkspaceRecord?.state.status === "creating";
+  const visibleQueuedRecords = (controller.queue.queuedRecords ?? []).filter(
+    (record) => !(record.kind === "deferred" && deferredWorkspaceInFlight),
+  );
 
   return (
     <ChatInput
@@ -43,23 +48,27 @@ export function HomeComposer({
             : (controller.queue.queuedMessage ??
               controller.deferredWorkspaceRecord?.payload ??
               null),
-        queuedMessageStatus:
-          controller.deferredWorkspaceRecord?.state.status === "creating"
-            ? t("queue.workspaceCreating")
-            : controller.deferredWorkspaceRecord?.state.status === "failed" ||
-                controller.deferredWorkspaceRecord?.state.status === "held"
-              ? t("queue.workspaceFailed")
-              : undefined,
+        queuedMessages: visibleQueuedRecords.map((record) => ({
+          recordId: record.recordId,
+          payload: record.payload,
+        })),
+        onUpdateQueue: deferredWorkspaceInFlight
+          ? undefined
+          : controller.queue.update,
+        onEditQueue: deferredWorkspaceInFlight
+          ? undefined
+          : controller.queue.beginEditing,
+        onCancelQueueEdit: deferredWorkspaceInFlight
+          ? undefined
+          : controller.queue.cancelEditing,
         onSendQueue:
           controller.deferredWorkspaceRecord?.state.status === "failed" ||
           controller.deferredWorkspaceRecord?.state.status === "held"
             ? controller.sendDeferredAnyway
             : undefined,
-        onDismissQueue:
-          controller.deferredWorkspaceRecord?.state.status === "naming" ||
-          controller.deferredWorkspaceRecord?.state.status === "creating"
-            ? undefined
-            : controller.queue.dismiss,
+        onDismissQueue: deferredWorkspaceInFlight
+          ? undefined
+          : controller.queue.dismiss,
         onStop: controller.stopStreaming,
         isStreaming:
           controller.chatState === "streaming" ||

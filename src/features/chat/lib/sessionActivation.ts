@@ -180,7 +180,11 @@ export async function loadSessionMessages(
   const load = performSessionMessagesLoad(sessionId, options);
   sessionLoadPromises.set(sessionId, load);
   try {
-    return await load;
+    const loaded = await load;
+    if (loaded) {
+      useChatStore.getState().markQueuedMessagesReady(sessionId);
+    }
+    return loaded;
   } finally {
     if (sessionLoadPromises.get(sessionId) === load) {
       sessionLoadPromises.delete(sessionId);

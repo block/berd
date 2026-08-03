@@ -82,20 +82,30 @@ async function resolveCurrentWindowLabel(fallback: string): Promise<string> {
 function applyHandoffSnapshot(payload: SessionHandoffSnapshot) {
   const handoffPayload = payload.payload;
   const runtime = handoffPayload.sessionState;
-  useChatStore.setState((state) => ({
-    messagesBySession: {
-      ...state.messagesBySession,
-      [handoffPayload.sessionId]: handoffPayload.messages,
-    },
-    ...(runtime
-      ? {
-          sessionStateById: {
-            ...state.sessionStateById,
-            [handoffPayload.sessionId]: runtime,
-          },
-        }
-      : {}),
-  }));
+  const queuedMessages = handoffPayload.queuedMessages ?? [];
+  useChatStore.setState((state) => {
+    const queuedMessageBySession = { ...state.queuedMessageBySession };
+    if (queuedMessages.length) {
+      queuedMessageBySession[handoffPayload.sessionId] = queuedMessages;
+    } else {
+      delete queuedMessageBySession[handoffPayload.sessionId];
+    }
+    return {
+      messagesBySession: {
+        ...state.messagesBySession,
+        [handoffPayload.sessionId]: handoffPayload.messages,
+      },
+      queuedMessageBySession,
+      ...(runtime
+        ? {
+            sessionStateById: {
+              ...state.sessionStateById,
+              [handoffPayload.sessionId]: runtime,
+            },
+          }
+        : {}),
+    };
+  });
 }
 
 function isSnapshotForWindow(
@@ -129,8 +139,8 @@ export function SessionWindowApp({
   currentWindowLabel: currentWindowLabelOverride,
 }: SessionWindowAppProps) {
   const { t } = useTranslation("chat");
-  useBerdctlQueuedMessageDrain();
   const [phase, setPhase] = useState<Phase>("loading");
+  useBerdctlQueuedMessageDrain(sessionId, phase === "ready");
   const [session, setSession] = useState<ChatSession | null>(null);
   const [currentWindowLabel, setCurrentWindowLabel] = useState<string | null>(
     currentWindowLabelOverride ?? null,
@@ -410,7 +420,10 @@ export function SessionWindowApp({
 
   return (
     <>
-      <ReleasedQueuedMessageDrain />
+      <ReleasedQueuedMessageDrain
+        sessionId={sessionId}
+        ownerReady={phase === "ready"}
+      />
       {content}
       <ProjectWorkspaceStartupNameDialog
         open={Boolean(workspaceName)}

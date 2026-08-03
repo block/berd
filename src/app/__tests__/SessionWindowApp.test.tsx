@@ -154,6 +154,7 @@ function renderSessionWindow() {
 function handoffSnapshot(
   message?: Message,
   isFinal = false,
+  queuedMessages: SessionHandoffSnapshot["payload"]["queuedMessages"] = [],
 ): SessionHandoffSnapshot {
   return {
     version: isFinal ? 2 : 1,
@@ -163,6 +164,7 @@ function handoffSnapshot(
       fromLabel: "main",
       toLabel: "session:session-1",
       messages: message ? [message] : [],
+      queuedMessages,
       sessionState: {
         ...INITIAL_SESSION_CHAT_RUNTIME,
         chatState: isFinal ? "idle" : "streaming",
@@ -301,6 +303,40 @@ describe("SessionWindowApp", () => {
     expect(
       useChatStore.getState().sessionStateById["session-1"]?.chatState,
     ).toBe("streaming");
+  });
+
+  it("applies queued records from the final ownership handoff", async () => {
+    seedSession();
+    await renderMirrorSessionWindow();
+    vi.mocked(readSessionHandoffSnapshot).mockResolvedValueOnce(
+      handoffSnapshot(undefined, true, [
+        {
+          kind: "transport-ready",
+          recordId: "queued-during-detach",
+          payload: {
+            text: "follow up",
+            sendOptions: {
+              userMessageMetadata: { origin: "berdctl_cross_session" },
+            },
+          },
+        },
+      ]),
+    );
+
+    act(() => {
+      handoffListeners.available?.({
+        sessionId: "session-1",
+        toLabel: "session:session-1",
+        version: 2,
+        isFinal: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"],
+      ).toMatchObject([{ recordId: "queued-during-detach" }]);
+    });
   });
 
   it("applies final snapshot and becomes writable without persisted reload", async () => {

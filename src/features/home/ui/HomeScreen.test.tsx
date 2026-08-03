@@ -11,7 +11,19 @@ const mockReadImageAttachment = vi.fn();
 const mockController = {
   handleSend: vi.fn(),
   projectMetadataPending: false,
-  queue: { queuedMessage: null, dismiss: vi.fn() },
+  queue: {
+    queuedMessage: null,
+    queuedRecords: [] as Array<{
+      kind: "deferred" | "transport-ready";
+      recordId: string;
+      payload: { text: string };
+      state?: { status: string };
+    }>,
+    dismiss: vi.fn(),
+    update: vi.fn(),
+    beginEditing: vi.fn(),
+    cancelEditing: vi.fn(),
+  },
   deferredWorkspaceRecord: null as {
     payload: { text: string };
     state: { status: "naming" | "creating" };
@@ -208,6 +220,7 @@ describe("HomeScreen", () => {
     setSelectedProviderWithoutPersist.mockReset();
     mockController.handleSend.mockReset();
     mockController.queue.dismiss.mockReset();
+    mockController.queue.queuedRecords = [];
     mockController.deferredWorkspaceRecord = null;
     mockOpenDialog.mockReset();
     mockOpenDialog.mockResolvedValue(null);
@@ -236,12 +249,20 @@ describe("HomeScreen", () => {
       payload: { text: "create this workspace" },
       state: { status: "creating" },
     };
+    mockController.queue.queuedRecords = [
+      {
+        kind: "deferred",
+        recordId: "deferred-1",
+        payload: { text: "create this workspace" },
+        state: { status: "creating" },
+      },
+    ];
 
     renderHome();
 
     expect(
-      screen.getByText("Creating project workspaces…"),
-    ).toBeInTheDocument();
+      screen.queryByText("Creating project workspaces…"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Edit" }),
     ).not.toBeInTheDocument();

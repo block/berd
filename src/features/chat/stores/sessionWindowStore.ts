@@ -23,6 +23,7 @@ export interface SessionWindowEntry {
 interface SessionWindowState {
   openSessions: Record<string, string>;
   handoffs: Record<string, SessionWindowHandoff>;
+  hasLoadedSnapshot: boolean;
   setSnapshot: (entries: SessionWindowEntry[]) => void;
   isOpenInWindow: (sessionId: string) => boolean;
   getWindowLabel: (sessionId: string) => string | undefined;
@@ -40,6 +41,7 @@ function getHandoff(mode: SessionWindowMode | undefined) {
 export const useSessionWindowStore = create<SessionWindowState>((set, get) => ({
   openSessions: {},
   handoffs: {},
+  hasLoadedSnapshot: false,
   setSnapshot: (entries) => {
     const openSessions: Record<string, string> = {};
     const handoffs: Record<string, SessionWindowHandoff> = {};
@@ -52,7 +54,7 @@ export const useSessionWindowStore = create<SessionWindowState>((set, get) => ({
       }
     }
 
-    set({ openSessions, handoffs });
+    set({ openSessions, handoffs, hasLoadedSnapshot: true });
   },
   isOpenInWindow: (sessionId) => sessionId in get().openSessions,
   getWindowLabel: (sessionId) => get().openSessions[sessionId],

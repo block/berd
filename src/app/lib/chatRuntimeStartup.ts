@@ -1,4 +1,6 @@
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
+import { loadPersistedMessageQueues } from "@/features/chat/stores/queuePersistence";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import {
@@ -60,10 +62,16 @@ export function filterStartupProvidersForRuntimeConfig(
   );
 }
 
-export async function runChatRuntimeStartup(): Promise<void> {
+export async function runChatRuntimeStartup(
+  options: { hydrateMessageQueues?: boolean } = {},
+): Promise<void> {
   const tConn = performance.now();
   registerChatSessionConfigSnapshotHandlers();
   setNotificationHandler(notificationHandler);
+  if (options.hydrateMessageQueues !== false) {
+    const persistedMessageQueues = await loadPersistedMessageQueues();
+    useChatStore.getState().replaceQueuedMessages(persistedMessageQueues);
+  }
   if (getBuildFeatureState().securityMl) {
     setPermissionHandler(handleSecurityPermissionRequest);
   }

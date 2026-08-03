@@ -653,7 +653,7 @@ describe("sessions.create", () => {
 
     const queued =
       useChatStore.getState().queuedMessageBySession["session-new"];
-    expect(queued).toMatchObject({
+    expect(queued?.[0]).toMatchObject({
       kind: "transport-ready",
       payload: { text: "what is 1+1" },
     });
@@ -1088,6 +1088,52 @@ describe("sessions.send", () => {
     ).toBeUndefined();
   });
 
+  it("rejects startup_name after the first send is no longer available", async () => {
+    mockSessionFound({ messageCount: 1 });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "follow up",
+          startup_name: "ignored-name",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects startup_name when an occupied first-send queue prevents workspace setup", async () => {
+    mockSessionFound();
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      text: "already queued",
+    });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "follow up",
+          startup_name: "ignored-name",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toHaveLength(1);
+  });
+
   it.each([
     { chatState: "streaming" as const, cancellationPending: false },
     { chatState: "idle" as const, cancellationPending: true },
@@ -1180,7 +1226,8 @@ describe("sessions.send", () => {
     expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
     expect(mocks.listProjects).not.toHaveBeenCalled();
     expect(
-      useChatStore.getState().queuedMessageBySession["session-1"]?.payload.text,
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .text,
     ).toBe("queue despite missing project");
   });
 
@@ -1201,7 +1248,8 @@ describe("sessions.send", () => {
 
     expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
     expect(
-      useChatStore.getState().queuedMessageBySession["session-1"]?.payload.text,
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .text,
     ).toBe("after cancellation");
   });
 
@@ -1246,7 +1294,7 @@ describe("sessions.send", () => {
     expect(mocks.acpSendMessage).not.toHaveBeenCalled();
   });
 
-  it("queues one running-target prompt and reports queue_full for a second", async () => {
+  it("appends running-target prompts to the shared queue", async () => {
     mockSessionFound();
     useChatStore.getState().setChatState("session-1", "streaming");
 
@@ -1266,7 +1314,7 @@ describe("sessions.send", () => {
       send_status: "queued",
     });
     expect(
-      useChatStore.getState().queuedMessageBySession["session-1"]?.payload,
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload,
     ).toEqual({
       text: "next prompt",
       sendOptions: {
@@ -1276,19 +1324,28 @@ describe("sessions.send", () => {
     });
 
     mockSessionFound();
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        {
-          action: "send",
-          session_id: "session-1",
-          prompt: "another prompt",
-          if_running: "queue",
-        },
-        ctx,
-      ),
-      "queue_full",
+    const secondResult = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "another prompt",
+        if_running: "queue",
+      },
+      ctx,
     );
+
+    expect(secondResult).toEqual({
+      session_id: "session-1",
+      send_status: "queued",
+    });
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["next prompt", "another prompt"]);
   });
 });
 

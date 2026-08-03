@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { sendQueuedPromptToExistingSessionInBackground } from "@/features/chat/lib/queuedSessionSend";
 
 const drainingSessionIds = new Set<string>();
@@ -12,7 +13,7 @@ function drainReleasedQueuedMessage(sessionId: string): void {
   }
 
   const chatStore = useChatStore.getState();
-  const queuedMessage = chatStore.queuedMessageBySession[sessionId];
+  const queuedMessage = chatStore.queuedMessageBySession[sessionId]?.[0];
   const runtime = chatStore.getSessionRuntime(sessionId);
   if (
     queuedMessage?.kind !== "transport-ready" ||
@@ -29,7 +30,7 @@ function drainReleasedQueuedMessage(sessionId: string): void {
     queuedMessage,
     () => {
       if (
-        useChatStore.getState().queuedMessageBySession[sessionId] !==
+        useChatStore.getState().queuedMessageBySession[sessionId]?.[0] !==
         queuedMessage
       ) {
         throw new DOMException("The queued prompt was canceled.", "AbortError");
@@ -43,7 +44,7 @@ function drainReleasedQueuedMessage(sessionId: string): void {
   )
     .then(() => {
       if (
-        useChatStore.getState().queuedMessageBySession[sessionId] ===
+        useChatStore.getState().queuedMessageBySession[sessionId]?.[0] ===
         queuedMessage
       ) {
         useChatStore
@@ -62,45 +63,85 @@ function drainReleasedQueuedMessage(sessionId: string): void {
     });
 }
 
-function drainReadyReleasedMessages(): void {
+function getOwnedSessionIds(
+  queuedMessageBySession: Record<string, unknown>,
+  scopedSessionId?: string,
+): string[] {
+  if (scopedSessionId) return [scopedSessionId];
+  const sessionWindowStore = useSessionWindowStore.getState();
+  if (!sessionWindowStore.hasLoadedSnapshot) return [];
+  return Object.keys(queuedMessageBySession).filter(
+    (sessionId) => !sessionWindowStore.isOpenInWindow(sessionId),
+  );
+}
+
+function drainReadyReleasedMessages(scopedSessionId?: string): void {
   const { queuedMessageBySession } = useChatStore.getState();
-  for (const sessionId of Object.keys(queuedMessageBySession)) {
+  for (const sessionId of getOwnedSessionIds(
+    queuedMessageBySession,
+    scopedSessionId,
+  )) {
     drainReleasedQueuedMessage(sessionId);
   }
 }
 
-export function useReleasedQueuedMessageDrain(): void {
+export function useReleasedQueuedMessageDrain(
+  scopedSessionId?: string,
+  ownerReady = true,
+): void {
   useEffect(() => {
-    drainReadyReleasedMessages();
-    return useChatStore.subscribe((state, previousState) => {
-      for (const sessionId of Object.keys(state.queuedMessageBySession)) {
-        const queuedMessage = state.queuedMessageBySession[sessionId];
-        if (
-          queuedMessage.kind !== "transport-ready" ||
-          !queuedMessage.releasedFromDeferred
-        ) {
-          continue;
-        }
+    if (!ownerReady) return;
+    drainReadyReleasedMessages(scopedSessionId);
+    const unsubscribeWindowStore = scopedSessionId
+      ? undefined
+      : useSessionWindowStore.subscribe((state, previousState) => {
+          if (
+            state.hasLoadedSnapshot &&
+            (!previousState.hasLoadedSnapshot ||
+              state.openSessions !== previousState.openSessions)
+          ) {
+            drainReadyReleasedMessages();
+          }
+        });
+    const unsubscribeChatStore = useChatStore.subscribe(
+      (state, previousState) => {
+        for (const sessionId of getOwnedSessionIds(
+          state.queuedMessageBySession,
+          scopedSessionId,
+        )) {
+          const queuedMessage = state.queuedMessageBySession[sessionId]?.[0];
+          if (
+            queuedMessage?.kind !== "transport-ready" ||
+            !queuedMessage.releasedFromDeferred
+          ) {
+            continue;
+          }
 
-        const currentRuntime = state.sessionStateById[sessionId];
-        const previousRuntime = previousState.sessionStateById[sessionId];
-        const currentChatState = currentRuntime?.chatState ?? "idle";
-        const currentBlocked =
-          isSessionRunning(currentChatState) ||
-          (currentRuntime?.isRunCancellationPending ?? false);
-        const previousBlocked =
-          isSessionRunning(previousRuntime?.chatState ?? "idle") ||
-          (previousRuntime?.isRunCancellationPending ?? false);
-        const becameTransportReady =
-          previousState.queuedMessageBySession[sessionId] !== queuedMessage;
-        if (
-          currentChatState === "idle" &&
-          !currentBlocked &&
-          (previousBlocked || becameTransportReady)
-        ) {
-          drainReleasedQueuedMessage(sessionId);
+          const currentRuntime = state.sessionStateById[sessionId];
+          const previousRuntime = previousState.sessionStateById[sessionId];
+          const currentChatState = currentRuntime?.chatState ?? "idle";
+          const currentBlocked =
+            isSessionRunning(currentChatState) ||
+            (currentRuntime?.isRunCancellationPending ?? false);
+          const previousBlocked =
+            isSessionRunning(previousRuntime?.chatState ?? "idle") ||
+            (previousRuntime?.isRunCancellationPending ?? false);
+          const becameTransportReady =
+            previousState.queuedMessageBySession[sessionId]?.[0] !==
+            queuedMessage;
+          if (
+            currentChatState === "idle" &&
+            !currentBlocked &&
+            (previousBlocked || becameTransportReady)
+          ) {
+            drainReleasedQueuedMessage(sessionId);
+          }
         }
-      }
-    });
-  }, []);
+      },
+    );
+    return () => {
+      unsubscribeWindowStore?.();
+      unsubscribeChatStore();
+    };
+  }, [ownerReady, scopedSessionId]);
 }

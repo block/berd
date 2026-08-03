@@ -8,6 +8,7 @@ import type {
   MessageMetadata,
 } from "@/shared/types/messages";
 import type { ChatSessionReasoningEffortConfig } from "./stores/chatSessionStore";
+import type { QueuedMessagePayload } from "./stores/chatStore";
 
 export interface ModelOption {
   id: string;
@@ -89,15 +90,16 @@ export interface ChatInputComposerActions {
   disabled?: boolean;
   sendDisabled?: boolean;
   sendDisabledReason?: string;
-  queuedMessage?: {
-    text: string;
-    personaId?: string;
-    attachments?: ChatAttachmentDraft[];
-    sendOptions?: ChatSendOptions;
-  } | null;
-  queuedMessageStatus?: string;
+  queuedMessage?: QueuedMessagePayload | null;
+  queuedMessages?: Array<{
+    recordId: string;
+    payload: QueuedMessagePayload;
+  }>;
   onSendQueue?: () => boolean | Promise<boolean>;
-  onDismissQueue?: () => void;
+  onDismissQueue?: (recordId?: string) => void;
+  onUpdateQueue?: (recordId: string, payload: QueuedMessagePayload) => boolean;
+  onEditQueue?: (recordId: string) => boolean;
+  onCancelQueueEdit?: (recordId: string) => boolean;
   voiceConversation?: ChatInputVoiceConversation;
 }
 

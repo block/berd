@@ -234,9 +234,12 @@ export function ChatInput({
     sendDisabled = false,
     sendDisabledReason,
     queuedMessage = null,
-    queuedMessageStatus,
+    queuedMessages,
     onSendQueue,
     onDismissQueue,
+    onUpdateQueue,
+    onEditQueue,
+    onCancelQueueEdit,
   } = composerActions;
   const {
     personas = [],
@@ -285,6 +288,24 @@ export function ChatInput({
     voice: controls?.voice ?? true,
   };
   const [text, setTextRaw] = useState(initialValue);
+  const [editingQueuedRecordId, setEditingQueuedRecordId] = useState<
+    string | null
+  >(null);
+  const editingQueuedRecordIdRef = useRef<string | null>(null);
+  const onCancelQueueEditRef = useRef(onCancelQueueEdit);
+  onCancelQueueEditRef.current = onCancelQueueEdit;
+  useEffect(() => {
+    return () => {
+      const recordId = editingQueuedRecordIdRef.current;
+      if (recordId) {
+        onCancelQueueEditRef.current?.(recordId);
+      }
+    };
+  }, []);
+  const setEditingQueuedRecord = useCallback((recordId: string | null) => {
+    editingQueuedRecordIdRef.current = recordId;
+    setEditingQueuedRecordId(recordId);
+  }, []);
   const [dismissedAgentToolsTipIds, setDismissedAgentToolsTipIds] = useState<
     Set<string>
   >(() => new Set());
@@ -446,18 +467,16 @@ export function ChatInput({
     };
   }, [scheduleResizeTextarea, surface]);
 
-  const hasQueuedMessage = queuedMessage !== null;
+  const visibleQueuedMessages =
+    queuedMessages ??
+    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : []);
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;
   const hasComposedMessage = text.trim().length > 0 || hasDraftContext;
   const hasDraftContent = text.length > 0 || hasDraftContext;
   const canQueueMessage =
-    hasComposedMessage &&
-    !hasQueuedMessage &&
-    !disabled &&
-    !sendDisabled &&
-    !attachmentWorkPending;
+    hasComposedMessage && !disabled && !sendDisabled && !attachmentWorkPending;
   const canSteerCurrentMessage =
     hasComposedMessage &&
     !disabled &&
@@ -652,8 +671,7 @@ export function ChatInput({
     onSend,
     onAutoSubmit: handleVoiceAutoSubmit,
     resetTextarea,
-    isSendLocked:
-      hasQueuedMessage || disabled || sendDisabled || attachmentWorkPending,
+    isSendLocked: disabled || sendDisabled || attachmentWorkPending,
   });
 
   const handleVoiceDictationShortcut = useVoiceDictationShortcutTarget(
@@ -722,23 +740,42 @@ export function ChatInput({
         restoredQueuedSendOptions && submittedSkills.length === 0
           ? restoredQueuedSendOptions
           : null;
-      const accepted = restoredSendOptions
-        ? await submitRestoredQueuedMessage(
-            submittedText,
-            submittedAttachments,
-            restoredSendOptions,
-            submitHandler,
-          )
-        : await submitChatInputMessage(
-            submittedText,
-            submittedAttachments,
-            submittedSkills,
-            submitHandler,
-          );
+      const accepted =
+        editingQueuedRecordId && onUpdateQueue
+          ? onUpdateQueue(editingQueuedRecordId, {
+              text: submittedText.trim() || " ",
+              personaId: selectedPersonaId ?? undefined,
+              attachments:
+                submittedAttachments.length > 0
+                  ? submittedAttachments
+                  : undefined,
+              sendOptions: restoredSendOptions
+                ? {
+                    ...restoredSendOptions,
+                    ...(restoredSendOptions.displayText === undefined
+                      ? {}
+                      : { displayText: submittedText.trim() }),
+                  }
+                : undefined,
+            })
+          : restoredSendOptions
+            ? await submitRestoredQueuedMessage(
+                submittedText,
+                submittedAttachments,
+                restoredSendOptions,
+                submitHandler,
+              )
+            : await submitChatInputMessage(
+                submittedText,
+                submittedAttachments,
+                submittedSkills,
+                submitHandler,
+              );
       if (!accepted) {
         return;
       }
       setRestoredQueuedSendOptions(null);
+      setEditingQueuedRecord(null);
       const textStillMatchesSubmission = textRef.current === submittedText;
       const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
         selectedSkillsRef.current,
@@ -764,11 +801,15 @@ export function ChatInput({
     [
       clearAttachments,
       dictation,
+      editingQueuedRecordId,
+      onUpdateQueue,
       scopedControls.attachments,
       scopedControls.voice,
+      setEditingQueuedRecord,
       setSelectedSkills,
       setText,
       restoredQueuedSendOptions,
+      selectedPersonaId,
       submitRestoredQueuedMessage,
       submitChatInputMessage,
       text,
@@ -829,6 +870,10 @@ export function ChatInput({
       );
     }
 
+    if (editingQueuedRecordId) {
+      onCancelQueueEdit?.(editingQueuedRecordId);
+      setEditingQueuedRecord(null);
+    }
     setRestoredQueuedSendOptions(null);
     setText("");
     setSelectedSkills([]);
@@ -840,10 +885,13 @@ export function ChatInput({
     canSteerCurrentMessage,
     clearAttachments,
     dictation,
+    editingQueuedRecordId,
+    onCancelQueueEdit,
     onSteerMessage,
     restoredQueuedSendOptions,
     scopedControls.attachments,
     scopedControls.voice,
+    setEditingQueuedRecord,
     setSelectedSkills,
     setText,
     submitChatInputMessage,
@@ -867,39 +915,51 @@ export function ChatInput({
     [setText],
   );
 
-  const restoreQueuedMessage = useCallback(() => {
-    if (!queuedMessage || !onDismissQueue) {
-      return false;
-    }
+  const restoreQueuedMessage = useCallback(
+    (recordId: string, message: NonNullable<typeof queuedMessage>) => {
+      const isLegacyMessage = recordId === "legacy";
+      if (isLegacyMessage ? !onDismissQueue : !onUpdateQueue) return false;
+      if (!isLegacyMessage) {
+        const previousRecordId = editingQueuedRecordIdRef.current;
+        if (!onEditQueue?.(recordId)) return false;
+        if (previousRecordId && previousRecordId !== recordId) {
+          onCancelQueueEdit?.(previousRecordId);
+        }
+      }
+      const nextText = message.sendOptions?.displayText ?? message.text;
+      setTextWithCursorAtEnd(nextText);
+      setRestoredQueuedSendOptions(
+        getManualEditQueuedSendOptions(message.sendOptions),
+      );
+      setEditingQueuedRecord(isLegacyMessage ? null : recordId);
+      onPersonaChange?.(message.personaId ?? null);
+      replaceAttachments(
+        scopedControls.attachments ? (message.attachments ?? []) : [],
+      );
+      setSelectedSkills([]);
+      if (isLegacyMessage) onDismissQueue?.();
+      return true;
+    },
+    [
+      onDismissQueue,
+      onEditQueue,
+      onCancelQueueEdit,
+      onPersonaChange,
+      onUpdateQueue,
+      replaceAttachments,
+      scopedControls.attachments,
+      setEditingQueuedRecord,
+      setSelectedSkills,
+      setTextWithCursorAtEnd,
+    ],
+  );
 
-    const nextText =
-      queuedMessage.sendOptions?.displayText ?? queuedMessage.text;
-    setTextWithCursorAtEnd(nextText);
-    setRestoredQueuedSendOptions(
-      getManualEditQueuedSendOptions(queuedMessage.sendOptions),
-    );
-    onPersonaChange?.(queuedMessage.personaId ?? null);
-    replaceAttachments(
-      scopedControls.attachments ? (queuedMessage.attachments ?? []) : [],
-    );
-    setSelectedSkills([]);
-    onDismissQueue();
-    return true;
-  }, [
-    onDismissQueue,
-    onPersonaChange,
-    queuedMessage,
-    replaceAttachments,
-    scopedControls.attachments,
-    setSelectedSkills,
-    setTextWithCursorAtEnd,
-  ]);
-
-  const handleEditQueuedMessage = useCallback(() => {
-    if (restoreQueuedMessage()) {
-      textareaRef.current?.focus();
-    }
-  }, [restoreQueuedMessage]);
+  const handleEditQueuedMessage = useCallback(
+    (recordId: string, message: NonNullable<typeof queuedMessage>) => {
+      if (restoreQueuedMessage(recordId, message)) textareaRef.current?.focus();
+    },
+    [restoreQueuedMessage],
+  );
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing =
@@ -962,8 +1022,13 @@ export function ChatInput({
       !hasDraftContent &&
       eventMatchesShortcutCommand(event.nativeEvent, "chat.recallLastMessage")
     ) {
-      if (queuedMessage) {
-        if (restoreQueuedMessage()) {
+      if (visibleQueuedMessages[0]) {
+        if (
+          restoreQueuedMessage(
+            visibleQueuedMessages[0].recordId,
+            visibleQueuedMessages[0].payload,
+          )
+        ) {
           event.preventDefault();
         }
         return;
@@ -1421,57 +1486,6 @@ export function ChatInput({
               : "mx-auto max-w-[var(--chat-composer-max-width)]",
           )}
         >
-          {queuedMessage && (
-            <div className="mb-2 flex items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 py-1.5 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]">
-              <span className="flex-1 truncate text-xs opacity-75">
-                {queuedMessageStatus ??
-                  t("queue.label", { text: queuedMessage.text })}
-              </span>
-              {isStreaming && canSteerQueuedMessage ? (
-                <button
-                  type="button"
-                  onClick={handleSteerQueuedMessage}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
-                  aria-label={t("toolbar.steer")}
-                  title={t("toolbar.steerQueued")}
-                >
-                  <IconCornerDownLeft className="size-3" aria-hidden="true" />
-                  {t("toolbar.steer")}
-                </button>
-              ) : null}
-              {onSendQueue ? (
-                <button
-                  type="button"
-                  onClick={() => void onSendQueue()}
-                  className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium opacity-75 hover:opacity-100"
-                >
-                  {t("queue.sendAnyway")}
-                </button>
-              ) : null}
-              {onDismissQueue ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleEditQueuedMessage}
-                    className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
-                    aria-label={t("queue.edit")}
-                    title={t("queue.edit")}
-                  >
-                    <Pencil className="size-3.5" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onDismissQueue}
-                    className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
-                    aria-label={t("queue.dismiss")}
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </>
-              ) : null}
-            </div>
-          )}
-
           <Popover open={mentionOpen}>
             {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for file attachments */}
             <div
@@ -1546,7 +1560,83 @@ export function ChatInput({
                 onRemoveSkill={handleRemoveSkill}
               />
 
-              {queuedMessage && queuedMessageAccessory ? (
+              {visibleQueuedMessages.length > 0 && (
+                <div className="mb-2 flex max-h-36 flex-col gap-1 overflow-y-auto">
+                  {visibleQueuedMessages.map(({ recordId, payload }, index) => (
+                    <div
+                      key={recordId}
+                      className="flex items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 py-1.5 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]"
+                    >
+                      <span className="flex-1 truncate text-xs opacity-75">
+                        {payload.text}
+                      </span>
+                      {index === 0 &&
+                      isStreaming &&
+                      canSteerQueuedMessage &&
+                      editingQueuedRecordId !== recordId ? (
+                        <button
+                          type="button"
+                          onClick={handleSteerQueuedMessage}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
+                          aria-label={t("toolbar.steer")}
+                          title={t("toolbar.steerQueued")}
+                        >
+                          <IconCornerDownLeft
+                            className="size-3"
+                            aria-hidden="true"
+                          />
+                          {t("toolbar.steer")}
+                        </button>
+                      ) : null}
+                      {index === 0 && onSendQueue ? (
+                        <button
+                          type="button"
+                          onClick={() => void onSendQueue()}
+                          className="shrink-0 rounded-full px-2 text-xs"
+                        >
+                          {t("toolbar.send")}
+                        </button>
+                      ) : null}
+                      {(
+                        recordId === "legacy"
+                          ? Boolean(onDismissQueue)
+                          : Boolean(onUpdateQueue)
+                      ) ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleEditQueuedMessage(recordId, payload)
+                          }
+                          className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                          aria-label={t("queue.edit")}
+                          title={t("queue.edit")}
+                        >
+                          <Pencil className="size-3.5" aria-hidden="true" />
+                        </button>
+                      ) : null}
+                      {onDismissQueue ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingQueuedRecordIdRef.current === recordId) {
+                              setEditingQueuedRecord(null);
+                            }
+                            onDismissQueue?.(
+                              recordId === "legacy" ? undefined : recordId,
+                            );
+                          }}
+                          className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                          aria-label={t("queue.dismiss")}
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {visibleQueuedMessages.length > 0 && queuedMessageAccessory ? (
                 <div
                   data-slot="queued-message-accessory"
                   className={cn(
