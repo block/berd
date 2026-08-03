@@ -198,10 +198,6 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
-    "multiWorkspace": {
-      "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
-      "title": "Chats con varios espacios de trabajo"
-    },
     "voiceConversation": {
       "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
       "title": "Conversaciones de voz"
@@ -285,6 +281,10 @@
     "globalShortcut": {
       "description": "Usa el atajo global configurado para crear y encontrar chats desde cualquier lugar de macOS.",
       "label": "Activar atajo global"
+    },
+    "multiWorkspace": {
+      "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
+      "label": "Compatibilidad con varios espacios de trabajo"
     },
     "terminalFallback": {
       "change": "Cambiar",

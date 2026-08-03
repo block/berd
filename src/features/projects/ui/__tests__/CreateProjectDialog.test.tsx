@@ -10,8 +10,7 @@ import {
 } from "../../api/projects";
 import { checkDirectoriesExist, resolvePath } from "@/shared/api/pathResolver";
 import { CreateProjectDialog } from "../CreateProjectDialog";
-import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 
 // ── ResizeObserver polyfill (needed by Radix Select in jsdom) ────────
 
@@ -214,6 +213,7 @@ describe("CreateProjectDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    setMultiWorkspaceEnabled(true);
     vi.mocked(openDialog).mockResolvedValue(null);
     gitMocks.getGitState.mockResolvedValue({
       isGitRepo: true,
@@ -1203,7 +1203,7 @@ describe("CreateProjectDialog", () => {
     });
 
     it("preserves hidden workspaces when saving with multi-workspace disabled", async () => {
-      setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+      setMultiWorkspaceEnabled(false);
       const user = userEvent.setup();
       const primaryWorkspace = {
         id: "path:/home/user/code",

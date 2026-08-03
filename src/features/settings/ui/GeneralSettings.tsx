@@ -72,6 +72,7 @@ import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/menti
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { RuntimeConfigSettings } from "./RuntimeConfigSettings";
 import { useStyleGuidelinesPreference } from "@/shared/preferences/styleGuidelinesPreference";
+import { useMultiWorkspacePreference } from "@/features/workspaces/multiWorkspacePreference";
 import {
   getBbCliStatus,
   installBbCli,
@@ -174,6 +175,7 @@ export function GeneralSettings({
   const sessionCostPreference = useSessionCostPreference();
   const responseStartGutterPreference = useResponseStartGutterPreference();
   const globalShortcutPreference = useGlobalShortcutPreference();
+  const multiWorkspacePreference = useMultiWorkspacePreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -695,6 +697,17 @@ export function GeneralSettings({
             checked={responseStartGutterPreference.enabled}
             onCheckedChange={responseStartGutterPreference.setEnabled}
             aria-label={t("general.responseStartGutter.label")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.multiWorkspace.label")}
+          description={t("general.multiWorkspace.description")}
+        >
+          <Switch
+            checked={multiWorkspacePreference.enabled}
+            onCheckedChange={multiWorkspacePreference.setEnabled}
+            aria-label={t("general.multiWorkspace.label")}
           />
         </SettingRow>
 

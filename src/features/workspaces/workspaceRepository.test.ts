@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { workspaceAttachmentIdForPath } from "@/features/chat/lib/workspaceAttachments";
 import type { WorkspaceAttachment } from "@/shared/types/chat";
 import { getWorkspaceRepository } from "./workspaceRepository";
@@ -25,8 +24,12 @@ describe("WorkspaceRepository", () => {
     window.localStorage.clear();
   });
 
+  it("defaults to single mode", () => {
+    expect(getWorkspaceRepository().mode).toBe("single");
+  });
+
   it("includes the explicitly saved cwd in multi mode", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    setMultiWorkspaceEnabled(true);
 
     const workspaceSet = getWorkspaceRepository().chatWorkspaces({
       workingDir: "/tmp/general-chat",
@@ -57,7 +60,7 @@ describe("WorkspaceRepository", () => {
   });
 
   it("uses the persisted active workspace in single mode", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+    setMultiWorkspaceEnabled(false);
 
     const activeWorkspaceId = workspaceAttachmentIdForPath("/repo-linked");
     const workspaceSet = getWorkspaceRepository().chatWorkspaces({
@@ -93,7 +96,7 @@ describe("WorkspaceRepository", () => {
   });
 
   it("preserves matching attachment metadata in single mode when no active workspace is set", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+    setMultiWorkspaceEnabled(false);
 
     const workspaceSet = getWorkspaceRepository().chatWorkspaces({
       workingDir: "/repo-linked",
@@ -122,8 +125,39 @@ describe("WorkspaceRepository", () => {
     });
   });
 
+  it("keeps configured project workspaces hidden rather than discarding them in single mode", () => {
+    const project = {
+      projectWorkspaces: [
+        {
+          ...attachment("/repo-main"),
+          startupMode: "none" as const,
+        },
+        {
+          ...attachment("/repo-secondary"),
+          startupMode: "worktree" as const,
+        },
+      ],
+      workingDirs: ["/repo-main", "/repo-secondary"],
+      useWorktrees: false,
+    };
+
+    setMultiWorkspaceEnabled(false);
+    expect(
+      getWorkspaceRepository()
+        .projectWorkspaces(project)
+        .workspaces.map((workspace) => workspace.path),
+    ).toEqual(["/repo-main"]);
+
+    setMultiWorkspaceEnabled(true);
+    expect(
+      getWorkspaceRepository()
+        .projectWorkspaces(project)
+        .workspaces.map((workspace) => workspace.path),
+    ).toEqual(["/repo-main", "/repo-secondary"]);
+  });
+
   it("does not add worktree startup project paths to a created chat workspace plan", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    setMultiWorkspaceEnabled(true);
 
     const workspaceSet = getWorkspaceRepository().chatWorkspaces({
       workingDir: "/repo-worktrees/chat-123/builderbot",
@@ -148,7 +182,7 @@ describe("WorkspaceRepository", () => {
   });
 
   it("keeps as-is project paths materialized into a created chat workspace plan", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    setMultiWorkspaceEnabled(true);
 
     const workspaceSet = getWorkspaceRepository().chatWorkspaces({
       workingDir: "/repo-worktrees/chat-123/builderbot",

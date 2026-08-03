@@ -10,8 +10,7 @@ import {
   loadSessionMessages,
 } from "@/features/chat/lib/sessionActivation";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
-import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   type ChatSession,
@@ -515,7 +514,7 @@ describe("loadSessionMessages", () => {
   });
 
   it("uses explicit chat workspace context when resolving the reload cwd", async () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    setMultiWorkspaceEnabled(true);
     seedSession(
       {
         id: "s-project-workspaces",

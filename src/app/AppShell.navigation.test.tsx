@@ -17,8 +17,7 @@ import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
-import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
@@ -2228,7 +2227,7 @@ describe("AppShell global navigation", () => {
     multiWorkspaceEnabled,
     expectedAttachments,
   }) => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, multiWorkspaceEnabled);
+    setMultiWorkspaceEnabled(multiWorkspaceEnabled);
     const createSession = deferred<{ sessionId: string }>();
     mockAcpCreateSession.mockReturnValueOnce(createSession.promise);
     const project: ProjectInfo = {

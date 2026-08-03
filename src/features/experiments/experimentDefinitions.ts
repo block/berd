@@ -47,7 +47,6 @@ export interface ExperimentDefinition {
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
 export const VOICE_CONVERSATION_EXPERIMENT_ID = "voice-conversation";
-export const MULTI_WORKSPACE_EXPERIMENT_ID = "multi-workspace";
 
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
@@ -59,11 +58,6 @@ export const EXPERIMENT_DEFINITIONS = [
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
     titleKey: "experiments.builderbot.title",
     descriptionKey: "experiments.builderbot.description",
-  },
-  {
-    id: MULTI_WORKSPACE_EXPERIMENT_ID,
-    titleKey: "experiments.multiWorkspace.title",
-    descriptionKey: "experiments.multiWorkspace.description",
   },
   {
     id: TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,

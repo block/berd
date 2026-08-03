@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
@@ -270,6 +269,7 @@ describe("useChatSessionController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    setMultiWorkspaceEnabled(true);
     mockUseChatSendMessage.mockImplementation(
       async (options?: {
         ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
@@ -827,8 +827,8 @@ describe("useChatSessionController", () => {
     expect(systemPrompt).not.toContain("<active-working-context>");
   });
 
-  it("omits multi-workspace context when the experiment is disabled", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+  it("omits multi-workspace context when the setting is disabled", () => {
+    setMultiWorkspaceEnabled(false);
     mockListSkills.mockResolvedValue([
       {
         id: "project:/tmp/project/.agents/skills/code-review",
@@ -904,7 +904,7 @@ describe("useChatSessionController", () => {
   });
 
   it("passes Berd app skills to normal single-workspace chats", async () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, false);
+    setMultiWorkspaceEnabled(false);
     mockListBerdAppSkills.mockResolvedValue([
       {
         id: "app:/app-data/skills/goose-help",
@@ -1086,7 +1086,7 @@ describe("useChatSessionController", () => {
   });
 
   it("does not seed project workspaces into an existing chat prompt", () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    setMultiWorkspaceEnabled(true);
     useProjectStore.setState({
       projects: [
         {
@@ -1943,7 +1943,7 @@ describe("useChatSessionController", () => {
   });
 
   it("routes a persona-switched builder first send through workspace startup", async () => {
-    setExperimentEnabled(MULTI_WORKSPACE_EXPERIMENT_ID, true);
+    setMultiWorkspaceEnabled(true);
     const onWorkspaceNameRequest = vi.fn();
     const onMessageAccepted = vi.fn();
     useAgentStore.setState({

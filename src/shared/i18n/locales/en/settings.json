@@ -198,10 +198,6 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
-    "multiWorkspace": {
-      "description": "Enable multiple chat and project workspaces, project workspace startup policies, and multi-workspace agent context.",
-      "title": "Multi-workspace chats"
-    },
     "voiceConversation": {
       "description": "Try continuous two-way voice conversations in Goose chats.",
       "title": "Voice conversations"
@@ -289,6 +285,10 @@
     "globalShortcut": {
       "description": "Use your configured global shortcut to create and find chats from anywhere in macOS.",
       "label": "Enable global shortcut"
+    },
+    "multiWorkspace": {
+      "description": "Enable multiple chat and project workspaces, project workspace startup policies, and multi-workspace agent context.",
+      "label": "Multi-workspace support"
     },
     "terminalFallback": {
       "change": "Change",

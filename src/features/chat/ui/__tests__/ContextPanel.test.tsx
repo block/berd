@@ -14,6 +14,7 @@ import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { useChatStore } from "../../stores/chatStore";
 import { getWorkspaceGitContext } from "../widgets/WorkspaceIdentity";
 import { ContextPanel, ContextPanelWorktreeTracker } from "../ContextPanel";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 
 const {
   mockUseGitState,
@@ -336,6 +337,7 @@ describe("ContextPanel", () => {
     vi.clearAllMocks();
     gitStateChangedHandlers.length = 0;
     window.localStorage.clear();
+    setMultiWorkspaceEnabled(true);
     useChatStore.setState({ sessionStateById: {} });
     useChatSessionStore.setState({
       sessions: [],

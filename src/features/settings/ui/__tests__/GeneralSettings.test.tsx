@@ -27,6 +27,7 @@ import type {
 } from "@/shared/runtime-config/schema";
 import { STYLE_GUIDELINES_STORAGE_KEY } from "@/shared/preferences/styleGuidelinesPreference";
 import { GLOBAL_SHORTCUT_ENABLED_STORAGE_KEY } from "@/features/global-shortcut/globalShortcutPreference";
+import { MULTI_WORKSPACE_STORAGE_KEY } from "@/features/workspaces/multiWorkspacePreference";
 import { trustDomain } from "@/shared/lib/trustedDomains";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
@@ -426,6 +427,25 @@ describe("GeneralSettings appearance section", () => {
       expect(localStorage.getItem(RESPONSE_START_GUTTER_STORAGE_KEY)).toBe(
         "true",
       );
+    });
+    expect(switchControl).toBeChecked();
+  });
+
+  it("defaults multi-workspace support off and can enable it", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Multi-workspace support",
+    });
+
+    expect(switchControl).not.toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(localStorage.getItem(MULTI_WORKSPACE_STORAGE_KEY)).toBe("true");
     });
     expect(switchControl).toBeChecked();
   });

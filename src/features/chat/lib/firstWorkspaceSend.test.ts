@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../stores/chatStore";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import type {
   ProjectInfo,
   ProjectWorkspace,
@@ -85,6 +86,7 @@ function session(attachments: WorkspaceAttachment[] = []) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setMultiWorkspaceEnabled(true);
   vi.mocked(rollbackProjectChatWorkspacePlan).mockResolvedValue(undefined);
   useChatStore.setState({ messagesBySession: {}, queuedMessageBySession: {} });
   useChatSessionStore.setState({ sessions: [session()] });

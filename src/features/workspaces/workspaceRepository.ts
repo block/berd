@@ -1,9 +1,8 @@
 import { useMemo } from "react";
-import { MULTI_WORKSPACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
-  getExperiment,
-  useExperiment,
-} from "@/features/experiments/experimentPreferences";
+  getMultiWorkspaceEnabled,
+  useMultiWorkspacePreference,
+} from "@/features/workspaces/multiWorkspacePreference";
 import {
   type ProjectInfo,
   type ProjectWorkspace,
@@ -53,14 +52,6 @@ export interface WorkspaceRepository {
       | null
       | undefined,
   ): WorkspaceSet<ProjectWorkspace>;
-}
-
-function isMultiWorkspaceExperimentEnabled(): boolean {
-  return getExperiment(MULTI_WORKSPACE_EXPERIMENT_ID)?.enabled === true;
-}
-
-function useMultiWorkspaceExperimentEnabled(): boolean {
-  return useExperiment(MULTI_WORKSPACE_EXPERIMENT_ID)?.enabled === true;
 }
 
 function workspaceFromPath(
@@ -179,12 +170,12 @@ function createWorkspaceRepository(mode: WorkspaceMode): WorkspaceRepository {
 
 export function getWorkspaceRepository(): WorkspaceRepository {
   return createWorkspaceRepository(
-    isMultiWorkspaceExperimentEnabled() ? "multi" : "single",
+    getMultiWorkspaceEnabled() ? "multi" : "single",
   );
 }
 
 export function useWorkspaceRepository(): WorkspaceRepository {
-  const isMulti = useMultiWorkspaceExperimentEnabled();
+  const { enabled: isMulti } = useMultiWorkspacePreference();
   return useMemo(
     () => createWorkspaceRepository(isMulti ? "multi" : "single"),
     [isMulti],

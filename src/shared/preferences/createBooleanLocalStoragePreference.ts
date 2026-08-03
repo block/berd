@@ -10,8 +10,10 @@ function readBooleanPreference(
   storageKey: string,
   defaultValue: boolean,
 ): boolean {
+  if (typeof window === "undefined") return defaultValue;
+
   try {
-    const stored = localStorage.getItem(storageKey);
+    const stored = window.localStorage.getItem(storageKey);
     if (stored === "true") {
       return true;
     }
@@ -39,20 +41,23 @@ export function createBooleanLocalStoragePreference({
   };
   let removeWindowListener: (() => void) | undefined;
 
+  const handleStorageChange = (event: StorageEvent) => {
+    if (event.key === storageKey || event.key === null) {
+      notifyListeners();
+    }
+  };
+
   const subscribe = (onStoreChange: () => void) => {
+    if (typeof window === "undefined") return () => {};
+
     listeners.add(onStoreChange);
 
     if (!removeWindowListener) {
-      const handleStorage = (event: StorageEvent) => {
-        if (event.key === storageKey || event.key === null) {
-          notifyListeners();
-        }
-      };
       window.addEventListener(changedEvent, notifyListeners);
-      window.addEventListener("storage", handleStorage);
+      window.addEventListener("storage", handleStorageChange);
       removeWindowListener = () => {
         window.removeEventListener(changedEvent, notifyListeners);
-        window.removeEventListener("storage", handleStorage);
+        window.removeEventListener("storage", handleStorageChange);
       };
     }
 
@@ -66,8 +71,10 @@ export function createBooleanLocalStoragePreference({
   };
 
   const set = (enabled: boolean): void => {
+    if (typeof window === "undefined") return;
+
     try {
-      localStorage.setItem(storageKey, String(enabled));
+      window.localStorage.setItem(storageKey, String(enabled));
     } catch {
       // localStorage can be unavailable in restricted contexts.
     }

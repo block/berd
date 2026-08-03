@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
-  MULTI_WORKSPACE_EXPERIMENT_ID,
   SKILL_DISCOVERY_EXPERIMENT_ID,
   TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
   VOICE_CONVERSATION_EXPERIMENT_ID,
@@ -104,7 +103,6 @@ describe("ExperimentsSettings", () => {
   it("registers only the currently supported experiments", () => {
     expect(EXPERIMENT_DEFINITIONS.map(({ id }) => id)).toEqual([
       BUILDERBOT_SURFACE_EXPERIMENT_ID,
-      MULTI_WORKSPACE_EXPERIMENT_ID,
       TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
       SKILL_DISCOVERY_EXPERIMENT_ID,
       VOICE_CONVERSATION_EXPERIMENT_ID,
