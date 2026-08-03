@@ -69,6 +69,8 @@ import { useChangeSessionFolder } from "@/features/chat/hooks/useChangeSessionFo
 import { supersedePendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import { useChatStore } from "../stores/chatStore";
 import { SessionPullRequestsWidget } from "./widgets/PullRequestsWidget";
+import { RELATED_PULL_REQUESTS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
 import type { WorkspaceRemovalPlan } from "./widgets/WorkspaceRowActionsMenu";
 
@@ -274,6 +276,12 @@ export function ContextPanel({
   onOpenTerminalAtPath,
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
+  const relatedPullRequestsExperiment = useExperiment(
+    RELATED_PULL_REQUESTS_EXPERIMENT_ID,
+  );
+  const relatedPullRequestsEnabled = Boolean(
+    relatedPullRequestsExperiment?.enabled,
+  );
   const workspaceRepository = useWorkspaceRepository();
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
   const [isAddWorkspaceOpen, setIsAddWorkspaceOpen] = useState(false);
@@ -1147,12 +1155,14 @@ export function ContextPanel({
 
       <TabsContent value="changes" className={TAB_CONTENT_CLASS}>
         <div className="w-full pb-4">
-          <SessionPullRequestsWidget
-            sessionId={sessionId}
-            workspacePath={gitTargetPath}
-            isOpen={sectionVisibility.pullRequests}
-            onToggleOpen={() => toggleSection("pullRequests")}
-          />
+          {relatedPullRequestsEnabled && (
+            <SessionPullRequestsWidget
+              sessionId={sessionId}
+              workspacePath={gitTargetPath}
+              isOpen={sectionVisibility.pullRequests}
+              onToggleOpen={() => toggleSection("pullRequests")}
+            />
+          )}
           {shouldShowChanges ? (
             hasWorkspaceAttachments ? (
               <WorkspaceChangesWidget
@@ -1200,46 +1210,16 @@ export function ContextPanel({
 
       <TabsContent value="files" className={TAB_CONTENT_CLASS}>
         <div className="w-full pb-4">
-          <SessionPullRequestsWidget
-            sessionId={sessionId}
-            workspacePath={gitTargetPath}
-            isOpen={sectionVisibility.pullRequests}
-            onToggleOpen={() => toggleSection("pullRequests")}
-          />
-          <FilesList projectWorkingDirs={fileBrowserRoots} />
-        </div>
-              }
+          {relatedPullRequestsEnabled && (
+            <SessionPullRequestsWidget
+              sessionId={sessionId}
+              workspacePath={gitTargetPath}
+              isOpen={sectionVisibility.pullRequests}
+              onToggleOpen={() => toggleSection("pullRequests")}
             />
-          ) : (
-            <ChangesEmptyState message={changesUnavailableMessage} />
           )}
-        </div>
-      </TabsContent>
-
-<<<<<<< HEAD
-      <TabsContent value="files" className={TAB_CONTENT_CLASS}>
-        <FilesList projectWorkingDirs={fileBrowserRoots} />
-||||||| parent of ca0943ec (Keep related pull requests visible across context tabs)
-      <TabsContent
-        value="files"
-        className="scrollbar-none w-full overflow-y-auto"
-      >
-        <FilesList projectWorkingDirs={fileBrowserRoots} />
-=======
-      <TabsContent
-        value="files"
-        className="scrollbar-none w-full overflow-y-auto"
-      >
-        <div className="w-full pb-4">
-          <SessionPullRequestsWidget
-            sessionId={sessionId}
-            workspacePath={gitTargetPath}
-            isOpen={sectionVisibility.pullRequests}
-            onToggleOpen={() => toggleSection("pullRequests")}
-          />
           <FilesList projectWorkingDirs={fileBrowserRoots} />
         </div>
->>>>>>> ca0943ec (Keep related pull requests visible across context tabs)
       </TabsContent>
     </Tabs>
   );
