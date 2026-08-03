@@ -293,6 +293,9 @@ mod tests {
             }
             ("skill", "list") => vec![],
             ("skill", "get") => vec!["--skill-id", "k"],
+            ("feedback", "open") | ("feedback", "submit") => {
+                vec!["--title", "t", "--description", "d"]
+            }
             ("info", "harnesses") => vec![],
             ("info", "models") => vec![],
             ("info", "context") => vec![],
@@ -592,6 +595,7 @@ sees there:
   project   projects             create, list, get, set-startup-mode, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
+  feedback  product feedback     open or submit
   info      read-only lookups    harnesses, models, context
 
 Results are JSON on stdout (pretty-printed; pass --json for raw single-line
@@ -601,13 +605,14 @@ which app-control condition to check.
 Usage: berdctl [OPTIONS] <COMMAND>
 
 Commands:
-  session  Manage chat sessions: create, send, open, list, get, rename, move,
-           move to group, clear project, set worktree, fork, archive
-  project  Manage projects: create, list, get, set startup mode, archive
-  agent    Manage agents (personas): create, list
-  skill    Manage skills: create, list, get
-  info     Look up installed harnesses, available models, and the app context
-  help     Print this message or the help of the given subcommand(s)
+  session   Manage chat sessions: create, send, open, list, get, rename, move,
+            move to group, clear project, set worktree, fork, archive
+  project   Manage projects: create, list, get, set startup mode, archive
+  agent     Manage agents (personas): create, list
+  skill     Manage skills: create, list, get
+  feedback  Open or submit an approved Berd feedback report
+  info      Look up installed harnesses, available models, and the app context
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --json

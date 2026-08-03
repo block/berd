@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
+import { useFeedbackDialogStore } from "@/features/feedback/feedbackDialogStore";
 import { KeyboardShortcutsDialog } from "@/features/shortcuts/ui/KeyboardShortcutsDialog";
 import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
@@ -3863,21 +3864,26 @@ export function AppShell({
     setRightRailOpen(!isRightRailOpen);
   }, [activeSessionId, isRightRailOpen, setRightRailOpen]);
 
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const feedbackOpen = useFeedbackDialogStore((state) => state.open);
+  const feedbackDraft = useFeedbackDialogStore((state) => state.draft);
+  const openFeedbackDialog = useFeedbackDialogStore(
+    (state) => state.openDialog,
+  );
+  const setFeedbackOpen = useFeedbackDialogStore((state) => state.setOpen);
   const shortcutsOpen = useShortcutsDialogStore((state) => state.open);
   const setShortcutsOpen = useShortcutsDialogStore((state) => state.setOpen);
   const handleFeedbackClick = useCallback(() => {
     if (!isFeedbackEnabled) {
       return;
     }
-    setFeedbackOpen(true);
-  }, [isFeedbackEnabled]);
+    openFeedbackDialog();
+  }, [isFeedbackEnabled, openFeedbackDialog]);
 
   useEffect(() => {
     if (!isFeedbackEnabled) {
       setFeedbackOpen(false);
     }
-  }, [isFeedbackEnabled]);
+  }, [isFeedbackEnabled, setFeedbackOpen]);
 
   const startupIssue = useMemo(
     () =>
@@ -4630,7 +4636,11 @@ export function AppShell({
         onSave={() => void saveAutomationLeave()}
       />
       {isFeedbackEnabled ? (
-        <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+        <FeedbackDialog
+          open={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          draft={feedbackDraft}
+        />
       ) : null}
       <KeyboardShortcutsDialog
         open={shortcutsOpen}

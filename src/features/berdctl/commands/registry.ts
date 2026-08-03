@@ -20,11 +20,13 @@ import { listSessionsCommand } from "./impl/listSessions";
 import { listSkillsCommand } from "./impl/listSkills";
 import { moveSessionCommand } from "./impl/moveSession";
 import { moveSessionToGroupCommand } from "./impl/moveSessionToGroup";
+import { openFeedbackCommand } from "./impl/openFeedback";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
 import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
 import { setSessionWorktreeCommand } from "./impl/setSessionWorktree";
+import { submitFeedbackCommand } from "./impl/submitFeedback";
 import { commandBridgeTimeoutMs } from "./timeouts";
 import { CommandError, type CommandContext, type ToolGroup } from "./types";
 
@@ -121,6 +123,18 @@ export const TOOL_GROUPS = {
       create: createSkillCommand,
       list: listSkillsCommand,
       get: getSkillCommand,
+    },
+  },
+  feedback: {
+    description:
+      "Open an approved report in Berd's feedback form or submit it directly after explicit user approval.",
+    cli: {
+      noun: "feedback",
+      about: "Open or submit an approved Berd feedback report",
+    },
+    actions: {
+      open: openFeedbackCommand,
+      submit: submitFeedbackCommand,
     },
   },
   info: {

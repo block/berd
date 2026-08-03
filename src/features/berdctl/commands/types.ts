@@ -84,6 +84,9 @@ export const COMMAND_ERROR_CODES = [
   "git_inspection_failed",
   "workspace_cleanup_failed",
   "focus_failed",
+  "feedback_disabled",
+  "feedback_form_busy",
+  "feedback_submission_failed",
   "timed_out",
   "internal_error",
 ] as const;

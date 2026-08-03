@@ -799,6 +799,115 @@
         }
       }
     },
+    "feedback": {
+      "description": "Open an approved report in Berd's feedback form or submit it directly after explicit user approval.",
+      "actions": {
+        "open": {
+          "description": "Open Berd's existing feedback form with the supplied title and description ready for optional hand editing. Nothing is submitted. Logs and Doctor diagnostics are selected only when --include-logs is explicitly passed.",
+          "fields": [
+            {
+              "name": "title",
+              "required": true,
+              "kind": "string",
+              "description": "Report title to prefill in the feedback form (1-200 chars).",
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "description",
+              "required": true,
+              "kind": "string",
+              "description": "Report description to prefill in the feedback form (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "include_logs",
+              "required": false,
+              "kind": "boolean",
+              "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "title": {
+                "description": "Report title to prefill in the feedback form (1-200 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": {
+                "description": "Report description to prefill in the feedback form (1-50000 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000
+              },
+              "include_logs": {
+                "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false.",
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": ["title", "description"],
+            "additionalProperties": false
+          }
+        },
+        "submit": {
+          "description": "Submit the supplied approved report without opening the feedback form. Use this only after the user explicitly asks to file, send, or submit it. Berd immediately shows success or failure in the app. Logs and Doctor diagnostics are attached only when --include-logs is explicitly passed.",
+          "fields": [
+            {
+              "name": "title",
+              "required": true,
+              "kind": "string",
+              "description": "Approved report title to submit (1-200 chars).",
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "description",
+              "required": true,
+              "kind": "string",
+              "description": "Approved report description to submit (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "include_logs",
+              "required": false,
+              "kind": "boolean",
+              "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "title": {
+                "description": "Approved report title to submit (1-200 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": {
+                "description": "Approved report description to submit (1-50000 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000
+              },
+              "include_logs": {
+                "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false.",
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": ["title", "description"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     "info": {
       "description": "Read-only app information: installed agent harnesses, available models, and the current app context.",
       "actions": {

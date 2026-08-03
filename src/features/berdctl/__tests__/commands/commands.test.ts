@@ -542,6 +542,8 @@ describe("action schemas", () => {
       "skills.create": { name: "Skill", description: "Does X", content: "#" },
       "skills.list": {},
       "skills.get": { skill_id: "global:/skills/x" },
+      "feedback.open": { title: "Bug", description: "Details" },
+      "feedback.submit": { title: "Bug", description: "Details" },
       "info.list_harnesses": {},
       "info.list_models": {},
       "info.get_context": {},
@@ -3405,5 +3407,23 @@ describe("info", () => {
     expect(result.active_session_id).toBe("session-2");
     expect(result.active_project_id).toBe("project-9");
     expect(result.app_version.length).toBeGreaterThan(0);
+  });
+});
+
+describe("feedback schemas", () => {
+  it("requires bounded report content and defaults diagnostics off", () => {
+    for (const action of ["open", "submit"] as const) {
+      const schema = TOOL_GROUPS.feedback.actions[action].schema;
+      expect(
+        schema.safeParse({ title: "Bug", description: "Details" }),
+      ).toMatchObject({ success: true, data: { include_logs: false } });
+      expect(
+        schema.safeParse({ title: "", description: "Details" }).success,
+      ).toBe(false);
+      expect(
+        schema.safeParse({ title: "Bug", description: "x".repeat(50_001) })
+          .success,
+      ).toBe(false);
+    }
   });
 });

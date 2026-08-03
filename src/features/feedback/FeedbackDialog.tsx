@@ -2,15 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { type DoctorReport, runDoctor } from "@/shared/api/doctor";
-import {
-  FeedbackSubmissionError,
-  submitFeedbackIssue,
-} from "@/shared/api/feedback";
-import { getPlatform } from "@/shared/lib/platform";
-import { trackFeedbackSubmitted } from "@/shared/telemetry/client";
 import { Button } from "@/shared/ui/button";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -26,11 +19,15 @@ import {
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
+import type { FeedbackDraft } from "./feedbackDialogStore";
+import { getFeedbackSubmitErrorMessage } from "./feedbackErrors";
+import { submitFeedbackReport } from "./submitFeedbackReport";
 import { useFeedbackImageAttachments } from "./useFeedbackImageAttachments";
 
 interface FeedbackDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  draft?: FeedbackDraft | null;
 }
 
 const FEEDBACK_FORM_ID = "feedback-form";
@@ -39,21 +36,11 @@ interface SuccessState {
   issueUrl?: string;
 }
 
-function buildEnhancedDescription(
-  description: string,
-  version: string,
-  platform: string,
-): string {
-  return [
-    description,
-    "",
-    "---",
-    `App version: ${version}`,
-    `Platform: ${platform}`,
-  ].join("\n");
-}
-
-export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
+export function FeedbackDialog({
+  open,
+  onOpenChange,
+  draft,
+}: FeedbackDialogProps) {
   const { t } = useTranslation("feedback");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -126,9 +113,14 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
 
   useEffect(() => {
     if (open) {
+      setTitle(draft?.title ?? "");
+      setDescription(draft?.description ?? "");
+      setIncludeLogs(draft?.includeLogs ?? false);
+      setError(null);
+      setSuccess(null);
       startDoctorCheck();
     }
-  }, [open, startDoctorCheck]);
+  }, [draft, open, startDoctorCheck]);
 
   const handleClose = () => {
     if (submitting) {
@@ -149,36 +141,18 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
     setSubmitting(true);
     setError(null);
     try {
-      let version: string;
-      try {
-        version = await getVersion();
-      } catch {
-        version = "unknown";
-      }
-      const platform = getPlatform();
-      const enhancedDescription = buildEnhancedDescription(
-        trimmedDescription,
-        version,
-        platform,
-      );
-      // Only the diagnostic zip carries the doctor output, so we only wait on
-      // the (pre-warmed) doctor check when the user opted into attaching logs.
-      const doctorReport = includeLogs
-        ? ((await doctorReportRef.current) ?? null)
-        : null;
-      const result = await submitFeedbackIssue({
+      const result = await submitFeedbackReport({
         title: trimmedTitle,
-        description: enhancedDescription,
+        description: trimmedDescription,
         attachmentPaths,
         attachmentFiles,
         includeLogs,
-        doctorReport,
+        doctorReportPromise: doctorReportRef.current,
       });
-      trackFeedbackSubmitted();
       clearAttachments();
       setSuccess({ issueUrl: result.issueUrl });
     } catch (submitError) {
-      const message = getSubmitErrorMessage(submitError, t);
+      const message = getFeedbackSubmitErrorMessage(submitError, t);
       setError(message);
       toast.error(message);
     } finally {
@@ -427,23 +401,4 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       />
     </>
   );
-}
-
-function getSubmitErrorMessage(
-  error: unknown,
-  t: (key: string) => string,
-): string {
-  if (
-    error instanceof FeedbackSubmissionError &&
-    error.code === "networkAccess"
-  ) {
-    return t("dialog.networkAccessError");
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return t("dialog.submitError");
 }

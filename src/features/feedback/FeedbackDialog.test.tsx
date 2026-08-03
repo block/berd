@@ -65,6 +65,25 @@ describe("FeedbackDialog", () => {
     vi.restoreAllMocks();
   });
 
+  it("prefills an agent-authored draft without submitting it", async () => {
+    render(
+      <FeedbackDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        draft={{
+          title: "Draft title",
+          description: "Draft details",
+          includeLogs: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Title")).toHaveValue("Draft title");
+    expect(screen.getByLabelText("Description")).toHaveValue("Draft details");
+    expect(screen.getByLabelText(/Attach logs and diagnostics/i)).toBeChecked();
+    expect(submitFeedbackIssue).not.toHaveBeenCalled();
+  });
+
   it("renders the WARP-specific message for network access failures", async () => {
     const user = userEvent.setup();
     vi.mocked(submitFeedbackIssue).mockRejectedValueOnce(

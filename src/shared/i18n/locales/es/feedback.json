@@ -1,5 +1,13 @@
 {
   "title": "Enviar comentarios",
+  "direct": {
+    "submittingTitle": "Enviando comentarios…",
+    "submittingBody": "Preparando y enviando el informe aprobado.",
+    "successTitle": "Comentarios enviados",
+    "successBody": "Tu informe fue enviado al equipo de Berd.",
+    "successWithUrl": "Tu informe está listo para ver.",
+    "failureTitle": "No se enviaron los comentarios"
+  },
   "dialog": {
     "title": "Enviar comentarios",
     "description": "Ayúdanos a mejorar Berd con errores o comentarios.",

@@ -135,6 +135,22 @@
         }
       }
     },
+    "feedback": {
+      "group": "feedback",
+      "about": "Open or submit an approved Berd feedback report",
+      "verbs": {
+        "open": {
+          "action": "open",
+          "about": "Open the feedback form with a report prefilled",
+          "afterHelp": "Example:\n  berdctl feedback open --title \"Composer loses draft\" \\\n    --description \"Steps to reproduce...\" --include-logs --json\n\nResult:\n  {\"opened\":true,\"include_logs\":true} — the existing feedback form is visible\n  for review and optional image attachments; nothing was submitted."
+        },
+        "submit": {
+          "action": "submit",
+          "about": "Submit an approved report directly to the Berd team",
+          "afterHelp": "Example:\n  berdctl feedback submit --title \"Composer loses draft\" \\\n    --description \"Steps to reproduce...\" --include-logs --json\n\nResult:\n  {\"submitted\":true,\"include_logs\":true,\"issue_url\":\"https://...\"}\n  issue_url is omitted when the feedback service does not return one."
+        }
+      }
+    },
     "info": {
       "group": "info",
       "about": "Look up installed harnesses, available models, and the app context",

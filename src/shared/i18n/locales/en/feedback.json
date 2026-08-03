@@ -1,5 +1,13 @@
 {
   "title": "Send Feedback",
+  "direct": {
+    "submittingTitle": "Submitting feedback…",
+    "submittingBody": "Preparing and sending the approved report.",
+    "successTitle": "Feedback submitted",
+    "successBody": "Your report was sent to the Berd team.",
+    "successWithUrl": "Your report is ready to view.",
+    "failureTitle": "Feedback wasn’t submitted"
+  },
   "dialog": {
     "title": "Submit feedback",
     "description": "Help us improve Berd with bugs or feedback.",
