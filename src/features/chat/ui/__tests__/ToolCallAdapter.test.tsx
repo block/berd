@@ -130,9 +130,9 @@ describe("ToolCallAdapter — ArtifactActions", () => {
 describe("ToolCallAdapter — expanded body", () => {
   it("renders the tool name and status badge in the header", () => {
     renderAdapter();
-    expect(
-      screen.getByRole("button", { name: /Write_file/i }),
-    ).toBeInTheDocument();
+    const header = screen.getByRole("button", { name: /Write_file/i });
+    expect(header).toBeInTheDocument();
+    expect(screen.getByText("Write_file")).toHaveClass("text-muted-foreground");
   });
 
   it("sentence-cases the tool title and renames shell to Running command", () => {
@@ -166,7 +166,7 @@ describe("ToolCallAdapter — expanded body", () => {
 
   it("renders the error result when isError is true", () => {
     renderAdapter({ open: true, isError: true, result: "Boom" });
-    expect(screen.getByText("Boom")).toBeInTheDocument();
+    expect(screen.getByText("Boom")).toHaveClass("text-destructive");
   });
 });
 

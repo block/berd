@@ -468,17 +468,18 @@ describe("MessageTimeline", () => {
     const workRow = screen.getByTestId(
       "virtual-transcript-row-message:assistant-1:agent-work",
     );
-    expect(workRow).toHaveTextContent("4 previous steps");
+    expect(workRow).toHaveTextContent("5 previous steps");
     expect(workRow).not.toHaveTextContent("Planning");
     expect(workRow).not.toHaveTextContent("Checking git branch status");
     expect(workRow).not.toHaveTextContent(
       "Reviewing transcript projection tests",
     );
     expect(workRow).not.toHaveTextContent("Running targeted tests");
+    expect(workRow).not.toHaveTextContent("Checking virtual timeline behavior");
     // The preview is a chronological window: text stays in stream order
     // between the tool calls instead of being pinned to the bottom.
     expect(workRow).toHaveTextContent(
-      "Checking virtual timeline behaviorWriting review summaryStreaming answerRecording diagnostics",
+      "Writing review summaryStreaming answerRecording diagnostics",
     );
     // While streaming there is no settled header trigger; the only
     // collapsible trigger inside the row is the nested hidden-steps one.
@@ -490,7 +491,7 @@ describe("MessageTimeline", () => {
     ).toHaveAttribute("data-state", "open");
     expect(workRow.querySelector(".max-h-\\[18rem\\]")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "4 previous steps" }));
+    fireEvent.click(screen.getByRole("button", { name: "5 previous steps" }));
     expect(workRow).toHaveTextContent("Planning");
     expect(workRow).toHaveTextContent("Checking git branch status");
 

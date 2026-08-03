@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   IconChevronRight,
   IconCircle,
@@ -66,7 +67,7 @@ type AgentWorkTimelineItem =
 
 const AGENT_THOUGHT_MARKDOWN_CLASSNAME =
   "[&_*]:font-normal [&_strong]:font-normal [&_b]:font-normal [&_h1]:font-normal [&_h2]:font-normal [&_h3]:font-normal [&_h4]:font-normal [&_h5]:font-normal [&_h6]:font-normal [&_strong]:text-foreground/75 [&_b]:text-foreground/75 [&_h1]:text-foreground/75 [&_h2]:text-foreground/75 [&_h3]:text-foreground/75 [&_h4]:text-foreground/75 [&_h5]:text-foreground/75 [&_h6]:text-foreground/75 [&_h1]:mb-0 [&_h2]:mb-0 [&_h3]:mb-0 [&_h4]:mb-0 [&_h5]:mb-0 [&_h6]:mb-0 [&_h1+p]:mt-0 [&_h2+p]:mt-0 [&_h3+p]:mt-0 [&_h4+p]:mt-0 [&_h5+p]:mt-0 [&_h6+p]:mt-0 [&_p:has(>strong:only-child)]:mb-0 [&_p:has(>b:only-child)]:mb-0 [&_p:has(>strong:only-child)+p]:mt-0 [&_p:has(>b:only-child)+p]:mt-0";
-const COMPACT_ACTIVE_PREVIEW_ITEM_COUNT = 4;
+const COMPACT_ACTIVE_PREVIEW_ITEM_COUNT = 3;
 
 function normalizeText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
@@ -192,11 +193,11 @@ function getRailColor(
   status: "thought" | "progress" | ToolCallStatus,
   primary = false,
 ): string {
+  if (status !== "thought" && status !== "progress") {
+    return "text-muted-foreground";
+  }
   if (primary) {
     return "text-foreground";
-  }
-  if (status === "pending" || status === "in_progress") {
-    return "text-foreground/70";
   }
   return "text-muted-foreground/80";
 }
@@ -311,7 +312,7 @@ function AgentWorkItemRow({
   const status = getToolStatus(item);
   return (
     <div className="flex gap-2.5">
-      <WorkRail isLast={isLast} status={status} primary={usePrimaryText} />
+      <WorkRail isLast={isLast} status={status} />
       <div className="min-w-0 flex-1 pb-2">
         <ToolCallAdapter
           name={getToolName(item)}
@@ -324,20 +325,10 @@ function AgentWorkItemRow({
           startedAt={item.request?.startedAt}
           showStatusBadge={false}
           fitWidth
-          className={cn(
-            usePrimaryText
-              ? "text-foreground [&_button[data-clickable-file]]:text-foreground [&_[data-tool-title-hoisted]]:text-foreground [&_[data-tool-title-prefix]]:text-foreground [&_dd]:text-foreground [&_dt]:text-foreground [&_pre]:text-foreground [&_code]:text-foreground"
-              : "text-muted-foreground [&_button[data-clickable-file]]:text-foreground/70 [&_[data-tool-title-hoisted]]:text-foreground/70 [&_[data-tool-title-prefix]]:text-foreground/75 [&_dd]:text-muted-foreground [&_pre]:text-muted-foreground [&_code]:text-muted-foreground",
-          )}
-          titleClassName={cn(
-            "font-normal",
-            usePrimaryText ? "text-foreground" : "text-foreground/75",
-          )}
-          chevronClassName={
-            usePrimaryText ? "text-foreground" : "text-muted-foreground/80"
-          }
+          className="text-muted-foreground [&_button[data-clickable-file]]:text-muted-foreground [&_[data-tool-title-hoisted]]:text-muted-foreground [&_[data-tool-title-prefix]]:text-muted-foreground [&_code]:text-muted-foreground [&_dd]:text-muted-foreground [&_dt]:text-muted-foreground"
+          titleClassName="font-normal text-muted-foreground"
+          chevronClassName="text-muted-foreground"
           agentWorkLayout
-          agentWorkUsePrimaryText={usePrimaryText}
         />
       </div>
     </div>
@@ -352,6 +343,7 @@ export function AgentWorkPanel({
   settleOnMount?: boolean;
 }) {
   const { t } = useTranslation("chat");
+  const prefersReducedMotion = useReducedMotion();
   const items = useMemo(
     () => buildAgentWorkTimeline(payload.content),
     [payload.content],
@@ -470,54 +462,116 @@ export function AgentWorkPanel({
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="min-h-0 space-y-0">
             {shouldShowPreviousSteps ? (
-              <Collapsible
-                open={previousStepsOpen}
-                onOpenChange={setPreviousStepsOpen}
+              <motion.div
+                key="previous-steps"
+                initial={prefersReducedMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={
+                  prefersReducedMotion
+                    ? { duration: 0 }
+                    : {
+                        duration: 0.18,
+                        ease: [0.215, 0.61, 0.355, 1],
+                      }
+                }
               >
-                <CollapsibleTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    flush
-                    size="sm"
-                    className="mb-1 flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
-                    rightIcon={
-                      <IconChevronRight
-                        aria-hidden
-                        className={cn(
-                          "size-3.5 transition-transform",
-                          previousStepsOpen && "rotate-90",
-                        )}
+                <Collapsible
+                  open={previousStepsOpen}
+                  onOpenChange={setPreviousStepsOpen}
+                >
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      flush
+                      size="sm"
+                      className="mb-1 flex h-auto w-full justify-start rounded-md px-0 py-2 text-left"
+                      rightIcon={
+                        <IconChevronRight
+                          aria-hidden
+                          className={cn(
+                            "size-3.5 transition-transform",
+                            previousStepsOpen && "rotate-90",
+                          )}
+                        />
+                      }
+                    >
+                      <span className="text-sm tabular-nums">
+                        {t("agent_work.summary.previousSteps", {
+                          count: hiddenStepCount,
+                        })}
+                      </span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+                    {hiddenItems.map((item) => (
+                      <AgentWorkItemRow
+                        key={item.key}
+                        item={item}
+                        isLast={false}
+                        usePrimaryText={open}
                       />
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+              </motion.div>
+            ) : null}
+            <motion.div
+              key="live-steps"
+              layout={prefersReducedMotion ? false : "position"}
+              data-role="agent-work-live-steps"
+              className="relative"
+              transition={
+                prefersReducedMotion
+                  ? { duration: 0 }
+                  : {
+                      type: "spring",
+                      duration: 0.26,
+                      bounce: 0,
+                    }
+              }
+            >
+              <AnimatePresence initial={false} mode="popLayout">
+                {visibleItems.map((item, index) => (
+                  <motion.div
+                    key={item.key}
+                    layout={prefersReducedMotion ? false : "position"}
+                    initial={
+                      prefersReducedMotion ? false : { opacity: 0, y: 4 }
+                    }
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={
+                      prefersReducedMotion ? undefined : { opacity: 0, y: -4 }
+                    }
+                    transition={
+                      prefersReducedMotion
+                        ? { duration: 0 }
+                        : {
+                            layout: {
+                              type: "spring",
+                              duration: 0.26,
+                              bounce: 0,
+                            },
+                            opacity: {
+                              duration: 0.18,
+                              ease: [0.215, 0.61, 0.355, 1],
+                            },
+                            y: {
+                              duration: 0.22,
+                              ease: [0.215, 0.61, 0.355, 1],
+                            },
+                          }
                     }
                   >
-                    <span className="text-sm">
-                      {t("agent_work.summary.previousSteps", {
-                        count: hiddenStepCount,
-                      })}
-                    </span>
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-                  {hiddenItems.map((item) => (
                     <AgentWorkItemRow
-                      key={item.key}
                       item={item}
-                      isLast={false}
+                      isLast={index === visibleItems.length - 1}
                       usePrimaryText={open}
                     />
-                  ))}
-                </CollapsibleContent>
-              </Collapsible>
-            ) : null}
-            {visibleItems.map((item, index) => (
-              <AgentWorkItemRow
-                key={item.key}
-                item={item}
-                isLast={index === visibleItems.length - 1}
-                usePrimaryText={open}
-              />
-            ))}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
           </div>
         </CollapsibleContent>
       </div>

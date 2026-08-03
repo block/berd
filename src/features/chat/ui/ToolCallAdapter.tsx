@@ -45,7 +45,6 @@ interface ToolCallAdapterProps {
   titleClassName?: string;
   chevronClassName?: string;
   agentWorkLayout?: boolean;
-  agentWorkUsePrimaryText?: boolean;
 }
 
 function useElapsedTime(status: ToolCallStatus, startedAt?: number) {
@@ -280,29 +279,19 @@ function AgentWorkToolSection({
   label,
   value,
   destructive = false,
-  usePrimaryText = false,
 }: {
   label: string;
   value: string | null;
   destructive?: boolean;
-  usePrimaryText?: boolean;
 }) {
   if (!value || value.trim().length === 0) return null;
 
   return (
     <section className="space-y-1.5">
+      <div className="text-xs font-normal text-muted-foreground">{label}</div>
       <div
         className={cn(
-          "text-xs font-normal",
-          usePrimaryText ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        {label}
-      </div>
-      <div
-        className={cn(
-          "rounded-sm bg-muted/30 px-3 py-2",
-          usePrimaryText ? "text-foreground" : "text-muted-foreground",
+          "rounded-sm bg-muted/30 px-3 py-2 text-muted-foreground",
           destructive && "text-destructive",
         )}
       >
@@ -353,7 +342,6 @@ export function ToolCallAdapter({
   titleClassName,
   chevronClassName,
   agentWorkLayout = false,
-  agentWorkUsePrimaryText = false,
 }: ToolCallAdapterProps) {
   const { t } = useTranslation("chat");
   const elapsed = useElapsedTime(status, startedAt);
@@ -422,7 +410,7 @@ export function ToolCallAdapter({
           aria-label={t("tools.openNamed", {
             name: headerTitleParts.fileLabel,
           })}
-          className="inline truncate text-foreground underline-offset-2 hover:underline"
+          className="inline truncate text-muted-foreground underline-offset-2 hover:underline"
         >
           {headerTitleParts.fileLabel}
         </button>
@@ -437,7 +425,7 @@ export function ToolCallAdapter({
       <span aria-hidden="true" className="text-muted-foreground">
         {" · "}
       </span>
-      <span data-tool-title-hoisted className="truncate text-foreground">
+      <span data-tool-title-hoisted className="truncate text-muted-foreground">
         {(result ?? "").trim()}
       </span>
     </>
@@ -467,7 +455,6 @@ export function ToolCallAdapter({
   const structuredDetails = hasStructuredContent
     ? formatToolValue(structuredContent)
     : null;
-
   return (
     <div className={cn("w-full min-w-0 max-w-full", className)}>
       <Tool open={open} onOpenChange={onOpenChange}>
@@ -479,35 +466,34 @@ export function ToolCallAdapter({
           showIcon={false}
           showStatusBadge={showStatusBadge}
           showChevron={showChevron}
-          titleClassName={titleClassName}
+          titleClassName={cn("text-muted-foreground", titleClassName)}
           chevronClassName={chevronClassName}
           splitTrigger={canOpenHeaderFile}
           layout={fitWidth ? "fit" : "fill"}
           elapsedSeconds={elapsedSeconds}
         />
-        <ToolContent>
+        <ToolContent
+          data-role="tool-call-content"
+          className="text-muted-foreground [&_button]:text-muted-foreground [&_code]:text-muted-foreground [&_dd]:text-muted-foreground [&_dt]:text-muted-foreground [&_span]:text-muted-foreground"
+        >
           {agentWorkLayout ? (
             <div className="space-y-3 py-1">
               <AgentWorkToolSection
                 label={t("tools.inputSummary.command")}
                 value={commandRow?.value ?? null}
-                usePrimaryText={agentWorkUsePrimaryText}
               />
               <AgentWorkToolSection
                 label={t("tools.input")}
                 value={inputDetails ?? rawInputDetails}
-                usePrimaryText={agentWorkUsePrimaryText}
               />
               <AgentWorkToolSection
                 label={isError ? t("tools.error") : t("tools.result")}
                 value={resultDetails}
                 destructive={isError}
-                usePrimaryText={agentWorkUsePrimaryText}
               />
               <AgentWorkToolSection
                 label={t("tools.structuredContent")}
                 value={structuredDetails}
-                usePrimaryText={agentWorkUsePrimaryText}
               />
             </div>
           ) : showCombinedSurface ? (
@@ -516,6 +502,7 @@ export function ToolCallAdapter({
                 input={args}
                 showLabel={false}
                 embedded
+                className="[&_pre]:text-muted-foreground"
                 summary={({ isOpen }) => (
                   <InputSummary rows={summaryRows} isOpen={isOpen} />
                 )}

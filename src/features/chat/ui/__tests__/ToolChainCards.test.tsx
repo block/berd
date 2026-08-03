@@ -645,6 +645,22 @@ describe("ToolChainCards", () => {
       '[data-role="tool-chain-step"]',
     );
     expect(afterRows.length).toBe(beforeRows.length + 2);
+
+    // Assert the accessibility state at the synchronous start of the exit.
+    // Awaiting userEvent here can outlast the short animation on slower CI
+    // workers, leaving no exiting node to inspect.
+    fireEvent.click(
+      screen.getByRole("button", { name: /hide internal steps \(2\)/i }),
+    );
+
+    const exitingSteps = container.querySelector(
+      '[data-role="tool-chain-internal-steps"]',
+    );
+    if (!exitingSteps) {
+      throw new Error("expected internal steps to remain during exit motion");
+    }
+    expect(exitingSteps).toHaveAttribute("aria-hidden", "true");
+    expect(exitingSteps).toHaveAttribute("inert");
   });
 
   it("removes the heavy parent card chrome around the chain wrapper", () => {

@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  AnimatePresence,
+  motion,
+  useIsPresent,
+  useReducedMotion,
+} from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, CircleIcon, ClockIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -39,7 +45,7 @@ const STEP_BULLET_CLASS: Record<
   Exclude<ToolCallStatus, "failed" | "stopped">,
   string
 > = {
-  pending: "text-muted-foreground/70",
+  pending: "text-muted-foreground",
   in_progress: "text-muted-foreground animate-pulse",
   completed: "text-muted-foreground",
 };
@@ -183,6 +189,54 @@ function getFallbackToolChainStateId(
   return toolItems.map((item) => item.key).join("|") || "tool-chain";
 }
 
+function InternalStepsContent({
+  children,
+  reduceMotion,
+}: {
+  children: ReactNode;
+  reduceMotion: boolean;
+}) {
+  const isPresent = useIsPresent();
+
+  return (
+    <motion.div
+      data-role="tool-chain-internal-steps"
+      initial={reduceMotion ? false : { opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : { duration: 0.18, ease: [0.215, 0.61, 0.355, 1] }
+      }
+      aria-hidden={isPresent ? undefined : true}
+      inert={isPresent ? undefined : true}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function InternalStepsTransition({
+  children,
+  reduceMotion,
+  show,
+}: {
+  children: ReactNode;
+  reduceMotion: boolean;
+  show: boolean;
+}) {
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      {show && (
+        <InternalStepsContent key="internal-steps" reduceMotion={reduceMotion}>
+          {children}
+        </InternalStepsContent>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export function ToolChainCards({
   chainId,
   toolItems,
@@ -196,6 +250,7 @@ export function ToolChainCards({
   detailOnly?: boolean;
   externalChainExpanded?: boolean;
 }) {
+  const prefersReducedMotion = useReducedMotion();
   const { t } = useTranslation("chat");
   // Every viewable file this chain touched. Chips are the single way back into
   // the viewer for a chain: they render for any count and stay put when the
@@ -487,13 +542,17 @@ export function ToolChainCards({
             </div>
           </div>
         )}
-        {showInternalSteps &&
-          hiddenItems.map((item, index) =>
+        <InternalStepsTransition
+          reduceMotion={prefersReducedMotion === true}
+          show={showInternalSteps}
+        >
+          {hiddenItems.map((item, index) =>
             renderToolItem(item, {
               withRail: true,
               isLastInChain: index === hiddenItems.length - 1,
             }),
           )}
+        </InternalStepsTransition>
       </div>
     );
   }
@@ -560,7 +619,7 @@ export function ToolChainCards({
             setChainExpanded((prev) => !prev);
           }}
           aria-expanded={chainExpanded}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-sm font-medium text-foreground"
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-sm font-medium text-muted-foreground"
         >
           <span
             aria-hidden="true"
@@ -642,13 +701,17 @@ export function ToolChainCards({
             </div>
           )}
 
-          {showInternalSteps &&
-            hiddenItems.map((item, index) =>
+          <InternalStepsTransition
+            reduceMotion={prefersReducedMotion === true}
+            show={showInternalSteps}
+          >
+            {hiddenItems.map((item, index) =>
               renderToolItem(item, {
                 withRail: true,
                 isLastInChain: index === hiddenItems.length - 1,
               }),
             )}
+          </InternalStepsTransition>
         </div>
       )}
     </section>
