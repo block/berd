@@ -8,13 +8,14 @@ import {
 } from "./lib/providerConnectionPolicy";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
 /**
  * Providers eligible for default-provider recovery: Goose reports them
- * configured AND either a stored Goose credential exists (API key or OAuth
- * token) or the provider is a user-created custom provider. Merely
- * "Configured" non-secret endpoints and runtime-managed providers (e.g.
- * databricks_v2 via runtime config) never satisfy the readiness gate.
+ * configured AND they have deliberate setup evidence: a stored Goose
+ * credential, a user-created custom provider, or a distribution-managed
+ * endpoint. Merely appearing in runtime inventory or having ambient/default
+ * setup values does not satisfy the readiness gate.
  */
 export async function getIntentionalConfiguredProviderIds(
   statuses: Awaited<ReturnType<typeof checkAllProviderStatus>>,
@@ -27,12 +28,21 @@ export async function getIntentionalConfiguredProviderIds(
   const credentialedIds = getCredentialedProviderIds(
     await listProviderSecrets(),
   );
+  const runtimeConfiguredIds = new Set(
+    useRuntimeConfigStore
+      .getState()
+      .config.goose.modelProviders.filter(
+        (provider) => provider.endpointEnv != null,
+      )
+      .map((provider) => provider.id),
+  );
   return getModelProviders()
     .filter(
       (provider) =>
         configuredIds.has(provider.id) &&
         (isCredentialedProvider(provider, credentialedIds) ||
-          provider.customProvider === true),
+          provider.customProvider === true ||
+          runtimeConfiguredIds.has(provider.id)),
     )
     .map((provider) => provider.id);
 }

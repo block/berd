@@ -9,6 +9,8 @@ import { getClient } from "@/shared/api/acpConnection";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useProviderCatalogStore } from "./stores/providerCatalogStore";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: vi.fn(),
@@ -128,6 +130,15 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      config: DEFAULT_RUNTIME_CONFIG,
+      result: {
+        status: "ready",
+        source: "appDefault",
+        config: DEFAULT_RUNTIME_CONFIG,
+      },
+    });
     useProviderCatalogStore.getState().mergeEntries([
       {
         id: "openai",
@@ -145,6 +156,15 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
             required: true,
           },
         ],
+      },
+      {
+        id: "databricks_v2",
+        displayName: "Databricks AI Gateway",
+        category: "model",
+        description: "Managed Databricks models",
+        setupMethod: "host_with_oauth_fallback",
+        group: "default",
+        catalogSource: "runtime",
       },
       {
         id: "lmstudio",
@@ -223,7 +243,7 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     expect(defaultsSave).not.toHaveBeenCalled();
   });
 
-  it("returns null when only ambient or runtime providers are configured", async () => {
+  it("restores a configured runtime-managed provider when defaults were lost", async () => {
     mockClientWithStatuses(
       [status("lmstudio", true), status("databricks_v2", true)],
       [],
@@ -231,7 +251,14 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
 
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
-    ).resolves.toBeNull();
-    expect(defaultsSave).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "gpt-4o",
+      modelName: "gpt-4o",
+    });
+    expect(defaultsSave).toHaveBeenCalledWith({
+      providerId: "databricks_v2",
+      modelId: "gpt-4o",
+    });
   });
 });
