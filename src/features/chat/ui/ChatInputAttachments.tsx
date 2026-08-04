@@ -10,6 +10,7 @@ import type {
   ChatImageAttachmentDraft,
 } from "@/shared/types/messages";
 import { ComposerChip } from "./ComposerChip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 function DraftImageAttachment({
   attachment,
@@ -26,19 +27,23 @@ function DraftImageAttachment({
 
   return (
     <div className="group relative inline-block">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="block cursor-pointer rounded-sm"
-        aria-label={t("attachments.view", { index: attachmentIndex + 1 })}
-        title={attachment.path ?? attachment.name}
-      >
-        <img
-          src={attachment.previewUrl}
-          alt={t("attachments.alt", { index: attachmentIndex + 1 })}
-          className="h-16 w-16 rounded-sm border border-border/80 object-cover"
-        />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onOpen}
+            className="block cursor-pointer rounded-sm"
+            aria-label={t("attachments.view", { index: attachmentIndex + 1 })}
+          >
+            <img
+              src={attachment.previewUrl}
+              alt={t("attachments.alt", { index: attachmentIndex + 1 })}
+              className="h-16 w-16 rounded-sm border border-border/80 object-cover"
+            />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{attachment.path ?? attachment.name}</TooltipContent>
+      </Tooltip>
       <button
         type="button"
         onClick={() => onRemove(attachment.id)}

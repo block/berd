@@ -13,6 +13,7 @@ import type { WorkspaceAttachment } from "@/shared/types/chat";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -299,23 +300,29 @@ function WorkspaceSectionActionsMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          disabled={disabled}
-          className="size-6 rounded-sm"
-          aria-label={t("contextPanel.actions.openWorkspaceActionsFor", {
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              disabled={disabled}
+              className="size-6 rounded-sm"
+              aria-label={t("contextPanel.actions.openWorkspaceActionsFor", {
+                name: t("contextPanel.labels.workspace"),
+              })}
+            >
+              <Ellipsis className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>
+          {t("contextPanel.actions.openWorkspaceActionsFor", {
             name: t("contextPanel.labels.workspace"),
           })}
-          title={t("contextPanel.actions.openWorkspaceActionsFor", {
-            name: t("contextPanel.labels.workspace"),
-          })}
-        >
-          <Ellipsis className="size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
+        </TooltipContent>
+      </Tooltip>
       <DropdownMenuContent
         align="end"
         sideOffset={8}
@@ -453,7 +460,7 @@ export function WorkspaceWidget({
                     disabled={isRefreshingAnyWorkspace}
                     className="size-6 rounded-sm"
                     aria-label={t("contextPanel.actions.refreshLocalStatus")}
-                    title={t("contextPanel.actions.refreshLocalStatus")}
+                    tooltip={t("contextPanel.actions.refreshLocalStatus")}
                   >
                     {isRefreshingAnyWorkspace ? (
                       <Spinner className="size-3.5" />

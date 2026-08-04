@@ -13,6 +13,7 @@ import {
   SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 interface SidebarNavItemProps {
   icon?: ElementType<{ className?: string }>;
@@ -69,7 +70,7 @@ export function SidebarNavItem({
 
   const ariaLabel = trailingLabel ? `${label} — ${trailingLabel}` : label;
 
-  return (
+  const button = (
     <button
       {...getDesignSystemMetadata({
         component: "SidebarNavItem",
@@ -85,7 +86,6 @@ export function SidebarNavItem({
       data-testid={testId}
       data-sidebar-nav-id={navId}
       onClick={onClick}
-      title={collapsed ? ariaLabel : undefined}
       aria-label={ariaLabel}
       aria-current={isActive ? "page" : undefined}
       className={className}
@@ -123,5 +123,16 @@ export function SidebarNavItem({
         <span className="sr-only">{trailingLabel}</span>
       ) : null}
     </button>
+  );
+
+  if (!collapsed) {
+    return button;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right">{ariaLabel}</TooltipContent>
+    </Tooltip>
   );
 }

@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
 } from "@/shared/ui/dropdown-menu";
 import { Button } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import type { Persona } from "@/shared/types/agents";
 
 interface PersonaPickerProps {
@@ -55,19 +56,25 @@ export function PersonaPicker({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        {triggerVariant === "icon" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={className}
-            aria-label={t("persona.chooseAssistant")}
-            title={t("persona.chooseAssistant")}
-          >
-            <AtSign />
-          </Button>
-        ) : (
+      {triggerVariant === "icon" ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className={className}
+                aria-label={t("persona.chooseAssistant")}
+              >
+                <AtSign />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{t("persona.chooseAssistant")}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
@@ -82,8 +89,8 @@ export function PersonaPicker({
             {!compact && <span>{label}</span>}
             <ChevronDown className="h-3 w-3 opacity-50" />
           </Button>
-        )}
-      </DropdownMenuTrigger>
+        </DropdownMenuTrigger>
+      )}
       <DropdownMenuContent
         align="start"
         className="max-h-[min(70vh,32rem)] w-[22rem] overflow-y-auto"

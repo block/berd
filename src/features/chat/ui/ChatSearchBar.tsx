@@ -215,7 +215,7 @@ export function ChatSearchBar({
         size="icon-xs"
         onClick={onClose}
         aria-label={closeLabel}
-        title={closeLabel}
+        tooltip={closeLabel}
       >
         <X aria-hidden="true" />
       </Button>

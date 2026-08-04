@@ -679,7 +679,7 @@ export function SearchView({
             variant="ghost"
             size="icon-xs"
             aria-label={t("actions.clear")}
-            title={t("actions.clear")}
+            tooltip={t("actions.clear")}
             onClick={() => {
               setQuery("");
               clearChatSearch();

@@ -48,12 +48,16 @@ export function ComponentPlayground({
   preview,
   controls,
   details,
+  fullWidthPreview = false,
+  previewCaption,
 }: {
   title?: string;
   description?: string;
   preview: ReactNode;
   controls: PlaygroundControl[];
   details?: ReactNode;
+  fullWidthPreview?: boolean;
+  previewCaption?: ReactNode;
 }) {
   return (
     <section className="rounded-md border border-border bg-background px-4 py-4">
@@ -64,21 +68,37 @@ export function ComponentPlayground({
         ) : null}
       </div>
 
-      <div className="grid overflow-hidden rounded-md border border-border bg-background md:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="flex min-h-52 items-center justify-center p-6">
+      <div
+        className={cn(
+          "grid overflow-hidden rounded-md border border-border bg-background",
+          !fullWidthPreview && "md:grid-cols-[minmax(0,1fr)_280px]",
+        )}
+      >
+        <div
+          className={cn(
+            "min-h-52",
+            !fullWidthPreview && "flex items-center justify-center p-6",
+          )}
+        >
           {preview}
         </div>
 
-        <div className="border-t border-border bg-background p-3 md:border-t-0 md:border-l">
-          <div className="grid gap-3">
-            {controls.map((control) => (
-              <PlaygroundControlField key={control.id} control={control} />
-            ))}
+        {!fullWidthPreview ? (
+          <div className="border-t border-border bg-background p-3 md:border-t-0 md:border-l">
+            <div className="grid gap-3">
+              {controls.map((control) => (
+                <PlaygroundControlField key={control.id} control={control} />
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
-      {details ? <div className="mt-4">{details}</div> : null}
+      {previewCaption ? <div className="mt-3">{previewCaption}</div> : null}
+
+      {details ? (
+        <div className={previewCaption ? "mt-8" : "mt-4"}>{details}</div>
+      ) : null}
     </section>
   );
 }

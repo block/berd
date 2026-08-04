@@ -2,6 +2,7 @@ import type * as React from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { Button, type ButtonProps } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,19 +61,23 @@ export function SplitButton<T extends string = string>({
         {activeAction.label}
       </Button>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant={variant}
-            size={size}
-            disabled={disabled}
-            className="rounded-l-none px-2"
-            aria-label={menuTriggerLabel}
-            title={menuTriggerLabel}
-          >
-            <IconChevronDown className="size-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant={variant}
+                size={size}
+                disabled={disabled}
+                className="rounded-l-none px-2"
+                aria-label={menuTriggerLabel}
+              >
+                <IconChevronDown className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{menuTriggerLabel}</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="end" sideOffset={4}>
           {actions.map((action) => (
             <DropdownMenuItem

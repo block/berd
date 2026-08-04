@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { ArtifactViewer } from "./ArtifactViewer";
 import {
   useArtifactViewerStore,
@@ -172,14 +173,18 @@ function ViewerPanel({
         className="flex h-full min-h-0 flex-col"
         style={settled ? undefined : { width }}
       >
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={t("artifactViewer.resize")}
-          title={t("artifactViewer.resize")}
-          onPointerDown={startResize}
-          className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent outline-none"
-        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={t("artifactViewer.resize")}
+              onPointerDown={startResize}
+              className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent outline-none"
+            />
+          </TooltipTrigger>
+          <TooltipContent>{t("artifactViewer.resize")}</TooltipContent>
+        </Tooltip>
         <ArtifactViewer artifact={artifact} onClose={() => close(sessionId)} />
       </div>
     </motion.div>

@@ -85,7 +85,7 @@ export function ConnectionDetailsDialog({
                 onReset(item.extension.config_key);
                 onClose();
               }}
-              title={t("extensions.alwaysOn.tooltip")}
+              tooltip={t("extensions.alwaysOn.tooltip")}
             >
               {t("extensions.alwaysOn.reset")}
             </Button>

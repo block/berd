@@ -10,6 +10,7 @@ import {
   isRunnableShellLanguage,
   normalizeRunnableShellCommand,
 } from "@/shared/lib/runnableShellCommand";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 export interface RunCommandOptions {
   newTerminal?: boolean;
@@ -80,16 +81,22 @@ export function RunnableCodeBlock({
       <CodeBlock code={code} language={language} isIncomplete={isIncomplete}>
         <CodeBlockDownloadButton language={language} />
         {canRun ? (
-          <button
-            type="button"
-            className="cursor-pointer p-1 text-muted-foreground transition-all hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={handleRun}
-            onMouseDown={(event) => event.preventDefault()}
-            title={t("components.codeBlock.runInTerminalLabel")}
-            aria-label={t("components.codeBlock.runInTerminalLabel")}
-          >
-            <IconPlayerPlay size={14} aria-hidden="true" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="cursor-pointer p-1 text-muted-foreground transition-all hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={handleRun}
+                onMouseDown={(event) => event.preventDefault()}
+                aria-label={t("components.codeBlock.runInTerminalLabel")}
+              >
+                <IconPlayerPlay size={14} aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {t("components.codeBlock.runInTerminalLabel")}
+            </TooltipContent>
+          </Tooltip>
         ) : null}
         <CodeBlockCopyButton />
       </CodeBlock>

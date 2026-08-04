@@ -203,7 +203,7 @@ export function HomeView({
           onClick={handleCleanUp}
           disabled={!hasCleanableWidgets}
           aria-label={cleanUpControlTitle}
-          title={cleanUpControlTitle}
+          tooltip={cleanUpControlTitle}
         >
           <LayoutGrid aria-hidden="true" />
         </TopBarIconButton>
@@ -212,7 +212,7 @@ export function HomeView({
           onClick={handleRecenter}
           disabled={!recenterTarget}
           aria-label={recenterTitle}
-          title={recenterTitle}
+          tooltip={recenterTitle}
         >
           <Crosshair aria-hidden="true" />
         </TopBarIconButton>

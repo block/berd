@@ -38,7 +38,7 @@ export function SidebarSectionHeaderAction({
       size="icon-xs"
       onClick={onClick}
       aria-label={label}
-      title={label}
+      tooltip={label}
       className={cn("size-5", revealClassName)}
     >
       <Icon className="size-4" />

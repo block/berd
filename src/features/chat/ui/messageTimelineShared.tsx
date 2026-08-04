@@ -191,7 +191,7 @@ export function MessageTimelineJumpToLatestButton({
           aria-hidden={!visible}
           tabIndex={visible ? undefined : -1}
           aria-label={label}
-          title={label}
+          tooltip={label}
         >
           <IconChevronsDown aria-hidden="true" />
         </JumpToLatestButton>

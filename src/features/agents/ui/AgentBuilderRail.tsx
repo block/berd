@@ -330,7 +330,7 @@ export function AgentBuilderRail({
           size="icon-xs"
           className="-mr-1 shrink-0"
           aria-label={t("builderRail.closeBuilder")}
-          title={t("builderRail.closeBuilder")}
+          tooltip={t("builderRail.closeBuilder")}
           onClick={onClose}
         >
           <IconX className="size-4" aria-hidden="true" />

@@ -1141,7 +1141,7 @@ export function SessionHistoryView({
                             variant="ghost"
                             size="icon-xs"
                             aria-label={t("history.copyImportCommand")}
-                            title={t("history.copyImportCommand")}
+                            tooltip={t("history.copyImportCommand")}
                             onClick={() => {
                               if (importNotice.command) {
                                 void handleCopyImportCommand(
@@ -1162,7 +1162,7 @@ export function SessionHistoryView({
                       size="icon-xs"
                       className="absolute right-3 top-3"
                       aria-label={t("common:actions.close")}
-                      title={t("common:actions.close")}
+                      tooltip={t("common:actions.close")}
                       onClick={handleDismissImportNotice}
                     >
                       <IconX />

@@ -365,7 +365,7 @@ export function SidebarProjectsSection({
                 size="icon-xs"
                 onClick={onCreateProject}
                 aria-label={t("empty.createProject")}
-                title={t("empty.createProject")}
+                tooltip={t("empty.createProject")}
                 className="rounded-lg"
               >
                 <IconCubePlus className="size-4" />
@@ -396,7 +396,7 @@ export function SidebarProjectsSection({
               size="icon-xs"
               onClick={onNewChat}
               aria-label={t("empty.startChat")}
-              title={t("empty.startChat")}
+              tooltip={t("empty.startChat")}
               className="rounded-lg"
             >
               <IconEdit className="size-4" />

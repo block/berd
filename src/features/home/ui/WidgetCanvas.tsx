@@ -735,7 +735,7 @@ export function WidgetCanvas({
                 ? "pointer-events-auto animate-scale-in translate-y-0 scale-100 opacity-100"
                 : "pointer-events-none translate-y-1 scale-95 opacity-0",
             )}
-            title={resolvedRecenterTitle}
+            tooltip={resolvedRecenterTitle}
             tabIndex={showRecenterControl ? undefined : -1}
             leftIcon={<Crosshair aria-hidden="true" />}
             onPointerDown={(event) => event.stopPropagation()}

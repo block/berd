@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { IconArrowDown, IconArrowNarrowLeft } from "@tabler/icons-react";
 import { AgentTileButton } from "./agent-tile-button";
@@ -247,6 +248,55 @@ describe("Button", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(button).toHaveAttribute("data-feedback-state", "loading");
+  });
+
+  it("keeps a tooltip reachable when the button is disabled", async () => {
+    const user = userEvent.setup();
+    render(
+      <Button disabled tooltip="Unavailable while saving">
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Save" });
+    const tooltipTrigger = button.parentElement;
+
+    expect(tooltipTrigger).not.toBeNull();
+    if (!tooltipTrigger) throw new Error("Expected a tooltip trigger wrapper");
+
+    expect(button).toBeDisabled();
+    expect(tooltipTrigger).toHaveAttribute("data-button-tooltip-trigger", "");
+    expect(tooltipTrigger).toHaveAttribute("tabindex", "0");
+    expect(tooltipTrigger).toHaveAttribute("aria-disabled", "true");
+    expect(tooltipTrigger).toHaveAccessibleName("Unavailable while saving");
+
+    await user.hover(tooltipTrigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Unavailable while saving",
+    );
+  });
+
+  it("uses a caller-provided accessible name on a disabled tooltip wrapper", () => {
+    render(
+      <Button disabled tooltip="Unavailable" aria-label="Save changes">
+        Save
+      </Button>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Save changes" }).parentElement,
+    ).toHaveAccessibleName("Save changes");
+  });
+
+  it("preserves an explicit tab order on a disabled tooltip wrapper", () => {
+    render(
+      <Button disabled tooltip="Unavailable" tabIndex={-1}>
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Save" });
+    expect(button.parentElement).toHaveAttribute("tabindex", "-1");
   });
 
   it("renders success feedback through the main button", () => {

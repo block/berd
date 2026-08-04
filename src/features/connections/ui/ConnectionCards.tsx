@@ -249,7 +249,7 @@ export function ExtensionConnectionCard({
                 aria-label={t("extensions.alwaysOn.resetAria", {
                   name: displayName,
                 })}
-                title={t("extensions.alwaysOn.tooltip")}
+                tooltip={t("extensions.alwaysOn.tooltip")}
               >
                 {t("extensions.alwaysOn.reset")}
               </Button>

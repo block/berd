@@ -4,6 +4,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import { cn } from "@/shared/lib/cn";
 import type { MessageChip } from "@/shared/types/messages";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 const messageChipClasses: Record<MessageChip["type"], string> = {
   agent: "bg-chip-agent-bg text-chip-agent-fg",
@@ -58,24 +59,30 @@ export function MessageMetadataChip({ chip }: { chip: MessageChip }) {
   const chipLabel = getChipLabel(chip);
 
   return (
-    <span
-      className={cn(
-        "inline-flex h-6 max-w-64 items-center gap-1.5 rounded-xs pl-[9px] pr-2 text-xs font-normal",
-        messageChipClasses[chip.type],
-        chip.type === "agent" && chip.agentRole === "mentioned" && "opacity-80",
-      )}
-      title={getChipTitle(chip, chipLabel)}
-    >
-      {agentAvatar ? (
-        <img
-          src={agentAvatar}
-          alt=""
-          className="size-3.5 shrink-0 object-contain"
-        />
-      ) : Icon ? (
-        <Icon className="size-3.5 shrink-0" />
-      ) : null}
-      <span className="min-w-0 truncate">{chipLabel}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "inline-flex h-6 max-w-64 items-center gap-1.5 rounded-xs pl-[9px] pr-2 text-xs font-normal",
+            messageChipClasses[chip.type],
+            chip.type === "agent" &&
+              chip.agentRole === "mentioned" &&
+              "opacity-80",
+          )}
+        >
+          {agentAvatar ? (
+            <img
+              src={agentAvatar}
+              alt=""
+              className="size-3.5 shrink-0 object-contain"
+            />
+          ) : Icon ? (
+            <Icon className="size-3.5 shrink-0" />
+          ) : null}
+          <span className="min-w-0 truncate">{chipLabel}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{getChipTitle(chip, chipLabel)}</TooltipContent>
+    </Tooltip>
   );
 }

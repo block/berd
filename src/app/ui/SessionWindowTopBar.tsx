@@ -61,7 +61,7 @@ export function SessionWindowTopBar({
             onClick={onToggleRightRail}
             aria-pressed={rightRailOpen}
             aria-label={rightRailLabel}
-            title={rightRailLabel}
+            tooltip={rightRailLabel}
             data-right-rail-toggle="true"
           >
             <RightRailIcon aria-hidden="true" />

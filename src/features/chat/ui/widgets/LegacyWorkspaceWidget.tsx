@@ -99,7 +99,7 @@ export function LegacyWorkspaceWidget({
                 disabled={!primaryWorkspaceRoot || isFetching}
                 className="rounded-full"
                 aria-label={t("contextPanel.actions.refreshLocalStatus")}
-                title={t("contextPanel.actions.refreshLocalStatus")}
+                tooltip={t("contextPanel.actions.refreshLocalStatus")}
               >
                 {isFetching ? (
                   <Spinner className="size-4" />
@@ -117,7 +117,7 @@ export function LegacyWorkspaceWidget({
                   onClick={onToggleTerminal}
                   className="rounded-full"
                   aria-label={t("terminal.open")}
-                  title={t("terminal.open")}
+                  tooltip={t("terminal.open")}
                 >
                   <IconTerminal2 className="size-4" />
                 </Button>

@@ -432,7 +432,7 @@
     "expand": "Expand to full chat",
     "placeholder": "Start a conversation",
     "setupVoiceConversation": "Set up Voice Conversation",
-    "startVoiceConversation": "Start Voice Conversation",
+    "startVoiceConversation": "Start voice conversation",
     "voiceConversationStartFailed": "Voice Conversation could not start. Your draft is still here.",
     "voiceConversationRequiresGoose": "Voice Conversation requires Goose"
   },
@@ -520,11 +520,11 @@
     "voiceInputTranscribing": "Transcribing...",
     "voiceInputAutoSubmitHint": "Say \"submit\" to send",
     "voiceConversation": {
-      "start": "Start Voice Conversation",
+      "start": "Start voice conversation",
       "muteMicrophone": "Mute microphone",
       "unmuteMicrophone": "Unmute microphone",
       "states": {
-        "off": "Start Voice Conversation",
+        "off": "Start voice conversation",
         "starting": "Starting voice conversation…",
         "stopping": "Stopping voice conversation…",
         "listening": "Voice conversation is listening for session {{sessionId}}",

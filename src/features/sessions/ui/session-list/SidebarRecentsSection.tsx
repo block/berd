@@ -172,7 +172,7 @@ export function SidebarRecentsSection({
             size="icon-xs"
             onClick={onNewChat}
             aria-label={t("empty.startChat")}
-            title={t("empty.startChat")}
+            tooltip={t("empty.startChat")}
             className="rounded-lg"
           >
             <IconEdit className="size-4" />
@@ -205,7 +205,11 @@ export function SidebarRecentsSection({
               variant="ghost"
               size="icon-xs"
               key={session.id}
-              title={getDisplaySessionTitle(
+              aria-label={getDisplaySessionTitle(
+                session.title,
+                t("common:session.defaultTitle"),
+              )}
+              tooltip={getDisplaySessionTitle(
                 session.title,
                 t("common:session.defaultTitle"),
               )}

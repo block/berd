@@ -900,6 +900,91 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows the start voice conversation tooltip on hover", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "off",
+          boundSessionId: null,
+          active: false,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    await user.hover(
+      screen.getByRole("button", { name: "Start voice conversation" }),
+    );
+
+    expect(
+      await screen.findByRole("tooltip", {
+        name: "Start voice conversation",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows voice tooltips in the individual-chat composer", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        surface="bare"
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "off",
+          boundSessionId: null,
+          active: false,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    const voiceConversationTrigger = screen.getByRole("button", {
+      name: "Start voice conversation",
+    });
+    await user.hover(voiceConversationTrigger);
+    expect(
+      await screen.findByRole("tooltip", {
+        name: "Start voice conversation",
+      }),
+    ).toBeInTheDocument();
+    await user.unhover(voiceConversationTrigger);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("tooltip", { name: "Start voice conversation" }),
+      ).not.toBeInTheDocument();
+    });
+
+    const dictationTrigger = screen.getByRole("button", {
+      name: "Voice dictation",
+    });
+    await user.hover(dictationTrigger);
+    expect(
+      await screen.findByRole("tooltip", { name: /voice dictation/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the voice dictation tooltip on hover", async () => {
+    const user = userEvent.setup();
+    render(<ChatInput onSend={vi.fn()} />);
+
+    const dictationButton = screen.getByRole("button", {
+      name: /voice dictation/i,
+    });
+    await user.hover(dictationButton);
+
+    expect(
+      await screen.findByRole("tooltip", { name: /voice dictation/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a distinct voice conversation control", async () => {
     const onToggle = vi.fn();
     const user = userEvent.setup();
@@ -919,7 +1004,7 @@ describe("ChatInput", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "Start Voice Conversation" }),
+      screen.getByRole("button", { name: "Start voice conversation" }),
     );
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
@@ -1580,9 +1665,7 @@ describe("ChatInput", () => {
     await user.type(input, "@@goose2");
     await user.click(await screen.findByRole("option", { name: /^goose2/i }));
     expect(input).toHaveValue("");
-    expect(
-      await screen.findByTitle("/Users/wesb/dev/goose2"),
-    ).toBeInTheDocument();
+    expect((await screen.findAllByText("goose2")).length).toBeGreaterThan(0);
   });
 
   it("shows static path shortcuts on empty @ without searching project files", async () => {
@@ -2234,7 +2317,7 @@ describe("ChatInput", () => {
       />,
     );
 
-    expect(screen.getByTitle("Steer queued message")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /steer/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /steer/i }));
 
@@ -3139,8 +3222,146 @@ describe("ChatInput", () => {
     expect(projectTrigger).toHaveTextContent("");
     expect(modelTrigger).toHaveClass("h-8", "w-10");
     expect(projectTrigger).toHaveClass("h-8", "w-10");
-    expect(modelTrigger).toHaveAttribute("title", "GPT-4o");
-    expect(projectTrigger).toHaveAttribute("title", "berd - /workspace/goose");
+    expect(modelTrigger).not.toHaveAttribute("title");
+    expect(projectTrigger).not.toHaveAttribute("title");
+  });
+
+  it("keeps the model picker open when clicked after the attach menu", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [{ id: "goose", label: "Goose" }],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [{ id: "gpt-4o", name: "GPT-4o" }],
+        }}
+        projectPicker={{
+          selectedProjectId: null,
+          availableProjects: [],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          attachmentsEnabled: true,
+          onAttachFiles: vi.fn(),
+          onAttachFolders: vi.fn(),
+          onSend: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    const modelPickerTrigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+
+    await user.click(screen.getByRole("button", { name: /attach/i }));
+    expect(screen.getByRole("menuitem", { name: "File" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(modelPickerTrigger, {
+      pointerType: "mouse",
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.pointerUp(modelPickerTrigger, { pointerType: "mouse" });
+    fireEvent.click(modelPickerTrigger);
+
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.queryByText("Attach file")).not.toBeInTheDocument();
+  });
+
+  it("restores composer tooltips after switching from attach to model", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [{ id: "goose", label: "Goose" }],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [{ id: "gpt-4o", name: "GPT-4o" }],
+        }}
+        projectPicker={{
+          selectedProjectId: null,
+          availableProjects: [],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          attachmentsEnabled: true,
+          onAttachFiles: vi.fn(),
+          onAttachFolders: vi.fn(),
+          onSend: vi.fn(),
+          voiceEnabled: true,
+          onVoiceToggle: vi.fn(),
+          voiceConversation: {
+            visible: true,
+            state: "off",
+            boundSessionId: null,
+            active: false,
+            microphoneMuted: false,
+            onToggle: vi.fn(),
+            onMicrophoneMuteToggle: vi.fn(),
+          },
+        }}
+        isCompact={false}
+      />,
+    );
+
+    const attachTrigger = screen.getByRole("button", { name: "Attach" });
+    const modelTrigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    await user.click(attachTrigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.pointerDown(modelTrigger, {
+      pointerType: "mouse",
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.pointerUp(modelTrigger, { pointerType: "mouse" });
+    fireEvent.click(modelTrigger);
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+
+    fireEvent.pointerDown(modelTrigger, {
+      pointerType: "mouse",
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.pointerUp(modelTrigger, { pointerType: "mouse" });
+    fireEvent.click(modelTrigger);
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+
+    const voiceConversationTrigger = screen.getByRole("button", {
+      name: "Start voice conversation",
+    });
+    await user.hover(voiceConversationTrigger);
+    expect(
+      await screen.findByRole("tooltip", {
+        name: "Start voice conversation",
+      }),
+    ).toBeInTheDocument();
+    await user.unhover(voiceConversationTrigger);
+
+    const dictationTrigger = screen.getByRole("button", {
+      name: "Voice dictation",
+    });
+    await user.hover(dictationTrigger);
+    expect(
+      await screen.findByRole("tooltip", { name: "Voice dictation" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the model picker open when clicked after the project picker", async () => {

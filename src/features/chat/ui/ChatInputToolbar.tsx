@@ -185,6 +185,15 @@ export function ChatInputToolbar({
             error: voiceConversation?.error ?? "",
           })
         : t("toolbar.voiceConversation.start");
+  const voiceInputTooltip = voiceConversationRunning
+    ? voiceConversationMicrophoneMuted
+      ? t("toolbar.voiceConversation.unmuteMicrophone")
+      : t("toolbar.voiceConversation.muteMicrophone")
+    : voiceRecording
+      ? t("toolbar.voiceInputRecording")
+      : voiceTranscribing
+        ? t("toolbar.voiceInputTranscribing")
+        : t("toolbar.voiceInput");
   const voiceConversationFeedbackState =
     voiceConversationState === "error"
       ? "error"
@@ -465,7 +474,7 @@ export function ChatInputToolbar({
                         className="shrink-0 rounded-sm"
                         onClick={handleOpenAutoCompactSettings}
                         aria-label={t("toolbar.settings")}
-                        title={t("toolbar.settings")}
+                        tooltip={t("toolbar.settings")}
                       >
                         <Settings2 className="size-4" />
                       </Button>
@@ -477,104 +486,83 @@ export function ChatInputToolbar({
           )}
 
           {voiceConversation?.visible ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <ComposerActionButton
-                    type="button"
-                    size="icon-pill-sm"
-                    disabled={
-                      voiceConversation.disabled || dictationOwnsMicrophone
-                    }
-                    onClick={() => void voiceConversation.onToggle()}
-                    aria-label={voiceConversationTooltip}
-                    aria-pressed={voiceConversationRunning}
-                    visualState={voiceConversationFeedbackState}
-                  >
-                    {voiceConversationState === "user-speaking" ? (
-                      <UserVoiceActivityIndicator />
-                    ) : voiceConversationState === "agent-speaking" ? (
-                      <AgentVoiceActivityIndicator />
-                    ) : (
-                      <Headphones aria-hidden="true" />
-                    )}
-                  </ComposerActionButton>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{voiceConversationTooltip}</TooltipContent>
-            </Tooltip>
+            <ComposerActionButton
+              type="button"
+              size="icon-pill-sm"
+              disabled={voiceConversation.disabled || dictationOwnsMicrophone}
+              onClick={() => void voiceConversation.onToggle()}
+              aria-label={voiceConversationTooltip}
+              aria-pressed={voiceConversationRunning}
+              visualState={voiceConversationFeedbackState}
+              tooltip={voiceConversationTooltip}
+            >
+              {voiceConversationState === "user-speaking" ? (
+                <UserVoiceActivityIndicator />
+              ) : voiceConversationState === "agent-speaking" ? (
+                <AgentVoiceActivityIndicator />
+              ) : (
+                <Headphones aria-hidden="true" />
+              )}
+            </ComposerActionButton>
           ) : null}
 
           {(voiceEnabled || voiceRecording || voiceConversationRunning) && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <ComposerActionButton
-                    type="button"
-                    size="icon-pill-sm"
-                    disabled={
-                      nativeVoiceOwnsMicrophone ||
-                      (!voiceConversationRunning &&
-                        !voiceRecording &&
-                        (!voiceEnabled || disabled))
-                    }
-                    onClick={
-                      voiceConversationRunning
-                        ? () => void voiceConversation?.onMicrophoneMuteToggle()
-                        : onVoiceToggle
-                    }
-                    aria-label={
-                      voiceConversationRunning
-                        ? voiceConversationMicrophoneMuted
-                          ? t("toolbar.voiceConversation.unmuteMicrophone")
-                          : t("toolbar.voiceConversation.muteMicrophone")
-                        : voiceRecording
-                          ? t("toolbar.voiceInputRecording")
-                          : t("toolbar.voiceInput")
-                    }
-                    aria-pressed={
-                      voiceConversationRunning
-                        ? voiceConversationMicrophoneMuted
-                        : voiceRecording
-                    }
-                    className={cn(
-                      voiceConversationRunning &&
-                        !voiceConversationMicrophoneMuted &&
-                        "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
-                      voiceRecording &&
-                        "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
-                      voiceTranscribing && "animate-pulse",
-                    )}
-                  >
-                    <Mic aria-hidden="true" />
-                  </ComposerActionButton>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {voiceConversationRunning ? (
-                  voiceConversationMicrophoneMuted ? (
-                    t("toolbar.voiceConversation.unmuteMicrophone")
-                  ) : (
-                    t("toolbar.voiceConversation.muteMicrophone")
-                  )
-                ) : voiceRecording ? (
-                  t("toolbar.voiceInputRecording")
-                ) : voiceTranscribing ? (
-                  t("toolbar.voiceInputTranscribing")
-                ) : (
+            <ComposerActionButton
+              type="button"
+              size="icon-pill-sm"
+              disabled={
+                nativeVoiceOwnsMicrophone ||
+                (!voiceConversationRunning &&
+                  !voiceRecording &&
+                  (!voiceEnabled || disabled))
+              }
+              onClick={
+                voiceConversationRunning
+                  ? () => void voiceConversation?.onMicrophoneMuteToggle()
+                  : onVoiceToggle
+              }
+              aria-label={
+                voiceConversationRunning
+                  ? voiceConversationMicrophoneMuted
+                    ? t("toolbar.voiceConversation.unmuteMicrophone")
+                    : t("toolbar.voiceConversation.muteMicrophone")
+                  : voiceRecording
+                    ? t("toolbar.voiceInputRecording")
+                    : t("toolbar.voiceInput")
+              }
+              aria-pressed={
+                voiceConversationRunning
+                  ? voiceConversationMicrophoneMuted
+                  : voiceRecording
+              }
+              tooltip={
+                !voiceConversationRunning &&
+                !voiceRecording &&
+                !voiceTranscribing &&
+                voiceShortcutDisplayParts?.length ? (
                   <span className="flex items-center gap-2">
-                    <span>{t("toolbar.voiceInput")}</span>
-                    {voiceShortcutDisplayParts?.length ? (
-                      <span className="flex items-center gap-1">
-                        {voiceShortcutDisplayParts.map((part) => (
-                          <Kbd key={part}>{part}</Kbd>
-                        ))}
-                      </span>
-                    ) : null}
+                    <span>{voiceInputTooltip}</span>
+                    <span className="flex items-center gap-1">
+                      {voiceShortcutDisplayParts.map((part) => (
+                        <Kbd key={part}>{part}</Kbd>
+                      ))}
+                    </span>
                   </span>
-                )}
-              </TooltipContent>
-            </Tooltip>
+                ) : (
+                  voiceInputTooltip
+                )
+              }
+              className={cn(
+                voiceConversationRunning &&
+                  !voiceConversationMicrophoneMuted &&
+                  "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
+                voiceRecording &&
+                  "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
+                voiceTranscribing && "animate-pulse",
+              )}
+            >
+              <Mic aria-hidden="true" />
+            </ComposerActionButton>
           )}
         </div>
 
@@ -585,7 +573,7 @@ export function ChatInputToolbar({
               onClick={onStop}
               size="icon-pill-sm"
               aria-label={t("toolbar.stopGeneration")}
-              title={t("toolbar.stopGeneration")}
+              tooltip={t("toolbar.stopGeneration")}
             >
               <IconPlayerStopFilled className="size-3.5" aria-hidden="true" />
             </ComposerActionButton>

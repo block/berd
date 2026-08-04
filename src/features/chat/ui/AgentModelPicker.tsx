@@ -19,6 +19,7 @@ import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Spinner } from "@/shared/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   formatProviderLabel,
   getProviderIcon,
@@ -382,45 +383,49 @@ export function AgentModelPicker({
         if (nextOpen) onOpen?.();
       }}
     >
-      <PopoverTrigger asChild>
-        <ComposerActionButton
-          ref={triggerRef}
-          type="button"
-          size={triggerButtonSize}
-          aria-label={t("toolbar.chooseAgentModel")}
-          title={triggerTitle}
-          tabIndex={triggerTabIndex}
-          disabled={loading && !selectedAgentLabel}
-          leftIcon={triggerProviderIcon}
-          rightIcon={
-            triggerIconOnly ? undefined : (
-              <IconChevronDown className="opacity-50" />
-            )
-          }
-          className={cn(
-            "chat-composer-selector-trigger group",
-            triggerIconOnly ? "shrink-0" : "min-w-0 max-w-full",
-          )}
-        >
-          {triggerIconOnly ? null : (
-            <span
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <ComposerActionButton
+              ref={triggerRef}
+              type="button"
+              size={triggerButtonSize}
+              aria-label={t("toolbar.chooseAgentModel")}
+              tabIndex={triggerTabIndex}
+              disabled={loading && !selectedAgentLabel}
+              leftIcon={triggerProviderIcon}
+              rightIcon={
+                triggerIconOnly ? undefined : (
+                  <IconChevronDown className="opacity-50" />
+                )
+              }
               className={cn(
-                "chat-composer-selector-label flex min-w-0 items-baseline gap-1.5 truncate",
-                isCompact ? "max-w-32" : "max-w-56",
+                "chat-composer-selector-trigger group",
+                triggerIconOnly ? "shrink-0" : "min-w-0 max-w-full",
               )}
             >
-              <span className="min-w-0 truncate">
-                {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
-              </span>
-              {showReasoningEffort && selectedReasoningEffortLabel ? (
-                <span className="shrink-0 text-muted-foreground/70 dark:group-hover:text-foreground dark:group-data-[state=open]:text-foreground dark:group-aria-expanded:text-foreground">
-                  {selectedReasoningEffortLabel}
+              {triggerIconOnly ? null : (
+                <span
+                  className={cn(
+                    "chat-composer-selector-label flex min-w-0 items-baseline gap-1.5 truncate",
+                    isCompact ? "max-w-32" : "max-w-56",
+                  )}
+                >
+                  <span className="min-w-0 truncate">
+                    {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
+                  </span>
+                  {showReasoningEffort && selectedReasoningEffortLabel ? (
+                    <span className="shrink-0 text-muted-foreground/70 dark:group-hover:text-foreground dark:group-data-[state=open]:text-foreground dark:group-aria-expanded:text-foreground">
+                      {selectedReasoningEffortLabel}
+                    </span>
+                  ) : null}
                 </span>
-              ) : null}
-            </span>
-          )}
-        </ComposerActionButton>
-      </PopoverTrigger>
+              )}
+            </ComposerActionButton>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{triggerTitle}</TooltipContent>
+      </Tooltip>
       <PopoverContent
         ref={contentRef}
         align={resolvedContentAlign}

@@ -545,16 +545,19 @@ function FloatingResizeHandles({
   ];
 
   return handles.map((handle) => (
-    <button
-      key={handle.edge}
-      type="button"
-      tabIndex={-1}
-      aria-label={t("terminal.resize")}
-      data-terminal-resize-edge={handle.edge}
-      title={t("terminal.resize")}
-      onPointerDown={(event) => onResizeStart(handle.edge, event)}
-      className={cn(handleClassName, handle.className)}
-    />
+    <Tooltip key={handle.edge}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={t("terminal.resize")}
+          data-terminal-resize-edge={handle.edge}
+          onPointerDown={(event) => onResizeStart(handle.edge, event)}
+          className={cn(handleClassName, handle.className)}
+        />
+      </TooltipTrigger>
+      <TooltipContent>{t("terminal.resize")}</TooltipContent>
+    </Tooltip>
   ));
 }
 
@@ -658,21 +661,24 @@ function TerminalPanelShell({
     >
       {!floating && controller.expanded
         ? dockResizeEdges.map((edge) => (
-            <button
-              key={edge}
-              type="button"
-              tabIndex={-1}
-              aria-label={t("terminal.resize")}
-              data-terminal-resize-edge={edge}
-              title={t("terminal.resize")}
-              onPointerDown={(event) => onDockResizeStart(edge, event)}
-              className={cn(
-                "absolute right-3 left-3 z-30 h-3 cursor-ns-resize bg-transparent outline-none",
-                edge === "bottom"
-                  ? "bottom-0 translate-y-1/2"
-                  : "top-0 -translate-y-1/2",
-              )}
-            />
+            <Tooltip key={edge}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label={t("terminal.resize")}
+                  data-terminal-resize-edge={edge}
+                  onPointerDown={(event) => onDockResizeStart(edge, event)}
+                  className={cn(
+                    "absolute right-3 left-3 z-30 h-3 cursor-ns-resize bg-transparent outline-none",
+                    edge === "bottom"
+                      ? "bottom-0 translate-y-1/2"
+                      : "top-0 -translate-y-1/2",
+                  )}
+                />
+              </TooltipTrigger>
+              <TooltipContent>{t("terminal.resize")}</TooltipContent>
+            </Tooltip>
           ))
         : null}
       <div

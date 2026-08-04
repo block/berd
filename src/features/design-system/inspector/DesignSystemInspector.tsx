@@ -774,7 +774,7 @@ export function DesignSystemInspector({
             variant="subtle"
             size="icon-sm"
             aria-label="Open design system explorer"
-            title="Open design system explorer"
+            tooltip="Open design system explorer"
             onClick={onOpenExplorer}
           >
             <Palette aria-hidden="true" />

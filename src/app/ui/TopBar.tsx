@@ -101,7 +101,7 @@ export function TopBar({
             size="icon-top-bar"
             onClick={onHomeClick}
             aria-label={t("navigation.gooseHome")}
-            title={t("navigation.gooseHome")}
+            tooltip={t("navigation.gooseHome")}
           >
             <BerdIcon aria-hidden="true" className="size-4" />
           </TopBarIconButton>
@@ -110,7 +110,7 @@ export function TopBar({
             size="icon-top-bar"
             onClick={onToggleSidebar}
             aria-label={sidebarLabel}
-            title={sidebarLabel}
+            tooltip={sidebarLabel}
           >
             <SidebarIcon aria-hidden="true" />
           </TopBarIconButton>
@@ -121,7 +121,7 @@ export function TopBar({
               onClick={onGoBack}
               disabled={!canGoBack}
               aria-label={t("actions.back")}
-              title={t("actions.back")}
+              tooltip={t("actions.back")}
             >
               <IconArrowLeft aria-hidden="true" />
             </TopBarIconButton>
@@ -131,7 +131,7 @@ export function TopBar({
               onClick={onGoForward}
               disabled={!canGoForward}
               aria-label={t("actions.forward")}
-              title={t("actions.forward")}
+              tooltip={t("actions.forward")}
             >
               <IconArrowRight aria-hidden="true" />
             </TopBarIconButton>
@@ -140,7 +140,7 @@ export function TopBar({
       </div>
       <div className="flex min-w-0 items-center self-stretch">
         {chatTitle ? (
-          <span className="truncate text-[length:var(--text-app-top-bar-title)] font-normal text-foreground">
+          <span className="block w-full min-w-0 truncate text-[length:var(--text-app-top-bar-title)] font-normal text-foreground">
             {chatTitle}
           </span>
         ) : null}
@@ -154,7 +154,7 @@ export function TopBar({
             size="icon-top-bar"
             onClick={onSearchClick}
             aria-label={t("actions.search")}
-            title={t("actions.search")}
+            tooltip={t("actions.search")}
           >
             <IconSearch aria-hidden="true" />
           </TopBarIconButton>
@@ -165,7 +165,7 @@ export function TopBar({
             size="icon-top-bar"
             onClick={onFeedbackClick}
             aria-label={t("feedback:title")}
-            title={t("feedback:title")}
+            tooltip={t("feedback:title")}
           >
             <IconMessageReport aria-hidden="true" />
           </TopBarIconButton>
@@ -177,7 +177,7 @@ export function TopBar({
             onClick={onToggleRightRail}
             aria-pressed={rightRailOpen}
             aria-label={rightRailLabel}
-            title={rightRailLabel}
+            tooltip={rightRailLabel}
             data-right-rail-toggle="true"
           >
             <RightRailIcon aria-hidden="true" />

@@ -25,6 +25,7 @@ const sessions = [
 function renderRecents(
   showChatIcons: boolean,
   sessionOverrides: Partial<SidebarSessionItem> = {},
+  collapsed = false,
 ) {
   return render(
     <SidebarChatDragProvider>
@@ -33,7 +34,7 @@ function renderRecents(
           ...session,
           ...(session.id === "regular-chat" ? sessionOverrides : {}),
         }))}
-        collapsed={false}
+        collapsed={collapsed}
         labelTransition=""
         labelVisible
         showChatIcons={showChatIcons}
@@ -66,6 +67,14 @@ describe("SidebarRecentsSection", () => {
         },
       ],
     });
+  });
+
+  it("keeps collapsed recent chat icons accessibly named", () => {
+    renderRecents(true, {}, true);
+
+    expect(
+      screen.getByRole("button", { name: "Regular Chat" }),
+    ).toBeInTheDocument();
   });
 
   it("offers one-click pinning when general chat icons are shown", async () => {

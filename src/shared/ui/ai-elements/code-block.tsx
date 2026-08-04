@@ -626,7 +626,7 @@ export const CodeBlockCopyButton = ({
       className={cn("shrink-0", className)}
       onClick={copyToClipboard}
       size="icon-xs"
-      title={t("components.codeBlock.copyLabel")}
+      tooltip={t("components.codeBlock.copyLabel")}
       variant="ghost"
       {...props}
     >

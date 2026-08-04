@@ -340,7 +340,7 @@ describe("GlobalComposerPill", () => {
     const input = screen.getByRole("textbox");
     await user.type(input, "keep this draft");
     const button = screen.getByRole("button", {
-      name: "Start Voice Conversation",
+      name: "Start voice conversation",
     });
     await user.click(button);
     await user.click(button);
@@ -366,7 +366,7 @@ describe("GlobalComposerPill", () => {
     });
 
     const button = screen.getByRole("button", {
-      name: "Start Voice Conversation",
+      name: "Start voice conversation",
     });
     expect(button).toBeDisabled();
     await user.click(button);
@@ -383,7 +383,7 @@ describe("GlobalComposerPill", () => {
     const input = screen.getByRole("textbox");
     await user.type(input, "do not lose me");
     await user.click(
-      screen.getByRole("button", { name: "Start Voice Conversation" }),
+      screen.getByRole("button", { name: "Start voice conversation" }),
     );
 
     await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
@@ -400,7 +400,7 @@ describe("GlobalComposerPill", () => {
       />,
     );
     expect(
-      screen.queryByRole("button", { name: "Start Voice Conversation" }),
+      screen.queryByRole("button", { name: "Start voice conversation" }),
     ).not.toBeInTheDocument();
 
     rerender(
@@ -416,7 +416,7 @@ describe("GlobalComposerPill", () => {
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
 
     expect(
-      screen.getByRole("button", { name: "Start Voice Conversation" }),
+      screen.getByRole("button", { name: "Start voice conversation" }),
     ).toBeDisabled();
     expect(onStart).not.toHaveBeenCalled();
   });
@@ -1237,6 +1237,45 @@ describe("GlobalComposerPill", () => {
           }),
         ],
       }),
+    });
+  });
+
+  it("keeps the hidden expand tooltip out of the tab order while attachment work is pending", async () => {
+    const attachmentWork = deferred<{ base64: string; mimeType: string }>();
+    mockResizeImage.mockReturnValueOnce(attachmentWork.promise);
+    renderGlobalComposer(vi.fn(), { onExpand: vi.fn() });
+
+    const pastedImage = new File(["image"], "pending.png", {
+      type: "image/png",
+    });
+    fireEvent.paste(screen.getByRole("textbox"), {
+      clipboardData: {
+        items: [
+          {
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => pastedImage,
+          },
+        ],
+      },
+    });
+
+    const expandButton = screen.getByRole("button", {
+      name: "Expand to full chat",
+    });
+    expect(expandButton).toBeDisabled();
+    expect(expandButton.parentElement).toHaveAttribute(
+      "data-button-tooltip-trigger",
+      "",
+    );
+    expect(expandButton.parentElement).toHaveAttribute("tabindex", "-1");
+
+    await act(async () => {
+      attachmentWork.resolve({
+        base64: "pending-base64",
+        mimeType: "image/png",
+      });
+      await attachmentWork.promise;
     });
   });
 

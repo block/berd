@@ -1443,7 +1443,7 @@ export function ChatInput({
   const composerRadius = surface === "bare" ? "rounded-sm" : "rounded-composer";
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider>
       <div
         className={cn(
           "relative z-10",

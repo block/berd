@@ -13,6 +13,7 @@ import { AgentProfileLayout } from "@/features/agents/ui/AgentProfileLayout";
 import { AgentIdentityRail } from "@/features/agents/ui/AgentIdentityRail";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { Button } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,7 +94,7 @@ export function SkillDetailPage({
           type="button"
           size="icon"
           aria-label={editLabel}
-          title={editLabel}
+          tooltip={editLabel}
           onClick={() => onEdit(skill)}
           className={PRIMARY_ACTION_BUTTON_CLASS}
         >
@@ -105,7 +106,7 @@ export function SkillDetailPage({
         size="icon"
         variant="ghost"
         aria-label={pinLabel}
-        title={pinLabel}
+        tooltip={pinLabel}
         onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
         disabled={isPinningToHome}
         className={ACTION_BUTTON_CLASS}
@@ -121,7 +122,7 @@ export function SkillDetailPage({
           size="icon"
           variant="ghost"
           aria-label={startChatLabel}
-          title={startChatLabel}
+          tooltip={startChatLabel}
           onClick={() => onStartChat(skill)}
           className={ACTION_BUTTON_CLASS}
         >
@@ -135,25 +136,29 @@ export function SkillDetailPage({
             size="icon"
             variant="ghost"
             aria-label={revealLabel}
-            title={revealLabel}
+            tooltip={revealLabel}
             onClick={() => onReveal(skill)}
             className={ACTION_BUTTON_CLASS}
           >
             <IconFolderOpen className={ACTION_ICON_CLASS} />
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={moreLabel}
-                title={moreLabel}
-                className={ACTION_BUTTON_CLASS}
-              >
-                <IconDots className={ACTION_ICON_CLASS} />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={moreLabel}
+                    className={ACTION_BUTTON_CLASS}
+                  >
+                    <IconDots className={ACTION_ICON_CLASS} />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{moreLabel}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent variant="inverse" align="end" sideOffset={8}>
               <DropdownMenuItem onSelect={() => onShare(skill)}>
                 <IconShare className="size-3.5" />

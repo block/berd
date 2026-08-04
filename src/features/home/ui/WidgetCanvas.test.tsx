@@ -552,7 +552,7 @@ describe("WidgetCanvas", () => {
     expect(recenterButton).toBeVisible();
     expect(recenterButton).toHaveClass("pointer-events-auto");
     expect(recenterButton).toHaveClass("animate-scale-in");
-    expect(recenterButton).toHaveAttribute("title", "Recenter pinned objects");
+    expect(recenterButton).not.toHaveAttribute("title");
   });
 
   it("animates the centered recenter button out before unmounting", () => {

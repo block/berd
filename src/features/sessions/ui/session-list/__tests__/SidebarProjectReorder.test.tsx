@@ -120,6 +120,22 @@ function pointerDragProjectTo({
 }
 
 describe("sidebar project pointer reorder", () => {
+  it("keeps collapsed project icons accessibly named", () => {
+    render(
+      <SidebarProjectList
+        projects={[project({ id: "alpha", name: "Alpha", order: 0 })]}
+        projectSessionsByProject={{}}
+        expandedProjects={{}}
+        toggleProject={vi.fn()}
+        collapsed
+        showChatIcons
+        showTimestamps
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Alpha" })).toBeInTheDocument();
+  });
+
   it("moves a project before an earlier target", () => {
     const onReorderProject = vi.fn();
     renderProjectList(onReorderProject);

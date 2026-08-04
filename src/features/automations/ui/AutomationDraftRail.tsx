@@ -18,6 +18,7 @@ import {
   type SchedulePreset,
 } from "@/features/automations/lib/automationFormatting";
 import { Button } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/cn";
 import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 import { Input } from "@/shared/ui/input";
@@ -455,19 +456,23 @@ export function AutomationDraftRail({
           <span>{statusText}</span>
         </div>
         {sessionId ? (
-          <button
-            type="button"
-            className="flex min-h-4 w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            title={t("builder.copySessionId")}
-            onClick={() => void copySessionId()}
-          >
-            <span className="shrink-0">
-              {copiedSessionId
-                ? t("builder.sessionIdCopied")
-                : t("builder.sessionId")}
-            </span>
-            <span className="truncate">{sessionId}</span>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="flex min-h-4 w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                onClick={() => void copySessionId()}
+              >
+                <span className="shrink-0">
+                  {copiedSessionId
+                    ? t("builder.sessionIdCopied")
+                    : t("builder.sessionId")}
+                </span>
+                <span className="truncate">{sessionId}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("builder.copySessionId")}</TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
     </aside>

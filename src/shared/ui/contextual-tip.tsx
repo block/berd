@@ -67,7 +67,7 @@ function ContextualTip({
         size="icon-xs"
         className="size-6 shrink-0 text-muted-foreground/70 hover:text-foreground"
         aria-label={dismissLabel}
-        title={dismissLabel}
+        tooltip={dismissLabel}
         onClick={onDismiss}
       >
         <X className="size-3.5" />

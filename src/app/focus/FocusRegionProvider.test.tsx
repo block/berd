@@ -7,6 +7,7 @@ import {
   FocusRegionProvider,
   getNearestFocusRegion,
   getVisibleFocusRegions,
+  hasOpenKeyboardOwningLayer,
   normalizePaneJumpShortcut,
   useFocusRegion,
   type FocusRegionRegistration,
@@ -340,6 +341,26 @@ describe("FocusRegionProvider", () => {
 
     unmount();
     expect(getVisibleFocusRegions([])).toEqual([]);
+  });
+
+  it("does not treat tooltip poppers as keyboard-owning layers", () => {
+    const tooltipWrapper = document.createElement("div");
+    tooltipWrapper.dataset.radixPopperContentWrapper = "";
+    const tooltip = document.createElement("div");
+    tooltip.dataset.slot = "tooltip-content";
+    tooltipWrapper.appendChild(tooltip);
+    document.body.appendChild(tooltipWrapper);
+
+    expect(hasOpenKeyboardOwningLayer()).toBe(false);
+
+    const menuWrapper = document.createElement("div");
+    menuWrapper.dataset.radixPopperContentWrapper = "";
+    document.body.appendChild(menuWrapper);
+
+    expect(hasOpenKeyboardOwningLayer()).toBe(true);
+
+    tooltipWrapper.remove();
+    menuWrapper.remove();
   });
 
   it("captures pane jump keys before xterm can type them", () => {

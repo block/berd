@@ -131,7 +131,7 @@ describe("AgentModelPicker", () => {
       name: /choose agent and model/i,
     });
     expect(trigger).toHaveTextContent("");
-    expect(trigger).toHaveAttribute("title", "Custom Provider");
+    expect(trigger).not.toHaveAttribute("title");
     expect(trigger.querySelector("svg")).not.toBeNull();
   });
 

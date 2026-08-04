@@ -64,7 +64,9 @@ export function normalizePaneJumpShortcut(shortcut: unknown): KeyboardShortcut {
 /** True while any modal/popper layer is mounted; global shortcuts should
     stand down regardless of where focus currently sits. */
 export function hasOpenKeyboardOwningLayer() {
-  return Boolean(document.querySelector(KEYBOARD_OWNING_LAYER_SELECTOR));
+  return Array.from(
+    document.querySelectorAll(KEYBOARD_OWNING_LAYER_SELECTOR),
+  ).some((layer) => !layer.querySelector('[data-slot="tooltip-content"]'));
 }
 
 function centerOf(rect: DOMRect) {

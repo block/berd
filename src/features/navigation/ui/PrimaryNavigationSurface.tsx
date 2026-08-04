@@ -189,7 +189,7 @@ export const PrimaryNavigationSurface = forwardRef<
                 variant="ghost"
                 size="icon-xs"
                 aria-label={t("search.jumpToChat")}
-                title={t("search.jumpToChat")}
+                tooltip={t("search.jumpToChat")}
                 onClick={expandSearch}
               >
                 <IconSearch aria-hidden="true" className="!size-4" />

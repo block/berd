@@ -91,7 +91,7 @@ export function AgentAvatarSection({
               variant="ghost"
               size="icon-sm"
               aria-label={t("common:actions.save")}
-              title={t("common:actions.save")}
+              tooltip={t("common:actions.save")}
               className="shrink-0"
               disabled={!canSaveCustomAvatar}
               onClick={onSaveCustomAvatar}

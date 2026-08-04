@@ -189,6 +189,7 @@ import { Textarea } from "@/shared/ui/textarea";
 import { Toggle } from "@/shared/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
+import { TOOLTIP_DELAY } from "@/shared/ui/tooltip-delay";
 import {
   DESIGN_SYSTEM_ALL_COMPONENT_SECTIONS,
   DESIGN_SYSTEM_COMPONENT_SECTIONS,
@@ -742,6 +743,12 @@ type TokenTextRow = {
   anatomy: string;
   size: string;
   weight: string;
+};
+
+type TokenTimingRow = {
+  token: string;
+  value: string;
+  use: string;
 };
 
 function uniqueValues(values: string[]) {
@@ -1921,9 +1928,11 @@ function TokenValue({ value }: { value?: string }) {
 function ComponentTokenDetails({
   colorRows,
   textRows,
+  timingRows = [],
 }: {
   colorRows: TokenColorRow[];
   textRows: TokenTextRow[];
+  timingRows?: TokenTimingRow[];
 }) {
   return (
     <div>
@@ -2002,6 +2011,40 @@ function ComponentTokenDetails({
             </table>
           </div>
         </div>
+
+        {timingRows.length > 0 ? (
+          <div className="min-w-0">
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+              Timing
+            </p>
+            <div className="overflow-hidden rounded-md border border-border">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead className="border-b border-border bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Token</th>
+                    <th className="px-3 py-2 font-medium">Value</th>
+                    <th className="px-3 py-2 font-medium">Use</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {timingRows.map((row) => (
+                    <tr key={row.token}>
+                      <td className="px-3 py-2">
+                        <TokenValue value={row.token} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <TokenValue value={row.value} />
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {row.use}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -4853,7 +4896,130 @@ function TogglePage() {
 }
 
 function TooltipPage() {
-  return <GenericComponentPage name="Tooltip" />;
+  return (
+    <>
+      <PageIntro
+        title="Tooltip"
+        description="Short hover or focus labels with shared surface styling and semantic interaction timing."
+      />
+      <ComponentSpec name="Tooltip" />
+
+      <ComponentPlayground
+        description="Tooltips give short, nonessential context for controls on hover or focus. Use them for concise labels or guidance, not critical instructions."
+        preview={
+          <div className="grid min-h-52 md:grid-cols-3 md:divide-x md:divide-border">
+            <div className="flex items-center justify-center p-5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button type="button" variant="outline">
+                    Standard tooltip
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Appears after hover intent</TooltipContent>
+              </Tooltip>
+            </div>
+
+            <div className="flex items-center justify-center border-t border-border p-5 md:border-t-0">
+              <Tooltip delayDuration={TOOLTIP_DELAY.restedHover}>
+                <TooltipTrigger asChild>
+                  <Button type="button" variant="outline">
+                    Rested hover
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Optional supporting information after deliberate hover
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            <div className="flex items-center justify-center border-t border-border p-5 md:border-t-0">
+              <div className="flex items-center gap-2">
+                {[1, 2, 3].map((number) => (
+                  <Tooltip key={number}>
+                    <TooltipTrigger asChild>
+                      <Button type="button" variant="outline" size="icon-sm">
+                        {number}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Tooltip {number}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+          </div>
+        }
+        controls={[]}
+        fullWidthPreview
+        previewCaption={
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="px-2">
+              <p className="text-xs font-medium text-foreground">
+                Standard tooltip
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {TOOLTIP_DELAY.standard} ms gives users time to settle on a
+                control before help appears.
+              </p>
+            </div>
+            <div className="px-2">
+              <p className="text-xs font-medium text-foreground">
+                Rested hover
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {TOOLTIP_DELAY.restedHover.toLocaleString()} ms is for optional
+                supporting information after deliberate hover, such as gestures,
+                shortcuts, or truncated metadata.
+              </p>
+            </div>
+            <div className="px-2">
+              <p className="text-xs font-medium text-foreground">Skip delay</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                After one opens, move between buttons within{" "}
+                {TOOLTIP_DELAY.skip} ms to skip the standard wait.
+              </p>
+            </div>
+          </div>
+        }
+        details={
+          <ComponentTokenDetails
+            colorRows={[
+              {
+                anatomy: "Tooltip surface",
+                state: "Default",
+                background: "--popover-inverse",
+                textIcon: "--popover-inverse-foreground",
+                border: undefined,
+              },
+            ]}
+            textRows={[
+              {
+                anatomy: "Tooltip label",
+                size: "text-xs",
+                weight: "font-normal",
+              },
+            ]}
+            timingRows={[
+              {
+                token: "standard",
+                value: `${TOOLTIP_DELAY.standard} ms`,
+                use: "Standard product tooltip delay",
+              },
+              {
+                token: "skip",
+                value: `${TOOLTIP_DELAY.skip} ms`,
+                use: "Immediate handoff between nearby tooltips",
+              },
+              {
+                token: "restedHover",
+                value: `${TOOLTIP_DELAY.restedHover.toLocaleString()} ms`,
+                use: "Optional supporting information after deliberate hover, such as gestures, shortcuts, or truncated metadata",
+              },
+            ]}
+          />
+        }
+      />
+    </>
+  );
 }
 
 type LiveColorTokenDeclaration = {
@@ -5617,7 +5783,7 @@ export function DesignSystemView({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Close design system"
-                title="Close design system"
+                tooltip="Close design system"
                 onClick={onClose}
               >
                 <X aria-hidden="true" />

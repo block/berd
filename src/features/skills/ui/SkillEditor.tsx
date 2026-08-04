@@ -478,7 +478,7 @@ export function SkillEditor({
                   type="button"
                   size="sm"
                   disabled
-                  title={t("dialog.customizeComingSoon")}
+                  tooltip={t("dialog.customizeComingSoon")}
                   className="h-10 rounded-full bg-[var(--surface-editor-control)] px-4 text-sm text-foreground hover:bg-[color-mix(in_oklab,var(--surface-editor-control)_90%,transparent)]"
                 >
                   <Copy className="h-3 w-3" />

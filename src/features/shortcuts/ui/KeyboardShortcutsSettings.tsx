@@ -214,7 +214,7 @@ export function KeyboardShortcutsSettings() {
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                title={t("settings.reset")}
+                tooltip={t("settings.reset")}
                 aria-label={t("settings.reset")}
                 onClick={() => handleReset(command.id)}
               >

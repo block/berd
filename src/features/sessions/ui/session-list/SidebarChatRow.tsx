@@ -45,6 +45,7 @@ import {
 } from "@/features/sidebar/lib/pointerDrag";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { TOOLTIP_DELAY } from "@/shared/ui/tooltip-delay";
 import {
   SIDEBAR_CHAT_ROW_DENSITY_CLASSES,
   SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
@@ -107,7 +108,6 @@ const SELECTED_CHAT_ROW_CLASS = cn(
   "ring-1 ring-inset ring-sidebar-border/80",
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
 );
-const SESSION_TOOLTIP_DELAY_MS = 1_500;
 
 /**
  * Compact single-unit relative time for sidebar chat rows: `5m`, `3h`, `2d`,
@@ -547,7 +547,7 @@ export function SidebarChatRow({
     </Button>
   );
   const rowButton = showRowTooltip ? (
-    <Tooltip delayDuration={SESSION_TOOLTIP_DELAY_MS} disableHoverableContent>
+    <Tooltip delayDuration={TOOLTIP_DELAY.restedHover} disableHoverableContent>
       <TooltipTrigger asChild>{titleButton}</TooltipTrigger>
       <TooltipContent pointerEvents="none">{rowTooltipLabel}</TooltipContent>
     </Tooltip>

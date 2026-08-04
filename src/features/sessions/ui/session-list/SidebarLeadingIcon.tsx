@@ -102,7 +102,7 @@ export function SidebarLeadingIcon({
                 size="icon-xs"
                 data-sidebar-drag-ignore
                 aria-label={quickPinLabel}
-                title={quickPinLabel}
+                tooltip={quickPinLabel}
                 disabled={quickPin.disabled}
                 tabIndex={
                   quickPin.pinned && quickPin.persistWhenPinned !== false

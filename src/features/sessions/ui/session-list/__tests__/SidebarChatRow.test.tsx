@@ -7,6 +7,7 @@ import {
   useHomeWidgetStore,
 } from "@/features/home/stores/homeWidgetStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { TOOLTIP_DELAY } from "@/shared/ui/tooltip-delay";
 import { formatSidebarChatTimestamp, SidebarChatRow } from "../SidebarChatRow";
 import {
   focusSessionWindow,
@@ -81,7 +82,9 @@ describe("SidebarChatRow", () => {
     render(<SidebarChatRow id="session-1" title="Pin Chat" isActive={false} />);
 
     await user.hover(screen.getByRole("button", { name: "Pin Chat" }));
-    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    await new Promise((resolve) =>
+      setTimeout(resolve, TOOLTIP_DELAY.restedHover + 100),
+    );
 
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
@@ -109,7 +112,7 @@ describe("SidebarChatRow", () => {
     const tooltip = await screen.findByRole(
       "tooltip",
       { name: "Double-click to rename" },
-      { timeout: 2_500 },
+      { timeout: TOOLTIP_DELAY.restedHover + 1_000 },
     );
     expect(tooltip).toBeInTheDocument();
     expect(

@@ -2,6 +2,7 @@ import { IconDots } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -63,19 +64,23 @@ export function SidebarDisplayOptionsMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          flush
-          size="icon-xs"
-          aria-label={t(labelKey)}
-          title={t(labelKey)}
-          className={cn("size-5", className)}
-        >
-          <IconDots className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              flush
+              size="icon-xs"
+              aria-label={t(labelKey)}
+              className={cn("size-5", className)}
+            >
+              <IconDots className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t(labelKey)}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent
         align="start"
         side="bottom"

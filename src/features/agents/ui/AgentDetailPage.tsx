@@ -17,6 +17,7 @@ import { avatarRef, isBundledAvatarRef } from "@/shared/avatars/catalog";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -261,7 +262,7 @@ export function AgentDetailPage({
             variant="ghost"
             size="icon"
             aria-label={t("editor.customizeAvatar")}
-            title={t("editor.customizeAvatar")}
+            tooltip={t("editor.customizeAvatar")}
             className={AVATAR_CUSTOMIZE_TRIGGER_CLASS}
             onClick={handleOpenAvatarSection}
           />
@@ -316,18 +317,22 @@ export function AgentDetailPage({
         {pinLabel}
       </Button>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label={t("detail.moreActions")}
-            title={t("detail.moreActions")}
-            className={OVERFLOW_TRIGGER_CLASS}
-          >
-            <MoreHorizontal className={ACTION_ICON_CLASS} />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={t("detail.moreActions")}
+                className={OVERFLOW_TRIGGER_CLASS}
+              >
+                <MoreHorizontal className={ACTION_ICON_CLASS} />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{t("detail.moreActions")}</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent
           variant="inverse"
           align="end"

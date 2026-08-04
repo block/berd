@@ -15,6 +15,7 @@ import {
   AGENT_BUILDER_RAIL_DESIGN_WIDTH,
 } from "@/features/agents/capabilities/AgentBuilderCapability";
 import { cn } from "@/shared/lib/cn";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { hasOpenKeyboardOwningLayer } from "@/app/focus/FocusRegionProvider";
 import { TerminalCapability } from "@/features/terminal/capabilities/TerminalCapability";
 import { TerminalDockPreview } from "@/features/terminal/ui/TerminalDockPreview";
@@ -286,15 +287,19 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
           }
         >
           {railPresentationVisible ? (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label={t("rightRail.resize")}
-              title={t("rightRail.resize")}
-              data-right-rail-resize-edge="left"
-              onPointerDown={startRailResize}
-              className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent outline-none"
-            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label={t("rightRail.resize")}
+                  data-right-rail-resize-edge="left"
+                  onPointerDown={startRailResize}
+                  className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent outline-none"
+                />
+              </TooltipTrigger>
+              <TooltipContent>{t("rightRail.resize")}</TooltipContent>
+            </Tooltip>
           ) : null}
           <ChatContextPanel
             activeSessionId={session.id}

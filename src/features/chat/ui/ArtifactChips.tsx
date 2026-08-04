@@ -69,7 +69,7 @@ export function ArtifactChips({
             variant="outline"
             size="xxs"
             onClick={() => void openInApp(artifact.path, artifact.filename)}
-            title={artifact.path}
+            tooltip={artifact.path}
             aria-label={t("artifactChips.open", { name: artifact.filename })}
             leftIcon={<PanelRight aria-hidden="true" />}
             className="min-w-0"

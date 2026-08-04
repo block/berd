@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { cn } from "@/shared/lib/cn";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 export interface ChatInputSelectorItem {
   value: string;
@@ -79,35 +80,41 @@ export function ChatInputSelector({
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <TriggerButton
-          type="button"
-          {...(triggerVariant === "toolbar"
-            ? {}
-            : { variant: "outline" as const })}
-          size={buttonSize}
-          aria-label={ariaLabel}
-          title={triggerTitle}
-          tabIndex={triggerTabIndex}
-          disabled={disabled}
-          leftIcon={icon}
-          rightIcon={triggerIconOnly ? undefined : <ChevronDown />}
-          className={cn(
-            "chat-composer-selector-trigger",
-            triggerIconOnly ? "shrink-0" : "min-w-0",
-            triggerVariant === "default" &&
-              !triggerIconOnly &&
-              "justify-between",
-            triggerVariant === "toolbar" && !triggerIconOnly && "max-w-40",
-          )}
-        >
-          {triggerIconOnly ? null : (
-            <span className="chat-composer-selector-label truncate">
-              {triggerLabel}
-            </span>
-          )}
-        </TriggerButton>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <TriggerButton
+              type="button"
+              {...(triggerVariant === "toolbar"
+                ? {}
+                : { variant: "outline" as const })}
+              size={buttonSize}
+              aria-label={ariaLabel}
+              tabIndex={triggerTabIndex}
+              disabled={disabled}
+              leftIcon={icon}
+              rightIcon={triggerIconOnly ? undefined : <ChevronDown />}
+              className={cn(
+                "chat-composer-selector-trigger",
+                triggerIconOnly ? "shrink-0" : "min-w-0",
+                triggerVariant === "default" &&
+                  !triggerIconOnly &&
+                  "justify-between",
+                triggerVariant === "toolbar" && !triggerIconOnly && "max-w-40",
+              )}
+            >
+              {triggerIconOnly ? null : (
+                <span className="chat-composer-selector-label truncate">
+                  {triggerLabel}
+                </span>
+              )}
+            </TriggerButton>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        {triggerTitle ? (
+          <TooltipContent side="top">{triggerTitle}</TooltipContent>
+        ) : null}
+      </Tooltip>
       <DropdownMenuContent
         align={contentAlign}
         side={contentSide}

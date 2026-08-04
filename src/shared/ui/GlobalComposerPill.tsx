@@ -1239,7 +1239,12 @@ export function GlobalComposerPill({
           onClick={handleExpand}
           disabled={attachmentWorkPending || handoffActive || expandPending}
           aria-label={t("globalPill.expand")}
-          title={t("globalPill.expand")}
+          tooltip={t("globalPill.expand")}
+          tabIndex={
+            attachmentWorkPending || handoffActive || expandPending
+              ? -1
+              : undefined
+          }
           className={cn(
             "absolute z-20 h-6 w-6 rounded-sm transition-[color,opacity] duration-150 ease-out hover:text-foreground hover:opacity-100 focus-visible:opacity-100 disabled:pointer-events-none disabled:opacity-0",
             expanded
@@ -1517,7 +1522,7 @@ export function GlobalComposerPill({
               onClick={() => void handleStartVoiceConversation()}
               size="icon-pill-sm"
               aria-label={t("globalPill.startVoiceConversation")}
-              title={
+              tooltip={
                 selectedAgentId === "goose"
                   ? t("globalPill.startVoiceConversation")
                   : t("globalPill.voiceConversationRequiresGoose")
@@ -1546,7 +1551,7 @@ export function GlobalComposerPill({
                   : t("toolbar.voiceInput")
               }
               aria-pressed={dictation.isRecording}
-              title={
+              tooltip={
                 dictation.isRecording
                   ? t("toolbar.voiceInputRecording")
                   : dictation.isTranscribing

@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 type ComposerChipTone = "file" | "agent" | "skill" | "automation";
 
@@ -32,28 +33,32 @@ export function ComposerChip({
   className,
 }: ComposerChipProps) {
   return (
-    <span
-      className={cn(
-        "group inline-flex h-6 max-w-64 items-center gap-1.5 rounded-xs pl-[9px] pr-2 text-xs font-normal transition-colors",
-        toneClasses[tone],
-        className,
-      )}
-      title={title ?? label}
-    >
-      <button
-        type="button"
-        onClick={onRemove}
-        className="group/remove relative flex size-3.5 shrink-0 items-center justify-center rounded-full text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        aria-label={removeLabel}
-      >
-        {leading ? (
-          <span className="flex items-center justify-center opacity-100 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
-            {leading}
-          </span>
-        ) : null}
-        <X className="absolute size-3.5 opacity-0 transition-opacity group-hover:opacity-45 group-focus-within:opacity-45 group-hover/remove:opacity-100 group-focus-visible/remove:opacity-100" />
-      </button>
-      <span className="min-w-0 truncate">{label}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "group inline-flex h-6 max-w-64 items-center gap-1.5 rounded-xs pl-[9px] pr-2 text-xs font-normal transition-colors",
+            toneClasses[tone],
+            className,
+          )}
+        >
+          <button
+            type="button"
+            onClick={onRemove}
+            className="group/remove relative flex size-3.5 shrink-0 items-center justify-center rounded-full text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={removeLabel}
+          >
+            {leading ? (
+              <span className="flex items-center justify-center opacity-100 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+                {leading}
+              </span>
+            ) : null}
+            <X className="absolute size-3.5 opacity-0 transition-opacity group-hover:opacity-45 group-focus-within:opacity-45 group-hover/remove:opacity-100 group-focus-visible/remove:opacity-100" />
+          </button>
+          <span className="min-w-0 truncate">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{title ?? label}</TooltipContent>
+    </Tooltip>
   );
 }

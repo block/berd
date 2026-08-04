@@ -163,7 +163,7 @@ export function SidebarFlatChatsSection({
                   size="icon-xs"
                   onClick={onCreateProject}
                   aria-label={t("actions.newProject")}
-                  title={t("actions.newProject")}
+                  tooltip={t("actions.newProject")}
                   className="rounded-lg"
                 >
                   <IconCubePlus className="size-4" />
@@ -176,7 +176,7 @@ export function SidebarFlatChatsSection({
                 size="icon-xs"
                 onClick={onNewChat}
                 aria-label={t("empty.startChat")}
-                title={t("empty.startChat")}
+                tooltip={t("empty.startChat")}
                 className="rounded-lg"
               >
                 <IconEdit className="size-4" />
@@ -212,7 +212,7 @@ export function SidebarFlatChatsSection({
                 size="icon-xs"
                 onClick={onCreateProject}
                 aria-label={t("actions.newProject")}
-                title={t("actions.newProject")}
+                tooltip={t("actions.newProject")}
                 className="rounded-lg"
               >
                 <IconCubePlus className="size-4" />
@@ -226,7 +226,7 @@ export function SidebarFlatChatsSection({
                 size="icon-xs"
                 onClick={onNewChat}
                 aria-label={t("actions.newChat")}
-                title={t("actions.newChat")}
+                tooltip={t("actions.newChat")}
                 className="rounded-lg"
               >
                 <IconEdit className="size-4" />
@@ -245,7 +245,7 @@ export function SidebarFlatChatsSection({
                   variant="ghost"
                   size="icon-xs"
                   key={session.id}
-                  title={title}
+                  tooltip={title}
                   aria-label={title}
                   onClick={() => onSelectSession?.(session.id)}
                   className={cn(

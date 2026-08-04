@@ -273,7 +273,8 @@ export function SidebarProjectList({
             variant="ghost"
             size="icon-xs"
             key={project.id}
-            title={project.name}
+            aria-label={project.name}
+            tooltip={project.name}
             onClick={() => onNavigate?.("projects")}
             className="rounded-lg text-sidebar-foreground hover:bg-transparent hover:text-sidebar-foreground"
           >

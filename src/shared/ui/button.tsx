@@ -5,6 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/shared/lib/cn";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 import { Spinner } from "@/shared/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 const buttonVariants = cva(
   "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-full text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -281,6 +282,12 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
     loadingDelayMs?: number;
     loadingVisual?: ButtonLoadingVisual;
     preserveWidth?: boolean;
+    /**
+     * Visible product tooltip for the control. Prefer this over the native
+     * `title` attribute so button help has consistent styling and behavior.
+     */
+    tooltip?: React.ReactNode;
+    tooltipSide?: React.ComponentProps<typeof TooltipContent>["side"];
   };
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
@@ -302,6 +309,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       loadingDelayMs = 0,
       loadingVisual = "spinnerText",
       preserveWidth = false,
+      tooltip,
+      tooltipSide = "top",
       disabled,
       onClick,
       ...props
@@ -340,6 +349,9 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const resolvedLeftIcon = leftIcon;
     const isLoading = feedbackState === "loading";
     const resolvedDisabled = disabled || isLoading;
+    const disabledTooltipLabel =
+      Object.entries(props).find(([key]) => key.endsWith("-label"))?.[1] ??
+      (typeof tooltip === "string" ? tooltip : undefined);
     const spinnerClass = getButtonSpinnerClass(size);
     const labels = {
       idle: childContent,
@@ -441,7 +453,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       onClick?.(event);
     }
 
-    return (
+    const button = (
       <Comp
         {...getDesignSystemMetadata({
           component: "Button",
@@ -490,6 +502,32 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           </>
         )}
       </Comp>
+    );
+
+    if (tooltip === undefined || tooltip === null || tooltip === "") {
+      return button;
+    }
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {resolvedDisabled ? (
+            <span
+              role="group"
+              data-button-tooltip-trigger=""
+              className="inline-flex"
+              tabIndex={props.tabIndex ?? 0}
+              aria-disabled="true"
+              aria-label={disabledTooltipLabel}
+            >
+              {button}
+            </span>
+          ) : (
+            button
+          )}
+        </TooltipTrigger>
+        <TooltipContent side={tooltipSide}>{tooltip}</TooltipContent>
+      </Tooltip>
     );
   },
 );

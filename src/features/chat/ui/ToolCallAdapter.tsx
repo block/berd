@@ -146,7 +146,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
         variant="outline"
         onClick={() => void openLocation(location)}
         className={className}
-        title={location.path}
+        tooltip={location.path}
       >
         <FolderOpen className={iconClassName} />
         <span className="truncate">{label}</span>

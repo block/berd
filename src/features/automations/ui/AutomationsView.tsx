@@ -438,7 +438,7 @@ export function AutomationsWorkbench({
             }}
             disabled={!detailTile.id || isRefreshing || isRunActive}
             aria-label={t("actions.runNow")}
-            title={t("actions.runNow")}
+            tooltip={t("actions.runNow")}
             leftIcon={<PlayIcon aria-hidden="true" />}
           >
             {isRefreshing || isRunActive
@@ -452,7 +452,7 @@ export function AutomationsWorkbench({
               void refetchDetail();
             }}
             aria-label={t("actions.refresh")}
-            title={t("actions.refresh")}
+            tooltip={t("actions.refresh")}
             leftIcon={<IconRefresh aria-hidden="true" />}
           >
             {t("actions.refreshShort")}
@@ -468,7 +468,7 @@ export function AutomationsWorkbench({
           type="button"
           onClick={() => refetchAutomations()}
           aria-label={t("actions.refresh")}
-          title={t("actions.refresh")}
+          tooltip={t("actions.refresh")}
           leftIcon={<IconRefresh aria-hidden="true" />}
         >
           {t("actions.refreshShort")}
@@ -477,7 +477,7 @@ export function AutomationsWorkbench({
           type="button"
           onClick={openBuilder}
           aria-label={t("actions.add")}
-          title={t("actions.add")}
+          tooltip={t("actions.add")}
           leftIcon={<IconPlus aria-hidden="true" />}
         >
           {t("actions.add")}

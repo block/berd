@@ -8,6 +8,7 @@ import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import type { PhotoShape, WidgetRenderProps } from "./types";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 const PHOTO_SHAPES: PhotoShape[] = ["original", "square", "circle"];
 const PHOTO_ASPECT_RATIO_TIMEOUT_MS = 5_000;
@@ -200,42 +201,50 @@ export function PhotoWidget({
 
   return (
     <div className="group/photo relative h-full w-full">
-      <button
-        type="button"
-        onClick={cycleShape}
-        className={cn(
-          "block h-full w-full cursor-pointer overflow-hidden bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          shape === "circle" ? "rounded-full" : "rounded-md",
-        )}
-        aria-label={t("widgets.photo.shapeControl", {
-          current: t(`widgets.photo.shapes.${shape}`),
-          next: t(`widgets.photo.shapes.${nextPhotoShape(shape)}`),
-        })}
-        title={t("widgets.photo.clickToChangeShape")}
-      >
-        <img
-          src={imageSrc}
-          alt={t("widgets.photo.imageAlt")}
-          draggable={false}
-          onLoad={(event) => {
-            setUnavailableImageSrc(null);
-            const { naturalWidth, naturalHeight } = event.currentTarget;
-            if (naturalWidth <= 0 || naturalHeight <= 0) {
-              return;
-            }
-            const renderedAspectRatio = naturalWidth / naturalHeight;
-            const persistedAspectRatio = photoAspectRatioOf(instance.state);
-            if (Math.abs(renderedAspectRatio - persistedAspectRatio) > 0.001) {
-              onUpdateState({ aspectRatio: renderedAspectRatio });
-            }
-          }}
-          onError={() => setUnavailableImageSrc(imageSrc)}
-          className={cn(
-            "pointer-events-none h-full w-full select-none",
-            shape === "original" ? "object-contain" : "object-cover",
-          )}
-        />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={cycleShape}
+            className={cn(
+              "block h-full w-full cursor-pointer overflow-hidden bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              shape === "circle" ? "rounded-full" : "rounded-md",
+            )}
+            aria-label={t("widgets.photo.shapeControl", {
+              current: t(`widgets.photo.shapes.${shape}`),
+              next: t(`widgets.photo.shapes.${nextPhotoShape(shape)}`),
+            })}
+          >
+            <img
+              src={imageSrc}
+              alt={t("widgets.photo.imageAlt")}
+              draggable={false}
+              onLoad={(event) => {
+                setUnavailableImageSrc(null);
+                const { naturalWidth, naturalHeight } = event.currentTarget;
+                if (naturalWidth <= 0 || naturalHeight <= 0) {
+                  return;
+                }
+                const renderedAspectRatio = naturalWidth / naturalHeight;
+                const persistedAspectRatio = photoAspectRatioOf(instance.state);
+                if (
+                  Math.abs(renderedAspectRatio - persistedAspectRatio) > 0.001
+                ) {
+                  onUpdateState({ aspectRatio: renderedAspectRatio });
+                }
+              }}
+              onError={() => setUnavailableImageSrc(imageSrc)}
+              className={cn(
+                "pointer-events-none h-full w-full select-none",
+                shape === "original" ? "object-contain" : "object-cover",
+              )}
+            />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" pointerEvents="none">
+          {t("widgets.photo.clickToChangeShape")}
+        </TooltipContent>
+      </Tooltip>
       <div
         role="toolbar"
         aria-label={t("widgets.photo.toolbar")}

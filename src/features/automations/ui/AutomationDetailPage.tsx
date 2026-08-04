@@ -541,7 +541,7 @@ export function AutomationDetailPage({
                       size="icon"
                       variant="ghost"
                       aria-label={t("actions.editWithChat")}
-                      title={t("actions.editWithChat")}
+                      tooltip={t("actions.editWithChat")}
                       onClick={actions.onEditWithChat}
                       disabled={!actions.canEditWithChat}
                       className={PRIMARY_ACTION_BUTTON_CLASS}
@@ -553,7 +553,7 @@ export function AutomationDetailPage({
                       size="icon"
                       variant="ghost"
                       aria-label={actions.pinLabel}
-                      title={actions.pinLabel}
+                      tooltip={actions.pinLabel}
                       onClick={actions.onTogglePin}
                       disabled={actions.isPinning || !tile.id}
                       className={ACTION_BUTTON_CLASS}
@@ -572,7 +572,7 @@ export function AutomationDetailPage({
                           ? t("actions.duplicating")
                           : t("actions.duplicate")
                       }
-                      title={
+                      tooltip={
                         actions.isDuplicating
                           ? t("actions.duplicating")
                           : t("actions.duplicate")
@@ -588,7 +588,7 @@ export function AutomationDetailPage({
                       size="icon"
                       variant="ghost"
                       aria-label={t("actions.delete")}
-                      title={t("actions.delete")}
+                      tooltip={t("actions.delete")}
                       onClick={actions.onDelete}
                       disabled={actions.isDeleting}
                       className={ACTION_BUTTON_CLASS}

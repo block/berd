@@ -444,7 +444,7 @@ export function WorkingContextPicker({
               onClick={handleCreateBranchClick}
               className="rounded-full"
               aria-label={t("contextPanel.createDialog.createBranch")}
-              title={t("contextPanel.createDialog.createBranch")}
+              tooltip={t("contextPanel.createDialog.createBranch")}
             >
               <IconPlus className="size-4" />
             </Button>

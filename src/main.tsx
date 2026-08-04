@@ -20,6 +20,7 @@ import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { initTelemetry, trackAppLaunched } from "@/shared/telemetry/client";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
+import { TooltipProvider } from "@/shared/ui/tooltip";
 import { RendererErrorBoundary } from "@/app/ui/RendererErrorBoundary";
 import "@xterm/xterm/css/xterm.css";
 import "@/shared/styles/globals.css";
@@ -141,11 +142,13 @@ if (bootError) {
     .then(([{ SessionWindowApp }, { SessionWindowRuntime }]) => {
       reactRoot.render(
         <React.StrictMode>
-          <RendererErrorBoundary>
-            <SessionWindowRuntime queryClient={queryClient}>
-              <SessionWindowApp sessionId={decodedSessionId} />
-            </SessionWindowRuntime>
-          </RendererErrorBoundary>
+          <TooltipProvider>
+            <RendererErrorBoundary>
+              <SessionWindowRuntime queryClient={queryClient}>
+                <SessionWindowApp sessionId={decodedSessionId} />
+              </SessionWindowRuntime>
+            </RendererErrorBoundary>
+          </TooltipProvider>
         </React.StrictMode>,
       );
     })
@@ -160,23 +163,25 @@ if (bootError) {
 
   reactRoot.render(
     <React.StrictMode>
-      <RendererErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <AcpToolsEvents />
-          <GitStateEvents />
-          <LocalMediaCacheEvents />
-          <ReleasedQueuedMessageDrain />
-          <OptionalBerdctlBridge />
-          <RendererTelemetry />
-          <I18nProvider>
-            <ThemeProvider>
-              <UpdaterProvider>
-                <App />
-              </UpdaterProvider>
-            </ThemeProvider>
-          </I18nProvider>
-        </QueryClientProvider>
-      </RendererErrorBoundary>
+      <TooltipProvider>
+        <RendererErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <AcpToolsEvents />
+            <GitStateEvents />
+            <LocalMediaCacheEvents />
+            <ReleasedQueuedMessageDrain />
+            <OptionalBerdctlBridge />
+            <RendererTelemetry />
+            <I18nProvider>
+              <ThemeProvider>
+                <UpdaterProvider>
+                  <App />
+                </UpdaterProvider>
+              </ThemeProvider>
+            </I18nProvider>
+          </QueryClientProvider>
+        </RendererErrorBoundary>
+      </TooltipProvider>
     </React.StrictMode>,
   );
 }
