@@ -23,6 +23,7 @@ function setWindowHeight(height: number) {
 function dragSidebar(
   sidebar: ResizableSidebar,
   axis: "width" | "height" | "both",
+  { clientX = 60, clientY = 80 } = {},
 ) {
   const start =
     axis === "both"
@@ -39,9 +40,7 @@ function dragSidebar(
     } as unknown as ReactMouseEvent);
   });
   act(() => {
-    document.dispatchEvent(
-      new MouseEvent("mousemove", { clientX: 60, clientY: 80 }),
-    );
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX, clientY }));
     document.dispatchEvent(new MouseEvent("mouseup"));
   });
 }
@@ -158,6 +157,116 @@ describe("useResizableSidebar", () => {
     expect(result.current.sidebarHeight).toBeGreaterThan(initialHeight);
   });
 
+  it("keeps a full-height sidebar attached to the viewport bottom", () => {
+    const { result } = renderHook(() => useResizableSidebar());
+
+    dragSidebar(result.current, "height", { clientY: 1000 });
+    expect(result.current.sidebarHeight).toBe(704);
+
+    act(() => {
+      setWindowHeight(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(836);
+
+    act(() => {
+      setWindowHeight(700);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(636);
+  });
+
+  it("restores full-height behavior after remount", () => {
+    const { result, unmount } = renderHook(() => useResizableSidebar());
+
+    dragSidebar(result.current, "height", { clientY: 1000 });
+    unmount();
+
+    setWindowHeight(900);
+    const { result: remountedResult } = renderHook(() => useResizableSidebar());
+    expect(remountedResult.current.sidebarHeight).toBe(836);
+  });
+
+  it("keeps a fixed preferred height when the viewport temporarily clamps it", () => {
+    setWindowHeight(900);
+    const { result } = renderHook(() => useResizableSidebar());
+
+    dragSidebar(result.current, "height", { clientY: 100 });
+    expect(result.current.sidebarHeight).toBe(727);
+
+    act(() => {
+      setWindowHeight(700);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(636);
+
+    act(() => {
+      setWindowHeight(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(727);
+  });
+
+  it("preserves a clamped fixed height during a width-only corner drag", () => {
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: 240,
+        height: 727,
+        heightMode: "fixed",
+      }),
+    );
+    setWindowHeight(700);
+    const { result } = renderHook(() => useResizableSidebar());
+    expect(result.current.sidebarHeight).toBe(636);
+
+    dragSidebar(result.current, "both", { clientX: 60, clientY: 0 });
+
+    act(() => {
+      setWindowHeight(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(727);
+  });
+
+  it("restores the starting height when a corner drag returns to its start Y", () => {
+    const { result } = renderHook(() => useResizableSidebar());
+    const initialHeight = result.current.sidebarHeight;
+
+    act(() => {
+      result.current.handleCornerResizeStart({
+        clientX: 0,
+        clientY: 0,
+        preventDefault: vi.fn(),
+      } as unknown as ReactMouseEvent);
+    });
+    act(() => {
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 60, clientY: 80 }),
+      );
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 60, clientY: 0 }),
+      );
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+
+    expect(result.current.sidebarHeight).toBe(initialHeight);
+  });
+
+  it("returns a full-height sidebar to fixed height after dragging upward", () => {
+    const { result } = renderHook(() => useResizableSidebar());
+
+    dragSidebar(result.current, "height", { clientY: 1000 });
+    dragSidebar(result.current, "height", { clientY: -100 });
+    expect(result.current.sidebarHeight).toBe(604);
+
+    act(() => {
+      setWindowHeight(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(604);
+  });
+
   it("restores resized dimensions after remount", () => {
     const { result, unmount } = renderHook(() => useResizableSidebar());
     const initialWidth = result.current.sidebarWidth;
@@ -206,6 +315,7 @@ describe("useResizableSidebar", () => {
       JSON.stringify({
         width: "wide",
         height: Number.POSITIVE_INFINITY,
+        heightMode: "tall",
         heightCustomized: "yes",
       }),
     );
@@ -214,6 +324,26 @@ describe("useResizableSidebar", () => {
 
     expect(result.current.sidebarWidth).toBe(defaultWidth);
     expect(result.current.sidebarHeight).toBe(defaultHeight);
+  });
+
+  it("migrates a legacy customized height to fixed height", () => {
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: 240,
+        height: 640,
+        heightCustomized: true,
+      }),
+    );
+    const { result } = renderHook(() => useResizableSidebar());
+
+    expect(result.current.sidebarHeight).toBe(640);
+
+    act(() => {
+      setWindowHeight(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(640);
   });
 
   it("shrinks a wide sidebar before collapsing on narrow windows", () => {
@@ -403,6 +533,24 @@ describe("useResizableSidebar", () => {
       "goose:sidebar:layout",
       expect.any(String),
     );
+  });
+
+  it("returns to the responsive default height on double-click", () => {
+    const { result } = renderHook(() => useResizableSidebar());
+
+    dragSidebar(result.current, "height", { clientY: 1000 });
+    expect(result.current.sidebarHeight).toBe(704);
+
+    act(() => {
+      result.current.handleHeightResizeDoubleClick();
+    });
+    expect(result.current.sidebarHeight).toBe(528);
+
+    act(() => {
+      setWindowHeight(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current.sidebarHeight).toBe(627);
   });
 
   it("uses app chrome tokens for the maximum sidebar height", () => {

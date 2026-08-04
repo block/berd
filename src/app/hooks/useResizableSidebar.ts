@@ -26,10 +26,13 @@ const COLLAPSED_WINDOW_MIN_WIDTH =
   APP_SHELL_HORIZONTAL_CHROME_WIDTH + MIN_MAIN_CONTENT_WIDTH;
 const WINDOW_RESIZE_SETTLE_MS = 120;
 
+type SidebarHeightMode = "default" | "fixed" | "full";
+
 type SidebarLayoutPreference = {
   width: number;
+  /** Preferred pixel height used when heightMode is fixed. */
   height: number;
-  heightCustomized: boolean;
+  heightMode: SidebarHeightMode;
 };
 
 type SidebarCollapseReason = "manual" | "viewport";
@@ -119,13 +122,6 @@ function getDefaultSidebarHeight() {
   return Math.round(getSidebarFrameHeight() * SIDEBAR_DEFAULT_HEIGHT_RATIO);
 }
 
-function clampSidebarHeight(height: number) {
-  return Math.min(
-    getSidebarFrameHeight(),
-    Math.max(SIDEBAR_MIN_HEIGHT, height),
-  );
-}
-
 function clampSidebarWidth(width: number) {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
 }
@@ -134,7 +130,7 @@ function getDefaultSidebarLayout(): SidebarLayoutPreference {
   return {
     width: SIDEBAR_DEFAULT_WIDTH,
     height: getDefaultSidebarHeight(),
-    heightCustomized: false,
+    heightMode: "default",
   };
 }
 
@@ -170,14 +166,23 @@ function validateSidebarLayoutPreference(
   const layout = value as Record<string, unknown>;
   const width = getFiniteNumber(layout.width);
   const height = getFiniteNumber(layout.height);
+  const storedHeightMode = layout.heightMode;
+  const heightMode: SidebarHeightMode =
+    storedHeightMode === "default" ||
+    storedHeightMode === "fixed" ||
+    storedHeightMode === "full"
+      ? storedHeightMode
+      : typeof layout.heightCustomized === "boolean"
+        ? layout.heightCustomized
+          ? "fixed"
+          : "default"
+        : defaults.heightMode;
 
   return {
     width: width === null ? defaults.width : clampSidebarWidth(width),
-    height: height === null ? defaults.height : clampSidebarHeight(height),
-    heightCustomized:
-      typeof layout.heightCustomized === "boolean"
-        ? layout.heightCustomized
-        : defaults.heightCustomized,
+    height:
+      height === null ? defaults.height : Math.max(SIDEBAR_MIN_HEIGHT, height),
+    heightMode,
   };
 }
 
@@ -215,6 +220,9 @@ export function useResizableSidebar() {
       return { collapsed, reason: collapsed ? "viewport" : null };
     });
   const [viewportWidth, setViewportWidth] = useState(getViewportWidth);
+  const [sidebarFrameHeight, setSidebarFrameHeight] = useState(
+    getSidebarFrameHeight,
+  );
   const [sidebarLayout, setSidebarLayout] = usePersistedState(
     SIDEBAR_LAYOUT_STORAGE_KEY,
     initialSidebarLayout,
@@ -228,7 +236,12 @@ export function useResizableSidebar() {
     preferredSidebarWidth,
     viewportWidth,
   );
-  const sidebarHeight = sidebarLayout.height;
+  const sidebarHeight =
+    sidebarLayout.heightMode === "full"
+      ? sidebarFrameHeight
+      : sidebarLayout.heightMode === "default"
+        ? Math.round(sidebarFrameHeight * SIDEBAR_DEFAULT_HEIGHT_RATIO)
+        : Math.min(sidebarFrameHeight, sidebarLayout.height);
   const sidebarCollapsed = sidebarCollapseState.collapsed;
   const patchSidebarLayout = useCallback(
     (patch: Partial<SidebarLayoutPreference>) => {
@@ -288,10 +301,9 @@ export function useResizableSidebar() {
       const startWidth = sidebarCollapsed ? 0 : sidebarWidth;
       const startHeight = sidebarHeight;
       let shouldCollapse = false;
-
-      if (axis === "height" || axis === "both") {
-        patchSidebarLayout({ heightCustomized: true });
-      }
+      let resizedHeight: number | null = null;
+      let resizedFrameHeight: number | null = null;
+      let hasVerticalMovement = false;
 
       const onMouseMove = (moveEvent: MouseEvent) => {
         if (axis === "width" || axis === "both") {
@@ -308,17 +320,32 @@ export function useResizableSidebar() {
           }
         }
 
-        if (axis === "height" || axis === "both") {
-          const deltaY = moveEvent.clientY - startY;
+        const deltaY = moveEvent.clientY - startY;
+        if (
+          axis === "height" ||
+          (axis === "both" && (hasVerticalMovement || deltaY !== 0))
+        ) {
+          hasVerticalMovement = hasVerticalMovement || deltaY !== 0;
+          resizedFrameHeight = getSidebarFrameHeight();
+          resizedHeight = Math.min(
+            resizedFrameHeight,
+            Math.max(SIDEBAR_MIN_HEIGHT, startHeight + deltaY),
+          );
           patchSidebarLayout({
-            height: clampSidebarHeight(startHeight + deltaY),
-            heightCustomized: true,
+            height: resizedHeight,
+            heightMode: "fixed",
           });
         }
       };
 
       const cleanup = () => {
         setIsResizing(false);
+        if (resizedHeight !== null && resizedFrameHeight !== null) {
+          patchSidebarLayout({
+            height: resizedHeight,
+            heightMode: resizedHeight >= resizedFrameHeight ? "full" : "fixed",
+          });
+        }
         if (shouldCollapse) {
           setSidebarCollapseState({ collapsed: true, reason: "manual" });
         }
@@ -379,8 +406,8 @@ export function useResizableSidebar() {
 
   const handleHeightResizeDoubleClick = useCallback(() => {
     patchSidebarLayout({
-      height: clampSidebarHeight(getDefaultSidebarHeight()),
-      heightCustomized: false,
+      height: getDefaultSidebarHeight(),
+      heightMode: "default",
     });
   }, [patchSidebarLayout]);
 
@@ -448,21 +475,18 @@ export function useResizableSidebar() {
 
   useEffect(() => {
     const handleWindowResize = () => {
-      setSidebarLayout((layout) => {
-        const nextHeight = layout.heightCustomized
-          ? clampSidebarHeight(layout.height)
-          : getDefaultSidebarHeight();
-
-        return nextHeight === layout.height
-          ? layout
-          : { ...layout, height: nextHeight };
-      });
+      const nextFrameHeight = getSidebarFrameHeight();
+      setSidebarFrameHeight((currentFrameHeight) =>
+        currentFrameHeight === nextFrameHeight
+          ? currentFrameHeight
+          : nextFrameHeight,
+      );
     };
 
     handleWindowResize();
     window.addEventListener("resize", handleWindowResize);
     return () => window.removeEventListener("resize", handleWindowResize);
-  }, [setSidebarLayout]);
+  }, []);
 
   return {
     expandSidebar,
