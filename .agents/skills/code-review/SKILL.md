@@ -127,11 +127,23 @@ Run these as passes, then consolidate findings before presenting them. A finding
 - Are comments reserved for non-obvious decisions rather than restating the code?
 - Are unrelated changes separated from the branch's main purpose?
 
-#### Tests And Verification
-- Did logic move without moving or adding the right tests?
-- Are new or changed behaviors covered at the right level?
-- Are brittle tests asserting implementation details instead of user-visible behavior?
-- Were obsolete tests removed only when the protected behavior was intentionally removed?
+#### Test Coverage And Integrity
+Review both sides: whether changed behavior needs protection, and whether changed tests still protect the intended behavior.
+
+**Coverage gaps**
+- For each new behavior, bug fix, state transition, or boundary change, identify the regression that a test should catch.
+- Check whether that regression is covered by an existing or changed test. For bug fixes, expect a test that fails without the fix when practical.
+- Require the lowest reliable test level: unit tests for pure logic, component/integration tests for user interactions and state, and E2E tests only for critical flows that cross boundaries or depend on the real app environment.
+- Do not require tests for trivial copy or visual-only changes unless behavior or accessibility changes.
+- Treat missing coverage as **[Must Fix]** when an automatable regression could affect persisted data, async success/failure, recovery, destructive actions, shared behavior, or a reproduced bug. Otherwise use **[Your Call]** and explain the residual risk.
+
+**Changed-test integrity**
+- When tests change or are deleted, compare the old and new assertions and verify that an intentional product-contract change justifies the update.
+- Flag deleted or weakened assertions, broader mocks, skipped tests, added retries/timeouts, or snapshots/existence checks that replace meaningful behavior checks.
+- Ask: would the revised test fail if the regression returned? A passing suite is not enough if the test was changed merely to accept the implementation.
+- Accept removed tests only when the protected behavior was intentionally removed or equivalent coverage exists elsewhere.
+
+Always state whether coverage is sufficient, identify any uncovered regression risk, and say whether changed tests preserve or intentionally redefine the behavioral contract.
 
 ### Maintainability Pass
 
