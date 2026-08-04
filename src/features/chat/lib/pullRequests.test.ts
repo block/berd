@@ -177,4 +177,52 @@ describe("advanceRelatedPullRequestScan", () => {
 
     expect(rebuilt.pullRequests.map((pr) => pr.number)).toEqual([30]);
   });
+
+  it("rebuilds when a same-id historical message is patched", () => {
+    const toolMessage: Message = {
+      id: "tool-message",
+      role: "assistant",
+      created: 1,
+      content: [
+        {
+          type: "toolRequest",
+          id: "tool-call",
+          name: "shell",
+          arguments: {},
+          status: "in_progress",
+        },
+      ],
+    };
+    const streaming = textMessage("streaming", "Still working");
+    const initial = advanceRelatedPullRequestScan(
+      EMPTY_RELATED_PULL_REQUEST_SCAN,
+      [toolMessage, streaming],
+      streaming.id,
+      false,
+    );
+    const patchedToolMessage: Message = {
+      ...toolMessage,
+      content: [
+        ...toolMessage.content,
+        {
+          type: "toolResponse",
+          id: "tool-call",
+          name: "shell",
+          result: "Opened https://github.com/squareup/berd/pull/40",
+          isError: false,
+        },
+      ],
+    };
+
+    const rebuilt = advanceRelatedPullRequestScan(
+      initial,
+      [patchedToolMessage, streaming],
+      streaming.id,
+      false,
+    );
+
+    expect(rebuilt.pullRequests.map((pr) => pr.number)).toEqual([40]);
+    expect(rebuilt.processedMessageCount).toBe(1);
+    expect(rebuilt.processedMessages).toEqual([patchedToolMessage]);
+  });
 });

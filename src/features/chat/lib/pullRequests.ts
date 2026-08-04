@@ -11,14 +11,15 @@ export interface DetectedPullRequest {
 export interface RelatedPullRequestScan {
   initialized: boolean;
   processedMessageCount: number;
-  lastProcessedMessageId: string | null;
+  /** Immutable message references reveal same-id patches to scanned history. */
+  processedMessages: readonly Message[];
   pullRequests: DetectedPullRequest[];
 }
 
 export const EMPTY_RELATED_PULL_REQUEST_SCAN: RelatedPullRequestScan = {
   initialized: false,
   processedMessageCount: 0,
-  lastProcessedMessageId: null,
+  processedMessages: [],
   pullRequests: [],
 };
 
@@ -116,9 +117,9 @@ export function advanceRelatedPullRequestScan(
 
   const prefixChanged =
     scan.processedMessageCount > messages.length ||
-    (scan.processedMessageCount > 0 &&
-      messages[scan.processedMessageCount - 1]?.id !==
-        scan.lastProcessedMessageId);
+    scan.processedMessages.some(
+      (processedMessage, index) => messages[index] !== processedMessage,
+    );
   const start =
     !scan.initialized || prefixChanged ? 0 : scan.processedMessageCount;
 
@@ -138,7 +139,7 @@ export function advanceRelatedPullRequestScan(
   return {
     initialized: true,
     processedMessageCount: end,
-    lastProcessedMessageId: end > 0 ? (messages[end - 1]?.id ?? null) : null,
+    processedMessages: messages.slice(0, end),
     pullRequests,
   };
 }
