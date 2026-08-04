@@ -347,6 +347,8 @@ export interface QueuedMessagePayload {
   personaId?: string;
   attachments?: ChatAttachmentDraft[];
   sendOptions?: ChatSendOptions;
+  /** False for reliable startup handoffs that should not look user-queued. */
+  showInComposer?: boolean;
 }
 
 export type QueuedMessageRecord =

@@ -1,19 +1,25 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import {
+  BERDY_ONBOARDING_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
 import {
   clearExperimentEnabledOverride,
+  getExperiment,
   getVisibleExperimentRegistry,
   setExperimentEnabled,
   useExperimentList,
   type ExperimentRegistry,
 } from "./experimentPreferences";
+import {
+  resetOnboardingTourExperience,
+  syncOnboardingExperimentState,
+} from "@/features/onboarding/resetOnboardingTour";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
@@ -35,6 +41,8 @@ export function ExperimentsSettings({
   registry = EXPERIMENT_DEFINITIONS,
 }: ExperimentsSettingsProps) {
   const { t } = useTranslation("settings");
+  const [isResettingBerdyOnboarding, setIsResettingBerdyOnboarding] =
+    useState(false);
   const visibleRegistry = useMemo(
     () => getVisibleExperimentRegistry(registry),
     [registry],
@@ -52,6 +60,11 @@ export function ExperimentsSettings({
 
     if (!didSave) {
       toast.error(t("experiments.saveError"));
+      return;
+    }
+
+    if (definition.id === BERDY_ONBOARDING_EXPERIMENT_ID) {
+      void syncOnboardingExperimentState(enabled);
     }
   };
 
@@ -113,6 +126,13 @@ export function ExperimentsSettings({
                     );
                     if (!didSave) {
                       toast.error(t("experiments.saveError"));
+                      return;
+                    }
+                    if (definition.id === BERDY_ONBOARDING_EXPERIMENT_ID) {
+                      const enabled =
+                        getExperiment(definition.id, registry)?.enabled ===
+                        true;
+                      void syncOnboardingExperimentState(enabled);
                     }
                   }}
                   aria-label={t("experiments.resetToAuto")}
@@ -140,6 +160,39 @@ export function ExperimentsSettings({
           registry={registry}
           disabled={configDisabled ?? !experiment.enabled}
         />
+        {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
+          <div className="flex items-center justify-between gap-8 border-t px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              {t("experiments.berdyOnboarding.resetDescription")}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={!experiment.enabled || isResettingBerdyOnboarding}
+              onClick={async () => {
+                setIsResettingBerdyOnboarding(true);
+                try {
+                  const didReset = await resetOnboardingTourExperience();
+                  if (didReset) {
+                    toast.success(
+                      t("experiments.berdyOnboarding.resetSuccess"),
+                    );
+                  } else {
+                    toast.error(t("experiments.berdyOnboarding.resetError"));
+                  }
+                } catch {
+                  toast.error(t("experiments.berdyOnboarding.resetError"));
+                } finally {
+                  setIsResettingBerdyOnboarding(false);
+                }
+              }}
+            >
+              {t("experiments.berdyOnboarding.resetLabel")}
+            </Button>
+          </div>
+        ) : null}
       </div>
     );
   };

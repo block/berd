@@ -17,14 +17,23 @@ interface AvatarMediaProps {
   className?: string;
   lazy?: boolean;
   loadingStrategy?: "eager" | "lazy-once" | "visible-video";
+  playbackMode?: "loop" | "occasional";
   poster?: string;
   onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
+}
+
+const OCCASIONAL_INITIAL_DELAY_MS = { min: 750, max: 1_250 };
+const OCCASIONAL_REPEAT_DELAY_MS = { min: 8_000, max: 14_000 };
+
+function randomDelay({ min, max }: { min: number; max: number }): number {
+  return min + Math.random() * (max - min);
 }
 
 function getVideoPreload(
   animatedAvatarsEnabled: boolean,
   shouldLoadVideo: boolean,
   loadingStrategy: AvatarMediaProps["loadingStrategy"],
+  playbackMode: AvatarMediaProps["playbackMode"],
 ) {
   if (!animatedAvatarsEnabled && shouldLoadVideo) {
     // No poster asset today, so load the video to paint frame 0.
@@ -33,6 +42,10 @@ function getVideoPreload(
 
   if (loadingStrategy === "eager") {
     return "metadata";
+  }
+
+  if (playbackMode === "occasional" && shouldLoadVideo) {
+    return "auto";
   }
 
   return "none";
@@ -82,6 +95,7 @@ export const AvatarMedia = memo(function AvatarMedia({
   className,
   lazy = false,
   loadingStrategy = lazy ? "lazy-once" : "eager",
+  playbackMode = "loop",
   poster,
   onError,
 }: AvatarMediaProps) {
@@ -142,24 +156,78 @@ export const AvatarMedia = memo(function AvatarMedia({
       return;
     }
 
-    if (shouldAnimateVideo) {
-      void video.play().catch(() => {});
-    } else {
+    if (!shouldAnimateVideo) {
       video.pause();
+      return;
     }
-  }, [media.mediaType, media.src, shouldAnimateVideo, shouldLoadVideo]);
+
+    if (playbackMode === "loop") {
+      void video.play().catch(() => {});
+      return;
+    }
+
+    let disposed = false;
+    let playbackTimer: number | null = null;
+
+    const schedulePlayback = (initial: boolean) => {
+      if (playbackTimer !== null) {
+        window.clearTimeout(playbackTimer);
+      }
+      playbackTimer = window.setTimeout(
+        () => {
+          playbackTimer = null;
+          if (disposed) {
+            return;
+          }
+          try {
+            video.currentTime = 0;
+          } catch {
+            // The media may not be seekable yet; play from its current frame.
+          }
+          void video.play().catch(() => {
+            if (!disposed) {
+              schedulePlayback(false);
+            }
+          });
+        },
+        randomDelay(
+          initial ? OCCASIONAL_INITIAL_DELAY_MS : OCCASIONAL_REPEAT_DELAY_MS,
+        ),
+      );
+    };
+
+    const handleEnded = () => schedulePlayback(false);
+    video.pause();
+    video.addEventListener("ended", handleEnded);
+    schedulePlayback(true);
+
+    return () => {
+      disposed = true;
+      if (playbackTimer !== null) {
+        window.clearTimeout(playbackTimer);
+      }
+      video.removeEventListener("ended", handleEnded);
+    };
+  }, [
+    media.mediaType,
+    media.src,
+    playbackMode,
+    shouldAnimateVideo,
+    shouldLoadVideo,
+  ]);
 
   if (media.mediaType === "video") {
     const preload = getVideoPreload(
       shouldAnimateVideo,
       shouldLoadVideo,
       loadingStrategy,
+      playbackMode,
     );
 
     return (
       <video
         ref={videoRef}
-        loop={shouldAnimateVideo}
+        loop={shouldAnimateVideo && playbackMode === "loop"}
         muted
         poster={poster}
         playsInline

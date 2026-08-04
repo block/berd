@@ -198,6 +198,14 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
+    "berdyOnboarding": {
+      "description": "Muestra la guía interactiva de introducción y ayuda de Berdy en Inicio.",
+      "resetDescription": "Restaura el mensaje inicial de Berdy y lo centra en Inicio.",
+      "resetError": "No se pudo restablecer la introducción de Berdy. Espera a que Inicio termine de cargar e inténtalo de nuevo.",
+      "resetLabel": "Restablecer introducción",
+      "resetSuccess": "Se restableció la introducción de Berdy.",
+      "title": "Introducción de Berdy"
+    },
     "voiceConversation": {
       "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
       "title": "Conversaciones de voz"

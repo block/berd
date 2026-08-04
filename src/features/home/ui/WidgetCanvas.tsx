@@ -46,6 +46,7 @@ const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
 
 interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
+  pickerInstances?: WidgetInstance[];
   mutations: WidgetMutationHandlers;
   animateCameraTransition?: boolean;
   onRecenter?: () => void;
@@ -291,6 +292,7 @@ function homeCanvasZoomConstraints(
  */
 export function WidgetCanvas({
   instances,
+  pickerInstances = instances,
   mutations,
   animateCameraTransition = false,
   onRecenter,
@@ -311,6 +313,8 @@ export function WidgetCanvas({
   onCreateProject,
   onOpenSkills,
   onOpenAutomations,
+  onStartOnboardingTour,
+  onStartChatWithPrompt,
 }: WidgetCanvasProps) {
   const { t } = useTranslation("home");
   const resolvedRecenterLabel =
@@ -648,6 +652,7 @@ export function WidgetCanvas({
                   instance={renderInstance}
                   constraints={constraints}
                   canvasGestureActive={canvasGestureActive}
+                  canvasDragPosition={dragPositions[instance.id]}
                   widgetResizePreviewActive={isResizePreview}
                   renderPaused={!widgetInViewport}
                   currentMaxZ={currentMaxZ}
@@ -670,37 +675,41 @@ export function WidgetCanvas({
                   onCreateProject={onCreateProject}
                   onOpenSkills={onOpenSkills}
                   onOpenAutomations={onOpenAutomations}
+                  onStartOnboardingTour={onStartOnboardingTour}
+                  onStartChatWithPrompt={onStartChatWithPrompt}
                 />
-                <button
-                  type="button"
-                  aria-label={t("widgets.resize.label", {
-                    widget: t(catalogEntry.labelKey),
-                  })}
-                  draggable={false}
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    beginWidgetResize(event, instance);
-                  }}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  className={
-                    catalogEntry.resizeHandleClassName ??
-                    "absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-sm group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring"
-                  }
-                >
-                  <span
-                    className="size-4 rounded-full border border-border bg-background shadow-mini"
-                    aria-hidden="true"
-                  />
-                  <span className="sr-only">
-                    {t("widgets.resize.label", {
+                {catalogEntry.hideResizeHandle ? null : (
+                  <button
+                    type="button"
+                    aria-label={t("widgets.resize.label", {
                       widget: t(catalogEntry.labelKey),
                     })}
-                  </span>
-                </button>
+                    draggable={false}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      beginWidgetResize(event, instance);
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    className={
+                      catalogEntry.resizeHandleClassName ??
+                      "absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-sm group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring"
+                    }
+                  >
+                    <span
+                      className="size-4 rounded-full border border-border bg-background shadow-mini"
+                      aria-hidden="true"
+                    />
+                    <span className="sr-only">
+                      {t("widgets.resize.label", {
+                        widget: t(catalogEntry.labelKey),
+                      })}
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -742,7 +751,7 @@ export function WidgetCanvas({
         x={picker.x}
         y={picker.y}
         side={picker.side}
-        instances={instances}
+        instances={pickerInstances}
         onClose={closePicker}
         onSelect={(type, state) => {
           mutations.addWidget(

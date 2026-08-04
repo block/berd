@@ -467,9 +467,10 @@ export function ChatInput({
     };
   }, [scheduleResizeTextarea, surface]);
 
-  const visibleQueuedMessages =
+  const visibleQueuedMessages = (
     queuedMessages ??
-    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : []);
+    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : [])
+  ).filter(({ payload }) => payload.showInComposer !== false);
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;

@@ -29,6 +29,8 @@ import {
 } from "@/features/skills/lib/resolveSkillPillTone";
 import type { Persona } from "@/shared/types/agents";
 import { cn } from "@/shared/lib/cn";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { Input } from "@/shared/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/shared/ui/popover";
 import { missingDefaultStickyNoteWidgets } from "../lib/homeLayoutMapper";
@@ -357,6 +359,9 @@ export function WidgetPicker({
   onSelect,
   onSelectStarterStickies,
 }: WidgetPickerProps) {
+  const berdyOnboardingEnabled = Boolean(
+    useExperiment(BERDY_ONBOARDING_EXPERIMENT_ID)?.enabled,
+  );
   const { t } = useTranslation("home");
   const automationsEnabled = useProfileCapability("automations");
   const visibleWidgetCategories = useMemo(
@@ -409,8 +414,8 @@ export function WidgetPicker({
     automationFallbackTitle: t("widgets.automationOutputPin.fallbackTitle"),
   });
   const missingStarterStickies = useMemo(
-    () => missingDefaultStickyNoteWidgets(instances),
-    [instances],
+    () => missingDefaultStickyNoteWidgets(instances, berdyOnboardingEnabled),
+    [berdyOnboardingEnabled, instances],
   );
 
   const [previousOpen, setPreviousOpen] = useState(open);

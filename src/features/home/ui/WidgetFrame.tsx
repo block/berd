@@ -21,6 +21,7 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   mutations: WidgetMutationHandlers;
   constraints?: LayoutConstraints | null;
   canvasGestureActive?: boolean;
+  canvasDragPosition?: { x: number; y: number };
   widgetResizePreviewActive?: boolean;
   renderPaused?: boolean;
   shouldIgnoreActivation?: () => boolean;
@@ -49,6 +50,7 @@ export function WidgetFrame({
   mutations,
   constraints,
   canvasGestureActive = false,
+  canvasDragPosition,
   widgetResizePreviewActive = false,
   renderPaused = false,
   shouldIgnoreActivation = () => false,
@@ -67,6 +69,8 @@ export function WidgetFrame({
   onCreateProject,
   onOpenSkills,
   onOpenAutomations,
+  onStartOnboardingTour,
+  onStartChatWithPrompt,
 }: WidgetFrameProps) {
   const { t } = useTranslation("home");
   const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
@@ -159,6 +163,7 @@ export function WidgetFrame({
         <Component
           instance={instance}
           canvasGestureActive={canvasGestureActive}
+          canvasDragPosition={canvasDragPosition}
           widgetResizePreviewActive={widgetResizePreviewActive}
           renderPaused={renderPaused}
           onUpdateState={handleUpdateState}
@@ -176,6 +181,8 @@ export function WidgetFrame({
           onCreateProject={onCreateProject}
           onOpenSkills={onOpenSkills}
           onOpenAutomations={onOpenAutomations}
+          onStartOnboardingTour={onStartOnboardingTour}
+          onStartChatWithPrompt={onStartChatWithPrompt}
           onRemoveWidget={handleRemove}
         />
       </fieldset>

@@ -79,6 +79,29 @@ describe("queuePersistence", () => {
     expect(queues.s1?.[0]).not.toHaveProperty("editing");
   });
 
+  it("reveals a hidden startup handoff when restoring it", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        s1: [
+          {
+            kind: "transport-ready",
+            recordId: "hidden-startup-handoff",
+            payload: { text: "first message", showInComposer: false },
+          },
+        ],
+      }),
+    );
+
+    await expect(loadPersistedMessageQueues()).resolves.toMatchObject({
+      s1: [
+        {
+          payload: { text: "first message", showInComposer: true },
+          restored: true,
+        },
+      ],
+    });
+  });
+
   it("rejects deferred records without supported workspace-first-send state", async () => {
     mockInvoke.mockResolvedValue(
       JSON.stringify({

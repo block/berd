@@ -39,8 +39,12 @@ function normalizeQueuedRecord(
   record: QueuedMessageRecord,
 ): QueuedMessageRecord {
   const { editing: _editing, restored: _restored, ...persisted } = record;
+  const restoredPayload =
+    persisted.payload.showInComposer === false
+      ? { ...persisted.payload, showInComposer: true }
+      : persisted.payload;
   if (persisted.kind !== "deferred") {
-    return { ...persisted, restored: true };
+    return { ...persisted, payload: restoredPayload, restored: true };
   }
   const state = persisted.state as Partial<DeferredWorkspaceSend> | undefined;
   if (state?.type !== "workspace-first-send") {
@@ -49,6 +53,7 @@ function normalizeQueuedRecord(
   if (state.status === "creating") {
     return {
       ...persisted,
+      payload: restoredPayload,
       state: {
         ...state,
         status: "held",
@@ -57,7 +62,11 @@ function normalizeQueuedRecord(
       restored: true,
     };
   }
-  return { ...persisted, restored: true };
+  return {
+    ...persisted,
+    payload: restoredPayload,
+    restored: true,
+  };
 }
 
 export async function loadPersistedMessageQueues(): Promise<PersistedQueues> {

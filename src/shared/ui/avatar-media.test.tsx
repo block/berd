@@ -88,6 +88,7 @@ describe("AvatarMedia", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     window.matchMedia = originalMatchMedia;
   });
@@ -235,5 +236,49 @@ describe("AvatarMedia", () => {
     );
     expect(playMock).not.toHaveBeenCalled();
     expect(pauseMock).toHaveBeenCalled();
+  });
+
+  it("plays occasional avatars once, then waits before replaying", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="eager"
+        playbackMode="occasional"
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    expect(video).not.toHaveAttribute("loop");
+    expect(playMock).not.toHaveBeenCalled();
+
+    await act(async () => vi.advanceTimersByTime(750));
+    expect(playMock).toHaveBeenCalledTimes(1);
+
+    act(() => video.dispatchEvent(new Event("ended")));
+    await act(async () => vi.advanceTimersByTime(7_999));
+    expect(playMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(playMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("preloads occasional video while it is visible", async () => {
+    render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+        playbackMode="occasional"
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    emitIntersection(true);
+
+    await waitFor(() => expect(video).toHaveAttribute("preload", "auto"));
   });
 });

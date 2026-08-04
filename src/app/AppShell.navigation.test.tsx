@@ -50,6 +50,7 @@ import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockAcpSetSessionConfigOption = vi.hoisted(() => vi.fn());
 const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
 const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
@@ -363,6 +364,8 @@ vi.mock("@/features/chat/lib/externalAgentReadiness", () => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
+  acpSetSessionConfigOption: (...args: unknown[]) =>
+    mockAcpSetSessionConfigOption(...args),
   acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
   acpListSessionsPage: (...args: unknown[]) => mockAcpListSessionsPage(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
@@ -474,6 +477,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onTagHomeComposerSkill,
     onSelectSession,
     onStartProjectChat,
+    onStartChatWithPrompt,
   }) => {
     const activeView = targetLocation.view;
     const activeSettingsSection =
@@ -515,6 +519,12 @@ vi.mock("./ui/AppShellContent", () => ({
           onClick={() => onStartProjectChat?.("project-startup")}
         >
           Start project chat
+        </button>
+        <button
+          type="button"
+          onClick={() => onStartChatWithPrompt?.("How do projects work?")}
+        >
+          Ask Berdy from Home
         </button>
         <button
           type="button"
@@ -761,6 +771,8 @@ describe("AppShell global navigation", () => {
     mockListExtensions.mockResolvedValue([]);
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockAcpSetSessionConfigOption.mockReset();
+    mockAcpSetSessionConfigOption.mockResolvedValue({});
     mockAcpListSessionsPage.mockReset();
     mockAcpListSessionsPage.mockImplementation(async () => ({
       sessions: useChatSessionStore.getState().sessions.map((session) => ({
@@ -2254,6 +2266,45 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("starts Berdy help prompts with the bundled Berdy persona", async () => {
+    const personaId = "/Users/test/.agents/agents/berdy.md";
+    useAgentStore.setState({
+      personas: [
+        {
+          id: personaId,
+          displayName: "Berdy",
+          avatar: "app-avatar:gloopies-14",
+          systemPrompt: "Help people use Berd.",
+          isBuiltin: false,
+          writable: true,
+          sourceProperties: { metadata: { berdBundled: true } },
+        },
+      ],
+    });
+    renderAppShell();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ask Berdy from Home" }),
+    );
+
+    await waitFor(() => {
+      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+        "created-session": [
+          {
+            payload: {
+              text: "How do projects work?",
+              personaId,
+              showInComposer: false,
+            },
+          },
+        ],
+      });
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({ personaId });
+    });
+  });
+
   it.each([
     {
       multiWorkspaceEnabled: true,
@@ -2477,6 +2528,80 @@ describe("AppShell global navigation", () => {
         "session-1",
       );
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("activates a centered composer handoff while reasoning configuration is pending", async () => {
+    vi.useFakeTimers();
+    const configUpdate = deferred<Record<string, never>>();
+    mockAcpSetSessionConfigOption.mockReturnValue(configUpdate.promise);
+    window.localStorage.setItem("goose:home-session-id", "home-session");
+
+    try {
+      const homeSession: ChatSession = {
+        id: "home-session",
+        title: "Home",
+        providerId: "goose",
+        workingDir: "~/goose artifacts",
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [
+            { id: "low", name: "low" },
+            { id: "high", name: "high" },
+          ],
+        },
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+        messageCount: 0,
+      };
+      const activeSession: ChatSession = {
+        ...homeSession,
+        id: "session-1",
+        title: "Active chat",
+        reasoningEffort: undefined,
+        messageCount: 1,
+      };
+      const reusableDraft: ChatSession = {
+        ...homeSession,
+        id: "reusable-draft",
+        title: "New Chat",
+      };
+      useChatSessionStore.setState({
+        sessions: [homeSession, activeSession, reusableDraft],
+        activeSessionId: null,
+      });
+      useChatStore.setState((state) => ({
+        draftsBySession: {
+          ...state.draftsBySession,
+          "reusable-draft": "preserve this draft",
+        },
+      }));
+      renderAppShell();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open session 1" }));
+      fireEvent.keyDown(window, { key: "n", metaKey: true });
+      const textbox = screen.getByPlaceholderText("Start a conversation");
+      fireEvent.change(textbox, { target: { value: "Think before sending" } });
+      fireEvent.keyDown(textbox, { key: "Enter" });
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockAcpSetSessionConfigOption).toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+        "session-1",
+      );
+    } finally {
+      configUpdate.resolve({});
       vi.useRealTimers();
     }
   });

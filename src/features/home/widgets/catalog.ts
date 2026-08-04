@@ -3,6 +3,7 @@ import { AutomationOutputWidget } from "./AutomationOutputWidget";
 import { ChatPinWidget } from "./ChatPinWidget";
 import { ChecklistWidget } from "./ChecklistWidget";
 import { ClockWidget } from "./ClockWidget";
+import { OnboardingTourWidget } from "./OnboardingTourWidget";
 import { photoAspectRatioOf, photoShapeOf, PhotoWidget } from "./PhotoWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 import { SkillPinWidget } from "./SkillPinWidget";
@@ -50,6 +51,21 @@ const CLOCK_DIGITAL_PROFILE: WidgetSizeProfile = {
 };
 
 export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
+  {
+    id: "onboardingTour",
+    category: "agent",
+    labelKey: "onboarding.callout.action",
+    defaultSize: { width: 448, height: 180 },
+    sizeBounds: {
+      minWidth: 448,
+      maxWidth: 448,
+      minHeight: 180,
+      maxHeight: 180,
+      lockAspectRatio: true,
+    },
+    hideResizeHandle: true,
+    Component: OnboardingTourWidget,
+  },
   {
     id: "clock",
     category: "clock",

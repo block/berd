@@ -25,6 +25,10 @@ type HomeLayoutKind = (typeof HOME_LAYOUT_REPLACE_KINDS)[number];
 
 const DEFAULT_CANVAS: CanvasBounds = { width: 1080, height: 760 };
 const DEFAULT_CLOCK_ANCHOR = { x: 0.83, y: 0.18 };
+// The rendered Berdy artwork has transparent space to its right, so its visual
+// center sits left of the 160px media box's geometric center.
+const ONBOARDING_AVATAR_CENTER_IN_WIDGET = { x: 72, y: 90 };
+const ONBOARDING_CLOCK_GAP = 32;
 
 const KIND_TO_WIDGET_TYPE = {
   clock: "clock",
@@ -39,6 +43,7 @@ const KIND_TO_WIDGET_TYPE = {
 } as const satisfies Record<HomeLayoutKind, string>;
 
 const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
+  onboardingTour: "stickyNote",
   clock: "clock",
   stickyNote: "stickyNote",
   checklist: "checklist",
@@ -159,6 +164,12 @@ function persistedStickyNoteStateFromItem(
   }
   if (typeof item.widgetState.fontSize === "string") {
     state.fontSize = item.widgetState.fontSize;
+  }
+  if (
+    item.targetId === "onboarding:tour" &&
+    item.widgetState.welcomeDismissed === true
+  ) {
+    state.welcomeDismissed = true;
   }
 
   return Object.keys(state).length > 0 ? state : undefined;
@@ -323,6 +334,12 @@ function widgetStateForLayoutItem(
       if (typeof instance.state?.fontSize === "string") {
         state.fontSize = instance.state.fontSize;
       }
+      if (
+        instance.type === "onboardingTour" &&
+        instance.state?.welcomeDismissed === true
+      ) {
+        state.welcomeDismissed = true;
+      }
       return Object.keys(state).length > 0 ? state : undefined;
     }
     case "checklist": {
@@ -406,7 +423,10 @@ export function layoutItemsToHomeWidgets(
     if (!isHomeLayoutKind(item.kind)) {
       return [];
     }
-    const type = KIND_TO_WIDGET_TYPE[item.kind];
+    const type =
+      item.kind === "stickyNote" && item.targetId === "onboarding:tour"
+        ? "onboardingTour"
+        : KIND_TO_WIDGET_TYPE[item.kind];
     const size = HOME_WIDGET_CATALOG_BY_ID[type]?.defaultSize;
     if (!size) {
       return [];
@@ -502,18 +522,58 @@ export function createDefaultClockLayoutItem(
   return item;
 }
 
+export function createDefaultOnboardingTourWidget(
+  clock?: WidgetInstance,
+): WidgetInstance {
+  const width = 448;
+  const height = 180;
+  const clockSize = clock ? widgetSizeForInstance(clock) : null;
+
+  return {
+    id: crypto.randomUUID(),
+    type: "onboardingTour",
+    x: clock && clockSize ? clock.x + clockSize.width / 2 - width / 2 : 664,
+    y:
+      clock && clockSize
+        ? clock.y + clockSize.height + ONBOARDING_CLOCK_GAP
+        : 288,
+    z: 1,
+    width,
+    height,
+    state: { noteId: "onboarding:tour" },
+  };
+}
+
+export function onboardingTourAvatarCenter(instance: WidgetInstance): {
+  x: number;
+  y: number;
+} {
+  return {
+    x: instance.x + ONBOARDING_AVATAR_CENTER_IN_WIDGET.x,
+    y: instance.y + ONBOARDING_AVATAR_CENTER_IN_WIDGET.y,
+  };
+}
+
 export function createDefaultStickyNoteWidgets(): WidgetInstance[] {
+  return createDefaultOnboardingWidgets(false);
+}
+
+export function createDefaultOnboardingWidgets(
+  berdyOnboardingEnabled: boolean,
+): WidgetInstance[] {
   return [
-    {
-      id: crypto.randomUUID(),
-      type: "stickyNote",
-      x: -360,
-      y: -240,
-      z: 1,
-      width: 224,
-      height: 196,
-      state: { noteId: "onboarding:welcome" },
-    },
+    berdyOnboardingEnabled
+      ? createDefaultOnboardingTourWidget()
+      : {
+          id: crypto.randomUUID(),
+          type: "stickyNote",
+          x: -360,
+          y: -240,
+          z: 1,
+          width: 224,
+          height: 196,
+          state: { noteId: "onboarding:welcome" },
+        },
     {
       id: crypto.randomUUID(),
       type: "stickyNote",
@@ -568,7 +628,7 @@ export function createDefaultStickyNoteWidgets(): WidgetInstance[] {
 }
 
 export function defaultStickyNoteId(instance: WidgetInstance): string | null {
-  if (instance.type !== "stickyNote") {
+  if (instance.type !== "stickyNote" && instance.type !== "onboardingTour") {
     return null;
   }
 
@@ -576,8 +636,89 @@ export function defaultStickyNoteId(instance: WidgetInstance): string | null {
   return typeof noteId === "string" && noteId.trim() ? noteId.trim() : null;
 }
 
+export function isUntouchedLegacyWelcomeStickyNote(
+  instance: WidgetInstance,
+): boolean {
+  if (defaultStickyNoteId(instance) !== "onboarding:welcome") {
+    return false;
+  }
+
+  const hasCustomizedState = ["text", "html", "tone", "fontSize"].some(
+    (key) => instance.state?.[key] !== undefined,
+  );
+
+  return (
+    !hasCustomizedState &&
+    instance.x === -360 &&
+    (instance.y === -250 || instance.y === -240) &&
+    instance.width === 224 &&
+    instance.height === 196
+  );
+}
+
+/**
+ * Reconcile the experiment-owned onboarding widget without overriding a
+ * user's canvas choice. An untouched legacy welcome note is the migration
+ * marker for opting in; no marker and no tour means the user removed Berdy.
+ */
+export function reconcileOnboardingExperimentWidgets(
+  instances: WidgetInstance[],
+  enabled: boolean,
+): WidgetInstance[] {
+  const hasOnboardingTour = instances.some(
+    (instance) => defaultStickyNoteId(instance) === "onboarding:tour",
+  );
+
+  if (!enabled) {
+    if (!hasOnboardingTour) {
+      return instances;
+    }
+
+    const withoutOnboardingTour = instances.filter(
+      (instance) => defaultStickyNoteId(instance) !== "onboarding:tour",
+    );
+    const hasLegacyWelcome = withoutOnboardingTour.some(
+      (instance) => defaultStickyNoteId(instance) === "onboarding:welcome",
+    );
+    if (hasLegacyWelcome) {
+      return withoutOnboardingTour;
+    }
+
+    const legacyWelcome = createDefaultOnboardingWidgets(false)[0];
+    const maxZ = withoutOnboardingTour.reduce(
+      (currentMax, instance) => Math.max(currentMax, instance.z),
+      0,
+    );
+    return [...withoutOnboardingTour, { ...legacyWelcome, z: maxZ + 1 }];
+  }
+
+  const withoutUntouchedLegacyWelcome = instances.filter(
+    (instance) => !isUntouchedLegacyWelcomeStickyNote(instance),
+  );
+  if (hasOnboardingTour) {
+    return withoutUntouchedLegacyWelcome.length === instances.length
+      ? instances
+      : withoutUntouchedLegacyWelcome;
+  }
+
+  const hasUntouchedLegacyWelcome =
+    withoutUntouchedLegacyWelcome.length !== instances.length;
+  if (!hasUntouchedLegacyWelcome) {
+    return instances;
+  }
+
+  const clock = instances.find((instance) => instance.type === "clock");
+  const onboardingTour = createDefaultOnboardingTourWidget(clock);
+  const maxZ = withoutUntouchedLegacyWelcome.reduce(
+    (currentMax, instance) => Math.max(currentMax, instance.z),
+    0,
+  );
+  return [...withoutUntouchedLegacyWelcome, { ...onboardingTour, z: maxZ + 1 }];
+}
+
 export function missingDefaultStickyNoteWidgets(
   instances: WidgetInstance[],
+  berdyOnboardingEnabled = false,
 ): WidgetInstance[] {
   const existingNoteIds = new Set(
     instances.flatMap((instance) => {
@@ -586,17 +727,20 @@ export function missingDefaultStickyNoteWidgets(
     }),
   );
 
-  return createDefaultStickyNoteWidgets().filter((instance) => {
-    const noteId = defaultStickyNoteId(instance);
-    return noteId !== null && !existingNoteIds.has(noteId);
-  });
+  return createDefaultOnboardingWidgets(berdyOnboardingEnabled).filter(
+    (instance) => {
+      const noteId = defaultStickyNoteId(instance);
+      return noteId !== null && !existingNoteIds.has(noteId);
+    },
+  );
 }
 
 export function createDefaultHomeWidgets(
   bounds: CanvasBounds = DEFAULT_CANVAS,
+  berdyOnboardingEnabled = false,
 ): WidgetInstance[] {
   return [
-    ...createDefaultStickyNoteWidgets(),
+    ...createDefaultOnboardingWidgets(berdyOnboardingEnabled),
     {
       ...createDefaultClockWidget(bounds),
       z: 7,
@@ -606,6 +750,9 @@ export function createDefaultHomeWidgets(
 
 export function createDefaultHomeLayoutItems(
   bounds?: CanvasBounds,
+  berdyOnboardingEnabled = false,
 ): LayoutItem[] {
-  return homeWidgetsToLayoutItems(createDefaultHomeWidgets(bounds));
+  return homeWidgetsToLayoutItems(
+    createDefaultHomeWidgets(bounds, berdyOnboardingEnabled),
+  );
 }

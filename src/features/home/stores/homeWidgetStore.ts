@@ -1,11 +1,19 @@
 import { toast } from "sonner";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { getExperiment } from "@/features/experiments/experimentPreferences";
 import type {
   LayoutCamera,
   LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import { isLayoutConstraints } from "../lib/snapToGrid";
+import {
+  createDefaultOnboardingTourWidget,
+  defaultStickyNoteId,
+  onboardingTourAvatarCenter,
+  reconcileOnboardingExperimentWidgets,
+} from "../lib/homeLayoutMapper";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   CanvasBounds,
@@ -182,6 +190,9 @@ interface HomeWidgetStore extends HomeWidgetState {
   ) => void;
   bumpZ: (id: string) => void;
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
+  syncOnboardingExperiment: (enabled: boolean) => void;
+  resetOnboardingTour: () => Promise<boolean>;
+  reloadOnboardingTourForDev: () => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (
     id: string,
@@ -415,6 +426,68 @@ function createHomeWidgetStore() {
           cleanUpSnapshot: snapshot,
         });
         runtime.enqueueSave(next);
+      },
+      syncOnboardingExperiment: (enabled) => {
+        applyMutation((instances) => {
+          const next = reconcileOnboardingExperimentWidgets(instances, enabled);
+          return next === instances ? null : next;
+        });
+      },
+      resetOnboardingTour: async () => {
+        const state = get();
+        const berdyOnboardingEnabled =
+          getExperiment(BERDY_ONBOARDING_EXPERIMENT_ID)?.enabled === true;
+        if (!berdyOnboardingEnabled || !canMutateWidgets(state)) {
+          return false;
+        }
+
+        const clock = state.instances.find(
+          (instance) => instance.type === "clock",
+        );
+        const onboardingTour = createDefaultOnboardingTourWidget(clock);
+        const avatarCenter = onboardingTourAvatarCenter(onboardingTour);
+        const expectedCamera = state.camera
+          ? {
+              ...state.camera,
+              centerX: avatarCenter.x,
+              centerY: avatarCenter.y,
+            }
+          : null;
+        const initialItemRevision = state.itemRevision;
+        const initialCameraRevision = state.cameraRevision;
+        applyMutation((instances) => {
+          const withoutOnboardingTour = instances.filter(
+            (instance) => defaultStickyNoteId(instance) !== "onboarding:tour",
+          );
+          const maxZ = withoutOnboardingTour.reduce(
+            (currentMax, instance) => Math.max(currentMax, instance.z),
+            0,
+          );
+
+          return [...withoutOnboardingTour, { ...onboardingTour, z: maxZ + 1 }];
+        });
+
+        if (expectedCamera) {
+          get().saveCamera(expectedCamera);
+        }
+        await runtime.waitForPendingSaves();
+
+        const latest = get();
+        const itemSaved =
+          latest.itemRevision !== initialItemRevision &&
+          latest.instances.some(
+            (instance) => instance.id === onboardingTour.id,
+          );
+        const cameraSaved =
+          !expectedCamera ||
+          (latest.cameraRevision !== initialCameraRevision &&
+            latest.camera?.centerX === expectedCamera.centerX &&
+            latest.camera.centerY === expectedCamera.centerY);
+        return itemSaved && cameraSaved;
+      },
+      reloadOnboardingTourForDev: () => {
+        if (!import.meta.env.DEV) return;
+        void get().resetOnboardingTour();
       },
       removeWidget: (id) => {
         applyMutation((instances) => removeWidgetMutation(instances, id));

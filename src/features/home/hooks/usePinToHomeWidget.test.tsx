@@ -82,7 +82,7 @@ beforeEach(() => {
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
   localStorage.clear();
-  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
 });
 
 describe("usePinToHomeWidget", () => {

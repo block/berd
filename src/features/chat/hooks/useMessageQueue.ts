@@ -169,6 +169,14 @@ export function useMessageQueue(
         }
 
         if (accepted === false) {
+          if (latestQueuedMessage.payload.showInComposer === false) {
+            useChatStore
+              .getState()
+              .updateQueuedMessage(sessionId, latestQueuedMessage.recordId, {
+                ...latestQueuedMessage.payload,
+                showInComposer: true,
+              });
+          }
           const previousFailureCount =
             failureStateRef.current?.key === key
               ? failureStateRef.current.count

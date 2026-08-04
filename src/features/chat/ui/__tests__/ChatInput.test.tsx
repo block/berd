@@ -2430,6 +2430,20 @@ describe("ChatInput", () => {
     expect(onSend).toHaveBeenCalledWith("new prompt", undefined, undefined);
   });
 
+  it("hides reliable startup handoffs from the queue bar", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessage={{
+          text: "first message",
+          showInComposer: false,
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Queued: first message")).not.toBeInTheDocument();
+  });
+
   it("edits a queued message from the queue bar", async () => {
     const onDismissQueue = vi.fn();
     const onPersonaChange = vi.fn();

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BERDY_ONBOARDING_EXPERIMENT_ID,
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
   SKILL_DISCOVERY_EXPERIMENT_ID,
@@ -14,6 +15,18 @@ import { ExperimentsSettings } from "../ExperimentsSettings";
 import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "../experimentPreferences";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
+
+const resetOnboardingTourExperienceMock = vi.hoisted(() =>
+  vi.fn(async () => true),
+);
+const syncOnboardingExperimentStateMock = vi.hoisted(() =>
+  vi.fn(async () => {}),
+);
+
+vi.mock("@/features/onboarding/resetOnboardingTour", () => ({
+  resetOnboardingTourExperience: resetOnboardingTourExperienceMock,
+  syncOnboardingExperimentState: syncOnboardingExperimentStateMock,
+}));
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -62,6 +75,8 @@ const uiRegistry = [
 describe("ExperimentsSettings", () => {
   beforeEach(() => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+    resetOnboardingTourExperienceMock.mockClear();
+    syncOnboardingExperimentStateMock.mockClear();
   });
 
   afterEach(() => {
@@ -106,7 +121,40 @@ describe("ExperimentsSettings", () => {
       TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
       SKILL_DISCOVERY_EXPERIMENT_ID,
       VOICE_CONVERSATION_EXPERIMENT_ID,
+      BERDY_ONBOARDING_EXPERIMENT_ID,
     ]);
+  });
+
+  it("resets Berdy onboarding from its experiment card", async () => {
+    vi.stubEnv("DEV", true);
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.berdyOnboarding.resetLabel", {
+          ns: "settings",
+        }),
+      }),
+    );
+
+    expect(resetOnboardingTourExperienceMock).toHaveBeenCalledOnce();
+  });
+
+  it("syncs Berdy onboarding when its experiment is toggled", async () => {
+    vi.stubEnv("DEV", false);
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    await user.click(
+      screen.getByRole("switch", {
+        name: i18n.t("experiments.berdyOnboarding.title", {
+          ns: "settings",
+        }),
+      }),
+    );
+
+    expect(syncOnboardingExperimentStateMock).toHaveBeenCalledWith(true);
   });
 
   it("does not advertise the retired macOS 26 voice requirement", () => {

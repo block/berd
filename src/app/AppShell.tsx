@@ -147,6 +147,7 @@ import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProvi
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
+import { findBerdyPersonaId } from "@/features/onboarding/berdyAgent";
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
@@ -450,7 +451,7 @@ function prefersReducedMotion(): boolean {
 
 function logProjectChatStartError(message: string, error: unknown): void {
   console.error(message, error);
-  toast.error(formatAcpErrorMessage(error, "Failed to start project chat."));
+  toast.error(formatAcpErrorMessage(error, "Couldn't start chat. Try again."));
 }
 
 function useWindowFullscreenState() {
@@ -2453,7 +2454,14 @@ export function AppShell({
   );
 
   const handleGlobalCompose = useCallback(
-    (text: string, options?: GlobalComposeOptions) => {
+    (
+      text: string,
+      options?: GlobalComposeOptions,
+      internalOptions?: {
+        showQueuedHandoff?: boolean;
+        onSettled?: (didStart: boolean) => void;
+      },
+    ) => {
       const project = options?.projectId
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
@@ -2516,6 +2524,9 @@ export function AppShell({
           sessionId,
           {
             text,
+            ...(internalOptions?.showQueuedHandoff === false
+              ? { showInComposer: false }
+              : {}),
             ...(options?.personaId ? { personaId: options.personaId } : {}),
             attachments: options?.attachments,
             ...(options?.sendOptions
@@ -2526,41 +2537,49 @@ export function AppShell({
         );
       };
 
-      const startChat = () => {
+      const startChat = async () => {
         const createChat = project
           ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
           : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
 
-        void createChat
-          .then((session) => {
-            if (session) {
-              return acceptGlobalFirstSend(session);
-            }
-          })
-          .catch((error) => {
-            logProjectChatStartError(
-              "Failed to start chat from global composer:",
-              error,
-            );
+        try {
+          const session = await createChat;
+          if (!session) {
             resetGlobalComposerTransition();
-          });
+            internalOptions?.onSettled?.(false);
+            return;
+          }
+          await acceptGlobalFirstSend(session);
+          internalOptions?.onSettled?.(true);
+        } catch (error) {
+          logProjectChatStartError(
+            "Failed to start chat from global composer:",
+            error,
+          );
+          resetGlobalComposerTransition();
+          internalOptions?.onSettled?.(false);
+        }
       };
 
-      const startBackgroundChat = () => {
-        void createBackgroundDraftChat(DEFAULT_CHAT_TITLE, project, chatOptions)
-          .then((session) => {
-            if (!session) {
-              resetGlobalComposerTransition();
-              return;
-            }
-            setChatComposerHandoffSessionId(session.id);
-            void acceptGlobalFirstSend(session);
-            clearGlobalComposerRouteSwapTimer();
-            if (prefersReducedMotion()) {
-              activateDeferredChatSession(session.id);
-              resetGlobalComposerTransition();
-              return;
-            }
+      const startBackgroundChat = async () => {
+        try {
+          const session = await createBackgroundDraftChat(
+            DEFAULT_CHAT_TITLE,
+            project,
+            chatOptions,
+          );
+          if (!session) {
+            resetGlobalComposerTransition();
+            internalOptions?.onSettled?.(false);
+            return;
+          }
+          setChatComposerHandoffSessionId(session.id);
+          const firstSendPromise = acceptGlobalFirstSend(session);
+          clearGlobalComposerRouteSwapTimer();
+          if (prefersReducedMotion()) {
+            activateDeferredChatSession(session.id);
+            resetGlobalComposerTransition();
+          } else {
             globalComposerRouteSwapTimeoutRef.current = window.setTimeout(
               () => {
                 globalComposerRouteSwapTimeoutRef.current = null;
@@ -2568,24 +2587,28 @@ export function AppShell({
               },
               GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS,
             );
-          })
-          .catch((error) => {
-            logProjectChatStartError(
-              "Failed to start chat from global composer:",
-              error,
-            );
-            resetGlobalComposerTransition();
-          });
+          }
+          await firstSendPromise;
+          internalOptions?.onSettled?.(true);
+        } catch (error) {
+          logProjectChatStartError(
+            "Failed to start chat from global composer:",
+            error,
+          );
+          resetGlobalComposerTransition();
+          internalOptions?.onSettled?.(false);
+        }
       };
 
       if (shouldRunComposerHandoff) {
         guardAppNavigation(startBackgroundChat, () => {
           resetGlobalComposerTransition();
+          internalOptions?.onSettled?.(false);
         });
         return;
       }
 
-      guardAppNavigation(startChat);
+      guardAppNavigation(startChat, () => internalOptions?.onSettled?.(false));
     },
     [
       activateDeferredChatSession,
@@ -2602,6 +2625,25 @@ export function AppShell({
       workspaceRepository,
       enqueueWorkspaceNameRequest,
     ],
+  );
+
+  const handleStartChatWithBerdy = useCallback(
+    (text: string): Promise<boolean> => {
+      const personaId = findBerdyPersonaId(useAgentStore.getState().personas);
+      if (!personaId) {
+        toast.error(t("home:onboarding.callout.agentUnavailable"));
+        return Promise.resolve(false);
+      }
+
+      return new Promise((resolve) => {
+        handleGlobalCompose(
+          text,
+          { personaId },
+          { showQueuedHandoff: false, onSettled: resolve },
+        );
+      });
+    },
+    [handleGlobalCompose, t],
   );
 
   const handleGlobalComposerExpand = useCallback(
@@ -4337,6 +4379,7 @@ export function AppShell({
               onStartChatFromProject={handleStartChatFromProject}
               onStartProjectChat={handleStartProjectChat}
               onStartChatWithSkill={handleStartChatWithSkill}
+              onStartChatWithPrompt={handleStartChatWithBerdy}
               onExitSearch={handleExitSearch}
               onOpenExtension={handleOpenExtensionFromSearch}
               onOpenAgent={handleStartChatWithAgent}

@@ -1,4 +1,6 @@
 import { toast } from "sonner";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { getExperiment } from "@/features/experiments/experimentPreferences";
 import {
   getLayout,
   HOME_LAYOUT_ID,
@@ -11,18 +13,22 @@ import {
 import { i18n } from "@/shared/i18n";
 import {
   createDefaultHomeLayoutItems,
-  createDefaultStickyNoteWidgets,
+  createDefaultOnboardingWidgets,
+  createDefaultOnboardingTourWidget,
   defaultStickyNoteId,
   homeWidgetsToLayoutItems,
   HOME_LAYOUT_REPLACE_KINDS,
   layoutItemsToHomeWidgets,
+  onboardingTourAvatarCenter,
+  reconcileOnboardingExperimentWidgets,
 } from "../lib/homeLayoutMapper";
 import type { WidgetInstance } from "../widgets/types";
 
 const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
   "goose:home:onboarding-stickies-seeded";
-const ONBOARDING_STICKIES_SEEDED_VERSION = 5;
+const ONBOARDING_STICKIES_SEEDED_VERSION = 6;
 const ONBOARDING_STICKY_INTRODUCED_VERSION: Record<string, number> = {
+  "onboarding:tour": 6,
   "onboarding:welcome": 5,
   "onboarding:build-agent": 1,
   "onboarding:start-project": 1,
@@ -233,6 +239,7 @@ function hasStickyNote(instances: WidgetInstance[]): boolean {
 
 function withMissingDefaultStickyNotes(
   instances: WidgetInstance[],
+  berdyOnboardingEnabled: boolean,
 ): WidgetInstance[] {
   const seenVersion = onboardingStickiesSeenVersion();
   if (seenVersion >= ONBOARDING_STICKIES_SEEDED_VERSION) {
@@ -245,18 +252,21 @@ function withMissingDefaultStickyNotes(
       return noteId ? [noteId] : [];
     }),
   );
-  const missingStickyNotes = createDefaultStickyNoteWidgets().filter(
-    (instance) => {
-      const noteId = defaultStickyNoteId(instance);
-      if (!noteId || existingNoteIds.has(noteId)) {
-        return false;
-      }
-      const introducedVersion =
-        ONBOARDING_STICKY_INTRODUCED_VERSION[noteId] ??
-        ONBOARDING_STICKIES_SEEDED_VERSION;
-      return seenVersion < introducedVersion;
-    },
-  );
+  const missingStickyNotes = createDefaultOnboardingWidgets(
+    berdyOnboardingEnabled,
+  ).filter((instance) => {
+    const noteId = defaultStickyNoteId(instance);
+    if (noteId === "onboarding:tour" && !berdyOnboardingEnabled) {
+      return false;
+    }
+    if (!noteId || existingNoteIds.has(noteId)) {
+      return false;
+    }
+    const introducedVersion =
+      ONBOARDING_STICKY_INTRODUCED_VERSION[noteId] ??
+      ONBOARDING_STICKIES_SEEDED_VERSION;
+    return seenVersion < introducedVersion;
+  });
   if (missingStickyNotes.length === 0) {
     return instances;
   }
@@ -273,35 +283,39 @@ function withMissingDefaultStickyNotes(
   return [...instances, ...stickyNotes];
 }
 
-function defaultStickyNotePositionsById(): Map<
-  string,
-  { x: number; y: number; width: number; height: number }
-> {
+function defaultStickyNotePositionsById(
+  berdyOnboardingEnabled: boolean,
+): Map<string, { x: number; y: number; width: number; height: number }> {
   return new Map(
-    createDefaultStickyNoteWidgets().flatMap((instance) => {
-      const noteId = defaultStickyNoteId(instance);
-      if (!noteId || !instance.width || !instance.height) {
-        return [];
-      }
-      return [
-        [
-          noteId,
-          {
-            x: instance.x,
-            y: instance.y,
-            width: instance.width,
-            height: instance.height,
-          },
-        ],
-      ];
-    }),
+    createDefaultOnboardingWidgets(berdyOnboardingEnabled).flatMap(
+      (instance) => {
+        const noteId = defaultStickyNoteId(instance);
+        if (!noteId || !instance.width || !instance.height) {
+          return [];
+        }
+        return [
+          [
+            noteId,
+            {
+              x: instance.x,
+              y: instance.y,
+              width: instance.width,
+              height: instance.height,
+            },
+          ],
+        ];
+      },
+    ),
   );
 }
 
 function withSnappedDefaultStickyNotePositions(
   instances: WidgetInstance[],
+  berdyOnboardingEnabled: boolean,
 ): WidgetInstance[] {
-  const currentPositionsById = defaultStickyNotePositionsById();
+  const currentPositionsById = defaultStickyNotePositionsById(
+    berdyOnboardingEnabled,
+  );
   let changed = false;
 
   const nextInstances = instances.map((instance) => {
@@ -441,12 +455,21 @@ export function createHomeWidgetRuntime({
           return;
         }
 
+        const berdyOnboardingEnabled =
+          getExperiment(BERDY_ONBOARDING_EXPERIMENT_ID)?.enabled === true;
         const instances = layoutItemsToHomeWidgets(layout.items);
         if (instances.length > 0) {
-          const instancesWithMissingNotes =
-            withMissingDefaultStickyNotes(instances);
+          const instancesWithoutWelcome = reconcileOnboardingExperimentWidgets(
+            instances,
+            berdyOnboardingEnabled,
+          );
+          const instancesWithMissingNotes = withMissingDefaultStickyNotes(
+            instancesWithoutWelcome,
+            berdyOnboardingEnabled,
+          );
           const preparedInstances = withSnappedDefaultStickyNotePositions(
             instancesWithMissingNotes,
+            berdyOnboardingEnabled,
           );
           if (preparedInstances !== instances) {
             const result = await saveLayoutItems({
@@ -475,11 +498,15 @@ export function createHomeWidgetRuntime({
         // Empty layout — seed default onboarding widgets so first-run users
         // have something on the canvas. If the user later unpins them, that
         // choice is respected: only an empty layout re-seeds.
+        const defaultItems = createDefaultHomeLayoutItems(
+          undefined,
+          berdyOnboardingEnabled,
+        );
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
           expectedRevision: layout.itemRevision,
           replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: createDefaultHomeLayoutItems(),
+          items: defaultItems,
         });
         if (generation !== runtime.generation) {
           return;
@@ -490,7 +517,28 @@ export function createHomeWidgetRuntime({
         if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
           markOnboardingStickiesSeen();
         }
-        setReadyLayout(result.layout, generation);
+        if (!result.ok) {
+          setReadyLayout(result.layout, generation);
+          return;
+        }
+
+        if (!berdyOnboardingEnabled) {
+          setReadyLayout(result.layout, generation);
+          return;
+        }
+
+        const onboardingTour = createDefaultOnboardingTourWidget();
+        const avatarCenter = onboardingTourAvatarCenter(onboardingTour);
+        const centeredCamera = {
+          ...result.layout.camera,
+          centerX: avatarCenter.x,
+          centerY: avatarCenter.y,
+        };
+        setReadyLayout(
+          { ...result.layout, camera: centeredCamera },
+          generation,
+        );
+        enqueueCameraSave(centeredCamera);
         return;
       } catch (error) {
         if (generation !== runtime.generation) {
@@ -741,6 +789,13 @@ export function createHomeWidgetRuntime({
     void drainCameraSaveQueue();
   }
 
+  async function waitForPendingSaves(): Promise<void> {
+    await Promise.all([
+      runtime.saveLoopPromise ?? Promise.resolve(),
+      runtime.cameraSaveLoopPromise ?? Promise.resolve(),
+    ]);
+  }
+
   function __resetForTests__(): void {
     // Callers awaiting an in-flight initialize may receive a resolved promise
     // without any state change after reset advances the active generation.
@@ -761,6 +816,7 @@ export function createHomeWidgetRuntime({
     retryInitialize,
     enqueueSave,
     enqueueCameraSave,
+    waitForPendingSaves,
     __resetForTests__,
   };
 }

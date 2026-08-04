@@ -103,6 +103,9 @@ interface AppShellContentProps {
   onStartChatFromProject: (project: ProjectInfo) => void;
   onStartProjectChat: (projectId: string) => void;
   onStartChatWithSkill: (skill: SkillInfo, projectId?: string | null) => void;
+  onStartChatWithPrompt: (
+    prompt: string,
+  ) => boolean | undefined | Promise<boolean | undefined>;
   onExitSearch: () => void;
   onOpenExtension: (entry: ExtensionEntry) => void;
   onOpenAgent: (agentId: string) => void;
@@ -164,6 +167,7 @@ export function AppShellContent({
   onStartChatFromProject,
   onStartProjectChat,
   onStartChatWithSkill,
+  onStartChatWithPrompt,
   onExitSearch,
   onOpenExtension,
   onOpenAgent,
@@ -218,6 +222,7 @@ export function AppShellContent({
       onOpenSkills={() => onNavigateSkills(null)}
       onOpenAutomations={openHomeAutomations}
       onHydratePinnedChatSessions={onHydratePinnedChatSessions}
+      onStartChatWithPrompt={onStartChatWithPrompt}
       viewportLeftOcclusionPx={homeViewportLeftOcclusionPx}
     />
   );

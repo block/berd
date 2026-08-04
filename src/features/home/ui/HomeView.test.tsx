@@ -8,6 +8,8 @@ import {
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
 import type { Layout } from "@/features/layout/api/layout";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import {
   getLayout,
   HOME_LAYOUT_ID,
@@ -124,7 +126,8 @@ beforeEach(() => {
     layout: layout({ camera: request.camera, cameraRevision: 2 }),
   }));
   localStorage.clear();
-  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
+  setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: {
@@ -134,6 +137,140 @@ beforeEach(() => {
 });
 
 describe("HomeView", () => {
+  it("removes Berdy from the canvas when its experiment is disabled", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          ...layout().items,
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "stickyNote",
+            targetId: "onboarding:tour",
+            centerX: 888,
+            centerY: 378,
+            width: 448,
+            height: 180,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+
+    expect(widgetCanvasMock.mock.calls.at(-1)?.[0].instances).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingTour" }),
+      ]),
+    );
+    await waitFor(() => {
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.some((instance) => instance.type === "onboardingTour"),
+      ).toBe(false);
+    });
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "stickyNote",
+          state: expect.objectContaining({ noteId: "onboarding:welcome" }),
+        }),
+      ]),
+    );
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
+  it("persists Berdy on live opt-in without moving the camera", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          ...layout().items,
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "stickyNote",
+            targetId: "onboarding:welcome",
+            centerX: -248,
+            centerY: -152,
+            width: 224,
+            height: 196,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+    vi.mocked(saveLayoutItems).mockClear();
+
+    act(() => {
+      setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    });
+
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingTour" }),
+      ]),
+    );
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) => instance.state?.noteId === "onboarding:welcome",
+        ),
+    ).toBe(false);
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
+  it("reconciles Berdy when Home mounts after opt-in", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "clock",
+          type: "clock",
+          x: 120,
+          y: 120,
+          z: 1,
+          width: 240,
+          height: 240,
+        },
+        {
+          id: "welcome",
+          type: "stickyNote",
+          x: -360,
+          y: -240,
+          z: 2,
+          width: 224,
+          height: 196,
+          state: { noteId: "onboarding:welcome" },
+        },
+      ],
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      cameraRevision: 1,
+      constraints: layout().constraints,
+    });
+
+    renderHomeView();
+
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingTour" }),
+      ]),
+    );
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
   it("calls initialize on mount", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout());
 
@@ -286,6 +423,16 @@ describe("HomeView", () => {
       centerY: 300,
       zoomBps: 10_000,
     });
+  });
+
+  it("keeps the onboarding restart control hidden", async () => {
+    vi.mocked(getLayout).mockResolvedValue(layout());
+    renderHomeViewWithTopBarActions();
+    await screen.findByText("widget canvas");
+
+    expect(
+      screen.queryByRole("button", { name: "Reload onboarding tour" }),
+    ).not.toBeInTheDocument();
   });
 
   it("passes the recenter action through to the widget canvas", async () => {

@@ -987,6 +987,22 @@ describe("WidgetCanvas", () => {
     );
   });
 
+  it("does not show a resize handle for the fixed-size onboarding widget", () => {
+    renderCanvas({
+      instances: [
+        widget({
+          id: "onboarding-tour",
+          type: "onboardingTour",
+          state: { noteId: "onboarding:tour" },
+        }),
+      ],
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /resize take a tour/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("clears temporary lift when resize ends without movement", async () => {
     const user = userEvent.setup();
     const resizeWidget = vi.fn();
@@ -1195,9 +1211,10 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas({
       instances: [
-        stickyNoteWidget({
-          id: "welcome-sticky",
-          state: { noteId: "onboarding:welcome" },
+        widget({
+          id: "onboarding-tour",
+          type: "onboardingTour",
+          state: { noteId: "onboarding:tour" },
         }),
         stickyNoteWidget({
           id: "build-agent-sticky",
@@ -1240,9 +1257,10 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas({
       instances: [
-        stickyNoteWidget({
-          id: "welcome-sticky",
-          state: { noteId: "onboarding:welcome" },
+        widget({
+          id: "onboarding-tour",
+          type: "onboardingTour",
+          state: { noteId: "onboarding:tour" },
         }),
         stickyNoteWidget({
           id: "build-agent-sticky",

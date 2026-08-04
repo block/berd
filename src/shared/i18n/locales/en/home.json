@@ -204,6 +204,7 @@
     },
     "canvasControls": {
       "cleanUpTitle": "Clean up pins",
+      "reloadOnboardingTourTitle": "Reload onboarding tour",
       "recenterVisibleLabel": "Recenter",
       "recenterTitle": "Recenter pinned objects",
       "restoreTitle": "Revert layout"
@@ -243,6 +244,80 @@
         "automation": "Nothing to pin",
         "project": "Nothing to pin",
         "skill": "Nothing to pin"
+      }
+    }
+  },
+  "onboarding": {
+    "callout": {
+      "avatarLabel": "Berdy",
+      "avatarAlt": "Berdy, your onboarding buddy",
+      "agentUnavailable": "Berdy couldn't start a chat. Try again.",
+      "dismiss": "Dismiss onboarding",
+      "title": "Welcome to Berd!",
+      "body": "I’m Berdy – your onboarding buddy. Try getting started by taking a tour of Berd.",
+      "action": "Take a tour",
+      "openHelp": "Ask Berdy",
+      "helpTitle": "How can I help?",
+      "presets": {
+        "useCases": "What can I use Berd for?",
+        "projects": "How do I start a project?",
+        "agentsAndSkills": "How do agents and skills work?"
+      },
+      "presetResponses": {
+        "useCases": "Berd can help you research, plan, write, code, organize projects, and automate repeatable work.",
+        "projects": "Projects keep related chats, files, and working folders together so agents have the right context.",
+        "agentsAndSkills": "Agents give Berd a role and instructions. Skills add reusable workflows and tools for specific kinds of work."
+      },
+      "followUpPlaceholder": "Ask a follow-up",
+      "sendFollowUp": "Send follow-up",
+      "followUpContext": "{{question}}\n\nFollow-up: {{followUp}}",
+      "askSomethingElse": "Ask something else",
+      "back": "Back",
+      "helpPlaceholder": "Ask Berdy anything",
+      "send": "Send message",
+      "closeHelp": "Close help"
+    },
+    "tour": {
+      "progress": "{{current}} of {{total}}",
+      "previous": "Previous tour step",
+      "next": "Next tour step",
+      "finish": "Finish tour",
+      "close": "Close tour",
+      "nextAction": "Next",
+      "doneAction": "Done",
+      "animateProject": "Spin project cube",
+      "chatPreview": {
+        "prompt": "Can you help me write a haiku about birds?",
+        "responseLine1": "Birds stitch dawn with song",
+        "responseLine2": "Wings brush gold across the sky",
+        "responseLine3": "Morning learns to fly",
+        "typing": "Berd is typing"
+      },
+      "projectPreview": {
+        "name": "Your project",
+        "description": "A place for chats, files, context, and ongoing work."
+      },
+      "steps": {
+        "1": {
+          "title": "Your canvas, your home",
+          "body": "Keep the people, projects, and work you care about together on a canvas that is yours.",
+          "visual": "A preview of the Berd home canvas"
+        },
+        "2": {
+          "title": "Chat with Berd about anything",
+          "body": "Ask questions, explore ideas, and work through a task with an agent that has the right context.",
+          "visual": "A short conversation with Berd"
+        },
+        "3": {
+          "title": "Connect with all your providers",
+          "body": "Bring the models and providers you already use into one place and choose the right one for each task.",
+          "visual": "A collection of AI provider icons"
+        },
+        "4": {
+          "title": "Bring your projects to life",
+          "body": "Group chats, files, and working directories around real efforts so Berd can help you keep moving.",
+          "visual": "A project brought to life"
+        }
       }
     }
   }

@@ -7,10 +7,12 @@ import {
   createDefaultClockWidget,
   createDefaultHomeLayoutItems,
   createDefaultHomeWidgets,
+  createDefaultOnboardingTourWidget,
   createDefaultStickyNoteWidgets,
   homeWidgetsToLayoutItems,
   layoutItemsToHomeWidgets,
   missingDefaultStickyNoteWidgets,
+  onboardingTourAvatarCenter,
 } from "./homeLayoutMapper";
 
 function layoutItem(overrides: Partial<LayoutItem>): LayoutItem {
@@ -363,11 +365,11 @@ describe("homeLayoutMapper", () => {
   });
 
   it("creates default home widgets with onboarding sticky notes and a clock", () => {
-    const widgets = createDefaultHomeWidgets();
-    const items = createDefaultHomeLayoutItems();
+    const widgets = createDefaultHomeWidgets(undefined, true);
+    const items = createDefaultHomeLayoutItems(undefined, true);
 
     expect(widgets.map((widget) => widget.type)).toEqual([
-      "stickyNote",
+      "onboardingTour",
       "stickyNote",
       "stickyNote",
       "stickyNote",
@@ -379,7 +381,7 @@ describe("homeLayoutMapper", () => {
     expect(
       widgets.slice(0, 6).map((widget) => ({ x: widget.x, y: widget.y })),
     ).toEqual([
-      { x: -360, y: -240 },
+      { x: 664, y: 288 },
       { x: -96, y: -240 },
       { x: 168, y: -240 },
       { x: -360, y: 0 },
@@ -396,7 +398,7 @@ describe("homeLayoutMapper", () => {
       "clock",
     ]);
     expect(items.map((item) => item.targetId)).toEqual([
-      "onboarding:welcome",
+      "onboarding:tour",
       "onboarding:start-project",
       "onboarding:build-agent",
       "onboarding:reuse-workflows",
@@ -404,6 +406,44 @@ describe("homeLayoutMapper", () => {
       "onboarding:shape-home",
       `widget:${items[6].id}`,
     ]);
+  });
+
+  it("locates Berdy's avatar for initial camera centering", () => {
+    const widget = createDefaultOnboardingTourWidget();
+
+    expect(onboardingTourAvatarCenter(widget)).toEqual({ x: 736, y: 378 });
+  });
+
+  it("persists the completed welcome callout for Berdy", () => {
+    const onboardingTour = {
+      ...createDefaultOnboardingTourWidget(),
+      state: {
+        noteId: "onboarding:tour",
+        welcomeDismissed: true,
+      },
+    };
+
+    const [item] = homeWidgetsToLayoutItems([onboardingTour]);
+    const [restored] = layoutItemsToHomeWidgets([item]);
+
+    expect(item.widgetState).toEqual({ welcomeDismissed: true });
+    expect(restored).toMatchObject({
+      type: "onboardingTour",
+      state: {
+        noteId: "onboarding:tour",
+        welcomeDismissed: true,
+      },
+    });
+  });
+
+  it("centers the Berdy and bubble lockup beneath the default clock", () => {
+    const onboardingTour = createDefaultOnboardingTourWidget();
+    const clock = createDefaultClockWidget();
+
+    expect(onboardingTour.x + (onboardingTour.width ?? 0) / 2).toBe(
+      clock.x + (clock.width ?? 0) / 2,
+    );
+    expect(onboardingTour.y - (clock.y + (clock.height ?? 0))).toBe(24);
   });
 
   describe("clock mode persistence round-trip", () => {

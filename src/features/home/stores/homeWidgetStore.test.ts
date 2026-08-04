@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import type { Layout, LayoutCamera } from "@/features/layout/api/layout";
 import {
   getLayout,
@@ -225,7 +227,7 @@ beforeEach(() => {
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
   localStorage.clear();
-  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: {
@@ -235,6 +237,99 @@ beforeEach(() => {
 });
 
 describe("homeWidgetStore", () => {
+  it("restores a fresh onboarding tour widget", async () => {
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: request.items }),
+    }));
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        camera: request.camera,
+        cameraRevision: 2,
+        itemRevision: 5,
+      }),
+    }));
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      constraints: layout().constraints,
+      instances: [
+        clockWidget(),
+        {
+          id: "old-onboarding",
+          type: "onboardingTour",
+          x: 10,
+          y: 20,
+          z: 2,
+          state: { noteId: "onboarding:tour", welcomeDismissed: true },
+        },
+      ],
+    });
+
+    await expect(
+      useHomeWidgetStore.getState().resetOnboardingTour(),
+    ).resolves.toBe(true);
+
+    const onboardingWidgets = useHomeWidgetStore
+      .getState()
+      .instances.filter((instance) => instance.type === "onboardingTour");
+    expect(onboardingWidgets).toHaveLength(1);
+    expect(onboardingWidgets[0]).toMatchObject({
+      x: -104,
+      y: 272,
+      state: { noteId: "onboarding:tour" },
+      z: 2,
+    });
+    expect(onboardingWidgets[0].state?.welcomeDismissed).toBeUndefined();
+    expect(useHomeWidgetStore.getState().camera).toMatchObject({
+      centerX: -32,
+      centerY: 362,
+    });
+  });
+
+  it("reports a failed onboarding reset when its widget is not persisted", async () => {
+    vi.mocked(saveLayoutItems).mockRejectedValue(new Error("save failed"));
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ camera: request.camera, cameraRevision: 2 }),
+    }));
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      constraints: layout().constraints,
+    });
+
+    await expect(
+      useHomeWidgetStore.getState().resetOnboardingTour(),
+    ).resolves.toBe(false);
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some((instance) => instance.type === "onboardingTour"),
+    ).toBe(false);
+  });
+
+  it("does not reset onboarding while its experiment is disabled", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+    setReadyHomeState({ instances: [clockWidget()] });
+
+    await expect(
+      useHomeWidgetStore.getState().resetOnboardingTour(),
+    ).resolves.toBe(false);
+    expect(useHomeWidgetStore.getState().instances).toEqual([clockWidget()]);
+  });
+
+  it("does not restore Berdy after the user removes it", () => {
+    setReadyHomeState({ instances: [clockWidget()] });
+
+    useHomeWidgetStore.getState().syncOnboardingExperiment(true);
+
+    expect(useHomeWidgetStore.getState().instances).toEqual([clockWidget()]);
+    expect(saveLayoutItems).not.toHaveBeenCalled();
+  });
+
   it("initializes from backend layout", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout());
 
@@ -268,8 +363,17 @@ describe("homeWidgetStore", () => {
       ok: true,
       layout: layout({ itemRevision: 8 }),
     });
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 8,
+        cameraRevision: 2,
+        camera: request.camera,
+      }),
+    }));
 
     await useHomeWidgetStore.getState().initialize();
+    await flushMicrotasks();
 
     expect(saveLayoutItems).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -279,7 +383,7 @@ describe("homeWidgetStore", () => {
       }),
     );
     expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
-      { kind: "stickyNote", targetId: "onboarding:welcome" },
+      { kind: "stickyNote", targetId: "onboarding:tour" },
       { kind: "stickyNote", targetId: "onboarding:start-project" },
       { kind: "stickyNote", targetId: "onboarding:build-agent" },
       { kind: "stickyNote", targetId: "onboarding:reuse-workflows" },
@@ -287,8 +391,45 @@ describe("homeWidgetStore", () => {
       { kind: "stickyNote", targetId: "onboarding:shape-home" },
       { kind: "clock" },
     ]);
+    expect(saveLayoutCamera).toHaveBeenCalledWith({
+      layoutId: HOME_LAYOUT_ID,
+      expectedRevision: 1,
+      camera: { centerX: 736, centerY: 378, zoomBps: 10_000 },
+    });
+    expect(useHomeWidgetStore.getState().camera).toEqual({
+      centerX: 736,
+      centerY: 378,
+      zoomBps: 10_000,
+    });
     expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
+  });
+
+  it("does not seed or center on Berdy while its experiment is disabled", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({ itemRevision: 7, items: [] }),
+    );
+    vi.mocked(saveLayoutItems).mockResolvedValue({
+      ok: true,
+      layout: layout({ itemRevision: 8 }),
+    });
+
+    await useHomeWidgetStore.getState().initialize();
+
+    const savedItems = vi.mocked(saveLayoutItems).mock.calls[0][0].items;
+    expect(savedItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ targetId: "onboarding:welcome" }),
+      ]),
+    );
+    expect(savedItems).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ targetId: "onboarding:tour" }),
+      ]),
+    );
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+    expect(useHomeWidgetStore.getState().camera).toEqual(INITIAL_CAMERA);
   });
 
   it("backfills onboarding sticky notes into existing layouts once", async () => {
@@ -317,7 +458,7 @@ describe("homeWidgetStore", () => {
     );
     expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
       { kind: "clock", zIndex: 2 },
-      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 3 },
+      { kind: "stickyNote", targetId: "onboarding:tour", zIndex: 3 },
       { kind: "stickyNote", targetId: "onboarding:start-project", zIndex: 4 },
       { kind: "stickyNote", targetId: "onboarding:build-agent", zIndex: 5 },
       {
@@ -333,7 +474,7 @@ describe("homeWidgetStore", () => {
       { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 8 },
     ]);
     expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
-      "5",
+      "6",
     );
     expect(useHomeWidgetStore.getState()).toMatchObject({
       loadStatus: "ready",
@@ -341,7 +482,7 @@ describe("homeWidgetStore", () => {
     });
     expect(useHomeWidgetStore.getState().instances).toMatchObject([
       { type: "clock" },
-      { type: "stickyNote", state: { noteId: "onboarding:welcome" } },
+      { type: "onboardingTour", state: { noteId: "onboarding:tour" } },
       { type: "stickyNote", state: { noteId: "onboarding:start-project" } },
       { type: "stickyNote", state: { noteId: "onboarding:build-agent" } },
       { type: "stickyNote", state: { noteId: "onboarding:reuse-workflows" } },
@@ -353,7 +494,7 @@ describe("homeWidgetStore", () => {
     ]);
   });
 
-  it("snaps untouched legacy onboarding sticky positions without moving customized notes", async () => {
+  it("migrates the legacy welcome note to Berdy and snaps untouched onboarding sticky positions without moving customized notes", async () => {
     vi.mocked(getLayout).mockResolvedValue(
       layout({
         itemRevision: 11,
@@ -425,11 +566,6 @@ describe("homeWidgetStore", () => {
     );
     expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
       {
-        targetId: "onboarding:welcome",
-        centerX: -248,
-        centerY: -142,
-      },
-      {
         targetId: "onboarding:start-project",
         centerX: 16,
         centerY: -118,
@@ -454,11 +590,46 @@ describe("homeWidgetStore", () => {
         centerX: 280,
         centerY: 98,
       },
+      {
+        targetId: "onboarding:tour",
+        centerX: 888,
+        centerY: 378,
+      },
     ]);
     expect(useHomeWidgetStore.getState()).toMatchObject({
       loadStatus: "ready",
       itemRevision: 12,
     });
+  });
+
+  it("preserves a customized legacy welcome note", async () => {
+    const customizedWelcome = {
+      ...stickyNoteLayoutItem({
+        id: "sticky-welcome",
+        noteId: "onboarding:welcome",
+        x: -360,
+        y: -250,
+        zIndex: 1,
+      }),
+      widgetState: { text: "Keep this note" },
+    };
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({ itemRevision: 11, items: [customizedWelcome] }),
+    );
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(saveLayoutItems).not.toHaveBeenCalled();
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      {
+        id: "sticky-welcome",
+        type: "stickyNote",
+        state: {
+          noteId: "onboarding:welcome",
+          text: "Keep this note",
+        },
+      },
+    ]);
   });
 
   it("upgrades old two-note onboarding layouts with the new primitive notes", async () => {
@@ -528,7 +699,7 @@ describe("homeWidgetStore", () => {
       { kind: "clock", zIndex: 1 },
       { kind: "stickyNote", targetId: "onboarding:build-agent", zIndex: 2 },
       { kind: "stickyNote", targetId: "onboarding:start-project", zIndex: 3 },
-      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 4 },
+      { kind: "stickyNote", targetId: "onboarding:tour", zIndex: 4 },
       {
         kind: "stickyNote",
         targetId: "onboarding:reuse-workflows",
@@ -542,11 +713,11 @@ describe("homeWidgetStore", () => {
       { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 7 },
     ]);
     expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
-      "5",
+      "6",
     );
   });
 
-  it("adds automations and welcome notes to layouts that already got the skills and home notes", async () => {
+  it("adds automations and the onboarding tour to layouts that already got the skills and home notes", async () => {
     localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "3");
 
     vi.mocked(getLayout).mockResolvedValue(
@@ -610,7 +781,7 @@ describe("homeWidgetStore", () => {
         zIndex: 2,
       },
       { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 3 },
-      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 4 },
+      { kind: "stickyNote", targetId: "onboarding:tour", zIndex: 4 },
       {
         kind: "stickyNote",
         targetId: "onboarding:manage-automations",
@@ -618,12 +789,12 @@ describe("homeWidgetStore", () => {
       },
     ]);
     expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
-      "5",
+      "6",
     );
   });
 
-  it("adds only the welcome note to layouts that already got the full v4 set", async () => {
-    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "4");
+  it("adds only the onboarding tour to layouts that already got the full v5 set", async () => {
+    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
 
     vi.mocked(getLayout).mockResolvedValue(
       layout({
@@ -714,10 +885,10 @@ describe("homeWidgetStore", () => {
         zIndex: 4,
       },
       { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 5 },
-      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 6 },
+      { kind: "stickyNote", targetId: "onboarding:tour", zIndex: 6 },
     ]);
     expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
-      "5",
+      "6",
     );
   });
 
@@ -867,7 +1038,7 @@ describe("homeWidgetStore", () => {
 
     const staleInitialize = useHomeWidgetStore.getState().initialize();
     resetHomeWidgetStoreForTests();
-    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
+    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
     await useHomeWidgetStore.getState().initialize();
 
     staleLoad.resolve(staleLayout);

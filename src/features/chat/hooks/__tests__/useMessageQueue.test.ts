@@ -487,6 +487,23 @@ describe("useMessageQueue", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
   });
 
+  it("reveals a hidden startup handoff if its send fails", () => {
+    const sendMessage = vi.fn().mockReturnValue(false);
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      text: "first message",
+      showInComposer: false,
+    });
+
+    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toEqual({
+      text: "first message",
+      showInComposer: true,
+    });
+  });
+
   it("stops auto-retrying the same queued message after repeated failures", () => {
     const sendMessage = vi.fn().mockReturnValue(false);
     useChatStore

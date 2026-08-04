@@ -69,9 +69,15 @@ export interface WidgetRenderProps {
   onCreateProject?: () => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
+  onStartOnboardingTour?: () => void;
+  onStartChatWithPrompt?: (
+    prompt: string,
+  ) => boolean | undefined | Promise<boolean | undefined>;
   onRemoveWidget?: () => void;
   /** True while this widget is being dragged or resized on the home canvas. */
   canvasGestureActive?: boolean;
+  /** Live world position while this widget is being dragged. */
+  canvasDragPosition?: { x: number; y: number };
   /** True while live resize is previewing new bounds (content is CSS-scaled). */
   widgetResizePreviewActive?: boolean;
   /** True when the widget is mounted outside the visible home canvas viewport. */
@@ -87,6 +93,8 @@ export interface WidgetCatalogEntry {
   sizeBounds: WidgetSizeBounds;
   /** Optional Tailwind classes for the canvas resize handle (defaults to corner). */
   resizeHandleClassName?: string;
+  /** Hide the resize handle for fixed-size widgets. */
+  hideResizeHandle?: boolean;
   /** Optional per-instance size profile. When present, sizing/resize use the
    *  returned profile instead of the entry's static defaultSize/sizeBounds. */
   resolveProfile?: (instance: WidgetInstance) => WidgetSizeProfile;
@@ -101,6 +109,10 @@ export interface WidgetCatalogEntry {
 }
 
 export interface WidgetNavigationHandlers {
+  onStartOnboardingTour?: () => void;
+  onStartChatWithPrompt?: (
+    prompt: string,
+  ) => boolean | undefined | Promise<boolean | undefined>;
   onOpenProject?: (projectId: string) => void;
   onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;

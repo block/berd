@@ -2,6 +2,9 @@ import { Crosshair, LayoutGrid } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
+import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDialog";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
@@ -30,6 +33,9 @@ export interface HomeViewProps {
   onCreateProject?: () => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
+  onStartChatWithPrompt?: (
+    prompt: string,
+  ) => boolean | undefined | Promise<boolean | undefined>;
   onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
   viewportLeftOcclusionPx?: number;
 }
@@ -48,6 +54,7 @@ export function HomeView({
   onCreateProject,
   onOpenSkills,
   onOpenAutomations,
+  onStartChatWithPrompt,
   onHydratePinnedChatSessions,
   viewportLeftOcclusionPx = 0,
 }: HomeViewProps) {
@@ -55,6 +62,11 @@ export function HomeView({
   const setTopBarActions = useSetTopBarActions();
   useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const berdyOnboardingExperiment = useExperiment(
+    BERDY_ONBOARDING_EXPERIMENT_ID,
+  );
+  const berdyOnboardingEnabled = Boolean(berdyOnboardingExperiment?.enabled);
   const {
     instances,
     loadStatus,
@@ -67,10 +79,19 @@ export function HomeView({
     saveCamera,
     cleanUpSnapshot,
     toggleCleanUpWidgets,
+    syncOnboardingExperiment,
+    reloadOnboardingTourForDev,
   } = useHomeWidgetLayoutController();
+  const visibleInstances = useMemo(
+    () =>
+      berdyOnboardingEnabled
+        ? instances
+        : instances.filter((instance) => instance.type !== "onboardingTour"),
+    [berdyOnboardingEnabled, instances],
+  );
   const recenterTarget = useMemo(
-    () => widgetCenterOfGravity(instances),
-    [instances],
+    () => widgetCenterOfGravity(visibleInstances),
+    [visibleInstances],
   );
   const pinnedChatSessionIdKey = useMemo(() => {
     const ids = [...getPinnedHomeChatSessionIds(instances)].sort();
@@ -86,6 +107,40 @@ export function HomeView({
 
   useEffect(() => {
     void prefetchProjectArtifactRenderer();
+  }, []);
+
+  useEffect(() => {
+    if (loadStatus === "ready") {
+      syncOnboardingExperiment(berdyOnboardingEnabled);
+    }
+  }, [berdyOnboardingEnabled, loadStatus, syncOnboardingExperiment]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    const handleReloadOnboarding = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "o"
+      ) {
+        event.preventDefault();
+        reloadOnboardingTourForDev();
+      }
+    };
+
+    window.addEventListener("keydown", handleReloadOnboarding);
+    return () => window.removeEventListener("keydown", handleReloadOnboarding);
+  }, [reloadOnboardingTourForDev]);
+
+  const handleStartTour = useCallback(() => {
+    setTourOpen(true);
+  }, []);
+
+  const handleTourOpenChange = useCallback((open: boolean) => {
+    setTourOpen(open);
   }, []);
 
   useEffect(() => {
@@ -180,7 +235,8 @@ export function HomeView({
     <div className="relative h-full w-full">
       {loadStatus === "ready" ? (
         <WidgetCanvas
-          instances={instances}
+          instances={visibleInstances}
+          pickerInstances={instances}
           mutations={widgetMutations}
           animateCameraTransition={layoutMotionActive}
           onRecenter={handleRecenter}
@@ -201,8 +257,14 @@ export function HomeView({
           onCreateProject={onCreateProject}
           onOpenSkills={onOpenSkills}
           onOpenAutomations={onOpenAutomations}
+          onStartOnboardingTour={handleStartTour}
+          onStartChatWithPrompt={onStartChatWithPrompt}
         />
       ) : null}
+      <OnboardingTourDialog
+        open={berdyOnboardingEnabled && tourOpen}
+        onOpenChange={handleTourOpenChange}
+      />
       {loadStatus === "loading" ? (
         <div className="relative h-full w-full bg-dot-grid">
           <div className="absolute inset-x-0 top-8 flex justify-center text-sm text-muted-foreground">
@@ -295,6 +357,12 @@ function useHomeWidgetLayoutController() {
   const toggleCleanUpWidgets = useHomeWidgetStore(
     (state) => state.toggleCleanUpWidgets,
   );
+  const syncOnboardingExperiment = useHomeWidgetStore(
+    (state) => state.syncOnboardingExperiment,
+  );
+  const reloadOnboardingTourForDev = useHomeWidgetStore(
+    (state) => state.reloadOnboardingTourForDev,
+  );
   const removeWidget = useHomeWidgetStore((state) => state.removeWidget);
   const updateWidgetState = useHomeWidgetStore(
     (state) => state.updateWidgetState,
@@ -335,5 +403,7 @@ function useHomeWidgetLayoutController() {
     saveCamera,
     cleanUpSnapshot,
     toggleCleanUpWidgets,
+    syncOnboardingExperiment,
+    reloadOnboardingTourForDev,
   };
 }

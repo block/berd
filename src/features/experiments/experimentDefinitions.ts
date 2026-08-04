@@ -53,6 +53,8 @@ export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
 
 export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
+export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -78,5 +80,10 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.voiceConversation.title",
     descriptionKey: "experiments.voiceConversation.description",
     defaultEnabled: true,
+  },
+  {
+    id: BERDY_ONBOARDING_EXPERIMENT_ID,
+    titleKey: "experiments.berdyOnboarding.title",
+    descriptionKey: "experiments.berdyOnboarding.description",
   },
 ] as const satisfies readonly ExperimentDefinition[];
