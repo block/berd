@@ -30,6 +30,8 @@ const buttonVariants = cva(
         sm: "h-8 px-3 text-xs [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
         lg: "h-10 px-8 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
         icon: "h-9 w-9 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
+        "icon-xxs":
+          "h-6 w-6 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3.5",
         "icon-xs":
           "h-7 w-7 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
         "icon-sm":
@@ -87,6 +89,12 @@ const buttonVariants = cva(
       },
       {
         variant: "ghost",
+        size: "icon-xxs",
+        className:
+          "bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent data-[state=open]:text-foreground aria-expanded:text-foreground",
+      },
+      {
+        variant: "ghost",
         size: "icon-xs",
         className:
           "bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent data-[state=open]:text-foreground aria-expanded:text-foreground",
@@ -126,6 +134,7 @@ const buttonIconSizeClasses = {
   sm: "size-3",
   lg: "size-4",
   icon: "size-4",
+  "icon-xxs": "size-3.5",
   "icon-xs": "size-3",
   "icon-sm": "size-3.5",
   "icon-top-bar": "size-[length:var(--text-app-top-bar-icon)]",
@@ -156,6 +165,7 @@ function getButtonSpinnerClass(
   switch (size) {
     case "xs":
     case "sm":
+    case "icon-xxs":
     case "icon-xs":
       return "size-3";
     case "lg":

@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconCheck,
-  IconChevronLeft,
-  IconSearch,
-  IconStar,
-} from "@tabler/icons-react";
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { IconCheck, IconDots, IconSearch, IconX } from "@tabler/icons-react";
 import { SearchBar } from "@/shared/ui/SearchBar";
+import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import {
   formatProviderLabel,
@@ -86,15 +90,45 @@ interface ModelListProps {
   t: (key: string) => string;
 }
 
-export function RecommendedModelList({
-  models,
-  currentModelId,
-  currentModelProviderId,
-  selectedAgentId,
-  onModelSelect,
-  onShowAll,
-  t,
-}: ModelListProps & { onShowAll: () => void }) {
+export interface RecommendedModelListHandle {
+  closeSearch: () => boolean;
+}
+
+export const RecommendedModelList = forwardRef<
+  RecommendedModelListHandle,
+  ModelListProps
+>(function RecommendedModelList(
+  {
+    models,
+    currentModelId,
+    currentModelProviderId,
+    selectedAgentId,
+    onModelSelect,
+    t,
+  },
+  ref,
+) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreSearchButtonFocusRef = useRef(false);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const resetScroll = useCallback(() => {
+    const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    if (viewport) {
+      viewport.scrollTop = 0;
+    }
+  }, []);
+  const resetView = useCallback(() => {
+    setQuery("");
+    setSearchOpen(false);
+    setShowAll(false);
+    resetScroll();
+  }, [resetScroll]);
   const recommended = useMemo(() => {
     const rec = models.filter((m) => m.recommended);
     if (
@@ -114,155 +148,143 @@ export function RecommendedModelList({
     return rec.length > 0 ? rec : models;
   }, [models, currentModelId, currentModelProviderId]);
 
+  useEffect(() => {
+    if (searchOpen) {
+      inputRef.current?.focus();
+    } else if (restoreSearchButtonFocusRef.current) {
+      restoreSearchButtonFocusRef.current = false;
+      searchButtonRef.current?.focus();
+    }
+  }, [searchOpen]);
+
+  const visibleModels = useMemo(() => {
+    if (!searchOpen && !showAll) {
+      return recommended;
+    }
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return models;
+    }
+    return models.filter(
+      (model) =>
+        model.name.toLowerCase().includes(normalizedQuery) ||
+        model.id.toLowerCase().includes(normalizedQuery) ||
+        model.displayName?.toLowerCase().includes(normalizedQuery) ||
+        model.providerName?.toLowerCase().includes(normalizedQuery) ||
+        model.providerId?.toLowerCase().includes(normalizedQuery),
+    );
+  }, [models, query, recommended, searchOpen, showAll]);
+
   const sorted = useMemo(
-    () => sortModels(recommended, currentModelId, currentModelProviderId),
-    [recommended, currentModelId, currentModelProviderId],
+    () => sortModels(visibleModels, currentModelId, currentModelProviderId),
+    [visibleModels, currentModelId, currentModelProviderId],
   );
 
   const hasMore = models.length > recommended.length;
-
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
-        {t("toolbar.model")}
-      </div>
-      <ScrollArea className="min-h-0 min-w-0 flex-1">
-        <div className="space-y-0.5 p-1">
-          {sorted.map((model) => {
-            const providerLabel = getGooseModelProviderLabel(model);
-            const providerIcon =
-              selectedAgentId === "goose" && model.providerId
-                ? getProviderIcon(model.providerId, "size-3.5")
-                : null;
-            const isSelected = modelMatchesSelection(
-              model,
-              currentModelId,
-              currentModelProviderId,
-            );
-            return (
-              <PickerItem
-                key={`${model.providerId ?? "model"}:${model.id}`}
-                onClick={() => onModelSelect(model)}
-                selected={isSelected}
-                className="justify-between"
-              >
-                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                  {providerIcon ? (
-                    <span
-                      className="shrink-0 text-muted-foreground"
-                      title={providerLabel ?? undefined}
-                    >
-                      {providerIcon}
-                    </span>
-                  ) : null}
-                  <div className="min-w-0 flex-1 truncate">
-                    {getModelDisplayName(model)}
-                  </div>
-                </div>
-                {model.featured ? (
-                  <IconStar
-                    className="size-3 shrink-0 text-muted-foreground/70"
-                    aria-label={t("toolbar.recommended")}
-                  />
-                ) : null}
-                {isSelected ? (
-                  <IconCheck className="size-4 shrink-0 text-muted-foreground" />
-                ) : null}
-              </PickerItem>
-            );
-          })}
-        </div>
-      </ScrollArea>
-      {hasMore ? (
-        <div className="shrink-0 border-t px-1 py-1">
-          <button
-            type="button"
-            onClick={onShowAll}
-            className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <IconSearch className="size-3.5" />
-            <span>{t("toolbar.showAllModels")}</span>
-          </button>
-        </div>
-      ) : null}
-    </div>
+  const closeSearch = useCallback(() => {
+    resetScroll();
+    restoreSearchButtonFocusRef.current = true;
+    setQuery("");
+    setSearchOpen(false);
+  }, [resetScroll]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      closeSearch: () => {
+        if (!searchOpen) {
+          return false;
+        }
+        closeSearch();
+        return true;
+      },
+    }),
+    [closeSearch, searchOpen],
   );
-}
-
-export function AllModelsList({
-  models,
-  currentModelId,
-  currentModelProviderId,
-  selectedAgentId,
-  onModelSelect,
-  onBack,
-  t,
-}: ModelListProps & { onBack: () => void }) {
-  const [query, setQuery] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const filtered = useMemo(() => {
-    if (!query.trim()) {
-      return sortModels(models, currentModelId, currentModelProviderId);
-    }
-    const q = query.toLowerCase();
-    const matches = models.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) ||
-        m.id.toLowerCase().includes(q) ||
-        m.displayName?.toLowerCase().includes(q) ||
-        m.providerName?.toLowerCase().includes(q) ||
-        m.providerId?.toLowerCase().includes(q),
-    );
-    return sortModels(matches, currentModelId, currentModelProviderId);
-  }, [models, query, currentModelId, currentModelProviderId]);
+  const openSearch = () => {
+    resetScroll();
+    setSearchOpen(true);
+  };
+  const showAllModels = () => {
+    resetScroll();
+    setShowAll(true);
+  };
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-1 px-1 py-1">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex shrink-0 items-center rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label={t("toolbar.model")}
-        >
-          <IconChevronLeft className="size-4" />
-        </button>
-        <SearchBar
-          inputRef={inputRef}
-          size="small"
-          value={query}
-          onChange={setQuery}
-          placeholder={t("toolbar.searchModels")}
-          className="min-w-0 flex-1"
-        />
+      <div className="flex h-8 shrink-0 items-center px-1">
+        {searchOpen ? (
+          <div data-model-search-open className="relative mr-2 min-w-0 flex-1">
+            <SearchBar
+              inputRef={inputRef}
+              size="picker"
+              value={query}
+              onChange={(nextQuery) => {
+                resetScroll();
+                setQuery(nextQuery);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                  event.stopPropagation();
+                }
+              }}
+              placeholder={t("toolbar.searchModels")}
+              aria-label={t("toolbar.searchModels")}
+              className="min-w-0 origin-right animate-in fade-in zoom-in-95 duration-150 ease-out motion-reduce:animate-none"
+            />
+            <Button
+              variant="ghost"
+              size="icon-xxs"
+              onClick={closeSearch}
+              className="absolute top-1/2 right-1 -translate-y-1/2"
+              aria-label={t("search.close")}
+              title={t("search.close")}
+            >
+              <IconX />
+            </Button>
+          </div>
+        ) : (
+          <span className="flex flex-1 items-center justify-between text-sm font-semibold">
+            <span>{t("toolbar.model")}</span>
+            {hasMore ? (
+              <Button
+                ref={searchButtonRef}
+                variant="ghost"
+                size="icon-xxs"
+                onClick={openSearch}
+                className="mr-3"
+                aria-label={t("toolbar.searchModels")}
+                title={t("toolbar.searchModels")}
+              >
+                <IconSearch />
+              </Button>
+            ) : null}
+          </span>
+        )}
       </div>
-      {filtered.length > 0 ? (
-        <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <div className="space-y-0.5 p-1">
-            {filtered.map((model) => {
+      {sorted.length > 0 ? (
+        <ScrollArea
+          ref={scrollAreaRef}
+          className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
+        >
+          <div className="space-y-0.5 p-1 pr-3">
+            {sorted.map((model) => {
               const providerLabel = getGooseModelProviderLabel(model);
               const providerIcon =
                 selectedAgentId === "goose" && model.providerId
                   ? getProviderIcon(model.providerId, "size-3.5")
                   : null;
-              const displayName = getModelDisplayName(model);
-              const showModelId =
-                model.id !== model.name && model.id !== displayName;
               const isSelected = modelMatchesSelection(
                 model,
                 currentModelId,
                 currentModelProviderId,
               );
-
               return (
                 <PickerItem
                   key={`${model.providerId ?? "model"}:${model.id}`}
-                  onClick={() => onModelSelect(model)}
+                  onClick={() => {
+                    onModelSelect(model);
+                    resetView();
+                  }}
                   selected={isSelected}
                   className="justify-between"
                 >
@@ -275,27 +297,25 @@ export function AllModelsList({
                         {providerIcon}
                       </span>
                     ) : null}
-                    <div className="min-w-0 flex-1 overflow-hidden">
-                      <div className="truncate">{displayName}</div>
-                      {showModelId ? (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {model.id}
-                        </div>
-                      ) : null}
+                    <div className="min-w-0 flex-1 truncate">
+                      {getModelDisplayName(model)}
                     </div>
                   </div>
-                  {model.featured ? (
-                    <IconStar
-                      className="size-3 shrink-0 text-muted-foreground/70"
-                      aria-label={t("toolbar.recommended")}
-                    />
-                  ) : null}
                   {isSelected ? (
                     <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                   ) : null}
                 </PickerItem>
               );
             })}
+            {hasMore && !searchOpen && !showAll ? (
+              <PickerItem
+                onClick={showAllModels}
+                className="text-muted-foreground/70 hover:text-muted-foreground"
+              >
+                <IconDots className="size-3.5 shrink-0" />
+                <span>{t("toolbar.viewMore")}</span>
+              </PickerItem>
+            ) : null}
           </div>
         </ScrollArea>
       ) : (
@@ -305,4 +325,4 @@ export function AllModelsList({
       )}
     </div>
   );
-}
+});

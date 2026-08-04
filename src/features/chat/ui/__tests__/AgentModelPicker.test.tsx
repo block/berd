@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentModelPicker } from "../AgentModelPicker";
@@ -210,6 +210,9 @@ describe("AgentModelPicker", () => {
       name: /Claude Opus 4\.8/,
     });
     expect(explicitModel).toHaveClass("bg-accent");
+    expect(
+      explicitModel.querySelector(".tabler-icon-check"),
+    ).toBeInTheDocument();
   });
 
   it("uses a stored human model name before models resolve", () => {
@@ -632,9 +635,16 @@ describe("AgentModelPicker", () => {
     const longModelButton = screen.getByRole("button", {
       name: "databricks-gpt-5-4-mini",
     });
+    const longModelLabel = within(longModelButton).getByText(
+      "databricks-gpt-5-4-mini",
+    );
 
     expect(longModelButton).toHaveClass("min-w-0");
     expect(longModelButton).toHaveClass("overflow-hidden");
+    expect(longModelLabel).toHaveClass("truncate");
+    expect(longModelLabel.closest("[data-slot='scroll-area']")).toHaveClass(
+      "[&_[data-slot=scroll-area-viewport]>div]:!block",
+    );
   });
 
   it("disables spellcheck in the all-models search field", async () => {
@@ -658,11 +668,220 @@ describe("AgentModelPicker", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
-    await user.click(screen.getByRole("button", { name: "Browse all models" }));
+    const searchButton = screen.getByRole("button", {
+      name: "Search models...",
+    });
+    const picker = screen.getByRole("dialog");
+    expect(searchButton.parentElement).toHaveTextContent("Model");
+    expect(searchButton).toHaveClass("mr-3", "h-6", "w-6");
+    expect(picker).toHaveClass("w-[26.25rem]");
+    expect(within(picker).getByText("Claude Sonnet 4")).toBeInTheDocument();
+    expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
+    expect(
+      within(picker).queryByText("gpt-4o-mini-2024-07-18"),
+    ).not.toBeInTheDocument();
+    const viewMoreButton = within(picker).getByRole("button", {
+      name: "View more",
+    });
+    expect(viewMoreButton).toHaveClass("text-sm", "text-muted-foreground/70");
+    expect(viewMoreButton.querySelector("svg")).toHaveClass("size-3.5");
+    expect(viewMoreButton.parentElement).toHaveClass("pr-3");
+    const modelViewport = viewMoreButton
+      .closest("[data-slot='scroll-area']")
+      ?.querySelector<HTMLElement>("[data-slot='scroll-area-viewport']");
+    expect(modelViewport).toBeInTheDocument();
+    if (modelViewport) {
+      modelViewport.scrollTop = 120;
+    }
+    await user.click(viewMoreButton);
 
+    expect(modelViewport?.scrollTop).toBe(0);
+    expect(
+      screen.queryByPlaceholderText("Search models..."),
+    ).not.toBeInTheDocument();
+    expect(within(picker).getByText("GPT-4o mini")).toBeInTheDocument();
+    expect(
+      within(picker).queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(picker).queryByText("gpt-4o-mini-2024-07-18"),
+    ).not.toBeInTheDocument();
+
+    await user.click(searchButton);
     const search = screen.getByPlaceholderText("Search models...");
 
     expect(search).toHaveAttribute("spellcheck", "false");
+    expect(modelViewport?.scrollTop).toBe(0);
+    const searchField = search.closest(".bg-accent");
+    expect(searchField).toBeInTheDocument();
+    expect(searchField?.parentElement?.parentElement).toHaveClass("px-1");
+    expect(searchField?.parentElement).toHaveClass("mr-2");
+    expect(searchField).toHaveClass(
+      "bg-accent",
+      "hover:bg-accent",
+      "focus-within:bg-accent",
+      "px-0",
+    );
+    expect(searchField?.querySelector("svg")).toHaveClass("left-2");
+    expect(search).toHaveClass(
+      "min-w-0",
+      "appearance-none",
+      "pl-8",
+      "pr-8",
+      "text-sm",
+      "[&::-webkit-search-cancel-button]:hidden",
+    );
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(within(picker).getByText("GPT-4o mini")).toBeInTheDocument();
+    expect(
+      within(picker).queryByText("gpt-4o-mini-2024-07-18"),
+    ).not.toBeInTheDocument();
+    expect(picker).toHaveClass("w-[26.25rem]");
+
+    if (modelViewport) {
+      modelViewport.scrollTop = 120;
+    }
+    await user.type(search, "GPT");
+    expect(modelViewport?.scrollTop).toBe(0);
+    const closeButton = screen.getByRole("button", { name: "Close search" });
+    expect(closeButton).toHaveClass("right-1", "h-6", "w-6");
+    if (modelViewport) {
+      modelViewport.scrollTop = 120;
+    }
+    await user.click(closeButton);
+
+    expect(
+      screen.queryByPlaceholderText("Search models..."),
+    ).not.toBeInTheDocument();
+    expect(modelViewport?.scrollTop).toBe(0);
+    expect(
+      within(picker).getByRole("button", { name: "Search models..." }),
+    ).toHaveFocus();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(
+      within(picker).queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(picker).getByRole("button", { name: /GPT-4o mini/ }),
+    );
+
+    expect(
+      within(picker).getByRole("button", { name: "View more" }),
+    ).toBeInTheDocument();
+    expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
+  });
+
+  it("keeps keyboard navigation on picker rows and preserves search caret keys", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="claude-sonnet-4"
+        currentModelName="Claude Sonnet 4"
+        availableModels={[
+          { id: "claude-sonnet-4", name: "Claude Sonnet 4", recommended: true },
+          { id: "gpt-4o-mini", name: "GPT-4o mini" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    const picker = screen.getByRole("dialog");
+    const selectedAgent = within(picker).getByRole("button", {
+      name: "Goose Goose",
+    });
+    const selectedModel = within(picker).getByRole("button", {
+      name: "Claude Sonnet 4",
+    });
+    const searchButton = within(picker).getByRole("button", {
+      name: "Search models...",
+    });
+
+    await waitFor(() => expect(selectedAgent).toHaveFocus());
+    await user.keyboard("{ArrowRight}");
+    expect(selectedModel).toHaveFocus();
+    expect(searchButton).not.toHaveFocus();
+
+    await user.click(searchButton);
+    const search = within(picker).getByRole("searchbox", {
+      name: "Search models...",
+    });
+    const lastModel = within(picker).getByRole("button", {
+      name: "GPT-4o mini",
+    });
+    expect(search).toHaveFocus();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(search).toHaveFocus();
+
+    await user.keyboard("{ArrowUp}");
+    expect(lastModel).toHaveFocus();
+
+    search.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(selectedModel).toHaveFocus();
+    expect(
+      within(picker).getByRole("button", { name: "Close search" }),
+    ).not.toHaveFocus();
+
+    search.focus();
+    await user.keyboard("{Escape}");
+    expect(
+      within(picker).queryByRole("searchbox", { name: "Search models..." }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(picker).getByRole("button", { name: "Search models..." }),
+    ).toHaveFocus();
+  });
+
+  it("closes model search with Escape from another picker column", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="claude-sonnet-4"
+        currentModelName="Claude Sonnet 4"
+        availableModels={[
+          { id: "claude-sonnet-4", name: "Claude Sonnet 4", recommended: true },
+          { id: "gpt-4o-mini", name: "GPT-4o mini" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    const picker = screen.getByRole("dialog");
+    await user.click(
+      within(picker).getByRole("button", { name: "Search models..." }),
+    );
+    const selectedAgent = within(picker).getByRole("button", {
+      name: "Goose Goose",
+    });
+    selectedAgent.focus();
+
+    await user.keyboard("{Escape}");
+
+    expect(
+      within(picker).queryByRole("searchbox", { name: "Search models..." }),
+    ).not.toBeInTheDocument();
+    expect(picker).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("shows only agent name when no model info is available", () => {

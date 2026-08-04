@@ -325,6 +325,118 @@ describe("useResolvedAgentModelPicker", () => {
     });
   });
 
+  it("resolves a Goose session model to its concrete provider row", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "goose-gpt-5-6-sol",
+          name: "GPT-5.6 Sol",
+          providerId: "databricks_v2",
+          recommended: true,
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [{ id: "goose", label: "Goose" }],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          modelId: "goose-gpt-5-6-sol",
+          modelName: "GPT-5.6 Sol",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn(),
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+      }),
+    );
+
+    expect(result.current.effectiveModelSelection).toEqual({
+      id: "goose-gpt-5-6-sol",
+      name: "GPT-5.6 Sol",
+      providerId: "databricks_v2",
+      source: "explicit",
+    });
+  });
+
+  it("does not use the latest preference to rewrite an ambiguous Goose session", () => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "llama3.2",
+          modelName: "llama3.2",
+          providerId: "custom_ollama",
+        },
+      }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "llama3.2",
+          name: "llama3.2",
+          providerId: "ollama",
+        },
+        {
+          id: "llama3.2",
+          name: "llama3.2",
+          providerId: "custom_ollama",
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [{ id: "goose", label: "Goose" }],
+        selectedProvider: "goose",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "goose",
+          modelId: "llama3.2",
+          modelName: "llama3.2",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn(),
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+      }),
+    );
+
+    expect(result.current.effectiveModelSelection).toEqual({
+      id: "llama3.2",
+      name: "llama3.2",
+      providerId: "goose",
+      source: "explicit",
+    });
+  });
+
   it("enforces concrete provider compatibility before catalog loads", () => {
     useProviderCatalogStore.getState().reset();
     window.localStorage.setItem(

@@ -22,6 +22,15 @@ const searchBarSizes = {
     inputVariant: "ghost" as const,
     hideIcon: false,
   },
+  picker: {
+    wrapper:
+      "rounded-sm border border-transparent bg-accent px-0 text-muted-foreground hover:bg-accent focus-within:bg-accent",
+    icon: "left-2 size-3.5",
+    input:
+      "h-auto min-w-0 appearance-none border-none bg-transparent px-0 pr-8 pl-8 text-sm font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden",
+    inputVariant: "ghost" as const,
+    hideIcon: false,
+  },
   default: {
     wrapper: "",
     icon: "left-3 size-4",

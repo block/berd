@@ -755,6 +755,7 @@ const buttonTextSizeBySize = {
   default: "text-sm",
   lg: "text-sm",
   icon: "text-sm",
+  "icon-xxs": "text-sm",
   "icon-xs": "text-xs",
   "icon-sm": "text-sm",
   "icon-top-bar": "text-sm",

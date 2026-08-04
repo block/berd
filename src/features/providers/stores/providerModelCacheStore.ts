@@ -251,13 +251,22 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
           const hasConfiguredFeaturedModel = configuredModels.some(
             (model) => model.featured,
           );
-          const entry: CachedProviderModels = {
-            providerId,
-            models: discoveredModels.map((model) => ({
+          const discoveredModelIds = new Set(
+            discoveredModels.map((model) => model.id),
+          );
+          const models = [
+            ...discoveredModels.map((model) => ({
               ...model,
               ...(hasConfiguredFeaturedModel ? { featured: false } : {}),
               ...configuredModelsById.get(model.id),
             })),
+            ...configuredModels.filter(
+              (model) => !discoveredModelIds.has(model.id),
+            ),
+          ];
+          const entry: CachedProviderModels = {
+            providerId,
+            models,
             fetchedAt: Date.now(),
             ...(configuredModels.length > 0 ? { configuredModels } : {}),
           };
@@ -280,6 +289,9 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
               providerId,
               models: existing?.models ?? [],
               fetchedAt: existing?.fetchedAt ?? 0,
+              ...(existing?.configuredModels
+                ? { configuredModels: existing.configuredModels }
+                : {}),
               error: formatAcpErrorMessage(error),
             });
             persistModels(providers);

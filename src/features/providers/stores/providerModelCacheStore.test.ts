@@ -131,6 +131,7 @@ describe("providerModelCacheStore", () => {
     expect(models.find((model) => model.id === "goose-gpt-5-5")).toEqual(
       expect.objectContaining({
         id: "goose-gpt-5-5",
+        recommended: true,
         featured: false,
       }),
     );
@@ -140,9 +141,74 @@ describe("providerModelCacheStore", () => {
     expect(models.find((model) => model.id === "goose-claude-opus-4")).toEqual(
       expect.objectContaining({
         id: "goose-claude-opus-4",
+        recommended: true,
         featured: false,
       }),
     );
+  });
+
+  it("keeps configured models that are missing from the provider model list", async () => {
+    const configuredModel = seededModel({
+      id: "goose-gpt-5-6-sol",
+      name: "GPT-5.6 Sol",
+      displayName: "GPT-5.6 Sol",
+      recommended: true,
+      featured: true,
+    });
+    useProviderModelCacheStore
+      .getState()
+      .seedRuntimeModels(new Map([["databricks_v2", [configuredModel]]]), {
+        runtimeManagedProviderIds: new Set(),
+      });
+    mocks.supportedModelsList.mockResolvedValueOnce({
+      models: ["goose-gpt-5-5"],
+    });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+
+    const models = useProviderModelCacheStore
+      .getState()
+      .getModelsForProvider("databricks_v2");
+    expect(models.map((model) => model.id)).toEqual([
+      "goose-gpt-5-5",
+      "goose-gpt-5-6-sol",
+    ]);
+    expect(models.find((model) => model.id === "goose-gpt-5-6-sol")).toEqual(
+      expect.objectContaining(configuredModel),
+    );
+  });
+
+  it("keeps configured models after a failed refresh and retry", async () => {
+    const configuredModel = seededModel({
+      id: "goose-gpt-5-6-sol",
+      name: "GPT-5.6 Sol",
+      displayName: "GPT-5.6 Sol",
+      recommended: true,
+    });
+    useProviderModelCacheStore
+      .getState()
+      .seedRuntimeModels(new Map([["databricks_v2", [configuredModel]]]), {
+        runtimeManagedProviderIds: new Set(),
+      });
+    mocks.supportedModelsList
+      .mockRejectedValueOnce(new Error("not authenticated"))
+      .mockResolvedValueOnce({ models: ["goose-gpt-5-5"] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2", { force: true });
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("databricks_v2")
+        .map((model) => model.id),
+    ).toEqual(["goose-gpt-5-5", "goose-gpt-5-6-sol"]);
   });
 
   it("removes stale runtime-managed providers when runtime config changes", () => {

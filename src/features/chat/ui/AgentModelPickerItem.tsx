@@ -15,6 +15,7 @@ export function PickerItem({
   return (
     <button
       type="button"
+      data-picker-nav-item
       onClick={onClick}
       disabled={disabled}
       className={cn(

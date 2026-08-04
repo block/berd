@@ -63,6 +63,20 @@ describe("Button", () => {
     );
   });
 
+  it("supports compact 24px icon-only buttons", () => {
+    render(
+      <Button size="icon-xxs" aria-label="Close">
+        <IconArrowNarrowLeft data-testid="icon" />
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Close" })).toHaveClass(
+      "h-6",
+      "w-6",
+    );
+    expect(screen.getByTestId("icon")).toHaveClass("size-3.5");
+  });
+
   it("applies icon button sizing to arrow icons with width-like icon names", () => {
     render(
       <Button size="icon-sm" aria-label="Jump to latest">

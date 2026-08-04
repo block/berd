@@ -5,6 +5,7 @@ import { filterModelProvidersForRuntimeConfig } from "../runtimeProviderConstrai
 import { getModelProvidersFromEntries } from "../providerCatalog";
 import { getModelCacheRefreshProviderIds } from "../modelCacheRefresh";
 import { getProviderModelSelectionHint } from "../modelSelectionHints";
+import { isGooseModelProviderId } from "../lib/modelRecommendations";
 import { defaultModelInventoryModeForLoadResult } from "../runtimeProviderConfig";
 import { useProviderCatalogStore } from "../stores/providerCatalogStore";
 import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
@@ -33,6 +34,24 @@ export function useProviderModels() {
         runtimeConfig,
       ).map((p) => p.id),
     [catalogEntries, runtimeConfig],
+  );
+  const runtimeModelMetadataByProviderId = useMemo(
+    () =>
+      new Map(
+        runtimeConfig.goose.modelProviders.map((provider) => [
+          provider.id,
+          new Map(
+            provider.models.map((model) => [
+              model.id,
+              {
+                recommended: model.recommended ?? false,
+                featured: model.featured ?? false,
+              },
+            ]),
+          ),
+        ]),
+      ),
+    [runtimeConfig],
   );
   const customProviderIds = useMemo(
     () =>
@@ -66,11 +85,33 @@ export function useProviderModels() {
         return getModelsForProvider(agentId);
       }
 
-      return configuredModelProviderIds.flatMap(
-        (providerId) => providers.get(providerId)?.models ?? [],
-      );
+      return configuredModelProviderIds.flatMap((providerId) => {
+        const models = providers.get(providerId)?.models ?? [];
+        if (isGooseModelProviderId(providerId)) {
+          return models;
+        }
+
+        // Goose combines every available provider into one searchable catalog.
+        // Only explicitly curated runtime models keep recommendation metadata;
+        // provider-local discovery must not expand the combined shortlist.
+        const runtimeModelMetadata =
+          runtimeModelMetadataByProviderId.get(providerId);
+        return models.map((model) => {
+          const curatedMetadata = runtimeModelMetadata?.get(model.id);
+          return {
+            ...model,
+            recommended: curatedMetadata?.recommended ?? false,
+            featured: curatedMetadata?.featured ?? false,
+          };
+        });
+      });
     },
-    [configuredModelProviderIds, getModelsForProvider, providers],
+    [
+      configuredModelProviderIds,
+      getModelsForProvider,
+      providers,
+      runtimeModelMetadataByProviderId,
+    ],
   );
 
   const isRefreshingProvider = useCallback(

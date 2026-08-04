@@ -133,4 +133,152 @@ describe("useProviderModels", () => {
       "custom-openrouter",
     );
   });
+
+  it("keeps provider-local recommendations out of the Goose curated shortlist", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      modelProvider("anthropic", [
+        {
+          key: "ANTHROPIC_API_KEY",
+          label: "API Key",
+          secret: true,
+          required: true,
+        },
+      ]),
+    ]);
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          {
+            providerId: "databricks_v2",
+            fetchedAt: Date.now(),
+            models: [
+              {
+                id: "goose-gpt-5-6-sol",
+                name: "GPT-5.6 Sol",
+                providerId: "databricks_v2",
+                recommended: true,
+                featured: true,
+              },
+            ],
+          },
+        ],
+        [
+          "anthropic",
+          {
+            providerId: "anthropic",
+            fetchedAt: Date.now(),
+            models: [
+              {
+                id: "claude-opus-5",
+                name: "Claude Opus 5",
+                providerId: "anthropic",
+                recommended: true,
+                featured: true,
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    const { result } = renderHook(() => useProviderModels());
+
+    expect(result.current.getModelsForAgent("goose")).toEqual([
+      expect.objectContaining({
+        id: "goose-gpt-5-6-sol",
+        recommended: true,
+        featured: true,
+      }),
+      expect.objectContaining({
+        id: "claude-opus-5",
+        recommended: false,
+        featured: false,
+      }),
+    ]);
+    expect(result.current.getModelsForProvider("anthropic")).toEqual([
+      expect.objectContaining({
+        id: "claude-opus-5",
+        recommended: true,
+        featured: true,
+      }),
+    ]);
+  });
+
+  it("keeps only explicitly curated models recommended for refreshable runtime providers", () => {
+    const runtimeConfig = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        modelProviders: [
+          ...DEFAULT_RUNTIME_CONFIG.goose.modelProviders,
+          {
+            id: "openai",
+            displayName: "OpenAI",
+            modelInventoryMode: "refreshable" as const,
+            models: [
+              {
+                id: "gpt-curated",
+                name: "GPT Curated",
+                recommended: true,
+                featured: true,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      config: runtimeConfig,
+      result: {
+        status: "ready",
+        source: "fakeEndpoint",
+        config: runtimeConfig,
+      },
+    });
+    useProviderCatalogStore.getState().mergeEntries([modelProvider("openai")]);
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "openai",
+          {
+            providerId: "openai",
+            fetchedAt: Date.now(),
+            models: [
+              {
+                id: "gpt-curated",
+                name: "GPT Curated",
+                providerId: "openai",
+                recommended: true,
+                featured: true,
+              },
+              {
+                id: "gpt-discovered",
+                name: "GPT Discovered",
+                providerId: "openai",
+                recommended: true,
+                featured: true,
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    const { result } = renderHook(() => useProviderModels());
+
+    expect(result.current.getModelsForAgent("goose")).toEqual([
+      expect.objectContaining({
+        id: "gpt-curated",
+        recommended: true,
+        featured: true,
+      }),
+      expect.objectContaining({
+        id: "gpt-discovered",
+        recommended: false,
+        featured: false,
+      }),
+    ]);
+  });
 });

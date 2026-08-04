@@ -632,14 +632,22 @@ export function useResolvedAgentModelPicker({
       return null;
     }
 
-    const matchingSessionModel =
-      availableModels.find(
+    const modelsMatchingSessionId = availableModels.filter(
+      (model) => model.id === session.modelId,
+    );
+    const exactProviderMatch =
+      modelsMatchingSessionId.find(
         (model) =>
-          model.id === session.modelId &&
-          (!session.providerId ||
-            !model.providerId ||
-            model.providerId === session.providerId),
+          !session.providerId ||
+          !model.providerId ||
+          model.providerId === session.providerId,
       ) ?? null;
+    const matchingSessionModel =
+      exactProviderMatch ??
+      (session.providerId === selectedAgentId &&
+      modelsMatchingSessionId.length === 1
+        ? modelsMatchingSessionId[0]
+        : null);
 
     if (matchingSessionModel) {
       return {
@@ -664,7 +672,7 @@ export function useResolvedAgentModelPicker({
       providerId: session.providerId,
       source: "explicit",
     };
-  }, [availableModels, session]);
+  }, [availableModels, selectedAgentId, session]);
 
   const availableDefaultModelSelection =
     useMemo<PreferredModelSelection | null>(() => {
