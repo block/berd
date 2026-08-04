@@ -84,7 +84,7 @@ fn classify_check(check: &GhStatusCheck) -> &'static str {
         "SUCCESS"
     } else if matches!(
         conclusion.as_str(),
-        "FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED"
+        "FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "STALE"
     ) || matches!(state.as_str(), "FAILURE" | "ERROR")
     {
         "FAILURE"
@@ -262,7 +262,11 @@ mod tests {
             Some("PENDING".to_string())
         );
 
-        let failing = vec![check(Some("FAILURE"), Some("COMPLETED"), None)];
+        let failing = vec![
+            check(Some("FAILURE"), Some("COMPLETED"), None),
+            check(Some("STARTUP_FAILURE"), Some("COMPLETED"), None),
+            check(Some("STALE"), Some("COMPLETED"), None),
+        ];
         assert_eq!(
             summarize_checks(Some(&failing)),
             Some("FAILURE".to_string())
