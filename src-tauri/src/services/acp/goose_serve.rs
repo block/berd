@@ -32,6 +32,7 @@ const GOOSE_SEARCH_PATHS_ENV: &str = "GOOSE_SEARCH_PATHS";
 const LOCALHOST: &str = "127.0.0.1";
 const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
 const DATABRICKS_HOST_ENV: &str = "DATABRICKS_HOST";
+const GOOSE_FAST_MODEL_ENV: &str = "GOOSE_FAST_MODEL";
 
 // ---------------------------------------------------------------------------
 // GooseServeProcess — singleton that owns the long-lived `goose serve` child
@@ -893,12 +894,23 @@ async fn runtime_config_for_spawn(app_handle: &tauri::AppHandle) -> Result<Runti
 
 fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &RuntimeConfig) {
     for provider in &runtime_config.goose.model_providers {
-        let Some(endpoint_env) = &provider.endpoint_env else {
-            continue;
-        };
-        for (key, value) in endpoint_env {
-            log::info!("setting goose runtime provider env {key}");
-            command.env(key, value);
+        if let Some(endpoint_env) = &provider.endpoint_env {
+            for (key, value) in endpoint_env {
+                log::info!("setting goose runtime provider env {key}");
+                command.env(key, value);
+            }
+        }
+        // Redirect Goose's lightweight "fast" tasks (session naming, context
+        // compaction/summarization, tool-call titles, orchestrator sub-calls)
+        // onto the provider's declared fast model instead of reusing the heavy
+        // main model. `GOOSE_FAST_MODEL` is the highest-priority source in
+        // Goose's fast-model resolution. Stock berd defaults declare no
+        // fastModelId (custom-build runtime config supplies the value), and
+        // BYO-key dev clears the field along with the databricks endpoint, so
+        // those sessions export nothing here.
+        if let Some(fast_model_id) = &provider.fast_model_id {
+            log::info!("setting goose fast model env for provider {}", provider.id);
+            command.env(GOOSE_FAST_MODEL_ENV, fast_model_id);
         }
     }
 }
@@ -943,9 +955,10 @@ fn reserve_free_port() -> Result<u16, String> {
 mod tests {
     use super::{
         acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
-        apply_shell_env_with_extended_path, apply_shell_env_with_extended_path_inner,
-        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+        apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
+        apply_shell_env_with_extended_path_inner, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
     };
+    use crate::commands::runtime_config::default_runtime_config;
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
@@ -1032,6 +1045,69 @@ mod tests {
             Some(OsString::from("en_US.UTF-8"))
         );
         assert!(env_value(&command, "PATH").is_some());
+    }
+
+    #[test]
+    fn apply_runtime_goose_provider_env_exports_declared_fast_model_alongside_host() {
+        let mut command = Command::new("goose");
+        let mut config = default_runtime_config();
+        config
+            .goose
+            .model_providers
+            .first_mut()
+            .expect("default config has a provider")
+            .fast_model_id = Some("goose-fast-model".to_string());
+
+        apply_runtime_goose_provider_env(&mut command, &config);
+
+        assert_eq!(
+            env_value(&command, "GOOSE_FAST_MODEL"),
+            Some(OsString::from("goose-fast-model"))
+        );
+        // The provider's endpoint env is still forwarded verbatim.
+        assert_eq!(
+            env_value(&command, DATABRICKS_HOST_ENV),
+            Some(OsString::from(
+                "https://block-lakehouse-production.cloud.databricks.com"
+            ))
+        );
+    }
+
+    // Stock berd defaults declare no fastModelId (custom-build runtime config
+    // supplies the value), so a stock build exports no GOOSE_FAST_MODEL.
+    #[test]
+    fn apply_runtime_goose_provider_env_exports_no_fast_model_for_default_config() {
+        let mut command = Command::new("goose");
+
+        apply_runtime_goose_provider_env(&mut command, &default_runtime_config());
+
+        assert_eq!(env_value(&command, "GOOSE_FAST_MODEL"), None);
+        // The endpoint env is forwarded independently of the fast model.
+        assert!(env_value(&command, DATABRICKS_HOST_ENV).is_some());
+    }
+
+    // BYO-key dev clears the default provider's endpoint and fast model, so
+    // neither leaks into those sessions. Stock defaults declare no
+    // fastModelId, so set one to mimic a bundled custom-build config.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn apply_runtime_goose_provider_env_exports_nothing_for_byo_stripped_config() {
+        use crate::commands::runtime_config::clear_default_databricks_provider_env;
+
+        let mut command = Command::new("goose");
+        let mut config = default_runtime_config();
+        config
+            .goose
+            .model_providers
+            .first_mut()
+            .expect("default config has a provider")
+            .fast_model_id = Some("goose-fast-model".to_string());
+        clear_default_databricks_provider_env(&mut config);
+
+        apply_runtime_goose_provider_env(&mut command, &config);
+
+        assert_eq!(env_value(&command, DATABRICKS_HOST_ENV), None);
+        assert_eq!(env_value(&command, "GOOSE_FAST_MODEL"), None);
     }
 
     #[test]

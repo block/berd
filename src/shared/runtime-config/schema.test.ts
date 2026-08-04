@@ -117,6 +117,14 @@ describe("runtimeConfigSchema", () => {
       ["goose", "modelProviders", 0, "customProvider", "providerId"],
     ],
     [
+      "fast model id",
+      configWithProvider({
+        ...defaultProvider,
+        fastModelId: " goose-fast-model ",
+      }),
+      ["goose", "modelProviders", 0, "fastModelId"],
+    ],
+    [
       "model id",
       configWithProvider({
         ...defaultProvider,
@@ -133,6 +141,19 @@ describe("runtimeConfigSchema", () => {
     [string, unknown, (string | number)[]]
   >)("rejects whitespace-padded %s", (_label, config, path) => {
     expectRuntimeConfigIssue(config, path, /leading or trailing whitespace/);
+  });
+
+  it("accepts a provider that declares a fastModelId", () => {
+    // Stock defaults declare no fastModelId (custom-build runtime config
+    // supplies the value), so pin acceptance with an explicit fixture.
+    expect(() =>
+      runtimeConfigSchema.parse(
+        configWithProvider({
+          ...defaultProvider,
+          fastModelId: "goose-fast-model",
+        }),
+      ),
+    ).not.toThrow();
   });
 
   it("rejects duplicate provider aliases", () => {

@@ -147,6 +147,13 @@ export const runtimeGooseModelProviderSchema = z
     customProvider: runtimeCustomProviderSchema.optional(),
     endpointEnv: endpointEnvSchema.optional(),
     modelInventoryMode: z.enum(modelInventoryModes).optional(),
+    // Model Goose's lightweight "fast" tasks run on (exported to `goose
+    // serve` as GOOSE_FAST_MODEL). A served endpoint id the provider must be
+    // able to route (databricks_v2 routes by model-name substring, e.g. a
+    // `claude` id takes the Anthropic Messages route), not necessarily one
+    // of `models` — fast models are not surfaced in the picker. Stock berd
+    // defaults declare none; custom-build runtime config supplies the value.
+    fastModelId: runtimeIdString("goose modelProvider fastModelId").optional(),
     models: z.array(runtimeGooseModelSchema),
   })
   .strict();

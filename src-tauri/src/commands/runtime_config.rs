@@ -101,6 +101,14 @@ pub struct RuntimeGooseModelProvider {
     pub endpoint_env: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model_inventory_mode: Option<String>,
+    /// Model Goose's lightweight "fast" tasks run on (exported to `goose
+    /// serve` as GOOSE_FAST_MODEL). A served endpoint id the provider must be
+    /// able to route (databricks_v2 routes by model-name substring, e.g. a
+    /// `claude` id takes the Anthropic Messages route), not necessarily one
+    /// of `models` — fast models are not surfaced in the picker. Stock berd
+    /// defaults declare none; custom-build runtime config supplies the value.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub fast_model_id: Option<String>,
     pub models: Vec<RuntimeGooseModel>,
 }
 
@@ -627,7 +635,7 @@ fn runtime_config_load_result_for_local_byo_dev(
                 ) =>
             {
                 let mut config = *config;
-                clear_default_databricks_endpoint_env(&mut config);
+                clear_default_databricks_provider_env(&mut config);
                 RuntimeConfigLoadResult::Ready {
                     source,
                     config: Box::new(config),
@@ -640,8 +648,14 @@ fn runtime_config_load_result_for_local_byo_dev(
     result
 }
 
+/// Strip the default provider's `goose serve` env contributions (the
+/// databricks endpoint and the fast-model override) so BYO-key dev sessions
+/// keep their own provider's endpoint and models. Stock defaults declare no
+/// fastModelId, but this also runs on bundled-file configs, which custom
+/// builds stage with one — keep the clear so the BYO exclusion holds
+/// regardless of the loaded source.
 #[cfg(debug_assertions)]
-fn clear_default_databricks_endpoint_env(config: &mut RuntimeConfig) {
+pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) {
     let Some(provider) = config
         .goose
         .model_providers
@@ -650,6 +664,7 @@ fn clear_default_databricks_endpoint_env(config: &mut RuntimeConfig) {
     else {
         return;
     };
+    provider.fast_model_id = None;
     let Some(endpoint_env) = provider.endpoint_env.as_mut() else {
         return;
     };
@@ -712,6 +727,7 @@ pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
                 DEFAULT_DATABRICKS_HOST.to_string(),
             )])),
             model_inventory_mode: None,
+            fast_model_id: None,
             models: vec![
                 RuntimeGooseModel {
                     id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
@@ -860,6 +876,10 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
         if let Some(mode) = provider.model_inventory_mode.as_deref() {
             validate_model_inventory_mode(mode)?;
         }
+        validate_optional_runtime_id(
+            provider.fast_model_id.as_deref(),
+            "goose.modelProviders.fastModelId",
+        )?;
 
         if provider.id == goose.default_model_provider_id {
             default_provider_models = Some(&provider.models);
@@ -1295,6 +1315,39 @@ mod tests {
         validate_runtime_config(&default_runtime_config()).expect("default config");
     }
 
+    // Stock defaults declare no fastModelId (custom-build runtime config
+    // supplies the value), so pin the mechanism with an explicit fixture: a
+    // declared id validates and round-trips through the camelCase wire name
+    // the staged config uses.
+    #[test]
+    fn declared_fast_model_id_validates_and_round_trips() {
+        let mut config = default_runtime_config();
+        config.goose.model_providers[0].fast_model_id = Some("goose-fast-model".to_string());
+        validate_runtime_config(&config).expect("declared fastModelId must validate");
+
+        let serialized = serde_json::to_string(&config).expect("serialize config");
+        assert!(serialized.contains(r#""fastModelId":"goose-fast-model""#));
+        let parsed = serde_json::from_str::<RuntimeConfig>(&serialized).expect("parse config");
+        assert_eq!(parsed, config);
+    }
+
+    // BYO-key dev must not inherit the default provider's goose-serve env:
+    // both the databricks endpoint and the fast-model override are cleared.
+    // Stock defaults declare no fastModelId, so set one to mimic a bundled
+    // custom-build config.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn clear_default_databricks_provider_env_clears_endpoint_env_and_fast_model() {
+        let mut config = default_runtime_config();
+        config.goose.model_providers[0].fast_model_id = Some("goose-fast-model".to_string());
+
+        clear_default_databricks_provider_env(&mut config);
+
+        let provider = &config.goose.model_providers[0];
+        assert_eq!(provider.endpoint_env, None);
+        assert_eq!(provider.fast_model_id, None);
+    }
+
     #[test]
     fn bundled_runtime_config_resource_is_valid_and_carries_no_restrictive_toggles() {
         // Pins the checked-in resource that ships as the official default source
@@ -1598,6 +1651,7 @@ mod tests {
             custom_provider: None,
             endpoint_env: None,
             model_inventory_mode: None,
+            fast_model_id: None,
             models: vec![],
         });
         assert!(validate_goose_config(&goose)
@@ -1689,6 +1743,12 @@ mod tests {
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("goose.modelProviders.id must not have leading or trailing whitespace"));
+
+        let mut goose = default_goose_config();
+        goose.model_providers[0].fast_model_id = Some("goose-fast-model ".to_string());
+        assert!(validate_goose_config(&goose).unwrap_err().contains(
+            "goose.modelProviders.fastModelId must not have leading or trailing whitespace"
+        ));
 
         let mut goose = default_goose_config();
         goose.model_providers[0].models[0].id = format!(" {DEFAULT_RUNTIME_MODEL_ID}");
