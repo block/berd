@@ -72,6 +72,9 @@ interface AgentProviderCardProps {
   expandedContent?: ReactNode;
   collapsedSupplement?: ReactNode;
   statusIndicator?: ReactNode;
+  // Makes a custom status indicator an explicit shortcut into the card's
+  // expandable setup details (for example, Goose's model-provider setup).
+  statusIndicatorOpensDetails?: boolean;
 }
 
 export function AgentProviderCard({
@@ -84,6 +87,7 @@ export function AgentProviderCard({
   expandedContent,
   collapsedSupplement,
   statusIndicator,
+  statusIndicatorOpensDetails = false,
 }: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
@@ -561,6 +565,19 @@ export function AgentProviderCard({
     isActive ||
     Boolean(setupError && !isActive);
   const hasExpandableDetails = hasProviderDetails || Boolean(expandedContent);
+  const actionableStatusIndicator =
+    statusIndicator && statusIndicatorOpensDetails && hasExpandableDetails ? (
+      <button
+        type="button"
+        onClick={() => setExpandedOpen(true)}
+        aria-expanded={expandedOpen}
+        className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {statusIndicator}
+      </button>
+    ) : (
+      statusIndicator
+    );
 
   function renderSummaryContent() {
     return (
@@ -590,12 +607,12 @@ export function AgentProviderCard({
           {renderSummaryContent()}
         </button>
       </CollapsibleTrigger>
-      {renderStatusIndicator()}
+      {actionableStatusIndicator ?? renderStatusIndicator()}
     </div>
   ) : (
     <div className="flex items-start justify-between gap-3">
       {renderSummaryContent()}
-      {renderStatusIndicator()}
+      {actionableStatusIndicator ?? renderStatusIndicator()}
     </div>
   );
 

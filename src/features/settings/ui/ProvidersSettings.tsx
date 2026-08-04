@@ -699,6 +699,9 @@ export function ProvidersSettings({
               statusIndicator={
                 agent.id === "goose" ? gooseStatusIndicator : undefined
               }
+              statusIndicatorOpensDetails={
+                agent.id === "goose" && connectedModels.length === 0
+              }
             />
           ))}
         </div>

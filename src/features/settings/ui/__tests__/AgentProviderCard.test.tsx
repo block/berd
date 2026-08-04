@@ -148,6 +148,32 @@ describe("AgentProviderCard", () => {
     useAgentSetupStore.setState({ operations: new Map() });
   });
 
+  it("opens expandable details from an actionable custom status", async () => {
+    const user = userEvent.setup();
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "goose",
+          displayName: "Goose",
+          status: "built_in",
+          binaryName: undefined,
+        })}
+        expandedContent={<div>Model provider setup</div>}
+        statusIndicator={<span>Connect a model provider</span>}
+        statusIndicatorOpensDetails
+      />,
+    );
+
+    expect(screen.queryByText("Model provider setup")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Connect a model provider" }),
+    );
+
+    expect(screen.getByText("Model provider setup")).toBeVisible();
+  });
+
   it("shows the checking indicator only during the shared report's first load", async () => {
     const { rerender } = renderCard(
       <AgentProviderCard provider={createProvider()} statusLoading={true} />,
