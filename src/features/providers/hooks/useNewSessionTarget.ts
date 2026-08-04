@@ -15,6 +15,8 @@ import { useDefaultProviderReadinessStore } from "../stores/defaultProviderReadi
 import { useProviderCatalogStore } from "../stores/providerCatalogStore";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { resolveSupportedSessionModelPreference } from "../lib/resolveSessionModelPreference";
+import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import { resolveSelectedAgentId } from "@/features/chat/lib/agentProviderResolution";
 
 export interface EnsureNewSessionTargetOptions {
   onUnavailable?: "open_settings" | "silent";
@@ -73,13 +75,34 @@ export function useNewSessionTarget() {
             .map((status) => status.providerId),
         );
       }
+      const selectedProviderId = useAgentStore.getState().selectedProvider;
+      const persistedAgentId = resolveSelectedAgentId({
+        catalogEntries: useProviderCatalogStore.getState().entries,
+        catalogLoaded: useProviderCatalogStore.getState().loaded,
+        selectedProvider: selectedProviderId,
+      });
+      const storedModelPreference = getStoredModelPreference(persistedAgentId);
+      const supportedStoredPreference = storedModelPreference
+        ? resolveSupportedSessionModelPreference(persistedAgentId, undefined)
+        : null;
+      const persistedModelPreference = supportedStoredPreference?.modelId
+        ? {
+            modelId: supportedStoredPreference.modelId,
+            modelName:
+              supportedStoredPreference.modelName ??
+              storedModelPreference?.modelName ??
+              supportedStoredPreference.modelId,
+            providerId: supportedStoredPreference.providerId,
+          }
+        : null;
       let result = resolveNewSessionTarget(
         {
           defaultProviderReadiness,
           readyAgentIds,
           configuredAgentIds,
           catalogAgentIds,
-          persistedProviderId: useAgentStore.getState().selectedProvider,
+          persistedProviderId: persistedAgentId,
+          persistedModelPreference,
           policy: {
             requireGooseDefaultProvider: getBuildFeatureState().byoKeyProviders,
           },

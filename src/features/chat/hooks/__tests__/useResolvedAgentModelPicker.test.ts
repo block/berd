@@ -125,6 +125,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: null,
+        sessionHasStarted: false,
         session: undefined,
         pendingModelSelection: undefined,
         setPendingProviderId,
@@ -173,6 +174,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "anthropic",
         sessionId: null,
+        sessionHasStarted: false,
         session: undefined,
         pendingModelSelection: undefined,
         setPendingProviderId,
@@ -242,6 +244,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -300,6 +303,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "codex-acp",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -347,6 +351,7 @@ describe("useResolvedAgentModelPicker", () => {
         providers: [{ id: "goose", label: "Goose" }],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -410,6 +415,7 @@ describe("useResolvedAgentModelPicker", () => {
         providers: [{ id: "goose", label: "Goose" }],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -467,6 +473,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -537,6 +544,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "codex-acp",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -619,6 +627,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -657,6 +666,130 @@ describe("useResolvedAgentModelPicker", () => {
         },
       });
     });
+  });
+
+  it("keeps a model change in a started chat session-local", async () => {
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          displayName: "GPT-5.4",
+          providerId: "anthropic",
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: (modelId: string) =>
+        onModelSelected?.({
+          id: modelId,
+          name: "GPT-5.4",
+          displayName: "GPT-5.4",
+          providerId: "anthropic",
+        }),
+    }));
+
+    const applySessionModelSelection = vi.fn().mockResolvedValue(true);
+    const setGlobalSelectedProvider = vi.fn();
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [{ id: "goose", label: "Goose" }],
+        selectedProvider: "openai",
+        sessionId: "session-1",
+        sessionHasStarted: true,
+        session: {
+          id: "session-1",
+          title: "Started chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider,
+        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+        applySessionModelSelection,
+      }),
+    );
+
+    act(() => result.current.handleModelChange("gpt-5.4"));
+
+    await waitFor(() => {
+      expect(applySessionModelSelection).toHaveBeenCalled();
+    });
+    expect(setGlobalSelectedProvider).not.toHaveBeenCalled();
+    expect(localStorage.getItem("goose:preferredModelsByAgent")).toBeNull();
+  });
+
+  it("preserves the future-chat preference when a started-chat switch fails", async () => {
+    const futurePreference = {
+      modelId: "future-model",
+      modelName: "Future model",
+      providerId: "openai",
+    };
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({ goose: futurePreference }),
+    );
+    const applySessionModelSelection = vi
+      .fn()
+      .mockRejectedValue(new Error("network down"));
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "session-model", name: "Session model", providerId: "openai" },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: () =>
+        onModelSelected?.({
+          id: "session-model",
+          name: "Session model",
+          providerId: "openai",
+        }),
+    }));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [{ id: "goose", label: "Goose" }],
+        selectedProvider: "openai",
+        sessionId: "session-1",
+        sessionHasStarted: true,
+        session: {
+          id: "session-1",
+          title: "Started chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+        applySessionModelSelection,
+      }),
+    );
+
+    act(() => result.current.handleModelChange("session-model"));
+    await waitFor(() => expect(applySessionModelSelection).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        JSON.parse(
+          localStorage.getItem("goose:preferredModelsByAgent") ?? "{}",
+        ),
+      ).toEqual({ goose: futurePreference }),
+    );
   });
 
   it("does not persist a superseded explicit model selection", async () => {
@@ -704,6 +837,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -770,6 +904,7 @@ describe("useResolvedAgentModelPicker", () => {
         providers: [],
         selectedProvider: "claude-acp",
         sessionId: null,
+        sessionHasStarted: false,
         session: undefined,
         pendingModelSelection: undefined,
         setPendingProviderId: vi.fn(),
@@ -824,6 +959,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "claude-acp",
         sessionId: null,
+        sessionHasStarted: false,
         session: undefined,
         pendingModelSelection: undefined,
         setPendingProviderId: vi.fn(),
@@ -857,6 +993,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -940,6 +1077,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -990,6 +1128,69 @@ describe("useResolvedAgentModelPicker", () => {
         },
       });
     });
+  });
+
+  it("keeps recovered model changes in a started chat session-local", async () => {
+    const recreateSessionForProvider = vi.fn().mockResolvedValue(true);
+    const applySessionModelSelection = vi
+      .fn()
+      .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
+    const previousPreference = {
+      modelId: "new-chat-model",
+      modelName: "New chat model",
+      providerId: "openai",
+    };
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({ goose: previousPreference }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "gpt-5.4", name: "GPT-5.4", providerId: "openai" },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: () =>
+        onModelSelected?.({
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          providerId: "openai",
+        }),
+    }));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [{ id: "goose", label: "Goose" }],
+        selectedProvider: "openai",
+        sessionId: "session-1",
+        sessionHasStarted: true,
+        session: {
+          id: "session-1",
+          title: "Started chat",
+          providerId: "openai",
+          modelId: "current",
+          modelName: "current",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+        applySessionModelSelection,
+        recreateSessionForProvider,
+      }),
+    );
+
+    act(() => result.current.handleModelChange("gpt-5.4"));
+    await waitFor(() => expect(recreateSessionForProvider).toHaveBeenCalled());
+    expect(
+      JSON.parse(localStorage.getItem("goose:preferredModelsByAgent") ?? "{}"),
+    ).toEqual({ goose: previousPreference });
   });
 
   it("rolls back the optimistic model patch when stranded-provider recovery fails", async () => {
@@ -1069,6 +1270,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -1161,6 +1363,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "openai",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -1228,6 +1431,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -1289,6 +1493,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -1362,6 +1567,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -1429,6 +1635,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",
@@ -1486,6 +1693,7 @@ describe("useResolvedAgentModelPicker", () => {
         ],
         selectedProvider: "goose",
         sessionId: "session-1",
+        sessionHasStarted: false,
         session: {
           id: "session-1",
           title: "Chat",

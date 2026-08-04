@@ -34,6 +34,7 @@ interface UseResolvedAgentModelPickerOptions {
   selectedProvider: string;
   sessionId: string | null;
   session?: ChatSession;
+  sessionHasStarted: boolean;
   pendingModelSelection: PreferredModelSelection | null | undefined;
   setPendingProviderId: (providerId: string | undefined) => void;
   setPendingModelSelection: (
@@ -66,6 +67,7 @@ export function useResolvedAgentModelPicker({
   selectedProvider,
   sessionId,
   session,
+  sessionHasStarted,
   pendingModelSelection,
   setPendingProviderId,
   setPendingModelSelection,
@@ -285,7 +287,9 @@ export function useResolvedAgentModelPicker({
       const sessionStore = useChatSessionStore.getState();
       sessionStore.clearModelSelectionIntent(sessionId);
       sessionStore.switchSessionProvider(sessionId, nextProviderId);
-      setGlobalSelectedProvider(nextProviderId);
+      if (!sessionHasStarted) {
+        setGlobalSelectedProvider(providerId);
+      }
 
       if (nextModelSelection?.id) {
         const previousProviderId = session?.providerId;
@@ -345,7 +349,9 @@ export function useResolvedAgentModelPicker({
               },
               applySessionModelSelection,
               prepareSelectedProvider,
-              setGlobalSelectedProvider,
+              setGlobalSelectedProvider: sessionHasStarted
+                ? undefined
+                : setGlobalSelectedProvider,
               restoreErrorMessage:
                 "Failed to restore previous model after provider switch failure:",
             });
@@ -456,7 +462,9 @@ export function useResolvedAgentModelPicker({
 
       if (providerChanged && nextProviderId) {
         sessionStore.switchSessionProvider(sessionId, nextProviderId);
-        setGlobalSelectedProvider(nextProviderId);
+        if (!sessionHasStarted) {
+          setGlobalSelectedProvider(selectedAgentId);
+        }
       }
 
       sessionStore.patchSession(sessionId, {
@@ -482,7 +490,12 @@ export function useResolvedAgentModelPicker({
           if (selectionVersionRef.current !== versionAtSelection) {
             return;
           }
-          setStoredModelPreference(selectedAgentId, nextStoredModelPreference);
+          if (!sessionHasStarted) {
+            setStoredModelPreference(
+              selectedAgentId,
+              nextStoredModelPreference,
+            );
+          }
         } catch (error) {
           const intentStillMatches = clearCurrentModelSelectionIntent(
             sessionId,
@@ -500,11 +513,13 @@ export function useResolvedAgentModelPicker({
               nextProviderId,
               nextModelSelection,
               versionAtSelection,
-              () =>
-                setStoredModelPreference(
-                  selectedAgentId,
-                  nextStoredModelPreference,
-                ),
+              sessionHasStarted
+                ? undefined
+                : () =>
+                    setStoredModelPreference(
+                      selectedAgentId,
+                      nextStoredModelPreference,
+                    ),
             )
           ) {
             return;
@@ -513,13 +528,15 @@ export function useResolvedAgentModelPicker({
             return;
           }
           console.error("Failed to set model:", error);
-          if (previousStoredModelPreference) {
-            setStoredModelPreference(
-              selectedAgentId,
-              previousStoredModelPreference,
-            );
-          } else {
-            clearStoredModelPreference(selectedAgentId);
+          if (!sessionHasStarted) {
+            if (previousStoredModelPreference) {
+              setStoredModelPreference(
+                selectedAgentId,
+                previousStoredModelPreference,
+              );
+            } else {
+              clearStoredModelPreference(selectedAgentId);
+            }
           }
           rollbackToPreviousModel({
             sessionId,
@@ -531,9 +548,10 @@ export function useResolvedAgentModelPicker({
             },
             applySessionModelSelection,
             prepareSelectedProvider,
-            setGlobalSelectedProvider: providerChanged
-              ? setGlobalSelectedProvider
-              : undefined,
+            setGlobalSelectedProvider:
+              providerChanged && !sessionHasStarted
+                ? setGlobalSelectedProvider
+                : undefined,
             restoreErrorMessage:
               "Failed to restore previous model after setModel failure:",
           });

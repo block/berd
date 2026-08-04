@@ -1,4 +1,5 @@
 import type { SessionModelPreference } from "@/features/chat/lib/sessionModelPreference";
+import type { StoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import type { DefaultProviderReadiness } from "../defaultProviderReadiness";
 
 export interface NewSessionTargetPolicy {
@@ -30,6 +31,7 @@ export interface NewSessionTargetSnapshot {
   configuredAgentIds: ReadonlySet<string>;
   catalogAgentIds: readonly string[];
   persistedProviderId?: string | null;
+  persistedModelPreference?: StoredModelPreference | null;
   policy: NewSessionTargetPolicy;
 }
 
@@ -93,6 +95,22 @@ export function resolveNewSessionTarget(
 
   const persistedProviderId = snapshot.persistedProviderId ?? undefined;
   if (persistedProviderId && isAgentReady(persistedProviderId, snapshot)) {
+    const persistedModelPreference = snapshot.persistedModelPreference;
+    const persistedModelMatchesTarget =
+      persistedModelPreference &&
+      (persistedProviderId === "goose" ||
+        !persistedModelPreference.providerId ||
+        persistedModelPreference.providerId === persistedProviderId);
+    if (persistedModelMatchesTarget) {
+      return {
+        status: "ready",
+        provenance: "persisted",
+        providerId: persistedProviderId,
+        modelId: persistedModelPreference.modelId,
+        modelName: persistedModelPreference.modelName,
+      };
+    }
+
     return readyTarget(
       persistedProviderId,
       persistedProviderId === "goose" &&

@@ -1782,6 +1782,36 @@ describe("useChatSessionController", () => {
     );
   });
 
+  it("keeps a reasoning-effort change in a started chat session-local", async () => {
+    patchReasoningEffort("session-1");
+    useChatSessionStore.getState().patchSession("session-1", {
+      messageCount: 1,
+    });
+    mockUseChatSendMessage.mockImplementationOnce(
+      async (options?: {
+        onMessageAccepted?: (sessionId: string, text: string) => void;
+      }) => {
+        options?.onMessageAccepted?.("session-1", "follow up");
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => result.current.handleReasoningEffortChange("high"));
+    act(() => result.current.handleSend("follow up"));
+
+    await waitFor(() => {
+      expect(mockAcpSetSessionConfigOption).toHaveBeenCalledWith(
+        "session-1",
+        "thinking_effort",
+        "high",
+      );
+    });
+    expect(mockGoosePreferencesSave).not.toHaveBeenCalled();
+  });
+
   it("does not save a changed reasoning effort before the user sends", () => {
     patchReasoningEffort("session-1");
 
@@ -2548,7 +2578,7 @@ describe("useChatSessionController", () => {
     expect(mockAcpPrepareSession.mock.invocationCallOrder[0]).toBeLessThan(
       mockAcpSetModel.mock.invocationCallOrder[0],
     );
-    expect(mockSetSelectedProvider).toHaveBeenCalledWith("anthropic");
+    expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({

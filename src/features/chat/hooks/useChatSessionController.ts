@@ -15,6 +15,7 @@ import { useAutoCompactPreferences } from "./useAutoCompactPreferences";
 import { useMessageQueue } from "./useMessageQueue";
 import { useChatStore } from "../stores/chatStore";
 import {
+  hasSessionStarted,
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
@@ -366,6 +367,12 @@ export function useChatSessionController({
   const reasoningEffortRefreshKeyBySessionRef = useRef<Record<string, string>>(
     {},
   );
+  const sessionLocalMessageCount = useChatStore((s) =>
+    sessionId ? (s.messagesBySession[sessionId]?.length ?? 0) : 0,
+  );
+  const sessionHasStarted = session
+    ? hasSessionStarted(session, sessionLocalMessageCount)
+    : false;
   const pendingDraftValue = useChatStore(
     isHomeSession
       ? (s) => s.draftsBySession[PENDING_HOME_SESSION_ID] ?? ""
@@ -1077,6 +1084,7 @@ export function useChatSessionController({
     selectedProvider,
     sessionId,
     session,
+    sessionHasStarted,
     pendingModelSelection,
     setPendingProviderId,
     setPendingModelSelection,
@@ -1356,7 +1364,9 @@ export function useChatSessionController({
           currentValue: value,
         },
       });
-      pendingDefaultReasoningEffortBySessionRef.current[sessionId] = value;
+      if (!sessionHasStarted) {
+        pendingDefaultReasoningEffortBySessionRef.current[sessionId] = value;
+      }
 
       void acpSetSessionConfigOption(sessionId, current.configId, value).catch(
         (error) => {
@@ -1373,7 +1383,7 @@ export function useChatSessionController({
         },
       );
     },
-    [session?.reasoningEffort, sessionId],
+    [session?.reasoningEffort, sessionHasStarted, sessionId],
   );
 
   const handleProjectChange = useCallback(

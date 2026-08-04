@@ -111,25 +111,23 @@ describe("resolveNewSessionTarget", () => {
     });
   });
 
-  it("does not let a stored Goose model provider replace the agent harness", () => {
-    window.localStorage.setItem(
-      "goose:preferredModelsByAgent",
-      JSON.stringify({
-        goose: {
-          modelId: "synthetic-model",
-          modelName: "synthetic-model",
-          providerId: "chatgpt_codex",
-        },
-      }),
-    );
-
+  it("uses the stored new-chat model without replacing the Goose harness", () => {
     expect(
-      resolveNewSessionTarget(snapshot({ persistedProviderId: "goose" })),
+      resolveNewSessionTarget(
+        snapshot({
+          persistedProviderId: "goose",
+          persistedModelPreference: {
+            modelId: "synthetic-model",
+            modelName: "Synthetic model",
+            providerId: "chatgpt_codex",
+          },
+        }),
+      ),
     ).toMatchObject({
       status: "ready",
       providerId: "goose",
-      modelId: "gpt-4o",
-      modelName: "gpt-4o",
+      modelId: "synthetic-model",
+      modelName: "Synthetic model",
       provenance: "persisted",
     });
   });
