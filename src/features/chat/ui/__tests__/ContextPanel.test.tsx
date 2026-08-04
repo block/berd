@@ -98,6 +98,10 @@ vi.mock("@/shared/api/system", () => ({
   ensureDirectory: mockEnsureDirectory,
 }));
 
+vi.mock("@/shared/hooks/useHomeDir", () => ({
+  useHomeDir: () => "/Users/test",
+}));
+
 vi.mock("@/shared/api/acpApi", () => ({
   updateWorkingDir: mockUpdateWorkingDir,
 }));
@@ -271,6 +275,7 @@ describe("ContextPanel", () => {
     );
     return {
       workspace: enrichedWorkspace,
+      comparableWorkspace: enrichedWorkspace,
       originalWorkspace: workspace,
       gitProbePath: gitProbePathForWorkspace(workspace),
       gitState,
@@ -1230,6 +1235,87 @@ describe("ContextPanel", () => {
         .getSession("test-session-remove-shared-worktree")
         ?.workspaceAttachments,
     ).toEqual([docsAttachment]);
+  });
+
+  it("keeps a created branch when a `~`-spelled sibling still uses the checkout", async () => {
+    const user = userEvent.setup();
+    const homeDir = "/Users/test";
+    // Mirror useWorkspaceGitRuntimes' `~` handling so the raw sibling renders
+    // as it does in the app: derived against the expanded spelling, raw path
+    // restored on `workspace`.
+    mockUseWorkspaceGitRuntimes.mockImplementation(
+      (workspaces: WorkspaceAttachment[]) => {
+        const queryResult = mockUseGitState();
+        return workspaces.map((workspace) => {
+          const expanded = {
+            ...workspace,
+            path: workspace.path.replace(/^~(?=\/|$)/, homeDir),
+          };
+          const runtime = createWorkspaceRuntime(expanded, queryResult.data);
+          return {
+            ...runtime,
+            workspace: { ...runtime.workspace, path: workspace.path },
+            originalWorkspace: workspace,
+          };
+        });
+      },
+    );
+    const createdPath = "/Users/test/goose2";
+    const createdAttachment: WorkspaceAttachment = {
+      id: workspaceAttachmentIdForPath(createdPath),
+      path: createdPath,
+      kind: "git-main-worktree",
+      source: "created",
+      branch: "feat/context-panel",
+      repositoryPath: createdPath,
+      worktreePath: createdPath,
+      lifecycle: {
+        owner: "goose",
+        cleanup: "branch",
+        branch: "feat/context-panel",
+        baseBranch: "main",
+        repositoryPath: createdPath,
+        worktreePath: createdPath,
+        createdBranch: true,
+      },
+      usedByAgent: false,
+    };
+    const tildeSibling = materializedWorkspace("~/goose2/docs");
+
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "test-session-tilde-sibling",
+          title: "Chat",
+          workspaceAttachments: [createdAttachment, tildeSibling],
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-tilde-sibling",
+      projectWorkingDirs: [],
+    });
+
+    await openWorkspaceActionsMenu(user, /goose2$/);
+    await user.click(
+      screen.getByRole("menuitem", { name: /^remove from chat$/i }),
+    );
+
+    // The `~`-spelled sibling still uses the checkout — its raw path only
+    // matches the absolute cleanup target in the home-expanded spelling — so
+    // the branch is kept and the workspace removes without a cleanup dialog.
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("test-session-tilde-sibling")
+          ?.workspaceAttachments,
+      ).toEqual([tildeSibling]);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(vi.mocked(gitApi.deleteBranch)).not.toHaveBeenCalled();
   });
 
   it("identifies a managed worktree used by another active chat", async () => {
@@ -2499,6 +2585,90 @@ describe("ContextPanel", () => {
         expect.objectContaining({
           path: "/Users/test/goose2",
           branch: "feature/new-branch",
+        }),
+      ],
+    });
+  });
+
+  it("classifies a branch created on a `~`-spelled workspace with the expanded path", async () => {
+    const user = userEvent.setup();
+    const homeDir = "/Users/test";
+    // Mirror useWorkspaceGitRuntimes' `~` handling: derive against the
+    // expanded spelling, restore the raw spelling on `workspace.path`.
+    mockUseWorkspaceGitRuntimes.mockImplementation(
+      (workspaces: WorkspaceAttachment[]) => {
+        const queryResult = mockUseGitState();
+        return workspaces.map((workspace) => {
+          const expanded = {
+            ...workspace,
+            path: workspace.path.replace(/^~(?=\/|$)/, homeDir),
+          };
+          const runtime = createWorkspaceRuntime(expanded, queryResult.data);
+          return {
+            ...runtime,
+            workspace: { ...runtime.workspace, path: workspace.path },
+            originalWorkspace: workspace,
+          };
+        });
+      },
+    );
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "test-session-7b",
+          title: "Chat",
+          workingDir: "~/goose2",
+          workspaceAttachments: [materializedWorkspace("~/goose2")],
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-7b",
+      projectWorkingDirs: ["~/goose2"],
+    });
+
+    await openWorkspaceActionsMenu(user);
+    await user.click(
+      screen.getByRole("menuitem", { name: /^create branch$/i }),
+    );
+    await user.type(screen.getByLabelText("Branch name"), "feature/tilde");
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: /^create branch$/i,
+      }),
+    );
+
+    // The branch action itself already ran at the absolute action path…
+    expect(vi.mocked(gitApi.createBranch)).toHaveBeenCalledWith(
+      "/Users/test/goose2",
+      "feature/tilde",
+      "main",
+    );
+    // …and the persisted classification must use that spelling too: a raw
+    // `~` path falls through classification and stores `~/goose2` as the
+    // lifecycle worktreePath, which removal later feeds to
+    // `git_delete_branch` un-expanded.
+    expect(
+      useChatSessionStore.getState().getSession("test-session-7b"),
+    ).toMatchObject({
+      workspaceAttachments: [
+        expect.objectContaining({
+          path: "~/goose2",
+          branch: "feature/tilde",
+          kind: "git-main-worktree",
+          worktreePath: "/Users/test/goose2",
+          lifecycle: expect.objectContaining({
+            cleanup: "branch",
+            branch: "feature/tilde",
+            baseBranch: "main",
+            repositoryPath: "/Users/test/goose2",
+            worktreePath: "/Users/test/goose2",
+            createdBranch: true,
+          }),
         }),
       ],
     });

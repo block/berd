@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listSkills } from "@/features/skills/api/skills";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { QueryClientContext } from "@tanstack/react-query";
+import { fetchSkillsList } from "@/features/skills/api/skillsQuery";
 import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 import {
@@ -383,6 +391,10 @@ export function useMentionHandlers({
   onFileMentionSelect,
 }: MentionHandlersOptions) {
   const sessionArtifacts = useSessionArtifacts();
+  // Optional so provider-less mounts (tests) fall back to a direct fetch;
+  // with a client, the skill list shares one react-query entry with the
+  // session controller and skill search instead of refetching per mount.
+  const queryClient = useContext(QueryClientContext);
   const normalizedSkillRoots = useMemo(
     () => normalizeRoots(skillProjectDirs),
     [skillProjectDirs],
@@ -446,11 +458,14 @@ export function useMentionHandlers({
       return;
     }
 
-    const loadSkillMentions = () => {
+    const loadSkillMentions = (options: { fresh?: boolean } = {}) => {
       const currentRequestId = requestId + 1;
       requestId = currentRequestId;
 
-      void listSkills(normalizedSkillRoots, { providerId: skillProviderId })
+      void fetchSkillsList(queryClient, normalizedSkillRoots, {
+        providerId: skillProviderId,
+        fresh: options.fresh,
+      })
         .then((skills) => {
           if (cancelled || currentRequestId !== requestId) return;
           setSkillMentionItems(
@@ -474,13 +489,15 @@ export function useMentionHandlers({
     };
 
     loadSkillMentions();
-    const cleanup = listenSkillsChanged(loadSkillMentions);
+    const cleanup = listenSkillsChanged(() =>
+      loadSkillMentions({ fresh: true }),
+    );
 
     return () => {
       cancelled = true;
       cleanup();
     };
-  }, [normalizedSkillRoots, skillProviderId, skillsEnabled]);
+  }, [normalizedSkillRoots, queryClient, skillProviderId, skillsEnabled]);
 
   const fileMentionItems: FileMentionItem[] = useMemo(() => {
     const dedup = new Map<string, FileMentionItem>();

@@ -2,6 +2,7 @@ import type { SourceEntry } from "@aaif/goose-sdk";
 import { invoke } from "@tauri-apps/api/core";
 import { getSkillProviderCapabilities } from "@/features/chat/lib/skillProviderCapabilities";
 import { getClient } from "@/shared/api/acpConnection";
+import { shareInFlight } from "@/shared/lib/shareInFlight";
 import { isHexColor } from "@/features/projects/lib/customPillColor";
 import { isPillTone } from "@/features/projects/lib/pillTones";
 import {
@@ -73,6 +74,15 @@ interface ListAgentSkillsResponse {
 
 export interface ListSkillsOptions {
   providerId?: string | null;
+  /** Set false when the caller already owns the Berd app-skill list (e.g. the
+   *  chat controller's dedicated catalog effect) so it isn't fetched again
+   *  only to be filtered out. Defaults to true. */
+  includeAppSkills?: boolean;
+  /** Replace the shared in-flight app-skills invoke instead of joining it, so
+   *  a read triggered by a skills-changed event observes post-change data.
+   *  The other discovery legs issue a new request per call and are always
+   *  fresh. */
+  fresh?: boolean;
 }
 
 function isFilesystemSkillSource(
@@ -339,17 +349,24 @@ export async function createSkill(
   return skill;
 }
 
-export async function listBerdAppSkills(): Promise<SkillInfo[]> {
-  if (!isDesktopRuntime()) {
-    return [];
-  }
-  const response = await invoke<ListAgentSkillsResponse>(
-    "list_berd_app_skills",
-  );
-  return response.skills.map((skill) => toAgentSkillInfo(skill, null));
-}
+// Several surfaces list app skills at once when a chat mounts; share the
+// in-flight request so a same-tick burst issues one IPC call. Callers that
+// must observe post-event data pass `{ fresh: true }` (threaded through by
+// `fetchBerdAppSkills`) so the shared slot is replaced instead of handing
+// back an invoke that started before the change.
+export const listBerdAppSkills = shareInFlight(
+  async (): Promise<SkillInfo[]> => {
+    if (!isDesktopRuntime()) {
+      return [];
+    }
+    const response = await invoke<ListAgentSkillsResponse>(
+      "list_berd_app_skills",
+    );
+    return response.skills.map((skill) => toAgentSkillInfo(skill, null));
+  },
+);
 
-async function listAgentFileSkills(
+export async function listAgentFileSkills(
   projectDirs: string[],
   providerId: string | null | undefined,
 ): Promise<SkillInfo[]> {
@@ -368,7 +385,7 @@ async function listAgentFileSkills(
   return response.skills.map((skill) => toAgentSkillInfo(skill, providerId));
 }
 
-async function listGooseSourceSkills(
+export async function listGooseSourceSkills(
   projectDirs: string[],
 ): Promise<SkillInfo[]> {
   const client = await getClient();
@@ -434,12 +451,17 @@ export async function listSkills(
 ): Promise<SkillInfo[]> {
   const capabilities = getSkillProviderCapabilities(options.providerId);
   if (capabilities.discoveryMode === "agent-skill-files") {
-    return listAgentFileSkills(projectDirs, options.providerId);
+    const skills = await listAgentFileSkills(projectDirs, options.providerId);
+    return options.includeAppSkills === false
+      ? skills.filter((skill) => skill.sourceKind !== "app")
+      : skills;
   }
 
   const [gooseSkills, appSkills] = await Promise.all([
     listGooseSourceSkills(projectDirs),
-    listBerdAppSkills(),
+    options.includeAppSkills === false
+      ? []
+      : listBerdAppSkills({ fresh: options.fresh }),
   ]);
   // Goose already orders project and Personal sources by its own precedence.
   // Append Berd app skills so a same-named Personal skill wins bare-name

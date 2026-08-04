@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useHomeDir } from "@/shared/hooks/useHomeDir";
+import {
+  changedFilesQueryKey,
+  gitStateQueryKey,
+} from "@/shared/lib/gitStateQueryKey";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import { isSessionRunning } from "../lib/sessionActivity";
 import { useChatSessionStore } from "../stores/chatSessionStore";
@@ -34,6 +39,7 @@ export function useGitStateAutoRefreshOnChatSettled({
   enabled = true,
 }: UseGitStateAutoRefreshOptions) {
   const queryClient = useQueryClient();
+  const homeDir = useHomeDir();
   const projectDefaultWorkspaceRoot = projectWorkingDirs[0] ?? null;
   const activeWorkspacePath = useChatSessionStore((state) =>
     sessionId ? state.activeWorkspaceBySession[sessionId]?.path : undefined,
@@ -60,23 +66,26 @@ export function useGitStateAutoRefreshOnChatSettled({
       clearScheduledRefresh(refreshTimeoutRef);
       refreshTimeoutRef.current = window.setTimeout(() => {
         refreshTimeoutRef.current = null;
+        // Expand `~` through the shared key builders so this invalidation
+        // targets the exact keys the ContextPanel/sidebar observers subscribe
+        // to; keying the raw spelling would drop it onto a key nothing observes.
         void Promise.all([
           queryClient
             .invalidateQueries({
-              queryKey: ["git-state", path],
+              queryKey: gitStateQueryKey(path, homeDir),
               exact: true,
             })
             .catch(() => undefined),
           queryClient
             .invalidateQueries({
-              queryKey: ["changed-files", path],
+              queryKey: changedFilesQueryKey(path, homeDir),
               exact: true,
             })
             .catch(() => undefined),
         ]);
       }, CHAT_GIT_AUTO_REFRESH_DELAY_MS);
     },
-    [queryClient],
+    [queryClient, homeDir],
   );
 
   useEffect(() => {

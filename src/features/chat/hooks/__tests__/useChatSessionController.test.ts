@@ -1,12 +1,18 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { emitSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
-import { useChatSessionStore } from "../../stores/chatSessionStore";
+import {
+  type ChatSession,
+  useChatSessionStore,
+} from "../../stores/chatSessionStore";
 import { applyLatestSessionConfig } from "../../lib/sessionConfigRequests";
 import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { ChatSendOptions } from "../../types";
@@ -36,6 +42,7 @@ const mockUseChatRuntime = {
 };
 const mockListSkills = vi.fn();
 const mockListBerdAppSkills = vi.fn();
+const mockListGooseSourceSkills = vi.fn();
 const mockLoadWorkspaceInstructionFiles = vi.fn();
 const mockPickerState = {
   selectedAgentId: "goose",
@@ -175,6 +182,8 @@ vi.mock("@/shared/api/agents", () => ({
 
 vi.mock("@/features/skills/api/skills", () => ({
   listBerdAppSkills: (...args: unknown[]) => mockListBerdAppSkills(...args),
+  listGooseSourceSkills: (...args: unknown[]) =>
+    mockListGooseSourceSkills(...args),
   listSkills: (...args: unknown[]) => mockListSkills(...args),
 }));
 
@@ -251,6 +260,46 @@ function latestMessageQueueArgs() {
   ];
 }
 
+function catalogSkill(name: string) {
+  return {
+    id: `project:/tmp/project/.agents/skills/${name}`,
+    name,
+    description: `${name} description`,
+    instructions: "Full instructions are not part of the catalog.",
+    path: `/tmp/project/.agents/skills/${name}`,
+    fileLocation: `/tmp/project/.agents/skills/${name}/SKILL.md`,
+    sourceKind: "project",
+    sourceLabel: "project",
+    projectLinks: [],
+    readonly: false,
+    color: null,
+  };
+}
+
+function singleWorkspaceSession(): ChatSession {
+  return {
+    id: "session-1",
+    title: "Chat",
+    providerId: "openai",
+    modelId: "gpt-4o",
+    modelName: "GPT-4o",
+    workingDir: "/tmp/project",
+    workspaceAttachments: [
+      {
+        id: workspaceAttachmentIdForPath("/tmp/project"),
+        path: "/tmp/project",
+        kind: "git-main-worktree",
+        source: "inferred",
+        branch: "main",
+        usedByAgent: false,
+      },
+    ],
+    createdAt: "2026-04-20T00:00:00.000Z",
+    updatedAt: "2026-04-20T00:00:00.000Z",
+    messageCount: 0,
+  };
+}
+
 function patchReasoningEffort(sessionId: string, currentValue = "off") {
   useChatSessionStore.getState().patchSession(sessionId, {
     reasoningEffort: {
@@ -292,6 +341,7 @@ describe("useChatSessionController", () => {
     mockListBerdAppSkills
       .mockReset()
       .mockImplementation(() => immediatelyResolved([]));
+    mockListGooseSourceSkills.mockReset().mockResolvedValue([]);
     mockLoadWorkspaceInstructionFiles.mockResolvedValue([]);
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
@@ -997,6 +1047,76 @@ describe("useChatSessionController", () => {
     });
     expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
       providerId: "goose",
+      includeAppSkills: false,
+    });
+  });
+
+  it("reloads both skills catalogs fresh when a skills-changed event fires", async () => {
+    mockListSkills.mockResolvedValue([catalogSkill("code-review")]);
+    useChatSessionStore.setState({
+      sessions: [singleWorkspaceSession()],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+      expect(systemPrompt).toContain("- code-review:");
+    });
+
+    // A skill is created or deleted elsewhere in the app: the session's
+    // catalogs must observe the change instead of serving the mount-time
+    // snapshot until remount.
+    mockListSkills.mockResolvedValue([catalogSkill("brand-new")]);
+    mockListBerdAppSkills.mockImplementation(() =>
+      immediatelyResolved([
+        { ...catalogSkill("goose-help"), sourceKind: "app" },
+      ]),
+    );
+    act(() => {
+      emitSkillsChanged();
+    });
+
+    await waitFor(() => {
+      const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+      expect(systemPrompt).toContain("- brand-new:");
+      expect(systemPrompt).toContain("- goose-help:");
+      expect(systemPrompt).not.toContain("- code-review:");
+    });
+  });
+
+  it("lands post-event skills when the event's fresh reload cancels an in-flight mount fetch on the shared query key", async () => {
+    // With a query client the catalog reads share query keys with the
+    // mention/search consumers, and a fresh reload cancels any in-flight
+    // fetch on the key. The mount fetch below stays pending so the
+    // skills-changed event lands mid-flight; the cancelled fetch's rejection
+    // must be superseded rather than clearing the catalog for the session's
+    // lifetime.
+    const preChange = deferred<never[]>();
+    mockListGooseSourceSkills
+      .mockImplementationOnce(() => preChange.promise)
+      .mockResolvedValue([catalogSkill("post-change")]);
+    useChatSessionStore.setState({
+      sessions: [singleWorkspaceSession()],
+    });
+
+    const queryClient = new QueryClient();
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children),
+    });
+
+    await waitFor(() =>
+      expect(mockListGooseSourceSkills).toHaveBeenCalledTimes(1),
+    );
+
+    act(() => {
+      emitSkillsChanged();
+    });
+
+    await waitFor(() => {
+      const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
+      expect(systemPrompt).toContain("- post-change:");
     });
   });
 
@@ -1035,6 +1155,7 @@ describe("useChatSessionController", () => {
     await waitFor(() => {
       expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
         providerId: "codex-acp",
+        includeAppSkills: false,
       });
     });
   });
@@ -2150,6 +2271,7 @@ describe("useChatSessionController", () => {
     await waitFor(() => {
       expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
         providerId: "codex-acp",
+        includeAppSkills: false,
       });
     });
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();

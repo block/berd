@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { shareInFlight } from "@/shared/lib/shareInFlight";
 
 export interface PocketVoice {
   id: string;
@@ -49,9 +50,14 @@ export interface VoiceModelDownloadProgress {
   phase: VoiceModelDownloadPhase;
 }
 
-export function getPocketVoiceStatus(): Promise<PocketVoiceStatus> {
-  return invoke<PocketVoiceStatus>("get_pocket_voice_status");
-}
+// Voice surfaces poll this on mount from several components at once; share
+// the in-flight request so a mount burst issues one IPC call. A refresh that
+// must observe a just-written setting (select voice / playback speed do not
+// bump statusRevision, so a stale same-revision snapshot would be accepted)
+// passes `{ fresh: true }` to bypass any pre-write read still in flight.
+export const getPocketVoiceStatus = shareInFlight(() =>
+  invoke<PocketVoiceStatus>("get_pocket_voice_status"),
+);
 
 export function installVoiceModel(
   model: VoiceModelKind,

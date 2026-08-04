@@ -273,6 +273,44 @@ describe("session workspace cleanup", () => {
     expect(planSessionWorkspaceCleanup(session, [session, other])).toEqual([]);
   });
 
+  it("does not clean a target a `~`-spelled attachment in another session still uses", () => {
+    const managed: WorkspaceAttachment = {
+      ...makeManagedBranch(),
+      id: "path:/Users/test/repo",
+      path: "/Users/test/repo",
+      repositoryPath: "/Users/test/repo",
+      worktreePath: "/Users/test/repo",
+      lifecycle: {
+        owner: "goose",
+        cleanup: "branch",
+        branch: "chat",
+        baseBranch: "main",
+        repositoryPath: "/Users/test/repo",
+        worktreePath: "/Users/test/repo",
+        createdBranch: true,
+      },
+    };
+    const session = makeSession("session", [managed]);
+    const other = makeSession("other", [
+      {
+        id: "path:~/repo",
+        path: "~/repo",
+        kind: "directory",
+        source: "selected",
+        branch: null,
+        usedByAgent: false,
+      },
+    ]);
+
+    // Without the home dir the raw spelling cannot match the absolute target.
+    expect(planSessionWorkspaceCleanup(session, [session, other])).toHaveLength(
+      1,
+    );
+    expect(
+      planSessionWorkspaceCleanup(session, [session, other], "/Users/test"),
+    ).toEqual([]);
+  });
+
   it("does clean a target used only by an archived session", () => {
     const managed = makeManagedWorktree();
     const session = makeSession("session", [managed]);

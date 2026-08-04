@@ -606,6 +606,55 @@ describe("listSkills", () => {
     delete window.__TAURI_INTERNALS__;
   });
 
+  it("threads fresh past a pending app-skill invoke so the listing observes post-change data", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    const appSkillResponse = (name: string) => ({
+      skills: [
+        {
+          name,
+          description: "",
+          content: "",
+          path: `/app/skills/${name}`,
+          fileLocation: `/app/skills/${name}/SKILL.md`,
+          sourceKind: "app",
+          sourceLabel: "Berd app",
+        },
+      ],
+    });
+    let resolveBeforeChange!: (value: unknown) => void;
+    let resolveAfterChange!: (value: unknown) => void;
+    mockInvoke
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveBeforeChange = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveAfterChange = resolve;
+        }),
+      );
+    mockGooseSourcesList.mockResolvedValue({ sources: [] });
+
+    const { listBerdAppSkills, listSkills } = await import("./skills");
+
+    // A pre-change app-skill request is still in flight when the fresh
+    // listing starts; without threading `fresh` into the shared invoke the
+    // listing would join it and resolve with pre-change data.
+    const pending = listBerdAppSkills();
+    const refreshed = listSkills([], { fresh: true });
+
+    resolveAfterChange(appSkillResponse("after-skill"));
+    resolveBeforeChange(appSkillResponse("before-skill"));
+
+    expect((await refreshed).map((skill) => skill.name)).toEqual([
+      "after-skill",
+    ]);
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+    await pending;
+    delete window.__TAURI_INTERNALS__;
+  });
+
   it("fetches and maps built-in skills without filesystem project/global metadata", async () => {
     mockGooseSourcesList
       .mockResolvedValueOnce({

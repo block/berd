@@ -195,7 +195,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
           : String(installError);
       setError(message);
       try {
-        const refreshed = await getPocketVoiceStatus();
+        const refreshed = await getPocketVoiceStatus({ fresh: true });
         setStatus((current) => mergePocketVoiceStatus(current, refreshed));
       } catch {
         // Preserve the actionable install error when status refresh also fails.
@@ -207,7 +207,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     setError(null);
     try {
       await selectPocketVoice(voiceId);
-      const refreshed = await getPocketVoiceStatus();
+      const refreshed = await getPocketVoiceStatus({ fresh: true });
       setStatus((current) => mergePocketVoiceStatus(current, refreshed));
     } catch (selectionError) {
       setError(String(selectionError));
@@ -218,7 +218,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     setError(null);
     try {
       await setPocketPlaybackSpeed(speed);
-      const refreshed = await getPocketVoiceStatus();
+      const refreshed = await getPocketVoiceStatus({ fresh: true });
       setStatus((current) => mergePocketVoiceStatus(current, refreshed));
     } catch (nextError) {
       setError(

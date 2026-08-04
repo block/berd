@@ -9,6 +9,10 @@ import {
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { useChatStore } from "../../stores/chatStore";
 
+vi.mock("@/shared/hooks/useHomeDir", () => ({
+  useHomeDir: () => "/Users/test",
+}));
+
 function resetStores() {
   useChatStore.setState({
     messagesBySession: {},
@@ -92,6 +96,50 @@ describe("useGitStateAutoRefreshOnChatSettled", () => {
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["changed-files", "/Users/test/project-worktree"],
+      exact: true,
+    });
+  });
+
+  it("expands ~ so the invalidation keys match the git-state observer keys", async () => {
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    useChatSessionStore.getState().setActiveWorkspace("session-1", {
+      path: "~/project-worktree",
+      branch: "feature",
+    });
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setStreamingMessageId("session-1", "message-1");
+
+    renderHook(
+      () =>
+        useGitStateAutoRefreshOnChatSettled({
+          sessionId: "session-1",
+        }),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+      useChatStore.getState().setStreamingMessageId("session-1", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(CHAT_GIT_AUTO_REFRESH_DELAY_MS);
+    });
+
+    // The observers (useGitState/useSidebarBranchSubtitles) key the expanded
+    // path, so the invalidation must too — keying the raw `~` spelling would
+    // miss them.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["git-state", "/Users/test/project-worktree"],
+      exact: true,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["changed-files", "/Users/test/project-worktree"],
+      exact: true,
+    });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ["git-state", "~/project-worktree"],
       exact: true,
     });
   });

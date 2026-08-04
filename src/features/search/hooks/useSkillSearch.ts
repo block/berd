@@ -1,68 +1,40 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { listSkills, type SkillInfo } from "@/features/skills/api/skills";
+import type { SkillInfo } from "@/features/skills/api/skills";
+import {
+  fetchSkillsList,
+  getCachedSkillsList,
+} from "@/features/skills/api/skillsQuery";
 import { hydrateProjectNames } from "@/features/skills/lib/projectHydration";
 import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { filterByQuery } from "../lib/filterByQuery";
 
-// Module-level cache so the dropdown feels instant after the first load.
-// `ui-reskin`'s skills API does not expose `getCachedSkills`, so we keep the
-// most recent snapshot here.
-let skillsCache: SkillInfo[] | null = null;
-let skillsRequest: Promise<SkillInfo[]> | null = null;
-let skillsRequestKey = "";
-
-function clearSkillsCache(): void {
-  skillsCache = null;
-  skillsRequest = null;
-  skillsRequestKey = "";
-}
-
-function loadSkills(projectDirs: string[]): Promise<SkillInfo[]> {
-  const requestKey = [...new Set(projectDirs)].sort().join("\n");
-  if (skillsRequest && skillsRequestKey !== requestKey) {
-    skillsRequest = null;
-  }
-  skillsRequestKey = requestKey;
-  if (!skillsRequest) {
-    const request = listSkills(projectDirs)
-      .then((skills) => {
-        if (skillsRequest === request) {
-          skillsCache = skills;
-        }
-        return skills;
-      })
-      .finally(() => {
-        if (skillsRequest === request) {
-          skillsRequest = null;
-        }
-      });
-    skillsRequest = request;
-  }
-
-  return skillsRequest;
-}
-
 export function useSkillSearch(query: string): SkillInfo[] {
-  const [skills, setSkills] = useState<SkillInfo[]>(() => skillsCache ?? []);
+  // Optional so provider-less mounts (tests) fall back to a direct fetch;
+  // with a client, the list shares the react-query entries used by the chat
+  // surfaces, and the cached snapshot keeps the dropdown instant after the
+  // first load.
+  const queryClient = useContext(QueryClientContext);
   const projects = useProjectStore((state) => state.projects);
   const projectDirs = useMemo(
     () => projects.flatMap((project) => project.workingDirs),
     [projects],
   );
+  const [skills, setSkills] = useState<SkillInfo[]>(() => {
+    const cached = getCachedSkillsList(queryClient, projectDirs);
+    return cached ? hydrateProjectNames(cached, projects) : [];
+  });
 
   useEffect(() => {
     let cancelled = false;
     let requestId = 0;
 
-    const reloadSkills = (forceRefresh = false) => {
+    const reloadSkills = (options: { fresh?: boolean } = {}) => {
       const currentRequestId = requestId + 1;
       requestId = currentRequestId;
-      if (forceRefresh) {
-        clearSkillsCache();
-      }
 
-      void loadSkills(projectDirs)
+      void fetchSkillsList(queryClient, projectDirs, { fresh: options.fresh })
         .then((loadedSkills) => {
           if (!cancelled && currentRequestId === requestId) {
             setSkills(hydrateProjectNames(loadedSkills, projects));
@@ -77,14 +49,14 @@ export function useSkillSearch(query: string): SkillInfo[] {
 
     reloadSkills();
     const cleanup = listenSkillsChanged(() => {
-      reloadSkills(true);
+      reloadSkills({ fresh: true });
     });
 
     return () => {
       cancelled = true;
       cleanup();
     };
-  }, [projectDirs, projects]);
+  }, [projectDirs, projects, queryClient]);
 
   return useMemo(
     () =>

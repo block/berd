@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { ARTIFACTS_QUERY_KEY, type Artifacts } from "@/shared/api/artifacts";
 import {
   avatarCachedRefQueryKey,
@@ -25,6 +26,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("@/shared/api/avatars", () => ({
+  AVATAR_CACHED_REF_QUERY_KEY_PREFIX: ["avatars", "cached-ref"],
   avatarCachedRefQueryKey: (avatarRef: string) => [
     "avatars",
     "cached-ref",
@@ -67,7 +69,11 @@ function createQueryClient() {
 function createWrapper(queryClient = createQueryClient()) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {/* Owns the cleared/warmed cache listeners the tiles react to. */}
+        <LocalMediaCacheEvents />
+        {children}
+      </QueryClientProvider>
     );
   };
 }
@@ -181,6 +187,47 @@ describe("useAvatarSrc", () => {
 
     expect(result.current.media).toBeUndefined();
     expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports loading, not unavailable, while re-checking a cached null on remount", async () => {
+    const queryClient = createQueryClient();
+    const wrapper = createWrapper(queryClient);
+
+    getCachedAvatarForRefMock.mockResolvedValueOnce(null);
+    const first = renderHook(() => useAvatarMediaState("app-avatar:gloopy-1"), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(first.result.current.unavailable).toBe(true);
+    });
+    first.unmount();
+
+    let resolveRecheck: (value: null) => void = () => {};
+    getCachedAvatarForRefMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRecheck = resolve;
+        }),
+    );
+
+    const second = renderHook(
+      () => useAvatarMediaState("app-avatar:gloopy-1"),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(2);
+    });
+    expect(second.result.current.loading).toBe(true);
+    expect(second.result.current.unavailable).toBe(false);
+
+    await act(async () => {
+      resolveRecheck(null);
+    });
+    await waitFor(() => {
+      expect(second.result.current.unavailable).toBe(true);
+    });
+    expect(second.result.current.loading).toBe(false);
   });
 
   it("ignores malformed app-avatar refs without cached lookup", () => {

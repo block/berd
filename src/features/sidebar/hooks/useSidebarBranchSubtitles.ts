@@ -1,6 +1,9 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { getGitState } from "@/shared/api/git";
+import { useHomeDir } from "@/shared/hooks/useHomeDir";
+import { gitStateQueryKey } from "@/shared/lib/gitStateQueryKey";
+import { isHomeRelativePath } from "@/shared/lib/homePath";
 import type {
   ActiveWorkspace,
   ChatSession,
@@ -66,18 +69,28 @@ export function useSidebarBranchSubtitles({
   enabled: boolean;
 }) {
   const workspaces = activeWorkspaceBySession ?? {};
+  const homeDir = useHomeDir();
   const paths = useMemo(
     () => getBranchSubtitlePaths(sessions, workspaces, enabled),
     [enabled, sessions, workspaces],
   );
+  // Key through the shared builder so both spellings of the same directory
+  // share one cache entry (with `useGitState`) and one `get_git_state` call —
+  // and so the chat-settled invalidation keys the same normalized path.
+  // Home-relative paths wait for the one-time home dir lookup rather than
+  // fetching under a key that would immediately be replaced.
   const branchQueries = useQueries({
-    queries: paths.map((path) => ({
-      queryKey: ["git-state", path],
-      queryFn: () => getGitState(path),
-      retry: false,
-      staleTime: Number.POSITIVE_INFINITY,
-      refetchOnWindowFocus: "always" as const,
-    })),
+    queries: paths.map((path) => {
+      const queryKey = gitStateQueryKey(path, homeDir);
+      return {
+        queryKey,
+        queryFn: () => getGitState(queryKey[1] ?? ""),
+        enabled: !isHomeRelativePath(path) || homeDir !== null,
+        retry: false,
+        staleTime: Number.POSITIVE_INFINITY,
+        refetchOnWindowFocus: "always" as const,
+      };
+    }),
   });
 
   const branchNameByPath = useMemo(() => {

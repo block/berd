@@ -1,13 +1,15 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { QueryClientContext } from "@tanstack/react-query";
+import { useCallback, useContext, useMemo } from "react";
+import {
+  QueryClient,
+  QueryClientContext,
+  useQuery,
+} from "@tanstack/react-query";
 import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import {
   avatarCachedRefQueryKey,
   cachedAssetToMedia,
   getCachedAvatarForRef,
-  listenAvatarCacheWarmed,
 } from "@/shared/api/avatars";
-import { listenLocalMediaCachesCleared } from "@/shared/api/localMediaCaches";
 import { isAppAvatarRef, parseAvatarRef } from "@/shared/avatars/catalog";
 import { resolveAvatarMedia, resolveAvatarSrc } from "@/shared/lib/avatarUrl";
 import type { Avatar } from "@/shared/types/agents";
@@ -65,6 +67,15 @@ export function useAvatarImage(
   return avatarImageQuery.data;
 }
 
+// Only used when a component mounts without a QueryClientProvider (some
+// tests do); `enabled` is false in that case so it never fetches — it just
+// keeps the unconditional useQuery call legal.
+let fallbackQueryClient: QueryClient | null = null;
+function getFallbackQueryClient(): QueryClient {
+  fallbackQueryClient ??= new QueryClient();
+  return fallbackQueryClient;
+}
+
 export function useAvatarMediaState(
   avatar: Avatar | null | undefined,
 ): AvatarMediaState {
@@ -72,110 +83,65 @@ export function useAvatarMediaState(
   const directMedia = useMemo(() => resolveAvatarMedia(avatar), [avatar]);
   const avatarRef = typeof avatar === "string" ? avatar.trim() : "";
   const shouldLoadCachedAvatar = !directMedia && isAppAvatarRef(avatarRef);
-  const [remoteMedia, setRemoteMedia] = useState<
-    ResolvedAvatarMedia | undefined
-  >(undefined);
-  const [loading, setLoading] = useState(false);
-  const [unavailable, setUnavailable] = useState(false);
-  const [retryToken, setRetryToken] = useState(0);
-  const loadKey = `${shouldLoadCachedAvatar}:${avatarRef}:${retryToken}:${Boolean(queryClient)}`;
-  const [previousLoadKey, setPreviousLoadKey] = useState(loadKey);
-  if (previousLoadKey !== loadKey) {
-    setPreviousLoadKey(loadKey);
-    setRemoteMedia(undefined);
-    setLoading(shouldLoadCachedAvatar && Boolean(queryClient));
-    setUnavailable(shouldLoadCachedAvatar && !queryClient);
-  }
+  const enabled = shouldLoadCachedAvatar && Boolean(queryClient);
+
+  // Reactive observer on the shared per-ref cache entry: when the app-level
+  // `LocalMediaCacheEvents` listener resets these keys on cache-cleared /
+  // cache-warmed events, every mounted tile refetches automatically. Tiles
+  // themselves no longer register per-mount IPC event subscriptions.
+  const cachedAvatarQuery = useQuery(
+    {
+      queryKey: avatarCachedRefQueryKey(avatarRef),
+      queryFn: async () => {
+        try {
+          return await getCachedAvatarForRef({ avatarRef });
+        } catch (error) {
+          console.warn("Failed to resolve avatar asset:", error);
+          throw error;
+        }
+      },
+      enabled,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+    queryClient ?? getFallbackQueryClient(),
+  );
 
   const retry = useCallback(() => {
-    setRetryToken((value) => value + 1);
-  }, []);
-
-  useEffect(() => {
-    if (!shouldLoadCachedAvatar) {
+    if (!queryClient || !shouldLoadCachedAvatar) {
       return;
     }
-
-    const unlisten = listenLocalMediaCachesCleared((payload) => {
-      if (!payload.avatars) {
-        return;
-      }
-      queryClient?.removeQueries({
-        queryKey: avatarCachedRefQueryKey(avatarRef),
-      });
-      setRemoteMedia(undefined);
-      setUnavailable(false);
-      setRetryToken((value) => value + 1);
+    // Reset (not invalidate) so the tile blanks and shows its loading state
+    // while the lookup re-runs, matching the cleared/warmed event behavior.
+    void queryClient.resetQueries({
+      queryKey: avatarCachedRefQueryKey(avatarRef),
     });
-    const unlistenWarmed = listenAvatarCacheWarmed((payload) => {
-      if (!payload.avatarRefs.includes(avatarRef)) {
-        return;
-      }
-      queryClient?.removeQueries({
-        queryKey: avatarCachedRefQueryKey(avatarRef),
-      });
-      setRemoteMedia(undefined);
-      setUnavailable(false);
-      setRetryToken((value) => value + 1);
-    });
-
-    return () => {
-      void unlisten.then((cleanup) => cleanup());
-      void unlistenWarmed.then((cleanup) => cleanup());
-    };
   }, [avatarRef, queryClient, shouldLoadCachedAvatar]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retryToken intentionally retriggers the same cached lookup when retry is called.
-  useEffect(() => {
-    if (!shouldLoadCachedAvatar) {
-      return;
-    }
+  const remoteMedia = useMemo(
+    () =>
+      cachedAvatarQuery.data
+        ? cachedAssetToMedia(cachedAvatarQuery.data.asset)
+        : undefined,
+    [cachedAvatarQuery.data],
+  );
 
-    let cancelled = false;
-    if (!queryClient) {
-      return;
-    }
-
-    void queryClient
-      .fetchQuery({
-        queryKey: avatarCachedRefQueryKey(avatarRef),
-        queryFn: async () => {
-          try {
-            return await getCachedAvatarForRef({ avatarRef });
-          } catch (error) {
-            console.warn("Failed to resolve avatar asset:", error);
-            throw error;
-          }
-        },
-      })
-      .then((cached) => {
-        if (cancelled) {
-          return;
-        }
-        setRemoteMedia(cached ? cachedAssetToMedia(cached.asset) : undefined);
-        setUnavailable(cached === null);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRemoteMedia(undefined);
-          setUnavailable(true);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [avatarRef, queryClient, retryToken, shouldLoadCachedAvatar]);
+  // A cached `null` ("not cached yet") is a valid success value, so on a
+  // remount within gcTime the query starts at data === null while a
+  // background refetch re-checks the ref. Report that re-check as loading
+  // rather than unavailable so the tile keeps its loading state until the
+  // lookup settles, as the pre-query implementation did.
+  const recheckingWithoutData =
+    cachedAvatarQuery.isFetching && !cachedAvatarQuery.data;
 
   return {
     media: directMedia ?? remoteMedia,
-    loading,
-    unavailable,
+    loading: enabled && (cachedAvatarQuery.isPending || recheckingWithoutData),
+    unavailable:
+      (shouldLoadCachedAvatar && !queryClient) ||
+      (enabled &&
+        !recheckingWithoutData &&
+        (cachedAvatarQuery.data === null || cachedAvatarQuery.isError)),
     retry,
   };
 }

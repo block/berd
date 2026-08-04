@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FilesList } from "./FilesList";
 import { useGitState } from "@/shared/hooks/useGitState";
 import { useChangedFiles } from "@/shared/hooks/useChangedFiles";
+import { useHomeDir } from "@/shared/hooks/useHomeDir";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { ensureDirectory } from "@/shared/api/system";
@@ -273,6 +274,7 @@ export function ContextPanel({
     s.sessions.find((candidate) => candidate.id === sessionId),
   );
   const allSessions = useChatSessionStore((s) => s.sessions);
+  const homeDir = useHomeDir();
   const attachWorkspace = useChatSessionStore((s) => s.attachWorkspace);
   const removeWorkspaceAttachment = useChatSessionStore(
     (s) => s.removeWorkspaceAttachment,
@@ -418,8 +420,11 @@ export function ContextPanel({
       worktreePath: string,
       branch: string | null,
     ) => {
+      // Compare via the expanded spelling: `gitContext.worktreePath` is
+      // absolute, so a `~`-spelled workspace's subdirectory suffix would be
+      // lost against the raw `workspace.path`.
       const relativePath = getRelativeWorkspacePath(
-        runtime.workspace.path,
+        runtime.comparableWorkspace.path,
         runtime.gitContext.worktreePath,
       );
       const nextPath =
@@ -605,13 +610,16 @@ export function ContextPanel({
         };
       }
 
+      // Compare in the home-expanded spelling: cleanup targets store absolute
+      // paths while a sibling attachment can still carry its raw `~` path, and
+      // a missed match here deletes a branch that sibling still uses.
       const usedByAnotherWorkspaceInChat = Boolean(
         session &&
           getWorkspaceAttachments(session).some(
             (attachment) =>
               attachment.id !== workspace.id &&
               attachment.source !== "excluded" &&
-              workspaceAttachmentUsesCleanupTarget(attachment, target),
+              workspaceAttachmentUsesCleanupTarget(attachment, target, homeDir),
           ),
       );
       const usedByAnotherChat = allSessions.some(
@@ -621,7 +629,7 @@ export function ContextPanel({
           getWorkspaceAttachments(candidate).some(
             (attachment) =>
               attachment.source !== "excluded" &&
-              workspaceAttachmentUsesCleanupTarget(attachment, target),
+              workspaceAttachmentUsesCleanupTarget(attachment, target, homeDir),
           ),
       );
 
@@ -637,7 +645,7 @@ export function ContextPanel({
         createdBranch: target.createdBranch,
       };
     },
-    [allSessions, session, sessionId],
+    [allSessions, homeDir, session, sessionId],
   );
 
   const cleanupWorkspace = useCallback(
@@ -741,8 +749,16 @@ export function ContextPanel({
             ),
           }
         : null;
+      // Classify via the expanded spelling (same rule as the worktree
+      // handlers below): a raw `~` workspace path never matches gitState's
+      // absolute worktrees, so classification would fall through and persist
+      // a `~` worktreePath into the managed-branch lifecycle, which cleanup
+      // later feeds to `git_delete_branch` un-expanded.
       const classification = updatedGitState
-        ? classifyWorkspaceAttachment(runtime.workspace.path, updatedGitState)
+        ? classifyWorkspaceAttachment(
+            runtime.comparableWorkspace.path,
+            updatedGitState,
+          )
         : null;
       attachWorkspace(sessionId, {
         path: runtime.workspace.path,
@@ -811,14 +827,17 @@ export function ContextPanel({
       context: CreatedWorkspaceWorktreeContext,
     ) => {
       if (!runtime.gitState) return;
-      const { workspace, gitState, gitContext } = runtime;
+      const { workspace, gitState, gitContext, comparableWorkspace } = runtime;
+      // Same expanded-spelling rule as the worktree-select handler above:
+      // mixing the raw `~` workspace path with the absolute
+      // `gitContext.worktreePath` would drop a subdirectory suffix.
       const sourceWorktreePath =
         gitContext.worktreePath ??
-        workspace.worktreePath ??
-        workspace.repositoryPath ??
-        workspace.path;
+        comparableWorkspace.worktreePath ??
+        comparableWorkspace.repositoryPath ??
+        comparableWorkspace.path;
       const relativePath = getRelativeWorkspacePath(
-        workspace.path,
+        comparableWorkspace.path,
         sourceWorktreePath,
       );
       const includedPath =

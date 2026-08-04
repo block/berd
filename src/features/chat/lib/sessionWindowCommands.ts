@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
 import type { SessionWindowEntry } from "@/features/chat/stores/sessionWindowStore";
+import { shareInFlight } from "@/shared/lib/shareInFlight";
 import type { SessionChatRuntime } from "@/shared/types/chat";
 import type { Message } from "@/shared/types/messages";
 
@@ -30,9 +31,11 @@ export interface JoinSessionHandoffResult {
   snapshot?: SessionHandoffSnapshot;
 }
 
-export async function getSessionWindowSupport(): Promise<SessionWindowSupport> {
-  return invoke<SessionWindowSupport>("get_session_window_support");
-}
+// Every mounted `useSessionWindowSupport` asks on mount; share the in-flight
+// request so simultaneous mounts issue a single IPC call.
+export const getSessionWindowSupport = shareInFlight(() =>
+  invoke<SessionWindowSupport>("get_session_window_support"),
+);
 
 export async function openSessionWindow(
   sessionId: string,

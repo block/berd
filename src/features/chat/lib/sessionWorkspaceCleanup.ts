@@ -135,6 +135,7 @@ function isTargetUsedByAnotherActiveSession(
   target: WorkspaceCleanupTarget,
   sessionId: string,
   sessions: ChatSession[],
+  homeDir: string | null,
 ): boolean {
   return sessions.some(
     (candidate) =>
@@ -143,7 +144,7 @@ function isTargetUsedByAnotherActiveSession(
       getWorkspaceAttachments(candidate)
         .filter((attachment) => attachment.source !== "excluded")
         .some((attachment) =>
-          workspaceAttachmentUsesCleanupTarget(attachment, target),
+          workspaceAttachmentUsesCleanupTarget(attachment, target, homeDir),
         ),
   );
 }
@@ -152,10 +153,13 @@ function isTargetUsedByAnotherActiveSession(
  * Finds Goose-owned branches and worktrees that stop being used when a session
  * is archived. User-selected/inferred workspaces are deliberately ignored:
  * only attachments with explicit Goose lifecycle metadata are safe to delete.
+ * Pass `homeDir` so used-elsewhere checks match `~`-spelled attachments
+ * against absolute cleanup targets.
  */
 export function planSessionWorkspaceCleanup(
   session: ChatSession,
   sessions: ChatSession[],
+  homeDir: string | null = null,
 ): SessionWorkspaceCleanupPlan[] {
   const seenTargets = new Set<string>();
   const plans: SessionWorkspaceCleanupPlan[] = [];
@@ -170,7 +174,9 @@ export function planSessionWorkspaceCleanup(
     if (seenTargets.has(key)) continue;
     seenTargets.add(key);
 
-    if (isTargetUsedByAnotherActiveSession(target, session.id, sessions)) {
+    if (
+      isTargetUsedByAnotherActiveSession(target, session.id, sessions, homeDir)
+    ) {
       continue;
     }
 

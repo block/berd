@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import type { ChatSendOptions, ChatSkillDraft, ModelOption } from "../types";
 import { INITIAL_TOKEN_STATE } from "@/shared/types/chat";
@@ -29,7 +37,11 @@ import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepositor
 import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
 import { formatWorkspaceInstructionsPrompt } from "@/features/chat/lib/workspaceContextPrompt";
 import { getSkillProviderCapabilities } from "@/features/chat/lib/skillProviderCapabilities";
-import { listBerdAppSkills, listSkills } from "@/features/skills/api/skills";
+import {
+  fetchBerdAppSkills,
+  fetchSkillsList,
+} from "@/features/skills/api/skillsQuery";
+import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillChatPrompt";
 import { setStoredModelPreference } from "../lib/modelPreferences";
 import { saveDefaultReasoningEffort } from "../lib/reasoningEffortPreferences";
@@ -487,6 +499,10 @@ export function useChatSessionController({
     [skillProviderId, workspaceContextKey],
   );
   const hasIncludedWorkspacePaths = includedWorkspacePaths.length > 0;
+  // Optional so tests and provider-less mounts fall back to direct fetches;
+  // with a client, skill/workspace reads share react-query entries with the
+  // other chat surfaces that load the same data on mount.
+  const queryClient = useContext(QueryClientContext);
   const [workspaceInstructionsState, setWorkspaceInstructionsState] =
     useState(EMPTY_PROMPT_STATE);
   const [availableSkillsCatalogState, setAvailableSkillsCatalogState] =
@@ -541,7 +557,7 @@ export function useChatSessionController({
       return;
     }
 
-    void loadWorkspaceInstructionFiles(includedWorkspacePaths)
+    void loadWorkspaceInstructionFiles(includedWorkspacePaths, { queryClient })
       .then((instructionFiles) => {
         if (cancelled) return;
         setWorkspaceInstructionsState((current) =>
@@ -565,37 +581,59 @@ export function useChatSessionController({
     return () => {
       cancelled = true;
     };
-  }, [includedWorkspacePaths, workspaceContextKey]);
+  }, [includedWorkspacePaths, queryClient, workspaceContextKey]);
+  // Both catalog effects below subscribe to skills-changed and reload fresh,
+  // mirroring useMentionHandlers: the mention/search consumers share these
+  // query keys and their fresh reloads cancel any in-flight fetch on them, so
+  // without a listener a mount fetch cancelled mid-flight would reject into
+  // the catch and leave the session's catalog missing until remount. The
+  // requestId guard drops that superseded rejection (and any late settle) —
+  // listeners run synchronously in the event sweep, so the guard is bumped
+  // before the cancelled fetch's rejection lands — while this effect's own
+  // fresh reload coalesces with the siblings' onto one post-event refetch.
   useEffect(() => {
     let cancelled = false;
+    let requestId = 0;
 
-    void listBerdAppSkills()
-      .then((skills) => {
-        if (cancelled) return;
-        setAppSkillsCatalogState((current) =>
-          nextPromptState(current, {
-            key: "app",
-            prompt: formatAvailableSkillsCatalogPrompt(skills),
-          }),
-        );
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to load Berd app skills catalog:", error);
-        setAppSkillsCatalogState((current) =>
-          nextPromptState(current, {
-            key: "app",
-            prompt: undefined,
-          }),
-        );
-      });
+    const loadAppSkillsCatalog = (options: { fresh?: boolean } = {}) => {
+      const currentRequestId = requestId + 1;
+      requestId = currentRequestId;
+
+      void fetchBerdAppSkills(queryClient, options)
+        .then((skills) => {
+          if (cancelled || currentRequestId !== requestId) return;
+          setAppSkillsCatalogState((current) =>
+            nextPromptState(current, {
+              key: "app",
+              prompt: formatAvailableSkillsCatalogPrompt(skills),
+            }),
+          );
+        })
+        .catch((error) => {
+          if (cancelled || currentRequestId !== requestId) return;
+          console.error("Failed to load Berd app skills catalog:", error);
+          setAppSkillsCatalogState((current) =>
+            nextPromptState(current, {
+              key: "app",
+              prompt: undefined,
+            }),
+          );
+        });
+    };
+
+    loadAppSkillsCatalog();
+    const cleanup = listenSkillsChanged(() =>
+      loadAppSkillsCatalog({ fresh: true }),
+    );
 
     return () => {
       cancelled = true;
+      cleanup();
     };
-  }, []);
+  }, [queryClient]);
   useEffect(() => {
     let cancelled = false;
+    let requestId = 0;
 
     if (!hasIncludedWorkspacePaths) {
       setAvailableSkillsCatalogState((current) =>
@@ -607,35 +645,51 @@ export function useChatSessionController({
       return;
     }
 
-    void listSkills(includedWorkspacePaths, { providerId: skillProviderId })
-      .then((skills) => {
-        if (cancelled) return;
-        setAvailableSkillsCatalogState((current) =>
-          nextPromptState(current, {
-            key: skillsCatalogKey,
-            prompt: formatAvailableSkillsCatalogPrompt(
-              skills.filter((skill) => skill.sourceKind !== "app"),
-            ),
-          }),
-        );
+    const loadAvailableSkillsCatalog = (options: { fresh?: boolean } = {}) => {
+      const currentRequestId = requestId + 1;
+      requestId = currentRequestId;
+
+      // The app-skills catalog effect above owns the Berd app skills; skip
+      // them here instead of fetching a copy just to filter it out.
+      void fetchSkillsList(queryClient, includedWorkspacePaths, {
+        providerId: skillProviderId,
+        includeAppSkills: false,
+        fresh: options.fresh,
       })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to load available skills catalog:", error);
-        setAvailableSkillsCatalogState((current) =>
-          nextPromptState(current, {
-            key: skillsCatalogKey,
-            prompt: undefined,
-          }),
-        );
-      });
+        .then((skills) => {
+          if (cancelled || currentRequestId !== requestId) return;
+          setAvailableSkillsCatalogState((current) =>
+            nextPromptState(current, {
+              key: skillsCatalogKey,
+              prompt: formatAvailableSkillsCatalogPrompt(skills),
+            }),
+          );
+        })
+        .catch((error) => {
+          if (cancelled || currentRequestId !== requestId) return;
+          console.error("Failed to load available skills catalog:", error);
+          setAvailableSkillsCatalogState((current) =>
+            nextPromptState(current, {
+              key: skillsCatalogKey,
+              prompt: undefined,
+            }),
+          );
+        });
+    };
+
+    loadAvailableSkillsCatalog();
+    const cleanup = listenSkillsChanged(() =>
+      loadAvailableSkillsCatalog({ fresh: true }),
+    );
 
     return () => {
       cancelled = true;
+      cleanup();
     };
   }, [
     hasIncludedWorkspacePaths,
     includedWorkspacePaths,
+    queryClient,
     skillProviderId,
     skillsCatalogKey,
   ]);

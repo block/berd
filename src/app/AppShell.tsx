@@ -51,6 +51,7 @@ import {
   type SessionWorkspaceCleanupInterruptionReason,
   wouldSessionWorkspaceCleanupDiscardFiles,
 } from "@/features/chat/lib/sessionWorkspaceCleanup";
+import { getCachedHomeDir, getHomeDir } from "@/shared/api/system";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { SessionWorkspaceCleanupDialog } from "@/features/chat/ui/SessionWorkspaceCleanupDialog";
 import {
@@ -3205,11 +3206,17 @@ export function AppShell({
         if (hasSessionWorkspaceCleanupTargets(session)) {
           try {
             const allSessions = await loadAllSessionsForWorkspaceCleanup();
+            // Resolve the home dir so the used-elsewhere check can match a
+            // `~`-spelled attachment in another chat against an absolute
+            // cleanup target; on failure fall back to the cached value (raw
+            // comparison, as before).
+            const homeDir = await getHomeDir().catch(() => getCachedHomeDir());
             plans = await inspectSessionWorkspaceCleanup(
-              planSessionWorkspaceCleanup(session, [
-                ...allSessions,
-                ...sessionStore.sessions,
-              ]),
+              planSessionWorkspaceCleanup(
+                session,
+                [...allSessions, ...sessionStore.sessions],
+                homeDir,
+              ),
             );
           } catch (error) {
             console.error("Failed to inspect session Git resources:", error);

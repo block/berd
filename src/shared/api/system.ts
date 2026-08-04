@@ -36,8 +36,49 @@ export interface ImageAttachmentPayload {
   mimeType: string;
 }
 
-export async function getHomeDir(): Promise<string> {
-  return invoke("get_home_dir");
+// The home directory never changes for the lifetime of the app, so resolve it
+// once and share the promise across every caller (mention handlers, workspace
+// path normalization, git-state keys) instead of re-invoking per mount.
+let homeDirRequest: Promise<string> | null = null;
+let cachedHomeDir: string | null = null;
+const homeDirListeners = new Set<() => void>();
+
+export function getHomeDir(): Promise<string> {
+  if (!homeDirRequest) {
+    const request = Promise.resolve()
+      .then(() => invoke<string>("get_home_dir"))
+      .then((dir) => {
+        cachedHomeDir = dir;
+        for (const listener of [...homeDirListeners]) {
+          listener();
+        }
+        return dir;
+      });
+    homeDirRequest = request;
+    request.catch(() => {
+      if (homeDirRequest === request) {
+        homeDirRequest = null;
+      }
+    });
+  }
+  return homeDirRequest;
+}
+
+/** Synchronous read of the already-resolved home directory, or null before
+ *  the first successful `getHomeDir()` call settles. */
+export function getCachedHomeDir(): string | null {
+  return cachedHomeDir;
+}
+
+/** Notified once when the home dir resolves. A failed lookup clears the shared
+ *  request slot, so any later `getHomeDir()` call retries; subscribers mounted
+ *  before that retry still observe its success through this store instead of
+ *  staying pinned to the null they read at mount. */
+export function subscribeHomeDir(listener: () => void): () => void {
+  homeDirListeners.add(listener);
+  return () => {
+    homeDirListeners.delete(listener);
+  };
 }
 
 export async function saveExportedAgentFile(

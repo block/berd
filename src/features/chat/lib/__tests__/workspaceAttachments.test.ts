@@ -395,6 +395,85 @@ describe("workspace cleanup targets", () => {
       ),
     ).toBe(false);
   });
+
+  it("matches `~`-spelled attachments against absolute cleanup targets when the home dir is known", () => {
+    const managedWorkspace = attachment("/Users/test/repo", {
+      kind: "git-main-worktree",
+      source: "created",
+      branch: "chat-123",
+      repositoryPath: "/Users/test/repo",
+      worktreePath: "/Users/test/repo",
+      lifecycle: {
+        owner: "goose",
+        cleanup: "branch",
+        branch: "chat-123",
+        baseBranch: "main",
+        repositoryPath: "/Users/test/repo",
+        worktreePath: "/Users/test/repo",
+        createdBranch: true,
+      },
+    });
+    const target = getWorkspaceCleanupTarget(managedWorkspace);
+
+    if (!target) {
+      throw new Error("Expected managed workspace to have a cleanup target");
+    }
+
+    const tildeSibling = attachment("~/repo/docs", { kind: "directory" });
+    // Without the home dir the raw spelling cannot match the absolute target.
+    expect(workspaceAttachmentUsesCleanupTarget(tildeSibling, target)).toBe(
+      false,
+    );
+    expect(
+      workspaceAttachmentUsesCleanupTarget(tildeSibling, target, "/Users/test"),
+    ).toBe(true);
+    // A `~` sibling in a different checkout still does not match.
+    expect(
+      workspaceAttachmentUsesCleanupTarget(
+        attachment("~/other-repo", { kind: "directory" }),
+        target,
+        "/Users/test",
+      ),
+    ).toBe(false);
+  });
+
+  it("matches absolute attachments against a legacy `~`-spelled cleanup target when the home dir is known", () => {
+    const managedWorkspace = attachment("~/repo", {
+      kind: "repository",
+      source: "created",
+      branch: "chat-123",
+      lifecycle: {
+        owner: "goose",
+        cleanup: "branch",
+        branch: "chat-123",
+        baseBranch: "main",
+        repositoryPath: "~/repo",
+        worktreePath: "~/repo",
+        createdBranch: true,
+      },
+    });
+    const target = getWorkspaceCleanupTarget(managedWorkspace);
+
+    if (!target) {
+      throw new Error("Expected managed workspace to have a cleanup target");
+    }
+
+    const absoluteSibling = attachment("/Users/test/repo", {
+      kind: "git-main-worktree",
+      repositoryPath: "/Users/test/repo",
+      worktreePath: "/Users/test/repo",
+    });
+    expect(workspaceAttachmentUsesCleanupTarget(absoluteSibling, target)).toBe(
+      false,
+    );
+    expect(
+      workspaceAttachmentUsesCleanupTarget(
+        absoluteSibling,
+        target,
+        "/Users/test",
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("removeWorkspaceAttachment", () => {

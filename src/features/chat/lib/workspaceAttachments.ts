@@ -1,3 +1,4 @@
+import { expandHomePath } from "@/shared/lib/homePath";
 import type {
   WorkspaceAttachment,
   WorkspaceAttachmentLifecycle,
@@ -151,17 +152,53 @@ export function getWorkspaceCleanupTarget(
   };
 }
 
+function expandCleanupComparablePath(
+  path: string | null | undefined,
+  homeDir: string | null,
+): string | null {
+  if (!path) return null;
+  if (!homeDir) return path;
+  return expandHomePath(path, homeDir);
+}
+
+/**
+ * Whether removing `target` would pull a branch/worktree out from under
+ * `attachment`. Guards destructive cleanup, so both sides are compared in the
+ * home-expanded spelling when `homeDir` is known: attachments can carry raw
+ * `~` paths while cleanup targets store absolute ones (and vice versa for
+ * lifecycles persisted before targets were classified via the expanded path),
+ * and the comparison normalizer does not expand `~` on its own.
+ */
 export function workspaceAttachmentUsesCleanupTarget(
   attachment: WorkspaceAttachment,
   target: WorkspaceCleanupTarget,
+  homeDir: string | null = null,
 ): boolean {
+  const attachmentPath =
+    expandCleanupComparablePath(attachment.path, homeDir) ?? attachment.path;
+  const attachmentRepositoryPath = expandCleanupComparablePath(
+    attachment.repositoryPath,
+    homeDir,
+  );
+  const attachmentWorktreePath = expandCleanupComparablePath(
+    attachment.worktreePath,
+    homeDir,
+  );
+  const targetRepositoryPath = expandCleanupComparablePath(
+    target.repositoryPath,
+    homeDir,
+  );
+  const targetWorktreePath = expandCleanupComparablePath(
+    target.worktreePath,
+    homeDir,
+  );
+
   if (target.cleanup === "worktree") {
-    const worktreePath = target.worktreePath;
-    if (!worktreePath) return false;
+    if (!targetWorktreePath) return false;
     return (
-      isSameWorkspacePath(attachment.worktreePath, worktreePath) ||
-      isSameWorkspacePath(attachment.path, worktreePath) ||
-      getRelativeWorkspacePath(attachment.path, worktreePath) !== null
+      isSameWorkspacePath(attachmentWorktreePath, targetWorktreePath) ||
+      isSameWorkspacePath(attachmentPath, targetWorktreePath) ||
+      getRelativeWorkspacePath(attachmentPath, targetWorktreePath) !== null
     );
   }
 
@@ -170,12 +207,12 @@ export function workspaceAttachmentUsesCleanupTarget(
     Boolean(target.branch) &&
     (!attachmentBranch || attachmentBranch === target.branch);
   const matchesTargetCheckout =
-    isSameWorkspacePath(attachment.repositoryPath, target.repositoryPath) ||
-    isSameWorkspacePath(attachment.worktreePath, target.worktreePath) ||
-    isSameWorkspacePath(attachment.path, target.worktreePath) ||
-    getRelativeWorkspacePath(attachment.path, target.worktreePath) !== null ||
-    isSameWorkspacePath(attachment.path, target.repositoryPath) ||
-    getRelativeWorkspacePath(attachment.path, target.repositoryPath) !== null;
+    isSameWorkspacePath(attachmentRepositoryPath, targetRepositoryPath) ||
+    isSameWorkspacePath(attachmentWorktreePath, targetWorktreePath) ||
+    isSameWorkspacePath(attachmentPath, targetWorktreePath) ||
+    getRelativeWorkspacePath(attachmentPath, targetWorktreePath) !== null ||
+    isSameWorkspacePath(attachmentPath, targetRepositoryPath) ||
+    getRelativeWorkspacePath(attachmentPath, targetRepositoryPath) !== null;
 
   return Boolean(branchCouldMatch && matchesTargetCheckout);
 }
