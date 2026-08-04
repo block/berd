@@ -3,6 +3,7 @@ import type { ProviderSecretDto } from "@aaif/goose-sdk";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import {
   getCredentialedProviderIds,
+  getProviderConnectionEvidence,
   hasMeaningfulSavedSettings,
   isCredentialedProvider,
 } from "./providerConnectionPolicy";
@@ -162,5 +163,65 @@ describe("hasMeaningfulSavedSettings", () => {
         fieldValue({ isSet: true, value: null }),
       ]),
     ).toBe(false);
+  });
+});
+
+describe("getProviderConnectionEvidence", () => {
+  const configuredIds = new Set(["provider"]);
+
+  it.each([
+    {
+      name: "stored credential",
+      entry: provider({}),
+      snapshot: {
+        configuredIds: new Set<string>(),
+        credentialedIds: new Set(["provider"]),
+        runtimeManagedIds: new Set<string>(),
+      },
+      expected: "credential",
+    },
+    {
+      name: "managed endpoint",
+      entry: provider({}),
+      snapshot: {
+        configuredIds,
+        credentialedIds: new Set<string>(),
+        runtimeManagedIds: new Set(["provider"]),
+      },
+      expected: "managed_endpoint",
+    },
+    {
+      name: "configured custom provider",
+      entry: provider({ customProvider: true }),
+      snapshot: {
+        configuredIds,
+        credentialedIds: new Set<string>(),
+        runtimeManagedIds: new Set<string>(),
+      },
+      expected: "custom",
+    },
+    {
+      name: "meaningful saved settings",
+      entry: provider({}),
+      snapshot: {
+        configuredIds,
+        credentialedIds: new Set<string>(),
+        runtimeManagedIds: new Set<string>(),
+        configuredBySavedValueIds: new Set(["provider"]),
+      },
+      expected: "saved_settings",
+    },
+    {
+      name: "ambient configured status",
+      entry: provider({}),
+      snapshot: {
+        configuredIds,
+        credentialedIds: new Set<string>(),
+        runtimeManagedIds: new Set<string>(),
+      },
+      expected: "none",
+    },
+  ])("classifies $name", ({ entry, snapshot, expected }) => {
+    expect(getProviderConnectionEvidence(entry, snapshot)).toBe(expected);
   });
 });

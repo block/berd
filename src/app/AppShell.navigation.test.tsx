@@ -427,7 +427,12 @@ vi.mock("@/features/updates/ui/UpdateButton", () => ({
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
     readyAgentIds: mockAgentStatus.readyAgentIds,
-    agentReadiness: new Map(),
+    agentReadiness: new Map(
+      [...mockAgentStatus.readyAgentIds].map((providerId) => [
+        providerId,
+        "ready" as const,
+      ]),
+    ),
     agentChecks: new Map(),
     loading: false,
     refresh: vi.fn().mockResolvedValue(undefined),
@@ -1028,11 +1033,43 @@ describe("AppShell global navigation", () => {
     );
   });
 
+  it("preserves the stored model for a ready external ACP agent", async () => {
+    requireByoDefaultProviderSetup();
+    selectCodexProvider();
+    mockAgentStatus.readyAgentIds = new Set(["codex-acp"]);
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        "codex-acp": {
+          modelId: "gpt-5.5",
+          modelName: "GPT-5.5",
+          providerId: "codex-acp",
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "codex-acp",
+        "~/goose artifacts",
+        {
+          deferProviderSetup: false,
+          modelId: "gpt-5.5",
+          projectId: undefined,
+        },
+      );
+    });
+  });
+
   it("routes an auth-failed external ACP agent to Providers settings", async () => {
     requireByoDefaultProviderSetup();
     selectCodexProvider();
     mockIsExternalAgentReady.mockResolvedValue(false);
-    mockAgentStatus.readyAgentIds = new Set(["goose", "codex-acp"]);
+    mockAgentStatus.readyAgentIds = new Set(["goose"]);
     const user = userEvent.setup();
     renderAppShell();
 

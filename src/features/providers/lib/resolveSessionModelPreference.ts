@@ -6,11 +6,11 @@ import {
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 
-export async function resolveSupportedSessionModelPreference(
+export function resolveSupportedSessionModelPreference(
   providerId: string,
   _unusedInventoryEntries: unknown,
   preferredModel?: string,
-): Promise<SessionModelPreference> {
+): SessionModelPreference {
   let sessionModelPreference = resolveSessionModelPreference({
     providerId,
     preferredModel,

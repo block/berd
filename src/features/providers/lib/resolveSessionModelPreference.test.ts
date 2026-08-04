@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
-import { resolveSupportedSessionModelPreference } from "./resolveSupportedSessionModelPreference";
+import { resolveSupportedSessionModelPreference } from "./resolveSessionModelPreference";
 
 function setCachedModels(providerId: string, models: string[]) {
   useProviderModelCacheStore.setState({
@@ -38,9 +38,7 @@ describe("resolveSupportedSessionModelPreference", () => {
       },
     });
 
-    await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
-    ).resolves.toEqual({
+    expect(resolveSupportedSessionModelPreference("goose", new Map())).toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
       modelName: "gpt-5.4",
@@ -59,9 +57,7 @@ describe("resolveSupportedSessionModelPreference", () => {
       }),
     );
 
-    await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
-    ).resolves.toEqual({
+    expect(resolveSupportedSessionModelPreference("goose", new Map())).toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
       modelName: "GPT-5.4",
@@ -69,9 +65,9 @@ describe("resolveSupportedSessionModelPreference", () => {
   });
 
   it("preserves a preferred model when cached models are missing", async () => {
-    await expect(
+    expect(
       resolveSupportedSessionModelPreference("openai", new Map(), "gpt-5.4"),
-    ).resolves.toEqual({
+    ).toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
       modelName: "gpt-5.4",
@@ -81,9 +77,9 @@ describe("resolveSupportedSessionModelPreference", () => {
   it("preserves the selected model when the model cache has no model list", async () => {
     setCachedModels("openai", []);
 
-    await expect(
+    expect(
       resolveSupportedSessionModelPreference("openai", undefined, "gpt-5.4"),
-    ).resolves.toEqual({
+    ).toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
       modelName: "gpt-5.4",
@@ -93,9 +89,9 @@ describe("resolveSupportedSessionModelPreference", () => {
   it("drops an unsupported model when populated model cache is available", async () => {
     setCachedModels("openai", ["gpt-5.3"]);
 
-    await expect(
+    expect(
       resolveSupportedSessionModelPreference("openai", undefined, "gpt-5.4"),
-    ).resolves.toEqual({
+    ).toEqual({
       providerId: "openai",
     });
   });
@@ -103,9 +99,9 @@ describe("resolveSupportedSessionModelPreference", () => {
   it("keeps a supported model when populated model cache is available", async () => {
     setCachedModels("openai", ["gpt-5.4"]);
 
-    await expect(
+    expect(
       resolveSupportedSessionModelPreference("openai", undefined, "gpt-5.4"),
-    ).resolves.toEqual({
+    ).toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
       modelName: "gpt-5.4",

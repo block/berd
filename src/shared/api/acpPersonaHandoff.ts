@@ -17,6 +17,7 @@
 
 import { getDefaultGooseModelProviderId } from "@/features/runtime-config/defaults";
 import { getCatalogEntry } from "@/features/providers/providerCatalog";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 
 export const GOOSE_PROVIDER_ID = "goose";
 
@@ -27,9 +28,14 @@ export const GOOSE_PROVIDER_ID = "goose";
  * passes through unchanged.
  */
 export function toWireProviderId(providerId: string): string {
-  return providerId === GOOSE_PROVIDER_ID
-    ? getDefaultGooseModelProviderId()
-    : providerId;
+  if (providerId !== GOOSE_PROVIDER_ID) {
+    return providerId;
+  }
+
+  const readiness = useDefaultProviderReadinessStore.getState().readiness;
+  return readiness?.status === "ready"
+    ? readiness.providerId
+    : getDefaultGooseModelProviderId();
 }
 
 /**

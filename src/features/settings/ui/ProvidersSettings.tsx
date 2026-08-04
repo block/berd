@@ -29,8 +29,11 @@ import {
 import {
   getCredentialedProviderIds,
   hasMeaningfulSavedSettings,
-  isCredentialedProvider,
 } from "@/features/providers/lib/providerConnectionPolicy";
+import {
+  projectModelProviderState,
+  type ModelProviderState,
+} from "@/features/providers/lib/providerState";
 import { listProviderSecrets } from "@/features/providers/api/credentials";
 import {
   CustomProviderChoice,
@@ -66,28 +69,10 @@ import type {
   ProviderCatalogEntry,
 } from "@/shared/types/providers";
 
-export function isExplicitlyConnectedModelProvider(
-  entry: ProviderCatalogEntry,
-  configuredIds: ReadonlySet<string>,
-  runtimeProviderIds: ReadonlySet<string>,
-  credentialedIds: ReadonlySet<string>,
-): boolean {
-  // A stored Goose credential (API key or OAuth token) is authoritative
-  // Active evidence on its own; Goose only stores one after a deliberate
-  // user action.
-  if (isCredentialedProvider(entry, credentialedIds)) return true;
-  if (!configuredIds.has(entry.id)) return false;
-
-  // Runtime providers are deliberately supplied by the distribution, and a
-  // custom provider exists only after the user creates it. Both are explicit
-  // connections once Goose reports them configured.
-  return runtimeProviderIds.has(entry.id) || entry.customProvider === true;
-}
-
 function resolveStatus(
   entry: ProviderCatalogEntry,
   configuredIds: Set<string>,
-  runtimeProviderIds: ReadonlySet<string>,
+  runtimeManagedIds: ReadonlySet<string>,
   credentialedIds: ReadonlySet<string>,
   configuredBySavedValueIds: ReadonlySet<string>,
 ): ProviderSetupStatus {
@@ -95,26 +80,18 @@ function resolveStatus(
   if (entry.category === "agent") {
     return entry.setupMethod === "none" ? "built_in" : "not_installed";
   }
-  if (
-    isExplicitlyConnectedModelProvider(
-      entry,
-      configuredIds,
-      runtimeProviderIds,
-      credentialedIds,
-    )
-  ) {
-    return "connected";
-  }
-  if (configuredIds.has(entry.id) && configuredBySavedValueIds.has(entry.id)) {
-    return "configured";
-  }
-  return "not_configured";
+  return projectModelProviderState(entry, {
+    configuredIds,
+    credentialedIds,
+    runtimeManagedIds,
+    configuredBySavedValueIds,
+  }).status;
 }
 
 function toDisplayInfo(
   entries: ProviderCatalogEntry[],
   configuredIds: Set<string>,
-  runtimeProviderIds: ReadonlySet<string>,
+  runtimeManagedIds: ReadonlySet<string>,
   credentialedIds: ReadonlySet<string> = new Set(),
   configuredBySavedValueIds: ReadonlySet<string> = new Set(),
 ): ProviderDisplayInfo[] {
@@ -123,7 +100,7 @@ function toDisplayInfo(
     status: resolveStatus(
       entry,
       configuredIds,
-      runtimeProviderIds,
+      runtimeManagedIds,
       credentialedIds,
       configuredBySavedValueIds,
     ),
@@ -185,10 +162,12 @@ export function ProvidersSettings({
     string | null
   >(null);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
-  const runtimeProviderIds = useMemo(
+  const runtimeManagedIds = useMemo(
     () =>
       new Set(
-        runtimeConfig.goose.modelProviders.map((provider) => provider.id),
+        runtimeConfig.goose.modelProviders
+          .filter((provider) => provider.endpointEnv != null)
+          .map((provider) => provider.id),
       ),
     [runtimeConfig],
   );
@@ -362,9 +341,9 @@ export function ProvidersSettings({
       toDisplayInfo(
         getAgentProvidersFromEntries(catalogEntries),
         configuredIds,
-        runtimeProviderIds,
+        runtimeManagedIds,
       ),
-    [configuredIds, catalogEntries, runtimeProviderIds],
+    [configuredIds, catalogEntries, runtimeManagedIds],
   );
 
   // Stored Goose credentials (API keys / OAuth tokens) are the authoritative
@@ -399,18 +378,18 @@ export function ProvidersSettings({
   const configStatusRunId = useRef(0);
   const nonCredentialConfiguredProviders = useMemo(
     () =>
-      getModelProvidersFromEntries(catalogEntries).filter(
-        (entry) =>
-          configuredIds.has(entry.id) &&
-          !isExplicitlyConnectedModelProvider(
-            entry,
-            configuredIds,
-            runtimeProviderIds,
-            credentialedIds,
-          ) &&
-          (entry.fields?.length ?? 0) > 0,
-      ),
-    [catalogEntries, configuredIds, runtimeProviderIds, credentialedIds],
+      getModelProvidersFromEntries(catalogEntries).filter((entry) => {
+        if (!configuredIds.has(entry.id) || (entry.fields?.length ?? 0) === 0) {
+          return false;
+        }
+        const state: ModelProviderState = projectModelProviderState(entry, {
+          configuredIds,
+          credentialedIds,
+          runtimeManagedIds,
+        });
+        return !state.connected;
+      }),
+    [catalogEntries, configuredIds, runtimeManagedIds, credentialedIds],
   );
   useEffect(() => {
     const runId = configStatusRunId.current + 1;
@@ -446,7 +425,7 @@ export function ProvidersSettings({
           runtimeConfig,
         ).filter((provider) => provider.customProvider !== true),
         configuredIds,
-        runtimeProviderIds,
+        runtimeManagedIds,
         credentialedIds,
         configuredBySavedValueIds,
       ),
@@ -454,7 +433,7 @@ export function ProvidersSettings({
       configuredIds,
       runtimeConfig,
       catalogEntries,
-      runtimeProviderIds,
+      runtimeManagedIds,
       credentialedIds,
       configuredBySavedValueIds,
     ],
@@ -473,7 +452,7 @@ export function ProvidersSettings({
   const visibleUnpromotedModels = namedModels.filter(
     (model) =>
       !promotedIds.has(model.id) &&
-      (runtimeProviderIds.has(model.id) ||
+      (runtimeManagedIds.has(model.id) ||
         model.status === "connected" ||
         model.status === "built_in" ||
         model.status === "configured"),

@@ -34,22 +34,22 @@ describe("useProviderSelection", () => {
     expect(result.current.selectedProvider).toBe("codex-acp");
   });
 
-  it("falls a catalogued-but-unready provider back to goose", () => {
+  it("keeps a catalogued provider as the persisted preference", () => {
     mockReadyAgentIds.value = new Set(["goose"]);
     useAgentStore.setState({ selectedProvider: "codex-acp" });
 
     const { result } = renderHook(() => useProviderSelection());
 
-    expect(result.current.selectedProvider).toBe("goose");
+    expect(result.current.selectedProvider).toBe("codex-acp");
   });
 
-  it("falls unready goose back to a ready external agent", () => {
+  it("keeps goose as the persisted preference when another agent is ready", () => {
     mockReadyAgentIds.value = new Set(["codex-acp"]);
     useAgentStore.setState({ selectedProvider: "goose" });
 
     const { result } = renderHook(() => useProviderSelection());
 
-    expect(result.current.selectedProvider).toBe("codex-acp");
+    expect(result.current.selectedProvider).toBe("goose");
   });
 
   it("falls an unknown provider back to goose once the catalog is loaded", () => {

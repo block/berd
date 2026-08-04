@@ -590,10 +590,34 @@ describe("ProvidersSettings", () => {
       credentialRevision: 0,
     });
 
+    mocks.listProviderSecrets.mockResolvedValue([
+      {
+        id: "provider_cache:openai",
+        provider: "openai",
+        providerDisplayName: "OpenAI",
+        name: "API key",
+        storage: "provider_cache",
+        status: "valid",
+        configured: true,
+        hasSecret: true,
+        canDelete: true,
+        canConfigure: true,
+      },
+      {
+        id: "provider_cache:databricks_v2",
+        provider: "databricks_v2",
+        providerDisplayName: "Databricks",
+        name: "OAuth token",
+        storage: "provider_cache",
+        status: "valid",
+        configured: true,
+        hasSecret: true,
+        canDelete: true,
+        canConfigure: false,
+      },
+    ]);
     renderProviders(<ProvidersSettings />);
-
-    expect(screen.getByText("Model providers")).toBeInTheDocument();
-    expect(screen.getByText("OpenAI, Databricks")).toBeInTheDocument();
+    expect(await screen.findByText("OpenAI, Databricks")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /goose/i }));
 

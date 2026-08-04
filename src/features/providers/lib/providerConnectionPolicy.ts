@@ -35,6 +35,48 @@ export function isCredentialedProvider(
   return (provider.aliases ?? []).some((alias) => credentialedIds.has(alias));
 }
 
+export type ProviderConnectionEvidence =
+  | "credential"
+  | "managed_endpoint"
+  | "custom"
+  | "saved_settings"
+  | "none";
+
+export interface ProviderConnectionSnapshot {
+  configuredIds: ReadonlySet<string>;
+  credentialedIds: ReadonlySet<string>;
+  runtimeManagedIds: ReadonlySet<string>;
+  configuredBySavedValueIds?: ReadonlySet<string>;
+}
+
+/**
+ * Classify the strongest deliberate setup evidence for a model provider.
+ * This is the shared policy boundary for settings presentation and default
+ * recovery. Backend "configured" status is required for managed, custom, and
+ * saved-setting evidence; a stored credential remains authoritative by itself.
+ */
+export function getProviderConnectionEvidence(
+  provider: Pick<ProviderCatalogEntry, "id" | "aliases" | "customProvider">,
+  snapshot: ProviderConnectionSnapshot,
+): ProviderConnectionEvidence {
+  if (isCredentialedProvider(provider, snapshot.credentialedIds)) {
+    return "credential";
+  }
+  if (!snapshot.configuredIds.has(provider.id)) {
+    return "none";
+  }
+  if (snapshot.runtimeManagedIds.has(provider.id)) {
+    return "managed_endpoint";
+  }
+  if (provider.customProvider === true) {
+    return "custom";
+  }
+  if (snapshot.configuredBySavedValueIds?.has(provider.id)) {
+    return "saved_settings";
+  }
+  return "none";
+}
+
 /**
  * Whether the provider has a meaningful saved non-secret setting: set,
  * readable, and different from the schema default. Untouched defaults and

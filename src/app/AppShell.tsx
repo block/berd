@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -8,11 +7,6 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  QueryClient,
-  QueryClientContext,
-  type QueryClient as QueryClientType,
-} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
 import { useFeedbackDialogStore } from "@/features/feedback/feedbackDialogStore";
@@ -32,7 +26,6 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import {
   OPEN_SETTINGS_EVENT,
-  requestOpenSettings,
   type AgentBuilderProviderSetupReturnTarget,
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
@@ -99,7 +92,7 @@ import {
 } from "./lib/appNavigationLocation";
 import { useStagedAppContentLocation } from "./lib/useStagedAppContentLocation";
 import { loadStoredHomeSessionId } from "./lib/homeSessionStorage";
-import { resolveSupportedSessionModelPreference } from "./lib/resolveSupportedSessionModelPreference";
+import { resolveSupportedSessionModelPreference } from "@/features/providers/lib/resolveSessionModelPreference";
 import { listenSessionDeepLinkErrors } from "./lib/sessionDeepLinkErrors";
 import {
   clearSettingsSectionUrl,
@@ -149,9 +142,10 @@ import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
-import { checkAllProviderStatus } from "@/features/providers/api/credentials";
-import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
+import { useNewSessionTarget } from "@/features/providers/hooks/useNewSessionTarget";
 import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
@@ -178,7 +172,6 @@ import {
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
-import { isExternalAgentReady } from "@/features/chat/lib/externalAgentReadiness";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { findMissingProjectDirs } from "@/features/projects/lib/missingProjectDirs";
 import {
@@ -196,9 +189,7 @@ import {
   type DeferredPendingVoiceStart,
 } from "@/features/voice-conversation/lib/pendingVoiceStart";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
-import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
-import { isExternalAgentProvider } from "@/shared/api/acpPersonaHandoff";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
   DESIGN_SYSTEM_SECTIONS,
@@ -222,8 +213,8 @@ type AppNavigationHistory = {
   isApplying: boolean;
 };
 
-type ResolvedSessionModelPreference = Awaited<
-  ReturnType<typeof resolveSupportedSessionModelPreference>
+type ResolvedSessionModelPreference = ReturnType<
+  typeof resolveSupportedSessionModelPreference
 >;
 type MaybePromise<T> = T | Promise<T>;
 type DraftSessionCreationReady = {
@@ -303,67 +294,6 @@ const current = (id: string, label: string): TopBarBreadcrumb => ({
   label,
 });
 
-function openProviderSetupRequiredSettings(message: string): void {
-  toast.info(message);
-  requestOpenSettings("providers");
-}
-
-async function getProviderConfiguredStatus(
-  providerId: string,
-): Promise<boolean | null> {
-  const statuses = await checkAllProviderStatus();
-  return (
-    statuses.find((status) => status.providerId === providerId)?.isConfigured ??
-    null
-  );
-}
-
-function requiresProviderSetupBeforeSession(providerId: string): boolean {
-  if (!getBuildFeatureState().byoKeyProviders) return false;
-  if (providerId !== "goose" && isExternalAgentProvider(providerId)) {
-    return false;
-  }
-
-  if (providerId !== "goose") return false;
-
-  const readiness = useDefaultProviderReadinessStore.getState().readiness;
-  return readiness?.status === "needs_setup";
-}
-
-async function requiresProviderSetupBeforeSessionAsync(
-  providerId: string,
-  queryClient: QueryClientType,
-): Promise<boolean> {
-  if (requiresProviderSetupBeforeSession(providerId)) return true;
-
-  if (providerId === "goose") {
-    return false;
-  }
-
-  const readiness = useDefaultProviderReadinessStore.getState().readiness;
-  if (readiness?.status === "ready" && readiness.providerId === providerId) {
-    try {
-      const configured = await getProviderConfiguredStatus(providerId);
-      return configured === false;
-    } catch {
-      return true;
-    }
-  }
-
-  if (isExternalAgentProvider(providerId)) {
-    try {
-      return !(await isExternalAgentReady(providerId, queryClient));
-    } catch {
-      return true;
-    }
-  }
-
-  try {
-    return (await getProviderConfiguredStatus(providerId)) !== true;
-  } catch {
-    return true;
-  }
-}
 const parent = (
   id: string,
   label: string,
@@ -596,14 +526,6 @@ export function AppShell({
   children?: React.ReactNode;
   onLoggedOut?: (status: AuthStatus) => void;
 }) {
-  const providedQueryClient = useContext(QueryClientContext);
-  const fallbackQueryClientRef = useRef<QueryClientType | null>(null);
-  if (!fallbackQueryClientRef.current) {
-    fallbackQueryClientRef.current = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-  }
-  const queryClient = providedQueryClient ?? fallbackQueryClientRef.current;
   const { t } = useTranslation([
     "chat",
     "common",
@@ -890,7 +812,15 @@ export function AppShell({
   }, []);
   const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
   const { selectedProvider } = useProviderSelection();
+  const ensureNewSessionTarget = useNewSessionTarget();
   const { readyAgentIds } = useAgentProviderStatus();
+  const defaultProviderReadinessStatus = useDefaultProviderReadinessStore(
+    (state) => state.readiness?.status,
+  );
+  const providerSetupRequiredForHome =
+    getBuildFeatureState().byoKeyProviders &&
+    defaultProviderReadinessStatus === "needs_setup" &&
+    ![...readyAgentIds].some((providerId) => providerId !== "goose");
   const selectedProviderRef = useRef(selectedProvider);
   selectedProviderRef.current = selectedProvider;
   const projects = useProjectStore(selectProjects);
@@ -1307,26 +1237,8 @@ export function AppShell({
     setHomeSessionId,
   });
 
-  // Mirrors the ProviderSetupRequired gate in AppShellContent: while the
-  // setup-required screen replaces Home, skip creating the home session, and
-  // create it as soon as readiness clears (no navigation required).
-  const defaultProviderReadinessStatus = useDefaultProviderReadinessStore(
-    (state) => state.readiness?.status,
-  );
-  const providerSetupRequiredForHome =
-    getBuildFeatureState().byoKeyProviders &&
-    defaultProviderReadinessStatus === "needs_setup" &&
-    ![...readyAgentIds].some(
-      (providerId) =>
-        providerId !== "goose" && isExternalAgentProvider(providerId),
-    );
-
   const ensureHomeSession = useCallback(async () => {
     if (!hasHydratedSessions || sessionsLoading) {
-      return undefined;
-    }
-
-    if (providerSetupRequiredForHome) {
       return undefined;
     }
 
@@ -1383,14 +1295,14 @@ export function AppShell({
         // Once a provider+model is set, don't let stored preferences re-seed
         // on model refreshes — that would clobber explicit user picks.
         if (liveHomeSession.providerId && liveHomeSession.modelId) {
-          if (
-            await requiresProviderSetupBeforeSessionAsync(
-              liveHomeSession.providerId,
-              queryClient,
-            )
-          ) {
-            return liveHomeSession;
-          }
+          const target = await ensureNewSessionTarget(
+            {
+              providerId: liveHomeSession.providerId,
+              modelId: liveHomeSession.modelId,
+            },
+            { onUnavailable: "silent" },
+          );
+          if (target.status !== "ready") return liveHomeSession;
           const result = await applyLatestSessionConfig({
             sessionId: homeSession.id,
             providerId: liveHomeSession.providerId,
@@ -1418,19 +1330,16 @@ export function AppShell({
         ) {
           return liveHomeSession;
         }
-        if (
-          await requiresProviderSetupBeforeSessionAsync(
-            resolvedProviderId,
-            queryClient,
-          )
-        ) {
-          return liveHomeSession;
-        }
+        const target = await ensureNewSessionTarget(
+          {},
+          { onUnavailable: "silent" },
+        );
+        if (target.status !== "ready") return liveHomeSession;
         const result = await applyLatestSessionConfig({
           sessionId: homeSession.id,
-          providerId: resolvedProviderId,
+          providerId: target.providerId,
           workingDir,
-          modelId: modelIdToApply,
+          modelId: target.modelId,
           forceConfigRefresh: !liveHomeSession.reasoningEffort,
         });
         if (!result.applied) {
@@ -1438,16 +1347,16 @@ export function AppShell({
         }
 
         const shouldClearHomeModel =
-          resolvedProviderId !== homeSession.providerId || !modelIdToApply;
+          target.providerId !== homeSession.providerId || !target.modelId;
         patchSession(homeSession.id, {
-          providerId: resolvedProviderId,
+          providerId: target.providerId,
           workingDir,
           modelId:
-            modelIdToApply ??
+            target.modelId ??
             (shouldClearHomeModel ? undefined : homeSession.modelId),
           modelName:
-            modelIdToApply != null
-              ? sessionModelPreference.modelName
+            target.modelId != null
+              ? target.modelName
               : shouldClearHomeModel
                 ? undefined
                 : homeSession.modelName,
@@ -1463,37 +1372,18 @@ export function AppShell({
         );
       }
 
-      const providerAtStart = currentProvider();
       const workingDir = await resolveSessionCwd(null);
-      const sessionModelPreference =
-        await resolveSupportedSessionModelPreference(
-          providerAtStart,
-          undefined,
-        );
-      const resolvedProviderId = resolveProviderAfterAwait(
-        providerAtStart,
-        sessionModelPreference,
+      const target = await ensureNewSessionTarget(
+        {},
+        { onUnavailable: "silent" },
       );
-      if (
-        await requiresProviderSetupBeforeSessionAsync(
-          resolvedProviderId,
-          queryClient,
-        )
-      ) {
-        return null;
-      }
+      if (target.status !== "ready") return null;
       const session = await createSession({
         title: DEFAULT_CHAT_TITLE,
-        providerId: resolvedProviderId,
+        providerId: target.providerId,
         workingDir,
-        modelId:
-          resolvedProviderId === sessionModelPreference.providerId
-            ? sessionModelPreference.modelId
-            : undefined,
-        modelName:
-          resolvedProviderId === sessionModelPreference.providerId
-            ? sessionModelPreference.modelName
-            : undefined,
+        modelId: target.modelId,
+        modelName: target.modelName,
       });
       setHomeSessionId(session.id);
       return session;
@@ -1513,9 +1403,8 @@ export function AppShell({
     homeSession,
     patchSession,
     projects,
-    providerSetupRequiredForHome,
-    queryClient,
     sessionsLoading,
+    ensureNewSessionTarget,
   ]);
 
   useEffect(() => {
@@ -1589,28 +1478,19 @@ export function AppShell({
         Promise.resolve(workingDir),
       ])
         .then(async ([resolvedSessionModelPreference, resolvedWorkingDir]) => {
-          if (
-            await requiresProviderSetupBeforeSessionAsync(
-              resolvedSessionModelPreference.providerId,
-              queryClient,
-            )
-          ) {
-            openProviderSetupRequiredSettings(
-              t("settings:providers.setupRequired.toast"),
-            );
+          const target = await ensureNewSessionTarget({
+            providerId: resolvedSessionModelPreference.providerId,
+            modelId: resolvedSessionModelPreference.modelId,
+          });
+          if (target.status !== "ready") {
             throw new Error(t("settings:providers.setupRequired.toast"));
           }
 
-          return acpCreateSession(
-            resolvedSessionModelPreference.providerId,
-            resolvedWorkingDir,
-            {
-              projectId,
-              modelId: resolvedSessionModelPreference.modelId,
-              deferProviderSetup:
-                resolvedSessionModelPreference.modelId == null,
-            },
-          ).then(({ sessionId, configOptionsSnapshot }) => ({
+          return acpCreateSession(target.providerId, resolvedWorkingDir, {
+            projectId,
+            modelId: resolvedSessionModelPreference.modelId,
+            deferProviderSetup: resolvedSessionModelPreference.modelId == null,
+          }).then(({ sessionId, configOptionsSnapshot }) => ({
             sessionId,
             configOptionsSnapshot,
             sessionModelPreference: resolvedSessionModelPreference,
@@ -1776,10 +1656,10 @@ export function AppShell({
       markSessionCreationFailed,
       promoteChatSessionId,
       promoteDraftSession,
-      queryClient,
       replaceNavigationSessionId,
       setActiveSession,
       setChatActiveSession,
+      ensureNewSessionTarget,
     ],
   );
 
@@ -1849,15 +1729,15 @@ export function AppShell({
           resetSessionCreation(session.id);
 
           const providerId = session.providerId ?? selectedProvider ?? "goose";
-          const sessionModelPreference = resolveSupportedSessionModelPreference(
+          const resolvedPreference = resolveSupportedSessionModelPreference(
             providerId,
             undefined,
             session.modelId ?? undefined,
-          ).then((preference) =>
-            session.modelName && preference.modelId === session.modelId
-              ? { ...preference, modelName: session.modelName }
-              : preference,
           );
+          const sessionModelPreference =
+            session.modelName && resolvedPreference.modelId === session.modelId
+              ? { ...resolvedPreference, modelName: session.modelName }
+              : resolvedPreference;
           startDraftSessionCreation({
             session,
             sessionModelPreference,
@@ -1894,32 +1774,18 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewTab start (project=${project?.id ?? "none"})`,
       );
-      const providerId = options.providerId ?? selectedProvider ?? "goose";
-      const resolvedSessionModelPreference =
-        await resolveSupportedSessionModelPreference(
-          providerId,
-          undefined,
-          options.modelId ?? undefined,
-        );
-      if (
-        await requiresProviderSetupBeforeSessionAsync(
-          resolvedSessionModelPreference.providerId,
-          queryClient,
-        )
-      ) {
-        openProviderSetupRequiredSettings(
-          t("settings:providers.setupRequired.toast"),
-        );
-        return undefined;
-      }
+      const requestedProviderId =
+        options.providerId ?? selectedProvider ?? "goose";
+      const target = await ensureNewSessionTarget(
+        options.providerId
+          ? { providerId: requestedProviderId, modelId: options.modelId }
+          : {},
+      );
+      if (target.status !== "ready") return undefined;
       const sessionModelPreference =
-        options.modelName &&
-        resolvedSessionModelPreference.modelId === options.modelId
-          ? {
-              ...resolvedSessionModelPreference,
-              modelName: options.modelName,
-            }
-          : resolvedSessionModelPreference;
+        options.modelName && target.modelId === options.modelId
+          ? { ...target, modelName: options.modelName }
+          : target;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       // New chats always start at the project default folder; worktree
@@ -2004,11 +1870,10 @@ export function AppShell({
       selectedProvider,
       createSession,
       createDraftSession,
-      queryClient,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
-      t,
+      ensureNewSessionTarget,
     ],
   );
 
@@ -2116,32 +1981,18 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
-      const providerId = options.providerId ?? selectedProvider ?? "goose";
-      const resolvedSessionModelPreference =
-        await resolveSupportedSessionModelPreference(
-          providerId,
-          undefined,
-          options.modelId ?? undefined,
-        );
+      const requestedProviderId =
+        options.providerId ?? selectedProvider ?? "goose";
+      const target = await ensureNewSessionTarget(
+        options.providerId
+          ? { providerId: requestedProviderId, modelId: options.modelId }
+          : {},
+      );
+      if (target.status !== "ready") return undefined;
       const sessionModelPreference =
-        options.modelName &&
-        resolvedSessionModelPreference.modelId === options.modelId
-          ? {
-              ...resolvedSessionModelPreference,
-              modelName: options.modelName,
-            }
-          : resolvedSessionModelPreference;
-      if (
-        await requiresProviderSetupBeforeSessionAsync(
-          sessionModelPreference.providerId,
-          queryClient,
-        )
-      ) {
-        openProviderSetupRequiredSettings(
-          t("settings:providers.setupRequired.toast"),
-        );
-        return undefined;
-      }
+        options.modelName && target.modelId === options.modelId
+          ? { ...target, modelName: options.modelName }
+          : target;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const needsStartup =
@@ -2211,12 +2062,11 @@ export function AppShell({
     [
       selectedProvider,
       createDraftSession,
-      queryClient,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
-      t,
       workspaceRepository.mode,
+      ensureNewSessionTarget,
     ],
   );
 
@@ -2235,32 +2085,18 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createBackgroundDraftChat start (project=${project?.id ?? "none"})`,
       );
-      const providerId = options.providerId ?? selectedProvider ?? "goose";
-      const resolvedSessionModelPreference =
-        await resolveSupportedSessionModelPreference(
-          providerId,
-          undefined,
-          options.modelId ?? undefined,
-        );
+      const requestedProviderId =
+        options.providerId ?? selectedProvider ?? "goose";
+      const target = await ensureNewSessionTarget(
+        options.providerId
+          ? { providerId: requestedProviderId, modelId: options.modelId }
+          : {},
+      );
+      if (target.status !== "ready") return undefined;
       const sessionModelPreference =
-        options.modelName &&
-        resolvedSessionModelPreference.modelId === options.modelId
-          ? {
-              ...resolvedSessionModelPreference,
-              modelName: options.modelName,
-            }
-          : resolvedSessionModelPreference;
-      if (
-        await requiresProviderSetupBeforeSessionAsync(
-          sessionModelPreference.providerId,
-          queryClient,
-        )
-      ) {
-        openProviderSetupRequiredSettings(
-          t("settings:providers.setupRequired.toast"),
-        );
-        return undefined;
-      }
+        options.modelName && target.modelId === options.modelId
+          ? { ...target, modelName: options.modelName }
+          : target;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const existingDraft = findExistingDraft({
@@ -2315,9 +2151,8 @@ export function AppShell({
     [
       selectedProvider,
       createDraftSession,
-      queryClient,
       startDraftSessionCreation,
-      t,
+      ensureNewSessionTarget,
     ],
   );
 

@@ -13,6 +13,7 @@ import {
   INITIAL_RUNTIME_CONFIG_RESULT,
   useRuntimeConfigStore,
 } from "@/shared/runtime-config/runtimeConfigStore";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 
 beforeEach(() => {
   __resetAllPersonaHandoffs();
@@ -21,6 +22,7 @@ beforeEach(() => {
     result: INITIAL_RUNTIME_CONFIG_RESULT,
     config: DEFAULT_RUNTIME_CONFIG,
   });
+  useDefaultProviderReadinessStore.setState({ readiness: null });
 });
 
 describe("toWireProviderId", () => {
@@ -45,6 +47,28 @@ describe("toWireProviderId", () => {
     });
 
     expect(toWireProviderId("goose")).toBe("runtime_provider");
+  });
+
+  it("uses the backend-saved Goose provider when it differs from runtime defaults", () => {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          defaultModelProviderId: "runtime_provider",
+          defaultModelId: "runtime-model",
+          modelProviders: [],
+        },
+      },
+    });
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+
+    expect(toWireProviderId("goose")).toBe("databricks_v2");
   });
 
   it("passes real provider ids through unchanged", () => {

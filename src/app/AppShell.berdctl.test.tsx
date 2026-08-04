@@ -12,6 +12,7 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
@@ -310,6 +311,9 @@ describe("AppShell berdctl integration", () => {
     });
     useAgentStore.setState({
       selectedProvider: "goose",
+    });
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "goose" },
     });
     useProjectStore.setState({
       projects: [],

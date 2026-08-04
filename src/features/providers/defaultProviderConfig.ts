@@ -2,10 +2,8 @@ import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { getClient } from "@/shared/api/acpConnection";
 import { checkAllProviderStatus, listProviderSecrets } from "./api/credentials";
 import { getModelProviders } from "./providerCatalog";
-import {
-  getCredentialedProviderIds,
-  isCredentialedProvider,
-} from "./lib/providerConnectionPolicy";
+import { getCredentialedProviderIds } from "./lib/providerConnectionPolicy";
+import { connectedModelProviderIds } from "./lib/providerState";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -40,15 +38,15 @@ export async function getIntentionalConfiguredProviderIds(
       )
       .map((provider) => provider.id),
   );
-  return getModelProviders()
-    .filter(
-      (provider) =>
-        configuredIds.has(provider.id) &&
-        (isCredentialedProvider(provider, credentialedIds) ||
-          provider.customProvider === true ||
-          runtimeConfiguredIds.has(provider.id)),
-    )
-    .map((provider) => provider.id);
+  const connectionSnapshot = {
+    configuredIds,
+    credentialedIds,
+    runtimeManagedIds: runtimeConfiguredIds,
+  };
+  return connectedModelProviderIds(
+    getModelProviders().filter((provider) => configuredIds.has(provider.id)),
+    connectionSnapshot,
+  );
 }
 
 /**

@@ -5,7 +5,7 @@ import {
   resolveModelProviderCatalogIdStrictFromEntries,
 } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import { getClient } from "@/shared/api/acpConnection";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import {
   useChatSessionStore,
   type ChatSession,
@@ -155,15 +155,18 @@ export function useResolvedAgentModelPicker({
 
     const loadGooseDefaultSelection = async () => {
       try {
-        const client = await getClient();
-        const defaults = await client.goose.GooseUnstableDefaultsRead({});
+        const readiness =
+          useDefaultProviderReadinessStore.getState().readiness ??
+          (await useDefaultProviderReadinessStore.getState().refresh());
 
         if (cancelled) {
           return;
         }
 
-        const providerId = defaults.providerId ?? undefined;
-        const modelId = defaults.modelId ?? undefined;
+        const providerId =
+          readiness.status === "ready" ? readiness.providerId : undefined;
+        const modelId =
+          readiness.status === "ready" ? readiness.modelId : undefined;
 
         if (!modelId) {
           setGooseDefaultSelection(null);

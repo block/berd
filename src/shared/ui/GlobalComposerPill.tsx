@@ -44,7 +44,7 @@ import type {
 } from "@/features/chat/types";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
-import { getClient } from "@/shared/api/acpConnection";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { cn } from "@/shared/lib/cn";
 import { isInteractiveElement } from "@/shared/lib/isInteractiveElement";
 import {
@@ -973,15 +973,20 @@ export function GlobalComposerPill({
     let cancelled = false;
     void (async () => {
       try {
-        const client = await getClient();
-        const defaults = await client.goose.GooseUnstableDefaultsRead({});
+        const readiness =
+          useDefaultProviderReadinessStore.getState().readiness ??
+          (await useDefaultProviderReadinessStore.getState().refresh());
 
         if (cancelled) {
           return;
         }
 
-        const providerId = defaults.providerId ?? selectedProvider;
-        const modelId = defaults.modelId ?? undefined;
+        const providerId =
+          readiness.status === "ready"
+            ? readiness.providerId
+            : selectedProvider;
+        const modelId =
+          readiness.status === "ready" ? readiness.modelId : undefined;
 
         setGooseDefaultSelection(
           modelId

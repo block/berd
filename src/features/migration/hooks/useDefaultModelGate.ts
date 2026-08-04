@@ -10,6 +10,7 @@ import {
   getDefaultGooseModelName,
   getDefaultGooseModelProviderId,
 } from "@/features/runtime-config/defaults";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 
 /**
  * Post-migration repair for installs left in the legacy broken state where
@@ -48,6 +49,8 @@ export function useDefaultModelGate(migrationReady: boolean): void {
           providerId: defaultProviderId,
           modelId: defaultModelId,
         });
+        if (cancelled) return;
+        await useDefaultProviderReadinessStore.getState().refresh();
         if (cancelled) return;
 
         if (!getStoredModelPreference("goose")) {

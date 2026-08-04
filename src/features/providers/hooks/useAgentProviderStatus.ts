@@ -15,7 +15,7 @@ interface UseAgentProviderStatusReturn {
   // source / version / update-available without re-probing.
   agentChecks: Map<string, DoctorCheck>;
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<Map<string, AgentProviderReadiness>>;
 }
 
 function gooseReadinessFromDefaultProviderStatus(
@@ -161,8 +161,11 @@ export function useAgentProviderStatus(): UseAgentProviderStatusReturn {
 
   const refetch = query.refetch;
   const refresh = useCallback(async () => {
-    await refetch();
-  }, [refetch]);
+    const result = await refetch();
+    return result.data
+      ? readinessFromReport(result.data, { gooseReadiness })
+      : initialReadiness(gooseReadiness);
+  }, [gooseReadiness, refetch]);
 
   return {
     readyAgentIds,
