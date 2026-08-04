@@ -1,6 +1,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 
+import { AcpToolsEvents } from "@/app/AcpToolsEvents";
 import { TopBarActionsProvider } from "@/app/contexts/TopBarActionsContext";
 import { GitStateEvents } from "@/app/GitStateEvents";
 import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
@@ -46,6 +47,7 @@ export function SessionWindowRuntime({
 
   return (
     <QueryClientProvider client={queryClient}>
+      <AcpToolsEvents />
       <GitStateEvents />
       <I18nProvider>
         <ThemeProvider>

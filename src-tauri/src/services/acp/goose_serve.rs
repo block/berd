@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::services::bundled_acp_tools;
 use crate::services::diagnostic_log::{
     self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
 };
@@ -19,6 +18,7 @@ use crate::services::dir_env;
 use crate::services::distro_bundle::DistroBundleState;
 use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
+use crate::services::managed_acp_tools;
 use crate::services::path_env;
 use crate::services::process::{pid_t_from_u32, process_is_alive};
 
@@ -151,9 +151,13 @@ impl GooseServeProcess {
                 command.env("GOOSE_DISTRO_DIR", &bundle.root_dir);
             }
         }
-        if let Some(acp_tools_dir) = bundled_acp_tools::resolve_bundled_acp_tools_dir(&app_handle) {
-            prepend_dirs.push(acp_tools_dir);
-        }
+        // Berd-managed installs: the lock-pinned bridge shims in `packages/bin`
+        // (or the `BERD_ACP_TOOLS_DIR` dev override), the private npm prefix
+        // (copilot, amp-acp), and the managed Node runtime their
+        // `#!/usr/bin/env node` shims run on — goosed spawns bridges from
+        // PATH / GOOSE_SEARCH_PATHS. Nothing ships inside the bundle; the
+        // startup reconciler installs the lock's bridges into app data.
+        prepend_dirs.extend(managed_acp_tools::managed_prepend_dirs(&app_handle));
 
         #[cfg(feature = "berdctl")]
         let berdctl_paths = resolve_berdctl_spawn_paths(&app_handle, &mut prepend_dirs);

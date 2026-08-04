@@ -522,6 +522,7 @@
       "missingComponent": "{{name}} no está instalado",
       "progress": {
         "installing": "Instalando {{name}}...",
+        "preparingRuntime": "Preparando el entorno de Node.js...",
         "step": "Paso {{step}} de {{total}}",
         "verifyingInstallation": "Verificando instalación..."
       },

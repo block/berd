@@ -525,6 +525,7 @@
       "missingComponent": "{{name}} not installed",
       "progress": {
         "installing": "Installing {{name}}...",
+        "preparingRuntime": "Preparing the Node.js runtime...",
         "step": "Step {{step}} of {{total}}",
         "verifyingInstallation": "Verifying installation..."
       },

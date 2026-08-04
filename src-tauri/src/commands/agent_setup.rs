@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::services::{bundled_acp_tools, path_env};
+use crate::services::{managed_acp_tools, managed_node, path_env};
 use doctor::FixType;
 use tauri::{AppHandle, Emitter, State};
 
@@ -68,6 +68,9 @@ enum SetupPhase {
     Checking,
     Installing,
     Authenticating,
+    /// Downloading/installing the Berd-managed Node.js runtime an npm-backed
+    /// fix is about to run on.
+    PreparingRuntime,
 }
 
 /// Lifecycle of an operation. Terminal states (`succeeded`/`failed`) persist
@@ -308,7 +311,7 @@ fn set_phase(app: &AppHandle, registry: &AgentSetupRegistry, provider_id: &str, 
 
 /// Translate a frontend provider id like `claude-acp` / `cursor-agent` into the
 /// crate's `ai-agent-<name>` check id.
-fn crate_check_id(provider_id: &str) -> String {
+pub(crate) fn crate_check_id(provider_id: &str) -> String {
     let name = provider_id
         .strip_suffix("-acp")
         .unwrap_or(match provider_id {
@@ -318,15 +321,24 @@ fn crate_check_id(provider_id: &str) -> String {
     format!("ai-agent-{name}")
 }
 
-fn bundled_acp_prepend_dirs(app: &AppHandle) -> Vec<std::path::PathBuf> {
-    bundled_acp_tools::resolve_bundled_acp_tools_dir(app)
-        .into_iter()
-        .collect()
+/// Binary search dirs for checks and fixes: the managed bridge shims in
+/// `packages/bin` (or the `BERD_ACP_TOOLS_DIR` dev override), then the
+/// Berd-private npm prefix and the managed Node runtime its shims run on.
+/// Bridges resolve only from managed installs — nothing ships inside the
+/// bundle anymore.
+fn setup_prepend_dirs(app: &AppHandle) -> Vec<std::path::PathBuf> {
+    managed_acp_tools::managed_prepend_dirs(app)
 }
 
-async fn home_env_vars_with_bundled_acp(app: &AppHandle) -> Vec<(String, String)> {
-    let prepend_dirs = bundled_acp_prepend_dirs(app);
-    path_env::home_env_vars_with_extended_path_and_prepended_dirs(&prepend_dirs).await
+/// The env snapshot every check/fix subprocess runs with: the captured home
+/// shell env with the extended PATH, plus the managed npm env steering global
+/// installs into the Berd-private prefix.
+async fn setup_env_vars(app: &AppHandle) -> Vec<(String, String)> {
+    let prepend_dirs = setup_prepend_dirs(app);
+    let mut vars =
+        path_env::home_env_vars_with_extended_path_and_prepended_dirs(&prepend_dirs).await;
+    managed_acp_tools::apply_managed_npm_env(&mut vars, &managed_acp_tools::managed_npm_env(app));
+    vars
 }
 
 async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::DoctorCheck, String> {
@@ -338,11 +350,13 @@ async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::Doctor
             offline: false,
             env: None,
             // The crate labels binaries resolving from this dir as bundled and
-            // offers no registry install/update fix for them — their versions
-            // are pinned by acp-tools.lock.json and ship with Berd updates.
-            bundled_tools_dir: bundled_acp_tools::resolve_bundled_acp_tools_dir(app),
+            // offers no registry install/update fix for them — Berd installs
+            // and upgrades these bridges itself (the startup reconciler floats
+            // them to the latest version), so the crate must not nag the user
+            // to update them manually.
+            bundled_tools_dir: managed_acp_tools::bundled_tools_dir_for_checks(app),
         }
-        .with_env_snapshot(home_env_vars_with_bundled_acp(app).await),
+        .with_env_snapshot(setup_env_vars(app).await),
     )
     .await;
     report
@@ -580,6 +594,29 @@ async fn run_fix(
     let log_tag = format!("[agent-setup {provider_id} {fix_type:?}]");
     log::info!("{log_tag} starting fix");
 
+    // Managed bridges (claude, codex) install through the managed installer so
+    // the floating `<pkg>@latest` install lands in `packages/tools` with an
+    // absolute-path shim in `packages/bin` (labeled bundled, no update nag), rather
+    // than the crate's bare `npm install -g` into the shared private prefix.
+    if command_override.is_none()
+        && matches!(fix_type, FixType::Command | FixType::Bridge)
+        && managed_acp_tools::is_managed(provider_id)
+    {
+        return run_managed_install(app, registry, provider_id, &log_tag).await;
+    }
+
+    // npm-backed fixes run the managed npm into the Berd-private prefix, so
+    // the managed Node runtime must exist before the command does.
+    let resolved_command = command_override
+        .clone()
+        .or_else(|| doctor::agents::lookup_fix_command(&check_id, &fix_type));
+    if resolved_command
+        .as_deref()
+        .is_some_and(managed_acp_tools::is_npm_backed_command)
+    {
+        ensure_managed_runtime(app, registry, provider_id).await?;
+    }
+
     let app_for_lines = app.clone();
     let registry_for_lines = registry.clone();
     let provider_for_lines = provider_id.to_string();
@@ -595,7 +632,7 @@ async fn run_fix(
             npm_registry: npm_registry().map(str::to_string),
             env: None,
         }
-        .with_env_snapshot(home_env_vars_with_bundled_acp(app).await),
+        .with_env_snapshot(setup_env_vars(app).await),
         move |line| {
             log::info!("{log_tag_for_lines} {line}");
             append_output(
@@ -613,6 +650,98 @@ async fn run_fix(
         Err(error) => log::info!("{log_tag} fix failed: {error}"),
     }
     result
+}
+
+/// Install (or upgrade) a managed bridge through the managed installer,
+/// streaming npm output into the card. The managed-runtime ensure runs first
+/// so the visible `preparingRuntime` phase brackets the runtime download; the
+/// installer's own ensure is then a no-op.
+async fn run_managed_install(
+    app: &AppHandle,
+    registry: &AgentSetupRegistry,
+    provider_id: &str,
+    log_tag: &str,
+) -> Result<(), String> {
+    ensure_managed_runtime(app, registry, provider_id).await?;
+
+    let app_for_lines = app.clone();
+    let registry_for_lines = registry.clone();
+    let provider_for_lines = provider_id.to_string();
+    let log_tag_for_lines = log_tag.to_string();
+    let on_line = move |line: &str| {
+        log::info!("{log_tag_for_lines} {line}");
+        append_output(
+            &app_for_lines,
+            &registry_for_lines,
+            &provider_for_lines,
+            line,
+        );
+    };
+    let result = managed_acp_tools::install_managed_tool(app, provider_id, &on_line)
+        .await
+        .map_err(|error| error.to_string());
+
+    match &result {
+        Ok(()) => log::info!("{log_tag} managed install succeeded"),
+        Err(error) => log::info!("{log_tag} managed install failed: {error}"),
+    }
+    result
+}
+
+/// Make sure the Berd-managed Node.js runtime is installed before an
+/// npm-backed fix runs. Quiet no-op when the pinned runtime is already
+/// healthy; otherwise the operation enters the visible `preparingRuntime`
+/// phase, streams download/extract progress into the output buffer, and
+/// returns to the phase it interrupted.
+async fn ensure_managed_runtime(
+    app: &AppHandle,
+    registry: &AgentSetupRegistry,
+    provider_id: &str,
+) -> Result<(), String> {
+    if let Some(root) = managed_node::managed_node_root(app) {
+        if managed_node::pinned_runtime_ready(&root).await {
+            return Ok(());
+        }
+    }
+
+    let version = &managed_node::node_runtime_lock().version;
+    let resume_phase = registry.get(provider_id).map(|operation| operation.phase);
+    set_phase(app, registry, provider_id, SetupPhase::PreparingRuntime);
+    append_output(
+        app,
+        registry,
+        provider_id,
+        &format!("Installing Berd-managed Node.js {version}"),
+    );
+
+    let app_for_lines = app.clone();
+    let registry_for_lines = registry.clone();
+    let provider_for_lines = provider_id.to_string();
+    let progress = managed_node::progress_line_reporter(move |line| {
+        append_output(
+            &app_for_lines,
+            &registry_for_lines,
+            &provider_for_lines,
+            &line,
+        );
+    });
+    let result = managed_node::ensure_managed_node_runtime(app, &progress).await;
+
+    if let Some(phase) = resume_phase {
+        set_phase(app, registry, provider_id, phase);
+    }
+    match result {
+        Ok(()) => {
+            append_output(
+                app,
+                registry,
+                provider_id,
+                &format!("Node.js {version} is ready"),
+            );
+            Ok(())
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -636,6 +765,22 @@ mod tests {
     #[test]
     fn crate_check_id_passes_through_goose() {
         assert_eq!(crate_check_id("goose"), "ai-agent-goose");
+    }
+
+    #[test]
+    fn npm_backed_install_fixes_trigger_the_managed_runtime_gate() {
+        // Pins the cross-crate contract the ensure step in `run_fix` relies
+        // on: copilot installs through npm (needs the managed runtime first),
+        // cursor installs through curl (host-only, no runtime needed). If the
+        // crate changes an install command's shape, this failing points at
+        // the gate, not at a mystery install regression.
+        let copilot = doctor::agents::lookup_fix_command("ai-agent-copilot", &FixType::Command)
+            .expect("copilot install command");
+        assert!(managed_acp_tools::is_npm_backed_command(&copilot));
+
+        let cursor = doctor::agents::lookup_fix_command("ai-agent-cursor", &FixType::Command)
+            .expect("cursor install command");
+        assert!(!managed_acp_tools::is_npm_backed_command(&cursor));
     }
 
     fn check_with_fix(fix_type: Option<FixType>) -> doctor::DoctorCheck {

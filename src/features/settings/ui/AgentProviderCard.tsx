@@ -534,9 +534,11 @@ export function AgentProviderCard({
         ? t("providers.agents.progress.installing", {
             name: provider.displayName,
           })
-        : phase === "authenticating"
-          ? t("providers.waitingForSignIn")
-          : t("providers.agents.progress.verifyingInstallation");
+        : phase === "preparingRuntime"
+          ? t("providers.agents.progress.preparingRuntime")
+          : phase === "authenticating"
+            ? t("providers.waitingForSignIn")
+            : t("providers.agents.progress.verifyingInstallation");
 
     return (
       <div className="space-y-2">

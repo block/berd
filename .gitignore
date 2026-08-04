@@ -35,10 +35,10 @@ project-artifacts-manifest.json
 src/features/projects/artifact/assets/images/*.webp
 src/features/projects/artifact/assets/hdri/studio_soft.exr
 resources/bb
-resources/acp/bin/*
-!resources/acp/bin/.gitkeep
-resources/acp/node/
-resources/acp/node-runtime.json
+# Legacy staged ACP bundle dir; bridges now install at runtime from the npm
+# registry onto the managed Node runtime. Kept ignored so stale staged trees
+# in older checkouts stay hidden.
+resources/acp/
 
 # Playwright artifacts
 playwright-report/

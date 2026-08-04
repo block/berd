@@ -1,8 +1,8 @@
 pub mod acp;
+pub(crate) mod acp_tools_reconciler;
 pub(crate) mod app_data_migration;
 pub(crate) mod berdctl_discovery;
 pub(crate) mod builderbot;
-pub(crate) mod bundled_acp_tools;
 pub mod bundled_agents;
 pub mod bundled_skills;
 pub(crate) mod diagnostic_log;
@@ -14,6 +14,8 @@ pub(crate) mod installer_media;
 pub(crate) mod kgoose;
 pub(crate) mod log_export;
 pub(crate) mod log_redaction;
+pub(crate) mod managed_acp_tools;
+pub(crate) mod managed_node;
 pub mod path_env;
 pub(crate) mod process;
 pub mod renderer_monitor;

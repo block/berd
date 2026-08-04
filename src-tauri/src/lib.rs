@@ -317,6 +317,13 @@ pub fn run() {
                 }
             });
 
+            // Install or upgrade the Berd-managed ACP bridges (claude, codex)
+            // to the latest published version in the background: each floats
+            // to `<pkg>@latest` from the private npm registry onto the managed
+            // Node runtime in app data; failures are logged and retried next
+            // launch while any previously installed version keeps working.
+            services::acp_tools_reconciler::spawn_startup_reconcile(app.handle());
+
             // Surface WKWebView renderer memory and detect silent OOM reaps.
             services::renderer_monitor::start(app.handle().clone());
 

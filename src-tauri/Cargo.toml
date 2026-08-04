@@ -31,6 +31,8 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 doctor = { git = "https://github.com/block/builderbot", rev = "f049fa2b559c860ebc1e7b83771023961930099e" }
 etcetera = "0.11.0"
+flate2 = "1"
+hex = "0.4"
 ignore = "0.4.25"
 infer = "0.19.0"
 libc = "0.2"
@@ -115,6 +117,11 @@ no-block-npm-registry = []
 # no-block-doctor-checks: omits Block-only Square Agent Tools and internal
 # service access checks from the doctor report. Custom builds only.
 no-block-doctor-checks = []
+# no-managed-acp-tools: ships no Berd-managed ACP bridges. The startup
+# reconciler and the managed installer treat the managed set as empty, so
+# nothing installs at runtime and the related doctor checks stay silent — the
+# analogue of the old empty-`acp-tools.lock.json` restricted-build lever.
+no-managed-acp-tools = []
 # Admin runtime-config endpoint fetch. Default-OFF: a normal build never
 # compiles the kgoose-backed fetch/cache path and instead loads the bundled
 # src-tauri/resources/runtime-config.json as the source of truth (falling back

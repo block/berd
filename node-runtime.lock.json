@@ -1,0 +1,21 @@
+{
+  "version": "v24.11.0",
+  "artifacts": {
+    "aarch64-apple-darwin": {
+      "filename": "node-v24.11.0-darwin-arm64.tar.gz",
+      "sha256": "0be2ab2816a4fa02d1acff014a434f29f56d8d956f5af6a98b70ced6c5f4d201"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "filename": "node-v24.11.0-linux-arm64.tar.gz",
+      "sha256": "4786d00c4d259d3ff0b2328307f764ef3ced65f2d6e9502d433e68d66238509d"
+    },
+    "x86_64-apple-darwin": {
+      "filename": "node-v24.11.0-darwin-x64.tar.gz",
+      "sha256": "3884671e87f46f773832d98a0a6cabcc5ec4f637084f0f3515b69e66ea27f2f1"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "filename": "node-v24.11.0-linux-x64.tar.gz",
+      "sha256": "b3c071cdf47aab867c3b2aa287257df12ec5d7c962bf922b32fd33226c4295fd"
+    }
+  }
+}

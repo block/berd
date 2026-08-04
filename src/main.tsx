@@ -10,6 +10,7 @@ import {
   installRendererDiagnostics,
   reportRendererError,
 } from "@/app/lib/rendererDiagnostics";
+import { AcpToolsEvents } from "@/app/AcpToolsEvents";
 import { App } from "@/app/App";
 import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
@@ -161,6 +162,7 @@ if (bootError) {
     <React.StrictMode>
       <RendererErrorBoundary>
         <QueryClientProvider client={queryClient}>
+          <AcpToolsEvents />
           <GitStateEvents />
           <LocalMediaCacheEvents />
           <ReleasedQueuedMessageDrain />

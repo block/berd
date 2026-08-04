@@ -16,7 +16,10 @@ export type AgentSetupPhase =
   | "idle"
   | "checking"
   | "installing"
-  | "authenticating";
+  | "authenticating"
+  // Downloading/installing the Berd-managed Node.js runtime an npm-backed
+  // fix is about to run on.
+  | "preparingRuntime";
 
 export type AgentSetupStatus = "running" | "succeeded" | "failed";
 
