@@ -1916,7 +1916,7 @@ describe("useChatSessionController", () => {
     expect(sendOptions?.assistantPrompt).toMatch(/\n\nfrom another skill$/);
   });
 
-  it("keeps the agent-builder skill visible in builder sessions", () => {
+  it("lets the canonical composer remove the agent-builder skill", () => {
     useChatSessionStore.setState({
       sessions: [
         {
@@ -1937,21 +1937,67 @@ describe("useChatSessionController", () => {
       useChatSessionController({ sessionId: "session-1" }),
     );
 
-    expect(result.current.selectedSkills).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "agent-builder" }),
-      ]),
-    );
+    expect(result.current.selectedSkills).toEqual([]);
 
     act(() => {
       result.current.handleSkillsChange([]);
     });
 
-    expect(useChatStore.getState().skillDraftsBySession["session-1"]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "agent-builder" }),
-      ]),
+    expect(
+      useChatStore.getState().skillDraftsBySession["session-1"] ?? [],
+    ).toEqual([]);
+  });
+
+  it("does not reopen a closed builder just because its skill remains selected", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+          intent: "build-agent",
+          agentBuilderOpen: false,
+          targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
+          targetAgentSlug: "draft-1",
+        },
+      ],
+    });
+    useChatStore
+      .getState()
+      .setSkillDrafts("session-1", [
+        { id: "builtin:agent-builder", name: "agent-builder" },
+      ]);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
     );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockPreSeedDraftAgent).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({ agentBuilderOpen: false });
+
+    act(() => {
+      result.current.handleSkillsChange([]);
+    });
+    act(() => {
+      result.current.handleSkillsChange([
+        { id: "builtin:agent-builder", name: "agent-builder" },
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({ agentBuilderOpen: true });
+    });
   });
 
   it("turns a normal chat into a builder session when agent-builder is invoked", async () => {

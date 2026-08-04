@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { AgentSourceEntry } from "@/shared/api/agents";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { AgentBuilderLeaveDraftDialogProps } from "../ui/AgentBuilderLeaveDraftDialog";
 import {
@@ -17,19 +16,11 @@ import {
 
 type MaybePromise<T> = T | Promise<T>;
 
-interface NavigateAgentsOptions {
-  replace?: boolean;
-}
-
 interface UseAgentBuilderCoordinatorOptions {
   startupReady: boolean;
   createNewTab: StartAgentBuilderSessionDeps["createNewTab"];
   closeSession: (sessionId: string) => MaybePromise<void>;
   navigateChat: (sessionId: string) => MaybePromise<void>;
-  navigateAgents: (
-    personaId: string | null,
-    options?: NavigateAgentsOptions,
-  ) => MaybePromise<void>;
 }
 
 type PendingNavigation = () => void;
@@ -44,7 +35,6 @@ export function useAgentBuilderCoordinator({
   createNewTab,
   closeSession,
   navigateChat,
-  navigateAgents,
 }: UseAgentBuilderCoordinatorOptions) {
   const { t } = useTranslation("agents");
   const [leaveDraftPromptOpen, setLeaveDraftPromptOpen] = useState(false);
@@ -127,7 +117,11 @@ export function useAgentBuilderCoordinator({
   const guardNavigation = useCallback(
     (next: PendingNavigation, onCancel?: () => void): boolean => {
       const session = useChatSessionStore.getState().getActiveSession();
-      if (!session || session.intent !== "build-agent") {
+      if (
+        !session ||
+        session.intent !== "build-agent" ||
+        session.agentBuilderOpen === false
+      ) {
         next();
         return true;
       }
@@ -179,7 +173,10 @@ export function useAgentBuilderCoordinator({
       };
 
       const session = useChatSessionStore.getState().getActiveSession();
-      if (session?.intent === "build-agent") {
+      if (
+        session?.intent === "build-agent" &&
+        session.agentBuilderOpen !== false
+      ) {
         if (!session.targetAgentPath) {
           return;
         }
@@ -222,13 +219,6 @@ export function useAgentBuilderCoordinator({
   const create = useCallback(() => {
     start();
   }, [start]);
-
-  const onSaved = useCallback(
-    (source: AgentSourceEntry) => {
-      void navigateAgents(source.path, { replace: true });
-    },
-    [navigateAgents],
-  );
 
   const handleCancelLeaveDraft = useCallback(() => {
     cancelPendingNavigation();
@@ -289,7 +279,6 @@ export function useAgentBuilderCoordinator({
     guardNavigation,
     start,
     create,
-    onSaved,
     leaveDraftDialogProps,
   };
 }

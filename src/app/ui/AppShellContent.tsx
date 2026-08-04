@@ -23,7 +23,6 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
-import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import type { CommandOutcome } from "@/features/berdctl/navigation";
@@ -84,8 +83,6 @@ interface AppShellContentProps {
     action: AutomationBuilderLeaveAction | null,
   ) => void;
   onCreatePersona: () => void;
-  onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
-  onAgentBuilderClose?: () => void;
   onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<CommandOutcome>;
   onCreateProject: (options?: {
@@ -154,8 +151,6 @@ export function AppShellContent({
   onBuilderbotBreadcrumbLabelChange,
   onAutomationBuilderLeaveActionChange,
   onCreatePersona,
-  onAgentBuilderSaved,
-  onAgentBuilderClose,
   onStartAgentBuilderSession,
   onArchiveChat,
   onCreateProject,
@@ -244,8 +239,6 @@ export function AppShellContent({
     onDesignSystemInspectorVisibleChange,
     onDesignSystemSectionChange,
     onActivateHomeSession,
-    onAgentBuilderClose,
-    onAgentBuilderSaved,
     onAgentsBreadcrumbLabelChange,
     onArchiveChat,
     onAutomationBuilderLeaveActionChange,
@@ -336,8 +329,6 @@ interface RenderRouteContentOptions {
     action: AutomationBuilderLeaveAction | null,
   ) => void;
   onCreatePersona: () => void;
-  onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
-  onAgentBuilderClose?: () => void;
   onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<CommandOutcome>;
   onCreateProject: (options?: {
@@ -384,8 +375,6 @@ function renderRouteContent({
   homeSessionId,
   location,
   onActivateHomeSession,
-  onAgentBuilderClose,
-  onAgentBuilderSaved,
   onAgentsBreadcrumbLabelChange,
   onArchiveChat,
   onAutomationBuilderLeaveActionChange,
@@ -517,8 +506,6 @@ function renderRouteContent({
           sessionId={renderedSession.id}
           activeSession={renderedSession}
           onCreatePersona={onCreatePersona}
-          onAgentBuilderSaved={onAgentBuilderSaved}
-          onAgentBuilderClose={onAgentBuilderClose}
           onCreateProject={onCreateProject}
           onOpenProjectSettings={onOpenProjectSettings}
           onForkChat={onForkChat}

@@ -9,6 +9,10 @@ import {
 } from "@/features/chat/lib/sessionHandoffEvents";
 import { listenSessionWindowSearchTarget } from "@/features/chat/lib/sessionWindowSearchEvents";
 import {
+  isAgentBuilderVisible,
+  isContextPanelVisible,
+} from "@/features/chat/lib/chatCapabilityVisibility";
+import {
   activateSession,
   loadSessionMessages,
 } from "@/features/chat/lib/sessionActivation";
@@ -162,12 +166,26 @@ export function SessionWindowApp({
     },
     [sessionId],
   );
-  const rightRailLabel = isRightRailOpen
+  const isReadOnly = phase === "mirror";
+  const isContextVisible = isContextPanelVisible(session, isRightRailOpen, {
+    readOnly: isReadOnly,
+  });
+  const rightRailLabel = isContextVisible
     ? t("rightRail.close")
     : t("rightRail.open");
   const handleToggleRightRail = useCallback(() => {
-    setRightRailOpen(!isRightRailOpen);
-  }, [isRightRailOpen, setRightRailOpen]);
+    const nextOpen = !isContextVisible;
+    if (
+      nextOpen &&
+      session &&
+      isAgentBuilderVisible(session, { readOnly: isReadOnly })
+    ) {
+      useChatSessionStore.getState().patchSession(session.id, {
+        agentBuilderContextState: "userOpened",
+      });
+    }
+    setRightRailOpen(nextOpen);
+  }, [isContextVisible, isReadOnly, session, setRightRailOpen]);
 
   useEffect(() => {
     const cancelPendingOnWindowClose = () => {
@@ -394,10 +412,8 @@ export function SessionWindowApp({
         <SessionWindowTopBar
           title={session?.title ?? "Berd"}
           rightRailLabel={rightRailLabel}
-          rightRailOpen={isRightRailOpen}
-          showRightRailToggle={Boolean(
-            session && session.intent !== "build-agent",
-          )}
+          rightRailOpen={isContextVisible}
+          showRightRailToggle={Boolean(session)}
           onToggleRightRail={handleToggleRightRail}
         />
         {(phase === "ready" || phase === "mirror") && session ? (

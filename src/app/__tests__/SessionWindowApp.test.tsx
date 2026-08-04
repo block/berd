@@ -258,6 +258,35 @@ describe("SessionWindowApp", () => {
     expect(loadSessionMessages).not.toHaveBeenCalled();
   });
 
+  it("shows ordinary Context state in a read-only builder mirror", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          ...session,
+          intent: "build-agent",
+          agentBuilderOpen: true,
+          agentBuilderContextState: "autoClosed",
+        },
+      ],
+      activeSessionId: null,
+      hasHydratedSessions: true,
+      isRightRailOpen: true,
+    });
+
+    await renderMirrorSessionWindow();
+
+    const toggle = screen.getByRole("button", { name: "Close right rail" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(toggle);
+
+    expect(useChatSessionStore.getState().isRightRailOpen).toBe(false);
+    expect(
+      useChatSessionStore.getState().getSession("session-1")
+        ?.agentBuilderContextState,
+    ).toBe("autoClosed");
+  });
+
   it("mounts owned chat windows while persisted history is still loading", async () => {
     seedSession();
     const historyLoad = deferred<boolean>();

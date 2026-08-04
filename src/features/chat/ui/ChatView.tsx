@@ -26,7 +26,10 @@ import {
 } from "./ArtifactViewerPanel";
 import { useOpenArtifact } from "../stores/artifactViewerStore";
 import { ArtifactAutoOpenMount } from "./ArtifactAutoOpenMount";
-import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
+import {
+  CP_TOTAL_W,
+  useChatContextPanelCompactViewport,
+} from "./ChatContextPanel";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
@@ -50,13 +53,16 @@ import {
   type TerminalDockedPlacement,
 } from "@/features/terminal/model/terminalState";
 import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
-import type { AgentSourceEntry } from "@/shared/api/agents";
 import { ActiveChatBerdIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { getTextContent } from "@/shared/types/messages";
 import { getConversationBeforeForMessageFork } from "@/features/sessions/lib/sessionFork";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscriptSearch";
+import {
+  isAgentBuilderVisible,
+  isContextPanelVisible,
+} from "@/features/chat/lib/chatCapabilityVisibility";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
@@ -86,8 +92,6 @@ interface ChatViewProps {
   activeSession?: ChatSession | null;
   readOnlyStatus?: string;
   onCreatePersona?: () => void;
-  onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
-  onAgentBuilderClose?: () => void;
   onCreateProject?: (options?: {
     onCreated?: (projectId: string) => void;
   }) => void;
@@ -107,8 +111,6 @@ export function ChatView({
   activeSession,
   readOnlyStatus,
   onCreatePersona,
-  onAgentBuilderSaved,
-  onAgentBuilderClose,
   onCreateProject,
   onOpenProjectSettings,
   onForkChat,
@@ -196,14 +198,19 @@ export function ChatView({
   ]);
   const workspaceRepository = useWorkspaceRepository();
   const effectiveSession = controller.session ?? activeSession ?? null;
+  const isReadOnly = Boolean(readOnlyStatus);
   // While the viewer panel is open it occupies row width much like the
   // sidebar occludes the viewport: include its floor allowance in the
   // compact-mode query so the right rail only docks when rail + viewer +
   // conversation genuinely fit side by side. Below that, the rail uses its
   // own compact overlay behavior instead of overflowing the row.
+  const agentBuilderOpenForLayout = isAgentBuilderVisible(effectiveSession, {
+    readOnly: isReadOnly,
+  });
   const chatRowOcclusionPx =
     leftViewportOcclusionPx +
-    (isArtifactViewerOpen ? ARTIFACT_VIEWER_RAIL_ALLOWANCE_PX : 0);
+    (isArtifactViewerOpen ? ARTIFACT_VIEWER_RAIL_ALLOWANCE_PX : 0) +
+    (agentBuilderOpenForLayout ? CP_TOTAL_W : 0);
   const isContextPanelCompactViewport =
     useChatContextPanelCompactViewport(chatRowOcclusionPx);
   const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
@@ -252,23 +259,49 @@ export function ChatView({
     setPocketVoiceSetupOpen(false);
     if (shouldStart) void voiceConversation.onToggle();
   }, [sessionId, voiceConversation.onToggle]);
-  const isAgentBuilderSession = effectiveSession?.intent === "build-agent";
+  const isAgentBuilderOpen = agentBuilderOpenForLayout;
+  const patchSession = useChatSessionStore((s) => s.patchSession);
+  const agentBuilderContextState = effectiveSession?.agentBuilderContextState;
+  const contextVisible = isContextPanelVisible(
+    effectiveSession,
+    isRightRailOpen,
+    { readOnly: isReadOnly },
+  );
+
+  useEffect(() => {
+    if (
+      !isAgentBuilderOpen ||
+      !effectiveSession?.id ||
+      agentBuilderContextState != null
+    ) {
+      return;
+    }
+
+    patchSession(effectiveSession.id, {
+      agentBuilderContextState: "autoClosed",
+    });
+  }, [
+    agentBuilderContextState,
+    effectiveSession?.id,
+    isAgentBuilderOpen,
+    patchSession,
+  ]);
   const isAgentBuilderTargetFailed =
-    effectiveSession?.targetAgentDraftState === "failed";
+    isAgentBuilderOpen && effectiveSession?.targetAgentDraftState === "failed";
   const isAgentBuilderTargetPending =
-    isAgentBuilderSession && !effectiveSession?.targetAgentPath;
+    isAgentBuilderOpen && !effectiveSession?.targetAgentPath;
   const hasVisibleRightRail =
-    isAgentBuilderSession ||
+    isAgentBuilderOpen ||
     Boolean(
-      effectiveSession?.id && isRightRailOpen && !isContextPanelCompactViewport,
+      effectiveSession?.id && contextVisible && !isContextPanelCompactViewport,
     );
-  const agentBuilderChatColumnStyle = isAgentBuilderSession
+  const agentBuilderChatColumnStyle = isAgentBuilderOpen
     ? ({
         "--agent-builder-column-enter-delay": "0ms",
         "--agent-builder-column-enter-y": "48px",
       } as CSSProperties)
     : undefined;
-  const agentBuilderRailColumnStyle = isAgentBuilderSession
+  const agentBuilderRailColumnStyle = isAgentBuilderOpen
     ? ({
         "--agent-builder-column-enter-delay": "105ms",
         "--agent-builder-column-enter-y": "72px",
@@ -420,18 +453,33 @@ export function ChatView({
   }, [handleToggleTerminal]);
 
   const handleCloseRightRail = useCallback(() => {
-    if (!effectiveSession?.id) return;
+    if (!effectiveSession?.id || !contextVisible) return;
     const focusedInsideRail = rightRailRef.current?.contains(
       document.activeElement,
     );
     setRightRailOpen(false);
     if (focusedInsideRail) focusChatComposer();
-  }, [effectiveSession?.id, focusChatComposer, setRightRailOpen]);
+  }, [
+    contextVisible,
+    effectiveSession?.id,
+    focusChatComposer,
+    setRightRailOpen,
+  ]);
 
   const handleOpenContextPanel = useCallback(() => {
     if (!effectiveSession?.id) return;
+    if (isAgentBuilderOpen) {
+      patchSession(effectiveSession.id, {
+        agentBuilderContextState: "userOpened",
+      });
+    }
     setRightRailOpen(true);
-  }, [effectiveSession?.id, setRightRailOpen]);
+  }, [
+    effectiveSession?.id,
+    isAgentBuilderOpen,
+    patchSession,
+    setRightRailOpen,
+  ]);
 
   const showIndicator =
     controller.chatState === "thinking" ||
@@ -443,9 +491,6 @@ export function ChatView({
     | "streaming"
     | "waiting"
     | "compacting";
-  const agentBuilderEmptyPrompt = t("emptyState.buildAgentPrompt");
-  const agentBuilderComposerPlaceholder = t("input.agentBuilderPlaceholder");
-  const isReadOnly = Boolean(readOnlyStatus);
   const chatInputControls = useMemo<ChatInputControls | undefined>(() => {
     if (isReadOnly) {
       return {
@@ -459,14 +504,6 @@ export function ChatView({
       };
     }
 
-    if (effectiveSession?.intent === "build-agent") {
-      return {
-        agentModelPicker: false,
-        ...(composerHandoffActive ? { autoFocus: false } : {}),
-        projectPicker: false,
-      };
-    }
-
     if (!controller.skillsEnabled || composerHandoffActive) {
       return {
         ...(!controller.skillsEnabled ? { skills: false } : {}),
@@ -475,12 +512,7 @@ export function ChatView({
     }
 
     return undefined;
-  }, [
-    composerHandoffActive,
-    controller.skillsEnabled,
-    effectiveSession?.intent,
-    isReadOnly,
-  ]);
+  }, [composerHandoffActive, controller.skillsEnabled, isReadOnly]);
   const shouldStageTranscript = shouldStageInitialTranscript(
     controller.messages,
     controller.isLoadingHistory,
@@ -644,9 +676,6 @@ export function ChatView({
               />
             ) : null
           }
-          placeholder={
-            isAgentBuilderSession ? agentBuilderComposerPlaceholder : undefined
-          }
           controls={chatInputControls}
           skillProjectDirs={controller.skillProjectDirs}
           fileMentionProjectDirs={controller.fileMentionProjectDirs}
@@ -774,7 +803,7 @@ export function ChatView({
   ) : (
     <div className="flex w-full flex-1 flex-col items-center justify-center px-6">
       <AnimatePresence initial={false}>
-        {!isAgentBuilderSession && controller.selectedPersona ? (
+        {controller.selectedPersona ? (
           <motion.div
             key="conversation-empty-avatar"
             className="overflow-hidden"
@@ -790,9 +819,7 @@ export function ChatView({
         ) : null}
       </AnimatePresence>
       <p className="text-sm font-normal text-foreground">
-        {isAgentBuilderSession
-          ? agentBuilderEmptyPrompt
-          : t("emptyState.startAConversation")}
+        {t("emptyState.startAConversation")}
       </p>
     </div>
   );
@@ -812,11 +839,7 @@ export function ChatView({
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }
       onEditProject={onOpenProjectSettings}
-      onOpenContextPanel={
-        // The builder rail replaces the context panel for fully-targeted
-        // agent-builder sessions, so opening it would silently no-op.
-        isAgentBuilderSession ? undefined : handleOpenContextPanel
-      }
+      onOpenContextPanel={handleOpenContextPanel}
       onForkFromMessage={
         !isReadOnly && onForkChat ? handleForkFromMessage : undefined
       }
@@ -885,7 +908,7 @@ export function ChatView({
           data-chat-column
           className={cn(
             "relative flex min-w-0 flex-1 flex-col",
-            isAgentBuilderSession && "agent-builder-column-enter",
+            isAgentBuilderOpen && "agent-builder-column-enter",
           )}
           style={{
             ...agentBuilderChatColumnStyle,
@@ -968,10 +991,10 @@ export function ChatView({
             workspaceRepository.chatWorkspaces(effectiveSession).primary
               ?.path ?? effectiveSession?.workingDir
           }
-          onDraftPromoted={onAgentBuilderSaved}
-          onAgentBuilderClose={onAgentBuilderClose}
+          contextVisible={contextVisible}
+          agentBuilderReadOnly={isReadOnly}
           builderColumnClassName={
-            isAgentBuilderSession ? "agent-builder-column-enter" : undefined
+            isAgentBuilderOpen ? "agent-builder-column-enter" : undefined
           }
           builderColumnStyle={agentBuilderRailColumnStyle}
           terminalOpen={terminal.activeWorkspaceHasTerminal}

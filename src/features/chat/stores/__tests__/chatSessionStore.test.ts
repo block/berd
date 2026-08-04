@@ -805,6 +805,8 @@ describe("chatSessionStore", () => {
         workingDir: "/tmp/project",
         creationState: "pending",
         intent: "build-agent",
+        agentBuilderOpen: false,
+        agentBuilderContextState: "userOpened",
         targetAgentPath: "/Users/x/.agents/agents/draft-local.md",
         targetAgentSlug: "draft-local",
         targetAgentDraftState: null,
@@ -820,11 +822,37 @@ describe("chatSessionStore", () => {
       ).toMatchObject({
         id: "acp-builder-session",
         intent: "build-agent",
+        agentBuilderOpen: false,
+        agentBuilderContextState: "userOpened",
         targetAgentPath: "/Users/x/.agents/agents/draft-local.md",
         targetAgentSlug: "draft-local",
         targetAgentDraftState: null,
         targetAgentDraftSaved: true,
       });
+    });
+
+    it("honors an explicit Context-state clear during builder promotion", () => {
+      seedSession({
+        id: "local-builder-session",
+        title: "New agent",
+        creationState: "pending",
+        intent: "build-agent",
+        agentBuilderOpen: true,
+        agentBuilderContextState: "userOpened",
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("local-builder-session", "acp-builder-session", {
+          agentBuilderOpen: false,
+          agentBuilderContextState: undefined,
+        });
+
+      const promoted = useChatSessionStore
+        .getState()
+        .getSession("acp-builder-session");
+      expect(promoted?.agentBuilderOpen).toBe(false);
+      expect(promoted?.agentBuilderContextState).toBeUndefined();
     });
 
     it("marks a pending draft session failed when ACP creation fails", () => {

@@ -59,6 +59,10 @@ import {
 } from "@/features/chat/lib/sessionWorkspaceCleanup";
 import { getCachedHomeDir, getHomeDir } from "@/shared/api/system";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
+import {
+  isAgentBuilderVisible,
+  isContextPanelVisible,
+} from "@/features/chat/lib/chatCapabilityVisibility";
 import { SessionWorkspaceCleanupDialog } from "@/features/chat/ui/SessionWorkspaceCleanupDialog";
 import {
   type ChatSession,
@@ -794,12 +798,6 @@ export function AppShell({
   const navigateAgentBuilderChatRef = useRef<
     (sessionId: string) => void | Promise<void>
   >(() => {});
-  const navigateAgentBuilderAgentsRef = useRef<
-    (
-      personaId: string | null,
-      options?: AppNavigationUpdateOptions,
-    ) => void | Promise<void>
-  >(() => {});
   const automationBuilderLeaveActionRef =
     useRef<AutomationBuilderLeaveAction | null>(null);
   const pendingAutomationNavigationRef = useRef<{
@@ -1212,7 +1210,11 @@ export function AppShell({
     renderedLocation.view === "chat" && renderedLocation.sessionId
       ? sessions.find((session) => session.id === renderedLocation.sessionId)
       : undefined;
-  const rightRailLabel = isRightRailOpen
+  const isContextVisible = isContextPanelVisible(
+    activeSession,
+    isRightRailOpen,
+  );
+  const rightRailLabel = isContextVisible
     ? t("rightRail.close")
     : t("rightRail.open");
 
@@ -1666,6 +1668,9 @@ export function AppShell({
             }
             const latestSessionPatch = {
               intent: latestSessionAfterReady.intent,
+              agentBuilderOpen: latestSessionAfterReady.agentBuilderOpen,
+              agentBuilderContextState:
+                latestSessionAfterReady.agentBuilderContextState,
               targetAgentPath: latestSessionAfterReady.targetAgentPath,
               targetAgentSlug: latestSessionAfterReady.targetAgentSlug,
               targetAgentDraftState:
@@ -2018,8 +2023,6 @@ export function AppShell({
     },
     closeSession: (sessionId) => closeAgentBuilderSessionRef.current(sessionId),
     navigateChat: (sessionId) => navigateAgentBuilderChatRef.current(sessionId),
-    navigateAgents: (personaId, options) =>
-      navigateAgentBuilderAgentsRef.current(personaId, options),
   });
 
   const handleAutomationBuilderLeaveActionChange = useCallback(
@@ -3465,19 +3468,12 @@ export function AppShell({
     [homeSessionId, guardAppNavigation, setActiveSession, setChatActiveSession],
   );
 
-  const selectSessionDirect = useCallback(
-    (id: string) => {
-      activateChatSession(id);
-      const session = useChatSessionStore.getState().getSession(id);
-      if (session?.intent === "build-agent") {
-        setRightRailOpen(true);
-      }
-      clearSettingsSectionUrl();
-      setActiveView("chat");
-      void loadSessionMessages(id);
-    },
-    [setRightRailOpen],
-  );
+  const selectSessionDirect = useCallback((id: string) => {
+    activateChatSession(id);
+    clearSettingsSectionUrl();
+    setActiveView("chat");
+    void loadSessionMessages(id);
+  }, []);
   navigateAgentBuilderChatRef.current = selectSessionDirect;
 
   const handleSelectSession = useCallback(
@@ -3681,8 +3677,6 @@ export function AppShell({
     },
     [setActiveSession],
   );
-  navigateAgentBuilderAgentsRef.current = navigateAgentsDirect;
-
   const navigateAgents = useCallback(
     (personaId: string | null, options?: AppNavigationUpdateOptions) => {
       guardAppNavigation(() => {
@@ -3691,10 +3685,6 @@ export function AppShell({
     },
     [guardAppNavigation, navigateAgentsDirect],
   );
-
-  const closeAgentBuilder = useCallback(() => {
-    navigateAgents(null);
-  }, [navigateAgents]);
 
   const navigateAutomations = useCallback(
     (
@@ -3908,8 +3898,14 @@ export function AppShell({
       return;
     }
 
-    setRightRailOpen(!isRightRailOpen);
-  }, [activeSessionId, isRightRailOpen, setRightRailOpen]);
+    const nextOpen = !isContextVisible;
+    if (nextOpen && isAgentBuilderVisible(activeSession)) {
+      useChatSessionStore.getState().patchSession(activeSessionId, {
+        agentBuilderContextState: "userOpened",
+      });
+    }
+    setRightRailOpen(nextOpen);
+  }, [activeSession, activeSessionId, isContextVisible, setRightRailOpen]);
 
   const feedbackOpen = useFeedbackDialogStore((state) => state.open);
   const feedbackDraft = useFeedbackDialogStore((state) => state.draft);
@@ -4378,11 +4374,9 @@ export function AppShell({
           onGoBack: goBack,
           onGoForward: goForward,
           showRightRailToggle:
-            activeView === "chat" &&
-            Boolean(activeSessionId) &&
-            activeSession?.intent !== "build-agent",
+            activeView === "chat" && Boolean(activeSessionId),
           chromeInsets: topBarChromeInsets,
-          rightRailOpen: isRightRailOpen,
+          rightRailOpen: isContextVisible,
           rightRailLabel,
           onToggleRightRail: toggleRightRail,
           onFeedbackClick: isFeedbackEnabled ? handleFeedbackClick : undefined,
@@ -4495,8 +4489,6 @@ export function AppShell({
                 handleAutomationBuilderLeaveActionChange
               }
               onCreatePersona={agentBuilder.create}
-              onAgentBuilderSaved={agentBuilder.onSaved}
-              onAgentBuilderClose={closeAgentBuilder}
               onStartAgentBuilderSession={agentBuilder.start}
               onArchiveChat={handleArchiveChat}
               onCreateProject={openCreateProjectDialog}

@@ -9,6 +9,7 @@ const chatState = vi.hoisted(() => ({
     creationError?: string;
     clientSessionId?: string;
     intent?: "build-agent" | null;
+    agentBuilderOpen?: boolean;
     targetAgentPath?: string | null;
     targetAgentSlug?: string | null;
     targetAgentDraftState?: "preparing" | "failed" | null;
@@ -140,6 +141,7 @@ function addBuilderSession(
       id: "sess-1",
       title: "New agent",
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
       ...patch,
@@ -191,6 +193,7 @@ describe("agentBuilderSession", () => {
     expect(navigateChat).toHaveBeenCalledWith("sess-1");
     expect(mocks.patchSession).toHaveBeenNthCalledWith(1, "sess-1", {
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: "preparing",
@@ -210,6 +213,7 @@ describe("agentBuilderSession", () => {
     );
     expect(mocks.patchSession).toHaveBeenCalledWith("sess-1", {
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
       targetAgentDraftState: null,
@@ -217,8 +221,35 @@ describe("agentBuilderSession", () => {
     });
     expect(chatState.sessions[0]).toMatchObject({
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
+    });
+  });
+
+  it("keeps the builder closed when draft preparation finishes later", async () => {
+    let resolveDraft!: (source: typeof draftSource) => void;
+    mocks.createPersonaSource.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDraft = resolve;
+        }),
+    );
+
+    await startAgentBuilderSession({}, deps);
+    await flushDraftPreparation();
+    expect(mocks.createPersonaSource).toHaveBeenCalledTimes(1);
+
+    patchSessionState("sess-1", { agentBuilderOpen: false });
+    resolveDraft(draftSource);
+    await flushDraftPreparation();
+
+    expect(chatState.sessions[0]).toMatchObject({
+      intent: "build-agent",
+      agentBuilderOpen: false,
+      targetAgentPath: draftSource.path,
+      targetAgentSlug: "draft-sess-1",
+      targetAgentDraftState: null,
     });
   });
 
@@ -248,6 +279,7 @@ describe("agentBuilderSession", () => {
     expect(chatState.sessions[0]).toMatchObject({
       id: "local-session",
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentDraftState: "preparing",
     });
 
@@ -257,6 +289,7 @@ describe("agentBuilderSession", () => {
         title: "New agent",
         clientSessionId: "local-session",
         intent: "build-agent",
+        agentBuilderOpen: true,
         targetAgentPath: null,
         targetAgentSlug: null,
         targetAgentDraftState: "preparing",
@@ -274,6 +307,7 @@ describe("agentBuilderSession", () => {
     );
     expect(mocks.patchSession).toHaveBeenCalledWith("backend-session", {
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: "/Users/x/.agents/agents/draft-backend-session.md",
       targetAgentSlug: "draft-backend-session",
       targetAgentDraftState: null,
@@ -428,6 +462,7 @@ describe("agentBuilderSession", () => {
       {
         id: "sess-old",
         intent: "build-agent",
+        agentBuilderOpen: true,
         targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
         targetAgentSlug: "code-reviewer",
       },
@@ -440,11 +475,32 @@ describe("agentBuilderSession", () => {
     expect(navigateChat).toHaveBeenCalledWith("sess-old");
   });
 
+  it("reopens a closed Agent Builder when its existing session is reused", async () => {
+    chatState.sessions = [
+      {
+        id: "sess-old",
+        intent: "build-agent",
+        agentBuilderOpen: false,
+        targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
+        targetAgentSlug: "code-reviewer",
+      },
+    ];
+
+    const id = await startAgentBuilderSession({ slug: "code-reviewer" }, deps);
+
+    expect(id).toBe("sess-old");
+    expect(mocks.patchSession).toHaveBeenCalledWith("sess-old", {
+      agentBuilderOpen: true,
+    });
+    expect(navigateChat).toHaveBeenCalledWith("sess-old");
+  });
+
   it("reuses an existing in-memory builder session by source path", async () => {
     chatState.sessions = [
       {
         id: "sess-old",
         intent: "build-agent",
+        agentBuilderOpen: true,
         targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
         targetAgentSlug: "stale-slug",
       },
@@ -472,6 +528,7 @@ describe("agentBuilderSession", () => {
     expect(saveHandler).toHaveBeenCalledTimes(1);
     expect(chatState.sessions[0]).toMatchObject({
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
       targetAgentDraftState: null,
@@ -752,12 +809,54 @@ describe("agentBuilderSession", () => {
       "sess-1",
       expect.objectContaining({
         intent: "build-agent",
+        agentBuilderOpen: true,
         targetAgentPath: draftSource.path,
         targetAgentSlug: "draft-sess-1",
         targetAgentDraftState: null,
         targetAgentDraftSaved: true,
       }),
     );
+  });
+
+  it("startup reconciliation preserves an explicitly closed builder", async () => {
+    chatState.sessions = [
+      { id: "sess-1", intent: "build-agent", agentBuilderOpen: false },
+    ];
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+
+    await reconcileAgentBuilderSessions();
+
+    expect(chatState.sessions[0]).toMatchObject({
+      intent: "build-agent",
+      agentBuilderOpen: false,
+      targetAgentPath: draftSource.path,
+      targetAgentSlug: "draft-sess-1",
+      targetAgentDraftState: null,
+      targetAgentDraftSaved: true,
+    });
+  });
+
+  it("delayed reconciliation does not reopen a builder closed in the meantime", async () => {
+    let resolveSources!: (sources: (typeof draftSource)[]) => void;
+    mocks.listPersonaSources.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSources = resolve;
+        }),
+    );
+    chatState.sessions = [
+      { id: "sess-1", intent: "build-agent", agentBuilderOpen: true },
+    ];
+
+    const reconciliation = reconcileAgentBuilderSessions();
+    patchSessionState("sess-1", { agentBuilderOpen: false });
+    resolveSources([draftSource]);
+    await reconciliation;
+
+    expect(chatState.sessions[0]).toMatchObject({
+      agentBuilderOpen: false,
+      targetAgentPath: draftSource.path,
+    });
   });
 
   it("startup cleanup deletes only unchanged placeholder drafts for known-dead sessions", async () => {

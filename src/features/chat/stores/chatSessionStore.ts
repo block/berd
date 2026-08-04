@@ -75,6 +75,8 @@ export interface ChatSession {
   pinnedLoadState?: "loading" | "failed";
   clientSessionId?: string;
   intent?: "build-agent" | null;
+  agentBuilderOpen?: boolean;
+  agentBuilderContextState?: "autoClosed" | "userOpened";
   targetAgentPath?: string | null;
   targetAgentSlug?: string | null;
   targetAgentDraftState?: "preparing" | "failed" | null;
@@ -496,6 +498,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       updatedAt: now,
       messageCount: 0,
       intent: null,
+      agentBuilderOpen: false,
+      agentBuilderContextState: undefined,
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: null,
@@ -535,6 +539,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       creationState: "pending",
       clientSessionId: id,
       intent: null,
+      agentBuilderOpen: false,
+      agentBuilderContextState: undefined,
       targetAgentPath: null,
       targetAgentSlug: null,
       targetAgentDraftState: null,
@@ -567,6 +573,16 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         creationState: undefined,
         creationError: undefined,
         intent: patch.intent ?? existing.intent,
+        agentBuilderOpen:
+          patch.agentBuilderOpen !== undefined
+            ? patch.agentBuilderOpen
+            : existing.agentBuilderOpen,
+        agentBuilderContextState: Object.hasOwn(
+          patch,
+          "agentBuilderContextState",
+        )
+          ? patch.agentBuilderContextState
+          : existing.agentBuilderContextState,
         targetAgentPath:
           patch.targetAgentPath !== undefined
             ? patch.targetAgentPath

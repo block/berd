@@ -105,6 +105,7 @@ export async function saveDraftAgentSession(sessionId: string): Promise<void> {
     const slug = fileStem(freshSource.path) || deriveSlug(freshSource.name);
     useChatSessionStore.getState().patchSession(sessionId, {
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: freshSource.path,
       targetAgentSlug: slug,
       targetAgentDraftState: null,
@@ -114,6 +115,7 @@ export async function saveDraftAgentSession(sessionId: string): Promise<void> {
   } else {
     useChatSessionStore.getState().patchSession(sessionId, {
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentDraftSaved: true,
       updatedAt: new Date().toISOString(),
     });
@@ -129,6 +131,9 @@ export async function startAgentBuilderSession(
   if (path || slug) {
     const existing = findLiveBuilderSession({ path, slug });
     if (existing) {
+      useChatSessionStore.getState().patchSession(existing.id, {
+        agentBuilderOpen: true,
+      });
       await deps.navigateChat(existing.id);
       return existing.id;
     }
@@ -141,6 +146,7 @@ export async function startAgentBuilderSession(
       const target = await resolveExistingAgentTarget({ path, slug });
       useChatSessionStore.getState().patchSession(sessionId, {
         intent: "build-agent",
+        agentBuilderOpen: true,
         targetAgentPath: target.path,
         targetAgentSlug: target.slug,
         targetAgentDraftState: null,
@@ -161,6 +167,7 @@ export async function startAgentBuilderSession(
     findSessionByInitialId(sessionId)?.id ?? sessionId;
   useChatSessionStore.getState().patchSession(provisionalSessionId, {
     intent: "build-agent",
+    agentBuilderOpen: true,
     targetAgentPath: null,
     targetAgentSlug: null,
     targetAgentDraftState: "preparing",
@@ -199,6 +206,7 @@ async function prepareProvisionalDraftTarget(
 
   chatStore.patchSession(sessionId, {
     intent: "build-agent",
+    agentBuilderOpen: session.agentBuilderOpen,
     targetAgentPath: target.path,
     targetAgentSlug: target.slug,
     targetAgentDraftState: null,
@@ -505,6 +513,7 @@ export async function reconcileAgentBuilderSessions(): Promise<void> {
     if (session && !session.archivedAt) {
       chatStore.patchSession(builderSessionId, {
         intent: "build-agent",
+        agentBuilderOpen: session.agentBuilderOpen ?? true,
         targetAgentPath: source.path,
         targetAgentSlug: fileStem(source.path) || deriveSlug(source.name),
         targetAgentDraftState: null,
@@ -525,6 +534,8 @@ export function clearBuilderSessionState(sessionId: string): void {
 
   useChatSessionStore.getState().patchSession(sessionId, {
     intent: null,
+    agentBuilderOpen: false,
+    agentBuilderContextState: undefined,
     targetAgentPath: null,
     targetAgentSlug: null,
     targetAgentDraftState: null,

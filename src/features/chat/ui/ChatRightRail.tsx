@@ -11,16 +11,9 @@ import {
 import { useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import {
-  AgentBuilderRail,
-  AGENT_BUILDER_RAIL_WIDTH,
-} from "@/features/agents/ui/AgentBuilderRail";
-import {
-  recoverPendingDraftAgent,
-  setAgentBuilderSessionLocalEdits,
-  setAgentBuilderSessionSaveHandler,
-} from "@/features/agents/lib/agentBuilderSession";
-import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
+  AgentBuilderCapability,
+  AGENT_BUILDER_RAIL_DESIGN_WIDTH,
+} from "@/features/agents/capabilities/AgentBuilderCapability";
 import { cn } from "@/shared/lib/cn";
 import { hasOpenKeyboardOwningLayer } from "@/app/focus/FocusRegionProvider";
 import { TerminalCapability } from "@/features/terminal/capabilities/TerminalCapability";
@@ -29,10 +22,7 @@ import type { TerminalController } from "@/features/terminal/hooks/useTerminalCo
 import type { TerminalDockedPlacement } from "@/features/terminal/model/terminalState";
 import { useGitStateAutoRefreshOnChatSettled } from "../hooks/useGitStateAutoRefresh";
 import { useResizableRightRail } from "../hooks/useResizableRightRail";
-import {
-  useChatSessionStore,
-  type ChatSession,
-} from "../stores/chatSessionStore";
+import type { ChatSession } from "../stores/chatSessionStore";
 import {
   ChatContextPanel,
   useChatContextPanelCompactViewport,
@@ -51,8 +41,8 @@ interface ChatRightRailProps {
   builderColumnClassName?: string;
   builderColumnStyle?: CSSProperties;
   sessionWorkingDir?: string | null;
-  onDraftPromoted?: (source: AgentSourceEntry) => void;
-  onAgentBuilderClose?: () => void;
+  contextVisible: boolean;
+  agentBuilderReadOnly?: boolean;
   terminalOpen?: boolean;
   terminalController?: TerminalController;
   terminalDockPreview?: TerminalDockedPlacement | null;
@@ -79,8 +69,8 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       builderColumnClassName,
       builderColumnStyle,
       sessionWorkingDir,
-      onDraftPromoted,
-      onAgentBuilderClose,
+      contextVisible,
+      agentBuilderReadOnly = false,
       terminalOpen = false,
       terminalController,
       terminalDockPreview,
@@ -107,20 +97,23 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       },
       [ref],
     );
-    const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
     const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
       contextPanelLeftViewportOcclusionPx,
     );
     const previousCompactViewportRef = useRef(isContextPanelCompactViewport);
     const dockingTimerRef = useRef<number | null>(null);
     const [isDockingFromOverlay, setIsDockingFromOverlay] = useState(false);
-    const patchSession = useChatSessionStore((s) => s.patchSession);
+    const agentBuilderVisible =
+      !agentBuilderReadOnly &&
+      session?.intent === "build-agent" &&
+      session.agentBuilderOpen !== false;
     const railTerminalDocked =
       terminalController?.visible &&
       terminalController.placement.kind === "docked" &&
       terminalController.placement.region === "rightRail";
     const railPreviewActive = terminalDockPreview?.region === "rightRail";
-    const railHostVisible = isRightRailOpen || railPreviewActive;
+    const railHostVisible =
+      contextVisible || railTerminalDocked || railPreviewActive;
 
     useEffect(() => {
       return () => {
@@ -154,7 +147,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
 
     useEffect(() => {
       if (
-        !railHostVisible ||
+        !contextVisible ||
         !isContextPanelCompactViewport ||
         !onRequestCloseRightRail
       ) {
@@ -200,7 +193,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
     }, [
       isContextPanelCompactViewport,
       onRequestCloseRightRail,
-      railHostVisible,
+      contextVisible,
     ]);
     const { railWidth, isResizingRail, startRailResize } =
       useResizableRightRail();
@@ -210,209 +203,76 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       sessionWorkingDir,
       projectWorkingDirs: project?.workingDirs,
     });
-    const handleDraftPromoted = useCallback(
-      (source: AgentSourceEntry) => {
-        if (!session?.id) {
-          return;
-        }
-
-        patchSession(session.id, {
-          intent: null,
-          targetAgentPath: null,
-          targetAgentSlug: null,
-          targetAgentDraftState: null,
-        });
-        void listPersonas()
-          .then((personas) => {
-            useAgentStore.getState().setPersonas(personas);
-          })
-          .catch((error) => {
-            console.error("Failed to refresh agents after save:", error);
-          })
-          .finally(() => {
-            onDraftPromoted?.(source);
-          });
-      },
-      [onDraftPromoted, patchSession, session?.id],
-    );
-    const handleDraftTargetChanged = useCallback(
-      (target: { path: string; slug: string }) => {
-        if (!session?.id) {
-          return;
-        }
-
-        patchSession(session.id, {
-          targetAgentPath: target.path,
-          targetAgentSlug: target.slug,
-          targetAgentDraftState: null,
-        });
-      },
-      [patchSession, session?.id],
-    );
-    const handleBuilderBack = useCallback(
-      (source: AgentSourceEntry) => {
-        if (!session?.id) {
-          return;
-        }
-
-        patchSession(session.id, {
-          intent: null,
-          targetAgentPath: null,
-          targetAgentSlug: null,
-          targetAgentDraftState: null,
-        });
-        void listPersonas()
-          .then((personas) => {
-            useAgentStore.getState().setPersonas(personas);
-          })
-          .catch((error) => {
-            console.error(
-              "Failed to refresh agents after leaving edit:",
-              error,
-            );
-          })
-          .finally(() => {
-            onDraftPromoted?.(source);
-          });
-      },
-      [onDraftPromoted, patchSession, session?.id],
-    );
-    const handleRecoverMissingDraft = useCallback(async () => {
-      if (!session?.id) {
-        return;
-      }
-
-      patchSession(session.id, {
-        targetAgentDraftState: "preparing",
-      });
-
-      try {
-        const target = await recoverPendingDraftAgent(
-          session.id,
-          session.targetAgentPath,
-        );
-        patchSession(session.id, {
-          intent: "build-agent",
-          targetAgentPath: target.path,
-          targetAgentSlug: target.slug,
-          targetAgentDraftState: null,
-        });
-      } catch (error) {
-        patchSession(session.id, {
-          targetAgentDraftState: "failed",
-        });
-        throw error;
-      }
-    }, [patchSession, session?.id, session?.targetAgentPath]);
-    const handleLocalEditStateChange = useCallback(
-      (hasLocalEdits: boolean) => {
-        if (!session?.id) {
-          return;
-        }
-
-        setAgentBuilderSessionLocalEdits(session.id, hasLocalEdits);
-      },
-      [session?.id],
-    );
-    const handleSaveDraft = useCallback(
-      (saveDraft: (() => boolean | Promise<boolean>) | null) => {
-        if (!session?.id) {
-          return;
-        }
-
-        setAgentBuilderSessionSaveHandler(session.id, saveDraft);
-      },
-      [session?.id],
-    );
-
-    useEffect(() => {
-      if (session?.intent !== "build-agent" || !session.id) {
-        return;
-      }
-
-      return () => {
-        setAgentBuilderSessionSaveHandler(session.id, null);
-      };
-    }, [session?.id, session?.intent]);
-
-    if (session?.intent === "build-agent") {
-      const draftState =
-        session.targetAgentDraftState ??
-        (session.targetAgentPath ? null : "preparing");
-      return (
-        <div
-          className={cn(
-            "flex h-full shrink-0 justify-center overflow-hidden",
-            builderColumnClassName,
-          )}
-          style={
-            {
-              // Cap the column at half the main content width (viewport minus
-              // the docked sidebar occlusion) so narrow windows keep a usable
-              // chat column; on wide layouts this resolves to the rail's full
-              // design width, mirroring the old lg: breakpoint behavior.
-              width: `min(${AGENT_BUILDER_RAIL_WIDTH}px, calc((100vw - ${contextPanelLeftViewportOcclusionPx}px) / 2))`,
-              ...builderColumnStyle,
-            } as CSSProperties
-          }
-        >
-          <AgentBuilderRail
-            sessionId={session.id}
-            targetAgentPath={session.targetAgentPath ?? null}
-            targetAgentSlug={session.targetAgentSlug ?? null}
-            draftState={draftState}
-            onDraftPromoted={handleDraftPromoted}
-            onDraftTargetChanged={handleDraftTargetChanged}
-            onRecoverMissingDraft={handleRecoverMissingDraft}
-            onBack={handleBuilderBack}
-            onClose={onAgentBuilderClose}
-            onLocalEditStateChange={handleLocalEditStateChange}
-            onSaveDraftHandlerChange={handleSaveDraft}
-          />
-        </div>
-      );
-    }
-
     if (!session?.id) {
       return null;
     }
 
     const railPresentationVisible =
-      isRightRailOpen && !isContextPanelCompactViewport;
-    const previewingClosedRail = railPreviewActive && !isRightRailOpen;
+      (contextVisible || railTerminalDocked) && !isContextPanelCompactViewport;
+    const previewingClosedRail = railPreviewActive && !contextVisible;
     const railSurfaceFloating =
       railHostVisible &&
       (isContextPanelCompactViewport ||
         isDockingFromOverlay ||
         previewingClosedRail);
 
+    const agentBuilderWidth = `min(${AGENT_BUILDER_RAIL_DESIGN_WIDTH}px, calc((100vw - ${contextPanelLeftViewportOcclusionPx}px) / 2))`;
+    const contextRailWidth = railPresentationVisible ? railWidth : 0;
+
     return (
       <div
         ref={setRailRef}
         data-chat-right-rail
-        aria-hidden={!railHostVisible || undefined}
-        inert={!railHostVisible ? true : undefined}
+        aria-hidden={
+          !agentBuilderVisible && !railHostVisible ? true : undefined
+        }
+        inert={!agentBuilderVisible && !railHostVisible ? true : undefined}
         className={cn(
-          "relative flex h-full min-h-0 shrink-0 flex-col items-stretch",
+          "relative flex h-full min-h-0 shrink-0 items-stretch",
+          agentBuilderVisible && "gap-[var(--spacing-app-panel-gutter-inline)]",
           isContextPanelCompactViewport ||
             isDockingFromOverlay ||
             previewingClosedRail
             ? "overflow-visible"
             : "overflow-hidden",
-          !railHostVisible && "invisible pointer-events-none",
+          !agentBuilderVisible &&
+            !railHostVisible &&
+            "invisible pointer-events-none",
         )}
         style={{
-          width: railPresentationVisible ? railWidth : 0,
+          width:
+            agentBuilderVisible && contextRailWidth > 0
+              ? `calc(${agentBuilderWidth} + ${contextRailWidth}px + var(--spacing-app-panel-gutter-inline))`
+              : agentBuilderVisible
+                ? agentBuilderWidth
+                : contextRailWidth,
           transition:
             isResizingRail || reflowDuration === 0
               ? "none"
               : `width ${reflowDuration}ms cubic-bezier(0.22, 1, 0.36, 1)`,
         }}
       >
+        {agentBuilderVisible ? (
+          <div
+            className={cn(
+              "flex h-full shrink-0 justify-center overflow-hidden",
+              builderColumnClassName,
+            )}
+            style={
+              {
+                width: agentBuilderWidth,
+                ...builderColumnStyle,
+              } as CSSProperties
+            }
+          >
+            <AgentBuilderCapability session={session} />
+          </div>
+        ) : null}
         <div
           data-right-rail-surface
           className={cn(
-            "flex min-h-0 w-full flex-col items-stretch",
+            "flex min-h-0 shrink-0 flex-col items-stretch",
+            !railHostVisible && "invisible pointer-events-none",
             railSurfaceFloating &&
               "absolute z-40 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))]",
             isContextPanelCompactViewport &&
@@ -422,7 +282,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
           style={
             railSurfaceFloating
               ? { width: `min(${railWidth}px, calc(100vw - 1.5rem))` }
-              : undefined
+              : { width: contextRailWidth }
           }
         >
           {railPresentationVisible ? (
@@ -438,7 +298,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
           ) : null}
           <ChatContextPanel
             activeSessionId={session.id}
-            isVisible={railHostVisible}
+            isVisible={contextVisible || railPreviewActive}
             project={project}
             sessionWorkingDir={sessionWorkingDir}
             terminalOpen={terminalOpen}

@@ -14,6 +14,21 @@ describe("composeBuilderSendOptions", () => {
     expect(out.assistantPrompt).toBe("from another skill");
   });
 
+  it("does not inject builder instructions after the capability closes", () => {
+    const options = { assistantPrompt: "from another skill" };
+
+    const out = composeBuilderSendOptions(
+      {
+        intent: "build-agent",
+        agentBuilderOpen: false,
+        targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
+      },
+      options,
+    );
+
+    expect(out).toBe(options);
+  });
+
   it("prepends builder prompt for builder sessions", () => {
     const out = composeBuilderSendOptions(
       {

@@ -310,7 +310,6 @@
   },
   "input": {
     "ariaLabel": "Entrada de mensaje del chat",
-    "agentBuilderPlaceholder": "Describe tu agente.",
     "placeholder": "Chatea con {{agent}}, @ para agentes/archivos o / para habilidades"
   },
   "loading": {
@@ -437,7 +436,6 @@
     "voiceConversationRequiresGoose": "La conversación por voz requiere Goose"
   },
   "emptyState": {
-    "buildAgentPrompt": "¿Qué quieres que haga tu agente?",
     "startAConversation": "Inicia una conversación"
   },
   "skeleton": {

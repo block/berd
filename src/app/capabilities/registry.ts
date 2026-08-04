@@ -1,7 +1,9 @@
 import type { CapabilityDescriptor } from "./types";
+import { agentBuilderCapabilityDescriptor } from "@/features/agents/capabilities/agentBuilderCapabilityDescriptor";
 import { terminalCapabilityDescriptor } from "@/features/terminal/capabilities/terminalCapabilityDescriptor";
 
 export const CAPABILITY_REGISTRY = [
+  agentBuilderCapabilityDescriptor,
   terminalCapabilityDescriptor,
 ] as const satisfies readonly CapabilityDescriptor[];
 

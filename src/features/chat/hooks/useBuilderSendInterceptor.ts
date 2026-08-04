@@ -16,10 +16,17 @@ const SKILL_BODY = resolveAgentBuilderSkillBody();
 const sentStaticPromptByPath = new Set<string>();
 
 export function composeBuilderSendOptions(
-  session: Pick<ChatSession, "intent" | "targetAgentPath"> | null | undefined,
+  session:
+    | Pick<ChatSession, "intent" | "agentBuilderOpen" | "targetAgentPath">
+    | null
+    | undefined,
   options: ChatSendOptions = {},
 ): ChatSendOptions {
-  if (session?.intent !== "build-agent" || !session.targetAgentPath) {
+  if (
+    session?.intent !== "build-agent" ||
+    session.agentBuilderOpen === false ||
+    !session.targetAgentPath
+  ) {
     return options;
   }
 
@@ -51,7 +58,10 @@ export function composeBuilderSendOptions(
 }
 
 export function useBuilderSendInterceptor(
-  session: Pick<ChatSession, "intent" | "targetAgentPath"> | null | undefined,
+  session:
+    | Pick<ChatSession, "intent" | "agentBuilderOpen" | "targetAgentPath">
+    | null
+    | undefined,
   baseSend: ChatInputSendHandler,
 ): ChatInputSendHandler {
   return useCallback(

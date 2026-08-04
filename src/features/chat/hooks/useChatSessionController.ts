@@ -1848,7 +1848,10 @@ export function useChatSessionController({
       overridePersona?: { id: string; name?: string },
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
-      sessionOverride?: Pick<ChatSession, "intent" | "targetAgentPath">,
+      sessionOverride?: Pick<
+        ChatSession,
+        "intent" | "agentBuilderOpen" | "targetAgentPath"
+      >,
       options: { recordDraftSubmission?: boolean } = {},
     ) => {
       const builderSendOptions = composeBuilderSendOptions(
@@ -1988,6 +1991,10 @@ export function useChatSessionController({
           currentSession.intent === "build-agent" &&
           currentSession.targetAgentPath
         ) {
+          if (currentSession.agentBuilderOpen !== true) {
+            chatSessions.patchSession(sessionId, { agentBuilderOpen: true });
+            return { ...currentSession, agentBuilderOpen: true };
+          }
           return currentSession;
         }
 
@@ -2022,6 +2029,7 @@ export function useChatSessionController({
 
         const patch = {
           intent: "build-agent" as const,
+          agentBuilderOpen: true,
           targetAgentPath: target.path,
           targetAgentSlug: target.slug,
         };
@@ -2071,7 +2079,8 @@ export function useChatSessionController({
       }
 
       if (
-        session?.intent !== "build-agent" &&
+        (session?.intent !== "build-agent" ||
+          session.agentBuilderOpen === false) &&
         isAgentBuilderSkillSendOptions(sendOptions)
       ) {
         return (async () => {
@@ -2249,6 +2258,7 @@ export function useChatSessionController({
       queue,
       readOnly,
       recordDraftPreservingSubmission,
+      session?.agentBuilderOpen,
       session?.intent,
       sessionId,
       selectedPersona,
@@ -2311,16 +2321,14 @@ export function useChatSessionController({
       }
 
       void (async () => {
-        const builderSession =
-          session?.intent !== "build-agent" &&
-          isAgentBuilderSkillSendOptions(sendOptions)
-            ? await ensureCurrentSessionIsAgentBuilder()
-            : undefined;
-        if (
-          isAgentBuilderSkillSendOptions(sendOptions) &&
-          session?.intent !== "build-agent" &&
-          !builderSession
-        ) {
+        const needsBuilderActivation =
+          (session?.intent !== "build-agent" ||
+            session.agentBuilderOpen === false) &&
+          isAgentBuilderSkillSendOptions(sendOptions);
+        const builderSession = needsBuilderActivation
+          ? await ensureCurrentSessionIsAgentBuilder()
+          : undefined;
+        if (needsBuilderActivation && !builderSession) {
           useChatStore.getState().setDraft(stateSessionId, text);
           resolve?.(false);
           return;
@@ -2346,6 +2354,7 @@ export function useChatSessionController({
     readOnly,
     selectedPersona,
     sendWithAutoCompact,
+    session?.agentBuilderOpen,
     session?.intent,
     stateSessionId,
     workspaceContextReady,
@@ -2379,12 +2388,13 @@ export function useChatSessionController({
   const storedSelectedSkills = sessionId
     ? sessionSkillDrafts
     : pendingSkillDrafts;
-  const selectedSkills =
-    session?.intent === "build-agent"
-      ? ensureAgentBuilderSkillDraft(storedSelectedSkills)
-      : storedSelectedSkills;
+  const selectedSkills = storedSelectedSkills;
   const hasSelectedAgentBuilderSkill =
     hasAgentBuilderSkillDraft(selectedSkills);
+  const agentBuilderSkillSelectionRef = useRef({
+    sessionId: null as string | null,
+    selected: false,
+  });
   const handleDraftChange = useCallback(
     (text: string) => {
       if (pendingDraftStoreWriteRef.current?.sessionId !== stateSessionId) {
@@ -2436,16 +2446,9 @@ export function useChatSessionController({
   ]);
   const handleSkillsChange = useCallback(
     (skills: typeof selectedSkills) => {
-      useChatStore
-        .getState()
-        .setSkillDrafts(
-          stateSessionId,
-          session?.intent === "build-agent"
-            ? ensureAgentBuilderSkillDraft(skills)
-            : skills,
-        );
+      useChatStore.getState().setSkillDrafts(stateSessionId, skills);
     },
-    [session?.intent, stateSessionId],
+    [stateSessionId],
   );
   const handleDraftAttachmentsChange = useCallback(
     (attachments: ChatAttachmentDraft[]) => {
@@ -2455,10 +2458,24 @@ export function useChatSessionController({
   );
 
   useEffect(() => {
+    const previousSelection = agentBuilderSkillSelectionRef.current;
+    const selectionBelongsToCurrentSession =
+      previousSelection.sessionId === stateSessionId;
+    const skillWasJustSelected =
+      hasSelectedAgentBuilderSkill &&
+      (selectionBelongsToCurrentSession
+        ? !previousSelection.selected
+        : session?.intent !== "build-agent");
+
+    agentBuilderSkillSelectionRef.current = {
+      sessionId: stateSessionId,
+      selected: hasSelectedAgentBuilderSkill,
+    };
+
     if (
       !sessionId ||
-      session?.intent === "build-agent" ||
-      !hasSelectedAgentBuilderSkill
+      !skillWasJustSelected ||
+      (session?.intent === "build-agent" && session.agentBuilderOpen !== false)
     ) {
       return;
     }
@@ -2482,6 +2499,7 @@ export function useChatSessionController({
   }, [
     ensureCurrentSessionIsAgentBuilder,
     hasSelectedAgentBuilderSkill,
+    session?.agentBuilderOpen,
     session?.intent,
     sessionId,
     stateSessionId,

@@ -1,0 +1,168 @@
+import { useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import {
+  clearBuilderSessionState,
+  recoverPendingDraftAgent,
+  saveDraftAgentSession,
+  setAgentBuilderSessionLocalEdits,
+  setAgentBuilderSessionSaveHandler,
+} from "@/features/agents/lib/agentBuilderSession";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import {
+  AgentBuilderRail,
+  AGENT_BUILDER_RAIL_WIDTH as AGENT_BUILDER_RAIL_INTERNAL_WIDTH,
+} from "@/features/agents/ui/AgentBuilderRail";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
+
+/** Design width hosts should use when laying out the chat-rail render mode. */
+export const AGENT_BUILDER_RAIL_DESIGN_WIDTH =
+  AGENT_BUILDER_RAIL_INTERNAL_WIDTH;
+
+export interface AgentBuilderCapabilityProps {
+  session: ChatSession;
+  className?: string;
+  onDraftPromoted?: (source: AgentSourceEntry) => void;
+}
+
+export function AgentBuilderCapability({
+  session,
+  className,
+  onDraftPromoted,
+}: AgentBuilderCapabilityProps) {
+  const { t } = useTranslation("agents");
+  const patchSession = useChatSessionStore((state) => state.patchSession);
+
+  const refreshPersonas = useCallback(async () => {
+    const personas = await listPersonas();
+    useAgentStore.getState().setPersonas(personas);
+  }, []);
+
+  const completeBuilder = useCallback(
+    (source: AgentSourceEntry, refreshErrorMessage: string) => {
+      clearBuilderSessionState(session.id);
+
+      void refreshPersonas()
+        .catch((error) => {
+          console.error(refreshErrorMessage, error);
+        })
+        .finally(() => {
+          onDraftPromoted?.(source);
+        });
+    },
+    [onDraftPromoted, refreshPersonas, session.id],
+  );
+
+  const handleDraftPromoted = useCallback(
+    (source: AgentSourceEntry) => {
+      completeBuilder(source, "Failed to refresh agents after save:");
+    },
+    [completeBuilder],
+  );
+
+  const handleBuilderBack = useCallback(
+    (source: AgentSourceEntry) => {
+      completeBuilder(source, "Failed to refresh agents after leaving edit:");
+    },
+    [completeBuilder],
+  );
+
+  const handleDraftTargetChanged = useCallback(
+    (target: { path: string; slug: string }) => {
+      patchSession(session.id, {
+        targetAgentPath: target.path,
+        targetAgentSlug: target.slug,
+        targetAgentDraftState: null,
+      });
+    },
+    [patchSession, session.id],
+  );
+
+  const handleRecoverMissingDraft = useCallback(async () => {
+    patchSession(session.id, {
+      targetAgentDraftState: "preparing",
+    });
+
+    try {
+      const target = await recoverPendingDraftAgent(
+        session.id,
+        session.targetAgentPath,
+      );
+      patchSession(session.id, {
+        intent: "build-agent",
+        agentBuilderOpen: true,
+        targetAgentPath: target.path,
+        targetAgentSlug: target.slug,
+        targetAgentDraftState: null,
+      });
+    } catch (error) {
+      patchSession(session.id, {
+        targetAgentDraftState: "failed",
+      });
+      throw error;
+    }
+  }, [patchSession, session.id, session.targetAgentPath]);
+
+  const handleLocalEditStateChange = useCallback(
+    (hasLocalEdits: boolean) => {
+      setAgentBuilderSessionLocalEdits(session.id, hasLocalEdits);
+    },
+    [session.id],
+  );
+
+  const handleSaveDraftHandlerChange = useCallback(
+    (saveDraft: (() => boolean | Promise<boolean>) | null) => {
+      setAgentBuilderSessionSaveHandler(session.id, saveDraft);
+    },
+    [session.id],
+  );
+
+  const handleClose = useCallback(async () => {
+    try {
+      await saveDraftAgentSession(session.id);
+    } catch (error) {
+      console.error("Failed to save agent draft before closing:", error);
+      toast.error(t("builderRail.saveError"));
+      return;
+    }
+
+    const closePatch: Partial<ChatSession> = {
+      agentBuilderOpen: false,
+      agentBuilderContextState: undefined,
+    };
+    patchSession(session.id, closePatch);
+  }, [patchSession, session.id, t]);
+
+  useEffect(() => {
+    if (session.intent !== "build-agent") {
+      return;
+    }
+
+    return () => {
+      setAgentBuilderSessionSaveHandler(session.id, null);
+    };
+  }, [session.id, session.intent]);
+
+  const draftState =
+    session.targetAgentDraftState ??
+    (session.targetAgentPath ? null : "preparing");
+
+  return (
+    <AgentBuilderRail
+      className={className}
+      sessionId={session.id}
+      targetAgentPath={session.targetAgentPath ?? null}
+      targetAgentSlug={session.targetAgentSlug ?? null}
+      draftState={draftState}
+      onDraftPromoted={handleDraftPromoted}
+      onDraftTargetChanged={handleDraftTargetChanged}
+      onRecoverMissingDraft={handleRecoverMissingDraft}
+      onBack={handleBuilderBack}
+      onClose={handleClose}
+      onLocalEditStateChange={handleLocalEditStateChange}
+      onSaveDraftHandlerChange={handleSaveDraftHandlerChange}
+    />
+  );
+}

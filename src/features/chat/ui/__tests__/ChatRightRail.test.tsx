@@ -16,9 +16,16 @@ const mocks = vi.hoisted(() => ({
   recoverDraftAgent: vi.fn(),
   setAgentBuilderSessionLocalEdits: vi.fn(),
   setAgentBuilderSessionSaveHandler: vi.fn(),
+  saveDraftAgentSession: vi.fn(),
+  clearBuilderSessionState: vi.fn(),
+  toastError: vi.fn(),
   rightRailOpen: false,
   compactViewport: false,
   reducedMotion: false,
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => mocks.toastError(...args) },
 }));
 
 vi.mock("motion/react", async (importOriginal) => {
@@ -91,12 +98,16 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
 }));
 
 vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
+  clearBuilderSessionState: (...args: unknown[]) =>
+    mocks.clearBuilderSessionState(...args),
   recoverPendingDraftAgent: (...args: unknown[]) =>
     mocks.recoverDraftAgent(...args),
   setAgentBuilderSessionLocalEdits: (...args: unknown[]) =>
     mocks.setAgentBuilderSessionLocalEdits(...args),
   setAgentBuilderSessionSaveHandler: (...args: unknown[]) =>
     mocks.setAgentBuilderSessionSaveHandler(...args),
+  saveDraftAgentSession: (...args: unknown[]) =>
+    mocks.saveDraftAgentSession(...args),
 }));
 
 vi.mock("@/features/agents/stores/agentStore", () => ({
@@ -163,11 +174,16 @@ describe("ChatRightRail", () => {
     });
     mocks.setAgentBuilderSessionLocalEdits.mockReset();
     mocks.setAgentBuilderSessionSaveHandler.mockReset();
+    mocks.saveDraftAgentSession.mockReset();
+    mocks.saveDraftAgentSession.mockResolvedValue(undefined);
+    mocks.clearBuilderSessionState.mockReset();
+    mocks.toastError.mockReset();
   });
 
-  it("renders AgentBuilderRail for build-agent sessions", () => {
+  it("renders Agent Builder without opening Context", () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -191,9 +207,144 @@ describe("ChatRightRail", () => {
     });
   });
 
+  it("lets Context and a rail-docked Terminal coexist with Agent Builder", () => {
+    mocks.rightRailOpen = true;
+    const terminalController = {
+      visible: true,
+      expanded: true,
+      placement: {
+        kind: "docked",
+        region: "rightRail",
+        slot: "belowContext",
+        size: { height: 300 },
+      },
+    } as never;
+
+    render(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            agentBuilderOpen: true,
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        terminalController={terminalController}
+        terminalRootRef={{ current: null }}
+      />,
+    );
+
+    expect(screen.getByTestId("agent-builder-rail")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Context content" }),
+    ).toBeVisible();
+    expect(screen.getByTestId("rail-terminal")).toBeVisible();
+  });
+
+  it("overlays Context and its Terminal beside Agent Builder in compact layouts", () => {
+    mocks.rightRailOpen = true;
+    mocks.compactViewport = true;
+    const terminalController = {
+      visible: true,
+      expanded: true,
+      placement: {
+        kind: "docked",
+        region: "rightRail",
+        slot: "belowContext",
+        size: { height: 300 },
+      },
+    } as never;
+
+    const { container } = render(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            agentBuilderOpen: true,
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        terminalController={terminalController}
+        terminalRootRef={{ current: null }}
+      />,
+    );
+
+    expect(screen.getByTestId("agent-builder-rail")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Context content" }),
+    ).toHaveAttribute("data-elevated", "true");
+    expect(screen.getByTestId("rail-terminal")).toBeVisible();
+    expect(container.querySelector("[data-right-rail-surface]")).toHaveClass(
+      "absolute",
+    );
+  });
+
+  it("keeps a rail-docked Terminal visible when Context is closed", () => {
+    const terminalController = {
+      visible: true,
+      expanded: true,
+      placement: {
+        kind: "docked",
+        region: "rightRail",
+        slot: "belowContext",
+        size: { height: 300 },
+      },
+    } as never;
+
+    render(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            agentBuilderOpen: true,
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        terminalController={terminalController}
+        terminalRootRef={{ current: null }}
+      />,
+    );
+
+    expect(screen.getByTestId("agent-builder-rail")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Context content" }),
+    ).toBeNull();
+    expect(screen.getByTestId("rail-terminal")).toBeVisible();
+  });
+
+  it("does not mount an editable Agent Builder in read-only chat windows", () => {
+    render(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            agentBuilderOpen: true,
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        agentBuilderReadOnly
+      />,
+    );
+
+    expect(screen.queryByTestId("agent-builder-rail")).toBeNull();
+  });
+
   it("renders AgentBuilderRail for provisional build-agent sessions", () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -221,6 +372,7 @@ describe("ChatRightRail", () => {
   it("applies builder column entrance props to the build-agent rail shell", () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -249,6 +401,7 @@ describe("ChatRightRail", () => {
     mocks.rightRailOpen = true;
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={{ id: "s2", intent: null } as never}
         project={null}
         sessionWorkingDir={null}
@@ -265,7 +418,10 @@ describe("ChatRightRail", () => {
     mocks.rightRailOpen = true;
     mocks.compactViewport = true;
     const { container } = render(
-      <ChatRightRail session={{ id: "s2", intent: null } as never} />,
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={{ id: "s2", intent: null } as never}
+      />,
     );
 
     expect(container.querySelector("[data-chat-right-rail]")).toHaveStyle({
@@ -300,6 +456,7 @@ describe("ChatRightRail", () => {
     } as never;
     const { container } = render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={{ id: "s2", intent: null } as never}
         terminalController={terminalController}
         terminalRootRef={{ current: null }}
@@ -323,6 +480,7 @@ describe("ChatRightRail", () => {
     mocks.compactViewport = false;
     const { container } = render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={{ id: "s2", intent: null } as never}
         terminalDockPreview={{
           kind: "docked",
@@ -357,11 +515,19 @@ describe("ChatRightRail", () => {
     mocks.compactViewport = true;
     mocks.reducedMotion = true;
     const { container, rerender } = render(
-      <ChatRightRail session={{ id: "s2", intent: null } as never} />,
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={{ id: "s2", intent: null } as never}
+      />,
     );
 
     mocks.compactViewport = false;
-    rerender(<ChatRightRail session={{ id: "s2", intent: null } as never} />);
+    rerender(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={{ id: "s2", intent: null } as never}
+      />,
+    );
 
     expect(container.querySelector("[data-chat-right-rail]")).toHaveStyle({
       transition: "none",
@@ -376,11 +542,19 @@ describe("ChatRightRail", () => {
     mocks.rightRailOpen = true;
     mocks.compactViewport = true;
     const { container, rerender } = render(
-      <ChatRightRail session={{ id: "s2", intent: null } as never} />,
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={{ id: "s2", intent: null } as never}
+      />,
     );
 
     mocks.compactViewport = false;
-    rerender(<ChatRightRail session={{ id: "s2", intent: null } as never} />);
+    rerender(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={{ id: "s2", intent: null } as never}
+      />,
+    );
 
     const rail = container.querySelector("[data-chat-right-rail]");
     const surface = container.querySelector("[data-right-rail-surface]");
@@ -396,7 +570,7 @@ describe("ChatRightRail", () => {
     vi.useRealTimers();
   });
 
-  it("hides a rail-docked terminal when the rail closes without changing its controller", () => {
+  it("keeps a rail-docked terminal visible when Context closes", () => {
     const terminalController = {
       visible: true,
       expanded: true,
@@ -411,19 +585,21 @@ describe("ChatRightRail", () => {
 
     const { rerender } = render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={{ id: "s2", intent: null } as never}
         terminalController={terminalController}
         terminalRootRef={terminalRootRef}
       />,
     );
-    expect(screen.getByTestId("rail-terminal")).toBeInTheDocument();
+    expect(screen.getByTestId("rail-terminal")).toBeVisible();
     expect(
-      screen.getByTestId("rail-terminal").closest("[data-chat-right-rail]"),
-    ).toHaveAttribute("aria-hidden", "true");
+      screen.queryByRole("button", { name: "Context content" }),
+    ).toBeNull();
 
     mocks.rightRailOpen = true;
     rerender(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={{ id: "s2", intent: null } as never}
         terminalController={terminalController}
         terminalRootRef={terminalRootRef}
@@ -432,13 +608,13 @@ describe("ChatRightRail", () => {
     expect(screen.getByTestId("rail-terminal")).toBeVisible();
   });
 
-  it("refreshes agents and notifies the app shell when a draft is promoted", async () => {
-    const onDraftPromoted = vi.fn();
+  it("refreshes agents and closes the capability when a draft is promoted", async () => {
     const personas = [{ id: "/path", displayName: "Snark" }];
     mocks.listPersonas.mockResolvedValue(personas);
 
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -447,27 +623,21 @@ describe("ChatRightRail", () => {
             targetAgentSlug: "draft-s1",
           } as never
         }
-        onDraftPromoted={onDraftPromoted}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "promote" }));
 
     await waitFor(() => {
-      expect(mocks.patchSession).toHaveBeenCalledWith("s1", {
-        intent: null,
-        targetAgentPath: null,
-        targetAgentSlug: null,
-        targetAgentDraftState: null,
-      });
+      expect(mocks.clearBuilderSessionState).toHaveBeenCalledWith("s1");
       expect(mocks.setPersonas).toHaveBeenCalledWith(personas);
-      expect(onDraftPromoted).toHaveBeenCalledWith({ path: "/path" });
     });
   });
 
   it("patches only chat session target fields when the draft target moves", () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -491,6 +661,7 @@ describe("ChatRightRail", () => {
   it("recovers a missing draft by pre-seeding and patching the chat session", async () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -511,6 +682,7 @@ describe("ChatRightRail", () => {
       expect(mocks.recoverDraftAgent).toHaveBeenCalledWith("s1", "/path");
       expect(mocks.patchSession).toHaveBeenCalledWith("s1", {
         intent: "build-agent",
+        agentBuilderOpen: true,
         targetAgentPath: "/Users/x/.agents/agents/recovered.md",
         targetAgentSlug: "recovered",
         targetAgentDraftState: null,
@@ -518,10 +690,10 @@ describe("ChatRightRail", () => {
     });
   });
 
-  it("notifies the parent when the builder close action fires", () => {
-    const onAgentBuilderClose = vi.fn();
+  it("saves and closes the capability without archiving the chat", async () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -530,18 +702,61 @@ describe("ChatRightRail", () => {
             targetAgentSlug: "draft-s1",
           } as never
         }
-        onAgentBuilderClose={onAgentBuilderClose}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "close" }));
 
-    expect(onAgentBuilderClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mocks.saveDraftAgentSession).toHaveBeenCalledWith("s1");
+      expect(mocks.patchSession).toHaveBeenCalledWith("s1", {
+        agentBuilderOpen: false,
+        agentBuilderContextState: undefined,
+      });
+    });
+  });
+
+  it("keeps Agent Builder open and reports an error when closing cannot save", async () => {
+    mocks.saveDraftAgentSession.mockRejectedValue(new Error("disk full"));
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    render(
+      <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            agentBuilderOpen: true,
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "close" }));
+
+    await waitFor(() => {
+      expect(mocks.saveDraftAgentSession).toHaveBeenCalledWith("s1");
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Save failed. Your edits are still here.",
+      );
+    });
+    expect(mocks.patchSession).not.toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ agentBuilderOpen: false }),
+    );
+    expect(screen.getByTestId("agent-builder-rail")).toBeVisible();
+    consoleError.mockRestore();
   });
 
   it("tracks local edit state for the builder session", () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",
@@ -564,6 +779,7 @@ describe("ChatRightRail", () => {
   it("registers a save handler for the builder session", () => {
     render(
       <ChatRightRail
+        contextVisible={mocks.rightRailOpen}
         session={
           {
             id: "s1",

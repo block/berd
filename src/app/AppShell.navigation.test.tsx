@@ -3115,7 +3115,7 @@ describe("AppShell global navigation", () => {
     expect(savedSession?.updatedAt).toEqual(expect.any(String));
   });
 
-  it("opens the builder rail when continuing a saved agent draft", async () => {
+  it("opens Agent Builder without also opening Context", async () => {
     const user = userEvent.setup();
     useChatSessionStore.setState({
       sessions: [
@@ -3148,7 +3148,7 @@ describe("AppShell global navigation", () => {
       id: "session-1",
       intent: "build-agent",
     });
-    expect(useChatSessionStore.getState().isRightRailOpen).toBe(true);
+    expect(useChatSessionStore.getState().isRightRailOpen).toBe(false);
   });
 
   it("prompts before leaving unsaved automation builder changes", async () => {

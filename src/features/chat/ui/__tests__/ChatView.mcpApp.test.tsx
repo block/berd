@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
   setRightRailOpen: vi.fn(),
+  patchSession: vi.fn(),
   handleSend: vi.fn(() => true),
   handleDraftChange: vi.fn(),
   queueTerminalCommand: vi.fn(),
@@ -178,6 +179,7 @@ vi.mock("../ChatRightRail", () => ({
     session?: ChatSession | null;
     onToggleTerminal?: () => void;
     terminalOpen?: boolean;
+    contextVisible?: boolean;
   }) => {
     mocks.chatRightRailSpy(props);
     if (!props.session) {
@@ -252,6 +254,7 @@ vi.mock("../../stores/chatSessionStore", () => ({
       activeWorkspaceBySession: mocks.activeWorkspaceBySession,
       isRightRailOpen: mocks.isRightRailOpen,
       setRightRailOpen: mocks.setRightRailOpen,
+      patchSession: mocks.patchSession,
     }),
 }));
 
@@ -367,6 +370,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
     mocks.setRightRailOpen.mockClear();
+    mocks.patchSession.mockClear();
     mocks.handleSend.mockClear();
     mocks.handleDraftChange.mockClear();
     mocks.queueTerminalCommand.mockClear();
@@ -684,7 +688,7 @@ describe("ChatView MCP app messaging", () => {
     expect(screen.queryByTestId("conversation-empty-avatar")).toBeNull();
   });
 
-  it("does not render the persona avatar in an empty agent-builder session", () => {
+  it("keeps the canonical empty conversation presentation when Agent Builder is open", () => {
     const persona = {
       id: "gloopy",
       displayName: "Gloopy",
@@ -698,6 +702,7 @@ describe("ChatView MCP app messaging", () => {
       updatedAt: "2026-05-27T00:00:00.000Z",
       messageCount: 0,
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: "/Users/test/.agents/agents/draft.md",
       targetAgentSlug: "draft",
     } satisfies ChatSession;
@@ -709,8 +714,11 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
-    expect(screen.queryByTestId("conversation-empty-avatar")).toBeNull();
-    expect(screen.getByText("emptyState.buildAgentPrompt")).toBeTruthy();
+    expect(screen.getByTestId("conversation-empty-avatar")).toHaveAttribute(
+      "data-persona-id",
+      "gloopy",
+    );
+    expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
   });
 
   it("forces the loading skeleton placeholder while history loads", () => {
@@ -964,7 +972,8 @@ describe("ChatView MCP app messaging", () => {
     ).toBe("draft stays put");
   });
 
-  it("reserves the builder rail from the active session before controller hydration", () => {
+  it("closes Context once when Agent Builder opens", () => {
+    mocks.isRightRailOpen = true;
     const activeSession = {
       id: "session-1",
       title: "Build agent",
@@ -972,6 +981,56 @@ describe("ChatView MCP app messaging", () => {
       updatedAt: "2026-05-27T00:00:00.000Z",
       messageCount: 0,
       intent: "build-agent",
+      agentBuilderOpen: true,
+      targetAgentPath: "/Users/test/.agents/agents/draft.md",
+      targetAgentSlug: "draft",
+    } satisfies ChatSession;
+
+    const firstMount = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    const firstRailProps = mocks.chatRightRailSpy.mock.calls.at(-1)?.[0] as {
+      contextVisible?: boolean;
+    };
+    expect(firstRailProps.contextVisible).toBe(false);
+    expect(mocks.patchSession).toHaveBeenCalledTimes(1);
+    expect(mocks.patchSession).toHaveBeenCalledWith("session-1", {
+      agentBuilderContextState: "autoClosed",
+    });
+    expect(mocks.setRightRailOpen).not.toHaveBeenCalledWith(false);
+
+    firstMount.unmount();
+    mocks.chatRightRailSpy.mockClear();
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={{
+          ...activeSession,
+          agentBuilderContextState: "userOpened",
+        }}
+      />,
+    );
+
+    const remountedRailProps = mocks.chatRightRailSpy.mock.calls.at(
+      -1,
+    )?.[0] as {
+      contextVisible?: boolean;
+    };
+    expect(remountedRailProps.contextVisible).toBe(true);
+    expect(mocks.patchSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("reserves the builder rail without changing the canonical composer", () => {
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: "/Users/test/.agents/agents/draft.md",
       targetAgentSlug: "draft",
     } satisfies ChatSession;
@@ -987,11 +1046,10 @@ describe("ChatView MCP app messaging", () => {
 
     const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
       controls?: unknown;
+      placeholder?: string;
     };
-    expect(chatInputProps.controls).toEqual({
-      agentModelPicker: false,
-      projectPicker: false,
-    });
+    expect(chatInputProps.controls).toEqual({ skills: false });
+    expect(chatInputProps.placeholder).toBeUndefined();
     expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
   });
 
@@ -1020,6 +1078,69 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.composerActions?.sendDisabledReason).toBe(
       "toolbar.agentBuilderPrepareFailed",
     );
+  });
+
+  it("keeps the canonical composer enabled when a pending builder is closed", () => {
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      agentBuilderOpen: false,
+      targetAgentPath: null,
+      targetAgentSlug: null,
+      targetAgentDraftState: "preparing",
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions?: {
+        sendDisabled?: boolean;
+        sendDisabledReason?: string;
+      };
+    };
+    expect(chatInputProps.composerActions?.sendDisabled).toBe(false);
+    expect(chatInputProps.composerActions?.sendDisabledReason).toBeUndefined();
+  });
+
+  it("accounts for Agent Builder when deciding if Context should overlay", () => {
+    const queriedMedia = vi.fn();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => {
+        queriedMedia(query);
+        return {
+          matches: false,
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        };
+      }),
+    });
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      agentBuilderOpen: true,
+      targetAgentPath: "/Users/test/.agents/agents/draft.md",
+      targetAgentSlug: "draft",
+    } satisfies ChatSession;
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={activeSession}
+        leftViewportOcclusionPx={100}
+      />,
+    );
+
+    expect(queriedMedia).toHaveBeenCalledWith("(max-width: 1150px)");
   });
 
   it("uses an inline rail gap while the desktop context panel takes layout space", () => {
@@ -1069,7 +1190,7 @@ describe("ChatView MCP app messaging", () => {
     expect(screen.getByTestId("chat-right-rail")).toBeInTheDocument();
   });
 
-  it("uses agent-building copy for empty builder sessions", () => {
+  it("uses canonical copy and composer controls while Agent Builder is open", () => {
     const activeSession = {
       id: "session-1",
       title: "Build agent",
@@ -1077,6 +1198,7 @@ describe("ChatView MCP app messaging", () => {
       updatedAt: "2026-05-27T00:00:00.000Z",
       messageCount: 0,
       intent: "build-agent",
+      agentBuilderOpen: true,
       targetAgentPath: "/Users/test/.agents/agents/draft.md",
       targetAgentSlug: "draft",
     } satisfies ChatSession;
@@ -1087,11 +1209,13 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
-    expect(screen.getByText("emptyState.buildAgentPrompt")).toBeTruthy();
+    expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
     const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
       placeholder?: string;
+      controls?: unknown;
     };
-    expect(chatInputProps.placeholder).toBe("input.agentBuilderPlaceholder");
+    expect(chatInputProps.placeholder).toBeUndefined();
+    expect(chatInputProps.controls).toEqual({ skills: false });
   });
 
   it("passes runnable shell commands through to the terminal runner for a non-git working dir", async () => {
