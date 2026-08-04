@@ -416,7 +416,8 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
-    expect(screen.getByText("Databricks")).toBeInTheDocument();
+    expect(screen.getByText("Connect a model provider")).toBeInTheDocument();
+    expect(screen.queryByText("Databricks")).not.toBeInTheDocument();
     expect(
       screen.queryByText(/AWS Bedrock, LM Studio, Atomic Chat/),
     ).not.toBeInTheDocument();

@@ -162,6 +162,10 @@ export function ProvidersSettings({
     string | null
   >(null);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
+  const runtimeProviderIds = useMemo(
+    () => new Set(runtimeConfig.goose.modelProviders.map(({ id }) => id)),
+    [runtimeConfig],
+  );
   const runtimeManagedIds = useMemo(
     () =>
       new Set(
@@ -452,7 +456,7 @@ export function ProvidersSettings({
   const visibleUnpromotedModels = namedModels.filter(
     (model) =>
       !promotedIds.has(model.id) &&
-      (runtimeManagedIds.has(model.id) ||
+      (runtimeProviderIds.has(model.id) ||
         model.status === "connected" ||
         model.status === "built_in" ||
         model.status === "configured"),
