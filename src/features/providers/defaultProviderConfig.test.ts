@@ -251,6 +251,31 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
   });
 
   it("restores a configured runtime-managed provider when defaults were lost", async () => {
+    const managedConfig = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        modelProviders: DEFAULT_RUNTIME_CONFIG.goose.modelProviders.map(
+          (provider) =>
+            provider.id === "databricks_v2"
+              ? {
+                  ...provider,
+                  endpointEnv: {
+                    DATABRICKS_HOST: "https://internal.example.com",
+                  },
+                }
+              : provider,
+        ),
+      },
+    };
+    useRuntimeConfigStore.setState({
+      config: managedConfig,
+      result: {
+        status: "ready",
+        source: "bundledFile",
+        config: managedConfig,
+      },
+    });
     mockClientWithStatuses(
       [status("lmstudio", true), status("databricks_v2", true)],
       [],

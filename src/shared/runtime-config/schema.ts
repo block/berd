@@ -350,10 +350,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
         nativeConnectQuery: "databricks",
         group: "default",
         aliases: ["databricks_v2", "databricks", "databricks-ai-gateway"],
-        endpointEnv: {
-          DATABRICKS_HOST:
-            "https://block-lakehouse-production.cloud.databricks.com",
-        },
         models: [
           {
             id: DEFAULT_RUNTIME_MODEL_ID,

@@ -12,6 +12,8 @@ import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { ModelProviderRow } from "@/features/providers/ui/ModelProviderRow";
 
 // The native sign-in is backend-owned; the row is a pure view over the store.
@@ -121,6 +123,11 @@ describe("ModelProviderRow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useProviderCatalogStore.getState().setEntries(providerCatalog);
+    useRuntimeConfigStore.getState().setResult({
+      status: "ready",
+      source: "appDefault",
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
     useModelSetupStore.setState({ operations: new Map() });
     onGetConfig.mockResolvedValue([]);
     onSaveFields.mockResolvedValue(undefined);
@@ -217,8 +224,27 @@ describe("ModelProviderRow", () => {
     expect(screen.getByText(/loading models/i)).toBeInTheDocument();
   });
 
-  it("shows the enforced Databricks AI Gateway URL when expanded", async () => {
+  it("shows a distribution-injected Databricks URL when expanded", async () => {
     const user = userEvent.setup();
+    const provider = DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0];
+    useRuntimeConfigStore.getState().setResult({
+      status: "ready",
+      source: "bundledFile",
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          modelProviders: [
+            {
+              ...provider,
+              endpointEnv: {
+                DATABRICKS_HOST: "https://workspace.cloud.databricks.com",
+              },
+            },
+          ],
+        },
+      },
+    });
 
     render(
       <ModelProviderRow
@@ -236,14 +262,9 @@ describe("ModelProviderRow", () => {
 
     expect(screen.getByText("Configured URL")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "https://block-lakehouse-production.cloud.databricks.com",
-      ),
+      screen.getByText("https://workspace.cloud.databricks.com"),
     ).toBeInTheDocument();
     expect(onGetConfig).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("button", { name: /disconnect/i }),
-    ).not.toBeInTheDocument();
   });
 
   it("shows a non-blocking model warning without replacing the connected state", async () => {

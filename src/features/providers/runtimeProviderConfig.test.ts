@@ -222,9 +222,26 @@ describe("mergeRuntimeProviderCatalog", () => {
       },
     ];
 
+    const managedConfig: RuntimeConfig = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        modelProviders: DEFAULT_RUNTIME_CONFIG.goose.modelProviders.map(
+          (provider) =>
+            provider.id === "databricks_v2"
+              ? {
+                  ...provider,
+                  endpointEnv: {
+                    DATABRICKS_HOST: "https://internal.example.com",
+                  },
+                }
+              : provider,
+        ),
+      },
+    };
     const [databricks] = mergeRuntimeProviderCatalog(
       existing,
-      DEFAULT_RUNTIME_CONFIG,
+      managedConfig,
     ).filter((entry) => entry.id === "databricks_v2");
 
     expect(databricks.fields).toBeUndefined();

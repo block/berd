@@ -29,7 +29,6 @@ const ADMIN_RUNTIME_CONFIG_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const ADMIN_OWNED_CUSTOM_PROVIDER_ID: &str = "block_openai_compatible";
 const DEFAULT_RUNTIME_PROVIDER_ID: &str = "databricks_v2";
 const DEFAULT_RUNTIME_MODEL_ID: &str = "goose-gpt-5-5";
-const DEFAULT_DATABRICKS_HOST: &str = "https://block-lakehouse-production.cloud.databricks.com";
 #[cfg(debug_assertions)]
 const BYO_KEY_PROVIDERS_ENV: &str = "VITE_BYO_KEY_PROVIDERS";
 const ALLOWED_ENDPOINT_ENV_KEYS: &[&str] = &["DATABRICKS_HOST"];
@@ -669,9 +668,7 @@ pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) 
         return;
     };
 
-    if endpoint_env.get("DATABRICKS_HOST").map(String::as_str) == Some(DEFAULT_DATABRICKS_HOST) {
-        endpoint_env.remove("DATABRICKS_HOST");
-    }
+    endpoint_env.remove("DATABRICKS_HOST");
     if endpoint_env.is_empty() {
         provider.endpoint_env = None;
     }
@@ -722,10 +719,7 @@ pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
             ]),
             native_connect_query: Some("databricks".to_string()),
             custom_provider: None,
-            endpoint_env: Some(HashMap::from([(
-                "DATABRICKS_HOST".to_string(),
-                DEFAULT_DATABRICKS_HOST.to_string(),
-            )])),
+            endpoint_env: None,
             model_inventory_mode: None,
             fast_model_id: None,
             models: vec![

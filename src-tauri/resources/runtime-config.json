@@ -12,9 +12,6 @@
         "group": "default",
         "aliases": ["databricks_v2", "databricks", "databricks-ai-gateway"],
         "nativeConnectQuery": "databricks",
-        "endpointEnv": {
-          "DATABRICKS_HOST": "https://block-lakehouse-production.cloud.databricks.com"
-        },
         "models": [
           {
             "id": "goose-gpt-5-5",

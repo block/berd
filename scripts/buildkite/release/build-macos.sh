@@ -17,6 +17,8 @@
 #                     DISABLE_BLOCK_DOCTOR_CHECKS for custom builds (default
 #                     "{}"); VITE_APP_VERSION and
 #                     VITE_ENVIRONMENT are owned by the release script
+#   - databricks_host: optional distribution-owned HTTPS origin injected into
+#                     the databricks_v2 provider's endpointEnv
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
 #
@@ -48,6 +50,9 @@ CUSTOM_BUILD_ENV="$(meta custom_vite_env 2>/dev/null || true)"
 [[ -n "$CUSTOM_BUILD_ENV" ]] || CUSTOM_BUILD_ENV="{}"
 CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-$(default_bundled_agents "$BUILD_KIND")}"
 DISABLE_BB_CLI="$(meta disable_bb_cli 2>/dev/null || echo false)"
+# Buildkite meta-data is the public pipeline input. Distribution orchestrators
+# may instead pass the same narrow value directly in the environment.
+DATABRICKS_HOST_VALUE="${DATABRICKS_HOST:-$(meta databricks_host 2>/dev/null || true)}"
 
 # In-app updates are an official-build-only feature. A custom build that embeds
 # the official updater pubkey/endpoint would poll the official feed and, because
@@ -217,6 +222,16 @@ awk -v v="$RELEASE_VERSION" '
 echo "+++ :hammer: just setup"
 just setup
 
+# A release distribution may supply its Databricks workspace as a narrow,
+# validated input. Public builds leave it unset and retain an editable provider
+# host; internal orchestration owns the Block value.
+if [[ -n "$DATABRICKS_HOST_VALUE" ]]; then
+  echo "+++ :wrench: Injecting distribution Databricks host"
+  pnpm exec tsx scripts/set-runtime-config-databricks-host.ts \
+    "$RUNTIME_CONFIG" "$DATABRICKS_HOST_VALUE"
+  pnpm exec tsx scripts/validate-runtime-config.ts --strict-toggles "$RUNTIME_CONFIG"
+fi
+
 # Custom builds: deep-merge the operator's one-off overrides onto the committed
 # base runtime-config.json, validate the result, write it transiently over the
 # bundled resource (nothing is committed — the same transient working-tree
@@ -325,7 +340,7 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
     tmp="$(mktemp)"
     jq '
       .goose.modelProviders |= map(
-        if .id == "databricks_v2" and .endpointEnv.DATABRICKS_HOST == "https://block-lakehouse-production.cloud.databricks.com" then
+        if .id == "databricks_v2" then
           .endpointEnv |= del(.DATABRICKS_HOST)
           | if (.endpointEnv | length) == 0 then del(.endpointEnv) else . end
         else

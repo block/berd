@@ -1051,12 +1051,16 @@ mod tests {
     fn apply_runtime_goose_provider_env_exports_declared_fast_model_alongside_host() {
         let mut command = Command::new("goose");
         let mut config = default_runtime_config();
-        config
+        let provider = config
             .goose
             .model_providers
             .first_mut()
-            .expect("default config has a provider")
-            .fast_model_id = Some("goose-fast-model".to_string());
+            .expect("default config has a provider");
+        provider.fast_model_id = Some("goose-fast-model".to_string());
+        provider.endpoint_env = Some(HashMap::from([(
+            DATABRICKS_HOST_ENV.to_string(),
+            "https://example.databricks.com".to_string(),
+        )]));
 
         apply_runtime_goose_provider_env(&mut command, &config);
 
@@ -1067,9 +1071,7 @@ mod tests {
         // The provider's endpoint env is still forwarded verbatim.
         assert_eq!(
             env_value(&command, DATABRICKS_HOST_ENV),
-            Some(OsString::from(
-                "https://block-lakehouse-production.cloud.databricks.com"
-            ))
+            Some(OsString::from("https://example.databricks.com"))
         );
     }
 
@@ -1082,8 +1084,7 @@ mod tests {
         apply_runtime_goose_provider_env(&mut command, &default_runtime_config());
 
         assert_eq!(env_value(&command, "GOOSE_FAST_MODEL"), None);
-        // The endpoint env is forwarded independently of the fast model.
-        assert!(env_value(&command, DATABRICKS_HOST_ENV).is_some());
+        assert_eq!(env_value(&command, DATABRICKS_HOST_ENV), None);
     }
 
     // BYO-key dev clears the default provider's endpoint and fast model, so
@@ -1096,12 +1097,16 @@ mod tests {
 
         let mut command = Command::new("goose");
         let mut config = default_runtime_config();
-        config
+        let provider = config
             .goose
             .model_providers
             .first_mut()
-            .expect("default config has a provider")
-            .fast_model_id = Some("goose-fast-model".to_string());
+            .expect("default config has a provider");
+        provider.fast_model_id = Some("goose-fast-model".to_string());
+        provider.endpoint_env = Some(HashMap::from([(
+            DATABRICKS_HOST_ENV.to_string(),
+            "https://example.databricks.com".to_string(),
+        )]));
         clear_default_databricks_provider_env(&mut config);
 
         apply_runtime_goose_provider_env(&mut command, &config);
