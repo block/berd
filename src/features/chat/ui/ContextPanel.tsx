@@ -1209,17 +1209,7 @@ export function ContextPanel({
       </TabsContent>
 
       <TabsContent value="files" className={TAB_CONTENT_CLASS}>
-        <div className="w-full pb-4">
-          {relatedPullRequestsEnabled && (
-            <SessionPullRequestsWidget
-              sessionId={sessionId}
-              workspacePath={gitTargetPath}
-              isOpen={sectionVisibility.pullRequests}
-              onToggleOpen={() => toggleSection("pullRequests")}
-            />
-          )}
-          <FilesList projectWorkingDirs={fileBrowserRoots} />
-        </div>
+        <FilesList projectWorkingDirs={fileBrowserRoots} />
       </TabsContent>
     </Tabs>
   );
