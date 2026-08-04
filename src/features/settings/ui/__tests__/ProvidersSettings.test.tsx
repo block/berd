@@ -108,6 +108,7 @@ const providerCatalog: ProviderCatalogEntry[] = [
     category: "model",
     description: "Databricks Foundation Models",
     setupMethod: "host_with_oauth_fallback",
+    nativeConnectQuery: "databricks",
     group: "default",
   },
   {
@@ -314,6 +315,27 @@ describe("ProvidersSettings", () => {
 
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("Checking provider status...")).toBeInTheDocument();
+  });
+
+  it("shows an unconfigured runtime-managed provider with a Connect action", async () => {
+    const user = userEvent.setup();
+
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      result: {
+        status: "ready",
+        source: "fakeEndpoint",
+        config: DEFAULT_RUNTIME_CONFIG,
+      },
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
+
+    renderProviders(<ProvidersSettings />);
+
+    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: "Databricks" }));
+
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 
   it("does not summarize default-ready providers as connected", () => {
@@ -674,7 +696,7 @@ describe("ProvidersSettings", () => {
 
     await user.click(screen.getByRole("button", { name: /goose/i }));
 
-    expect(screen.queryByText("Databricks")).not.toBeInTheDocument();
+    expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
     expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
@@ -698,7 +720,7 @@ describe("ProvidersSettings", () => {
 
     await user.click(screen.getByRole("button", { name: /goose/i }));
 
-    expect(screen.queryByText("Databricks")).not.toBeInTheDocument();
+    expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
   });

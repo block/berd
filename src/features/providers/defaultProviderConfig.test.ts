@@ -186,6 +186,17 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
       },
     ]);
     const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
+      const models =
+        providerId === "databricks_v2"
+          ? [
+              {
+                id: "goose-gpt-5-6-sol",
+                name: "GPT-5.6 Sol",
+                recommended: true,
+              },
+              { id: "goose-gpt-5-5", name: "GPT-5.5" },
+            ]
+          : [{ id: "gpt-4o", name: "gpt-4o", recommended: true }];
       useProviderModelCacheStore.setState({
         providers: new Map([
           [
@@ -193,7 +204,7 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
             {
               providerId,
               fetchedAt: Date.now(),
-              models: [{ id: "gpt-4o", name: "gpt-4o", recommended: true }],
+              models,
             },
           ],
         ]),
@@ -202,13 +213,9 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     useProviderModelCacheStore.setState({ refreshProviderModels });
   });
 
-  it("restores a provider with a stored Goose credential and skips the rest", async () => {
+  it("restores a provider with a stored Goose credential and skips ambient providers", async () => {
     mockClientWithStatuses(
-      [
-        status("lmstudio", true),
-        status("databricks_v2", true),
-        status("openai", true),
-      ],
+      [status("lmstudio", true), status("openai", true)],
       [secret("openai")],
     );
 
@@ -253,12 +260,12 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
       saveDefaultProviderSelectionFromConfiguredProvider(),
     ).resolves.toEqual({
       providerId: "databricks_v2",
-      modelId: "gpt-4o",
-      modelName: "gpt-4o",
+      modelId: "goose-gpt-5-5",
+      modelName: "GPT-5.5",
     });
     expect(defaultsSave).toHaveBeenCalledWith({
       providerId: "databricks_v2",
-      modelId: "gpt-4o",
+      modelId: "goose-gpt-5-5",
     });
   });
 });

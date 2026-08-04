@@ -90,6 +90,7 @@ export function getNativeConnectDescription(
   switch (setupMethod) {
     case "oauth_device_code":
     case "oauth_browser":
+    case "host_with_oauth_fallback":
       return t("providers.models.setup.nativeConnectDescription");
     default:
       return null;

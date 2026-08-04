@@ -9,6 +9,10 @@ import {
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import {
+  getDefaultGooseModelId,
+  getDefaultGooseModelProviderId,
+} from "@/features/runtime-config/defaults";
 
 /**
  * Providers eligible for default-provider recovery: Goose reports them
@@ -62,6 +66,12 @@ export async function saveDefaultProviderSelectionFromConfiguredProvider(): Prom
   const providerIds = await getIntentionalConfiguredProviderIds(
     await checkAllProviderStatus(),
   );
+  const runtimeDefaultProviderId = getDefaultGooseModelProviderId();
+  providerIds.sort(
+    (left, right) =>
+      Number(right === runtimeDefaultProviderId) -
+      Number(left === runtimeDefaultProviderId),
+  );
   let lastError: unknown;
   for (const providerId of providerIds) {
     try {
@@ -85,7 +95,12 @@ export async function saveDefaultProviderSelection(
   const models = useProviderModelCacheStore
     .getState()
     .getModelsForProvider(providerId);
+  const runtimeDefaultModelId =
+    providerId === getDefaultGooseModelProviderId()
+      ? getDefaultGooseModelId()
+      : undefined;
   const model =
+    models.find((candidate) => candidate.id === runtimeDefaultModelId) ??
     models.find((candidate) => candidate.recommended) ??
     models.find((candidate) => candidate.featured) ??
     models[0];

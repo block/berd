@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -7,6 +8,11 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  QueryClient,
+  QueryClientContext,
+  type QueryClient as QueryClientType,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
 import { useFeedbackDialogStore } from "@/features/feedback/feedbackDialogStore";
@@ -322,6 +328,7 @@ function requiresProviderSetupBeforeSession(providerId: string): boolean {
 
 async function requiresProviderSetupBeforeSessionAsync(
   providerId: string,
+  queryClient: QueryClientType,
 ): Promise<boolean> {
   if (requiresProviderSetupBeforeSession(providerId)) return true;
 
@@ -341,7 +348,7 @@ async function requiresProviderSetupBeforeSessionAsync(
 
   if (isExternalAgentProvider(providerId)) {
     try {
-      return !(await isExternalAgentReady(providerId));
+      return !(await isExternalAgentReady(providerId, queryClient));
     } catch {
       return true;
     }
@@ -585,6 +592,14 @@ export function AppShell({
   children?: React.ReactNode;
   onLoggedOut?: (status: AuthStatus) => void;
 }) {
+  const providedQueryClient = useContext(QueryClientContext);
+  const fallbackQueryClientRef = useRef<QueryClientType | null>(null);
+  if (!fallbackQueryClientRef.current) {
+    fallbackQueryClientRef.current = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  }
+  const queryClient = providedQueryClient ?? fallbackQueryClientRef.current;
   const { t } = useTranslation([
     "chat",
     "common",
@@ -1369,6 +1384,7 @@ export function AppShell({
           if (
             await requiresProviderSetupBeforeSessionAsync(
               liveHomeSession.providerId,
+              queryClient,
             )
           ) {
             return liveHomeSession;
@@ -1400,7 +1416,12 @@ export function AppShell({
         ) {
           return liveHomeSession;
         }
-        if (await requiresProviderSetupBeforeSessionAsync(resolvedProviderId)) {
+        if (
+          await requiresProviderSetupBeforeSessionAsync(
+            resolvedProviderId,
+            queryClient,
+          )
+        ) {
           return liveHomeSession;
         }
         const result = await applyLatestSessionConfig({
@@ -1451,7 +1472,12 @@ export function AppShell({
         providerAtStart,
         sessionModelPreference,
       );
-      if (await requiresProviderSetupBeforeSessionAsync(resolvedProviderId)) {
+      if (
+        await requiresProviderSetupBeforeSessionAsync(
+          resolvedProviderId,
+          queryClient,
+        )
+      ) {
         return null;
       }
       const session = await createSession({
@@ -1486,6 +1512,7 @@ export function AppShell({
     patchSession,
     projects,
     providerSetupRequiredForHome,
+    queryClient,
     sessionsLoading,
   ]);
 
@@ -1563,6 +1590,7 @@ export function AppShell({
           if (
             await requiresProviderSetupBeforeSessionAsync(
               resolvedSessionModelPreference.providerId,
+              queryClient,
             )
           ) {
             openProviderSetupRequiredSettings(
@@ -1743,6 +1771,7 @@ export function AppShell({
       markSessionCreationFailed,
       promoteChatSessionId,
       promoteDraftSession,
+      queryClient,
       replaceNavigationSessionId,
       setActiveSession,
       setChatActiveSession,
@@ -1870,6 +1899,7 @@ export function AppShell({
       if (
         await requiresProviderSetupBeforeSessionAsync(
           resolvedSessionModelPreference.providerId,
+          queryClient,
         )
       ) {
         openProviderSetupRequiredSettings(
@@ -1969,6 +1999,7 @@ export function AppShell({
       selectedProvider,
       createSession,
       createDraftSession,
+      queryClient,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
@@ -2100,6 +2131,7 @@ export function AppShell({
       if (
         await requiresProviderSetupBeforeSessionAsync(
           sessionModelPreference.providerId,
+          queryClient,
         )
       ) {
         openProviderSetupRequiredSettings(
@@ -2176,6 +2208,7 @@ export function AppShell({
     [
       selectedProvider,
       createDraftSession,
+      queryClient,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
@@ -2217,6 +2250,7 @@ export function AppShell({
       if (
         await requiresProviderSetupBeforeSessionAsync(
           sessionModelPreference.providerId,
+          queryClient,
         )
       ) {
         openProviderSetupRequiredSettings(
@@ -2275,7 +2309,13 @@ export function AppShell({
       });
       return session;
     },
-    [selectedProvider, createDraftSession, startDraftSessionCreation, t],
+    [
+      selectedProvider,
+      createDraftSession,
+      queryClient,
+      startDraftSessionCreation,
+      t,
+    ],
   );
 
   const activateDeferredChatSession = useCallback(

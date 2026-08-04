@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -124,10 +125,15 @@ function flushAfterNextPaintCallbacks() {
 }
 
 function appShellWithTheme(children?: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return (
-    <ThemeProvider>
-      <AppShell>{children}</AppShell>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <AppShell>{children}</AppShell>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 

@@ -1,4 +1,6 @@
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import { DOCTOR_REPORT_QUERY_KEY } from "@/shared/api/useDoctorReport";
 import { isExternalAgentReady } from "./externalAgentReadiness";
 
 const runDoctor = vi.fn();
@@ -14,8 +16,6 @@ vi.mock("@/shared/api/doctor", async () => {
 });
 
 function codexReport(authStatus: "authenticated" | "notAuthenticated") {
-  // The bundled codex-acp bridge vendors the full codex CLI, so the check is
-  // single-binary: the bridge reports under `path` and `bridgePath` is null.
   return {
     checks: [
       {
@@ -30,16 +30,38 @@ function codexReport(authStatus: "authenticated" | "notAuthenticated") {
   };
 }
 
-describe("isExternalAgentReady", () => {
-  it("allows a ready external ACP agent", async () => {
-    runDoctor.mockResolvedValue(codexReport("authenticated"));
+function queryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+}
 
-    await expect(isExternalAgentReady("codex-acp")).resolves.toBe(true);
+describe("isExternalAgentReady", () => {
+  it("uses the shared cached readiness shown by the UI", async () => {
+    const client = queryClient();
+    client.setQueryData(DOCTOR_REPORT_QUERY_KEY, codexReport("authenticated"));
+
+    await expect(isExternalAgentReady("codex-acp", client)).resolves.toBe(true);
+    expect(runDoctor).not.toHaveBeenCalled();
   });
 
   it("rejects an auth-failed external ACP agent", async () => {
-    runDoctor.mockResolvedValue(codexReport("notAuthenticated"));
+    const client = queryClient();
+    client.setQueryData(
+      DOCTOR_REPORT_QUERY_KEY,
+      codexReport("notAuthenticated"),
+    );
 
-    await expect(isExternalAgentReady("codex-acp")).resolves.toBe(false);
+    await expect(isExternalAgentReady("codex-acp", client)).resolves.toBe(
+      false,
+    );
+  });
+
+  it("loads the shared report when the cache is cold", async () => {
+    const client = queryClient();
+    runDoctor.mockResolvedValue(codexReport("authenticated"));
+
+    await expect(isExternalAgentReady("codex-acp", client)).resolves.toBe(true);
+    expect(runDoctor).toHaveBeenCalledTimes(1);
   });
 });

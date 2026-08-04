@@ -473,7 +473,8 @@ export function ProvidersSettings({
   const visibleUnpromotedModels = namedModels.filter(
     (model) =>
       !promotedIds.has(model.id) &&
-      (model.status === "connected" ||
+      (runtimeProviderIds.has(model.id) ||
+        model.status === "connected" ||
         model.status === "built_in" ||
         model.status === "configured"),
   );
