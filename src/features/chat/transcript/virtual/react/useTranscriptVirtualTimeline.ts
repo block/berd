@@ -13,7 +13,11 @@ import {
   VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE,
   VIRTUAL_ROW_RESERVED_BLOCK_SIZE_ATTRIBUTE,
 } from "../../measurement";
-import type { TranscriptRowDescriptor } from "../../projection";
+import {
+  createTranscriptProjectionCache,
+  type TranscriptProjectionCache,
+  type TranscriptRowDescriptor,
+} from "../../projection";
 import {
   createTranscriptRowStateRegistry,
   type TranscriptKeepAliveDecision,
@@ -140,8 +144,9 @@ export interface TranscriptVirtualTimelineRowStateControls {
 }
 
 interface UseTranscriptVirtualTimelineInput {
-  sessionId: string;
-  sessionEpoch: number;
+  loadedTranscript?: LoadedTranscriptState;
+  sessionId?: string;
+  sessionEpoch?: number;
   rows: readonly TranscriptRowDescriptor[];
   protectedRowIds?: readonly string[];
   containerRef: RefObject<HTMLDivElement | null>;
@@ -230,10 +235,96 @@ const MAX_CONTROLLER_MEASUREMENT_UPDATES_PER_BATCH = 24;
 const TRANSCRIPT_MEASUREMENT_STABILITY_EPSILON_PX = 2;
 const TRANSCRIPT_LAYOUT_SYNC_EPSILON_PX = 1;
 const EMPTY_PROTECTED_ROW_IDS: readonly string[] = [];
+let nextLoadedTranscriptStateId = 0;
+
+/** All mutable virtual-renderer state owned by one loaded transcript. */
+export interface LoadedTranscriptState {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly sessionEpoch: number;
+  readonly projectionCache: TranscriptProjectionCache;
+  readonly virtualTimeline: TranscriptVirtualTimelineState;
+}
+
+export interface TranscriptVirtualTimelineState {
+  rows: readonly TranscriptRowDescriptor[];
+  normalizedProtectedRowIds: readonly string[];
+  controller: TranscriptVirtualEngine | null;
+  controllerScrollElement: HTMLDivElement | null;
+  measurementScheduler: TranscriptMeasurementScheduler | null;
+  protectedRowKey: string;
+  cachedMeasurementReplay: {
+    rows: readonly TranscriptRowDescriptor[];
+    widthScope: string;
+    protectedRowKey: string;
+  } | null;
+  readonly rowStateRegistry: ReturnType<
+    typeof createTranscriptRowStateRegistry
+  >;
+  localMeasurementCounters: LocalMeasurementCounters;
+  readonly measuredHeightByToken: Map<string, number>;
+  readonly offscreenMeasuredHeightByToken: Map<string, number>;
+  readonly cachedHeightAppliedByToken: Map<string, number>;
+  readonly skippedMeasurementByToken: Set<string>;
+  readonly deferredMeasurementByToken: Set<string>;
+  measurementFlushScheduled: boolean;
+  visibleMeasurementFrame: number | null;
+  deferDomCorrections: boolean;
+  controllerScrollWritesSuspended: boolean;
+  deferredCorrection: DeferredTranscriptCorrection | null;
+  readonly pendingVisibleMeasurementElements: Map<string, HTMLElement>;
+  readonly pendingOffscreenShellMeasurementElements: Map<string, HTMLElement>;
+  readonly pendingOffscreenRealMeasurementElements: Map<string, HTMLElement>;
+  readonly registeredVisibleRowElements: Map<string, HTMLElement>;
+  snapshot: TranscriptVirtualTimelineSnapshot | null;
+}
+
+function createTranscriptVirtualTimelineState(): TranscriptVirtualTimelineState {
+  return {
+    rows: [],
+    normalizedProtectedRowIds: [],
+    controller: null,
+    controllerScrollElement: null,
+    measurementScheduler: null,
+    protectedRowKey: "",
+    cachedMeasurementReplay: null,
+    rowStateRegistry: createTranscriptRowStateRegistry(),
+    localMeasurementCounters: { ...EMPTY_LOCAL_MEASUREMENT_COUNTERS },
+    measuredHeightByToken: new Map(),
+    offscreenMeasuredHeightByToken: new Map(),
+    cachedHeightAppliedByToken: new Map(),
+    skippedMeasurementByToken: new Set(),
+    deferredMeasurementByToken: new Set(),
+    measurementFlushScheduled: false,
+    visibleMeasurementFrame: null,
+    deferDomCorrections: false,
+    controllerScrollWritesSuspended: false,
+    deferredCorrection: null,
+    pendingVisibleMeasurementElements: new Map(),
+    pendingOffscreenShellMeasurementElements: new Map(),
+    pendingOffscreenRealMeasurementElements: new Map(),
+    registeredVisibleRowElements: new Map(),
+    snapshot: null,
+  };
+}
+
+export function createLoadedTranscriptState(
+  sessionId: string,
+  sessionEpoch = 0,
+): LoadedTranscriptState {
+  return {
+    id: `loaded-transcript-${nextLoadedTranscriptStateId++}`,
+    sessionId,
+    sessionEpoch,
+    projectionCache: createTranscriptProjectionCache(),
+    virtualTimeline: createTranscriptVirtualTimelineState(),
+  };
+}
 
 export function useTranscriptVirtualTimeline({
-  sessionId,
-  sessionEpoch,
+  loadedTranscript: providedLoadedTranscript,
+  sessionId: providedSessionId,
+  sessionEpoch: providedSessionEpoch = 0,
   rows,
   protectedRowIds = EMPTY_PROTECTED_ROW_IDS,
   containerRef,
@@ -241,62 +332,60 @@ export function useTranscriptVirtualTimeline({
   preserveScrollPosition = false,
   shouldPreserveLiveScrollPosition: readLiveScrollOwnership,
 }: UseTranscriptVirtualTimelineInput) {
+  const fallbackLoadedTranscriptRef = useRef<LoadedTranscriptState | null>(
+    null,
+  );
+  if (!providedLoadedTranscript) {
+    if (!providedSessionId) {
+      throw new Error("A loaded transcript or session id is required");
+    }
+    if (
+      !fallbackLoadedTranscriptRef.current ||
+      fallbackLoadedTranscriptRef.current.sessionId !== providedSessionId ||
+      fallbackLoadedTranscriptRef.current.sessionEpoch !== providedSessionEpoch
+    ) {
+      fallbackLoadedTranscriptRef.current = createLoadedTranscriptState(
+        providedSessionId,
+        providedSessionEpoch,
+      );
+    }
+  }
+  const loadedTranscript =
+    providedLoadedTranscript ?? fallbackLoadedTranscriptRef.current;
+  if (!loadedTranscript) {
+    throw new Error("A loaded transcript is required");
+  }
+  const { sessionId, sessionEpoch } = loadedTranscript;
+  const runtimeRef = useRef(loadedTranscript.virtualTimeline);
+  const runtimeChanged =
+    runtimeRef.current !== loadedTranscript.virtualTimeline;
+  if (runtimeChanged) {
+    runtimeRef.current = loadedTranscript.virtualTimeline;
+  }
+  useLayoutEffect(
+    () => () => {
+      const runtime = loadedTranscript.virtualTimeline;
+      if (runtime.visibleMeasurementFrame !== null) {
+        cancelAnimationFrame(runtime.visibleMeasurementFrame);
+        runtime.visibleMeasurementFrame = null;
+      }
+      runtime.measurementFlushScheduled = false;
+      runtime.measurementScheduler?.cancelPendingWork(sessionId, sessionEpoch);
+      loadedTranscript.projectionCache.cancelPendingWork(
+        sessionId,
+        sessionEpoch,
+      );
+    },
+    [loadedTranscript, sessionEpoch, sessionId],
+  );
   const normalizedProtectedRowIds = useMemo(
     () => normalizeProtectedRowIds(rows, protectedRowIds),
     [protectedRowIds, rows],
   );
-  const rowsRef = useRef(rows);
-  const normalizedProtectedRowIdsRef = useRef(normalizedProtectedRowIds);
-  const controllerRef = useRef<TranscriptVirtualEngine | null>(null);
-  const controllerScrollElementRef = useRef<HTMLDivElement | null>(null);
-  const measurementSchedulerRef = useRef<TranscriptMeasurementScheduler | null>(
-    null,
-  );
-  const protectedRowKeyRef = useRef("");
-  const cachedMeasurementReplayRef = useRef<{
-    rows: readonly TranscriptRowDescriptor[];
-    widthScope: string;
-    protectedRowKey: string;
-  } | null>(null);
-  const rowStateRegistryRef = useRef(createTranscriptRowStateRegistry());
-  const localMeasurementCountersRef = useRef<LocalMeasurementCounters>({
-    ...EMPTY_LOCAL_MEASUREMENT_COUNTERS,
-  });
-  const measuredHeightByTokenRef = useRef(new Map<string, number>());
-  const offscreenMeasuredHeightByTokenRef = useRef(new Map<string, number>());
-  const cachedHeightAppliedByTokenRef = useRef(new Map<string, number>());
-  const skippedMeasurementByTokenRef = useRef(new Set<string>());
-  const deferredMeasurementByTokenRef = useRef(new Set<string>());
-  const measurementFlushScheduledRef = useRef(false);
-  const visibleMeasurementFrameRef = useRef<number | null>(null);
-  // While a rAF measurement flush is running, scroll corrections are recorded
-  // here instead of being written to the DOM, then applied after the snapshot
-  // commits so scrollTop and row layout change in the same paint.
-  const deferDomCorrectionsRef = useRef(false);
-  const controllerScrollWritesSuspendedRef = useRef(false);
-  const deferredCorrectionRef = useRef<DeferredTranscriptCorrection | null>(
-    null,
-  );
-  const pendingVisibleMeasurementElementsRef = useRef(
-    new Map<string, HTMLElement>(),
-  );
-  const pendingOffscreenShellMeasurementElementsRef = useRef(
-    new Map<string, HTMLElement>(),
-  );
-  const pendingOffscreenRealMeasurementElementsRef = useRef(
-    new Map<string, HTMLElement>(),
-  );
-  // All currently mounted visible row elements, kept so a width change can
-  // remeasure every visible row before the next paint instead of only the
-  // rows whose ResizeObserver happened to fire first.
-  const registeredVisibleRowElementsRef = useRef(
-    new Map<string, HTMLElement>(),
-  );
+  runtimeRef.current.rows = rows;
+  runtimeRef.current.normalizedProtectedRowIds = normalizedProtectedRowIds;
 
-  rowsRef.current = rows;
-  normalizedProtectedRowIdsRef.current = normalizedProtectedRowIds;
-
-  if (!controllerRef.current) {
+  if (!runtimeRef.current.controller) {
     const container = containerRef.current;
     const controller = createController({
       sessionId,
@@ -306,35 +395,47 @@ export function useTranscriptVirtualTimeline({
       protectedRowIds: normalizedProtectedRowIds,
     });
     controller.setRows(rows);
-    controllerRef.current = controller;
-    controllerScrollElementRef.current = container;
+    runtimeRef.current.controller = controller;
+    runtimeRef.current.controllerScrollElement = container;
   }
 
-  if (!measurementSchedulerRef.current) {
+  if (!runtimeRef.current.measurementScheduler) {
     const controllerState = (
-      controllerRef.current as TranscriptVirtualEngine
+      runtimeRef.current.controller as TranscriptVirtualEngine
     ).getState();
-    measurementSchedulerRef.current = createTranscriptMeasurementScheduler({
-      sessionId,
-      sessionEpoch,
-      widthScope: controllerState.widthScope,
-      rows,
-    });
+    runtimeRef.current.measurementScheduler =
+      createTranscriptMeasurementScheduler({
+        sessionId,
+        sessionEpoch,
+        widthScope: controllerState.widthScope,
+        rows,
+      });
   }
 
   const [snapshot, setSnapshot] = useState<TranscriptVirtualTimelineSnapshot>(
     () =>
       buildSnapshot({
-        controller: controllerRef.current as TranscriptVirtualEngine,
-        registry: rowStateRegistryRef.current,
+        controller: runtimeRef.current.controller as TranscriptVirtualEngine,
+        registry: runtimeRef.current.rowStateRegistry,
         rows,
         sessionId,
         sessionEpoch,
         suppressProtectedRowFailFallback: false,
       }),
   );
-  const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
+  let currentSnapshot = snapshot;
+  if (runtimeChanged) {
+    currentSnapshot = buildSnapshot({
+      controller: runtimeRef.current.controller as TranscriptVirtualEngine,
+      registry: runtimeRef.current.rowStateRegistry,
+      rows,
+      sessionId,
+      sessionEpoch,
+      suppressProtectedRowFailFallback: false,
+    });
+    setSnapshot(currentSnapshot);
+  }
+  runtimeRef.current.snapshot = currentSnapshot;
 
   const shouldPreserveLiveScrollPosition = useCallback(
     () => preserveScrollPosition || readLiveScrollOwnership?.() === true,
@@ -350,8 +451,8 @@ export function useTranscriptVirtualTimeline({
         return;
       }
 
-      if (deferDomCorrectionsRef.current) {
-        deferredCorrectionRef.current = { correction, source };
+      if (runtimeRef.current.deferDomCorrections) {
+        runtimeRef.current.deferredCorrection = { correction, source };
         return;
       }
 
@@ -360,9 +461,12 @@ export function useTranscriptVirtualTimeline({
         return;
       }
 
-      controllerRef.current?.writeScrollTop?.(correction.nextScrollTop, {
-        source: "correction",
-      });
+      runtimeRef.current.controller?.writeScrollTop?.(
+        correction.nextScrollTop,
+        {
+          source: "correction",
+        },
+      );
     },
     [containerRef],
   );
@@ -373,12 +477,12 @@ export function useTranscriptVirtualTimeline({
     // token records may no longer reflect the controller's current row height
     // (for visible or offscreen rows), so cached replay must be allowed to
     // restore the current width's measurement.
-    cachedHeightAppliedByTokenRef.current.clear();
+    runtimeRef.current.cachedHeightAppliedByToken.clear();
   }, []);
 
   const syncMeasurementScheduler = useCallback(
     (controller: TranscriptVirtualEngine) => {
-      const scheduler = measurementSchedulerRef.current;
+      const scheduler = runtimeRef.current.measurementScheduler;
       if (!scheduler) {
         return null;
       }
@@ -387,7 +491,7 @@ export function useTranscriptVirtualTimeline({
         sessionId,
         sessionEpoch,
         widthScope: controller.getState().widthScope,
-        rows: rowsRef.current,
+        rows: runtimeRef.current.rows,
       });
       return scheduler;
     },
@@ -439,7 +543,7 @@ export function useTranscriptVirtualTimeline({
 
   const flushMeasurementBatch = useCallback(
     (controller: TranscriptVirtualEngine) => {
-      const scheduler = measurementSchedulerRef.current;
+      const scheduler = runtimeRef.current.measurementScheduler;
       if (!scheduler) {
         return null;
       }
@@ -456,10 +560,11 @@ export function useTranscriptVirtualTimeline({
         );
         if (
           result.updates.length >
-          localMeasurementCountersRef.current.controllerUpdateBatchMaxSize
+          runtimeRef.current.localMeasurementCounters
+            .controllerUpdateBatchMaxSize
         ) {
-          localMeasurementCountersRef.current = {
-            ...localMeasurementCountersRef.current,
+          runtimeRef.current.localMeasurementCounters = {
+            ...runtimeRef.current.localMeasurementCounters,
             controllerUpdateBatchMaxSize: result.updates.length,
           };
         }
@@ -502,23 +607,23 @@ export function useTranscriptVirtualTimeline({
       }
 
       const state = controller.getState();
-      const previousReplay = cachedMeasurementReplayRef.current;
+      const previousReplay = runtimeRef.current.cachedMeasurementReplay;
       if (
-        previousReplay?.rows === rowsRef.current &&
+        previousReplay?.rows === runtimeRef.current.rows &&
         previousReplay.widthScope === state.widthScope &&
-        previousReplay.protectedRowKey === protectedRowKeyRef.current
+        previousReplay.protectedRowKey === runtimeRef.current.protectedRowKey
       ) {
         return false;
       }
 
-      cachedMeasurementReplayRef.current = {
-        rows: rowsRef.current,
+      runtimeRef.current.cachedMeasurementReplay = {
+        rows: runtimeRef.current.rows,
         widthScope: state.widthScope,
-        protectedRowKey: protectedRowKeyRef.current,
+        protectedRowKey: runtimeRef.current.protectedRowKey,
       };
 
       let queued = false;
-      for (const row of rowsRef.current) {
+      for (const row of runtimeRef.current.rows) {
         const cached = scheduler.peekCachedMeasurement(row.rowId);
         if (!cached) {
           continue;
@@ -526,13 +631,17 @@ export function useTranscriptVirtualTimeline({
 
         const tokenKey = getMeasurementTokenKey(cached.token);
         if (
-          cachedHeightAppliedByTokenRef.current.get(tokenKey) === cached.height
+          runtimeRef.current.cachedHeightAppliedByToken.get(tokenKey) ===
+          cached.height
         ) {
           continue;
         }
 
         if (scheduler.queueCachedControllerUpdate(row.rowId)) {
-          cachedHeightAppliedByTokenRef.current.set(tokenKey, cached.height);
+          runtimeRef.current.cachedHeightAppliedByToken.set(
+            tokenKey,
+            cached.height,
+          );
           queued = true;
         }
       }
@@ -542,19 +651,21 @@ export function useTranscriptVirtualTimeline({
           // Controller rebuilds start from estimates; cached replay is an
           // internal warm-up, so recapture the browser's live viewport instead
           // of replaying estimate-based row-anchor corrections into the DOM.
-          const wasDeferringCorrections = deferDomCorrectionsRef.current;
-          const previousDeferredCorrection = deferredCorrectionRef.current;
+          const wasDeferringCorrections =
+            runtimeRef.current.deferDomCorrections;
+          const previousDeferredCorrection =
+            runtimeRef.current.deferredCorrection;
 
-          deferDomCorrectionsRef.current = true;
-          deferredCorrectionRef.current = null;
-          controllerScrollWritesSuspendedRef.current = true;
+          runtimeRef.current.deferDomCorrections = true;
+          runtimeRef.current.deferredCorrection = null;
+          runtimeRef.current.controllerScrollWritesSuspended = true;
           controller.setScrollWritesSuspended?.(true);
           try {
             flushMeasurementBatch(controller);
           } finally {
-            deferDomCorrectionsRef.current = wasDeferringCorrections;
-            deferredCorrectionRef.current = previousDeferredCorrection;
-            controllerScrollWritesSuspendedRef.current = false;
+            runtimeRef.current.deferDomCorrections = wasDeferringCorrections;
+            runtimeRef.current.deferredCorrection = previousDeferredCorrection;
+            runtimeRef.current.controllerScrollWritesSuspended = false;
             controller.setScrollWritesSuspended?.(false);
           }
 
@@ -591,12 +702,12 @@ export function useTranscriptVirtualTimeline({
   );
 
   const commitSnapshot = useCallback(() => {
-    const controller = controllerRef.current;
+    const controller = runtimeRef.current.controller;
     if (!controller) {
       return null;
     }
 
-    const registry = rowStateRegistryRef.current;
+    const registry = runtimeRef.current.rowStateRegistry;
     registry.setSessionEpoch(sessionId, sessionEpoch);
     syncControllerFromLiveViewport(controller);
     syncMeasurementScheduler(controller);
@@ -605,21 +716,21 @@ export function useTranscriptVirtualTimeline({
     let nextSnapshot = buildSnapshot({
       controller,
       registry,
-      rows: rowsRef.current,
+      rows: runtimeRef.current.rows,
       sessionId,
       sessionEpoch,
       measurementStats: getMeasurementStats(
-        measurementSchedulerRef.current?.getDiagnostics(),
-        localMeasurementCountersRef.current,
+        runtimeRef.current.measurementScheduler?.getDiagnostics(),
+        runtimeRef.current.localMeasurementCounters,
       ),
     });
 
-    const protectedRowIds = normalizeProtectedRowIds(rowsRef.current, [
-      ...normalizedProtectedRowIdsRef.current,
+    const protectedRowIds = normalizeProtectedRowIds(runtimeRef.current.rows, [
+      ...runtimeRef.current.normalizedProtectedRowIds,
       ...(nextSnapshot.keepAliveDecision?.protectedRowIds ?? []),
     ]);
     const nextProtectedRowKey = protectedRowIds.join("\u0000");
-    if (nextProtectedRowKey !== protectedRowKeyRef.current) {
+    if (nextProtectedRowKey !== runtimeRef.current.protectedRowKey) {
       const state = controller.getState();
       const replacement = createController({
         sessionId,
@@ -629,8 +740,8 @@ export function useTranscriptVirtualTimeline({
         protectedRowIds,
         state,
       });
-      controllerRef.current = replacement;
-      controllerScrollElementRef.current = containerRef.current;
+      runtimeRef.current.controller = replacement;
+      runtimeRef.current.controllerScrollElement = containerRef.current;
       const liveViewportBeforeRows = readViewportGeometry(
         containerRef.current,
         footerHeight,
@@ -658,7 +769,7 @@ export function useTranscriptVirtualTimeline({
         !state.nearBottom ||
         liveDistanceFromBottom > 1;
       replacement.setScrollWritesSuspended?.(shouldRestoreLiveViewport);
-      const rowsResult = replacement.setRows(rowsRef.current);
+      const rowsResult = replacement.setRows(runtimeRef.current.rows);
       if (shouldRestoreLiveViewport) {
         replacement.syncViewport(liveViewportBeforeRows, {
           source: "browser",
@@ -669,9 +780,9 @@ export function useTranscriptVirtualTimeline({
         applyCorrection(rowsResult.correction, "protected-rows-setRows");
       }
       replacement.setScrollWritesSuspended?.(false);
-      protectedRowKeyRef.current = nextProtectedRowKey;
-      cachedMeasurementReplayRef.current = null;
-      cachedHeightAppliedByTokenRef.current.clear();
+      runtimeRef.current.protectedRowKey = nextProtectedRowKey;
+      runtimeRef.current.cachedMeasurementReplay = null;
+      runtimeRef.current.cachedHeightAppliedByToken.clear();
       syncMeasurementScheduler(replacement);
       queueCachedMeasurementsForController(replacement, {
         preserveLiveViewport: true,
@@ -685,19 +796,22 @@ export function useTranscriptVirtualTimeline({
       nextSnapshot = buildSnapshot({
         controller: replacement,
         registry,
-        rows: rowsRef.current,
+        rows: runtimeRef.current.rows,
         sessionId,
         sessionEpoch,
         measurementStats: getMeasurementStats(
-          measurementSchedulerRef.current?.getDiagnostics(),
-          localMeasurementCountersRef.current,
+          runtimeRef.current.measurementScheduler?.getDiagnostics(),
+          runtimeRef.current.localMeasurementCounters,
         ),
       });
     }
 
-    const previousSnapshot = snapshotRef.current;
-    if (!areTimelineSnapshotsEquivalent(previousSnapshot, nextSnapshot)) {
-      snapshotRef.current = nextSnapshot;
+    const previousSnapshot = runtimeRef.current.snapshot;
+    if (
+      previousSnapshot === null ||
+      !areTimelineSnapshotsEquivalent(previousSnapshot, nextSnapshot)
+    ) {
+      runtimeRef.current.snapshot = nextSnapshot;
       setSnapshot(nextSnapshot);
     }
     return nextSnapshot.controllerState;
@@ -715,7 +829,7 @@ export function useTranscriptVirtualTimeline({
 
   const syncViewportFromDom = useCallback(
     (options: SyncViewportOptions = {}) => {
-      const controller = controllerRef.current;
+      const controller = runtimeRef.current.controller;
       if (!controller) {
         return null;
       }
@@ -740,17 +854,17 @@ export function useTranscriptVirtualTimeline({
       const controllerState = commitSnapshot();
       if (options.forceRangeRefresh) {
         const refreshedSnapshot = buildSnapshot({
-          controller: controllerRef.current ?? controller,
-          registry: rowStateRegistryRef.current,
-          rows: rowsRef.current,
+          controller: runtimeRef.current.controller ?? controller,
+          registry: runtimeRef.current.rowStateRegistry,
+          rows: runtimeRef.current.rows,
           sessionId,
           sessionEpoch,
           measurementStats: getMeasurementStats(
-            measurementSchedulerRef.current?.getDiagnostics(),
-            localMeasurementCountersRef.current,
+            runtimeRef.current.measurementScheduler?.getDiagnostics(),
+            runtimeRef.current.localMeasurementCounters,
           ),
         });
-        snapshotRef.current = refreshedSnapshot;
+        runtimeRef.current.snapshot = refreshedSnapshot;
         setSnapshot(refreshedSnapshot);
       }
       return controllerState;
@@ -767,17 +881,15 @@ export function useTranscriptVirtualTimeline({
   );
 
   useLayoutEffect(() => {
-    const controller = controllerRef.current;
+    const controller = runtimeRef.current.controller;
     const container = containerRef.current;
     const shouldBindRealContainer =
-      container != null && controllerScrollElementRef.current !== container;
+      container != null &&
+      runtimeRef.current.controllerScrollElement !== container;
     const controllerState = controller?.getState();
-    const shouldResetSessionState =
-      !controller || controllerState?.sessionId !== sessionId;
-    if (shouldResetSessionState || shouldBindRealContainer) {
-      const previousState =
-        controllerState?.sessionId === sessionId ? controllerState : undefined;
-      controllerRef.current = createController({
+    if (!controller || shouldBindRealContainer) {
+      const previousState = controllerState ?? undefined;
+      runtimeRef.current.controller = createController({
         sessionId,
         sessionEpoch,
         container,
@@ -785,45 +897,29 @@ export function useTranscriptVirtualTimeline({
         protectedRowIds: normalizedProtectedRowIds,
         state: previousState,
       });
-      controllerScrollElementRef.current = container;
-      measurementSchedulerRef.current = createTranscriptMeasurementScheduler({
-        sessionId,
-        sessionEpoch,
-        widthScope:
-          controllerRef.current?.getState().widthScope ?? getWidthScope(null),
-        rows,
-      });
-      if (shouldResetSessionState) {
-        protectedRowKeyRef.current = "";
-        localMeasurementCountersRef.current = {
-          ...EMPTY_LOCAL_MEASUREMENT_COUNTERS,
-        };
-        cachedMeasurementReplayRef.current = null;
-        measuredHeightByTokenRef.current.clear();
-        offscreenMeasuredHeightByTokenRef.current.clear();
-        cachedHeightAppliedByTokenRef.current.clear();
-        skippedMeasurementByTokenRef.current.clear();
-        deferredMeasurementByTokenRef.current.clear();
-        measurementFlushScheduledRef.current = false;
-        pendingVisibleMeasurementElementsRef.current.clear();
-        pendingOffscreenShellMeasurementElementsRef.current.clear();
-        pendingOffscreenRealMeasurementElementsRef.current.clear();
-        if (visibleMeasurementFrameRef.current !== null) {
-          cancelAnimationFrame(visibleMeasurementFrameRef.current);
-          visibleMeasurementFrameRef.current = null;
-        }
-      } else {
-        cachedMeasurementReplayRef.current = null;
-        cachedHeightAppliedByTokenRef.current.clear();
-      }
+      runtimeRef.current.controllerScrollElement = container;
+      runtimeRef.current.measurementScheduler =
+        createTranscriptMeasurementScheduler({
+          sessionId,
+          sessionEpoch,
+          widthScope:
+            runtimeRef.current.controller?.getState().widthScope ??
+            getWidthScope(null),
+          rows,
+        });
+      runtimeRef.current.cachedMeasurementReplay = null;
+      runtimeRef.current.cachedHeightAppliedByToken.clear();
     }
 
-    const currentController = controllerRef.current;
+    const currentController = runtimeRef.current.controller;
     if (!currentController) {
       return;
     }
 
-    rowStateRegistryRef.current.setSessionEpoch(sessionId, sessionEpoch);
+    runtimeRef.current.rowStateRegistry.setSessionEpoch(
+      sessionId,
+      sessionEpoch,
+    );
     syncMeasurementScheduler(currentController);
     const preserveLiveViewport = shouldPreserveLiveScrollPosition();
     applyCorrection(
@@ -872,46 +968,38 @@ export function useTranscriptVirtualTimeline({
     syncMeasurementScheduler,
   ]);
 
-  useLayoutEffect(
-    () => () => {
-      rowStateRegistryRef.current.cleanupSession(sessionId);
-      measurementSchedulerRef.current?.cleanupSession(sessionId);
-    },
-    [sessionId],
-  );
-
   const flushPendingMeasurementsInner = useCallback(() => {
-    measurementFlushScheduledRef.current = false;
-    visibleMeasurementFrameRef.current = null;
+    runtimeRef.current.measurementFlushScheduled = false;
+    runtimeRef.current.visibleMeasurementFrame = null;
 
-    const controller = controllerRef.current;
+    const controller = runtimeRef.current.controller;
     if (!controller) {
-      pendingVisibleMeasurementElementsRef.current.clear();
-      pendingOffscreenShellMeasurementElementsRef.current.clear();
-      pendingOffscreenRealMeasurementElementsRef.current.clear();
+      runtimeRef.current.pendingVisibleMeasurementElements.clear();
+      runtimeRef.current.pendingOffscreenShellMeasurementElements.clear();
+      runtimeRef.current.pendingOffscreenRealMeasurementElements.clear();
       return;
     }
 
     const scheduler = syncMeasurementScheduler(controller);
     if (!scheduler) {
-      pendingVisibleMeasurementElementsRef.current.clear();
-      pendingOffscreenShellMeasurementElementsRef.current.clear();
-      pendingOffscreenRealMeasurementElementsRef.current.clear();
+      runtimeRef.current.pendingVisibleMeasurementElements.clear();
+      runtimeRef.current.pendingOffscreenShellMeasurementElements.clear();
+      runtimeRef.current.pendingOffscreenRealMeasurementElements.clear();
       return;
     }
 
     const visibleEntries = Array.from(
-      pendingVisibleMeasurementElementsRef.current,
+      runtimeRef.current.pendingVisibleMeasurementElements,
     );
     const offscreenEntries = Array.from(
-      pendingOffscreenShellMeasurementElementsRef.current,
+      runtimeRef.current.pendingOffscreenShellMeasurementElements,
     );
     const offscreenRealEntries = Array.from(
-      pendingOffscreenRealMeasurementElementsRef.current,
+      runtimeRef.current.pendingOffscreenRealMeasurementElements,
     );
-    pendingVisibleMeasurementElementsRef.current.clear();
-    pendingOffscreenShellMeasurementElementsRef.current.clear();
-    pendingOffscreenRealMeasurementElementsRef.current.clear();
+    runtimeRef.current.pendingVisibleMeasurementElements.clear();
+    runtimeRef.current.pendingOffscreenShellMeasurementElements.clear();
+    runtimeRef.current.pendingOffscreenRealMeasurementElements.clear();
 
     let queuedSinceFlush = 0;
     let shouldCommitSnapshot = false;
@@ -944,12 +1032,15 @@ export function useTranscriptVirtualTimeline({
       const measuredBlockSize = measureElementBlockSize(element);
 
       if (measuredBlockSize <= 0) {
-        if (!skippedMeasurementByTokenRef.current.has(`${tokenKey}:zero`)) {
-          skippedMeasurementByTokenRef.current.add(`${tokenKey}:zero`);
-          localMeasurementCountersRef.current = {
-            ...localMeasurementCountersRef.current,
+        if (
+          !runtimeRef.current.skippedMeasurementByToken.has(`${tokenKey}:zero`)
+        ) {
+          runtimeRef.current.skippedMeasurementByToken.add(`${tokenKey}:zero`);
+          runtimeRef.current.localMeasurementCounters = {
+            ...runtimeRef.current.localMeasurementCounters,
             skippedZeroMeasurements:
-              localMeasurementCountersRef.current.skippedZeroMeasurements + 1,
+              runtimeRef.current.localMeasurementCounters
+                .skippedZeroMeasurements + 1,
           };
           shouldCommitSnapshot = true;
         }
@@ -964,7 +1055,8 @@ export function useTranscriptVirtualTimeline({
       });
       const shouldAcceptPendingAnimationMeasurement =
         shouldAcceptVisibleAnimationMeasurement(element, finalization);
-      const previousHeight = measuredHeightByTokenRef.current.get(tokenKey);
+      const previousHeight =
+        runtimeRef.current.measuredHeightByToken.get(tokenKey);
       if (
         (finalization.canFinalize || shouldAcceptPendingAnimationMeasurement) &&
         previousHeight !== undefined &&
@@ -974,10 +1066,11 @@ export function useTranscriptVirtualTimeline({
         continue;
       }
 
-      localMeasurementCountersRef.current = {
-        ...localMeasurementCountersRef.current,
+      runtimeRef.current.localMeasurementCounters = {
+        ...runtimeRef.current.localMeasurementCounters,
         visibleMeasurementAttempts:
-          localMeasurementCountersRef.current.visibleMeasurementAttempts + 1,
+          runtimeRef.current.localMeasurementCounters
+            .visibleMeasurementAttempts + 1,
       };
 
       const result = scheduler.finalizePendingMeasurement(
@@ -999,12 +1092,13 @@ export function useTranscriptVirtualTimeline({
         !shouldAcceptPendingAnimationMeasurement
       ) {
         const skippedKey = `${tokenKey}:${finalization.source}`;
-        if (!deferredMeasurementByTokenRef.current.has(skippedKey)) {
-          deferredMeasurementByTokenRef.current.add(skippedKey);
-          localMeasurementCountersRef.current = {
-            ...localMeasurementCountersRef.current,
+        if (!runtimeRef.current.deferredMeasurementByToken.has(skippedKey)) {
+          runtimeRef.current.deferredMeasurementByToken.add(skippedKey);
+          runtimeRef.current.localMeasurementCounters = {
+            ...runtimeRef.current.localMeasurementCounters,
             reservedMeasurementsDeferred:
-              localMeasurementCountersRef.current.reservedMeasurementsDeferred +
+              runtimeRef.current.localMeasurementCounters
+                .reservedMeasurementsDeferred +
               (finalization.source === "reserved" ? 1 : 0),
           };
           shouldCommitSnapshot = true;
@@ -1013,8 +1107,11 @@ export function useTranscriptVirtualTimeline({
       }
 
       if (result.status === "accepted" && result.queuedControllerUpdate) {
-        measuredHeightByTokenRef.current.set(tokenKey, result.entry.height);
-        cachedHeightAppliedByTokenRef.current.set(
+        runtimeRef.current.measuredHeightByToken.set(
+          tokenKey,
+          result.entry.height,
+        );
+        runtimeRef.current.cachedHeightAppliedByToken.set(
           tokenKey,
           result.entry.height,
         );
@@ -1040,21 +1137,21 @@ export function useTranscriptVirtualTimeline({
       const tokenKey = getMeasurementTokenKey(plan.token);
       if (
         isStableMeasurementHeight(
-          offscreenMeasuredHeightByTokenRef.current.get(tokenKey),
+          runtimeRef.current.offscreenMeasuredHeightByToken.get(tokenKey),
           measuredBlockSize,
         )
       ) {
         continue;
       }
 
-      offscreenMeasuredHeightByTokenRef.current.set(
+      runtimeRef.current.offscreenMeasuredHeightByToken.set(
         tokenKey,
         measuredBlockSize,
       );
-      localMeasurementCountersRef.current = {
-        ...localMeasurementCountersRef.current,
+      runtimeRef.current.localMeasurementCounters = {
+        ...runtimeRef.current.localMeasurementCounters,
         offscreenShellMeasurementAttempts:
-          localMeasurementCountersRef.current
+          runtimeRef.current.localMeasurementCounters
             .offscreenShellMeasurementAttempts + 1,
       };
 
@@ -1064,7 +1161,7 @@ export function useTranscriptVirtualTimeline({
         source: "offscreen-shell",
       });
       if (result.status === "accepted" && result.queuedControllerUpdate) {
-        cachedHeightAppliedByTokenRef.current.set(
+        runtimeRef.current.cachedHeightAppliedByToken.set(
           tokenKey,
           result.entry.height,
         );
@@ -1090,22 +1187,22 @@ export function useTranscriptVirtualTimeline({
       const tokenKey = getMeasurementTokenKey(plan.token);
       if (
         isStableMeasurementHeight(
-          offscreenMeasuredHeightByTokenRef.current.get(tokenKey),
+          runtimeRef.current.offscreenMeasuredHeightByToken.get(tokenKey),
           measuredBlockSize,
         )
       ) {
         continue;
       }
 
-      offscreenMeasuredHeightByTokenRef.current.set(
+      runtimeRef.current.offscreenMeasuredHeightByToken.set(
         tokenKey,
         measuredBlockSize,
       );
-      localMeasurementCountersRef.current = {
-        ...localMeasurementCountersRef.current,
+      runtimeRef.current.localMeasurementCounters = {
+        ...runtimeRef.current.localMeasurementCounters,
         offscreenRealMeasurementAttempts:
-          localMeasurementCountersRef.current.offscreenRealMeasurementAttempts +
-          1,
+          runtimeRef.current.localMeasurementCounters
+            .offscreenRealMeasurementAttempts + 1,
       };
 
       const result = scheduler.recordOffscreenMeasurement({
@@ -1114,7 +1211,7 @@ export function useTranscriptVirtualTimeline({
         source: "offscreen-real",
       });
       if (result.status === "accepted" && result.queuedControllerUpdate) {
-        cachedHeightAppliedByTokenRef.current.set(
+        runtimeRef.current.cachedHeightAppliedByToken.set(
           tokenKey,
           result.entry.height,
         );
@@ -1130,8 +1227,8 @@ export function useTranscriptVirtualTimeline({
 
   const flushPendingMeasurements = useCallback(() => {
     const takeDeferredCorrection = (): DeferredTranscriptCorrection | null => {
-      const deferredCorrection = deferredCorrectionRef.current;
-      deferredCorrectionRef.current = null;
+      const deferredCorrection = runtimeRef.current.deferredCorrection;
+      runtimeRef.current.deferredCorrection = null;
       return deferredCorrection;
     };
 
@@ -1139,16 +1236,16 @@ export function useTranscriptVirtualTimeline({
     // paint as the re-rendered row positions. Defer the scrollTop writes
     // while the controller updates run, commit the snapshot synchronously,
     // then apply the final correction against the new layout.
-    deferDomCorrectionsRef.current = true;
-    deferredCorrectionRef.current = null;
-    controllerRef.current?.setScrollWritesSuspended?.(true);
+    runtimeRef.current.deferDomCorrections = true;
+    runtimeRef.current.deferredCorrection = null;
+    runtimeRef.current.controller?.setScrollWritesSuspended?.(true);
     try {
       flushSync(() => {
         flushPendingMeasurementsInner();
       });
     } finally {
-      deferDomCorrectionsRef.current = false;
-      controllerRef.current?.setScrollWritesSuspended?.(false);
+      runtimeRef.current.deferDomCorrections = false;
+      runtimeRef.current.controller?.setScrollWritesSuspended?.(false);
     }
 
     const deferredCorrection = takeDeferredCorrection();
@@ -1161,12 +1258,12 @@ export function useTranscriptVirtualTimeline({
   }, [applyCorrection, flushPendingMeasurementsInner]);
 
   const scheduleMeasurementFlush = useCallback(() => {
-    if (measurementFlushScheduledRef.current) {
+    if (runtimeRef.current.measurementFlushScheduled) {
       return;
     }
 
-    measurementFlushScheduledRef.current = true;
-    visibleMeasurementFrameRef.current = requestAnimationFrame(
+    runtimeRef.current.measurementFlushScheduled = true;
+    runtimeRef.current.visibleMeasurementFrame = requestAnimationFrame(
       flushPendingMeasurements,
     );
   }, [flushPendingMeasurements]);
@@ -1174,13 +1271,13 @@ export function useTranscriptVirtualTimeline({
   const measureRowElement = useCallback(
     (rowId: string, element: HTMLElement | null) => {
       if (!element) {
-        pendingVisibleMeasurementElementsRef.current.delete(rowId);
-        registeredVisibleRowElementsRef.current.delete(rowId);
+        runtimeRef.current.pendingVisibleMeasurementElements.delete(rowId);
+        runtimeRef.current.registeredVisibleRowElements.delete(rowId);
         return;
       }
 
-      registeredVisibleRowElementsRef.current.set(rowId, element);
-      pendingVisibleMeasurementElementsRef.current.set(rowId, element);
+      runtimeRef.current.registeredVisibleRowElements.set(rowId, element);
+      runtimeRef.current.pendingVisibleMeasurementElements.set(rowId, element);
       scheduleMeasurementFlush();
     },
     [scheduleMeasurementFlush],
@@ -1192,43 +1289,52 @@ export function useTranscriptVirtualTimeline({
   // ResizeObserver callbacks lets partially remeasured layouts paint, which
   // reads as content jumping during rail/window resizes.
   const remeasureVisibleRowsSync = useCallback(() => {
-    for (const [rowId, element] of registeredVisibleRowElementsRef.current) {
+    for (const [rowId, element] of runtimeRef.current
+      .registeredVisibleRowElements) {
       if (!element.isConnected) {
-        registeredVisibleRowElementsRef.current.delete(rowId);
+        runtimeRef.current.registeredVisibleRowElements.delete(rowId);
         continue;
       }
-      const token = measurementSchedulerRef.current?.getMeasurementToken(rowId);
+      const token =
+        runtimeRef.current.measurementScheduler?.getMeasurementToken(rowId);
       if (token) {
         // Force the current-width visible measurement through even if this
         // exact token height was observed before. Controller measurements are
         // row-keyed, so an intervening width can overwrite the current row
         // height; on A → B → A resize, token A must be allowed to restore its
         // height even when the DOM height equals the previous A measurement.
-        measuredHeightByTokenRef.current.delete(getMeasurementTokenKey(token));
+        runtimeRef.current.measuredHeightByToken.delete(
+          getMeasurementTokenKey(token),
+        );
       }
-      pendingVisibleMeasurementElementsRef.current.set(rowId, element);
+      runtimeRef.current.pendingVisibleMeasurementElements.set(rowId, element);
     }
 
-    if (pendingVisibleMeasurementElementsRef.current.size === 0) {
+    if (runtimeRef.current.pendingVisibleMeasurementElements.size === 0) {
       return;
     }
 
-    if (visibleMeasurementFrameRef.current !== null) {
-      cancelAnimationFrame(visibleMeasurementFrameRef.current);
-      visibleMeasurementFrameRef.current = null;
+    if (runtimeRef.current.visibleMeasurementFrame !== null) {
+      cancelAnimationFrame(runtimeRef.current.visibleMeasurementFrame);
+      runtimeRef.current.visibleMeasurementFrame = null;
     }
-    measurementFlushScheduledRef.current = false;
+    runtimeRef.current.measurementFlushScheduled = false;
     flushPendingMeasurements();
   }, [flushPendingMeasurements]);
 
   const measureOffscreenShellElement = useCallback(
     (rowId: string, element: HTMLElement | null) => {
       if (!element) {
-        pendingOffscreenShellMeasurementElementsRef.current.delete(rowId);
+        runtimeRef.current.pendingOffscreenShellMeasurementElements.delete(
+          rowId,
+        );
         return;
       }
 
-      pendingOffscreenShellMeasurementElementsRef.current.set(rowId, element);
+      runtimeRef.current.pendingOffscreenShellMeasurementElements.set(
+        rowId,
+        element,
+      );
       scheduleMeasurementFlush();
     },
     [scheduleMeasurementFlush],
@@ -1237,11 +1343,16 @@ export function useTranscriptVirtualTimeline({
   const measureOffscreenRealElement = useCallback(
     (rowId: string, element: HTMLElement | null) => {
       if (!element) {
-        pendingOffscreenRealMeasurementElementsRef.current.delete(rowId);
+        runtimeRef.current.pendingOffscreenRealMeasurementElements.delete(
+          rowId,
+        );
         return;
       }
 
-      pendingOffscreenRealMeasurementElementsRef.current.set(rowId, element);
+      runtimeRef.current.pendingOffscreenRealMeasurementElements.set(
+        rowId,
+        element,
+      );
       scheduleMeasurementFlush();
     },
     [scheduleMeasurementFlush],
@@ -1249,7 +1360,7 @@ export function useTranscriptVirtualTimeline({
 
   const scrollToRow = useCallback(
     (rowId: string, align: TranscriptScrollAlign = "auto") => {
-      const controller = controllerRef.current;
+      const controller = runtimeRef.current.controller;
       if (!controller) {
         return false;
       }
@@ -1264,7 +1375,7 @@ export function useTranscriptVirtualTimeline({
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
-      const controller = controllerRef.current;
+      const controller = runtimeRef.current.controller;
       const container = containerRef.current;
       if (!controller || !container) {
         return false;
@@ -1332,7 +1443,7 @@ export function useTranscriptVirtualTimeline({
         preserveScrollPosition?: boolean;
       } = {},
     ) => {
-      const controller = controllerRef.current;
+      const controller = runtimeRef.current.controller;
       if (!controller?.writeScrollTop) {
         return null;
       }
@@ -1345,7 +1456,7 @@ export function useTranscriptVirtualTimeline({
 
   const readRealRowCoverage = useCallback(
     (transcriptRoot?: HTMLElement | null) => {
-      const controller = controllerRef.current;
+      const controller = runtimeRef.current.controller;
       return controller instanceof TranscriptViewportCoordinator
         ? controller.readRealRowCoverage(transcriptRoot)
         : null;
@@ -1357,7 +1468,7 @@ export function useTranscriptVirtualTimeline({
     TranscriptVirtualTimelineRowStateControls["setRowFocused"]
   >(
     (rowId, focused, options = {}) => {
-      rowStateRegistryRef.current.setFocusedRow({
+      runtimeRef.current.rowStateRegistry.setFocusedRow({
         sessionId,
         sessionEpoch,
         rowId,
@@ -1375,7 +1486,7 @@ export function useTranscriptVirtualTimeline({
     TranscriptVirtualTimelineRowStateControls["setRowOpenOverlay"]
   >(
     (rowId, open, options) => {
-      rowStateRegistryRef.current.setOpenOverlay({
+      runtimeRef.current.rowStateRegistry.setOpenOverlay({
         sessionId,
         sessionEpoch,
         rowId,
@@ -1393,7 +1504,7 @@ export function useTranscriptVirtualTimeline({
     TranscriptVirtualTimelineRowStateControls["setRowMcpActivity"]
   >(
     (rowId, active, options) => {
-      rowStateRegistryRef.current.setMcpActivity({
+      runtimeRef.current.rowStateRegistry.setMcpActivity({
         sessionId,
         sessionEpoch,
         rowId,
@@ -1412,7 +1523,7 @@ export function useTranscriptVirtualTimeline({
     TranscriptVirtualTimelineRowStateControls["markRowInteracted"]
   >(
     (rowId, options = {}) => {
-      rowStateRegistryRef.current.markRowInteracted({
+      runtimeRef.current.rowStateRegistry.markRowInteracted({
         sessionId,
         sessionEpoch,
         rowId,
@@ -1426,7 +1537,7 @@ export function useTranscriptVirtualTimeline({
   );
 
   const clearSessionRowState = useCallback(() => {
-    rowStateRegistryRef.current.cleanupSession(sessionId);
+    runtimeRef.current.rowStateRegistry.cleanupSession(sessionId);
     commitSnapshot();
   }, [commitSnapshot, sessionId]);
 
@@ -1451,7 +1562,7 @@ export function useTranscriptVirtualTimeline({
   const rowStateProvider = useMemo(
     () =>
       ({
-        registry: rowStateRegistryRef.current,
+        registry: runtimeRef.current.rowStateRegistry,
         sessionId,
         sessionEpoch,
         onRowStateChange: commitSnapshot,
@@ -1460,7 +1571,7 @@ export function useTranscriptVirtualTimeline({
   );
 
   return {
-    snapshot,
+    snapshot: currentSnapshot,
     rowStateProvider,
     rowStateControls,
     measureRowElement,

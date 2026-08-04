@@ -32,50 +32,61 @@ vi.mock("../MessageBubble", () => ({
   ),
 }));
 
-vi.mock("../../transcript/virtual/react/useTranscriptVirtualTimeline", () => ({
-  useTranscriptVirtualTimeline: ({
-    footerHeight,
-    rows,
-    sessionEpoch,
-    sessionId,
-  }: {
-    footerHeight: number;
-    rows: readonly { rowId: string }[];
-    sessionEpoch: number;
-    sessionId: string;
-  }) => ({
-    snapshot: buildVirtualTimelineSnapshot({
-      footerHeight,
-      rows,
-      sessionEpoch,
-      sessionId,
-      window: mockState.window,
-    }),
-    rowStateProvider: null,
-    measureRowElement: vi.fn(),
-    remeasureVisibleRowsSync: vi.fn(),
-    measureOffscreenShellElement: vi.fn(),
-    syncViewportFromDom: vi.fn(() => ({
-      anchor: { type: "bottom" },
-      bottomScrollTop: 0,
-      distanceFromBottom: 0,
-      footerHeight,
-      nearBottom: true,
-      pinnedToBottom: true,
-      rowCount: rows.length,
-      scrollTop: 0,
-      sessionEpoch,
-      sessionId,
-      viewportHeight: 500,
-      virtualScrollHeight: rows.length * 120 + footerHeight,
-      widthScope: "w:800",
-    })),
-    scrollToRow: mockState.scrollToRow ?? vi.fn(() => true),
-    scrollToBottom: vi.fn(() => true),
-    setRowFocused: vi.fn(),
-    markRowInteracted: vi.fn(),
-  }),
-}));
+vi.mock(
+  "../../transcript/virtual/react/useTranscriptVirtualTimeline",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../transcript/virtual/react/useTranscriptVirtualTimeline")
+      >();
+    return {
+      ...actual,
+      useTranscriptVirtualTimeline: ({
+        footerHeight,
+        rows,
+        loadedTranscript,
+      }: {
+        footerHeight: number;
+        rows: readonly { rowId: string }[];
+        loadedTranscript: { sessionEpoch: number; sessionId: string };
+      }) => {
+        const { sessionEpoch, sessionId } = loadedTranscript;
+        return {
+          snapshot: buildVirtualTimelineSnapshot({
+            footerHeight,
+            rows,
+            sessionEpoch,
+            sessionId,
+            window: mockState.window,
+          }),
+          rowStateProvider: null,
+          measureRowElement: vi.fn(),
+          remeasureVisibleRowsSync: vi.fn(),
+          measureOffscreenShellElement: vi.fn(),
+          syncViewportFromDom: vi.fn(() => ({
+            anchor: { type: "bottom" },
+            bottomScrollTop: 0,
+            distanceFromBottom: 0,
+            footerHeight,
+            nearBottom: true,
+            pinnedToBottom: true,
+            rowCount: rows.length,
+            scrollTop: 0,
+            sessionEpoch,
+            sessionId,
+            viewportHeight: 500,
+            virtualScrollHeight: rows.length * 120 + footerHeight,
+            widthScope: "w:800",
+          })),
+          scrollToRow: mockState.scrollToRow ?? vi.fn(() => true),
+          scrollToBottom: vi.fn(() => true),
+          setRowFocused: vi.fn(),
+          markRowInteracted: vi.fn(),
+        };
+      },
+    };
+  },
+);
 
 let registry: Map<string, MockHighlight>;
 const scrollIntoViewMock = vi.fn();

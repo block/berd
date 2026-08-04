@@ -1,9 +1,10 @@
-import type { ComponentProps, RefObject } from "react";
+import { useMemo, type ComponentProps, type RefObject } from "react";
 import { TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { MessageTimeline } from "./MessageTimeline";
 import { VirtualMessageTimeline } from "./VirtualMessageTimeline";
+import { createLoadedTranscriptState } from "../transcript/virtual/react/useTranscriptVirtualTimeline";
 
 type MessageTimelineProps = ComponentProps<typeof MessageTimeline>;
 
@@ -24,12 +25,20 @@ export function VirtualMessageTimelineGate({
     TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
   );
 
-  if (!virtualRendererExperiment?.enabled) {
+  const virtualRendererEnabled = virtualRendererExperiment?.enabled ?? false;
+  const loadedTranscript = useMemo(
+    () =>
+      virtualRendererEnabled ? createLoadedTranscriptState(sessionId) : null,
+    [sessionId, virtualRendererEnabled],
+  );
+
+  if (!loadedTranscript) {
     return <MessageTimeline {...timelineProps} />;
   }
 
   return (
     <VirtualMessageTimeline
+      loadedTranscript={loadedTranscript}
       sessionId={sessionId}
       searchBackendRef={searchBackendRef}
       {...timelineProps}

@@ -12,6 +12,7 @@ import {
   type TranscriptDiagnostics,
 } from "../../transcript/diagnostics";
 import type { TranscriptRowDescriptor } from "../../transcript/projection";
+import { createLoadedTranscriptState } from "../../transcript/virtual/react/useTranscriptVirtualTimeline";
 import {
   TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
   TRANSCRIPT_SELECTION_SURFACE_VALUE,
@@ -1842,6 +1843,56 @@ describe("VirtualMessageTimeline", () => {
     expect(scroller.scrollTop).toBe(300);
   });
 
+  it("replaces the complete virtual renderer when the loaded transcript object changes", () => {
+    const primaryTranscript = createLoadedTranscriptState("session-primary");
+    const replacementTranscript =
+      createLoadedTranscriptState("session-primary");
+    const messages = [textMessage("primary-user", "user", "Question")];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        loadedTranscript={primaryTranscript}
+        sessionId="session-primary"
+        messages={messages}
+      />,
+    );
+    const primaryScroller = screen.getByTestId("message-timeline-scroll");
+
+    rerender(
+      <VirtualMessageTimeline
+        loadedTranscript={replacementTranscript}
+        sessionId="session-primary"
+        messages={messages}
+      />,
+    );
+
+    const replacementScroller = screen.getByTestId("message-timeline-scroll");
+    expect(replacementScroller).not.toBe(primaryScroller);
+    expect(primaryScroller.isConnected).toBe(false);
+    expect(replacementScroller.isConnected).toBe(true);
+  });
+
+  it("replaces the complete virtual renderer instance when switching sessions", () => {
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-primary"
+        messages={[textMessage("primary-user", "user", "Question")]}
+      />,
+    );
+    const primaryScroller = screen.getByTestId("message-timeline-scroll");
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-secondary"
+        messages={[textMessage("secondary-user", "user", "Another question")]}
+      />,
+    );
+
+    const secondaryScroller = screen.getByTestId("message-timeline-scroll");
+    expect(secondaryScroller).not.toBe(primaryScroller);
+    expect(primaryScroller.isConnected).toBe(false);
+    expect(secondaryScroller.isConnected).toBe(true);
+  });
+
   it("releases scrollbar-drag ownership when switching sessions", async () => {
     const animationFrame = mockRequestAnimationFrame();
     const primaryMessages = [
@@ -1858,14 +1909,14 @@ describe("VirtualMessageTimeline", () => {
         messages={primaryMessages}
       />,
     );
-    const scroller = screen.getByTestId("message-timeline-scroll");
+    const primaryScroller = screen.getByTestId("message-timeline-scroll");
     animationFrame.runAll(0);
-    setScrollMetrics(scroller, {
+    setScrollMetrics(primaryScroller, {
       scrollTop: 300,
       scrollHeight: 1000,
       clientHeight: 300,
     });
-    fireEvent.pointerDown(scroller);
+    fireEvent.pointerDown(primaryScroller);
 
     rerender(
       <VirtualMessageTimeline
@@ -1873,10 +1924,17 @@ describe("VirtualMessageTimeline", () => {
         messages={secondaryMessages}
       />,
     );
+    const secondaryScroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(secondaryScroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
     triggerResizeObservers();
     animationFrame.runAll(1000);
 
-    expect(scroller.scrollTop).toBe(700);
+    expect(primaryScroller.isConnected).toBe(false);
+    expect(secondaryScroller.scrollTop).toBe(700);
   });
 
   it("releases wheel ownership when switching sessions", async () => {
@@ -1895,14 +1953,14 @@ describe("VirtualMessageTimeline", () => {
         messages={primaryMessages}
       />,
     );
-    const scroller = screen.getByTestId("message-timeline-scroll");
+    const primaryScroller = screen.getByTestId("message-timeline-scroll");
     animationFrame.runAll(0);
-    setScrollMetrics(scroller, {
+    setScrollMetrics(primaryScroller, {
       scrollTop: 300,
       scrollHeight: 1000,
       clientHeight: 300,
     });
-    fireEvent.wheel(scroller, { deltaY: 0 });
+    fireEvent.wheel(primaryScroller, { deltaY: 0 });
 
     rerender(
       <VirtualMessageTimeline
@@ -1910,7 +1968,12 @@ describe("VirtualMessageTimeline", () => {
         messages={secondaryMessages}
       />,
     );
-    scroller.scrollTop = 300;
+    const secondaryScroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(secondaryScroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
     rerender(
       <VirtualMessageTimeline
         sessionId="session-secondary"
@@ -1923,7 +1986,8 @@ describe("VirtualMessageTimeline", () => {
     triggerResizeObservers();
     animationFrame.runAll(1000);
 
-    expect(scroller.scrollTop).toBe(700);
+    expect(primaryScroller.isConnected).toBe(false);
+    expect(secondaryScroller.scrollTop).toBe(700);
   });
 
   it("keeps detached users stable across virtual timeline resizes", async () => {

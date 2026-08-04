@@ -28,9 +28,7 @@ import {
   shouldShowAssistiveMoment,
 } from "@/shared/assistive-ux/runtime";
 import {
-  createTranscriptProjectionCache,
   toDateBucket,
-  type TranscriptProjectionCache,
   type TranscriptProjectionSnapshot,
   type TranscriptRowDescriptor,
 } from "../transcript/projection";
@@ -53,7 +51,9 @@ import {
   type TranscriptVirtualItem,
 } from "../transcript/virtual";
 import {
+  createLoadedTranscriptState,
   useTranscriptVirtualTimeline,
+  type LoadedTranscriptState,
   type TranscriptVirtualTimelineRowStateControls,
   type TranscriptVirtualTimelineFallbackReason,
   type TranscriptVirtualTimelineMeasurementStats,
@@ -224,6 +224,7 @@ declare global {
 }
 
 interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
+  loadedTranscript?: LoadedTranscriptState;
   sessionId: string;
   messages: Message[];
   streamingMessageId?: string | null;
@@ -939,6 +940,36 @@ function applyTimelineDiagnosticSamples(
 }
 
 export function VirtualMessageTimeline({
+  loadedTranscript: providedLoadedTranscript,
+  ...props
+}: VirtualMessageTimelineProps) {
+  const fallbackLoadedTranscriptRef = useRef<LoadedTranscriptState | null>(
+    null,
+  );
+  if (
+    !fallbackLoadedTranscriptRef.current ||
+    fallbackLoadedTranscriptRef.current.sessionId !== props.sessionId
+  ) {
+    fallbackLoadedTranscriptRef.current = createLoadedTranscriptState(
+      props.sessionId,
+    );
+  }
+  const loadedTranscript =
+    providedLoadedTranscript ?? fallbackLoadedTranscriptRef.current;
+  if (loadedTranscript.sessionId !== props.sessionId) {
+    throw new Error("Loaded transcript does not match the rendered session");
+  }
+  return (
+    <VirtualMessageTimelineSession
+      key={loadedTranscript.id}
+      loadedTranscript={loadedTranscript}
+      {...props}
+    />
+  );
+}
+
+function VirtualMessageTimelineSession({
+  loadedTranscript,
   sessionId,
   messages,
   streamingMessageId,
@@ -963,12 +994,12 @@ export function VirtualMessageTimeline({
   footerStatus,
   placeholder,
   showPlaceholder,
-}: VirtualMessageTimelineProps) {
+}: VirtualMessageTimelineProps & {
+  loadedTranscript: LoadedTranscriptState;
+}) {
   const { t, i18n } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
   const responseStartGutterPreference = useResponseStartGutterPreference();
-  const projectionCacheRef = useRef<TranscriptProjectionCache | null>(null);
-  const sessionLifecycleRef = useRef({ sessionId, sessionEpoch: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1045,82 +1076,15 @@ export function VirtualMessageTimeline({
   const blankViewportRecoveryFrameRef = useRef<number | null>(null);
   const browserScrollOwnershipUntilRef = useRef(0);
   const requestBlankViewportInspectionRef = useRef<() => void>(() => undefined);
-  const [transientStateSessionId, setTransientStateSessionId] =
-    useState(sessionId);
 
-  if (!projectionCacheRef.current) {
-    projectionCacheRef.current = createTranscriptProjectionCache();
-  }
+  const { sessionEpoch } = loadedTranscript;
 
-  if (sessionLifecycleRef.current.sessionId !== sessionId) {
-    sessionLifecycleRef.current = {
-      sessionId,
-      sessionEpoch: sessionLifecycleRef.current.sessionEpoch + 1,
-    };
-    messageRefs.current = {};
-    responseStartRowRefs.current.clear();
-    isNearBottomRef.current = true;
-    scrollIntentRef.current = "following-latest";
-    suppressFollowResumeFromProgrammaticScrollRef.current = false;
-    userDetachedRef.current = false;
-    userScrollDirectionRef.current = null;
-    detachedScrollTopRef.current = null;
-    liveTailHandoffRef.current = null;
-    streamingBottomFollowActiveRef.current = false;
-    previousStreamingMessageIdRef.current = null;
-    previousLatestAssistantCompletionStatusRef.current = null;
-    previousLatestCompletedAssistantMessageIdRef.current = null;
-    hasInitializedResponseStartHintRef.current = false;
-    responseStartHintCandidateMessageIdRef.current = null;
-    if (responseStartHintAnimationFrameRef.current != null) {
-      cancelAnimationFrame(responseStartHintAnimationFrameRef.current);
-      responseStartHintAnimationFrameRef.current = null;
-    }
-    responseStartHintSeenMessageIdsRef.current.clear();
-    lastAutoScrollMessagesRef.current = null;
-    lastLatestUserAutoScrollKeyRef.current = null;
-    pointerScrollIntentActiveRef.current = false;
-    userScrollIntentRef.current = false;
-    userScrollDirectionRef.current = null;
-    if (userScrollIntentExpiryFrameRef.current != null) {
-      cancelAnimationFrame(userScrollIntentExpiryFrameRef.current);
-      userScrollIntentExpiryFrameRef.current = null;
-    }
-    diagnosticsStartMsRef.current = getDiagnosticsNowMs();
-    diagnosticsAccumulatorRef.current = createTimelineDiagnosticsAccumulator();
-    blankViewportRecoveryStateRef.current = null;
-  }
-
-  // Reset transient timeline UI state inline when the session changes, using a
-  // `prev`-prop guard (concurrency-safe, unlike folding these into the
-  // ref-guarded block above), so a switched-to session never paints the
-  // previous one's scroll affordances for a frame.
-  if (transientStateSessionId !== sessionId) {
-    setTransientStateSessionId(sessionId);
-    setUserDetached(false);
-    setShowJumpToLatest(false);
-    setResponseStartHintMessageId(null);
-    setLiveTailScrollHeightFloorPx(0);
-    setPulsingMessageId(null);
-    setBrowserRowCoverage(null);
-    setBlankViewportRecoveryAttempts(0);
-  }
-
-  const sessionEpoch = sessionLifecycleRef.current.sessionEpoch;
   const hasFooter = footer != null;
   const nowBucket = toDateBucket(Date.now());
   const localeKey = i18n.resolvedLanguage ?? i18n.language ?? "default";
   const snapshot = useMemo(
     () =>
-      projectionCacheRef.current?.update({
-        sessionId,
-        sessionEpoch,
-        messages,
-        streamingMessageId: streamingMessageId ?? null,
-        nowBucket,
-        localeKey,
-      }) ??
-      createTranscriptProjectionCache().update({
+      loadedTranscript.projectionCache.update({
         sessionId,
         sessionEpoch,
         messages,
@@ -1129,12 +1093,13 @@ export function VirtualMessageTimeline({
         localeKey,
       }),
     [
+      loadedTranscript,
       localeKey,
       messages,
       nowBucket,
-      sessionEpoch,
       sessionId,
       streamingMessageId,
+      sessionEpoch,
     ],
   );
   const stableRows = useStableTranscriptRows(snapshot.rows);
@@ -1209,8 +1174,7 @@ export function VirtualMessageTimeline({
     [],
   );
   const virtualTimeline = useTranscriptVirtualTimeline({
-    sessionId,
-    sessionEpoch,
+    loadedTranscript,
     rows: virtualRows,
     protectedRowIds: activeStreamingProtectedRowIds,
     containerRef,
@@ -1608,7 +1572,6 @@ export function VirtualMessageTimeline({
       liveStreamingTailRows,
       mountedRows,
       offscreenShellMountedRows,
-      sessionEpoch,
       offscreenRealMountedRows,
       sessionId,
       snapshot.fragmentRowCount,
@@ -1625,6 +1588,7 @@ export function VirtualMessageTimeline({
       virtualRangeMountedRows,
       virtualProtectedOffscreenRows,
       virtualTimelineSnapshot,
+      sessionEpoch,
     ],
   );
   useEffect(() => {
@@ -1714,13 +1678,6 @@ export function VirtualMessageTimeline({
     streamingMessageId,
     virtualTimelineSnapshot.controllerState.nearBottom,
   ]);
-
-  useEffect(
-    () => () => {
-      projectionCacheRef.current?.cleanupSession(sessionId);
-    },
-    [sessionId],
-  );
 
   const hasRealScrollableOverflow = useCallback((container: HTMLDivElement) => {
     return hasTimelineRealScrollableOverflow({
@@ -3706,7 +3663,6 @@ export function VirtualMessageTimeline({
   }, [
     isBoundedVirtualMode,
     remeasureVisibleRowsSync,
-    sessionEpoch,
     sessionId,
     showPlaceholderContent,
     stableRows.length,
@@ -3714,6 +3670,7 @@ export function VirtualMessageTimeline({
     readRealRowCoverage,
     virtualRangeRevision,
     writeVirtualScrollTop,
+    sessionEpoch,
   ]);
 
   useLayoutEffect(() => {

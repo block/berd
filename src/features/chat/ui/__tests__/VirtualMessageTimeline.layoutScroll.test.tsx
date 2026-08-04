@@ -28,38 +28,49 @@ vi.mock("../MessageBubble", () => ({
   ),
 }));
 
-vi.mock("../../transcript/virtual/react/useTranscriptVirtualTimeline", () => ({
-  useTranscriptVirtualTimeline: ({
-    footerHeight,
-    rows,
-    sessionEpoch,
-    sessionId,
-  }: {
-    footerHeight: number;
-    rows: readonly {
-      rowId: string;
-    }[];
-    sessionEpoch: number;
-    sessionId: string;
-  }) => ({
-    snapshot: buildVirtualTimelineSnapshot({
-      footerHeight,
-      rows,
-      sessionEpoch,
-      sessionId,
-    }),
-    rowStateProvider: null,
-    measureRowElement: vi.fn(),
-    measureOffscreenShellElement: vi.fn(),
-    measureOffscreenRealElement: vi.fn(),
-    remeasureVisibleRowsSync: timelineMocks.remeasureVisibleRowsSync,
-    syncViewportFromDom: timelineMocks.syncViewportFromDom,
-    scrollToRow: vi.fn(() => true),
-    scrollToBottom: timelineMocks.scrollToBottom,
-    setRowFocused: vi.fn(),
-    markRowInteracted: vi.fn(),
-  }),
-}));
+vi.mock(
+  "../../transcript/virtual/react/useTranscriptVirtualTimeline",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../transcript/virtual/react/useTranscriptVirtualTimeline")
+      >();
+    return {
+      ...actual,
+      useTranscriptVirtualTimeline: ({
+        footerHeight,
+        rows,
+        loadedTranscript,
+      }: {
+        footerHeight: number;
+        rows: readonly {
+          rowId: string;
+        }[];
+        loadedTranscript: { sessionEpoch: number; sessionId: string };
+      }) => {
+        const { sessionEpoch, sessionId } = loadedTranscript;
+        return {
+          snapshot: buildVirtualTimelineSnapshot({
+            footerHeight,
+            rows,
+            sessionEpoch,
+            sessionId,
+          }),
+          rowStateProvider: null,
+          measureRowElement: vi.fn(),
+          measureOffscreenShellElement: vi.fn(),
+          measureOffscreenRealElement: vi.fn(),
+          remeasureVisibleRowsSync: timelineMocks.remeasureVisibleRowsSync,
+          syncViewportFromDom: timelineMocks.syncViewportFromDom,
+          scrollToRow: vi.fn(() => true),
+          scrollToBottom: timelineMocks.scrollToBottom,
+          setRowFocused: vi.fn(),
+          markRowInteracted: vi.fn(),
+        };
+      },
+    };
+  },
+);
 
 class ResizeObserverMock {
   observe = vi.fn();

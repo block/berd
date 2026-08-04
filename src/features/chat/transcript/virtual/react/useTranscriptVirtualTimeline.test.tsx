@@ -2,7 +2,10 @@ import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { useLayoutEffect, type RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptRowDescriptor } from "../../projection/transcriptItemTypes";
-import { useTranscriptVirtualTimeline } from "./useTranscriptVirtualTimeline";
+import {
+  createLoadedTranscriptState,
+  useTranscriptVirtualTimeline,
+} from "./useTranscriptVirtualTimeline";
 
 const SESSION_ID = "session-a";
 
@@ -89,6 +92,102 @@ describe("useTranscriptVirtualTimeline", () => {
         result.current.snapshot.measurementStats.acceptedVisibleMeasurements,
       ).toBe(1);
     });
+  });
+
+  it("cancels pending measurements when the loaded transcript unmounts", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("assistant-tail", 120)];
+
+    const loadedTranscript = createLoadedTranscriptState(SESSION_ID, 1);
+    const { result, unmount } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        loadedTranscript,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      result.current.measureRowElement(
+        "assistant-tail",
+        createMeasuredElement(240),
+      );
+    });
+    const pendingMeasurementFrameCount = frameCallbacks.length;
+    expect(pendingMeasurementFrameCount).toBeGreaterThan(0);
+
+    unmount();
+
+    expect(frameCallbacks.length).toBeLessThan(pendingMeasurementFrameCount);
+    expect(cancelAnimationFrame).toHaveBeenCalled();
+  });
+
+  it("replaces fallback runtime state when the session changes", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("assistant-tail", 120)];
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useTranscriptVirtualTimeline({
+          sessionId,
+          sessionEpoch: 1,
+          rows,
+          containerRef,
+          footerHeight: 0,
+        }),
+      { initialProps: { sessionId: SESSION_ID } },
+    );
+    const firstControllerState = result.current.snapshot.controllerState;
+    const firstRegistry = result.current.rowStateProvider.registry;
+
+    await act(async () => {
+      result.current.measureRowElement(
+        "assistant-tail",
+        createMeasuredElement(240),
+      );
+    });
+    const pendingFrameId = frameCallbacks.at(-1)?.id;
+    expect(pendingFrameId).toBeDefined();
+
+    await act(async () => {
+      rerender({ sessionId: "session-b" });
+    });
+
+    expect(result.current.snapshot.controllerState).not.toBe(
+      firstControllerState,
+    );
+    expect(result.current.snapshot.controllerState.sessionId).toBe("session-b");
+    expect(result.current.rowStateProvider.registry).not.toBe(firstRegistry);
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(pendingFrameId);
+    expect(frameCallbacks.some((frame) => frame.id === pendingFrameId)).toBe(
+      false,
+    );
+  });
+
+  it("models each loaded transcript as one independently replaceable state value", () => {
+    const first = createLoadedTranscriptState(SESSION_ID, 1);
+    const replacement = createLoadedTranscriptState(SESSION_ID, 1);
+
+    first.virtualTimeline.rows = [row("retained-only-by-first", 120)];
+    first.virtualTimeline.pendingVisibleMeasurementElements.set(
+      "retained-only-by-first",
+      document.createElement("div"),
+    );
+
+    expect(replacement).not.toBe(first);
+    expect(replacement.id).not.toBe(first.id);
+    expect(replacement.virtualTimeline).not.toBe(first.virtualTimeline);
+    expect(replacement.projectionCache).not.toBe(first.projectionCache);
+    expect(replacement.virtualTimeline.rows).toEqual([]);
+    expect(
+      replacement.virtualTimeline.pendingVisibleMeasurementElements,
+    ).toEqual(new Map());
   });
 
   it("does not publish a new snapshot for no-op bottom scrolls", async () => {

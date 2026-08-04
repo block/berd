@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
@@ -31,6 +31,7 @@ vi.mock("../MessageTimeline", () => ({
 
 vi.mock("../VirtualMessageTimeline", () => ({
   VirtualMessageTimeline: (props: {
+    loadedTranscript: { id: string };
     sessionId: string;
     messages: Message[];
     footer?: ReactNode;
@@ -140,6 +141,40 @@ describe("VirtualMessageTimelineGate", () => {
       }),
     );
     expect(mocks.legacyTimelineSpy).not.toHaveBeenCalled();
+  });
+
+  it("replaces loaded transcript state when the virtual renderer is toggled", () => {
+    expect(
+      setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, true),
+    ).toBe(true);
+
+    render(
+      <VirtualMessageTimelineGate
+        sessionId="session-1"
+        messages={[message("user-1")]}
+      />,
+    );
+    const firstLoadedTranscript =
+      mocks.virtualTimelineSpy.mock.lastCall?.[0].loadedTranscript;
+
+    act(() => {
+      expect(
+        setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, false),
+      ).toBe(true);
+    });
+    expect(screen.getByTestId("legacy-message-timeline")).toBeInTheDocument();
+
+    act(() => {
+      expect(
+        setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, true),
+      ).toBe(true);
+    });
+    const replacementLoadedTranscript =
+      mocks.virtualTimelineSpy.mock.lastCall?.[0].loadedTranscript;
+
+    expect(screen.getByTestId("virtual-message-timeline")).toBeInTheDocument();
+    expect(replacementLoadedTranscript).not.toBe(firstLoadedTranscript);
+    expect(replacementLoadedTranscript?.id).not.toBe(firstLoadedTranscript?.id);
   });
 
   it("passes shared message-bubble callbacks through both experiment states", () => {
