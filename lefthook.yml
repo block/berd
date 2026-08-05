@@ -6,12 +6,14 @@ pre-commit:
     biome-format:
       # Allowlist of biome-supported extensions; safer than a denylist since
       # ignoreUnknown is false and unknown types would cause biome to error.
+      # --no-errors-on-unmatched keeps commits green when every staged file
+      # is biome-ignored (e.g. generated src-tauri/gen JSON).
       glob: "*.{ts,tsx,js,jsx,json,css}"
-      run: pnpm exec biome format --write {staged_files}
+      run: pnpm exec biome format --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     biome-check:
       glob: "*.{ts,tsx,js,jsx,json,css}"
-      run: pnpm exec biome check --fix {staged_files}
+      run: pnpm exec biome check --fix --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     check:
       run: just check

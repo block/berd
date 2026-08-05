@@ -20,7 +20,9 @@ use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
 use crate::services::managed_acp_tools;
 use crate::services::path_env;
-use crate::services::process::{pid_t_from_u32, process_is_alive};
+use crate::services::process::{
+    kill_process, pid_t_from_u32, process_is_alive, terminate_process, ProcessId,
+};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, Command};
@@ -83,10 +85,7 @@ impl GooseServeProcess {
             match pid_t_from_u32(child_pid) {
                 Some(pid) => {
                     log::info!("Killing goose serve child (pid {child_pid})");
-                    // SAFETY: sending SIGTERM to a known child process.
-                    unsafe {
-                        libc::kill(pid, libc::SIGTERM);
-                    }
+                    terminate_process(pid);
                 }
                 None => {
                     log::warn!(
@@ -521,7 +520,7 @@ fn read_process_record(path: &Path) -> Result<ServeProcessRecord, String> {
     serde_json::from_str(&contents).map_err(|error| error.to_string())
 }
 
-async fn cleanup_orphaned_serve_process(path: &Path, pid: libc::pid_t) {
+async fn cleanup_orphaned_serve_process(path: &Path, pid: ProcessId) {
     if !process_is_alive(pid) {
         log::info!(
             "Previous goose serve (pid {pid}) is no longer running, removing process record {}",
@@ -549,10 +548,7 @@ async fn cleanup_orphaned_serve_process(path: &Path, pid: libc::pid_t) {
         None,
         diagnostic_log::fields([("pid", (pid as i64).into())]),
     );
-    // SAFETY: sending SIGTERM to an orphaned goose serve process.
-    unsafe {
-        libc::kill(pid, libc::SIGTERM);
-    }
+    terminate_process(pid);
 
     // Give it a moment to exit, then force-kill if still alive.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -565,10 +561,7 @@ async fn cleanup_orphaned_serve_process(path: &Path, pid: libc::pid_t) {
             None,
             diagnostic_log::fields([("pid", (pid as i64).into())]),
         );
-        // SAFETY: sending SIGKILL as a last resort.
-        unsafe {
-            libc::kill(pid, libc::SIGKILL);
-        }
+        kill_process(pid);
     }
 
     let _ = std::fs::remove_file(path);
@@ -576,7 +569,7 @@ async fn cleanup_orphaned_serve_process(path: &Path, pid: libc::pid_t) {
 
 /// Check whether the given PID belongs to a goose binary. Uses
 /// `proc_pidpath` on macOS and `/proc/{pid}/exe` on Linux.
-fn is_goose_process(pid: libc::pid_t) -> bool {
+fn is_goose_process(pid: ProcessId) -> bool {
     if let Some(name) = process_executable_name(pid) {
         name.contains("goose")
     } else {
@@ -587,7 +580,7 @@ fn is_goose_process(pid: libc::pid_t) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn process_executable_name(pid: libc::pid_t) -> Option<String> {
+fn process_executable_name(pid: ProcessId) -> Option<String> {
     let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     // SAFETY: buf is large enough for the maximum path length.
     let len =
@@ -599,11 +592,26 @@ fn process_executable_name(pid: libc::pid_t) -> Option<String> {
     path.rsplit('/').next().map(String::from)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn process_executable_name(pid: libc::pid_t) -> Option<String> {
+#[cfg(all(unix, not(target_os = "macos")))]
+fn process_executable_name(pid: ProcessId) -> Option<String> {
     let exe_link = format!("/proc/{pid}/exe");
     let path = std::fs::read_link(exe_link).ok()?;
     path.file_name()?.to_str().map(String::from)
+}
+
+#[cfg(windows)]
+fn process_executable_name(pid: ProcessId) -> Option<String> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+    let mut system = System::new();
+    let pid = Pid::from_u32(pid);
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    let process = system.process(pid)?;
+    Some(process.name().to_string_lossy().into_owned())
 }
 
 /// Paths resolved by `resolve_berdctl_spawn_paths`, consumed by
@@ -676,12 +684,12 @@ fn apply_berdctl_env(
 }
 
 /// Create or refresh the PATH shim that lets harness children run a bare
-/// `berdctl`: a `berdctl` symlink in `shim_dir` pointing at `cli_path`.
-/// The symlink is recreated on every spawn because the resolved bundle path
-/// changes under App Translocation and app updates; when multiple dev app
-/// instances share an app_data_dir the last spawner wins, which is
-/// acceptable. A symlink (not a copy) keeps the signed bundled binary and
-/// its updates authoritative.
+/// `berdctl`.
+///
+/// Unix uses a `berdctl` symlink so the signed bundled binary and updates stay
+/// authoritative. Windows uses a `berdctl.cmd` wrapper because creating
+/// symlinks is not reliably available in non-admin developer shells, and
+/// replacing an in-use copied `.exe` can fail.
 #[cfg(feature = "berdctl")]
 fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
     if !cli_path.exists() {
@@ -694,7 +702,7 @@ fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(shim_dir)
         .map_err(|error| format!("failed to create {}: {error}", shim_dir.display()))?;
 
-    let link = shim_dir.join("berdctl");
+    let link = shim_dir.join(berdctl_shim_name());
     // `remove_file` deletes a symlink itself rather than its target.
     match std::fs::remove_file(&link) {
         Ok(()) => {}
@@ -706,13 +714,7 @@ fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
             ));
         }
     }
-    std::os::unix::fs::symlink(cli_path, &link).map_err(|error| {
-        format!(
-            "failed to symlink {} -> {}: {error}",
-            link.display(),
-            cli_path.display()
-        )
-    })
+    create_berdctl_shim_file(cli_path, &link)
 }
 
 /// Mirrors `get_goose_command`: explicit env override (exported by `just
@@ -727,7 +729,48 @@ fn resolve_berdctl_bin() -> Option<PathBuf> {
     }
 
     let exe = std::env::current_exe().ok()?;
-    Some(exe.parent()?.join("berdctl"))
+    Some(exe.parent()?.join(berdctl_binary_name()))
+}
+
+#[cfg(feature = "berdctl")]
+fn berdctl_binary_name() -> &'static str {
+    if cfg!(windows) {
+        "berdctl.exe"
+    } else {
+        "berdctl"
+    }
+}
+
+#[cfg(feature = "berdctl")]
+fn berdctl_shim_name() -> &'static str {
+    if cfg!(windows) {
+        "berdctl.cmd"
+    } else {
+        berdctl_binary_name()
+    }
+}
+
+#[cfg(all(feature = "berdctl", unix))]
+fn create_berdctl_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(cli_path, link).map_err(|error| {
+        format!(
+            "failed to symlink {} -> {}: {error}",
+            link.display(),
+            cli_path.display()
+        )
+    })
+}
+
+#[cfg(all(feature = "berdctl", windows))]
+fn create_berdctl_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> {
+    let content = format!("@echo off\r\n\"{}\" %*\r\n", cli_path.to_string_lossy());
+    std::fs::write(link, content).map_err(|error| {
+        format!(
+            "failed to write {} wrapper for {}: {error}",
+            link.display(),
+            cli_path.display(),
+        )
+    })
 }
 
 pub fn get_goose_command(app_handle: &tauri::AppHandle) -> Result<Command, String> {
@@ -1252,6 +1295,7 @@ mod tests {
             path
         }
 
+        #[cfg(unix)]
         #[test]
         fn shim_symlink_points_at_resolved_cli_path() {
             let temp = tempfile::tempdir().expect("temp dir");
@@ -1265,6 +1309,7 @@ mod tests {
             assert_eq!(std::fs::read_link(&link).expect("read link"), cli_path);
         }
 
+        #[cfg(unix)]
         #[test]
         fn shim_symlink_is_refreshed_when_target_path_changes() {
             let temp = tempfile::tempdir().expect("temp dir");
@@ -1288,6 +1333,21 @@ mod tests {
 
             assert!(result.is_err());
             assert!(!shim_dir.exists());
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn shim_cmd_wrapper_points_at_resolved_cli_path() {
+            let temp = tempfile::tempdir().expect("temp dir");
+            let cli_path = write_fake_cli(temp.path(), "berdctl.exe");
+            let shim_dir = temp.path().join("bin");
+
+            create_berdctl_shim(&shim_dir, &cli_path).expect("shim creation should succeed");
+
+            let link = shim_dir.join("berdctl.cmd");
+            assert!(link.is_file());
+            let wrapper = std::fs::read_to_string(&link).expect("read shim");
+            assert!(wrapper.contains(&format!("\"{}\" %*", cli_path.to_string_lossy())));
         }
     }
 }

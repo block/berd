@@ -20,6 +20,15 @@ If you already have an upstream Goose binary you want to test, set `GOOSE_BIN=/p
 before running `just dev`; that is an explicit local override and bypasses the
 managed pinned checkout.
 
+### Native Windows verification
+
+Windows development is a separate native verification lane. It does not replace
+the Mac/Hermit flow above, and the first milestone is launching the real Tauri
+dev app on Windows, not producing a Windows installer. Follow the full fresh
+machine workflow in [docs/windows-onboarding.md](docs/windows-onboarding.md).
+Bootstrap does not write Block npm/Artifactory configuration; the Windows guide
+keeps that as an explicit manual corporate setup step.
+
 To preview the ready-to-restart update indicator in the top bar during local
 development, run:
 

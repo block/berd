@@ -1,17 +1,38 @@
-# Derive a stable port from the working directory so the same checkout always
-# gets the same Vite port.
-vite_port := `python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)"`
-
-# Use one shared Tauri target dir across Berd worktrees while keeping it
-# separate from the managed upstream Goose checkout.
-tauri_cargo_target_dir := `if [ -n "${BERD_TAURI_CARGO_TARGET_DIR:-}" ]; then printf '%s\n' "$BERD_TAURI_CARGO_TARGET_DIR"; elif [ -n "${XDG_CACHE_HOME:-}" ]; then printf '%s/berd-tauri/cargo-target\n' "$XDG_CACHE_HOME"; elif [ "$(uname -s)" = "Darwin" ]; then printf '%s/Library/Caches/berd-tauri/cargo-target\n' "$HOME"; else printf '%s/.cache/berd-tauri/cargo-target\n' "$HOME"; fi`
-
 # Cargo features for the full dev/CI posture of the app crate.
 app_features := "berdctl,app-test-driver"
 
 # Default recipe
 default:
     @just --list
+
+# Check or install native Windows prerequisites. Fresh Windows machines only
+# need `winget install --id Casey.Just -e` before this entrypoint is available.
+bootstrap-windows mode="check":
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Bootstrap-Windows.ps1 -Mode "{{ mode }}"
+
+# Report native Windows readiness for first-milestone Berd verification.
+doctor-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Doctor-Windows.ps1
+
+# Dry-run or remove native Windows onboarding state.
+cleanup-windows *ARGS:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Cleanup-Windows.ps1 {{ ARGS }}
+
+# Install pnpm dependencies, build the SDK, install hooks, and build pinned Goose natively on Windows.
+setup-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Setup-Windows.ps1
+
+# Launch the native Windows Tauri dev app with managed goose.exe and berdctl.exe.
+dev-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Dev-Windows.ps1
+
+# Run Windows-native Rust/Tauri checks with external sidecars disabled.
+tauri-check-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Tauri-Check-Windows.ps1
+
+# Run focused tests for Windows script path/stamp helpers.
+test-windows-dev:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Test-WindowsDev.ps1
 
 # ── Dev Environment ──────────────────────────────────────────
 
@@ -117,12 +138,37 @@ tauri-fmt:
 tauri-fmt-check:
     cd src-tauri && cargo fmt --check
 
+_tauri-cargo-unix *ARGS:
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && cd src-tauri && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo {{ ARGS }}
+
+_tauri-cargo-windows *ARGS:
+    #!powershell.exe -NoProfile -ExecutionPolicy Bypass
+    $ErrorActionPreference = "Stop"
+    Import-Module (Join-Path (Get-Location) "scripts/windows/WindowsDev.psm1") -Force -DisableNameChecking
+    Assert-WindowsHost
+    Update-SessionPathFromRegistry
+    Assert-MsvcEnvironment
+    Set-Location (Join-Path (Get-BerdRepoRoot) "src-tauri")
+    $env:CARGO_TARGET_DIR = Get-TauriCargoTargetDir
+    $env:TAURI_CONFIG = '{"bundle":{"externalBin":[]}}'
+    cargo {{ ARGS }}
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Run Rust clippy with warnings denied.
 clippy:
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy --features {{ app_features }} -- -D warnings
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p berdctl -- -D warnings
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p tauri-plugin-berdctl --features server -- -D warnings
+    just _clippy-{{ os_family() }}
+
+_clippy-unix:
+    just _tauri-cargo-unix clippy -- -D warnings
+    just _tauri-cargo-unix clippy --features {{ app_features }} -- -D warnings
+    just _tauri-cargo-unix clippy -p berdctl -- -D warnings
+    just _tauri-cargo-unix clippy -p tauri-plugin-berdctl --features server -- -D warnings
+
+_clippy-windows:
+    just _tauri-cargo-windows clippy -- -D warnings
+    just _tauri-cargo-windows clippy --features {{ app_features }} -- -D warnings
+    just _tauri-cargo-windows clippy -p berdctl -- -D warnings
+    just _tauri-cargo-windows clippy -p tauri-plugin-berdctl --features server -- -D warnings
 
 # Build the frontend.
 build:
@@ -130,14 +176,27 @@ build:
 
 # Check the Tauri/Rust crate with external sidecars disabled.
 tauri-check:
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check --features {{ app_features }}
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check -p berdctl
+    just _tauri-check-{{ os_family() }}
+
+_tauri-check-unix:
+    just _tauri-cargo-unix check
+    just _tauri-cargo-unix check --features {{ app_features }}
+    just _tauri-cargo-unix check -p berdctl
+
+_tauri-check-windows:
+    just tauri-check-windows
 
 # Run the Rust plugin tests with external sidecars disabled.
 tauri-test:
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p tauri-plugin-berdctl --features server
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p berdctl
+    just _tauri-test-{{ os_family() }}
+
+_tauri-test-unix:
+    just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
+    just _tauri-cargo-unix test -p berdctl
+
+_tauri-test-windows:
+    just _tauri-cargo-windows test -p tauri-plugin-berdctl --features server
+    just _tauri-cargo-windows test -p berdctl
 
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
@@ -175,8 +234,9 @@ bundle:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
+    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
     ./scripts/prepare-catch-sidecar.sh
 
@@ -193,17 +253,17 @@ bundle:
       TAURI_BUILD_ARGS+=(--bundles app)
     fi
 
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \
       VITE_AUTH_GATE=0 \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       "${TAURI_BUILD_ARGS[@]}"
 
     if [[ "$(uname -s)" = "Darwin" ]]; then
-      APP_PATH="{{ tauri_cargo_target_dir }}/release/bundle/macos/Berd.app"
+      APP_PATH="$TAURI_CARGO_TARGET_DIR/release/bundle/macos/Berd.app"
       # Local Tauri builds are ad-hoc signed before resources are sealed. Re-sign
       # after app bundling so the local DMG contains a verifiable app bundle.
       codesign --force --deep --sign - "$APP_PATH"
-      DMG_DIR="{{ tauri_cargo_target_dir }}/release/bundle/dmg"
+      DMG_DIR="$TAURI_CARGO_TARGET_DIR/release/bundle/dmg"
       mkdir -p "$DMG_DIR"
       case "$(uname -m)" in
         arm64) DMG_ARCH="aarch64" ;;
@@ -229,8 +289,9 @@ bundle-debug:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
+    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-bb-cli-resource.sh
     ./scripts/prepare-catch-sidecar.sh
 
@@ -244,7 +305,7 @@ bundle-debug:
     jq --arg v "$BERD_APP_VERSION" '.version = $v | .app.windows[0].devtools = true' \
       src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \
       VITE_AUTH_GATE=0 \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"
@@ -278,14 +339,14 @@ dev:
         just setup
     fi
 
-    VITE_PORT={{ vite_port }}
+    VITE_PORT="$(python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)")"
     export VITE_PORT
     # ACP bridges install at runtime onto the Berd-managed Node runtime, the
     # same path dev and release share; set BERD_ACP_TOOLS_DIR by hand to point
     # goosed at a locally built bridge dir instead.
     export VITE_DESIGN_SYSTEM_EXPLORER=1
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
-    export CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}"
+    export CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
     echo "Using Tauri Cargo target dir: ${CARGO_TARGET_DIR}"
 
     # Derive a git-based version so dev builds don't report the 0.1.0
@@ -377,13 +438,33 @@ new-command noun verb:
     node scripts/new-berdctl-command.mjs {{ noun }} {{ verb }}
 
 clean:
-    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" cargo clean
+    just _clean-{{ os_family() }}
+
+_clean-unix:
+    just _tauri-cargo-unix clean
     rm -rf dist node_modules sdk/node_modules sdk/dist
 
+_clean-windows:
+    #!powershell.exe -NoProfile -ExecutionPolicy Bypass
+    $ErrorActionPreference = "Stop"
+    just _tauri-cargo-windows clean
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue dist,node_modules,sdk/node_modules,sdk/dist
+
 stage-sidecar:
-    ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-berdctl-sidecar.sh
-    ./scripts/prepare-catch-sidecar.sh
+    just _stage-sidecar-{{ os_family() }}
+
+_stage-sidecar-unix:
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
+
+_stage-sidecar-windows:
+    #!powershell.exe -NoProfile -ExecutionPolicy Bypass
+    $ErrorActionPreference = "Stop"
+    Import-Module (Join-Path (Get-Location) "scripts/windows/WindowsDev.psm1") -Force -DisableNameChecking
+    $bash = Get-GitBashPath
+    if ([string]::IsNullOrWhiteSpace($bash)) { throw "Git Bash is required for stage-sidecar on Windows." }
+    & $bash -c 'TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh'
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 avatars-manifest source version:
     pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"

@@ -227,11 +227,10 @@ git -C "$goose_repo" checkout --detach "$pinned_commit" >/dev/null 2>&1
 git -C "$goose_repo" reset --hard "$pinned_commit" >/dev/null 2>&1
 
 log "Building Goose from $goose_repo at $pinned_commit."
-(cd "$goose_repo" && cargo build -p "$goose_package" --bin "$goose_bin")
-
-if [[ -n "$(git -C "$goose_repo" status --porcelain -- Cargo.lock)" ]]; then
-  git -C "$goose_repo" checkout -- Cargo.lock
-fi
+# --locked keeps the build on the pinned commit's Cargo.lock; without it cargo
+# may resolve newer deps and the stamp would record a binary that does not
+# match the pin.
+(cd "$goose_repo" && cargo build --locked -p "$goose_package" --bin "$goose_bin")
 [[ -x "$bin_path" ]] || { echo "Expected Goose binary at $bin_path, but it was not built." >&2; exit 1; }
 write_stamp "$pinned_ref" "$(git -C "$goose_repo" rev-parse HEAD)"
 log "Local Goose binary ready at $bin_path."
