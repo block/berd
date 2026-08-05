@@ -51,9 +51,13 @@ export const VOICE_CONVERSATION_EXPERIMENT_ID = "voice-conversation";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
-export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
+export const GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID = "gloopie-avatar-creator";
+
+export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
 
 export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
+
+export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
 export const EXPERIMENT_DEFINITIONS = [
   {
@@ -74,6 +78,16 @@ export const EXPERIMENT_DEFINITIONS = [
     // Skill discovery is an opt-in surface because it requires the optional
     // sq-agents CLI and can make remote catalog requests.
     defaultEnabled: false,
+  },
+  {
+    id: STARTER_TASKS_EXPERIMENT_ID,
+    titleKey: "experiments.starterTasks.title",
+    descriptionKey: "experiments.starterTasks.description",
+  },
+  {
+    id: GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
+    titleKey: "experiments.gloopieAvatarCreator.title",
+    descriptionKey: "experiments.gloopieAvatarCreator.description",
   },
   {
     id: VOICE_CONVERSATION_EXPERIMENT_ID,

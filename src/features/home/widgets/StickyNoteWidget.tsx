@@ -16,6 +16,9 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import type { WidgetRenderProps } from "./types";
+import { StarterTaskList } from "@/features/home/onboarding/StarterTaskList";
+import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
+import { STARTER_TASKS_NOTE_ID } from "@/features/home/onboarding/starterTasks";
 
 const ONBOARDING_NOTE_CONTENT = {
   "onboarding:welcome": {
@@ -339,6 +342,7 @@ export function StickyNoteWidget({
   onRemoveWidget,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
+  const starterTasks = useStarterTasks();
   const noteId = getNoteId(instance.state);
   const editableText = getEditableText(instance.state);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -411,6 +415,47 @@ export function StickyNoteWidget({
       textarea.setSelectionRange(start + marker.length, end + marker.length);
     });
   };
+
+  if (
+    noteId === STARTER_TASKS_NOTE_ID &&
+    (!starterTasks?.visible || starterTasks.docked)
+  ) {
+    return null;
+  }
+
+  if (noteId === STARTER_TASKS_NOTE_ID && starterTasks) {
+    return (
+      <StarterTaskList
+        mode="canvas"
+        completionState={starterTasks.completionState}
+        labels={{
+          title: t("onboarding.starterTasks.title"),
+          backHome: t("onboarding.starterTasks.backHome"),
+          dismiss: t("onboarding.starterTasks.dismiss"),
+          tasks: {
+            "connect-provider": t("onboarding.starterTasks.connectProvider"),
+            "start-chat": t("onboarding.starterTasks.startChat"),
+            "create-project": t("onboarding.starterTasks.createProject"),
+            "build-agent": t("onboarding.starterTasks.buildAgent"),
+          },
+          openTask: (label) => t("onboarding.starterTasks.openTask", { label }),
+          completedTask: (label) =>
+            t("onboarding.starterTasks.completedTask", { label }),
+          checkTask: (label) =>
+            t("onboarding.starterTasks.checkTask", { label }),
+          uncheckTask: (label) =>
+            t("onboarding.starterTasks.uncheckTask", { label }),
+        }}
+        onTaskSelect={starterTasks.onTaskSelect}
+        onTaskToggle={starterTasks.onTaskToggle}
+        onBackHome={starterTasks.onBackHome}
+        onDismiss={() => {
+          starterTasks.onDismiss();
+          onRemoveWidget?.();
+        }}
+      />
+    );
+  }
 
   if (!isOnboardingNoteId(noteId)) {
     const tone = getEditableTone(instance.state);

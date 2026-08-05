@@ -2,6 +2,13 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+/* Smooth elevation for floating surfaces without a hard border/ring edge. */
+@utility smooth-shadow-sm {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
 @source "../../../node_modules/streamdown/dist";
 
 .goose-terminal .xterm {

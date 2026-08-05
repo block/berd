@@ -1,6 +1,10 @@
 import { toast } from "sonner";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  STARTER_PROJECT_ID,
+  STARTER_TASKS_NOTE_ID,
+} from "@/features/home/onboarding/starterTasks";
 import { getExperiment } from "@/features/experiments/experimentPreferences";
 import type {
   LayoutCamera,
@@ -9,6 +13,7 @@ import type {
 import { i18n } from "@/shared/i18n";
 import { isLayoutConstraints } from "../lib/snapToGrid";
 import {
+  createDefaultClockWidget,
   createDefaultOnboardingTourWidget,
   defaultStickyNoteId,
   onboardingTourAvatarCenter,
@@ -192,6 +197,8 @@ interface HomeWidgetStore extends HomeWidgetState {
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
   syncOnboardingExperiment: (enabled: boolean) => void;
   resetOnboardingTour: () => Promise<boolean>;
+  resetStarterTasks: () => Promise<boolean>;
+  resetHomeForOnboarding: () => Promise<boolean>;
   reloadOnboardingTourForDev: () => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (
@@ -484,6 +491,157 @@ function createHomeWidgetStore() {
             latest.camera?.centerX === expectedCamera.centerX &&
             latest.camera.centerY === expectedCamera.centerY);
         return itemSaved && cameraSaved;
+      },
+      resetStarterTasks: async () => {
+        const state = get();
+        if (!canMutateWidgets(state)) return false;
+        const initialItemRevision = state.itemRevision;
+        const existingTaskNote = state.instances.find(
+          (instance) => defaultStickyNoteId(instance) === STARTER_TASKS_NOTE_ID,
+        );
+        const existingProject = state.instances.find(
+          (instance) =>
+            instance.type === "onboardingProjectArtifact" ||
+            instance.state?.onboardingStarterProject === true,
+        );
+        const withoutOwnedWidgets = state.instances.filter(
+          (instance) =>
+            instance.id !== existingTaskNote?.id &&
+            instance.id !== existingProject?.id,
+        );
+        const nextInstances: WidgetInstance[] = [
+          ...withoutOwnedWidgets,
+          {
+            id: existingTaskNote?.id ?? crypto.randomUUID(),
+            type: "stickyNote",
+            x: existingTaskNote?.x ?? -20,
+            y: existingTaskNote?.y ?? -260,
+            z: existingTaskNote?.z ?? withoutOwnedWidgets.length + 1,
+            width: 256,
+            height: 196,
+            state: { noteId: STARTER_TASKS_NOTE_ID },
+          },
+          {
+            id: existingProject?.id ?? crypto.randomUUID(),
+            type: "onboardingProjectArtifact",
+            x: existingProject?.x ?? 300,
+            y: existingProject?.y ?? -260,
+            z: existingProject?.z ?? withoutOwnedWidgets.length + 2,
+            width: 400,
+            height: 400,
+            state: {
+              projectId: STARTER_PROJECT_ID,
+              onboardingStarterProject: true,
+            },
+          },
+        ];
+        set({ instances: nextInstances });
+        runtime.enqueueSave(nextInstances);
+        await runtime.waitForPendingSaves();
+        const latest = get();
+        return (
+          latest.itemRevision !== initialItemRevision &&
+          latest.instances.some(
+            (instance) =>
+              defaultStickyNoteId(instance) === STARTER_TASKS_NOTE_ID,
+          ) &&
+          latest.instances.some(
+            (instance) =>
+              instance.type === "onboardingProjectArtifact" &&
+              instance.state?.projectId === STARTER_PROJECT_ID,
+          )
+        );
+      },
+      resetHomeForOnboarding: async () => {
+        const state = get();
+        if (!canMutateWidgets(state)) {
+          return false;
+        }
+        const initialItemRevision = state.itemRevision;
+        const initialCameraRevision = state.cameraRevision;
+
+        const clock = {
+          ...createDefaultClockWidget(),
+          x: -520,
+          y: -260,
+        };
+        const onboardingTour = {
+          ...createDefaultOnboardingTourWidget(clock),
+          x: -520,
+          y: 40,
+        };
+        const nextInstances: WidgetInstance[] = [
+          { ...clock, z: 1 },
+          { ...onboardingTour, z: 2 },
+          {
+            id: crypto.randomUUID(),
+            type: "stickyNote",
+            x: -20,
+            y: -260,
+            z: 3,
+            width: 256,
+            height: 196,
+            state: { noteId: STARTER_TASKS_NOTE_ID },
+          },
+          {
+            id: crypto.randomUUID(),
+            type: "stickyNote",
+            x: -20,
+            y: 40,
+            z: 4,
+            width: 224,
+            height: 196,
+            state: { text: "", tone: "warm", fontSize: "md" },
+          },
+          {
+            id: crypto.randomUUID(),
+            type: "onboardingProjectArtifact",
+            x: 300,
+            y: -260,
+            z: 5,
+            width: 400,
+            height: 400,
+            state: {
+              projectId: STARTER_PROJECT_ID,
+              onboardingStarterProject: true,
+            },
+          },
+        ];
+        const expectedCamera = state.camera
+          ? {
+              ...state.camera,
+              centerX: 90,
+              centerY: 0,
+              zoomBps: 10_000,
+            }
+          : null;
+        persistCleanUpSnapshot(null);
+        clearPendingCleanUpSaveOutcomes();
+        set({ instances: nextInstances, cleanUpSnapshot: null });
+        runtime.enqueueSave(nextInstances);
+        if (expectedCamera) {
+          get().saveCamera(expectedCamera);
+        }
+        await runtime.waitForPendingSaves();
+
+        const latest = get();
+        const confirmedIds = new Set(
+          latest.instances.map((instance) => instance.id),
+        );
+        const itemsConfirmed =
+          latest.itemRevision !== initialItemRevision &&
+          latest.instances.length === nextInstances.length &&
+          nextInstances.every((instance) => confirmedIds.has(instance.id));
+        const cameraConfirmed =
+          !expectedCamera ||
+          (latest.cameraRevision !== initialCameraRevision &&
+            latest.camera?.centerX === expectedCamera.centerX &&
+            latest.camera.centerY === expectedCamera.centerY &&
+            latest.camera.zoomBps === expectedCamera.zoomBps);
+        if (itemsConfirmed && !cameraConfirmed) {
+          toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
+        }
+        return itemsConfirmed;
       },
       reloadOnboardingTourForDev: () => {
         if (!import.meta.env.DEV) return;

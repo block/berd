@@ -198,14 +198,6 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
-    "berdyOnboarding": {
-      "description": "Muestra la guía interactiva de introducción y ayuda de Berdy en Inicio.",
-      "resetDescription": "Restaura el mensaje inicial de Berdy y lo centra en Inicio.",
-      "resetError": "No se pudo restablecer la introducción de Berdy. Espera a que Inicio termine de cargar e inténtalo de nuevo.",
-      "resetLabel": "Restablecer introducción",
-      "resetSuccess": "Se restableció la introducción de Berdy.",
-      "title": "Introducción de Berdy"
-    },
     "voiceConversation": {
       "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
       "title": "Conversaciones de voz"
@@ -223,7 +215,38 @@
       "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
       "title": "Renderizador virtual de transcripciones"
     },
-    "title": "Experimentos"
+    "title": "Experimentos",
+    "gloopieAvatarCreator": {
+      "description": "Permite crear un avatar gloopie personalizado desde el creador de agentes.",
+      "title": "Crea tu propio gloopie"
+    },
+    "starterTasks": {
+      "title": "Tareas iniciales de incorporación",
+      "description": "Muestra la nota adhesiva de tareas iniciales en Inicio para probar el flujo de incorporación.",
+      "reset": "Restablecer",
+      "resetSuccess": "Se restablecieron las tareas iniciales.",
+      "resetAria": "Restablecer incorporación de tareas iniciales"
+    },
+    "berdyOnboarding": {
+      "description": "Muestra la guía interactiva de introducción y ayuda de Berdy en Inicio.",
+      "resetDescription": "Restaura el mensaje inicial de Berdy y lo centra en Inicio.",
+      "resetError": "No se pudo restablecer la introducción de Berdy. Espera a que Inicio termine de cargar e inténtalo de nuevo.",
+      "resetLabel": "Restablecer",
+      "resetSuccess": "Se restableció la introducción de Berdy.",
+      "title": "Introducción de Berdy"
+    },
+    "onboarding": {
+      "title": "Incorporación",
+      "description": "Prueba y restablece las experiencias de incorporación juntas.",
+      "resetAll": "Restablecer toda la incorporación",
+      "resetAllSuccess": "Se restablecieron todas las experiencias de incorporación.",
+      "resetAllError": "No se pudieron restablecer todas las experiencias de incorporación. Inténtalo de nuevo.",
+      "confirmTitle": "¿Restablecer el lienzo de incorporación?",
+      "confirmDescription": "Esto reemplaza todo el contenido del lienzo de Inicio con el diseño inicial. Tus proyectos, chats, agentes y archivos no se eliminarán.",
+      "cancel": "Cancelar",
+      "confirm": "Restablecer lienzo",
+      "confirming": "Restableciendo…"
+    }
   },
   "general": {
     "agentToolsTips": {

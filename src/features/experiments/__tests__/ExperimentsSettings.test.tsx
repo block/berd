@@ -6,7 +6,9 @@ import {
   BERDY_ONBOARDING_EXPERIMENT_ID,
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
+  GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
   SKILL_DISCOVERY_EXPERIMENT_ID,
+  STARTER_TASKS_EXPERIMENT_ID,
   TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
   VOICE_CONVERSATION_EXPERIMENT_ID,
   type ExperimentDefinition,
@@ -19,12 +21,20 @@ import { renderWithProviders } from "@/test/render";
 const resetOnboardingTourExperienceMock = vi.hoisted(() =>
   vi.fn(async () => true),
 );
+const resetHomeForOnboardingExperienceMock = vi.hoisted(() =>
+  vi.fn(async () => true),
+);
+const resetStarterTasksExperienceMock = vi.hoisted(() =>
+  vi.fn(async () => true),
+);
 const syncOnboardingExperimentStateMock = vi.hoisted(() =>
   vi.fn(async () => {}),
 );
 
 vi.mock("@/features/onboarding/resetOnboardingTour", () => ({
+  resetHomeForOnboardingExperience: resetHomeForOnboardingExperienceMock,
   resetOnboardingTourExperience: resetOnboardingTourExperienceMock,
+  resetStarterTasksExperience: resetStarterTasksExperienceMock,
   syncOnboardingExperimentState: syncOnboardingExperimentStateMock,
 }));
 
@@ -76,6 +86,8 @@ describe("ExperimentsSettings", () => {
   beforeEach(() => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     resetOnboardingTourExperienceMock.mockClear();
+    resetHomeForOnboardingExperienceMock.mockClear();
+    resetStarterTasksExperienceMock.mockClear();
     syncOnboardingExperimentStateMock.mockClear();
   });
 
@@ -120,9 +132,48 @@ describe("ExperimentsSettings", () => {
       BUILDERBOT_SURFACE_EXPERIMENT_ID,
       TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
       SKILL_DISCOVERY_EXPERIMENT_ID,
+      STARTER_TASKS_EXPERIMENT_ID,
+      GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
       VOICE_CONVERSATION_EXPERIMENT_ID,
       BERDY_ONBOARDING_EXPERIMENT_ID,
     ]);
+  });
+
+  it("groups onboarding experiments and resets all onboarding experiences", async () => {
+    vi.stubEnv("DEV", true);
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    const onboardingGroup = screen.getByRole("region", {
+      name: i18n.t("experiments.onboarding.title", { ns: "settings" }),
+    });
+    expect(onboardingGroup).toHaveTextContent(
+      i18n.t("experiments.starterTasks.title", { ns: "settings" }),
+    );
+    expect(onboardingGroup).toHaveTextContent(
+      i18n.t("experiments.berdyOnboarding.title", { ns: "settings" }),
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.resetAll", { ns: "settings" }),
+      }),
+    );
+
+    expect(
+      screen.getByRole("dialog", {
+        name: i18n.t("experiments.onboarding.confirmTitle", { ns: "settings" }),
+      }),
+    ).toBeInTheDocument();
+    expect(resetHomeForOnboardingExperienceMock).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.confirm", { ns: "settings" }),
+      }),
+    );
+
+    expect(resetHomeForOnboardingExperienceMock).toHaveBeenCalledOnce();
   });
 
   it("resets Berdy onboarding from its experiment card", async () => {

@@ -14,6 +14,16 @@ export async function syncOnboardingExperimentState(
   useHomeWidgetStore.getState().syncOnboardingExperiment(enabled);
 }
 
+export async function resetStarterTasksExperience(): Promise<boolean> {
+  await initializeHomeWidgets();
+  return useHomeWidgetStore.getState().resetStarterTasks();
+}
+
+export async function resetHomeForOnboardingExperience(): Promise<boolean> {
+  await initializeHomeWidgets();
+  return useHomeWidgetStore.getState().resetHomeForOnboarding();
+}
+
 export async function resetOnboardingTourExperience(): Promise<boolean> {
   await initializeHomeWidgets();
   return useHomeWidgetStore.getState().resetOnboardingTour();

@@ -254,7 +254,7 @@ export function OnboardingTourWidget({
               media={gloopyMedia}
               poster={gloopyPoster.data}
               alt={t("onboarding.callout.avatarAlt")}
-              loadingStrategy="visible-video"
+              loadingStrategy="lazy-once"
               playbackMode="occasional"
               className="size-full object-contain"
             />

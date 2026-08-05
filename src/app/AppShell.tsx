@@ -206,6 +206,26 @@ import type {
 import type { TopBarBreadcrumb } from "./ui/TopBar";
 import { STARTUP_LOADING_MIN_DISPLAY_MS } from "./lib/startupLoading";
 import { StartupLoadingView } from "./ui/StartupLoadingView";
+import { deriveStarterTaskCompletion } from "@/features/home/onboarding/starterTaskCompletion";
+import type {
+  StarterTaskCompletionState,
+  StarterTaskId,
+} from "@/features/home/onboarding/starterTasks";
+import { StarterTaskList } from "@/features/home/onboarding/StarterTaskList";
+import {
+  clearStarterTaskProgress,
+  EMPTY_STARTER_TASK_COMPLETION,
+  loadStarterTaskProgress,
+  saveStarterTaskProgress,
+} from "@/features/home/onboarding/starterTaskProgress";
+import { StarterTasksProvider } from "@/features/home/onboarding/StarterTasksContext";
+import { STARTER_TASKS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import {
+  recordAssistiveMomentRetired,
+  recordAssistiveMomentShown,
+  shouldShowAssistiveMoment,
+} from "@/shared/assistive-ux/runtime";
 export type { AppView } from "./types/appNavigation";
 
 type AppNavigationHistory = {
@@ -533,6 +553,7 @@ export function AppShell({
     "agents",
     "settings",
     "search",
+    "home",
   ]);
   const {
     expandSidebar,
@@ -625,6 +646,9 @@ export function AppShell({
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
+  const messagesBySession = useChatStore((state) => state.messagesBySession);
+  const personas = useAgentStore((state) => state.personas);
+  const personasLoading = useAgentStore((state) => state.personasLoading);
   const previousActiveSessionIdRef = useRef(activeSessionId);
   useEffect(() => {
     const previousSessionId = previousActiveSessionIdRef.current;
@@ -656,6 +680,48 @@ export function AppShell({
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
     useState(0);
+  const starterTasksExperimentEnabled =
+    useExperiment(STARTER_TASKS_EXPERIMENT_ID)?.enabled === true;
+  const [starterTasksEligible, setStarterTasksEligible] = useState(() =>
+    shouldShowAssistiveMoment("home.starterTasks"),
+  );
+  const starterTasksVisible =
+    starterTasksExperimentEnabled && starterTasksEligible;
+  const [starterTasksDocked, setStarterTasksDocked] = useState(false);
+  const [starterProjectId, setStarterProjectId] = useState<string | null>(null);
+  const starterTasksLeftHomeRef = useRef(false);
+  const initialStarterTaskProgressRef = useRef(loadStarterTaskProgress());
+  const [starterTaskOverrides, setStarterTaskOverrides] =
+    useState<StarterTaskCompletionState>(
+      initialStarterTaskProgressRef.current.completion,
+    );
+  const [starterTasksAwaitingCompletion, setStarterTasksAwaitingCompletion] =
+    useState<Set<StarterTaskId>>(
+      initialStarterTaskProgressRef.current.awaiting,
+    );
+
+  useEffect(() => {
+    if (starterTasksVisible) {
+      recordAssistiveMomentShown("home.starterTasks");
+    }
+  }, [starterTasksVisible]);
+
+  useEffect(() => {
+    const reset = () => {
+      clearStarterTaskProgress();
+      setStarterTaskOverrides({ ...EMPTY_STARTER_TASK_COMPLETION });
+      setStarterTasksAwaitingCompletion(new Set());
+      setStarterTasksDocked(false);
+      setStarterProjectId(null);
+      setStarterTasksEligible(true);
+    };
+    window.addEventListener("starter-tasks-reset", reset);
+    window.addEventListener("starter-tasks-state-reset", reset);
+    return () => {
+      window.removeEventListener("starter-tasks-reset", reset);
+      window.removeEventListener("starter-tasks-state-reset", reset);
+    };
+  }, []);
   const [globalComposerPlacement, setGlobalComposerPlacement] =
     useState<GlobalComposerPlacement>("docked");
   const [globalComposerStarterRequest, setGlobalComposerStarterRequest] =
@@ -825,6 +891,9 @@ export function AppShell({
   const selectedProviderRef = useRef(selectedProvider);
   selectedProviderRef.current = selectedProvider;
   const projects = useProjectStore(selectProjects);
+  const hasFetchedProjects = useProjectStore(
+    (state) => state.hasFetchedProjects,
+  );
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
   const reorderProjects = useProjectStore((s) => s.reorderProjects);
   const retryFailedSessionsForProjectRef = useRef<
@@ -4265,6 +4334,145 @@ export function AppShell({
     };
   }, [showGlobalComposer]);
 
+  const derivedStarterTaskCompletion = useMemo(
+    () =>
+      deriveStarterTaskCompletion({
+        providerReady: defaultProviderReadinessStatus === "ready",
+        sessionsHydrated: hasHydratedSessions,
+        sessions,
+        messagesBySession,
+        projectsFetched: hasFetchedProjects,
+        projects,
+        personasLoaded: !personasLoading,
+        personas,
+      }),
+    [
+      defaultProviderReadinessStatus,
+      hasHydratedSessions,
+      sessions,
+      messagesBySession,
+      hasFetchedProjects,
+      projects,
+      personasLoading,
+      personas,
+    ],
+  );
+  useEffect(() => {
+    const completedTaskIds = [...starterTasksAwaitingCompletion].filter(
+      (taskId) => derivedStarterTaskCompletion[taskId],
+    );
+    if (completedTaskIds.length === 0) return;
+
+    setStarterTasksAwaitingCompletion((awaiting) => {
+      const next = new Set(awaiting);
+      for (const taskId of completedTaskIds) next.delete(taskId);
+      return next;
+    });
+    setStarterTaskOverrides((overrides) => {
+      const next = { ...overrides };
+      for (const taskId of completedTaskIds) next[taskId] = true;
+      return next;
+    });
+  }, [derivedStarterTaskCompletion, starterTasksAwaitingCompletion]);
+
+  const starterTaskCompletion = starterTaskOverrides;
+
+  useEffect(() => {
+    saveStarterTaskProgress({
+      completion: starterTaskOverrides,
+      awaiting: starterTasksAwaitingCompletion,
+    });
+  }, [starterTaskOverrides, starterTasksAwaitingCompletion]);
+
+  useEffect(() => {
+    if (!starterTasksDocked) return;
+    if (renderedLocation.view !== "home") {
+      starterTasksLeftHomeRef.current = true;
+      return;
+    }
+    if (starterTasksLeftHomeRef.current) {
+      starterTasksLeftHomeRef.current = false;
+      setStarterTasksDocked(false);
+    }
+  }, [renderedLocation.view, starterTasksDocked]);
+
+  const handleStarterTaskToggle = (taskId: StarterTaskId) => {
+    setStarterTasksAwaitingCompletion((awaiting) => {
+      if (!awaiting.has(taskId)) return awaiting;
+      const next = new Set(awaiting);
+      next.delete(taskId);
+      return next;
+    });
+    setStarterTaskOverrides((overrides) => ({
+      ...overrides,
+      [taskId]: !overrides[taskId],
+    }));
+  };
+
+  const handleStarterProjectCreated = (projectId: string) => {
+    setStarterProjectId(projectId);
+    setStarterTasksAwaitingCompletion((awaiting) => {
+      const next = new Set(awaiting);
+      next.delete("create-project");
+      return next;
+    });
+    setStarterTaskOverrides((overrides) => ({
+      ...overrides,
+      "create-project": true,
+    }));
+    const homeWidgetState = useHomeWidgetStore.getState();
+    const starterProject = homeWidgetState.instances.find(
+      (instance) =>
+        instance.type === "onboardingProjectArtifact" ||
+        instance.state?.onboardingStarterProject === true,
+    );
+    if (starterProject) {
+      homeWidgetState.updateWidgetState(starterProject.id, {
+        ...starterProject.state,
+        projectId,
+      });
+    }
+  };
+
+  const handleStarterTaskSelect = (taskId: StarterTaskId) => {
+    starterTasksLeftHomeRef.current = renderedLocation.view !== "home";
+    if (derivedStarterTaskCompletion[taskId]) {
+      setStarterTaskOverrides((overrides) => ({
+        ...overrides,
+        [taskId]: true,
+      }));
+    } else {
+      setStarterTasksAwaitingCompletion((awaiting) =>
+        new Set(awaiting).add(taskId),
+      );
+    }
+    setStarterTasksDocked(true);
+    switch (taskId) {
+      case "connect-provider":
+        openSettings("providers");
+        break;
+      case "start-chat":
+        void createNewTab();
+        break;
+      case "create-project":
+        openCreateProjectDialog({ onCreated: handleStarterProjectCreated });
+        break;
+      case "build-agent":
+        agentBuilder.create();
+        break;
+    }
+  };
+
+  const handleStarterTasksBackHome = () => {
+    setStarterTasksDocked(false);
+    handleNavigate("home");
+  };
+
+  const dismissStarterTasks = () => {
+    recordAssistiveMomentRetired("home.starterTasks", "dismissed");
+    setStarterTasksEligible(false);
+  };
+
   if (forceStartupLoading || !startup.ready || !startupLoadingMinElapsed) {
     return <StartupLoadingView />;
   }
@@ -4355,14 +4563,36 @@ export function AppShell({
         contentTakeover={activeView === "design-system"}
         createProjectDialog={{
           isOpen: createProjectOpen,
-          onClose: closeCreateProjectDialog,
+          onClose: () => {
+            closeCreateProjectDialog();
+            setStarterTasksAwaitingCompletion((awaiting) => {
+              if (!awaiting.has("create-project")) return awaiting;
+              const next = new Set(awaiting);
+              next.delete("create-project");
+              return next;
+            });
+            if (starterTasksDocked && renderedLocation.view === "home") {
+              setStarterTasksDocked(false);
+            }
+          },
           onCreated: handleProjectCreated,
           initialWorkingDir: createProjectInitialWorkingDir,
           editingProject: editingProject ?? undefined,
         }}
       >
         {children ?? (
-          <>
+          <StarterTasksProvider
+            value={{
+              completionState: starterTaskCompletion,
+              visible: starterTasksVisible,
+              docked: starterTasksDocked,
+              starterProjectId,
+              onTaskSelect: handleStarterTaskSelect,
+              onTaskToggle: handleStarterTaskToggle,
+              onBackHome: handleStarterTasksBackHome,
+              onDismiss: dismissStarterTasks,
+            }}
+          >
             <AppShellContent
               targetLocation={targetLocation}
               renderedLocation={renderedLocation}
@@ -4405,7 +4635,18 @@ export function AppShell({
               onCreatePersona={agentBuilder.create}
               onStartAgentBuilderSession={agentBuilder.start}
               onArchiveChat={handleArchiveChat}
-              onCreateProject={openCreateProjectDialog}
+              onCreateProject={() => {
+                if (starterTasksVisible) {
+                  setStarterTasksAwaitingCompletion((awaiting) =>
+                    new Set(awaiting).add("create-project"),
+                  );
+                  openCreateProjectDialog({
+                    onCreated: handleStarterProjectCreated,
+                  });
+                  return;
+                }
+                openCreateProjectDialog();
+              }}
               onOpenProjectSettings={handleEditProject}
               onActivateHomeSession={activateHomeSession}
               onRenameChat={handleRenameChat}
@@ -4437,6 +4678,39 @@ export function AppShell({
               }
               onOpenProvidersSettings={() => openSettings("providers")}
             />
+            {starterTasksVisible && starterTasksDocked ? (
+              <StarterTaskList
+                completionState={starterTaskCompletion}
+                mode="overlay"
+                labels={{
+                  title: t("home:onboarding.starterTasks.title"),
+                  backHome: t("home:onboarding.starterTasks.backHome"),
+                  dismiss: t("home:onboarding.starterTasks.dismiss"),
+                  tasks: {
+                    "connect-provider": t(
+                      "home:onboarding.starterTasks.connectProvider",
+                    ),
+                    "start-chat": t("home:onboarding.starterTasks.startChat"),
+                    "create-project": t(
+                      "home:onboarding.starterTasks.createProject",
+                    ),
+                    "build-agent": t("home:onboarding.starterTasks.buildAgent"),
+                  },
+                  openTask: (label) =>
+                    t("home:onboarding.starterTasks.openTask", { label }),
+                  completedTask: (label) =>
+                    t("home:onboarding.starterTasks.completedTask", { label }),
+                  checkTask: (label) =>
+                    t("home:onboarding.starterTasks.checkTask", { label }),
+                  uncheckTask: (label) =>
+                    t("home:onboarding.starterTasks.uncheckTask", { label }),
+                }}
+                onTaskSelect={handleStarterTaskSelect}
+                onTaskToggle={handleStarterTaskToggle}
+                onBackHome={handleStarterTasksBackHome}
+                onDismiss={dismissStarterTasks}
+              />
+            ) : null}
             {showGlobalComposerShim ? (
               <div
                 aria-hidden="true"
@@ -4493,7 +4767,7 @@ export function AppShell({
                 }
               />
             ) : null}
-          </>
+          </StarterTasksProvider>
         )}
       </AppShellLayout>
       <PocketVoiceSetupDialog

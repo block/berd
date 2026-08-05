@@ -6,7 +6,8 @@ export type AssistiveUxMomentType = "discover" | "suggest" | "autoApply";
 export type AssistiveUxMomentId =
   | "notifications.changeSound"
   | "chat.jumpToResponseStart"
-  | "chat.agentToolsConnectionTips";
+  | "chat.agentToolsConnectionTips"
+  | "home.starterTasks";
 
 export type AssistiveUxRetiredReason =
   | "accepted"
@@ -36,6 +37,10 @@ export const ASSISTIVE_UX_RULES = {
   chatAgentToolsConnectionTips: {
     id: "chat.agentToolsConnectionTips",
     type: "autoApply",
+  },
+  homeStarterTasks: {
+    id: "home.starterTasks",
+    type: "discover",
   },
 } as const satisfies Record<string, AssistiveUxRuleDefinition>;
 

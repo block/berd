@@ -18,6 +18,20 @@ import {
 import { useInvalidateHomeWidgetSkillsOnChange } from "../widgets/skillQueryKey";
 import type { WidgetInstance } from "../widgets/types";
 import { WidgetCanvas } from "./WidgetCanvas";
+import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
+import {
+  STARTER_PROJECT_ID,
+  STARTER_TASKS_NOTE_ID,
+} from "@/features/home/onboarding/starterTasks";
+
+const RETIRED_EDUCATIONAL_STICKY_IDS = new Set([
+  "onboarding:welcome",
+  "onboarding:start-project",
+  "onboarding:build-agent",
+  "onboarding:reuse-workflows",
+  "onboarding:manage-automations",
+  "onboarding:shape-home",
+]);
 
 export interface HomeViewProps {
   onOpenProject?: (projectId: string) => void;
@@ -59,14 +73,17 @@ export function HomeView({
   viewportLeftOcclusionPx = 0,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
+  const starterTasks = useStarterTasks();
   const setTopBarActions = useSetTopBarActions();
   useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
+
   const [tourOpen, setTourOpen] = useState(false);
   const berdyOnboardingExperiment = useExperiment(
     BERDY_ONBOARDING_EXPERIMENT_ID,
   );
   const berdyOnboardingEnabled = Boolean(berdyOnboardingExperiment?.enabled);
+
   const {
     instances,
     loadStatus,
@@ -82,12 +99,116 @@ export function HomeView({
     syncOnboardingExperiment,
     reloadOnboardingTourForDev,
   } = useHomeWidgetLayoutController();
-  const visibleInstances = useMemo(
+
+  const experimentVisibleInstances = useMemo(
     () =>
       berdyOnboardingEnabled
         ? instances
         : instances.filter((instance) => instance.type !== "onboardingTour"),
     [berdyOnboardingEnabled, instances],
+  );
+  const contentInstances = useMemo(
+    () =>
+      experimentVisibleInstances.filter((instance) => {
+        if (
+          !starterTasks?.visible &&
+          instance.type === "onboardingProjectArtifact" &&
+          instance.state?.projectId === STARTER_PROJECT_ID
+        ) {
+          return false;
+        }
+        return !RETIRED_EDUCATIONAL_STICKY_IDS.has(
+          typeof instance.state?.noteId === "string"
+            ? instance.state.noteId
+            : "",
+        );
+      }),
+    [experimentVisibleInstances, starterTasks?.visible],
+  );
+  useEffect(() => {
+    if (
+      loadStatus !== "ready" ||
+      !starterTasks?.visible ||
+      instances.some(
+        (instance) => instance.state?.noteId === STARTER_TASKS_NOTE_ID,
+      )
+    ) {
+      return;
+    }
+    widgetMutations.addWidget("stickyNote", -496, -142, {
+      noteId: STARTER_TASKS_NOTE_ID,
+    });
+  }, [instances, loadStatus, starterTasks?.visible, widgetMutations]);
+
+  useEffect(() => {
+    if (loadStatus !== "ready" || !starterTasks?.visible) return;
+
+    const existing = instances.find(
+      (instance) =>
+        instance.state?.onboardingStarterProject === true ||
+        instance.state?.projectId === STARTER_PROJECT_ID,
+    );
+    const persistedProjectId =
+      typeof existing?.state?.projectId === "string" &&
+      existing.state.projectId !== STARTER_PROJECT_ID
+        ? existing.state.projectId
+        : null;
+    const projectId =
+      starterTasks.starterProjectId ?? persistedProjectId ?? STARTER_PROJECT_ID;
+    if (existing) {
+      if (existing.state?.projectId !== projectId) {
+        widgetMutations.updateWidgetState(existing.id, {
+          ...existing.state,
+          projectId,
+        });
+      }
+      if (
+        existing.state?.projectId === STARTER_PROJECT_ID &&
+        existing.width === 200 &&
+        existing.height === 200
+      ) {
+        widgetMutations.resizeWidget(existing.id, 400, 400);
+      }
+      return;
+    }
+    widgetMutations.addWidget("onboardingProjectArtifact", 300, -60, {
+      projectId,
+      onboardingStarterProject: true,
+    });
+  }, [
+    instances,
+    loadStatus,
+    starterTasks?.starterProjectId,
+    starterTasks?.visible,
+    widgetMutations,
+  ]);
+
+  const starterTaskInstance = useMemo<WidgetInstance | null>(() => {
+    if (!starterTasks?.visible || starterTasks.docked) return null;
+    if (
+      contentInstances.some(
+        (instance) => instance.state?.noteId === STARTER_TASKS_NOTE_ID,
+      )
+    ) {
+      return null;
+    }
+    return {
+      id: "onboarding-starter-tasks",
+      type: "stickyNote",
+      x: -624,
+      y: -240,
+      z: Math.max(0, ...contentInstances.map((instance) => instance.z)) + 1,
+      width: 224,
+      height: 196,
+      state: { noteId: STARTER_TASKS_NOTE_ID },
+    };
+  }, [contentInstances, starterTasks?.docked, starterTasks?.visible]);
+  const visibleInstances = useMemo(
+    () =>
+      starterTaskInstance
+        ? [...contentInstances, starterTaskInstance]
+        : contentInstances,
+    [contentInstances, starterTaskInstance],
   );
   const recenterTarget = useMemo(
     () => widgetCenterOfGravity(visibleInstances),

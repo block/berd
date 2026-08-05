@@ -31,6 +31,40 @@ function layoutItem(overrides: Partial<LayoutItem>): LayoutItem {
 }
 
 describe("homeLayoutMapper", () => {
+  it("round-trips the onboarding starter project as a sticky-note-backed cube", () => {
+    const widget: WidgetInstance = {
+      id: "00000000-0000-0000-0000-000000000099",
+      type: "onboardingProjectArtifact",
+      x: 300,
+      y: -260,
+      z: 5,
+      width: 400,
+      height: 400,
+      state: {
+        projectId: "onboarding-starter-project",
+        onboardingStarterProject: true,
+      },
+    };
+
+    const [item] = homeWidgetsToLayoutItems([widget]);
+    expect(item).toMatchObject({
+      kind: "stickyNote",
+      targetId: "onboarding:starter-project",
+      width: 400,
+      height: 400,
+    });
+    expect(layoutItemsToHomeWidgets([item])).toMatchObject([
+      {
+        type: "onboardingProjectArtifact",
+        width: 400,
+        height: 400,
+        state: {
+          projectId: "onboarding-starter-project",
+          onboardingStarterProject: true,
+        },
+      },
+    ]);
+  });
   it("maps layout kinds to home widget types including projects and skills", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "clock", targetId: "widget:clock-1" }),

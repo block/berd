@@ -91,6 +91,26 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       minHeight: 156,
       maxHeight: 320,
     },
+    resolveProfile: (instance) =>
+      instance.state?.noteId === "onboarding:starter-tasks"
+        ? {
+            defaultSize: { width: 256, height: 196 },
+            sizeBounds: {
+              minWidth: 256,
+              maxWidth: 360,
+              minHeight: 156,
+              maxHeight: 320,
+            },
+          }
+        : {
+            defaultSize: { width: 224, height: 196 },
+            sizeBounds: {
+              minWidth: 184,
+              maxWidth: 360,
+              minHeight: 156,
+              maxHeight: 320,
+            },
+          },
     Component: StickyNoteWidget,
   },
   {
@@ -181,6 +201,23 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     Component: ChatPinWidget,
   },
   {
+    id: "onboardingProjectArtifact",
+    category: "project",
+    labelKey: "widgets.projectArtifactPin.label",
+    descriptionKey: "widgets.projectArtifactPin.description",
+    defaultSize: { width: 400, height: 400 },
+    sizeBounds: {
+      minWidth: 140,
+      maxWidth: 1000,
+      minHeight: 140,
+      maxHeight: 1000,
+      lockAspectRatio: true,
+    },
+    resizeHandleClassName:
+      "absolute right-[6%] bottom-[13%] z-30 hidden size-6 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring",
+    Component: ProjectArtifactWidget,
+  },
+  {
     id: "projectArtifactPin",
     category: "project",
     labelKey: "widgets.projectArtifactPin.label",
@@ -194,6 +231,29 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       maxHeight: 1000,
       lockAspectRatio: true,
     },
+    resolveProfile: (instance) =>
+      instance.state?.onboardingStarterProject === true ||
+      instance.state?.projectId === "onboarding-starter-project"
+        ? {
+            defaultSize: { width: 400, height: 400 },
+            sizeBounds: {
+              minWidth: 140,
+              maxWidth: 1000,
+              minHeight: 140,
+              maxHeight: 1000,
+              lockAspectRatio: true,
+            },
+          }
+        : {
+            defaultSize: { width: 200, height: 200 },
+            sizeBounds: {
+              minWidth: 140,
+              maxWidth: 1000,
+              minHeight: 140,
+              maxHeight: 1000,
+              lockAspectRatio: true,
+            },
+          },
     resizeHandleClassName:
       "absolute right-[6%] bottom-[13%] z-30 hidden size-6 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring",
     Component: ProjectArtifactWidget,

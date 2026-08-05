@@ -198,14 +198,6 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
-    "berdyOnboarding": {
-      "description": "Show Berdy's interactive onboarding guide and help bubble on Home.",
-      "resetDescription": "Restore Berdy's starter tooltip and center it on Home.",
-      "resetError": "Couldn't reset Berdy onboarding. Wait for Home to finish loading and try again.",
-      "resetLabel": "Reset onboarding",
-      "resetSuccess": "Berdy onboarding was reset.",
-      "title": "Berdy onboarding"
-    },
     "voiceConversation": {
       "description": "Try continuous two-way voice conversations in Goose chats.",
       "title": "Voice conversations"
@@ -223,7 +215,38 @@
       "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",
       "title": "Transcript virtual renderer"
     },
-    "title": "Experiments"
+    "title": "Experiments",
+    "gloopieAvatarCreator": {
+      "description": "Let users create a custom gloopie avatar from the agent builder.",
+      "title": "Create your own gloopie"
+    },
+    "starterTasks": {
+      "title": "Onboarding starter tasks",
+      "description": "Show the starter-task sticky note on Home for trying the onboarding flow.",
+      "reset": "Reset",
+      "resetSuccess": "Onboarding starter tasks reset.",
+      "resetAria": "Reset starter tasks onboarding"
+    },
+    "berdyOnboarding": {
+      "description": "Show Berdy's interactive onboarding guide and help bubble on Home.",
+      "resetDescription": "Restore Berdy's starter tooltip and center it on Home.",
+      "resetError": "Couldn't reset Berdy onboarding. Wait for Home to finish loading and try again.",
+      "resetLabel": "Reset",
+      "resetSuccess": "Berdy onboarding was reset.",
+      "title": "Berdy onboarding"
+    },
+    "onboarding": {
+      "title": "Onboarding",
+      "description": "Try and reset onboarding experiences together.",
+      "resetAll": "Reset all onboarding",
+      "resetAllSuccess": "All onboarding experiences were reset.",
+      "resetAllError": "Couldn't reset all onboarding experiences. Try again.",
+      "confirmTitle": "Reset onboarding canvas?",
+      "confirmDescription": "This replaces everything on your Home canvas with the starter layout. Your projects, chats, agents, and files won’t be deleted.",
+      "cancel": "Cancel",
+      "confirm": "Reset canvas",
+      "confirming": "Resetting…"
+    }
   },
   "general": {
     "agentToolsTips": {

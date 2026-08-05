@@ -1,4 +1,5 @@
 import type { LayoutItem, LayoutItemKind } from "@/features/layout/api/layout";
+import { STARTER_PROJECT_ID } from "@/features/home/onboarding/starterTasks";
 import {
   clampWidgetSize,
   clampWidgetSizeForInstance,
@@ -44,6 +45,7 @@ const KIND_TO_WIDGET_TYPE = {
 
 const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   onboardingTour: "stickyNote",
+  onboardingProjectArtifact: "stickyNote",
   clock: "clock",
   stickyNote: "stickyNote",
   checklist: "checklist",
@@ -292,6 +294,17 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
         persistedClockStateFromItem(item),
       );
     case "stickyNote":
+      if (item.targetId === "onboarding:starter-project") {
+        const persistedState =
+          typeof item.widgetState === "object" && item.widgetState !== null
+            ? item.widgetState
+            : {};
+        return {
+          projectId:
+            nonEmptyStateString(persistedState.projectId) ?? STARTER_PROJECT_ID,
+          onboardingStarterProject: true,
+        };
+      }
       return mergeState(
         { noteId: item.targetId },
         persistedStickyNoteStateFromItem(item),
@@ -321,6 +334,14 @@ function widgetStateForLayoutItem(
         : undefined;
     }
     case "stickyNote": {
+      if (instance.type === "onboardingProjectArtifact") {
+        return {
+          projectId:
+            nonEmptyStateString(instance.state?.projectId) ??
+            STARTER_PROJECT_ID,
+          onboardingStarterProject: true,
+        };
+      }
       const state: Record<string, unknown> = {};
       if (typeof instance.state?.text === "string") {
         state.text = instance.state.text;
@@ -389,6 +410,9 @@ function targetIdForWidget(
         ? `${syntheticTarget(instance.id)}${DIGITAL_CLOCK_TARGET_SUFFIX}`
         : syntheticTarget(instance.id);
     case "stickyNote":
+      if (instance.type === "onboardingProjectArtifact") {
+        return "onboarding:starter-project";
+      }
       return nonEmptyStateString(state.noteId) ?? syntheticTarget(instance.id);
     case "checklist":
     case "photo":
@@ -426,7 +450,10 @@ export function layoutItemsToHomeWidgets(
     const type =
       item.kind === "stickyNote" && item.targetId === "onboarding:tour"
         ? "onboardingTour"
-        : KIND_TO_WIDGET_TYPE[item.kind];
+        : item.kind === "stickyNote" &&
+            item.targetId === "onboarding:starter-project"
+          ? "onboardingProjectArtifact"
+          : KIND_TO_WIDGET_TYPE[item.kind];
     const size = HOME_WIDGET_CATALOG_BY_ID[type]?.defaultSize;
     if (!size) {
       return [];

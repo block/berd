@@ -237,6 +237,70 @@ beforeEach(() => {
 });
 
 describe("homeWidgetStore", () => {
+  it("resets starter tasks from a non-Home route and persists the placeholder cube", async () => {
+    const existingProject = {
+      id: "00000000-0000-0000-0000-000000000099",
+      type: "onboardingProjectArtifact",
+      x: 20,
+      y: 30,
+      z: 2,
+      width: 400,
+      height: 400,
+      state: {
+        projectId: "real-project",
+        onboardingStarterProject: true,
+      },
+    } satisfies WidgetInstance;
+    setReadyHomeState({
+      instances: [clockWidget(), existingProject],
+      itemRevision: 4,
+    });
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: request.items }),
+    }));
+
+    await expect(
+      useHomeWidgetStore.getState().resetStarterTasks(),
+    ).resolves.toBe(true);
+
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: existingProject.id,
+          type: "onboardingProjectArtifact",
+          state: expect.objectContaining({
+            projectId: "onboarding-starter-project",
+          }),
+        }),
+        expect.objectContaining({
+          type: "stickyNote",
+          state: { noteId: "onboarding:starter-tasks" },
+        }),
+      ]),
+    );
+  });
+
+  it("keeps a confirmed onboarding canvas when camera recentering fails", async () => {
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+    });
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: request.items }),
+    }));
+    vi.mocked(saveLayoutCamera).mockRejectedValue(new Error("camera failed"));
+
+    await expect(
+      useHomeWidgetStore.getState().resetHomeForOnboarding(),
+    ).resolves.toBe(true);
+    expect(toast.warning).toHaveBeenCalledWith(
+      "home:widgetLayer.toasts.cameraSaveFailed",
+    );
+  });
+
   it("restores a fresh onboarding tour widget", async () => {
     vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
       ok: true,

@@ -6,6 +6,8 @@ const storeMocks = vi.hoisted(() => {
     loadStatus = "ready";
   });
   const resetOnboardingTour = vi.fn(async () => true);
+  const resetHomeForOnboarding = vi.fn(async () => true);
+  const resetStarterTasks = vi.fn(async () => true);
   const syncOnboardingExperiment = vi.fn();
 
   return {
@@ -17,6 +19,8 @@ const storeMocks = vi.hoisted(() => {
     },
     initialize,
     resetOnboardingTour,
+    resetHomeForOnboarding,
+    resetStarterTasks,
     syncOnboardingExperiment,
   };
 });
@@ -27,13 +31,17 @@ vi.mock("@/features/home/stores/homeWidgetStore", () => ({
       loadStatus: storeMocks.loadStatus,
       initialize: storeMocks.initialize,
       resetOnboardingTour: storeMocks.resetOnboardingTour,
+      resetHomeForOnboarding: storeMocks.resetHomeForOnboarding,
+      resetStarterTasks: storeMocks.resetStarterTasks,
       syncOnboardingExperiment: storeMocks.syncOnboardingExperiment,
     }),
   },
 }));
 
 import {
+  resetHomeForOnboardingExperience,
   resetOnboardingTourExperience,
+  resetStarterTasksExperience,
   syncOnboardingExperimentState,
 } from "./resetOnboardingTour";
 
@@ -42,7 +50,23 @@ describe("onboarding tour experience controls", () => {
     storeMocks.setLoadStatus("idle");
     storeMocks.initialize.mockClear();
     storeMocks.resetOnboardingTour.mockClear();
+    storeMocks.resetHomeForOnboarding.mockClear();
+    storeMocks.resetStarterTasks.mockClear();
     storeMocks.syncOnboardingExperiment.mockClear();
+  });
+
+  it("initializes before resetting the whole Home onboarding canvas", async () => {
+    await expect(resetHomeForOnboardingExperience()).resolves.toBe(true);
+
+    expect(storeMocks.initialize).toHaveBeenCalledOnce();
+    expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
+  });
+
+  it("initializes before resetting starter tasks from another route", async () => {
+    await expect(resetStarterTasksExperience()).resolves.toBe(true);
+
+    expect(storeMocks.initialize).toHaveBeenCalledOnce();
+    expect(storeMocks.resetStarterTasks).toHaveBeenCalledOnce();
   });
 
   it("initializes the Home widget store before resetting from another route", async () => {

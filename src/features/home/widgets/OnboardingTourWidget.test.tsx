@@ -57,7 +57,7 @@ describe("OnboardingTourWidget", () => {
 
     expect(screen.getByTestId("animated-berdy")).toHaveAttribute(
       "data-loading-strategy",
-      "visible-video",
+      "lazy-once",
     );
     expect(screen.getByTestId("animated-berdy")).toHaveAttribute(
       "data-playback-mode",

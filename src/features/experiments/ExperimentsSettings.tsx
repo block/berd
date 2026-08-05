@@ -17,13 +17,18 @@ import {
   type ExperimentRegistry,
 } from "./experimentPreferences";
 import {
+  resetHomeForOnboardingExperience,
   resetOnboardingTourExperience,
+  resetStarterTasksExperience,
   syncOnboardingExperimentState,
 } from "@/features/onboarding/resetOnboardingTour";
 import { Badge } from "@/shared/ui/badge";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Switch } from "@/shared/ui/switch";
+import { STARTER_TASKS_EXPERIMENT_ID } from "./experimentDefinitions";
+import { resetAssistiveUxMoment } from "@/shared/assistive-ux/state";
 
 interface ExperimentsSettingsProps {
   registry?: ExperimentRegistry;
@@ -42,6 +47,10 @@ export function ExperimentsSettings({
 }: ExperimentsSettingsProps) {
   const { t } = useTranslation("settings");
   const [isResettingBerdyOnboarding, setIsResettingBerdyOnboarding] =
+    useState(false);
+  const [isResettingAllOnboarding, setIsResettingAllOnboarding] =
+    useState(false);
+  const [resetAllConfirmationOpen, setResetAllConfirmationOpen] =
     useState(false);
   const visibleRegistry = useMemo(
     () => getVisibleExperimentRegistry(registry),
@@ -140,6 +149,56 @@ export function ExperimentsSettings({
                   {t("experiments.resetToAuto")}
                 </Button>
               ) : null}
+              {definition.id === STARTER_TASKS_EXPERIMENT_ID ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label={t("experiments.starterTasks.resetAria")}
+                  onClick={() => {
+                    void resetStarterTasksExperience().then((didReset) => {
+                      if (!didReset) {
+                        toast.error(t("experiments.onboarding.resetAllError"));
+                        return;
+                      }
+                      resetAssistiveUxMoment("home.starterTasks");
+                      window.dispatchEvent(new Event("starter-tasks-reset"));
+                      toast.success(t("experiments.starterTasks.resetSuccess"));
+                    });
+                  }}
+                >
+                  {t("experiments.starterTasks.reset")}
+                </Button>
+              ) : null}
+              {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!experiment.enabled || isResettingBerdyOnboarding}
+                  onClick={async () => {
+                    setIsResettingBerdyOnboarding(true);
+                    try {
+                      const didReset = await resetOnboardingTourExperience();
+                      if (didReset) {
+                        toast.success(
+                          t("experiments.berdyOnboarding.resetSuccess"),
+                        );
+                      } else {
+                        toast.error(
+                          t("experiments.berdyOnboarding.resetError"),
+                        );
+                      }
+                    } catch {
+                      toast.error(t("experiments.berdyOnboarding.resetError"));
+                    } finally {
+                      setIsResettingBerdyOnboarding(false);
+                    }
+                  }}
+                >
+                  {t("experiments.berdyOnboarding.resetLabel")}
+                </Button>
+              ) : null}
               {showExperimentToggle ? (
                 <Switch
                   checked={experiment.enabled}
@@ -160,43 +219,20 @@ export function ExperimentsSettings({
           registry={registry}
           disabled={configDisabled ?? !experiment.enabled}
         />
-        {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
-          <div className="flex items-center justify-between gap-8 border-t px-4 py-3">
-            <p className="text-xs text-muted-foreground">
-              {t("experiments.berdyOnboarding.resetDescription")}
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              disabled={!experiment.enabled || isResettingBerdyOnboarding}
-              onClick={async () => {
-                setIsResettingBerdyOnboarding(true);
-                try {
-                  const didReset = await resetOnboardingTourExperience();
-                  if (didReset) {
-                    toast.success(
-                      t("experiments.berdyOnboarding.resetSuccess"),
-                    );
-                  } else {
-                    toast.error(t("experiments.berdyOnboarding.resetError"));
-                  }
-                } catch {
-                  toast.error(t("experiments.berdyOnboarding.resetError"));
-                } finally {
-                  setIsResettingBerdyOnboarding(false);
-                }
-              }}
-            >
-              {t("experiments.berdyOnboarding.resetLabel")}
-            </Button>
-          </div>
-        ) : null}
       </div>
     );
   };
 
+  const onboardingExperimentIds = new Set([
+    STARTER_TASKS_EXPERIMENT_ID,
+    BERDY_ONBOARDING_EXPERIMENT_ID,
+  ]);
+  const onboardingDefinitions = visibleRegistry.filter((definition) =>
+    onboardingExperimentIds.has(definition.id),
+  );
+  const otherDefinitions = visibleRegistry.filter(
+    (definition) => !onboardingExperimentIds.has(definition.id),
+  );
   const renderExperimentCard = (definition: ExperimentDefinition) => (
     <section
       key={definition.id}
@@ -206,7 +242,70 @@ export function ExperimentsSettings({
     </section>
   );
 
-  const experimentCards = visibleRegistry.map(renderExperimentCard);
+  const handleResetAllOnboarding = async () => {
+    setIsResettingAllOnboarding(true);
+    const previousStarterTasks = getExperiment(
+      STARTER_TASKS_EXPERIMENT_ID,
+      registry,
+    );
+    const previousBerdy = getExperiment(
+      BERDY_ONBOARDING_EXPERIMENT_ID,
+      registry,
+    );
+    let resetSucceeded = false;
+    try {
+      const starterTasksEnabled = setExperimentEnabled(
+        STARTER_TASKS_EXPERIMENT_ID,
+        true,
+        registry,
+      );
+      const berdyEnabled = setExperimentEnabled(
+        BERDY_ONBOARDING_EXPERIMENT_ID,
+        true,
+        registry,
+      );
+      if (!starterTasksEnabled || !berdyEnabled) {
+        throw new Error("Unable to enable onboarding experiments");
+      }
+      const didReset = await resetHomeForOnboardingExperience();
+      if (didReset) {
+        resetAssistiveUxMoment("home.starterTasks");
+        window.dispatchEvent(new Event("starter-tasks-state-reset"));
+        setResetAllConfirmationOpen(false);
+        resetSucceeded = true;
+        toast.success(t("experiments.onboarding.resetAllSuccess"));
+      } else {
+        toast.error(t("experiments.onboarding.resetAllError"));
+      }
+    } catch {
+      toast.error(t("experiments.onboarding.resetAllError"));
+    } finally {
+      if (!resetSucceeded) {
+        if (previousStarterTasks?.enabledSource === "auto") {
+          clearExperimentEnabledOverride(STARTER_TASKS_EXPERIMENT_ID, registry);
+        } else if (previousStarterTasks) {
+          setExperimentEnabled(
+            STARTER_TASKS_EXPERIMENT_ID,
+            previousStarterTasks.enabled,
+            registry,
+          );
+        }
+        if (previousBerdy?.enabledSource === "auto") {
+          clearExperimentEnabledOverride(
+            BERDY_ONBOARDING_EXPERIMENT_ID,
+            registry,
+          );
+        } else if (previousBerdy) {
+          setExperimentEnabled(
+            BERDY_ONBOARDING_EXPERIMENT_ID,
+            previousBerdy.enabled,
+            registry,
+          );
+        }
+      }
+      setIsResettingAllOnboarding(false);
+    }
+  };
 
   return (
     <SettingsPage contentClassName="space-y-3">
@@ -229,9 +328,60 @@ export function ExperimentsSettings({
             {t("experiments.emptyDescription")}
           </p>
         ) : (
-          <div className="space-y-3">{experimentCards}</div>
+          <div className="space-y-6">
+            {otherDefinitions.length > 0 ? (
+              <div className="space-y-3">
+                {otherDefinitions.map(renderExperimentCard)}
+              </div>
+            ) : null}
+            {onboardingDefinitions.length > 0 ? (
+              <section
+                aria-labelledby="onboarding-experiments-title"
+                className="overflow-hidden rounded-md border bg-background"
+              >
+                <div className="flex items-end justify-between gap-4 border-b px-4 py-4">
+                  <div>
+                    <h5
+                      id="onboarding-experiments-title"
+                      className="text-sm font-medium"
+                    >
+                      {t("experiments.onboarding.title")}
+                    </h5>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t("experiments.onboarding.description")}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isResettingAllOnboarding}
+                    onClick={() => setResetAllConfirmationOpen(true)}
+                  >
+                    {t("experiments.onboarding.resetAll")}
+                  </Button>
+                </div>
+                <div className="divide-y">
+                  {onboardingDefinitions.map((definition) =>
+                    renderExperimentControls(definition),
+                  )}
+                </div>
+              </section>
+            ) : null}
+          </div>
         )}
       </section>
+      <ConfirmDialog
+        open={resetAllConfirmationOpen}
+        onOpenChange={setResetAllConfirmationOpen}
+        title={t("experiments.onboarding.confirmTitle")}
+        description={t("experiments.onboarding.confirmDescription")}
+        cancelLabel={t("experiments.onboarding.cancel")}
+        confirmLabel={t("experiments.onboarding.confirm")}
+        loadingLabel={t("experiments.onboarding.confirming")}
+        isLoading={isResettingAllOnboarding}
+        onConfirm={handleResetAllOnboarding}
+      />
     </SettingsPage>
   );
 }

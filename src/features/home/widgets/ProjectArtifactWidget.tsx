@@ -20,6 +20,7 @@ import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPref
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import { useWidgetGestureFreeze } from "./useWidgetGestureFreeze";
 import type { WidgetRenderProps } from "./types";
+import { STARTER_PROJECT_ID } from "@/features/home/onboarding/starterTasks";
 
 function getProjectId(
   state: Record<string, unknown> | undefined,
@@ -53,6 +54,7 @@ export function ProjectArtifactWidget({
   shouldIgnoreActivation,
   onTagProjectInComposer,
   onStartProjectChat,
+  onCreateProject,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const { enabled: alwaysShowLabel } = useHomePinLabelsPreference();
@@ -60,6 +62,10 @@ export function ProjectArtifactWidget({
   const sessions = useChatSessionStore((state) => state.sessions);
   const projectId = getProjectId(instance.state);
   const project = projects.find((candidate) => candidate.id === projectId);
+  const isStarterProject =
+    (instance.type === "onboardingProjectArtifact" ||
+      projectId === STARTER_PROJECT_ID) &&
+    !project;
   const sessionCount = useMemo(
     () =>
       project
@@ -85,17 +91,22 @@ export function ProjectArtifactWidget({
           }
         : {
             projectId,
-            name: t("widgets.projectArtifactPin.unavailableTitle"),
-            color: null,
+            name: isStarterProject
+              ? t("widgets.projectArtifactPin.starterTitle")
+              : t("widgets.projectArtifactPin.unavailableTitle"),
+            color: isStarterProject ? "blue" : null,
             workingDirs: [],
             sessionCount: 0,
             artifact: null,
           },
-    [project, projectId, sessionCount, t],
+    [isStarterProject, project, projectId, sessionCount, t],
   );
 
   const label =
-    project?.name ?? t("widgets.projectArtifactPin.unavailableTitle");
+    project?.name ??
+    (isStarterProject
+      ? t("widgets.projectArtifactPin.starterTitle")
+      : t("widgets.projectArtifactPin.unavailableTitle"));
   const lastPointerPosition = useRef<{
     time: number;
     x: number;
@@ -124,7 +135,11 @@ export function ProjectArtifactWidget({
   const handleGuardedClick = useWidgetActivationGuard(
     shouldIgnoreActivation,
     () => {
-      if (project) (onTagProjectInComposer ?? onStartProjectChat)?.(project.id);
+      if (project) {
+        (onTagProjectInComposer ?? onStartProjectChat)?.(project.id);
+      } else if (isStarterProject) {
+        onCreateProject?.();
+      }
     },
   );
   const handleClick: MouseEventHandler<HTMLButtonElement> = (event) => {
@@ -191,15 +206,19 @@ export function ProjectArtifactWidget({
       onPointerDown={handlePointerDown}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
-      disabled={!project}
+      disabled={!project && !isStarterProject}
       aria-label={
         project
           ? t("widgets.projectArtifactPin.openAria", { name: project.name })
-          : t("widgets.projectArtifactPin.unavailableTitle")
+          : isStarterProject
+            ? t("widgets.projectArtifactPin.starterAria")
+            : t("widgets.projectArtifactPin.unavailableTitle")
       }
       className={cn(
         "group relative isolate flex h-full w-full flex-col items-center overflow-visible rounded-md bg-transparent text-left text-foreground transition-opacity duration-150 cursor-pointer [transform:translateZ(0)]",
-        project ? "hover:opacity-95" : "cursor-not-allowed opacity-70",
+        project || isStarterProject
+          ? "hover:opacity-95"
+          : "cursor-not-allowed opacity-70",
       )}
     >
       <div className="pointer-events-none relative flex min-h-0 w-full flex-1 items-center justify-center overflow-visible">
