@@ -1,5 +1,12 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { FileTextIcon, FolderOpenIcon, ImageIcon, XIcon } from "lucide-react";
+import {
+  EllipsisIcon,
+  ExternalLinkIcon,
+  FileTextIcon,
+  FolderOpenIcon,
+  ImageIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -13,12 +20,26 @@ import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { MarkdownImage } from "@/features/chat/ui/MarkdownImage";
 import { CodeBlock } from "@/shared/ui/ai-elements/code-block";
 import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
 import { Spinner } from "@/shared/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group";
 import { readTextFile } from "@/shared/api/system";
+import { revealInFileManager } from "@/shared/lib/fileManager";
+import { getPlatform } from "@/shared/lib/platform";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { classifyArtifactView } from "@/features/chat/lib/artifactViewerTypes";
 import type { OpenArtifact } from "@/features/chat/stores/artifactViewerStore";
+
+// Platform-aware reveal label ("Reveal in Finder" / "Explorer" / "File
+// Manager"), matching FileContextMenu so the doc viewer and right-click
+// menus name the same action identically.
+const revealLabelKey =
+  `common:labels.revealInFileManager_${getPlatform()}` as const;
 
 interface ArtifactViewerProps {
   artifact: OpenArtifact;
@@ -33,7 +54,7 @@ interface TextState {
 }
 
 export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
-  const { t } = useTranslation("chat");
+  const { t } = useTranslation(["chat", "common"]);
   const { openResolvedPath } = useArtifactActionsContext();
   const viewMode = useMemo(
     () => classifyArtifactView(artifact.resolvedPath),
@@ -81,14 +102,14 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
 
   return (
     <Artifact className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none">
-      <ArtifactHeader className="gap-2">
+      <ArtifactHeader>
         <div className="flex min-w-0 items-center gap-2">
           {viewMode === "image" ? (
-            <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+            <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
           ) : (
-            <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+            <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
           )}
-          <ArtifactTitle className="truncate" title={artifact.resolvedPath}>
+          <ArtifactTitle title={artifact.resolvedPath}>
             {artifact.filename}
           </ArtifactTitle>
         </div>
@@ -114,14 +135,43 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
               </ToggleGroupItem>
             </ToggleGroup>
           ) : null}
-          <ArtifactAction
-            icon={FolderOpenIcon}
-            tooltip={t("artifactViewer.openExternally")}
-            label={t("artifactViewer.openExternally")}
-            onClick={() => {
-              void openResolvedPath(artifact.resolvedPath).catch(() => {});
-            }}
-          />
+          {/* "Open in editor" and "Reveal in Finder" are the same kind of
+              hand-off to the OS, so they share one menu rather than competing
+              as two similar folder-ish glyphs next to Close. The trigger stays
+              a neutral `⋯`: it opens a set of choices rather than performing
+              one, so borrowing either destination's glyph would misreport what
+              the button does. The distinguishing icons live on the menu items,
+              where each one labels a single action — ExternalLink for the
+              hand-off out of the app, FolderOpen for the reveal in place. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <ArtifactAction
+                icon={EllipsisIcon}
+                tooltip={t("artifactViewer.fileActions")}
+                label={t("artifactViewer.fileActions")}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() => {
+                  void openResolvedPath(artifact.resolvedPath).catch(() => {});
+                }}
+              >
+                <ExternalLinkIcon />
+                {t("artifactViewer.openExternally")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  void revealInFileManager(artifact.resolvedPath).catch(
+                    () => {},
+                  );
+                }}
+              >
+                <FolderOpenIcon />
+                {t(revealLabelKey)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ArtifactAction
             icon={XIcon}
             tooltip={t("artifactViewer.close")}
@@ -202,19 +252,30 @@ function MarkdownBody({
 
   if (markdownView === "raw") {
     return (
+      // CodeBlock's own `pre` already pads by 12px, so the container only adds
+      // the remaining 4px. That lands the line-number gutter at the same 16px
+      // inset as the Preview body below, and the two views stop shifting
+      // horizontally when you toggle between them. Padding both layers (the
+      // old `p-4`) stacked to 28px before the gutter even started.
       <CodeBlock
         code={textState.contents}
         language="markdown"
         showLineNumbers
         transparentBackground
-        className="p-4"
+        className="px-1"
       />
     );
   }
 
+  // Body copy at the app's Body scale (DESIGN.md §3), matching the agent and
+  // skill detail pages. Heading scale comes from the shared markdown type
+  // scale in shared/ui/ai-elements/message.tsx, so it is not restated here.
   return (
-    <div className="p-4">
-      <MessageResponse imageRenderer={MarkdownImage}>
+    <div className="px-4 py-3">
+      <MessageResponse
+        className="min-w-0 text-sm leading-relaxed"
+        imageRenderer={MarkdownImage}
+      >
         {textState.contents}
       </MessageResponse>
     </div>

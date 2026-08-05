@@ -1901,6 +1901,9 @@ body,
 }
 
 /* Streamdown (markdown rendering) — visual conformance */
+/* Heading scale is owned by the `components` override in
+ * shared/ui/ai-elements/message.tsx, not by CSS, so the app scale lands on the
+ * element itself and stays overridable per surface. */
 [data-streamdown="table-wrapper"],
 [data-streamdown="mermaid-block"] {
   border: none;

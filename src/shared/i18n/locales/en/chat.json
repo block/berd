@@ -603,6 +603,7 @@
     "close": "Close viewer",
     "resize": "Resize viewer",
     "openExternally": "Open in editor",
+    "fileActions": "File actions",
     "viewPreview": "Preview",
     "viewCode": "Code",
     "loading": "Loading file…",

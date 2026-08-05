@@ -495,8 +495,71 @@ const DefaultMarkdownImage: MarkdownImageRenderer = ({
   ...rest
 }) => <img {...rest} alt={rest.alt ?? ""} />;
 
+/**
+ * Markdown heading scale.
+ *
+ * Streamdown ships a web-document scale (h1 `text-3xl`, h2 `text-2xl`,
+ * h3 `text-xl`) that overshoots the app hierarchy in DESIGN.md §3, where Title
+ * tops out at `text-lg` and body copy is `text-sm`. Rendered inside product
+ * chrome — the doc viewer, agent/skill detail pages, chat — those headings read
+ * like a marketing page instead of app UI, and an `# H1` in a file ends up
+ * larger than any real page title in the window.
+ *
+ * Overriding through `components` rather than CSS matters: it replaces the
+ * class on the element instead of merely out-specifying it, so the DOM carries
+ * the app scale and `cn()` still lets a surface adjust a heading locally.
+ *
+ * Per The Calm Scale Rule, hierarchy comes from weight and rhythm rather than
+ * size. Sizes compress into `text-lg` → `text-sm`, and separation is carried by
+ * the space above each heading. h4–h6 have no size headroom left above body
+ * copy, so they separate by weight and color; h6 settles into a quiet label.
+ *
+ * No `uppercase` anywhere in this scale, even though DESIGN.md's Label style
+ * uses it: heading text here is authored document content, not app chrome.
+ * Transforming it would rewrite the author's casing and corrupt identifiers
+ * (`api_KEY` → `API_KEY`), filenames, and paths that appear in headings.
+ */
+const MARKDOWN_HEADING_CLASS = {
+  1: "mt-6 mb-2 font-display text-lg font-semibold leading-6 tracking-tight",
+  2: "mt-6 mb-2 font-display text-base font-semibold leading-6 tracking-tight",
+  3: "mt-5 mb-1.5 font-display text-sm font-semibold leading-5 tracking-tight",
+  4: "mt-4 mb-1 text-sm font-semibold leading-5",
+  5: "mt-4 mb-1 text-sm font-medium leading-5",
+  6: "mt-4 mb-1 text-xs font-medium tracking-wide text-muted-foreground",
+} as const;
+
+type MarkdownHeadingLevel = keyof typeof MARKDOWN_HEADING_CLASS;
+
+function createMarkdownHeading(level: MarkdownHeadingLevel) {
+  const Tag = `h${level}` as const;
+  const headingClass = MARKDOWN_HEADING_CLASS[level];
+
+  const MarkdownHeading = ({
+    className,
+    node: _node,
+    ...rest
+  }: ComponentProps<typeof Tag> & { node?: unknown }) => (
+    <Tag className={cn(headingClass, className)} {...rest} />
+  );
+  MarkdownHeading.displayName = `MarkdownHeading${level}`;
+  return MarkdownHeading;
+}
+
+const markdownHeadingComponents = {
+  h1: createMarkdownHeading(1),
+  h2: createMarkdownHeading(2),
+  h3: createMarkdownHeading(3),
+  h4: createMarkdownHeading(4),
+  h5: createMarkdownHeading(5),
+  h6: createMarkdownHeading(6),
+} satisfies Pick<StreamdownComponents, "h1" | "h2" | "h3" | "h4" | "h5" | "h6">;
+
 function buildStreamdownComponents(imageRenderer?: MarkdownImageRenderer) {
-  return { a: MarkdownLink, img: imageRenderer ?? DefaultMarkdownImage };
+  return {
+    ...markdownHeadingComponents,
+    a: MarkdownLink,
+    img: imageRenderer ?? DefaultMarkdownImage,
+  };
 }
 
 /**

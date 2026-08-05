@@ -595,6 +595,17 @@
     "open": "Abrir panel derecho",
     "close": "Cerrar panel derecho"
   },
+  "artifactViewer": {
+    "close": "Cerrar visor",
+    "resize": "Redimensionar visor",
+    "openExternally": "Abrir en el editor",
+    "fileActions": "Acciones de archivo",
+    "viewPreview": "Vista previa",
+    "viewCode": "Código",
+    "loading": "Cargando archivo…",
+    "loadError": "No se pudo cargar este archivo.",
+    "imageAlt": "Vista previa de {{filename}}"
+  },
   "artifactChips": {
     "open": "Abrir {{name}} en el visor",
     "more": "+{{count}} más"
