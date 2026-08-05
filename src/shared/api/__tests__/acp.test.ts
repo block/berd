@@ -17,6 +17,7 @@ const mockPrompt = vi.fn();
 const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
+const mockArchiveSession = vi.fn();
 
 const managedRuntimeConfig: RuntimeConfig = {
   schemaVersion: 1,
@@ -82,6 +83,7 @@ vi.mock("../acpApi", () => ({
   importSession: vi.fn(),
   forkSession: (...args: unknown[]) => mockForkSession(...args),
   renameSession: (...args: unknown[]) => mockRenameSession(...args),
+  archiveSession: (...args: unknown[]) => mockArchiveSession(...args),
   cancelSession: vi.fn(),
 }));
 
@@ -597,6 +599,34 @@ describe("acpCreateSession", () => {
       mockSetModel.mock.invocationCallOrder[0],
     );
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
+  it("archives a newly created session when eager provider setup fails", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "orphaned-session" });
+    mockSetProvider.mockRejectedValueOnce(new Error("provider setup failed"));
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(acpCreateSession("openai", "/tmp/project")).rejects.toThrow(
+      "provider setup failed",
+    );
+    expect(mockArchiveSession).toHaveBeenCalledWith("orphaned-session");
+    expect(sessionRegistry.isSessionPrepared("orphaned-session")).toBe(false);
+  });
+
+  it("archives and unregisters a newly created session when eager model setup fails", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "orphaned-session" });
+    mockSetModel.mockRejectedValueOnce(new Error("model setup failed"));
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(
+      acpCreateSession("openai", "/tmp/project", { modelId: "gpt-4.1" }),
+    ).rejects.toThrow("model setup failed");
+    expect(mockArchiveSession).toHaveBeenCalledWith("orphaned-session");
+    expect(sessionRegistry.isSessionPrepared("orphaned-session")).toBe(false);
   });
 
   it("returns the latest config snapshot from session creation setup", async () => {

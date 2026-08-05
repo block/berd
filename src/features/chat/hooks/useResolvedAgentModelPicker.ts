@@ -291,6 +291,19 @@ export function useResolvedAgentModelPicker({
         setGlobalSelectedProvider(providerId);
       }
 
+      // A pending draft only has a client-generated id. Keep the selection on
+      // the draft so startup can apply it after ACP returns the backend id;
+      // sending a config request now would target a session ACP cannot know.
+      if (session?.creationState === "pending") {
+        if (nextModelSelection?.id) {
+          sessionStore.patchSession(sessionId, {
+            modelId: nextModelSelection.id,
+            modelName: nextModelSelection.name,
+          });
+        }
+        return;
+      }
+
       if (nextModelSelection?.id) {
         const previousProviderId = session?.providerId;
         const previousModelId = session?.modelId;
@@ -448,6 +461,34 @@ export function useResolvedAgentModelPicker({
       const providerChanged =
         Boolean(nextProviderId) && nextProviderId !== session.providerId;
       const sessionStore = useChatSessionStore.getState();
+
+      // Pending drafts are not ACP sessions yet. Record the latest choice on
+      // the draft and let draft promotion configure the real backend session.
+      if (session.creationState === "pending") {
+        if (providerChanged && nextProviderId) {
+          sessionStore.switchSessionProvider(sessionId, nextProviderId);
+          if (!sessionHasStarted) {
+            setGlobalSelectedProvider(selectedAgentId);
+          }
+        }
+        sessionStore.patchSession(sessionId, {
+          modelId,
+          modelName,
+          reasoningEffort: undefined,
+        });
+        sessionStore.beginModelSelectionIntent(sessionId, {
+          requestId,
+          kind: "model",
+          providerId: nextProviderId,
+          modelId,
+          modelName,
+          previousProviderId,
+          previousModelId,
+          previousModelName,
+          preferenceAgentId: selectedAgentId,
+        });
+        return;
+      }
 
       sessionStore.beginModelSelectionIntent(sessionId, {
         requestId,

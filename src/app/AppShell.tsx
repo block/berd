@@ -113,6 +113,8 @@ import { AppShellLayout } from "./ui/AppShellLayout";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { AppShellContent } from "./ui/AppShellContent";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
+import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import { archiveSession as archiveSessionApi } from "@/shared/api/acpApi";
 import {
   moveSessionToProject,
   updateSessionTitle,
@@ -1512,6 +1514,7 @@ export function AppShell({
       onCreationFailed?: (error: unknown) => Promise<void> | void;
     }) => {
       let hasHandledCreationFailure = false;
+      let createdBackendSessionId: string | null = null;
       const handleCreationFailure = async (
         error: unknown,
       ): Promise<unknown | null> => {
@@ -1548,24 +1551,47 @@ export function AppShell({
         Promise.resolve(workingDir),
       ])
         .then(async ([resolvedSessionModelPreference, resolvedWorkingDir]) => {
+          const liveDraft = useChatSessionStore
+            .getState()
+            .getSession(session.id);
+          const requestedPreference = liveDraft
+            ? {
+                providerId:
+                  liveDraft.providerId ??
+                  resolvedSessionModelPreference.providerId,
+                modelId: liveDraft.modelId,
+                modelName: liveDraft.modelName,
+              }
+            : resolvedSessionModelPreference;
           const target = await ensureNewSessionTarget({
-            providerId: resolvedSessionModelPreference.providerId,
-            modelId: resolvedSessionModelPreference.modelId,
+            providerId: requestedPreference.providerId,
+            modelId: requestedPreference.modelId,
           });
           if (target.status !== "ready") {
             throw new Error(t("settings:providers.setupRequired.toast"));
           }
 
+          const creationPreference = {
+            providerId: target.providerId,
+            modelId: requestedPreference.modelId,
+            modelName: requestedPreference.modelName,
+          };
           return acpCreateSession(target.providerId, resolvedWorkingDir, {
             projectId,
-            modelId: resolvedSessionModelPreference.modelId,
-            deferProviderSetup: resolvedSessionModelPreference.modelId == null,
-          }).then(({ sessionId, configOptionsSnapshot }) => ({
-            sessionId,
-            configOptionsSnapshot,
-            sessionModelPreference: resolvedSessionModelPreference,
-            workingDir: resolvedWorkingDir,
-          }));
+            modelId: creationPreference.modelId,
+            // The draft is already interactive. Construct its provider now so
+            // a selection made while creation is in flight can be applied to
+            // the backend session as soon as it exists.
+            deferProviderSetup: false,
+          }).then(({ sessionId, configOptionsSnapshot }) => {
+            createdBackendSessionId = sessionId;
+            return {
+              sessionId,
+              configOptionsSnapshot,
+              sessionModelPreference: creationPreference,
+              workingDir: resolvedWorkingDir,
+            };
+          });
         })
         .then(
           async ({
@@ -1584,22 +1610,62 @@ export function AppShell({
               );
               return;
             }
+            let appliedPreference = sessionModelPreference;
             let resolvedConfigOptionsSnapshot = configOptionsSnapshot;
+            const reconcileLatestDraftSelection = async () => {
+              while (true) {
+                const liveDraft = useChatSessionStore
+                  .getState()
+                  .getSession(session.id);
+                const latestPreference = liveDraft
+                  ? {
+                      providerId:
+                        liveDraft.providerId ?? appliedPreference.providerId,
+                      modelId: liveDraft.modelId,
+                      modelName: liveDraft.modelName,
+                    }
+                  : appliedPreference;
+                if (
+                  latestPreference.providerId ===
+                    appliedPreference.providerId &&
+                  latestPreference.modelId === appliedPreference.modelId
+                ) {
+                  return latestPreference;
+                }
+                const result = await applyLatestSessionConfig({
+                  sessionId,
+                  providerId: latestPreference.providerId,
+                  workingDir,
+                  modelId: latestPreference.modelId,
+                });
+                if (!result.applied) {
+                  throw new Error(
+                    "Draft session selection was superseded during creation.",
+                  );
+                }
+                resolvedConfigOptionsSnapshot =
+                  result.configOptionsSnapshot ?? resolvedConfigOptionsSnapshot;
+                appliedPreference = latestPreference;
+              }
+            };
+
+            await reconcileLatestDraftSelection();
             if (onReady) {
               await onReady({
                 backendSessionId: sessionId,
-                configOptionsSnapshot,
+                configOptionsSnapshot: resolvedConfigOptionsSnapshot,
               });
               const pendingReasoningEffort = useChatSessionStore
                 .getState()
                 .getSession(session.id)?.reasoningEffort;
               if (pendingReasoningEffort) {
                 resolvedConfigOptionsSnapshot = {
-                  ...configOptionsSnapshot,
+                  ...resolvedConfigOptionsSnapshot,
                   reasoningEffort: pendingReasoningEffort,
                 };
               }
             }
+            const latestPreference = await reconcileLatestDraftSelection();
 
             const sessionStoreAfterReady = useChatSessionStore.getState();
             const latestSessionAfterReady = sessionStoreAfterReady.getSession(
@@ -1631,11 +1697,33 @@ export function AppShell({
             };
             const shouldRemainActive =
               sessionStoreAfterReady.activeSessionId === session.id;
+            const pendingSelectionIntent =
+              sessionStoreAfterReady.getModelSelectionIntent(session.id);
+            if (
+              pendingSelectionIntent?.kind === "model" &&
+              pendingSelectionIntent.preferenceAgentId &&
+              pendingSelectionIntent.modelId
+            ) {
+              setStoredModelPreference(
+                pendingSelectionIntent.preferenceAgentId,
+                {
+                  modelId: pendingSelectionIntent.modelId,
+                  modelName:
+                    pendingSelectionIntent.modelName ??
+                    pendingSelectionIntent.modelId,
+                  providerId: pendingSelectionIntent.providerId,
+                },
+              );
+              sessionStoreAfterReady.clearModelSelectionIntent(
+                session.id,
+                pendingSelectionIntent.requestId,
+              );
+            }
             promoteChatSessionId(session.id, sessionId);
             promoteDraftSession(session.id, sessionId, {
-              providerId: sessionModelPreference.providerId,
-              modelId: sessionModelPreference.modelId,
-              modelName: sessionModelPreference.modelName,
+              providerId: latestPreference.providerId,
+              modelId: latestPreference.modelId,
+              modelName: latestPreference.modelName,
               workingDir,
               ...latestSessionPatch,
               ...(resolvedConfigOptionsSnapshot?.reasoningEffort
@@ -1657,6 +1745,16 @@ export function AppShell({
         )
         .catch(async (error) => {
           const chatStore = useChatStore.getState();
+          if (createdBackendSessionId) {
+            try {
+              await archiveSessionApi(createdBackendSessionId);
+            } catch (archiveError) {
+              console.error(
+                "Failed to archive backend session after draft startup failed:",
+                archiveError,
+              );
+            }
+          }
           const cleanupError = await handleCreationFailure(error);
 
           // Before falling back to the opaque backend error, check whether the

@@ -150,6 +150,44 @@ describe("useResolvedAgentModelPicker", () => {
     });
   });
 
+  it("keeps a pending draft harness change local until ACP creates the session", () => {
+    const prepareSelectedProvider = vi.fn();
+    useChatSessionStore.getState().createDraftSession({
+      workingDir: "/tmp/project",
+      providerId: "goose",
+    });
+    const session = useChatSessionStore.getState().sessions[0];
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "codex-acp", label: "Codex" },
+        ],
+        selectedProvider: "goose",
+        sessionId: session.id,
+        sessionHasStarted: false,
+        session,
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider,
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+      }),
+    );
+
+    act(() => result.current.handleProviderChange("codex-acp"));
+
+    expect(prepareSelectedProvider).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().getSession(session.id)).toMatchObject(
+      {
+        creationState: "pending",
+        providerId: "codex-acp",
+      },
+    );
+  });
+
   it("keeps explicit concrete provider requests authoritative", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",

@@ -127,6 +127,8 @@ export interface ModelSelectionIntent {
   previousProviderId?: string;
   previousModelId?: string;
   previousModelName?: string;
+  /** Agent whose future-chat preference should be updated after this model reaches ACP. */
+  preferenceAgentId?: string;
 }
 
 export function hasSessionStarted(

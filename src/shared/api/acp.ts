@@ -378,6 +378,7 @@ export async function acpCreateSession(
     personaId: options.personaId,
   });
   const sessionId = response.sessionId;
+  let rollbackSessionRegistration: (() => void) | undefined;
   let configOptionsSnapshot = readSessionConfigOptionsSnapshots(response);
   logReasoningEffortInfo("acpCreateSession newSession response", {
     sessionId: shortLogId(sessionId),
@@ -390,32 +391,49 @@ export async function acpCreateSession(
       configOptionsSnapshot.reasoningEffort,
     ),
   });
-  if (!deferProviderSetup) {
-    configOptionsSnapshot = mergeSessionConfigSnapshots(
-      configOptionsSnapshot,
-      await directAcp.setProvider(sessionId, providerId),
-    );
-    logReasoningEffortInfo("acpCreateSession setProvider complete", {
-      sessionId: shortLogId(sessionId),
-      providerId,
-      requestedModelId: options.modelId ?? null,
-      hasReasoningEffortSnapshot: Boolean(
-        configOptionsSnapshot.reasoningEffort,
-      ),
-      ...reasoningEffortConfigLogFields(
-        "reasoningEffort",
-        configOptionsSnapshot.reasoningEffort,
-      ),
-    });
-    sessionRegistry.registerPreparedSession(sessionId, providerId, workingDir);
+  try {
+    if (!deferProviderSetup) {
+      configOptionsSnapshot = mergeSessionConfigSnapshots(
+        configOptionsSnapshot,
+        await directAcp.setProvider(sessionId, providerId),
+      );
+      logReasoningEffortInfo("acpCreateSession setProvider complete", {
+        sessionId: shortLogId(sessionId),
+        providerId,
+        requestedModelId: options.modelId ?? null,
+        hasReasoningEffortSnapshot: Boolean(
+          configOptionsSnapshot.reasoningEffort,
+        ),
+        ...reasoningEffortConfigLogFields(
+          "reasoningEffort",
+          configOptionsSnapshot.reasoningEffort,
+        ),
+      });
+      rollbackSessionRegistration = sessionRegistry.registerPreparedSession(
+        sessionId,
+        providerId,
+        workingDir,
+      );
+    }
+    if (options.modelId) {
+      configOptionsSnapshot = mergeSessionConfigSnapshots(
+        configOptionsSnapshot,
+        await sessionRegistry.applySessionModel(sessionId, options.modelId),
+      );
+    }
+    return { sessionId, configOptionsSnapshot };
+  } catch (error) {
+    rollbackSessionRegistration?.();
+    try {
+      await directAcp.archiveSession(sessionId);
+    } catch (archiveError) {
+      console.error(
+        "Failed to archive ACP session after creation setup failed:",
+        archiveError,
+      );
+    }
+    throw error;
   }
-  if (options.modelId) {
-    configOptionsSnapshot = mergeSessionConfigSnapshots(
-      configOptionsSnapshot,
-      await sessionRegistry.applySessionModel(sessionId, options.modelId),
-    );
-  }
-  return { sessionId, configOptionsSnapshot };
 }
 
 export async function acpSetModel(

@@ -50,6 +50,8 @@ import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockAcpPrepareSession = vi.hoisted(() => vi.fn());
+const mockAcpSetModel = vi.hoisted(() => vi.fn());
 const mockAcpSetSessionConfigOption = vi.hoisted(() => vi.fn());
 const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
 const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
@@ -366,6 +368,8 @@ vi.mock("@/features/chat/lib/externalAgentReadiness", () => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
+  acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
+  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
   acpSetSessionConfigOption: (...args: unknown[]) =>
     mockAcpSetSessionConfigOption(...args),
   acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
@@ -775,6 +779,10 @@ describe("AppShell global navigation", () => {
     mockListExtensions.mockResolvedValue([]);
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockAcpPrepareSession.mockReset();
+    mockAcpPrepareSession.mockResolvedValue({});
+    mockAcpSetModel.mockReset();
+    mockAcpSetModel.mockResolvedValue({});
     mockAcpSetSessionConfigOption.mockReset();
     mockAcpSetSessionConfigOption.mockResolvedValue({});
     mockAcpListSessionsPage.mockReset();
@@ -912,7 +920,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "~/goose artifacts",
       {
-        deferProviderSetup: true,
+        deferProviderSetup: false,
         modelId: undefined,
         projectId: undefined,
       },
@@ -995,7 +1003,7 @@ describe("AppShell global navigation", () => {
       "databricks_v2",
       "~/goose artifacts",
       {
-        deferProviderSetup: true,
+        deferProviderSetup: false,
         modelId: undefined,
         projectId: undefined,
       },
@@ -1022,7 +1030,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "~/goose artifacts",
       {
-        deferProviderSetup: true,
+        deferProviderSetup: false,
         modelId: undefined,
         projectId: undefined,
       },
@@ -1046,7 +1054,7 @@ describe("AppShell global navigation", () => {
       "codex-acp",
       "~/goose artifacts",
       {
-        deferProviderSetup: true,
+        deferProviderSetup: false,
         modelId: undefined,
         projectId: undefined,
       },
@@ -1121,7 +1129,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "~/goose artifacts",
       {
-        deferProviderSetup: true,
+        deferProviderSetup: false,
         modelId: undefined,
         projectId: undefined,
       },
@@ -1192,7 +1200,7 @@ describe("AppShell global navigation", () => {
       "goose",
       "/Users/test/goose artifacts test",
       {
-        deferProviderSetup: true,
+        deferProviderSetup: false,
         modelId: undefined,
         projectId: undefined,
       },
@@ -2467,7 +2475,7 @@ describe("AppShell global navigation", () => {
         "goose",
         "/repo/builderbot",
         {
-          deferProviderSetup: true,
+          deferProviderSetup: false,
           modelId: undefined,
           projectId: "project-1",
         },
@@ -2747,6 +2755,93 @@ describe("AppShell global navigation", () => {
     ).toMatchObject({
       creationState: undefined,
       workingDir: draftWorkingDir,
+    });
+  });
+
+  it("applies the latest pending draft selection before promotion", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    const pendingPrepare = deferred<Record<string, never>>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    mockAcpPrepareSession.mockReturnValueOnce(pendingPrepare.promise);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+
+    act(() => {
+      const sessionStore = useChatSessionStore.getState();
+      sessionStore.patchSession(draftSessionId, {
+        providerId: "codex-acp",
+        modelId: "gpt-5.4-mini",
+        modelName: "GPT-5.4 mini",
+      });
+      sessionStore.beginModelSelectionIntent(draftSessionId, {
+        requestId: "pending-model",
+        kind: "model",
+        providerId: "codex-acp",
+        modelId: "gpt-5.4-mini",
+        modelName: "GPT-5.4 mini",
+        preferenceAgentId: "codex-acp",
+      });
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "created-session",
+        "codex-acp",
+        "~/goose artifacts",
+      );
+    });
+    act(() => pendingPrepare.resolve({}));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        providerId: "codex-acp",
+        modelId: "gpt-5.4-mini",
+        modelName: "GPT-5.4 mini",
+      });
+    });
+    expect(
+      JSON.parse(localStorage.getItem("goose:preferredModelsByAgent") ?? "{}"),
+    ).toMatchObject({
+      "codex-acp": {
+        modelId: "gpt-5.4-mini",
+        modelName: "GPT-5.4 mini",
+        providerId: "codex-acp",
+      },
+    });
+    expect(
+      useChatSessionStore.getState().getModelSelectionIntent("created-session"),
+    ).toBeUndefined();
+  });
+
+  it("archives the backend session when post-creation reconciliation fails", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("switch failed"));
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+    act(() => {
+      useChatSessionStore.getState().patchSession(draftSessionId, {
+        providerId: "codex-acp",
+      });
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("created-session");
+      expect(
+        useChatSessionStore.getState().getSession(draftSessionId),
+      ).toMatchObject({ creationState: "failed" });
     });
   });
 
@@ -4023,7 +4118,7 @@ describe("AppShell global navigation", () => {
         "goose",
         "~/goose artifacts",
         {
-          deferProviderSetup: true,
+          deferProviderSetup: false,
           modelId: undefined,
           projectId: undefined,
         },
