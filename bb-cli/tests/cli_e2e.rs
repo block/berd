@@ -627,7 +627,7 @@ fn describe_commands_uses_static_catalog_without_network() {
         json!([
             {
                 "name": "appkit",
-                "summary": "Block App Kit CLI (local exec)"
+                "summary": "Cloudflare-backed internal Block App Kit CLI (local exec)"
             },
             {
                 "name": "secret",

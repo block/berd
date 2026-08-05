@@ -7,6 +7,7 @@ mod common;
 use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1220,11 +1221,12 @@ fn parse_stderr_error(stderr: &str) -> Value {
 // bb root surfaces
 
 #[test]
-fn bb_root_help_lists_skills_and_tools() {
+fn bb_root_help_lists_appkit_skills_and_tools() {
     let output = bb_command().arg("--help").output().expect("run bb help");
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
+    assert!(stdout.contains("appkit"));
     assert!(stdout.contains("auth"));
     assert!(stdout.contains("config"));
     assert!(stdout.contains("skills"));
@@ -3458,6 +3460,303 @@ fn bb_skills_doctor_offline_reports_server_failure() {
 }
 
 // ---------------------------------------------------------------------------
+// External App Kit-on-Compose control plane
+
+#[test]
+fn bb_appkit_help_distinguishes_external_and_internal_paths() {
+    let output = bb_command()
+        .args(["appkit", "--help"])
+        .output()
+        .expect("run bb appkit help");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    for expected in [
+        "external Block App Kit",
+        "bb-block",
+        "bb-public",
+        "Cloudflare-backed internal App Kit",
+        "bb tools appkit",
+        "separate internal Compose workflow",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "help did not explain {expected:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn bb_appkit_contract_exchanges_session_and_calls_control_plane() {
+    let purpose_token = "compose-purpose-token";
+    let session_credential = "stored-bbidentity-session";
+    let contract = json!({
+        "ok": true,
+        "contract_version": "2026-06-30",
+        "minimum_client_version": "0.1.0",
+        "supported_operations": [{
+            "method": "GET",
+            "path": "/v1/agent/contract"
+        }]
+    });
+    let server = MockServer::start(vec![
+        MockResponse::json(json!({
+            "access_token": purpose_token,
+            "token_type": "Bearer",
+            "expires_at": "2099-01-01T00:05:00Z",
+            "expires_in_seconds": 300
+        })),
+        MockResponse::json(contract.clone()),
+    ]);
+    let temp = temp_test_dir("bb-appkit-contract");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        session_credential,
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "appkit",
+            "contract",
+            "--base-url",
+            &server.base_url,
+            "--client-version",
+            "0.2.0",
+        ])
+        .output()
+        .expect("run bb appkit contract");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse contract output"),
+        contract
+    );
+    assert!(!stdout.contains(session_credential));
+    assert!(!stdout.contains(purpose_token));
+    assert!(!stderr.contains(session_credential));
+    assert!(!stderr.contains(purpose_token));
+
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/api/goose/v1/auth/token/compose");
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some(session_credential)
+    );
+    assert!(!requests[0].headers.contains_key("authorization"));
+    assert_eq!(requests[0].body, Value::Null);
+
+    assert_eq!(requests[1].method, "GET");
+    assert_eq!(requests[1].path, "/v1/agent/contract");
+    assert_eq!(
+        requests[1].headers.get("authorization").map(String::as_str),
+        Some("Bearer compose-purpose-token")
+    );
+    assert_eq!(
+        requests[1]
+            .headers
+            .get("x-hotpod-agent-client-version")
+            .map(String::as_str),
+        Some("0.2.0")
+    );
+    for sensitive_header in [
+        "x-bb-session-credential",
+        "x-forwarded-user",
+        "x-forwarded-workspace-id",
+    ] {
+        assert!(
+            !requests[1].headers.contains_key(sensitive_header),
+            "control-plane request unexpectedly included {sensitive_header}"
+        );
+    }
+    assert_eq!(requests[1].body, Value::Null);
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_appkit_contract_rejects_untrusted_origin_before_token_exchange() {
+    let kgoose = MockServer::start(vec![]);
+    let temp = temp_test_dir("bb-appkit-untrusted-origin");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &kgoose.base_url,
+        "stored-bbidentity-session",
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &kgoose.base_url)
+        .args([
+            "appkit",
+            "contract",
+            "--base-url",
+            "https://attacker.example",
+        ])
+        .output()
+        .expect("run bb appkit contract with untrusted origin");
+    let requests = kgoose.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("approved Builderlab ingress"));
+    assert!(requests.is_empty(), "token exchange must not be attempted");
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_appkit_contract_shares_purpose_token_between_concurrent_processes() {
+    let purpose_token = "shared-compose-purpose-token";
+    let session_credential = "stored-bbidentity-session";
+    let contract = json!({
+        "contract_version": "2026-06-30",
+        "supported_operations": []
+    });
+    let server = MockServer::start(vec![
+        MockResponse::json(json!({
+            "access_token": purpose_token,
+            "token_type": "Bearer",
+            "expires_at": "2099-01-01T00:05:00Z",
+            "expires_in_seconds": 300
+        })),
+        MockResponse::json(contract.clone()),
+        MockResponse::json(contract.clone()),
+    ]);
+    let temp = temp_test_dir("bb-appkit-shared-purpose-token");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        session_credential,
+        "2099-01-01T00:00:00Z",
+    );
+
+    let mut children = Vec::new();
+    for _ in 0..2 {
+        children.push(
+            bb_command()
+                .env("BB_HOME", &bb_home)
+                .env("BB_AUTH_STORAGE", "file")
+                .env("BB_AUTH_STORAGE_FILE", &storage_path)
+                .env("KGOOSE_BASE_URL", &server.base_url)
+                .args(["appkit", "contract", "--base-url", &server.base_url])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn bb appkit contract"),
+        );
+    }
+
+    for (index, child) in children.into_iter().enumerate() {
+        let output = child
+            .wait_with_output()
+            .expect("wait for bb appkit contract");
+        let (stdout, stderr) = output_text(&output);
+
+        assert!(
+            output.status.success(),
+            "invocation {} failed: {stderr}",
+            index + 1
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&stdout).expect("parse contract output"),
+            contract
+        );
+        assert!(!stdout.contains(purpose_token));
+        assert!(!stderr.contains(purpose_token));
+    }
+
+    let requests = server.finish();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/api/goose/v1/auth/token/compose")
+            .count(),
+        1
+    );
+    let control_plane_requests = requests
+        .iter()
+        .filter(|request| request.path == "/v1/agent/contract")
+        .collect::<Vec<_>>();
+    assert_eq!(control_plane_requests.len(), 2);
+    for request in control_plane_requests {
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer shared-compose-purpose-token")
+        );
+    }
+
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_appkit_exchange_failure_does_not_echo_response_or_credentials() {
+    let secret = "credential-that-must-not-be-logged";
+    let server = MockServer::start(vec![MockResponse::text(403, secret)]);
+    let temp = temp_test_dir("bb-appkit-exchange-failure");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        secret,
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "appkit",
+            "contract",
+            "--base-url",
+            &server.base_url,
+            "--json",
+        ])
+        .output()
+        .expect("run failing bb appkit contract");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(
+        !stderr.contains(secret),
+        "stderr leaked credential: {stderr}"
+    );
+    let error = parse_stderr_error(&stderr);
+    assert_eq!(error["error"]["code"], json!("forbidden"));
+    assert_eq!(requests.len(), 1, "request should stop after exchange");
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+// ---------------------------------------------------------------------------
 // bb tools passthrough
 
 #[test]
@@ -3677,7 +3976,7 @@ fn bb_tools_describe_commands_uses_static_catalog_without_network() {
         json!([
             {
                 "name": "appkit",
-                "summary": "Block App Kit CLI (local exec)"
+                "summary": "Cloudflare-backed internal Block App Kit CLI (local exec)"
             },
             {
                 "name": "secret",

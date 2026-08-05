@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod agents_install;
 pub mod agents_models;
+pub mod appkit;
 pub mod auth;
 pub mod auth_login;
 pub mod auth_storage;

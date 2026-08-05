@@ -19,6 +19,7 @@ anyhow = "1"
 builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 clap = { version = "4.5", features = ["env"] }
 clap_complete = "4.5"
+fs2 = "0.4"
 pbjson = "0.9"
 pbjson-types = "0.9"
 prost = "0.14"

@@ -1,3 +1,9 @@
+//! Compatibility wrapper for the Cloudflare-backed internal Block App Kit CLI.
+//!
+//! This powers `sq agent-tools appkit` and `bb tools appkit`. It is separate
+//! from the root `bb appkit` command used by the external App Kit-on-Compose
+//! pilot and must remain available while the internal experience is unchanged.
+
 use std::io;
 use std::process::{Command, ExitStatus, Stdio};
 
