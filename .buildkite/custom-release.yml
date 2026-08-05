@@ -47,7 +47,12 @@ steps:
     depends_on: "release-input"
     env:
       BUILD_KIND: "custom"
-    command: ./scripts/buildkite/release/build-macos.sh
+      BERD_RELEASE_CHANNEL: "disabled"
+    command: |
+      source scripts/buildkite/release/release-inputs.sh
+      load_buildkite_release_inputs version custom_name custom_config custom_vite_env disable_bb_cli
+      load_optional_buildkite_release_inputs databricks_host fast_model_id
+      ./scripts/release/build-macos.sh
     plugins:
       - squareup/apple-codesign#v1:
           identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"
@@ -71,4 +76,5 @@ steps:
       - "build-macos"
     env:
       BUILD_KIND: "custom"
+      BERD_RELEASE_CHANNEL: "disabled"
     command: ./scripts/buildkite/release/publish-custom-artifacts.sh

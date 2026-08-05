@@ -28,6 +28,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:release-scripts": "vitest run --config vitest.release-scripts.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm build && playwright test",
@@ -40,7 +41,7 @@
     "test:transcript-virtualization:ci": "TRANSCRIPT_VIRTUALIZATION_START_SERVER=1 TRANSCRIPT_VIRTUALIZATION_RENDERER_URL=http://127.0.0.1:1520/tests/transcript-virtualization/real-renderer-bridge.html TRANSCRIPT_VIRTUALIZATION_RENDERERS=virtual playwright test --config tests/transcript-virtualization/playwright.config.ts --project=desktop tests/transcript-virtualization/transcript-parity.spec.ts tests/transcript-virtualization/transcript-resize-anchoring.spec.ts tests/transcript-virtualization/transcript-product-contract.spec.ts",
     "test:app-e2e": "vitest run --config vitest.app-e2e.config.ts",
     "test-driver": "tsx tests/app-e2e/lib/test-driver-cli.ts",
-    "tauri:release:config": "node scripts/build-tauri-release-config.mjs",
+    "tauri:release:config": "node scripts/release/build-tauri-release-config.mjs",
     "validate:runtime-config": "tsx scripts/validate-runtime-config.ts",
     "validate:bundled-agents": "tsx scripts/validate-bundled-agents.ts"
   },

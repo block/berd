@@ -1,0 +1,5 @@
+{
+  "repository": "squareup/berd",
+  "rollingTag": "berd-desktop-latest",
+  "platform": "darwin-aarch64"
+}

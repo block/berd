@@ -162,10 +162,7 @@ describe("applyDistributionValues", () => {
 // not carry it. Pin both del() clauses so removing one fails here.
 describe("build-macos.sh BYO strip", () => {
   it("deletes the injected host and fast model", () => {
-    const script = readFileSync(
-      "scripts/buildkite/release/build-macos.sh",
-      "utf8",
-    );
+    const script = readFileSync("scripts/release/build-macos.sh", "utf8");
     const byoStripStart = script.indexOf(
       'VITE_BYO_KEY_PROVIDERS_VALUE" == "1"',
     );

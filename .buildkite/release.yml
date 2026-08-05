@@ -2,7 +2,8 @@ agents:
   xcode: "26.3.0"
 
 env:
-  GOOSE2_UPDATER_ENDPOINT: "https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json"
+  BERD_RELEASE_CHANNEL: "internal"
+  BERD_UPDATER_ENDPOINT: "https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json"
   APPLE_TEAM_ID: "EYF346PHUG"
 
   MACOS_ENVIRONMENT_XCODE_VERSION: "26.3.0"
@@ -32,7 +33,11 @@ steps:
   - label: ":mac: Build & sign macOS"
     key: "build-macos"
     depends_on: "release-input"
-    command: ./scripts/buildkite/release/build-macos.sh
+    command: |
+      source scripts/buildkite/release/release-inputs.sh
+      load_buildkite_release_inputs version
+      load_optional_buildkite_release_inputs databricks_host fast_model_id
+      ./scripts/release/build-macos.sh
     plugins:
       - squareup/apple-codesign#v1:
           identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"

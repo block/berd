@@ -3,7 +3,7 @@
 # .app at release/macos/ for the squareup/apple-codesign plugin to sign,
 # notarize, staple, and package in its post-command hook.
 #
-# Inputs (Buildkite meta-data, or uppercase env var override for local runs):
+# Inputs (uppercase environment variables supplied by the CI adapter):
 #   - version:        semver for the release (e.g. 0.2.0)
 #   - build_kind:     "official" (default) or "custom"; the custom pipeline
 #                     sets BUILD_KIND=custom on the generated build step
@@ -28,6 +28,8 @@
 #                     the bundled value
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
+#   - BERD_RELEASE_CHANNEL: public | internal | disabled (required)
+#   - BERD_UPDATER_PUBLIC_KEY / BERD_UPDATER_ENDPOINT: enabled-channel trust pair
 #
 # An official build — the default, with all of the above unset — is byte-for-
 # byte the build this script ran before custom builds existed: features =
@@ -37,47 +39,50 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/buildkite/release/lib.sh
+# shellcheck source=scripts/release/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cd "$REPO_ROOT"
 activate_hermit
 
 # resolve_release_version (lib.sh) validates the version, applies the custom
-# build name suffix, and validates custom_name; official builds get `meta
-# version` unchanged.
+# build name suffix, and validates custom_name; official builds use VERSION
+# unchanged.
 RELEASE_VERSION="$(resolve_release_version)"
 
-# Remaining build-kind inputs. meta() falls back to the uppercased env var for
-# local runs (BUILD_KIND / CUSTOM_CONFIG / DISABLE_BB_CLI).
+# Remaining build-kind inputs are explicit environment values supplied by the
+# caller. Optional values retain the existing defaults.
 BUILD_KIND="$(release_build_kind)"
-CUSTOM_CONFIG="$(meta custom_config 2>/dev/null || true)"
+CUSTOM_CONFIG="$(release_input custom_config 2>/dev/null || true)"
 [[ -n "$CUSTOM_CONFIG" ]] || CUSTOM_CONFIG="{}"
-CUSTOM_BUILD_ENV="$(meta custom_vite_env 2>/dev/null || true)"
+CUSTOM_BUILD_ENV="$(release_input custom_vite_env 2>/dev/null || true)"
 [[ -n "$CUSTOM_BUILD_ENV" ]] || CUSTOM_BUILD_ENV="{}"
 CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-$(default_bundled_agents "$BUILD_KIND")}"
-DISABLE_BB_CLI="$(meta disable_bb_cli 2>/dev/null || echo false)"
-# Buildkite meta-data is the public pipeline input. Distribution orchestrators
-# may instead pass the same narrow values directly in the environment.
-DATABRICKS_HOST_VALUE="${DATABRICKS_HOST:-$(meta databricks_host 2>/dev/null || true)}"
-FAST_MODEL_ID_VALUE="${FAST_MODEL_ID:-$(meta fast_model_id 2>/dev/null || true)}"
+DISABLE_BB_CLI="$(release_input disable_bb_cli 2>/dev/null || echo false)"
+DATABRICKS_HOST_VALUE="$(release_input databricks_host 2>/dev/null || true)"
+FAST_MODEL_ID_VALUE="$(release_input fast_model_id 2>/dev/null || true)"
 
-# In-app updates are an official-build-only feature. A custom build that embeds
-# the official updater pubkey/endpoint would poll the official feed and, because
-# a custom version sorts below official in semver (X.Y.Z-<name> < X.Y.Z),
-# silently download-and-install the official release over itself — undoing every
-# custom feature gate. So disable the updater for all custom builds, at both
-# layers: VITE_UPDATER_ENABLED gates the renderer (no startup/6h poll, the
-# Settings "Check for Updates" control disabled), and GOOSE2_UPDATER_DISABLED
-# tells the release-config generator to omit plugins.updater so lib.rs never
-# registers the plugin and the binary carries no key/endpoint at all. The
-# trigger is BUILD_KIND alone — there is no scenario where a custom build should
-# consume the official feed, so this needs no separate input or toggle.
-if [[ "$BUILD_KIND" == "custom" ]]; then
+# Build kind controls product customization; updater channel is an independent,
+# explicit trust contract. The internal Buildkite pipeline selects `internal`,
+# the public GitHub workflow selects `public`, and custom/local builds select
+# `disabled`. Never infer an enabled channel from the CI system or silently fall
+# back between public and internal keys/endpoints.
+BERD_RELEASE_CHANNEL="$(trim_whitespace "${BERD_RELEASE_CHANNEL:-}")"
+validate_release_channel "$BERD_RELEASE_CHANNEL" || exit 1
+if [[ "$BERD_RELEASE_CHANNEL" == "disabled" ]]; then
   UPDATER_ENABLED=false
-  export GOOSE2_UPDATER_DISABLED=1
 else
   UPDATER_ENABLED=true
+fi
+if [[ "$BUILD_KIND" == "custom" && "$BERD_RELEASE_CHANNEL" != "disabled" ]]; then
+  echo "custom builds require BERD_RELEASE_CHANNEL=disabled" >&2
+  exit 1
+fi
+export BERD_RELEASE_CHANNEL
+# Keep the existing internal Buildkite secret usable while the secret name is
+# migrated; all downstream code sees only the BERD_* contract.
+if [[ "$BERD_RELEASE_CHANNEL" == "internal" && -z "${BERD_UPDATER_PUBLIC_KEY:-}" && -n "${GOOSE2_UPDATER_PUBLIC_KEY:-}" ]]; then
+  export BERD_UPDATER_PUBLIC_KEY="$GOOSE2_UPDATER_PUBLIC_KEY"
 fi
 
 # Cargo feature list + VITE_* env applied to the build below. Keep official
@@ -99,7 +104,7 @@ set_vite_env() {
   local value="$2"
 
   case "$key" in
-    VITE_APP_VERSION|VITE_ENVIRONMENT)
+    VITE_APP_VERSION|VITE_ENVIRONMENT|VITE_UPDATER_ENABLED)
       echo "custom_vite_env cannot override release-owned key: $key" >&2
       return 1
       ;;
@@ -108,9 +113,6 @@ set_vite_env() {
       ;;
     VITE_BYO_KEY_PROVIDERS)
       VITE_BYO_KEY_PROVIDERS_VALUE="$value"
-      ;;
-    VITE_UPDATER_ENABLED)
-      VITE_UPDATER_ENABLED_VALUE="$value"
       ;;
     VITE_SECURITY_ML)
       VITE_SECURITY_ML_VALUE="$value"
@@ -202,11 +204,13 @@ stage_custom_bundled_agents() {
 # against the same working tree doesn't accidentally include them.
 cleanup_custom_bundled_agents() {
   local file
-  for file in "${STAGED_CUSTOM_AGENTS[@]}"; do
-    if [[ -f "$file" ]]; then
-      rm -f "$file"
-    fi
-  done
+  if [[ ${#STAGED_CUSTOM_AGENTS[@]} -gt 0 ]]; then
+    for file in "${STAGED_CUSTOM_AGENTS[@]}"; do
+      if [[ -f "$file" ]]; then
+        rm -f "$file"
+      fi
+    done
+  fi
 }
 
 typeset -a STAGED_CUSTOM_AGENTS=()
@@ -389,20 +393,12 @@ if [[ "$BUILD_KIND" == "custom" && "$VITE_SECURITY_ML_VALUE" == "0" ]]; then
 fi
 
 # Stage the selected bundled agents into distro/agents/ for the Tauri resource
-# bundle. Official builds use block,builderbot; custom builds default to the
-# public-safe builderbot-only selection.
+# bundle. Official builds use the default block,builderbot selection.
 stage_custom_bundled_agents
 
-# Generate release config. For official builds this bakes the updater endpoint
-# and public key into the binary; the apple-codesign plugin handles signing, and
-# publish-updater.sh creates updater artifacts after notarization. Custom builds
-# set GOOSE2_UPDATER_DISABLED above, so the generator writes an empty overlay and
-# the key/endpoint secrets aren't needed — only require them for official.
+# Generate the channel-specific release overlay. The generator validates the
+# endpoint/key pair together and emits no updater config for disabled builds.
 echo "+++ :key: Generating tauri.release.conf.json"
-if [[ "$UPDATER_ENABLED" == "true" ]]; then
-  : "${GOOSE2_UPDATER_PUBLIC_KEY:?GOOSE2_UPDATER_PUBLIC_KEY is required}"
-  : "${GOOSE2_UPDATER_ENDPOINT:?GOOSE2_UPDATER_ENDPOINT is required}"
-fi
 pnpm run tauri:release:config
 
 echo "+++ :hammer: Patching release config for signing flow"
@@ -429,6 +425,7 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 TARGET_TRIPLE="aarch64-apple-darwin"
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
+./scripts/prepare-acp-tools-resource.sh "$TARGET_TRIPLE"
 ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
 ./scripts/prepare-catch-sidecar.sh "$TARGET_TRIPLE"
@@ -451,7 +448,11 @@ env \
   pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features "$CARGO_FEATURES" \
     --config src-tauri/tauri.release.conf.json
 
-UNSIGNED_APP="src-tauri/target/${TARGET_TRIPLE}/release/bundle/macos/${APP_BUNDLE_NAME}.app"
+TAURI_TARGET_DIR="$(
+  cd src-tauri
+  cargo metadata --no-deps --format-version 1 | jq -er '.target_directory | select(length > 0)'
+)"
+UNSIGNED_APP="$TAURI_TARGET_DIR/${TARGET_TRIPLE}/release/bundle/macos/${APP_BUNDLE_NAME}.app"
 [[ -d "$UNSIGNED_APP" ]] || { echo "Missing $UNSIGNED_APP" >&2; exit 1; }
 
 echo "+++ :package: Staging unsigned .app for apple-codesign"

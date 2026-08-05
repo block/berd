@@ -654,7 +654,7 @@ fn runtime_config_load_result_for_local_byo_dev(
 /// distribution may have injected one into — keep the clear so the BYO
 /// exclusion holds regardless of the loaded source. This covers dev only
 /// (`cfg(debug_assertions)`); the release-build twin is the BYO strip jq in
-/// scripts/buildkite/release/build-macos.sh, which deletes the same two fields.
+/// scripts/release/build-macos.sh, which deletes the same two fields.
 #[cfg(debug_assertions)]
 pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) {
     let Some(default_provider_id) = config.goose.default_model_provider_id.as_deref() else {

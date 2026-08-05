@@ -140,7 +140,11 @@ tauri-test:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p berdctl
 
 # Run the local CI gate.
-ci: check tauri-fmt-check tauri-check tauri-test clippy test build
+ci: check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
+
+# Run release/updater script tests.
+release-scripts-test:
+    pnpm test:release-scripts
 
 # ── BuilderBot CLI ───────────────────────────────────────────
 

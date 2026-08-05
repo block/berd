@@ -3,7 +3,7 @@
 // Reuses the shared `runtimeConfigSchema` (src/shared/runtime-config/schema.ts)
 // — the same `.strict()` schema the renderer parses bundled config with, which
 // mirrors the Rust `RuntimeConfig`'s `deny_unknown_fields`. The release build
-// (scripts/buildkite/release/build-macos.sh) runs this so a malformed blob or a
+// (scripts/release/build-macos.sh) runs this so a malformed blob or a
 // typo'd/unknown key hard-fails before the expensive `pnpm tauri build`,
 // instead of mid-build: over the merged config of a CUSTOM build, and — on any
 // build kind — after the release-time distribution injector

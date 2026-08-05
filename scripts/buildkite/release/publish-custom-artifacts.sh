@@ -16,8 +16,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/buildkite/release/lib.sh
-source "$SCRIPT_DIR/lib.sh"
+# shellcheck source=scripts/release/lib.sh
+source "$SCRIPT_DIR/release-inputs.sh"
+load_buildkite_release_inputs version custom_name
+# shellcheck source=scripts/release/lib.sh
+source "$SCRIPT_DIR/../../release/lib.sh"
 
 BUILD_KIND="$(release_build_kind)"
 if [[ "$BUILD_KIND" != "custom" ]]; then

@@ -6,8 +6,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/buildkite/release/lib.sh
-source "$SCRIPT_DIR/lib.sh"
+# shellcheck source=scripts/release/lib.sh
+source "$SCRIPT_DIR/release-inputs.sh"
+load_buildkite_release_inputs version
+# shellcheck source=scripts/release/lib.sh
+source "$SCRIPT_DIR/../../release/lib.sh"
 
 RELEASE_VERSION="$(release_input_version)"
 TAG="v${RELEASE_VERSION}"

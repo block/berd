@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Upload Berd's auto-updater payload to Artifactory so internal installs
-# poll it and self-update. Running Berd reads `GOOSE2_UPDATER_ENDPOINT`
+# poll it and self-update. Running Berd reads `BERD_UPDATER_ENDPOINT`
 # from its compiled-in config, which for internal builds points at
 # `.../mdx/goose-internal/latest.json` served by this script.
 #
@@ -8,12 +8,13 @@
 # notarized + stapled .app re-tarred, archive minisign-signed with
 # GOOSE2_TAURI_SIGNING_PRIVATE_KEY):
 #
-#   $RELEASE_DIR/macos/Berd.app.tar.gz        Updater archive of the signed .app
-#   $RELEASE_DIR/macos/Berd.app.tar.gz.sig    Minisign signature of the archive
+#   $RELEASE_DIR/macos/Berd_<version>_darwin-aarch64.app.tar.gz
+#   $RELEASE_DIR/macos/Berd_<version>_darwin-aarch64.app.tar.gz.sig
+#   $RELEASE_DIR/macos/Berd_<version>_darwin-aarch64.app.tar.gz.sha256
 #
 # Uploads:
-#   mdx/goose-internal/v<version>/Berd.app.tar.gz      Versioned archive
-#   mdx/goose-internal/v<version>/Berd.app.tar.gz.sig  Versioned signature
+#   mdx/goose-internal/v<version>/Berd_<version>_darwin-aarch64.app.tar.gz
+#   mdx/goose-internal/v<version>/Berd_<version>_darwin-aarch64.app.tar.gz.sig
 #   mdx/goose-internal/latest.json                      Stable manifest installs poll
 #
 # The final manifest upload is gated on the pipeline's publish_latest input so
@@ -26,7 +27,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/buildkite/release/lib.sh"
+# shellcheck source=scripts/release/lib.sh
+source "$SCRIPT_DIR/../../release/lib.sh"
 
 RELEASE_VERSION="$(release_input_version)"
 : "${MOBUILD_ARTIFACTORY_UPLOAD_TOKEN:?MOBUILD_ARTIFACTORY_UPLOAD_TOKEN is required}"
@@ -38,44 +40,31 @@ ARTIFACTORY_BASE="${ARTIFACTORY_BASE:-https://global.block-artifacts.com/artifac
 ARTIFACTORY_USER="${ARTIFACTORY_USER:-mobuild}"
 
 VERSION_PATH="v$RELEASE_VERSION"
-ARCHIVE_SRC="$RELEASE_DIR/macos/${APP_BUNDLE_NAME}.app.tar.gz"
+PLATFORM="darwin-aarch64"
+validate_release_platform "$PLATFORM"
+ARCHIVE_NAME="$(release_archive_name "$RELEASE_VERSION" "$PLATFORM")"
+ARCHIVE_SRC="$RELEASE_DIR/macos/$ARCHIVE_NAME"
 SIGNATURE_SRC="$ARCHIVE_SRC.sig"
+DIGEST_SRC="$ARCHIVE_SRC.sha256"
 [[ -f "$ARCHIVE_SRC" ]] || { echo "Missing $ARCHIVE_SRC" >&2; exit 1; }
 [[ -f "$SIGNATURE_SRC" ]] || { echo "Missing $SIGNATURE_SRC" >&2; exit 1; }
+[[ -f "$DIGEST_SRC" ]] || { echo "Missing $DIGEST_SRC" >&2; exit 1; }
 
-ARCHIVE_URL="$ARTIFACTORY_BASE/$VERSION_PATH/${APP_BUNDLE_NAME}.app.tar.gz"
+ARCHIVE_URL="$ARTIFACTORY_BASE/$VERSION_PATH/$ARCHIVE_NAME"
 SIGNATURE_URL="$ARCHIVE_URL.sig"
+DIGEST_URL="$ARCHIVE_URL.sha256"
 MANIFEST_URL="$ARTIFACTORY_BASE/latest.json"
 
 echo "+++ :memo: Assembling latest.json"
 MANIFEST="$(mktemp)"
 trap 'rm -f "$MANIFEST"' EXIT
 
-# The signature field is the raw contents of the tauri-generated .sig file,
-# which is already a single-line base64 blob. jq only escapes it as a JSON
-# string.
-jq -n \
-  --arg version   "$RELEASE_VERSION" \
-  --arg notes     "Berd v$RELEASE_VERSION internal build." \
-  --arg pub_date  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg signature "$(cat "$SIGNATURE_SRC")" \
-  --arg url       "$ARCHIVE_URL" \
-  '{
-    version: $version,
-    notes: $notes,
-    pub_date: $pub_date,
-    platforms: {
-      "darwin-aarch64": {
-        signature: $signature,
-        url: $url
-      }
-    }
-  }' > "$MANIFEST"
-
-jq -e '
-  (.platforms["darwin-aarch64"].url | test("^https://")) and
-  (.platforms["darwin-aarch64"].signature | length > 0)
-' "$MANIFEST" >/dev/null
+"$REPO_ROOT/scripts/release/generate-latest-json.sh" \
+  "$RELEASE_VERSION" \
+  "$PLATFORM" \
+  "$SIGNATURE_SRC" \
+  "$ARCHIVE_URL" \
+  "Berd v$RELEASE_VERSION internal build." > "$MANIFEST"
 
 upload() {
   local src="$1"
@@ -96,10 +85,11 @@ upload() {
 # in place, and running installs keep polling the prior version.
 upload "$ARCHIVE_SRC" "$ARCHIVE_URL"
 upload "$SIGNATURE_SRC" "$SIGNATURE_URL"
+upload "$DIGEST_SRC" "$DIGEST_URL"
 
 # latest.json is the stable URL every install polls. Overwriting it is what
 # triggers auto-update, so the pipeline's input step gates this.
-PUBLISH_LATEST="$(meta publish_latest)"
+PUBLISH_LATEST="$(release_input publish_latest)"
 if [[ "$PUBLISH_LATEST" == "true" ]]; then
   upload "$MANIFEST" "$MANIFEST_URL"
   echo "+++ :white_check_mark: Published updater to $MANIFEST_URL"

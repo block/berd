@@ -226,7 +226,7 @@ external-shaped build.
    BYO cards can coexist with it.
 3. ✅ (2026-07-06) External Databricks path — already productionized,
    verified rather than built. The release pipeline
-   (`scripts/buildkite/release/build-macos.sh`) already rewrites the
+   (`scripts/release/build-macos.sh`) already rewrites the
    bundled runtime-config when a build sets `VITE_BYO_KEY_PROVIDERS=1`:
    it strips the injected `DATABRICKS_HOST` via jq and re-validates. So an
    external-shaped release build = custom build env with that var; the

@@ -1,68 +1,100 @@
 # Release and Auto-Update
 
-## Overview
+## Release channels
 
-Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/) to deliver in-app updates. The official release flow:
+Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/). Every release build selects exactly one build-time updater profile:
 
-1. The Buildkite release pipeline builds a signed `.app` and the `squareup/apple-codesign` plugin signs, notarizes, and staples it.
-2. A separate pipeline step downloads the Apple-codesigned `.app.zip`, re-archives it as `.app.tar.gz`, signs it with an Ed25519 key, and publishes the updater feed (`latest.json` + versioned archive) to Artifactory.
-3. Signed release builds check `latest.json` on startup and every 6 hours. When a newer version is found, Berd downloads and installs it in the background, then shows “restart to apply”. Restart stays user-controlled.
+| `BERD_RELEASE_CHANNEL` | Endpoint and key | Publisher |
+|---|---|---|
+| `public` | GitHub rolling release endpoint + public Ed25519 key | `.github/workflows/public-release.yml` |
+| `internal` | Artifactory endpoint + distinct internal Ed25519 key | `.buildkite/release.yml` |
+| `disabled` | no endpoint, key, or updater plugin registration | custom/local builds |
 
-The updater feed is hosted on Artifactory rather than GitHub Releases because Artifactory supports unauthenticated reads — critical for a private repo where GitHub Releases URLs return 404 for unauthenticated clients. Artifactory also provides versioned archive history and a `publish_latest` gate for safe rollout (test builds can upload versioned archives without overwriting `latest.json`).
+The endpoint and verification key are one trust contract. `scripts/release/build-tauri-release-config.mjs` requires `BERD_RELEASE_CHANNEL`; enabled profiles require both `BERD_UPDATER_ENDPOINT` and `BERD_UPDATER_PUBLIC_KEY`, enforce credential-free HTTPS, and never fall back to another channel. `disabled` rejects either value and emits an empty overlay. Runtime arbitrary URL selection is intentionally unsupported.
 
-Custom releases use a separate Buildkite pipeline. They build, sign, notarize, staple, and upload the macOS `.app.zip` and `.dmg` artifacts to a named Artifactory path, but they never publish updater artifacts, never update `latest.json`, never create go/mr records, and never create GitHub releases or tags.
+The renderer also receives `VITE_UPDATER_ENABLED=true` only for enabled profiles. On the Rust side, `tauri-plugin-updater` is registered only when the merged config contains a non-empty updater public key. A disabled build therefore neither polls nor carries an endpoint/key/plugin registration.
 
-## URLs
+Public and internal Berd do not need to coexist. They retain the same app name, bundle identifier, deep-link scheme, and data directory. Installing one may replace the other; each binary polls only the feed/key baked into its build.
 
-| Resource | Location |
-|----------|----------|
-| Version tags | `v<X.Y.Z>` on `squareup/berd` |
-| Updater endpoint | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json` |
-| Versioned archive | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/v<VERSION>/Berd.app.tar.gz` |
-| DMG / zip downloads | Available on versioned (`v<X.Y.Z>`) GitHub releases |
-| Custom DMG / zip downloads | `https://global.block-artifacts.com/artifactory/mdx/berd-custom/<custom_name>/v<VERSION>/` |
+## Public feed and assets
 
-## One-time Setup
+The public release boundary is centralized in `scripts/release/public-channel.json`:
 
-### Generate Ed25519 key pair
-
-```bash
-pnpm exec tauri signer generate -- --write-keys ~/.tauri/berd-release.key
+```json
+{
+  "repository": "squareup/berd",
+  "rollingTag": "berd-desktop-latest",
+  "platform": "darwin-aarch64"
+}
 ```
 
-This creates `~/.tauri/berd-release.key` (private) and `~/.tauri/berd-release.key.pub` (public).
+The public endpoint is:
 
-### Required Buildkite secrets
+`https://github.com/squareup/berd/releases/download/berd-desktop-latest/latest.json`
 
-| Secret | Description |
-|--------|-------------|
-| `GOOSE2_UPDATER_PUBLIC_KEY` | Ed25519 public key (contents of `~/.tauri/berd-release.key.pub`) |
-| `GOOSE2_TAURI_SIGNING_PRIVATE_KEY` | Ed25519 private key (contents of `~/.tauri/berd-release.key`) |
-| `GOOSE2_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the private key (set during `signer generate`) |
-| `MOBUILD_ARTIFACTORY_UPLOAD_TOKEN` | Write access to `mdx/` on Artifactory via the `mobuild` service account |
-| `ARTIFACTORY_USER` | Optional Artifactory user override; defaults to `mobuild` |
+A version `X.Y.Z` publishes architecture-qualified assets, avoiding the filename collision that occurs when multiple macOS architectures share `Berd.app.tar.gz`:
 
-## Official Release Flow
+- `Berd_X.Y.Z_darwin-aarch64.app.zip`
+- `Berd_X.Y.Z_darwin-aarch64.dmg`
+- `Berd_X.Y.Z_darwin-aarch64.app.tar.gz`
+- `Berd_X.Y.Z_darwin-aarch64.app.tar.gz.sig`
+- `Berd_X.Y.Z_darwin-aarch64.app.tar.gz.sha256`
 
-1. **Trigger** — Open the official Buildkite release pipeline (`.buildkite/release.yml`) and enter a semver version (e.g. `0.2.0`). Optionally set `publish_latest` to control whether the updater feed is updated.
-2. **Build & sign macOS** (`build-macos.sh`):
-   - Stamps the version into `package.json`, `tauri.conf.json`, and `Cargo.toml`.
-   - Generates `tauri.release.conf.json` with the Artifactory updater endpoint and public key (no `createUpdaterArtifacts` — updater artifacts are created in the publish step instead).
-   - Builds with `VITE_UPDATER_ENABLED=true`, producing the `.app` bundle.
-   - The `squareup/apple-codesign` plugin signs, notarizes, and staples the `.app`, then packages `.app.zip` and `.dmg`.
-3. **Publish updater feed** (`publish-updater.sh`):
-   - Downloads the Apple-codesigned `.app.zip` artifact.
-   - Extracts the signed `.app` and archives it as `.app.tar.gz`.
-   - Signs the archive with `pnpm tauri signer sign` (Ed25519).
-   - Delegates to `publish-updater-to-artifactory.sh`, which uploads the versioned archive, signature, and (if `publish_latest` is set) `latest.json` to Artifactory.
-4. **Publish GitHub release** (`publish-release.sh`):
-   - Creates a versioned `v<X.Y.Z>` GitHub release with `.app.zip` and `.dmg` attached.
+Only Apple Silicon is supported by this workflow. Adding x86_64, Windows, or Linux is separate product/release work.
 
-Steps 3 and 4 run in parallel after the build step completes.
+## Public release flow
 
-The `publish_latest` gate allows test builds to upload versioned archives to Artifactory without overwriting `latest.json`, so existing users don't get prompted to update until the release is validated.
+Public release tags use canonical SemVer without build metadata (for example, `v1.2.3` or `v1.2.3-rc.1`). Numeric identifiers cannot have leading zeroes.
 
-## Distribution Inputs
+1. An authorized human creates and pushes a protected `v<semver>` tag. The workflow also supports manual recovery dispatch, but its required `tag` input must name the same already-existing tag selected as the workflow run ref. Setup checks out that requested ref before reading release code, then validates it with the shared helper from the same immutable checkout.
+2. `scripts/release/github/verify-release-ref.sh` verifies local `HEAD`, the local tag target, and the canonical `origin` tag all resolve to the same commit. A dispatch cannot build a branch head while claiming a version.
+3. The workflow creates the immutable versioned GitHub release if it does not exist. Recovery reuses an existing complete staged payload without rebuilding; if assets are incomplete, the workflow rebuilds and `scripts/release/github/upload-immutable-assets.sh` confirms existing assets are byte-identical before filling only missing assets.
+4. Before promotion, `scripts/release/github/verify-versioned-release.sh` independently rechecks the release tag/commit binding plus the exact non-empty staged asset set.
+5. `scripts/release/build-macos.sh` stamps the version, stages Berd's pinned Goose/backend/CLI resources, generates the `public` updater overlay, and builds an unsigned Apple Silicon app. The internal Buildkite pipeline invokes this same implementation.
+6. Pinned `block/apple-codesign-action@679535d…` receives Berd's existing unsigned styled DMG, signs/notarizes/staples its app through GitHub OIDC, and returns both the signed app zip and a DMG rebuilt around that same signed app. The job verifies code signatures, Gatekeeper, stapling, every committed entitlement, and the returned DMG.
+7. `scripts/release/package-signed-updater.sh` extracts the signed `.app.zip`, repeats those checks, archives the signed `Berd.app`, Tauri-signs it, verifies the signature against the public key embedded in the app, and records SHA-256. The immutable release receives the app zip, DMG, updater archive, signature, and digest.
+8. The `promote` job waits on the GitHub `public-release` environment. Required reviewers approve or reject it. After approval it first verifies that GitHub exposes the approval record, then re-downloads the exact updater archive/signature/digest from the versioned release; it never rebuilds or re-signs.
+9. `scripts/release/github/promote-public-updater.sh` verifies digest, updater signature, archive root, repository boundary, and unauthenticated public download. It uploads version-qualified payloads to `berd-desktop-latest`, generates and validates `latest.json`, and uploads `latest.json` last.
+10. The promotion job is serialized with `berd-public-release` and `cancel-in-progress: false`. The run summary records version, source SHA, digest, workflow run, and the GitHub environment review record.
+
+A failure before `latest.json` upload leaves installed clients on the prior manifest. Rollback is a new higher patch release containing reverted code, not a lower manifest version.
+
+`squareup/berd` is private today, so staging and every authenticated immutability/signature check can run there, but end-to-end promotion intentionally cannot succeed: the script requires its rolling archive to be downloadable without `GH_TOKEN`, just as installed updater clients require. Make the repository public (or migrate to the public `block/berd` destination) before the first promotion, then verify the archive and `latest.json` anonymously.
+
+### Manual recovery
+
+Recovery is only for the same immutable tag and source:
+
+```bash
+gh workflow run public-release.yml \
+  --repo squareup/berd \
+  --ref v1.2.3 \
+  -f tag=v1.2.3
+```
+
+The selected dispatch ref and the required `tag` input must be the same existing immutable tag. The workflow checks out `v1.2.3`, verifies it against `origin`, and reuses a complete staged payload without rebuilding. If the versioned release is incomplete, it rebuilds from that same immutable tag, confirms every existing asset is byte-identical, and uploads only missing assets. It cannot overwrite different immutable bytes.
+
+## Internal and custom flows
+
+The internal Buildkite path remains in place:
+
+1. `.buildkite/release.yml` selects `BERD_RELEASE_CHANNEL=internal` and the existing unauthenticated Artifactory feed.
+2. `scripts/release/build-macos.sh` is the same CI-neutral build implementation used by GitHub Actions; the `squareup/apple-codesign` plugin signs/notarizes/staples and emits the signed `.app.zip` and DMG.
+3. `scripts/buildkite/release/publish-updater.sh` calls the same CI-neutral `scripts/release/package-signed-updater.sh`, remapping existing `GOOSE2_TAURI_*` secrets only at this compatibility boundary.
+4. `scripts/buildkite/release/publish-updater-to-artifactory.sh` uploads the version/platform-qualified updater archive, signature, and digest to `mdx/goose-internal/v<VERSION>/`; the existing `publish_latest` Buildkite input gates `latest.json`, which remains last.
+5. `scripts/buildkite/release/publish-release.sh` continues publishing the internal GitHub release artifacts.
+
+`.buildkite/custom-release.yml` explicitly selects `BERD_RELEASE_CHANNEL=disabled`. Custom builds still apply their one-off runtime/build configuration and publish signed zip/DMG assets to their named Artifactory path, but cannot publish or consume an updater feed.
+
+Internal URLs:
+
+| Resource | Location |
+|---|---|
+| Updater endpoint | `https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json` |
+| Versioned updater | `.../v<VERSION>/Berd_<VERSION>_darwin-aarch64.app.tar.gz` |
+| Custom downloads | `.../mdx/berd-custom/<custom_name>/v<VERSION>/` |
+
+## Distribution inputs
 
 A distribution that packages Berd against its own gateway may supply two narrow, validated provider values to `build-macos.sh`. Both are optional and independent, and each is read from Buildkite meta-data or, for an orchestrator driving the build directly, from the uppercased env var:
 
@@ -77,88 +109,82 @@ The `fast_model_id` input is deliberately *not* named `GOOSE_FAST_MODEL`: an inp
 
 A custom build with `VITE_BYO_KEY_PROVIDERS=1` strips both fields back out before building, so a BYO-key bundle never carries a distribution's host or fast model.
 
-## Custom Release Flow
+## Owner/admin setup before first public release
 
-1. **Trigger** — Open the custom Buildkite release pipeline (`.buildkite/custom-release.yml`) at the target commit and enter:
-   - `version`: semver base version (e.g. `0.2.0`)
-   - `custom_name`: lowercase slug (e.g. `acme-demo`)
-   - `custom_config`: optional JSON overrides for `featureToggles`, `doctor`, and `feedback`
-   - `disable_bb_cli`: optional toggle to omit the bb CLI PATH install
-2. **Build & sign macOS** (`build-macos.sh`):
-   - Stamps the app as `<version>-<custom_name>`.
-   - Disables the updater in the renderer and Tauri config.
-   - Deep-merges the optional `custom_config` onto `src-tauri/resources/runtime-config.json`, validates it, and derives build-time feature gates.
-   - Builds the unsigned `.app`; the `squareup/apple-codesign` plugin signs, notarizes, staples, packages, and uploads `.app.zip` / `.dmg` artifacts.
-3. **Upload custom artifacts** (`publish-custom-artifacts.sh`):
-   - Downloads the signed `.app.zip` and `.dmg` artifacts from the build step.
-   - Renames them with the custom app version, e.g. `Berd_0.2.0-acme-demo.app.zip` and `Berd_0.2.0-acme-demo_aarch64.dmg`.
-   - Uploads them to `mdx/berd-custom/<custom_name>/v<version>/`.
+Repository code cannot perform these operations. An owner/admin must:
 
-Custom pipelines intentionally stop there. They do not upload updater archives, do not update `latest.json`, do not create go/mr records, and do not create GitHub releases or tags.
+1. **Generate a distinct public updater Ed25519 keypair**:
 
-When both official and custom builds are needed for the same code, run both Buildkite pipelines at the same commit. The official pipeline owns the update channel and GitHub release; the custom pipeline owns only its named Artifactory artifact path.
+   ```bash
+   pnpm exec tauri signer generate -- --write-keys ~/.tauri/berd-public-release.key
+   ```
 
-## How the Updater Works
+   Escrow the private key/password in the approved secret manager. Do not reuse `GOOSE2_*` internal keys.
 
-The updater provider (`src/features/updates/hooks/UpdaterProvider.tsx`) is mounted in `src/main.tsx` and exposes `useUpdaterContext()` through `src/features/updates/hooks/useUpdater.ts` to the settings page and top bar:
+2. Configure repository secret `TAURI_SIGNING_PRIVATE_KEY` and repository secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` with the public private half/password.
+3. Configure repository variable `BERD_PUBLIC_UPDATER_PUBLIC_KEY` with the public half. The build embeds it in public-channel apps, so it is a non-secret repository variable.
+4. Ask the Apple codesigning owners to authorize `squareup/berd`. Configure `OSX_CODESIGN_ROLE` and `CODESIGN_S3_BUCKET`, update AWS IAM OIDC trust for this repository, and confirm the pinned action commit is allowed. The release job alone gets `id-token: write`.
+5. Create GitHub environment **`public-release`**, require reviewers, restrict deployments to protected `v*` tags/workflow policy, and do not bypass its approval for ordinary releases.
+6. Set default Actions token permissions read-only. The workflow grants only setup/stage/promotion jobs `contents: write`; only signing receives `id-token: write`; promotion receives only the additional `actions: read`/`deployments: read` needed to preflight and record environment approval.
+7. Protect `v*` tags against unauthorized creation, deletion, and force-update. Start with manual authorized tag creation; no release-tagger GitHub App or PAT is required. For recovery, select the existing tag itself as the workflow run ref and pass that same tag in the required input; this keeps the privileged workflow definition tag-bound rather than loading it from a movable branch.
+8. Confirm Actions may create GitHub Releases and upload assets. The workflow idempotently creates `berd-desktop-latest` on first promotion.
+9. Make the release repository public before end-to-end promotion. While it remains private, use the staging path to validate authenticated release creation, signing, immutable upload/recovery, and pre-promotion verification only.
+10. Keep existing internal Buildkite secrets: `GOOSE2_UPDATER_PUBLIC_KEY`, `GOOSE2_TAURI_SIGNING_PRIVATE_KEY`, `GOOSE2_TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and `MOBUILD_ARTIFACTORY_UPLOAD_TOKEN`.
 
-1. **Gating** — The hook only activates when all three conditions are met:
-   - `VITE_UPDATER_ENABLED=true` (set at build time, only in release builds)
-   - Not in Vite dev mode (`import.meta.env.DEV` is false)
-   - Running inside Tauri (`window.__TAURI_INTERNALS__` exists)
+### Key rotation
 
-2. **Polling** — An immediate quiet check runs on mount, then every 6 hours via `setInterval`.
+The verification key is baked into installed apps. Do not simply replace the repository variable/secret. Publish a bridge release signed by the old key whose binary trusts the new public key/feed, allow supported installs to cross the bridge, then sign later releases with the new key. Keep the old private key until the supported installed population has crossed. Losing the active private key without a bridge requires manual reinstall.
 
-3. **Check** — Calls `check()` from `@tauri-apps/plugin-updater`, which fetches `latest.json` from the configured Artifactory endpoint and compares the remote version against the running version. A 15-second timeout prevents hangs.
+## Move from `squareup/berd` to `block/berd`
 
-4. **Install** — If a newer version is found, Berd stores the Tauri `Update` object and calls `update.downloadAndInstall()` in the background. The Ed25519 signature is verified against the public key baked into the release config.
+The mechanism does not change. At migration:
 
-5. **Ready** — Once installation finishes, the provider moves to `ready`, shows a toast, and surfaces a compact top-bar restart indicator.
+1. Update only `repository` in `scripts/release/public-channel.json` from `squareup/berd` to `block/berd`. The workflow derives the baked endpoint and promotion URLs from this file/output boundary.
+2. Recreate repository variables/secrets and the `public-release` environment/review rules in `block/berd`.
+3. Update Apple codesigning AWS OIDC trust and codesigning authorization from the old repo claims to the new repo/environment claims.
+4. Recreate protected `v*` tag rules and least-privilege Actions settings.
+5. Decide feed continuity before release. Existing public installs contain the old `squareup/berd` endpoint. If GitHub does not preserve the release-asset URL after transfer, publish an old-feed bridge release before moving or retain a redirect/old rolling release. The updater signing key may stay the same across a repository move only if this is the same public trust channel; never substitute the internal key.
+6. Run a non-promoting tagged test, approve promotion, and verify unauthenticated archive/manifest access off the corporate network before announcing the new public feed.
 
-6. **Relaunch** — `relaunch()` from `@tauri-apps/plugin-process` only runs after the user clicks restart.
+## Validation before first promotion
 
-On the Rust side, `tauri-plugin-updater` is registered conditionally in `lib.rs` — only when the merged Tauri config contains a non-empty `plugins.updater.pubkey` (i.e. when `tauri.release.conf.json` is present). Dev builds skip the plugin entirely.
+- Run `just ci` and static workflow/shell validation.
+- Verify tag, checkout SHA, versioned release target, and staged asset SHA-256 agree.
+- Inspect the updater archive and confirm the root is signed `Berd.app`, not an unsigned build output.
+- Verify codesign, Gatekeeper, stapling, entitlements, and anonymous HTTP download. Exercise an update from a prior public test build to validate the Tauri signature end to end.
+- Install the prior public test build on the oldest supported arm64 macOS version; observe check, download, install, restart, version, and data preservation.
+- Confirm an internal build polls only Artifactory, a public build only GitHub, and a disabled/custom build never invokes the updater.
+- Exercise recovery and failed promotion. An archive failure must leave the previous `latest.json`; concurrent promotions must serialize.
 
-## Local Verification
-
-### Generate the release config
+## Local profile checks
 
 ```bash
-GOOSE2_UPDATER_PUBLIC_KEY="<your-pubkey>" \
-GOOSE2_UPDATER_ENDPOINT="https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json" \
+BERD_RELEASE_CHANNEL=internal \
+BERD_UPDATER_PUBLIC_KEY='<internal-public-key>' \
+BERD_UPDATER_ENDPOINT='https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json' \
   pnpm run tauri:release:config
+
+BERD_RELEASE_CHANNEL=disabled pnpm run tauri:release:config
+
+pnpm test:release-scripts
 ```
 
-This writes `src-tauri/tauri.release.conf.json` (gitignored).
+Generated `src-tauri/tauri.release.conf.json` is gitignored.
 
-### Build with the release config
-
-```bash
-VITE_UPDATER_ENABLED=true \
-  pnpm tauri build --no-sign --target aarch64-apple-darwin \
-    --config src-tauri/tauri.release.conf.json
-```
-
-The build will produce the `.app` bundle in `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`.
-
-## Key Files
+## Key files
 
 | File | Role |
-|------|------|
-| `src/features/updates/hooks/UpdaterProvider.tsx` | Provider implementation: checks, downloads, installs, exposes restart |
-| `src/features/updates/hooks/useUpdater.ts` | Public updater hook exports |
-| `src/features/updates/ui/UpdatesSettings.tsx` | Settings surface for manual checks and restart |
-| `src/features/updates/ui/UpdateIndicator.tsx` | Compact top-bar restart/update indicator |
-| `src/main.tsx` | Mounts `UpdaterProvider` inside app providers |
-| `src-tauri/src/lib.rs` | Conditionally registers `tauri-plugin-updater` based on pubkey presence |
-| `src-tauri/Cargo.toml` | Rust dependencies for `tauri-plugin-updater` and `tauri-plugin-process` |
-| `src-tauri/capabilities/default.json` | Grants `updater:default` and `process:allow-restart` permissions |
-| `scripts/build-tauri-release-config.mjs` | Generates `tauri.release.conf.json` from env vars |
-| `scripts/publish-updater-to-artifactory.sh` | Uploads updater archive, signature, and `latest.json` to Artifactory |
-| `scripts/buildkite/release/build-macos.sh` | Release build: stamps version, generates release config, builds app |
-| `scripts/set-runtime-config-distribution.ts` | Injects the optional distribution-owned Databricks host and fast model into the bundled runtime config |
-| `scripts/buildkite/release/publish-custom-artifacts.sh` | Uploads custom signed `.app.zip` and `.dmg` artifacts to Artifactory |
-| `scripts/buildkite/release/publish-updater.sh` | Post-codesign: re-archives `.app`, signs with Ed25519, delegates to Artifactory publish script |
-| `.buildkite/release.yml` | Official pipeline with static build, publish-updater, and publish steps |
-| `.buildkite/custom-release.yml` | Custom pipeline with build/sign and custom Artifactory upload steps |
-| `.gitignore` | Excludes generated `src-tauri/tauri.release.conf.json` |
+|---|---|
+| `scripts/release/public-channel.json` | centralized repo/rolling tag/platform migration boundary |
+| `scripts/release/lib.sh` | CI-neutral release validation, naming, paths, and explicit input helpers |
+| `scripts/release/build-macos.sh` | CI-neutral version/resource/sidecar build implementation |
+| `scripts/release/build-tauri-release-config.mjs` | fail-closed updater profile overlay |
+| `scripts/release/package-signed-updater.sh` | CI-neutral signed-app verification, archive, signing, digest |
+| `scripts/release/verify-updater-signature.sh` | verifies Tauri updater signatures against the key embedded in the app |
+| `scripts/release/generate-latest-json.sh` | validates and creates the public manifest |
+| `scripts/release/github/` | GitHub-only signed-output preparation, tag/release verification, immutable upload, and manifest-last promotion adapters |
+| `scripts/buildkite/release/` | Buildkite/Artifactory adapters and pipeline-input bridge |
+| `.github/workflows/public-release.yml` | tag/recovery staging plus approval-gated promotion |
+| `scripts/set-runtime-config-distribution.ts` | injects the optional distribution-owned Databricks host and fast model into bundled runtime config |
+| `src/features/updates/hooks/UpdaterProvider.tsx` | update checks/download/install/restart UI state |
+| `src-tauri/src/lib.rs` | conditionally registers updater plugin from baked config |

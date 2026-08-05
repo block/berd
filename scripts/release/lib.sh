@@ -6,14 +6,13 @@
 # Provides:
 #   - REPO_ROOT, RELEASE_DIR paths
 #   - APP_NAME, APP_BUNDLE_NAME constants
-#   - meta(key)         Reads Buildkite meta-data in Buildkite, falling back to
-#                       the uppercased env var so scripts also run locally.
-#   - activate_hermit   Sources ./bin/activate-hermit so pinned node/pnpm/rust
-#                       tools are on PATH.
+#   - release_input(key) Reads an uppercased environment input.
+#   - activate_hermit    Sources ./bin/activate-hermit so pinned node/pnpm/rust
+#                        tools are on PATH.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RELEASE_DIR="${REPO_ROOT}/release"
 
 APP_NAME="berd"
@@ -21,20 +20,14 @@ APP_BUNDLE_NAME="Berd"
 
 BERD_REPO="${BERD_REPO:-squareup/berd}"
 
-meta() {
+release_input() {
   local key="$1"
   local env_name
   env_name="$(echo "$key" | tr '[:lower:]' '[:upper:]')"
-  if [[ -n "${BUILDKITE:-}" ]] && command -v buildkite-agent >/dev/null 2>&1; then
-    buildkite-agent meta-data get "$key"
-  elif [[ -n "${!env_name:-}" ]]; then
+  if [[ -n "${!env_name:-}" ]]; then
     printf '%s' "${!env_name}"
   else
-    # Return (don't exit) so callers can supply a default with
-    # `meta key 2>/dev/null || echo default` — `exit` here would terminate the
-    # enclosing $(...) subshell before the `||` ran. Callers of required keys
-    # (`X="$(meta version)"`) still abort under `set -e` on this non-zero status.
-    echo "Missing $env_name (no Buildkite meta-data available)" >&2
+    echo "Missing $env_name" >&2
     return 1
   fi
 }
@@ -42,6 +35,17 @@ meta() {
 activate_hermit() {
   # shellcheck source=/dev/null
   . "$REPO_ROOT/bin/activate-hermit"
+}
+
+SEMVER_PATTERN='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
+RELEASE_PLATFORM_PATTERN='^darwin-(aarch64|x86_64)$'
+REPOSITORY_PATTERN='^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
+ROLLING_TAG_PATTERN='^[A-Za-z0-9_.-]+$'
+SOURCE_SHA_PATTERN='^[0-9a-f]{40}$'
+
+release_error() {
+  echo "$*" >&2
+  return 1
 }
 
 trim_whitespace() {
@@ -53,16 +57,76 @@ trim_whitespace() {
 
 validate_release_version() {
   local version="$1"
-  if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-    return 0
+  [[ "$version" =~ $SEMVER_PATTERN ]] ||
+    release_error "refusing to use non-canonical semver without build metadata: $version"
+}
+
+validate_release_channel() {
+  local channel="$1"
+  case "$channel" in
+    public|internal|disabled) ;;
+    *) release_error "release channel must be public, internal, or disabled: $channel" ;;
+  esac
+}
+
+validate_release_tag() {
+  local tag="$1"
+  if [[ "$tag" != v* ]]; then
+    release_error "invalid release tag: $tag"
+    return 1
   fi
-  echo "refusing to stamp non-semver version: $version" >&2
-  return 1
+  validate_release_version "${tag#v}" || {
+    release_error "invalid release tag: $tag"
+    return 1
+  }
+}
+
+validate_release_platform() {
+  local platform="$1"
+  [[ "$platform" =~ $RELEASE_PLATFORM_PATTERN ]] ||
+    release_error "unsupported updater platform: $platform"
+}
+
+validate_repository() {
+  local repository="$1"
+  [[ "$repository" =~ $REPOSITORY_PATTERN ]] ||
+    release_error "invalid release repository: $repository"
+}
+
+validate_rolling_tag() {
+  local tag="$1"
+  [[ "$tag" =~ $ROLLING_TAG_PATTERN ]] ||
+    release_error "invalid rolling release tag: $tag"
+}
+
+validate_source_sha() {
+  local source_sha="$1"
+  [[ "$source_sha" =~ $SOURCE_SHA_PATTERN ]] ||
+    release_error "invalid source SHA: $source_sha"
+}
+
+release_archive_name() {
+  local version="$1"
+  local platform="$2"
+  validate_release_version "$version" || return 1
+  validate_release_platform "$platform" || return 1
+  printf '%s_%s_%s.app.tar.gz' "$APP_BUNDLE_NAME" "$version" "$platform"
+}
+
+load_public_channel() {
+  local config="${1:-}"
+  [[ -n "$config" ]] || config="$REPO_ROOT/scripts/release/public-channel.json"
+  PUBLIC_REPOSITORY="$(jq -er '.repository' "$config")"
+  PUBLIC_ROLLING_TAG="$(jq -er '.rollingTag' "$config")"
+  PUBLIC_PLATFORM="$(jq -er '.platform' "$config")"
+  validate_repository "$PUBLIC_REPOSITORY"
+  validate_rolling_tag "$PUBLIC_ROLLING_TAG"
+  validate_release_platform "$PUBLIC_PLATFORM"
 }
 
 release_input_version() {
   local version
-  version="$(meta version)"
+  version="$(release_input version)"
   validate_release_version "$version" || return 1
   printf '%s' "$version"
 }
@@ -72,7 +136,7 @@ release_build_kind() {
   build_kind="${BUILD_KIND:-}"
   build_kind="$(trim_whitespace "$build_kind")"
   if [[ -z "$build_kind" ]]; then
-    build_kind="$(meta build_kind 2>/dev/null || true)"
+    build_kind="$(release_input build_kind 2>/dev/null || true)"
     build_kind="$(trim_whitespace "$build_kind")"
   fi
   [[ -n "$build_kind" ]] || build_kind="official"
@@ -108,7 +172,7 @@ default_bundled_agents() {
 
 custom_build_name() {
   local custom_name
-  custom_name="$(meta custom_name 2>/dev/null || true)"
+  custom_name="$(release_input custom_name 2>/dev/null || true)"
   custom_name="$(trim_whitespace "$custom_name")"
   if [[ ! "$custom_name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
     echo "custom builds require a lowercase slug custom_name (^[a-z0-9][a-z0-9-]*\$); got: '${custom_name}'" >&2
@@ -138,7 +202,7 @@ validate_custom_config_override() {
 
 # Resolve the version to stamp, applying the custom-build name suffix.
 #
-# Official builds (the default) echo `meta version` unchanged. Custom builds
+# Official builds (the default) echo `VERSION` unchanged. Custom builds
 # echo `<version>-<custom_name>` so the suffix flows into the .app version,
 # custom artifact filenames, and any custom-only publishing path.
 # `custom_name` is slug-validated so the result is always valid semver (the

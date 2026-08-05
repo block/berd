@@ -31,7 +31,7 @@ Bring-your-own-key model providers (OpenAI/Anthropic/Google Gemini) are on by
 default: a normal `just dev` shows their API-key entry rows alongside the
 managed `databricks_v2` provider. A restricted build opts out with
 `VITE_BYO_KEY_PROVIDERS=0` (the official internal release build does this
-explicitly in `scripts/buildkite/release/build-macos.sh`).
+explicitly in `scripts/release/build-macos.sh`).
 
 To also simulate the external-build Databricks posture in dev — no injected
 `DATABRICKS_HOST`, so the Databricks row shows an editable host field instead
