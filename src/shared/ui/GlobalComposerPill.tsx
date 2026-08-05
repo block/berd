@@ -141,6 +141,12 @@ const MODEL_ALIAS_IDS = new Set(["current", "default"]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 200;
 const COMPOSER_ACTION_STRIP_CLASS = "h-[40px]";
+// Geometry of the trailing action cluster, used to reserve space for it.
+// Keep in sync with the buttons' `icon-pill-sm` size and the cluster's gap-2.
+const COMPOSER_ACTION_BUTTON_WIDTH_PX = 40;
+const COMPOSER_ACTION_GAP_PX = 8;
+// Breathing room between the cluster and the content that stops short of it.
+const COMPOSER_ACTION_GUTTER_PX = 8;
 
 const COMPOSER_LAYOUT_TRANSITION_CLASS =
   "transition-[height,min-height,padding] duration-300 ease-in-out motion-reduce:transition-none";
@@ -1181,7 +1187,21 @@ export function GlobalComposerPill({
     },
     [handoffActive],
   );
+  // The trailing action cluster is absolutely positioned, so the toolbar and
+  // textarea have to reserve its width themselves. Derive that from the number
+  // of buttons actually rendered: a hardcoded inset silently overlaps the
+  // project chip as soon as an optional button (voice conversation) appears.
+  const trailingActionCount =
+    1 +
+    (voiceConversation?.enabled ? 1 : 0) +
+    (dictation.isEnabled || dictation.isRecording ? 1 : 0);
+  const actionsInset = `${
+    trailingActionCount * COMPOSER_ACTION_BUTTON_WIDTH_PX +
+    (trailingActionCount - 1) * COMPOSER_ACTION_GAP_PX +
+    COMPOSER_ACTION_GUTTER_PX
+  }px`;
   const composerStyle = {
+    "--global-composer-actions-inset": actionsInset,
     "--global-composer-main-left": `${mainLeftOffsetPx}px`,
     "--global-composer-from-left": `${handoffSourceRect?.left ?? 0}px`,
     "--global-composer-from-top": `${handoffSourceRect?.top ?? 0}px`,
@@ -1417,7 +1437,7 @@ export function GlobalComposerPill({
                   handoffActive && "caret-transparent",
                   expanded
                     ? "min-h-10 py-2.5 pr-2"
-                    : "h-8 min-h-0 py-0 pr-[5.75rem]",
+                    : "h-8 min-h-0 py-0 pr-[var(--global-composer-actions-inset)]",
                 )}
               />
             </PopoverAnchor>
@@ -1448,8 +1468,9 @@ export function GlobalComposerPill({
       </div>
 
       <div
+        data-role="composer-action-strip"
         className={cn(
-          "pointer-events-none absolute bottom-2 left-6 right-[1.125rem] z-20 flex items-center overflow-hidden pr-[5.75rem]",
+          "pointer-events-none absolute bottom-2 left-6 right-[1.125rem] z-20 flex items-center overflow-hidden pr-[var(--global-composer-actions-inset)]",
           COMPOSER_ACTION_STRIP_CLASS,
         )}
       >

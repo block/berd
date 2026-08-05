@@ -255,6 +255,88 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  // The trailing action cluster is absolutely positioned, so the toolbar has to
+  // reserve its width. A hardcoded reservation overlapped the project chip once
+  // the optional voice-conversation button appeared (BOT-1533).
+  describe("trailing action cluster spacing", () => {
+    const INSET_VAR = "--global-composer-actions-inset";
+    // Assert both halves of the contract: the pill computes a reservation, and
+    // the surfaces that must stop short of the cluster actually consume it.
+    // Checking only the variable would still pass if the padding were dropped.
+    const getReservedInsetPx = () => {
+      const pill = document.querySelector<HTMLElement>("[data-placement]");
+      const strip = pill?.querySelector<HTMLElement>(
+        '[data-role="composer-action-strip"]',
+      );
+      const textarea = screen.getByRole("textbox");
+
+      expect(strip).toBeTruthy();
+      expect(strip?.className).toContain(`pr-[var(${INSET_VAR})]`);
+      // The collapsed textarea shares the reservation so text never runs under
+      // the cluster; when expanded it sits above the strip and does not need it.
+      expect(textarea.className).toContain(`pr-[var(${INSET_VAR})]`);
+
+      const inset = pill?.style.getPropertyValue(INSET_VAR);
+      expect(inset).toMatch(/^\d+px$/);
+      return Number.parseInt(inset ?? "", 10);
+    };
+
+    const measureCluster = () => {
+      const buttons = [
+        screen.queryByRole("button", { name: "Start voice conversation" }),
+        screen.queryByRole("button", { name: /voice dictation|listening/i }),
+        screen.getByRole("button", { name: /send message/i }),
+      ].filter(Boolean);
+      // icon-pill-sm is w-10 (40px), cluster uses gap-2 (8px).
+      return buttons.length * 40 + (buttons.length - 1) * 8;
+    };
+
+    it("reserves room for send only", () => {
+      renderGlobalComposer();
+
+      expect(getReservedInsetPx()).toBeGreaterThanOrEqual(measureCluster());
+    });
+
+    it("reserves room for dictation and send", () => {
+      mockVoiceDictation.isEnabled = true;
+      renderGlobalComposer();
+
+      expect(getReservedInsetPx()).toBeGreaterThanOrEqual(measureCluster());
+    });
+
+    it("reserves room for voice conversation, dictation, and send", () => {
+      mockVoiceDictation.isEnabled = true;
+      renderGlobalComposer(vi.fn(), {
+        voiceConversation: {
+          enabled: true,
+          ready: true,
+          onStart: vi.fn().mockResolvedValue(true),
+        },
+      });
+
+      // Three buttons: the regression case where the chip got overlapped.
+      expect(measureCluster()).toBe(136);
+      expect(getReservedInsetPx()).toBeGreaterThanOrEqual(measureCluster());
+    });
+
+    it("grows the reservation when the voice conversation button appears", () => {
+      mockVoiceDictation.isEnabled = true;
+      const { unmount } = render(<GlobalComposerPill onSend={vi.fn()} />);
+      const withoutVoiceConversation = getReservedInsetPx();
+      unmount();
+
+      renderGlobalComposer(vi.fn(), {
+        voiceConversation: {
+          enabled: true,
+          ready: true,
+          onStart: vi.fn().mockResolvedValue(true),
+        },
+      });
+
+      expect(getReservedInsetPx()).toBeGreaterThan(withoutVoiceConversation);
+    });
+  });
+
   it("preselects a suggested persona and sends with that persona", async () => {
     const user = userEvent.setup();
     setPersonas();
