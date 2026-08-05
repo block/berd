@@ -161,7 +161,10 @@ fn humanize_list_tools_error(
     playpen: Option<&str>,
     err: &anyhow::Error,
 ) -> anyhow::Error {
-    let raw = err.to_string();
+    // `{err:#}` prints the full context chain (e.g. "POST <path>: error sending
+    // request: dns error"), not just the outermost context. Without the chain, a
+    // request that never left the machine looks like a backend response.
+    let raw = format!("{err:#}");
     let raw_lower = raw.to_ascii_lowercase();
     let playpen_suffix = playpen
         .map(|playpen| format!(" in playpen `{playpen}`"))
@@ -177,6 +180,13 @@ fn humanize_list_tools_error(
              This usually means the extension is not connected in your account.\n\
              Check your G2 Connections settings to verify the extension is connected: https://g2.sqprod.co/settings\n\
              Server response: {raw}"
+        )
+    } else if raw_lower.contains("error sending request") {
+        format!(
+            "Can't inspect `{extension_name}`{playpen_suffix}.\n\
+             The request never reached the backend service — this is a local network failure, not a server error.\n\
+             This usually means the command ran without network access (for example inside a coding agent's sandbox, like Codex's default sandbox) or the corporate VPN (WARP) is off.\n\
+             Error: {raw}"
         )
     } else {
         format!(
@@ -596,6 +606,39 @@ mod tests {
         }
     }
 
+    struct ConnectFailureKgooseClient;
+
+    impl KgooseClient for ConnectFailureKgooseClient {
+        fn list_extensions(
+            &self,
+            _config: &KgooseConfig,
+        ) -> anyhow::Result<ListExtensionsResponse> {
+            unreachable!("list_extensions is not used during metadata loading")
+        }
+
+        fn list_tools(
+            &self,
+            _config: &KgooseConfig,
+            _extension_name: &str,
+        ) -> anyhow::Result<ListToolsResponse> {
+            Err(anyhow::anyhow!(
+                "error sending request for url (https://example.test/cash-app/goose/v3/list-tools): dns error: failed to lookup address information"
+            )
+            .context("POST /cash-app/goose/v3/list-tools"))
+        }
+
+        fn call_tool(
+            &self,
+            _config: &KgooseConfig,
+            _extension_name: &str,
+            _tool_name: &str,
+            _arguments_json: &str,
+            _headers: &BTreeMap<String, String>,
+        ) -> anyhow::Result<CallToolResponse> {
+            unreachable!("call_tool is not used during metadata loading")
+        }
+    }
+
     fn kgoose_config() -> KgooseConfig {
         KgooseConfig {
             base_url: "https://example.test".to_string(),
@@ -667,6 +710,31 @@ mod tests {
         assert!(message.contains("wouldn't return its tools"));
         assert!(message.contains("G2 Connections settings"));
         assert!(message.contains("Server response:"));
+    }
+
+    #[test]
+    fn load_extension_rewrites_send_failures_as_local_network_errors() {
+        let known = vec![ExtensionSummary {
+            name: "sourcegraph".to_string(),
+            about: "Sourcegraph tools".to_string(),
+        }];
+        let error = load_extension(
+            &ConnectFailureKgooseClient,
+            &kgoose_config(),
+            "sourcegraph",
+            &known,
+        )
+        .expect_err("expected connect failure");
+
+        let message = error.to_string();
+        assert!(message.contains("Can't inspect `sourcegraph`"));
+        assert!(message.contains("never reached the backend service"));
+        assert!(message.contains("network access"));
+        assert!(message.contains("dns error: failed to lookup address information"));
+        assert!(
+            !message.contains("Server response:"),
+            "a request that never sent must not claim a server response: {message}"
+        );
     }
 
     #[test]
