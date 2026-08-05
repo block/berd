@@ -15,7 +15,7 @@ import {
 } from "../../stores/chatSessionStore";
 import { applyLatestSessionConfig } from "../../lib/sessionConfigRequests";
 import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
-import type { ChatSendOptions } from "../../types";
+import type { ChatSendOptions, ModelOption } from "../../types";
 
 const mockAcpPrepareSession = vi.fn();
 const mockAcpSetModel = vi.fn();
@@ -47,13 +47,8 @@ const mockLoadWorkspaceInstructionFiles = vi.fn();
 const mockPickerState = {
   selectedAgentId: "goose",
   pickerAgents: [{ id: "goose", label: "Goose" }],
-  availableModels: [] as Array<{
-    id: string;
-    name: string;
-    displayName?: string;
-    providerId?: string;
-    recommended?: boolean;
-  }>,
+  availableModels: [] as ModelOption[],
+  modelsByAgent: new Map<string, ModelOption[]>(),
   modelsLoading: false,
   modelStatusMessage: null as string | null,
 };
@@ -227,6 +222,9 @@ vi.mock("../useAgentModelPickerState", () => ({
     selectedAgentId: mockPickerState.selectedAgentId,
     pickerAgents: mockPickerState.pickerAgents,
     availableModels: mockPickerState.availableModels,
+    getModelsForAgent: (agentId: string) =>
+      mockPickerState.modelsByAgent.get(agentId) ??
+      mockPickerState.availableModels,
     modelsLoading: mockPickerState.modelsLoading,
     modelStatusMessage: mockPickerState.modelStatusMessage,
     handleProviderChange: (providerId: string) =>
@@ -402,6 +400,7 @@ describe("useChatSessionController", () => {
     mockPickerState.selectedAgentId = "goose";
     mockPickerState.pickerAgents = [{ id: "goose", label: "Goose" }];
     mockPickerState.availableModels = [];
+    mockPickerState.modelsByAgent.clear();
     mockPickerState.modelsLoading = false;
     mockPickerState.modelStatusMessage = null;
     mockUseChatRuntime.chatState = "idle";
@@ -3373,7 +3372,7 @@ describe("useChatSessionController", () => {
       {
         id: "goose-claude-opus-4-8",
         name: "goose-claude-opus-4-8",
-        providerId: "goose",
+        providerId: "databricks_v2",
       },
     ];
 
@@ -3388,7 +3387,7 @@ describe("useChatSessionController", () => {
     await waitFor(() => {
       expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
     });
-    expect(result.current.currentModelProviderId).toBe("goose");
+    expect(result.current.currentModelProviderId).toBe("databricks_v2");
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
@@ -3408,6 +3407,66 @@ describe("useChatSessionController", () => {
         "goose-claude-opus-4-8",
       );
     });
+  });
+
+  it("resolves a persona model from its agent when another harness is selected", async () => {
+    useAgentStore.setState({
+      selectedProvider: "codex-acp",
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "goose",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.selectedAgentId = "codex-acp";
+    mockPickerState.availableModels = [
+      {
+        id: "gpt-5.4",
+        name: "gpt-5.4",
+        providerId: "codex-acp",
+        recommended: true,
+      },
+    ];
+    mockPickerState.modelsByAgent.set("goose", [
+      {
+        id: "goose-claude-opus-4-8",
+        name: "goose-claude-opus-4-8",
+        providerId: "databricks_v2",
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      personaId: "persona-1",
+      providerId: "goose",
+      modelId: "goose-claude-opus-4-8",
+      modelName: "goose-claude-opus-4-8",
+    });
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "session-1",
+        "goose-claude-opus-4-8",
+      );
+    });
+    expect(mockAcpSetModel).not.toHaveBeenCalledWith("session-1", "gpt-5.4");
   });
 
   it("keeps a selected persona when a later persona refresh omits it", async () => {

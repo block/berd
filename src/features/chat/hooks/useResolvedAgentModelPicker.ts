@@ -233,6 +233,7 @@ export function useResolvedAgentModelPicker({
   const {
     pickerAgents,
     availableModels,
+    getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,
@@ -769,6 +770,7 @@ export function useResolvedAgentModelPicker({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,

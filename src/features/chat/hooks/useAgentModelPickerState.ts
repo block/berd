@@ -202,6 +202,7 @@ export function useAgentModelPickerState({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,

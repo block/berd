@@ -1073,6 +1073,7 @@ export function useChatSessionController({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,
@@ -1175,9 +1176,7 @@ export function useChatSessionController({
       persona: Persona,
       providerId: string,
     ): PreferredModelSelection | undefined => {
-      const providerModels = availableModels.filter(
-        (model) => !model.providerId || model.providerId === providerId,
-      );
+      const providerModels = getModelsForAgent(providerId);
       const savedModel = persona.model
         ? providerModels.find((model) => model.id === persona.model)
         : undefined;
@@ -1193,7 +1192,7 @@ export function useChatSessionController({
         source: savedModel ? "explicit" : "default",
       };
     },
-    [availableModels],
+    [getModelsForAgent],
   );
   const prepareSessionForPersona = useCallback(
     async (personaId?: string) => {
