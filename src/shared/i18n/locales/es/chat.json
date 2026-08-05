@@ -155,6 +155,8 @@
     "empty": {
       "folderNotSet": "Carpeta no configurada",
       "noChanges": "No hay cambios sin confirmar",
+      "noGitWorkspaces": "Ningún espacio de trabajo de este chat es un repositorio de git",
+      "notGitRepo": "Esta carpeta no es un repositorio de git",
       "noProjectAssigned": "No hay proyecto asignado"
     },
     "errors": {

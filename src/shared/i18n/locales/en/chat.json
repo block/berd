@@ -156,6 +156,8 @@
     "empty": {
       "folderNotSet": "Folder not set",
       "noChanges": "No uncommitted changes",
+      "noGitWorkspaces": "No git repo in this chat's workspaces",
+      "notGitRepo": "This folder isn't a git repo",
       "noProjectAssigned": "No project assigned"
     },
     "errors": {

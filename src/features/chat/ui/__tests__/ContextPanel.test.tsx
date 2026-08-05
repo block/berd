@@ -2835,4 +2835,219 @@ describe("ContextPanel", () => {
     expect(worktreeNameInput).toHaveValue("demo-next");
     expect(branchNameInput).toHaveValue("custom-branch");
   });
+  it("shows a Changes empty state instead of a blank rail for a non-git folder", async () => {
+    const user = userEvent.setup();
+    mockUseGitState.mockReturnValue({
+      data: {
+        isGitRepo: false,
+        currentBranch: null,
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [],
+        isWorktree: false,
+        mainWorktreePath: null,
+        localBranches: [],
+      },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-changes-empty-non-git",
+      projectWorkingDirs: ["/Users/test/not-a-repo"],
+    });
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+
+    expect(
+      await screen.findByText("This folder isn't a git repo"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a Changes empty state when no folder is set", async () => {
+    const user = userEvent.setup();
+    mockUseGitState.mockReturnValue({
+      data: undefined,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "test-session-changes-empty-no-folder",
+          title: "Chat",
+          workingDir: "",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-changes-empty-no-folder",
+      projectWorkingDirs: [],
+      sessionWorkingDir: null,
+    });
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+
+    expect(await screen.findByText("Folder not set")).toBeInTheDocument();
+  });
+
+  it("shows loading placeholders instead of an empty rail while the git probe resolves", async () => {
+    const user = userEvent.setup();
+    mockUseGitState.mockReturnValue({
+      data: undefined,
+      error: null,
+      isLoading: true,
+      isFetching: true,
+      refetch: mockRefetch,
+    });
+    mockUseWorkspaceGitRuntimes.mockImplementation(
+      (workspaces: WorkspaceAttachment[]) =>
+        workspaces.map((workspace) =>
+          createWorkspaceRuntime(workspace, undefined, {
+            isLoading: true,
+            isFetching: true,
+          }),
+        ),
+    );
+
+    const { container } = renderContextPanel({
+      sessionId: "test-session-changes-probe-loading",
+      projectWorkingDirs: ["/Users/test/goose2"],
+    });
+
+    const changesTab = screen.getByRole("tab", { name: /changes/i });
+    await user.click(changesTab);
+
+    // Assert the placeholders are actually rendered, not merely that the empty
+    // copy is absent: a regression back to a blank rail would satisfy absence.
+    const changesPanel = container.querySelector<HTMLElement>(
+      `#${changesTab.getAttribute("aria-controls")}`,
+    );
+    expect(changesPanel).not.toBeNull();
+    expect(
+      changesPanel?.querySelectorAll('[data-slot="skeleton"]').length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("This folder isn't a git repo"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Folder not set")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a git probe failure instead of claiming the folder is not a repo", async () => {
+    const user = userEvent.setup();
+    mockUseWorkspaceGitRuntimes.mockImplementation(
+      (workspaces: WorkspaceAttachment[]) =>
+        workspaces.map((workspace) =>
+          createWorkspaceRuntime(workspace, undefined, {
+            error: new Error("git status failed"),
+          }),
+        ),
+    );
+    mockUseWorkspaceChangedFilesRuntimes.mockReturnValue([]);
+
+    renderContextPanel({
+      sessionId: "test-session-changes-probe-error",
+      projectWorkingDirs: ["/Users/test/goose2"],
+    });
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+
+    // A transient git failure must not be reported as "no repo here" — that
+    // would push someone toward re-initializing a perfectly healthy repo.
+    expect(await screen.findByText("git status failed")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No git repo in this chat's workspaces"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("This folder isn't a git repo"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces a sibling workspace probe failure alongside resolved changes", async () => {
+    const user = userEvent.setup();
+    const okPath = "/Users/test/goose2";
+    const badPath = "/Users/test/broken-repo";
+    // One healthy repo probes fine; the other's git-state probe fails, so it
+    // never produces a changed-files runtime and drops out of the group list.
+    mockUseWorkspaceGitRuntimes.mockImplementation(
+      (workspaces: WorkspaceAttachment[]) =>
+        workspaces.map((workspace) =>
+          workspace.path === badPath
+            ? createWorkspaceRuntime(workspace, undefined, {
+                error: new Error("git status failed"),
+              })
+            : createWorkspaceRuntime(workspace, mockUseGitState().data),
+        ),
+    );
+    mockUseWorkspaceChangedFilesRuntimes.mockReturnValue([
+      {
+        id: okPath.toLowerCase(),
+        workspace: materializedWorkspace(okPath),
+        workspaceTitle: "goose2",
+        repoPath: okPath,
+        currentBranch: "main",
+        dirtyFileCount: 1,
+        files: [
+          {
+            path: "src/App.tsx",
+            status: "modified" as const,
+            additions: 2,
+            deletions: 1,
+          },
+        ],
+        isLoading: false,
+        error: null,
+        isLoadingError: false,
+      },
+    ]);
+
+    renderContextPanel({
+      sessionId: "test-session-changes-partial-probe-error",
+      projectWorkingDirs: [okPath, badPath],
+    });
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+
+    // The healthy workspace's changes stay visible, but the failed sibling's
+    // probe error must not be silently swallowed by the resolved group.
+    expect(await screen.findByText("src/App.tsx")).toBeInTheDocument();
+    expect(screen.getByText("git status failed")).toBeInTheDocument();
+  });
+
+  it("shows the no-changes empty state for a clean git repo", async () => {
+    const user = userEvent.setup();
+    mockUseWorkspaceChangedFilesRuntimes.mockReturnValue([
+      {
+        id: "/users/test/goose2",
+        workspace: materializedWorkspace("/Users/test/goose2"),
+        workspaceTitle: "goose2",
+        repoPath: "/Users/test/goose2",
+        currentBranch: "main",
+        dirtyFileCount: 0,
+        files: [],
+        isLoading: false,
+        error: null,
+        isLoadingError: false,
+      },
+    ]);
+
+    renderContextPanel({
+      sessionId: "test-session-changes-clean-repo",
+      projectWorkingDirs: ["/Users/test/goose2"],
+    });
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+
+    expect(
+      await screen.findByText("No uncommitted changes"),
+    ).toBeInTheDocument();
+  });
 });

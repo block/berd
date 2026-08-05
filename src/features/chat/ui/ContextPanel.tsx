@@ -30,7 +30,13 @@ import {
 } from "../stores/chatSessionStore";
 import { WorkspaceWidget } from "./widgets/WorkspaceWidget";
 import { LegacyWorkspaceWidget } from "./widgets/LegacyWorkspaceWidget";
-import { ChangesWidget, WorkspaceChangesWidget } from "./widgets/ChangesWidget";
+import {
+  ChangesEmptyState,
+  ChangesErrorState,
+  ChangesLoadingState,
+  ChangesWidget,
+  WorkspaceChangesWidget,
+} from "./widgets/ChangesWidget";
 import { ArtifactsWidget } from "./widgets/ArtifactsWidget";
 import { formatErrorMessage } from "./widgets/formatError";
 import {
@@ -355,6 +361,35 @@ export function ContextPanel({
   const shouldShowChanges = hasWorkspaceAttachments
     ? workspaceChangedFileRuntimes.length > 0
     : Boolean(gitTargetPath) && fallbackGitState?.isGitRepo !== false;
+  // The git probe decides whether the tab can render changes at all, so wait
+  // for it before committing to an empty state — otherwise a repo-backed
+  // session flashes "not a git repo" on every first open of the tab.
+  const isChangesProbeLoading = hasWorkspaceAttachments
+    ? workspaceGitRuntimes.some(
+        (runtime) => runtime.isLoading && !runtime.gitState,
+      )
+    : Boolean(gitTargetPath) && fallbackGitIsLoading && !fallbackGitState;
+  // A failed probe also leaves the tab with nothing to render, but it is not
+  // evidence that the folder lacks a repo — surface the failure instead, or we
+  // would tell someone with a healthy repo to go initialize git.
+  const changesProbeError = hasWorkspaceAttachments
+    ? (workspaceGitRuntimes.find((runtime) => runtime.error)?.error ?? null)
+    : fallbackGitError instanceof Error
+      ? fallbackGitError
+      : null;
+  // Explain which precondition is missing instead of rendering a blank rail.
+  // Phrasing follows how many folders the chat actually carries, not whether
+  // multi-workspace mode is on: singular "this folder" would misdescribe a
+  // chat holding several non-git workspaces.
+  const changesFolderCount = hasWorkspaceAttachments
+    ? workspaceAttachments.length
+    : Number(Boolean(gitTargetPath));
+  const changesUnavailableMessage =
+    changesFolderCount === 0
+      ? t("contextPanel.empty.folderNotSet")
+      : changesFolderCount > 1
+        ? t("contextPanel.empty.noGitWorkspaces")
+        : t("contextPanel.empty.notGitRepo");
   const shouldShowArtifacts =
     hasWorkspaceAttachments && workspaceGitRuntimes.length > 0
       ? workspaceGitRuntimes.every(
@@ -1153,6 +1188,12 @@ export function ContextPanel({
             <WorkspaceChangesWidget
               groups={workspaceChangedFileRuntimes}
               onOpenFile={handleOpenWorkspaceChangedFile}
+              probeErrorMessage={
+                changesProbeError
+                  ? changesProbeError.message ||
+                    t("contextPanel.errors.gitChangesRead")
+                  : null
+              }
             />
           ) : (
             <ChangesWidget
@@ -1172,7 +1213,18 @@ export function ContextPanel({
               onToggleOpen={() => toggleSection("changes")}
             />
           )
-        ) : null}
+        ) : isChangesProbeLoading ? (
+          <ChangesLoadingState />
+        ) : changesProbeError ? (
+          <ChangesErrorState
+            message={
+              changesProbeError.message ||
+              t("contextPanel.errors.gitChangesRead")
+            }
+          />
+        ) : (
+          <ChangesEmptyState message={changesUnavailableMessage} />
+        )}
       </TabsContent>
 
       <TabsContent

@@ -12,6 +12,58 @@ const CHANGES_SCROLL_CONTAINER_CLASS =
 const CHANGES_SCROLL_FADE_CLASS =
   "pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-[10px] bg-gradient-to-t from-background/90 to-transparent";
 
+/** Placeholder rows shared by the widgets and the tab-level loading branch.
+ *  Padding is the caller's job: the widgets already sit in a padded
+ *  `<section>`, while the tab renders these directly. */
+function ChangesSkeletonRows() {
+  return (
+    <div className="space-y-2">
+      <Skeleton className="h-3 w-3/4" />
+      <Skeleton className="h-3 w-1/2" />
+      <Skeleton className="h-3 w-2/3" />
+    </div>
+  );
+}
+
+/** Text-only empty message for use inside the widgets' padded `<section>`,
+ *  where the surrounding layout already owns spacing and alignment. */
+function ChangesEmptyMessage({ message }: { message?: string }) {
+  const { t } = useTranslation("chat");
+
+  return (
+    <p className="text-sm text-muted-foreground">
+      {message ?? t("contextPanel.empty.noChanges")}
+    </p>
+  );
+}
+
+/** Tab-level states. The Changes tab renders these instead of a widget, so
+ *  unlike the widgets there is no padded `<section>` around them — these own
+ *  their own framing, centered to match the Files tab's empty state. */
+export function ChangesEmptyState({ message }: { message?: string }) {
+  return (
+    <div className="flex h-32 items-center justify-center px-4 text-center">
+      <ChangesEmptyMessage message={message} />
+    </div>
+  );
+}
+
+export function ChangesErrorState({ message }: { message: string }) {
+  return (
+    <div className="flex h-32 items-center justify-center px-4 text-center">
+      <p className="text-sm text-destructive">{message}</p>
+    </div>
+  );
+}
+
+export function ChangesLoadingState() {
+  return (
+    <div className="px-4 py-4">
+      <ChangesSkeletonRows />
+    </div>
+  );
+}
+
 function splitPath(relativePath: string) {
   const lastSlash = relativePath.lastIndexOf("/");
   if (lastSlash === -1) return { dir: "", name: relativePath };
@@ -129,11 +181,7 @@ export function ChangesWidget({
   return (
     <section className="w-full px-4 py-4 text-sm font-normal">
       {isLoading && !files ? (
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-          <Skeleton className="h-3 w-2/3" />
-        </div>
+        <ChangesSkeletonRows />
       ) : error && isLoadingError ? (
         <p className="text-sm text-destructive">{errorMessage}</p>
       ) : hasChanges ? (
@@ -184,9 +232,7 @@ export function ChangesWidget({
           ) : null}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {t("contextPanel.empty.noChanges")}
-        </p>
+        <ChangesEmptyMessage />
       )}
     </section>
   );
@@ -195,11 +241,17 @@ export function ChangesWidget({
 interface WorkspaceChangesWidgetProps {
   groups: WorkspaceChangedFilesRuntime[];
   onOpenFile: (path: string) => void;
+  /** Git-state probe failure from a workspace that produced no changed-files
+   *  runtime. Shown as a non-blocking notice above the groups: a sibling
+   *  workspace's failure must not hide the changes we did resolve, but it also
+   *  must not read as "no changes" for the workspace that failed. */
+  probeErrorMessage?: string | null;
 }
 
 export function WorkspaceChangesWidget({
   groups,
   onOpenFile,
+  probeErrorMessage = null,
 }: WorkspaceChangesWidgetProps) {
   const { t } = useTranslation("chat");
   const isLoading = groups.some((group) => group.isLoading && !group.files);
@@ -234,15 +286,14 @@ export function WorkspaceChangesWidget({
   return (
     <section className="w-full px-4 py-4 text-sm font-normal">
       {isLoading && changedGroups.length === 0 ? (
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-          <Skeleton className="h-3 w-2/3" />
-        </div>
+        <ChangesSkeletonRows />
       ) : firstLoadingError ? (
         <p className="text-sm text-destructive">{errorMessage}</p>
       ) : changedGroups.length > 0 ? (
         <div className="space-y-4">
+          {probeErrorMessage ? (
+            <p className="px-2 text-sm text-destructive">{probeErrorMessage}</p>
+          ) : null}
           {changedGroups.map((group) => (
             <div key={group.id} className="space-y-2">
               {hasMultipleGroups ? (
@@ -311,9 +362,7 @@ export function WorkspaceChangesWidget({
           ))}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {t("contextPanel.empty.noChanges")}
-        </p>
+        <ChangesEmptyMessage />
       )}
     </section>
   );
