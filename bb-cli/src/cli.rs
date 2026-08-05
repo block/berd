@@ -20,7 +20,7 @@ pub const APPKIT_COMMAND_NAME: &str = "appkit";
 pub const APPKIT_COMMAND_ABOUT: &str = "Cloudflare-backed internal Block App Kit CLI (local exec)";
 pub const APPKIT_COMMAND_LONG_ABOUT: &str =
     "Proxies to the Cloudflare-backed internal appkit CLI. This is separate from the external \
- Builderlab Compose control plane exposed at root `bb appkit`.\n\
+ Builderlab Apps Platform control plane exposed at root `bb apps`.\n\
  Requires appkit on PATH, or uvx to run mcp_block_app_kit on demand.";
 pub const EXTENSION_DESCRIBE_COMMAND_NAME: &str = "describe";
 pub const EXTENSION_DESCRIBE_COMMAND_ABOUT: &str =

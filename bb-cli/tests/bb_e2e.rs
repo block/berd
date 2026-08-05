@@ -1221,18 +1221,39 @@ fn parse_stderr_error(stderr: &str) -> Value {
 // bb root surfaces
 
 #[test]
-fn bb_root_help_lists_appkit_skills_and_tools() {
+fn bb_root_help_lists_apps_skills_and_tools() {
     let output = bb_command().arg("--help").output().expect("run bb help");
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
-    assert!(stdout.contains("appkit"));
+    assert!(stdout.contains("apps"));
+    assert!(!stdout.contains("appkit"));
     assert!(stdout.contains("auth"));
     assert!(stdout.contains("config"));
     assert!(stdout.contains("skills"));
     assert!(stdout.contains("tools"));
     assert!(stdout.contains("Builderbot command line tools"));
     assert!(!stdout.contains("--local-dev"));
+}
+
+#[test]
+fn bb_root_description_lists_apps_not_appkit() {
+    let output = bb_command()
+        .arg("--describe-commands")
+        .output()
+        .expect("describe bb commands");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let description = serde_json::from_str::<Value>(&stdout).expect("parse command description");
+    let command_names = description["commands"]
+        .as_array()
+        .expect("commands array")
+        .iter()
+        .filter_map(|command| command["name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(command_names.contains(&"apps"));
+    assert!(!command_names.contains(&"appkit"));
 }
 
 #[test]
@@ -3460,19 +3481,19 @@ fn bb_skills_doctor_offline_reports_server_failure() {
 }
 
 // ---------------------------------------------------------------------------
-// External App Kit-on-Compose control plane
+// External Apps Platform control plane
 
 #[test]
-fn bb_appkit_help_distinguishes_external_and_internal_paths() {
+fn bb_apps_help_distinguishes_external_and_internal_paths() {
     let output = bb_command()
-        .args(["appkit", "--help"])
+        .args(["apps", "--help"])
         .output()
-        .expect("run bb appkit help");
+        .expect("run bb apps help");
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
     for expected in [
-        "external Block App Kit",
+        "Apps Platform",
         "bb-block",
         "bb-public",
         "Cloudflare-backed internal App Kit",
@@ -3487,7 +3508,7 @@ fn bb_appkit_help_distinguishes_external_and_internal_paths() {
 }
 
 #[test]
-fn bb_appkit_contract_exchanges_session_and_calls_control_plane() {
+fn bb_apps_contract_exchanges_session_and_calls_control_plane() {
     let purpose_token = "compose-purpose-token";
     let session_credential = "stored-bbidentity-session";
     let contract = json!({
@@ -3508,7 +3529,7 @@ fn bb_appkit_contract_exchanges_session_and_calls_control_plane() {
         })),
         MockResponse::json(contract.clone()),
     ]);
-    let temp = temp_test_dir("bb-appkit-contract");
+    let temp = temp_test_dir("bb-apps-contract");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     write_bb_org_config(&bb_home, "test");
@@ -3525,7 +3546,7 @@ fn bb_appkit_contract_exchanges_session_and_calls_control_plane() {
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "appkit",
+            "apps",
             "contract",
             "--base-url",
             &server.base_url,
@@ -3533,7 +3554,7 @@ fn bb_appkit_contract_exchanges_session_and_calls_control_plane() {
             "0.2.0",
         ])
         .output()
-        .expect("run bb appkit contract");
+        .expect("run bb apps contract");
     let requests = server.finish();
     let (stdout, stderr) = output_text(&output);
 
@@ -3588,9 +3609,9 @@ fn bb_appkit_contract_exchanges_session_and_calls_control_plane() {
 }
 
 #[test]
-fn bb_appkit_contract_rejects_untrusted_origin_before_token_exchange() {
+fn bb_apps_contract_rejects_untrusted_origin_before_token_exchange() {
     let kgoose = MockServer::start(vec![]);
-    let temp = temp_test_dir("bb-appkit-untrusted-origin");
+    let temp = temp_test_dir("bb-apps-untrusted-origin");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     write_bb_org_config(&bb_home, "test");
@@ -3606,14 +3627,9 @@ fn bb_appkit_contract_rejects_untrusted_origin_before_token_exchange() {
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .env("KGOOSE_BASE_URL", &kgoose.base_url)
-        .args([
-            "appkit",
-            "contract",
-            "--base-url",
-            "https://attacker.example",
-        ])
+        .args(["apps", "contract", "--base-url", "https://attacker.example"])
         .output()
-        .expect("run bb appkit contract with untrusted origin");
+        .expect("run bb apps contract with untrusted origin");
     let requests = kgoose.finish();
     let (stdout, stderr) = output_text(&output);
 
@@ -3625,7 +3641,7 @@ fn bb_appkit_contract_rejects_untrusted_origin_before_token_exchange() {
 }
 
 #[test]
-fn bb_appkit_contract_shares_purpose_token_between_concurrent_processes() {
+fn bb_apps_contract_shares_purpose_token_between_concurrent_processes() {
     let purpose_token = "shared-compose-purpose-token";
     let session_credential = "stored-bbidentity-session";
     let contract = json!({
@@ -3642,7 +3658,7 @@ fn bb_appkit_contract_shares_purpose_token_between_concurrent_processes() {
         MockResponse::json(contract.clone()),
         MockResponse::json(contract.clone()),
     ]);
-    let temp = temp_test_dir("bb-appkit-shared-purpose-token");
+    let temp = temp_test_dir("bb-apps-shared-purpose-token");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     write_bb_org_config(&bb_home, "test");
@@ -3661,18 +3677,16 @@ fn bb_appkit_contract_shares_purpose_token_between_concurrent_processes() {
                 .env("BB_AUTH_STORAGE", "file")
                 .env("BB_AUTH_STORAGE_FILE", &storage_path)
                 .env("KGOOSE_BASE_URL", &server.base_url)
-                .args(["appkit", "contract", "--base-url", &server.base_url])
+                .args(["apps", "contract", "--base-url", &server.base_url])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .expect("spawn bb appkit contract"),
+                .expect("spawn bb apps contract"),
         );
     }
 
     for (index, child) in children.into_iter().enumerate() {
-        let output = child
-            .wait_with_output()
-            .expect("wait for bb appkit contract");
+        let output = child.wait_with_output().expect("wait for bb apps contract");
         let (stdout, stderr) = output_text(&output);
 
         assert!(
@@ -3713,10 +3727,10 @@ fn bb_appkit_contract_shares_purpose_token_between_concurrent_processes() {
 }
 
 #[test]
-fn bb_appkit_exchange_failure_does_not_echo_response_or_credentials() {
+fn bb_apps_exchange_failure_does_not_echo_response_or_credentials() {
     let secret = "credential-that-must-not-be-logged";
     let server = MockServer::start(vec![MockResponse::text(403, secret)]);
-    let temp = temp_test_dir("bb-appkit-exchange-failure");
+    let temp = temp_test_dir("bb-apps-exchange-failure");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     write_bb_org_config(&bb_home, "test");
@@ -3732,15 +3746,9 @@ fn bb_appkit_exchange_failure_does_not_echo_response_or_credentials() {
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .env("KGOOSE_BASE_URL", &server.base_url)
-        .args([
-            "appkit",
-            "contract",
-            "--base-url",
-            &server.base_url,
-            "--json",
-        ])
+        .args(["apps", "contract", "--base-url", &server.base_url, "--json"])
         .output()
-        .expect("run failing bb appkit contract");
+        .expect("run failing bb apps contract");
     let requests = server.finish();
     let (stdout, stderr) = output_text(&output);
 

@@ -1,4 +1,4 @@
-//! External Builderlab App Kit-on-Compose control-plane commands.
+//! External Builderlab Apps Platform control-plane commands.
 //!
 //! This module serves only the external pilot: first in `bb-block` staging,
 //! then in the multi-tenant `bb-public` environment. It does not replace the
@@ -38,9 +38,9 @@ use super::runner;
 use super::skills_api::{exit_codes, failure};
 use super::skills_config::{kgoose_service_url, SkillsConfig};
 
-const APPKIT_BASE_URL_ENV_VAR: &str = "BB_APPKIT_CONTROL_PLANE_URL";
-const APPKIT_CLIENT_VERSION_ENV_VAR: &str = "BB_APPKIT_CLIENT_VERSION";
-const APPKIT_CONTRACT_PATH: &str = "/v1/agent/contract";
+const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
+const APPS_CLIENT_VERSION_ENV_VAR: &str = "BB_APPS_CLIENT_VERSION";
+const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
 const COMPOSE_TOKEN_EXCHANGE_PATH: &str = "/v1/auth/token/compose";
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -49,14 +49,14 @@ const CONTROL_PLANE_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const COMPOSE_TOKEN_PURPOSE: &str = "compose";
 const PURPOSE_TOKEN_REFRESH_SKEW: Duration = Duration::from_secs(60);
 const PURPOSE_TOKEN_REPLACEMENT_INTERVAL: Duration = Duration::from_secs(60);
-const PURPOSE_TOKEN_LOCK_FILE: &str = "appkit-purpose-token.lock";
+const PURPOSE_TOKEN_LOCK_FILE: &str = "apps-purpose-token.lock";
 const TRUSTED_CONTROL_PLANE_HOSTS: &[&str] = &["test.blockstaging.build", "app.builderlab.xyz"];
 
 pub fn command() -> Command {
-    Command::new("appkit")
-        .about("Manage external Block App Kit apps through Compose")
+    Command::new("apps")
+        .about("Manage apps through Apps Platform")
         .long_about(
-            "Manage external Block App Kit apps through the Builderlab Compose control plane, first in \
+            "Manage apps through the Builderlab Apps Platform control plane on Compose, first in \
              `bb-block` staging and then in multi-tenant `bb-public`. This does not replace the \
              Cloudflare-backed internal App Kit CLI (`bb tools appkit`) or migrate the separate internal \
              Compose workflow.",
@@ -70,19 +70,19 @@ pub fn command() -> Command {
                     "Read the control-plane contract, runtime metadata, and supported operations",
                 )
                 .arg(
-                    Arg::new("appkit-base-url")
+                    Arg::new("apps-base-url")
                         .long("base-url")
                         .visible_alias("control-plane-url")
                         .value_name("URL")
-                        .env(APPKIT_BASE_URL_ENV_VAR)
+                        .env(APPS_BASE_URL_ENV_VAR)
                         .required(true)
                         .help("Approved Builderlab Compose control-plane ingress URL"),
                 )
                 .arg(
-                    Arg::new("appkit-client-version")
+                    Arg::new("apps-client-version")
                         .long("client-version")
                         .value_name("VERSION")
-                        .env(APPKIT_CLIENT_VERSION_ENV_VAR)
+                        .env(APPS_CLIENT_VERSION_ENV_VAR)
                         .default_value(env!("CARGO_PKG_VERSION"))
                         .help("Agent client version sent to the Compose control plane"),
                 ),
@@ -101,17 +101,17 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     runner::ensure_org_configured(config)?;
     match matches.subcommand() {
         Some(("contract", contract_matches)) => run_contract(config, contract_matches),
-        _ => anyhow::bail!("expected an appkit subcommand"),
+        _ => anyhow::bail!("expected an apps subcommand"),
     }
 }
 
 fn run_contract(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let base_url = matches
-        .get_one::<String>("appkit-base-url")
-        .context("expected App Kit control-plane URL")?;
+        .get_one::<String>("apps-base-url")
+        .context("expected Apps Platform control-plane URL")?;
     let client_version = matches
-        .get_one::<String>("appkit-client-version")
-        .context("expected App Kit client version")?;
+        .get_one::<String>("apps-client-version")
+        .context("expected Apps Platform client version")?;
 
     let client = ControlPlaneClient::new(base_url, client_version, config.style)?;
     let token_provider = KgoosePurposeTokenProvider::from_config(config)?;
@@ -190,7 +190,7 @@ impl KgoosePurposeTokenProvider {
         let mut request = self
             .client
             .post(self.exchange_url.clone())
-            .header(USER_AGENT, appkit_user_agent())
+            .header(USER_AGENT, apps_user_agent())
             .header(ACCEPT, "application/json")
             .header(SESSION_CREDENTIAL_HEADER, self.session_credential.clone());
         if let Some(baggage) = &self.baggage {
@@ -388,23 +388,23 @@ struct ControlPlaneClient {
 
 impl ControlPlaneClient {
     fn new(base_url: &str, client_version: &str, style: Style) -> Result<Self> {
-        let contract_url = auth_url(base_url, APPKIT_CONTRACT_PATH)
-            .context("build App Kit control-plane contract URL")?;
+        let contract_url = auth_url(base_url, APPS_CONTRACT_PATH)
+            .context("build Apps Platform control-plane contract URL")?;
         if !matches!(contract_url.scheme(), "http" | "https") {
-            anyhow::bail!("App Kit control-plane URL must use http or https");
+            anyhow::bail!("Apps Platform control-plane URL must use http or https");
         }
         if contract_url.scheme() == "http" && !is_loopback_url(&contract_url) {
             anyhow::bail!(
-                "App Kit control-plane URL must use https unless it targets loopback local development"
+                "Apps Platform control-plane URL must use https unless it targets loopback local development"
             );
         }
         if !is_trusted_control_plane_url(&contract_url) {
             anyhow::bail!(
-                "App Kit control-plane URL must target an approved Builderlab ingress host or loopback local development"
+                "Apps Platform control-plane URL must target an approved Builderlab ingress host or loopback local development"
             );
         }
         let client_version = HeaderValue::from_str(client_version)
-            .context("App Kit client version is not a valid HTTP header value")?;
+            .context("Apps Platform client version is not a valid HTTP header value")?;
         Ok(Self {
             client: build_auth_http_client(REQUEST_TIMEOUT)?,
             contract_url,
@@ -426,15 +426,15 @@ impl ControlPlaneClient {
         if !status.is_success() {
             return Err(control_plane_http_failure(status, &body));
         }
-        serde_json::from_str(&body).context("parse App Kit control-plane contract response")
+        serde_json::from_str(&body).context("parse Apps Platform control-plane contract response")
     }
 
     fn contract_response(&self, authorization: HeaderValue) -> Result<(StatusCode, String)> {
-        self.style.verbose(&format!("GET {APPKIT_CONTRACT_PATH}"));
+        self.style.verbose(&format!("GET {APPS_CONTRACT_PATH}"));
         let request = self
             .client
             .get(self.contract_url.clone())
-            .header(USER_AGENT, appkit_user_agent())
+            .header(USER_AGENT, apps_user_agent())
             .header(ACCEPT, "application/json")
             .header(
                 HOTPOD_AGENT_CLIENT_VERSION_HEADER,
@@ -443,15 +443,15 @@ impl ControlPlaneClient {
         let response = request
             .header(AUTHORIZATION, authorization)
             .send()
-            .map_err(|error| network_failure("GET", APPKIT_CONTRACT_PATH, error))?;
+            .map_err(|error| network_failure("GET", APPS_CONTRACT_PATH, error))?;
         let status = response.status();
         let body = read_limited_response_body(
             response,
             CONTROL_PLANE_RESPONSE_MAX_BYTES,
-            "App Kit control-plane",
+            "Apps Platform control-plane",
         )?;
         self.style.verbose(&format!(
-            "GET {APPKIT_CONTRACT_PATH} -> {status} ({} bytes)",
+            "GET {APPS_CONTRACT_PATH} -> {status} ({} bytes)",
             body.len()
         ));
         Ok((status, body))
@@ -517,8 +517,8 @@ fn sha256(value: &str) -> String {
         .collect()
 }
 
-fn appkit_user_agent() -> String {
-    format!("bb-appkit/{}", env!("CARGO_PKG_VERSION"))
+fn apps_user_agent() -> String {
+    format!("bb-apps/{}", env!("CARGO_PKG_VERSION"))
 }
 
 fn auth_required_error() -> anyhow::Error {
@@ -579,7 +579,7 @@ fn control_plane_http_failure(status: StatusCode, body: &str) -> anyhow::Error {
                 .or_else(|| value.pointer("/error/next_action"))
         })
         .and_then(Value::as_str);
-    let mut message = format!("GET {APPKIT_CONTRACT_PATH} failed with {status}");
+    let mut message = format!("GET {APPS_CONTRACT_PATH} failed with {status}");
     if let Some(next_action) = next_action {
         message.push_str("\nnext_action: ");
         message.push_str(&terminal_safe_text(next_action));

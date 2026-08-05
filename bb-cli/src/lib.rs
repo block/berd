@@ -125,7 +125,7 @@ fn run_bb() -> Result<()> {
             "commands": [
                 bb::skills::describe_auth_commands(),
                 bb::workspace::describe_commands(),
-                bb::appkit::describe_commands(),
+                bb::apps::describe_commands(),
                 bb::skills::describe_config_commands(),
                 bb::skills::describe_commands(),
                 bb::agents::describe_commands(),
@@ -147,7 +147,7 @@ fn run_bb() -> Result<()> {
         Some(("skills", skills_matches)) => bb::skills::run(skills_matches),
         Some(("auth", auth_matches)) => bb::skills::run_auth(auth_matches),
         Some(("workspace", workspace_matches)) => bb::workspace::run(workspace_matches),
-        Some(("appkit", appkit_matches)) => bb::appkit::run(appkit_matches),
+        Some(("apps", apps_matches)) => bb::apps::run(apps_matches),
         Some(("config", config_matches)) => bb::skills::run_config(config_matches),
         Some(("completions", completions_matches)) => {
             let shell = completions_matches
@@ -173,7 +173,7 @@ fn build_bb_command() -> Command {
         .disable_help_subcommand(true)
         .subcommand(bb::skills::auth_command())
         .subcommand(bb::workspace::command())
-        .subcommand(bb::appkit::command())
+        .subcommand(bb::apps::command())
         .subcommand(bb::skills::config_command())
         .subcommand(bb::skills::skills_command())
         .subcommand(bb::agents::agents_command())
@@ -260,7 +260,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
 
     // The Cloudflare-backed internal App Kit deploy needs direct access to the
     // local workspace so it can tar files and upload them. Keep this compatibility
-    // path as a local process; root `bb appkit` is the separate external Compose
+    // path as a local process; root `bb apps` is the separate Apps Platform
     // control-plane client.
     if appkit::is_appkit_command(&bootstrap.command_tokens) {
         return appkit::run(raw_args);
