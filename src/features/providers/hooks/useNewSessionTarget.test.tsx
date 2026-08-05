@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { checkAllProviderStatus } from "../api/credentials";
 import { useProviderCatalogStore } from "../stores/providerCatalogStore";
 import { useDefaultProviderReadinessStore } from "../stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
@@ -105,6 +106,39 @@ describe("useNewSessionTarget", () => {
         },
       }),
     );
+
+    const { result } = renderHook(() => useNewSessionTarget());
+    let target: Awaited<ReturnType<typeof result.current>> | undefined;
+    await act(async () => {
+      target = await result.current();
+    });
+
+    expect(target).toMatchObject({
+      status: "ready",
+      providerId: "goose",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
+  it("drops a stored model whose provider was disconnected and falls back to the Goose default", async () => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "claude-sonnet-4",
+          modelName: "Claude Sonnet 4",
+          providerId: "anthropic",
+        },
+      }),
+    );
+    // Disconnecting a provider removes its model-cache entry entirely.
+    useProviderModelCacheStore.setState({
+      providers: new Map(),
+      refreshingProviderIds: new Set(),
+    });
+    vi.mocked(checkAllProviderStatus).mockResolvedValue([
+      { providerId: "anthropic", isConfigured: false },
+    ]);
 
     const { result } = renderHook(() => useNewSessionTarget());
     let target: Awaited<ReturnType<typeof result.current>> | undefined;

@@ -214,8 +214,8 @@ type AppNavigationHistory = {
   isApplying: boolean;
 };
 
-type ResolvedSessionModelPreference = ReturnType<
-  typeof resolveSupportedSessionModelPreference
+type ResolvedSessionModelPreference = Awaited<
+  ReturnType<typeof resolveSupportedSessionModelPreference>
 >;
 type MaybePromise<T> = T | Promise<T>;
 type DraftSessionCreationReady = {
@@ -1730,11 +1730,12 @@ export function AppShell({
           resetSessionCreation(session.id);
 
           const providerId = session.providerId ?? selectedProvider ?? "goose";
-          const resolvedPreference = resolveSupportedSessionModelPreference(
-            providerId,
-            undefined,
-            session.modelId ?? undefined,
-          );
+          const resolvedPreference =
+            await resolveSupportedSessionModelPreference(
+              providerId,
+              undefined,
+              session.modelId ?? undefined,
+            );
           const sessionModelPreference =
             session.modelName && resolvedPreference.modelId === session.modelId
               ? { ...resolvedPreference, modelName: session.modelName }
