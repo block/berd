@@ -13,8 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
 
-const ARTIFACTORY_BASE: &str =
-    "https://global.block-artifacts.com/artifactory/goose-internal/avatars/";
+const AVATAR_CDN_BASE: &str = "https://dwwgwmfqqjotj.cloudfront.net/avatars/";
 const AVATAR_CACHE_WARMED_EVENT: &str = "berd:avatar-cache-warmed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -141,7 +140,7 @@ impl AvatarCommandError {
         log::warn!("Avatar library network access error: {}", raw.as_ref());
         Self {
             code: AvatarErrorCode::NetworkAccess,
-            message: "Unable to load avatar library. Connect to Cloudflare WARP and try again."
+            message: "Unable to load avatar library. Check your network connection and try again."
                 .to_string(),
         }
     }
@@ -194,10 +193,7 @@ impl AvatarAssetError {
     }
 
     fn status(label: &str, status: StatusCode) -> Self {
-        Self {
-            code: classify_artifactory_status(status),
-            detail: format!("{label}: HTTP status {status}"),
-        }
+        Self::unavailable(format!("{label}: HTTP status {status}"))
     }
 }
 
@@ -607,7 +603,7 @@ where
     T: DeserializeOwned,
 {
     let response = client
-        .get(allowed_artifactory_url(relative_path)?)
+        .get(allowed_cdn_url(relative_path)?)
         .send()
         .await
         .map_err(|error| metadata_request_error(label, error))?;
@@ -658,30 +654,8 @@ fn metadata_request_error(label: &str, error: reqwest::Error) -> AvatarCommandEr
     }
 }
 
-fn classify_artifactory_status(status: StatusCode) -> AvatarErrorCode {
-    // Artifactory is normally reached through Cloudflare WARP/Zero Trust, where
-    // off-network clients can surface as proxy/auth statuses instead of pure
-    // transport failures.
-    if status.is_redirection()
-        || matches!(
-            status,
-            StatusCode::UNAUTHORIZED
-                | StatusCode::FORBIDDEN
-                | StatusCode::PROXY_AUTHENTICATION_REQUIRED
-        )
-    {
-        AvatarErrorCode::NetworkAccess
-    } else {
-        AvatarErrorCode::Unavailable
-    }
-}
-
 fn metadata_status_error(label: &str, status: StatusCode) -> AvatarCommandError {
-    let raw = format!("{label} returned HTTP status {status}");
-    match classify_artifactory_status(status) {
-        AvatarErrorCode::NetworkAccess => AvatarCommandError::network_access(raw),
-        AvatarErrorCode::Unavailable => AvatarCommandError::unavailable(raw),
-    }
+    AvatarCommandError::unavailable(format!("{label} returned HTTP status {status}"))
 }
 
 /// Lock that protects catalog metadata reads/writes, pruning, and part-file
@@ -885,7 +859,7 @@ async fn ensure_entry_download(
 ) -> Result<(), AvatarAssetError> {
     delete_file_if_exists(target)?;
 
-    let url = allowed_artifactory_url(&format!("{}/{}", catalog.catalog_version, variant.path))?;
+    let url = allowed_cdn_url(&format!("{}/{}", catalog.catalog_version, variant.path))?;
     download_asset(client, url, target, variant).await
 }
 
@@ -1345,13 +1319,13 @@ fn variant_for_format<'a>(
     }
 }
 
-fn allowed_artifactory_url(relative_path: &str) -> Result<Url, String> {
+fn allowed_cdn_url(relative_path: &str) -> Result<Url, String> {
     validate_safe_relative_path(relative_path)?;
-    let base = Url::parse(ARTIFACTORY_BASE).map_err(|error| error.to_string())?;
+    let base = Url::parse(AVATAR_CDN_BASE).map_err(|error| error.to_string())?;
     let url = base
         .join(relative_path)
         .map_err(|error| format!("Invalid avatar artifact URL: {error}"))?;
-    if !url.as_str().starts_with(ARTIFACTORY_BASE) {
+    if !url.as_str().starts_with(AVATAR_CDN_BASE) {
         return Err("Avatar artifact URL is outside the allowed base".to_string());
     }
     Ok(url)
@@ -1959,14 +1933,14 @@ mod tests {
     }
 
     #[test]
-    fn artifactory_urls_are_allowlisted() {
-        let url = allowed_artifactory_url("v1/manifest.json").unwrap();
+    fn cdn_urls_are_allowlisted() {
+        let url = allowed_cdn_url("v1/manifest.json").unwrap();
         assert_eq!(
             url.as_str(),
-            "https://global.block-artifacts.com/artifactory/goose-internal/avatars/v1/manifest.json"
+            "https://dwwgwmfqqjotj.cloudfront.net/avatars/v1/manifest.json"
         );
-        assert!(allowed_artifactory_url("../manifest.json").is_err());
-        assert!(allowed_artifactory_url("https://example.com/file").is_err());
+        assert!(allowed_cdn_url("../manifest.json").is_err());
+        assert!(allowed_cdn_url("https://example.com/file").is_err());
     }
 
     #[test]
@@ -2586,33 +2560,20 @@ mod tests {
     }
 
     #[test]
-    fn metadata_statuses_classify_network_access_and_unavailable() {
+    fn metadata_http_errors_are_unavailable() {
         for status in [
             StatusCode::FOUND,
             StatusCode::UNAUTHORIZED,
             StatusCode::FORBIDDEN,
             StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+            StatusCode::INTERNAL_SERVER_ERROR,
         ] {
             assert_eq!(
-                classify_artifactory_status(status),
-                AvatarErrorCode::NetworkAccess,
-                "{status}"
-            );
-            assert_eq!(
                 metadata_status_error("avatar metadata", status).code,
-                AvatarErrorCode::NetworkAccess,
+                AvatarErrorCode::Unavailable,
                 "{status}"
             );
         }
-
-        assert_eq!(
-            classify_artifactory_status(StatusCode::INTERNAL_SERVER_ERROR),
-            AvatarErrorCode::Unavailable
-        );
-        assert_eq!(
-            metadata_status_error("avatar metadata", StatusCode::INTERNAL_SERVER_ERROR).code,
-            AvatarErrorCode::Unavailable
-        );
     }
 
     #[test]

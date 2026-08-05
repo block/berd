@@ -28,7 +28,7 @@ Startup artifact media is resolved by the Tauri backend and returned as local
 cache paths. Renderer code should use `getArtifacts()` or
 `selectProjectPreviewArtifacts()` from `src/shared/api/artifacts.ts`, then pass
 paths through `convertFileSrc(..., "asset")` before rendering media. Do not
-vendor startup media, fetch catalogs in the renderer, or construct Artifactory
+vendor startup media, fetch catalogs in the renderer, or construct CDN
 URLs in UI code.
 
 ## Experimental features

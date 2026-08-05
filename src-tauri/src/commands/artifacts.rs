@@ -10,8 +10,7 @@ use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 
-const ARTIFACTORY_BASE: &str =
-    "https://global.block-artifacts.com/artifactory/goose-internal/artifacts/";
+const ARTIFACT_CDN_BASE: &str = "https://dwwgwmfqqjotj.cloudfront.net/artifacts/";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const REFRESH_MARKER_FILE: &str = "refresh.marker";
@@ -197,7 +196,7 @@ async fn refresh_cached_catalog(paths: &ArtifactCachePaths) -> Result<ArtifactCa
 async fn fetch_current_catalog() -> Result<(ArtifactLatest, ArtifactCatalog), String> {
     let client = http_client()?;
     let latest: ArtifactLatest = client
-        .get(allowed_artifactory_url(LATEST_PATH)?)
+        .get(allowed_cdn_url(LATEST_PATH)?)
         .send()
         .await
         .map_err(|error| format!("Failed to fetch artifact latest pointer: {error}"))?
@@ -209,7 +208,7 @@ async fn fetch_current_catalog() -> Result<(ArtifactLatest, ArtifactCatalog), St
 
     let manifest_path = manifest_path_for_latest(&latest)?;
     let catalog: ArtifactCatalog = client
-        .get(allowed_artifactory_url(&manifest_path)?)
+        .get(allowed_cdn_url(&manifest_path)?)
         .send()
         .await
         .map_err(|error| format!("Failed to fetch artifact catalog: {error}"))?
@@ -393,7 +392,7 @@ async fn ensure_entry(
         &entry.path,
     )?)?;
 
-    let url = allowed_artifactory_url(&format!("{}/{}", catalog.catalog_version, entry.path))?;
+    let url = allowed_cdn_url(&format!("{}/{}", catalog.catalog_version, entry.path))?;
     download_asset(client, url, &target, entry).await?;
     write_checksum_marker(paths, &catalog.catalog_version, entry)?;
 
@@ -644,14 +643,13 @@ fn cache_paths_for_root_with_legacy(
     }
 }
 
-fn allowed_artifactory_url(relative_path: &str) -> Result<Url, String> {
-    // Publishing/promoting require authenticated scripts; app downloads rely on public read access.
+fn allowed_cdn_url(relative_path: &str) -> Result<Url, String> {
     validate_safe_relative_path(relative_path)?;
-    let base = Url::parse(ARTIFACTORY_BASE).map_err(|error| error.to_string())?;
+    let base = Url::parse(ARTIFACT_CDN_BASE).map_err(|error| error.to_string())?;
     let url = base
         .join(relative_path)
         .map_err(|error| format!("Invalid artifact URL: {error}"))?;
-    if !url.as_str().starts_with(ARTIFACTORY_BASE) {
+    if !url.as_str().starts_with(ARTIFACT_CDN_BASE) {
         return Err("Artifact URL is outside the allowed base".to_string());
     }
     Ok(url)
@@ -959,14 +957,14 @@ mod tests {
     }
 
     #[test]
-    fn artifactory_urls_are_allowlisted() {
-        let url = allowed_artifactory_url("v1/manifest.json").unwrap();
+    fn cdn_urls_are_allowlisted() {
+        let url = allowed_cdn_url("v1/manifest.json").unwrap();
         assert_eq!(
             url.as_str(),
-            "https://global.block-artifacts.com/artifactory/goose-internal/artifacts/v1/manifest.json"
+            "https://dwwgwmfqqjotj.cloudfront.net/artifacts/v1/manifest.json"
         );
-        assert!(allowed_artifactory_url("../manifest.json").is_err());
-        assert!(allowed_artifactory_url("https://example.com/file").is_err());
+        assert!(allowed_cdn_url("../manifest.json").is_err());
+        assert!(allowed_cdn_url("https://example.com/file").is_err());
     }
 
     #[test]

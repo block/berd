@@ -90,14 +90,14 @@ describe("avatars api", () => {
     invokeMock.mockRejectedValueOnce({
       code: "networkAccess",
       message:
-        "Unable to load avatar library. Connect to Cloudflare WARP and try again.",
+        "Unable to load avatar library. Check your network connection and try again.",
     });
 
     await expect(getAvatarLibrarySnapshot()).rejects.toMatchObject({
       name: "AvatarLibraryError",
       code: "networkAccess",
       message:
-        "Unable to load avatar library. Connect to Cloudflare WARP and try again.",
+        "Unable to load avatar library. Check your network connection and try again.",
     });
 
     const legacyError = normalizeAvatarLibraryError("Avatar library exploded");

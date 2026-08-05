@@ -47,7 +47,7 @@ function isAvatarLibraryErrorCode(
 
 function fallbackAvatarLibraryErrorMessage(code: AvatarLibraryErrorCode) {
   return code === "networkAccess"
-    ? "Unable to load avatar library. Connect to Cloudflare WARP and try again."
+    ? "Unable to load avatar library. Check your network connection and try again."
     : "Avatar library unavailable. Try again.";
 }
 
