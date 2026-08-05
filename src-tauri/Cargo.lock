@@ -1732,7 +1732,7 @@ dependencies = [
 [[package]]
 name = "doctor"
 version = "0.1.0"
-source = "git+https://github.com/block/builderbot?rev=f049fa2b559c860ebc1e7b83771023961930099e#f049fa2b559c860ebc1e7b83771023961930099e"
+source = "git+https://github.com/block/builderbot?rev=d76aaa9495c98d18252d627acb00c24c85e6d2cd#d76aaa9495c98d18252d627acb00c24c85e6d2cd"
 dependencies = [
  "dirs",
  "futures",
