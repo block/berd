@@ -177,6 +177,26 @@ function getButtonSpinnerClass(
   }
 }
 
+// Comparable key for a feedback label, used to detect a loading label that
+// repeats a resting label (see the duplicateStatusLabels note in Button).
+//
+// Only plain text is comparable: element labels return null, so a call site
+// passing `<span>Save</span>` as children alongside `loadingLabel="Save"` gets
+// no protection. That is a deliberate limit — reaching into arbitrary element
+// trees to extract text is more fragile than the artifact is costly, and every
+// preserveWidth call site in the app passes strings.
+//
+// Intentionally not a JSDoc block: the design-system manifest publishes the
+// first module-scope doc block as the public description for Button, and this
+// private helper should not own that. Avoid apostrophes here too — the manifest
+// scanner matches quoted spans across raw text, so a stray quote character
+// swallows nearby source and lands junk entries in the generated manifest.
+function getButtonLabelKey(label: React.ReactNode) {
+  return typeof label === "string" || typeof label === "number"
+    ? String(label)
+    : null;
+}
+
 function hasExplicitIconDimensions(icon: React.ReactElement<ButtonIconProps>) {
   return (
     icon.props.size !== undefined ||
@@ -363,6 +383,29 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       ? (["idle", "loading", "success", "error"] as const)
       : ([displayStatus] as const);
     const hasFeedbackContent = feedbackState !== "idle" || preserveWidth;
+    /**
+     * preserveWidth stacks every feedback layer in one centered grid cell and
+     * cross-fades them with transition-opacity. Identical labels alone are
+     * harmless — same geometry means they superimpose pixel-perfectly. The
+     * artifact needs a *width* mismatch: spinnerText gives the loading layer a
+     * spinner slot + gap, so centering shifts its text sideways. Fading that
+     * against an identical string paints two offset copies at once, reading as
+     * garbled text like "Try Againin" (BOT-1466).
+     *
+     * So this is deliberately scoped to the only combination that can garble:
+     * a spinner-plus-text loading layer whose label repeats another layer's.
+     * Note success/error fall back to children, so a broader duplicate check
+     * would match nearly every preserveWidth button and needlessly kill the
+     * fade for legitimately distinct labels.
+     */
+    const loadingLabelKey = getButtonLabelKey(labels.loading);
+    const duplicateStatusLabels =
+      preserveWidth &&
+      loadingVisual === "spinnerText" &&
+      loadingLabelKey !== null &&
+      (["idle", "success", "error"] as const).some(
+        (status) => getButtonLabelKey(labels[status]) === loadingLabelKey,
+      );
 
     React.useEffect(() => {
       if (feedbackState !== "loading") {
@@ -422,10 +465,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             key={targetStatus}
             aria-hidden={targetStatus !== displayStatus}
             className={cn(
-              "inline-flex items-center justify-center gap-2 whitespace-nowrap [grid-area:1/1] transition-opacity",
-              targetStatus === displayStatus
-                ? "opacity-100"
-                : "pointer-events-none opacity-0",
+              "inline-flex items-center justify-center gap-2 whitespace-nowrap [grid-area:1/1]",
+              !duplicateStatusLabels && "transition-opacity",
+              targetStatus === displayStatus && "opacity-100",
+              targetStatus !== displayStatus && "pointer-events-none opacity-0",
+              targetStatus !== displayStatus &&
+                duplicateStatusLabels &&
+                "invisible",
             )}
           >
             {renderStatusContent(targetStatus, targetStatus === displayStatus)}

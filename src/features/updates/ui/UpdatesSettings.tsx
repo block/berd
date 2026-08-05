@@ -69,12 +69,22 @@ export function UpdatesSettings() {
     status === "checking" ||
     status === "downloading" ||
     status === "installing";
+  // The resting label and the busy label must stay distinct strings. Deriving
+  // both from one value made the button cross-fade a label onto an identical
+  // copy offset by the spinner slot, which read as garbled text (BOT-1466).
   const actionLabel =
-    status === "checking"
-      ? t("updates.actions.checking")
-      : status === "error"
-        ? t("updates.actions.retry")
-        : t("updates.actions.check");
+    status === "error"
+      ? t("updates.actions.retry")
+      : t("updates.actions.check");
+  // The same button stays in its loading state across the whole busy run, so
+  // the busy label has to track the phase or it contradicts the progress row
+  // below it.
+  const busyLabel =
+    status === "downloading"
+      ? t("updates.actions.downloading")
+      : status === "installing"
+        ? t("updates.actions.installing")
+        : t("updates.actions.checking");
 
   return (
     <SettingsPage contentClassName="space-y-6">
@@ -116,7 +126,7 @@ export function UpdatesSettings() {
               onClick={() => void checkForUpdate()}
               disabled={!enabled || isCheckDisabled(status)}
               feedbackState={isBusy ? "loading" : "idle"}
-              loadingLabel={actionLabel}
+              loadingLabel={busyLabel}
               preserveWidth
             >
               {actionLabel}

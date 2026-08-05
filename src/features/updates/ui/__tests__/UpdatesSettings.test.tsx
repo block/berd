@@ -144,6 +144,55 @@ describe("UpdatesSettings", () => {
     expect(state.checkForUpdate).toHaveBeenCalledTimes(1);
   });
 
+  it("never renders the retry label in the spinner layer while retrying", () => {
+    setUpdaterState({ status: "error", errorMessage: "download failed" });
+
+    const { rerender } = renderWithProviders(<UpdatesSettings />);
+
+    // Retrying after a failure is the exact transition that garbled: the label
+    // flips to "Try Again" while the button cross-fades back out of loading.
+    setUpdaterState({ status: "checking" });
+    rerender(<UpdatesSettings />);
+
+    const button = screen.getByRole("button", { name: "Checking..." });
+
+    // preserveWidth stacks every feedback layer in one centered grid cell, but
+    // only the busy layer carries a spinner, so only it is a different width.
+    // If it repeated a resting label, centering would offset the two identical
+    // strings and the fade would paint both ("Try Againin", BOT-1466). Layers
+    // without a spinner share geometry and superimpose exactly, so repeats
+    // among those are harmless — the busy label just has to differ from them.
+    const layers = Array.from(button.querySelectorAll('[class*="grid-area"]'));
+    const busyLayer = layers.find((layer) => layer.querySelector("svg"));
+
+    if (!busyLayer) {
+      throw new Error("expected the busy layer to render a spinner");
+    }
+
+    const restingLabels = layers
+      .filter((layer) => layer !== busyLayer)
+      .map((layer) => layer.textContent);
+
+    expect(busyLayer.textContent).toBe("Checking...");
+    expect(restingLabels).not.toContain(busyLayer.textContent);
+  });
+
+  it.each([
+    ["downloading", "Downloading..."],
+    ["installing", "Installing..."],
+  ] as const)("names the busy button for the %s phase", (status, expectedLabel) => {
+    setUpdaterState({ status, downloadProgress: 42 });
+
+    renderWithProviders(<UpdatesSettings />);
+
+    // The button stays in its loading state for the whole busy run, so a
+    // fixed "Checking..." label would contradict the progress row below it.
+    expect(screen.getByRole("button", { name: expectedLabel })).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Checking..." }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the raw error detail alongside the friendly summary", () => {
     setUpdaterState({
       status: "error",

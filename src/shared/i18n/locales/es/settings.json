@@ -452,6 +452,8 @@
     "actions": {
       "check": "Buscar actualizaciones",
       "checking": "Comprobando...",
+      "downloading": "Descargando...",
+      "installing": "Instalando...",
       "restart": "Reiniciar",
       "retry": "Intentar de nuevo",
       "update": "Actualizar Berd"

@@ -455,6 +455,8 @@
     "actions": {
       "check": "Check for Updates",
       "checking": "Checking...",
+      "downloading": "Downloading...",
+      "installing": "Installing...",
       "restart": "Restart to Update",
       "retry": "Try Again",
       "update": "Update Berd"

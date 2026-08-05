@@ -475,3 +475,45 @@ describe("link variant defaults", () => {
     );
   });
 });
+
+describe("preserveWidth duplicate label layers (BOT-1466)", () => {
+  it("hides inactive layers outright when idle and loading labels match", () => {
+    render(
+      <Button preserveWidth loadingLabel="Try Again" feedbackState="idle">
+        Try Again
+      </Button>,
+    );
+
+    const layers = Array.from(
+      screen.getByRole("button").querySelectorAll("[aria-hidden]"),
+    );
+    const inactive = layers.filter(
+      (layer) => layer.getAttribute("aria-hidden") === "true",
+    );
+
+    expect(inactive.length).toBeGreaterThan(0);
+    for (const layer of inactive) {
+      // invisible removes the layer from the paint pass, so a mid-fade can
+      // never show two offset copies of the same string.
+      expect(layer).toHaveClass("invisible");
+      expect(layer).not.toHaveClass("transition-opacity");
+    }
+  });
+
+  it("keeps the opacity cross-fade when labels are distinct", () => {
+    render(
+      <Button preserveWidth loadingLabel="Checking..." feedbackState="idle">
+        Check for Updates
+      </Button>,
+    );
+
+    const layers = Array.from(
+      screen.getByRole("button").querySelectorAll("[aria-hidden]"),
+    );
+
+    for (const layer of layers) {
+      expect(layer).toHaveClass("transition-opacity");
+      expect(layer).not.toHaveClass("invisible");
+    }
+  });
+});
