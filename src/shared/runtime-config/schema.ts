@@ -152,7 +152,8 @@ export const runtimeGooseModelProviderSchema = z
     // able to route (databricks_v2 routes by model-name substring, e.g. a
     // `claude` id takes the Anthropic Messages route), not necessarily one
     // of `models` — fast models are not surfaced in the picker. Stock berd
-    // defaults declare none; custom-build runtime config supplies the value.
+    // defaults declare none; a distribution supplies one at release time via
+    // scripts/set-runtime-config-distribution.ts.
     fastModelId: runtimeIdString("goose modelProvider fastModelId").optional(),
     models: z.array(runtimeGooseModelSchema),
   })

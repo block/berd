@@ -105,7 +105,8 @@ pub struct RuntimeGooseModelProvider {
     /// able to route (databricks_v2 routes by model-name substring, e.g. a
     /// `claude` id takes the Anthropic Messages route), not necessarily one
     /// of `models` — fast models are not surfaced in the picker. Stock berd
-    /// defaults declare none; custom-build runtime config supplies the value.
+    /// defaults declare none; a distribution supplies one at release time via
+    /// scripts/set-runtime-config-distribution.ts.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub fast_model_id: Option<String>,
     pub models: Vec<RuntimeGooseModel>,
@@ -650,9 +651,11 @@ fn runtime_config_load_result_for_local_byo_dev(
 /// Strip the default provider's `goose serve` env contributions (the
 /// databricks endpoint and the fast-model override) so BYO-key dev sessions
 /// keep their own provider's endpoint and models. Stock defaults declare no
-/// fastModelId, but this also runs on bundled-file configs, which custom
-/// builds stage with one — keep the clear so the BYO exclusion holds
-/// regardless of the loaded source.
+/// fastModelId, but this also runs on bundled-file configs, which a release
+/// distribution may have injected one into — keep the clear so the BYO
+/// exclusion holds regardless of the loaded source. This covers dev only
+/// (`cfg(debug_assertions)`); the release-build twin is the BYO strip jq in
+/// scripts/buildkite/release/build-macos.sh, which deletes the same two fields.
 #[cfg(debug_assertions)]
 pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) {
     let Some(provider) = config
@@ -1309,10 +1312,10 @@ mod tests {
         validate_runtime_config(&default_runtime_config()).expect("default config");
     }
 
-    // Stock defaults declare no fastModelId (custom-build runtime config
-    // supplies the value), so pin the mechanism with an explicit fixture: a
+    // Stock defaults declare no fastModelId (the release-time distribution
+    // injector supplies it), so pin the mechanism with an explicit fixture: a
     // declared id validates and round-trips through the camelCase wire name
-    // the staged config uses.
+    // the injected config uses.
     #[test]
     fn declared_fast_model_id_validates_and_round_trips() {
         let mut config = default_runtime_config();
@@ -1328,7 +1331,7 @@ mod tests {
     // BYO-key dev must not inherit the default provider's goose-serve env:
     // both the databricks endpoint and the fast-model override are cleared.
     // Stock defaults declare no fastModelId, so set one to mimic a bundled
-    // custom-build config.
+    // config a distribution injected one into.
     #[cfg(debug_assertions)]
     #[test]
     fn clear_default_databricks_provider_env_clears_endpoint_env_and_fast_model() {

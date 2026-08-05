@@ -62,6 +62,21 @@ Steps 3 and 4 run in parallel after the build step completes.
 
 The `publish_latest` gate allows test builds to upload versioned archives to Artifactory without overwriting `latest.json`, so existing users don't get prompted to update until the release is validated.
 
+## Distribution Inputs
+
+A distribution that packages Berd against its own gateway may supply two narrow, validated provider values to `build-macos.sh`. Both are optional and independent, and each is read from Buildkite meta-data or, for an orchestrator driving the build directly, from the uppercased env var:
+
+| Input | Env var | Injected as | Effect |
+|-------|---------|-------------|--------|
+| `databricks_host` | `DATABRICKS_HOST` | `goose.modelProviders[databricks_v2].endpointEnv.DATABRICKS_HOST` | Packages the distribution's workspace host instead of leaving the provider host editable |
+| `fast_model_id` | `FAST_MODEL_ID` | `goose.modelProviders[databricks_v2].fastModelId` | Exported to `goose serve` as `GOOSE_FAST_MODEL`, so Goose's lightweight tasks (session naming, compaction, tool-call titles) route to that endpoint instead of reusing the main model |
+
+The `fast_model_id` input is deliberately *not* named `GOOSE_FAST_MODEL`: an input sharing the runtime env name Goose consumes would let an ambient value on the build agent silently become the bundled value.
+
+`scripts/set-runtime-config-distribution.ts` applies whichever values are supplied — normalizing the host to a canonical HTTPS origin and the fast model to a served endpoint id — and re-parses the config against the shared schema; `validate-runtime-config.ts --strict-toggles` then runs once over the result. With neither input set, the injector never runs and the committed `runtime-config.json` ships as-is: no fast model, so Goose reuses the main model for fast tasks.
+
+A custom build with `VITE_BYO_KEY_PROVIDERS=1` strips both fields back out before building, so a BYO-key bundle never carries a distribution's host or fast model.
+
 ## Custom Release Flow
 
 1. **Trigger** — Open the custom Buildkite release pipeline (`.buildkite/custom-release.yml`) at the target commit and enter:
@@ -141,6 +156,7 @@ The build will produce the `.app` bundle in `src-tauri/target/aarch64-apple-darw
 | `scripts/build-tauri-release-config.mjs` | Generates `tauri.release.conf.json` from env vars |
 | `scripts/publish-updater-to-artifactory.sh` | Uploads updater archive, signature, and `latest.json` to Artifactory |
 | `scripts/buildkite/release/build-macos.sh` | Release build: stamps version, generates release config, builds app |
+| `scripts/set-runtime-config-distribution.ts` | Injects the optional distribution-owned Databricks host and fast model into the bundled runtime config |
 | `scripts/buildkite/release/publish-custom-artifacts.sh` | Uploads custom signed `.app.zip` and `.dmg` artifacts to Artifactory |
 | `scripts/buildkite/release/publish-updater.sh` | Post-codesign: re-archives `.app`, signs with Ed25519, delegates to Artifactory publish script |
 | `.buildkite/release.yml` | Official pipeline with static build, publish-updater, and publish steps |

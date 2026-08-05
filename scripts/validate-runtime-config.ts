@@ -3,9 +3,12 @@
 // Reuses the shared `runtimeConfigSchema` (src/shared/runtime-config/schema.ts)
 // — the same `.strict()` schema the renderer parses bundled config with, which
 // mirrors the Rust `RuntimeConfig`'s `deny_unknown_fields`. The release build
-// (scripts/buildkite/release/build-macos.sh) runs this over the merged config
-// of a CUSTOM build so a malformed blob or a typo'd/unknown key hard-fails
-// before the expensive `pnpm tauri build`, instead of mid-build.
+// (scripts/buildkite/release/build-macos.sh) runs this so a malformed blob or a
+// typo'd/unknown key hard-fails before the expensive `pnpm tauri build`,
+// instead of mid-build: over the merged config of a CUSTOM build, and — on any
+// build kind — after the release-time distribution injector
+// (scripts/set-runtime-config-distribution.ts) writes a distribution-owned
+// Databricks host or fast model into the bundled config.
 //
 // The schema alone is NOT enough for a custom build. `featureToggles` is a
 // free-form record<string, boolean> (mirroring the Rust HashMap), so a
@@ -48,8 +51,9 @@ export interface ValidateRuntimeConfigOptions {
    * RUNTIME_FEATURE_TOGGLE_KEYS in addition to the schema check. The schema
    * accepts arbitrary toggle keys (free-form record), so this is what catches a
    * fat-fingered toggle that would otherwise validate and silently no-op.
-   * Custom release builds enable it; the official build never runs the
-   * validator.
+   * Every release-build invocation enables it — custom merges and the
+   * distribution injector alike — so no lane can ship an unrecognized toggle
+   * key.
    */
   knownToggleKeysOnly?: boolean;
 }

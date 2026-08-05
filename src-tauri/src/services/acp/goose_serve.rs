@@ -905,9 +905,9 @@ fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &Runt
         // onto the provider's declared fast model instead of reusing the heavy
         // main model. `GOOSE_FAST_MODEL` is the highest-priority source in
         // Goose's fast-model resolution. Stock berd defaults declare no
-        // fastModelId (custom-build runtime config supplies the value), and
-        // BYO-key dev clears the field along with the databricks endpoint, so
-        // those sessions export nothing here.
+        // fastModelId (a distribution injects one at release time), and BYO-key
+        // dev clears the field along with the databricks endpoint, so those
+        // sessions export nothing here.
         if let Some(fast_model_id) = &provider.fast_model_id {
             log::info!("setting goose fast model env for provider {}", provider.id);
             command.env(GOOSE_FAST_MODEL_ENV, fast_model_id);
@@ -1075,8 +1075,8 @@ mod tests {
         );
     }
 
-    // Stock berd defaults declare no fastModelId (custom-build runtime config
-    // supplies the value), so a stock build exports no GOOSE_FAST_MODEL.
+    // Stock berd defaults declare no fastModelId (the release-time distribution
+    // injector supplies it), so a stock build exports no GOOSE_FAST_MODEL.
     #[test]
     fn apply_runtime_goose_provider_env_exports_no_fast_model_for_default_config() {
         let mut command = Command::new("goose");
@@ -1089,7 +1089,8 @@ mod tests {
 
     // BYO-key dev clears the default provider's endpoint and fast model, so
     // neither leaks into those sessions. Stock defaults declare no
-    // fastModelId, so set one to mimic a bundled custom-build config.
+    // fastModelId, so set one to mimic a bundled config a distribution injected
+    // one into.
     #[cfg(debug_assertions)]
     #[test]
     fn apply_runtime_goose_provider_env_exports_nothing_for_byo_stripped_config() {

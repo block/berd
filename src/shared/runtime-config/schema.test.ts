@@ -144,8 +144,8 @@ describe("runtimeConfigSchema", () => {
   });
 
   it("accepts a provider that declares a fastModelId", () => {
-    // Stock defaults declare no fastModelId (custom-build runtime config
-    // supplies the value), so pin acceptance with an explicit fixture.
+    // Stock defaults declare no fastModelId (the release-time distribution
+    // injector supplies it), so pin acceptance with an explicit fixture.
     expect(() =>
       runtimeConfigSchema.parse(
         configWithProvider({

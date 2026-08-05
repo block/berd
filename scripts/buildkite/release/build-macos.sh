@@ -19,6 +19,13 @@
 #                     VITE_ENVIRONMENT are owned by the release script
 #   - databricks_host: optional distribution-owned HTTPS origin injected into
 #                     the databricks_v2 provider's endpointEnv
+#   - fast_model_id:  optional distribution-owned served endpoint id injected as
+#                     the databricks_v2 provider's fastModelId, which the app
+#                     exports to `goose serve` as GOOSE_FAST_MODEL. Named
+#                     fast_model_id, NOT goose_fast_model: the input must not
+#                     collide with the runtime env name, or an ambient
+#                     GOOSE_FAST_MODEL on the build agent would silently become
+#                     the bundled value
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
 #
@@ -51,8 +58,9 @@ CUSTOM_BUILD_ENV="$(meta custom_vite_env 2>/dev/null || true)"
 CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-$(default_bundled_agents "$BUILD_KIND")}"
 DISABLE_BB_CLI="$(meta disable_bb_cli 2>/dev/null || echo false)"
 # Buildkite meta-data is the public pipeline input. Distribution orchestrators
-# may instead pass the same narrow value directly in the environment.
+# may instead pass the same narrow values directly in the environment.
 DATABRICKS_HOST_VALUE="${DATABRICKS_HOST:-$(meta databricks_host 2>/dev/null || true)}"
+FAST_MODEL_ID_VALUE="${FAST_MODEL_ID:-$(meta fast_model_id 2>/dev/null || true)}"
 
 # In-app updates are an official-build-only feature. A custom build that embeds
 # the official updater pubkey/endpoint would poll the official feed and, because
@@ -222,13 +230,23 @@ awk -v v="$RELEASE_VERSION" '
 echo "+++ :hammer: just setup"
 just setup
 
-# A release distribution may supply its Databricks workspace as a narrow,
-# validated input. Public builds leave it unset and retain an editable provider
-# host; internal orchestration owns the Block value.
-if [[ -n "$DATABRICKS_HOST_VALUE" ]]; then
-  echo "+++ :wrench: Injecting distribution Databricks host"
-  pnpm exec tsx scripts/set-runtime-config-databricks-host.ts \
-    "$RUNTIME_CONFIG" "$DATABRICKS_HOST_VALUE"
+# A release distribution may supply its Databricks workspace and its fast model
+# as narrow, validated inputs. Public builds leave both unset and ship the
+# committed config unchanged — an editable provider host and no fast model, so
+# Goose reuses the main model for its lightweight tasks; internal orchestration
+# owns the Block values. The injector validates each value and re-parses the
+# config, so one --strict-toggles pass afterwards covers both.
+if [[ -n "$DATABRICKS_HOST_VALUE" || -n "$FAST_MODEL_ID_VALUE" ]]; then
+  echo "+++ :wrench: Injecting distribution provider values"
+  DISTRIBUTION_ARGS=()
+  if [[ -n "$DATABRICKS_HOST_VALUE" ]]; then
+    DISTRIBUTION_ARGS+=("--databricks-host=$DATABRICKS_HOST_VALUE")
+  fi
+  if [[ -n "$FAST_MODEL_ID_VALUE" ]]; then
+    DISTRIBUTION_ARGS+=("--fast-model-id=$FAST_MODEL_ID_VALUE")
+  fi
+  pnpm exec tsx scripts/set-runtime-config-distribution.ts \
+    "${DISTRIBUTION_ARGS[@]}" "$RUNTIME_CONFIG"
   pnpm exec tsx scripts/validate-runtime-config.ts --strict-toggles "$RUNTIME_CONFIG"
 fi
 
@@ -336,12 +354,18 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
   done < <(printf '%s' "$CUSTOM_BUILD_ENV" | jq -r 'to_entries[] | [.key, .value] | @tsv')
 
   if [[ "$VITE_BYO_KEY_PROVIDERS_VALUE" == "1" ]]; then
-    echo "+++ :wrench: Removing bundled Databricks host for BYO key providers"
+    echo "+++ :wrench: Removing bundled distribution provider values for BYO key providers"
+    # Strip every distribution-injected `goose serve` contribution, not just the
+    # host: a BYO-key build routes fast tasks through the user's own provider,
+    # so a bundled internal fastModelId would leak into it. This is the
+    # release-time twin of clear_default_databricks_provider_env in Rust, which
+    # is cfg(debug_assertions) and therefore covers BYO dev only.
     tmp="$(mktemp)"
     jq '
       .goose.modelProviders |= map(
         if .id == "databricks_v2" then
-          .endpointEnv |= del(.DATABRICKS_HOST)
+          del(.fastModelId)
+          | .endpointEnv |= del(.DATABRICKS_HOST)
           | if (.endpointEnv | length) == 0 then del(.endpointEnv) else . end
         else
           .
