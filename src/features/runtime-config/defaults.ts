@@ -1,10 +1,6 @@
-import {
-  DEFAULT_RUNTIME_MODEL_ID,
-  DEFAULT_RUNTIME_MODEL_PROVIDER_ID,
-} from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
-export function getDefaultGooseModelProviderId(): string {
+export function getDefaultGooseModelProviderId(): string | undefined {
   return useRuntimeConfigStore.getState().config.goose.defaultModelProviderId;
 }
 
@@ -21,5 +17,3 @@ export function getDefaultGooseModelName(modelId: string): string {
       ?.models.find((model) => model.id === modelId)?.name ?? modelId
   );
 }
-
-export { DEFAULT_RUNTIME_MODEL_ID, DEFAULT_RUNTIME_MODEL_PROVIDER_ID };

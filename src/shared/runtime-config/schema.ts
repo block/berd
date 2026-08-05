@@ -161,14 +161,15 @@ export const runtimeGooseModelProviderSchema = z
 
 export const runtimeGooseConfigSchema = z
   .object({
-    defaultModelProviderId: runtimeIdString("goose defaultModelProviderId"),
+    defaultModelProviderId: runtimeIdString(
+      "goose defaultModelProviderId",
+    ).optional(),
     defaultModelId: runtimeIdString("goose defaultModelId").optional(),
-    modelProviders: z.array(runtimeGooseModelProviderSchema).min(1),
+    modelProviders: z.array(runtimeGooseModelProviderSchema),
   })
   .strict()
   .superRefine((goose, ctx) => {
     const providerIds = new Set<string>();
-    let defaultProvider: (typeof goose.modelProviders)[number] | undefined;
 
     for (const [providerIndex, provider] of goose.modelProviders.entries()) {
       const providerId = provider.id;
@@ -180,10 +181,6 @@ export const runtimeGooseConfigSchema = z
         });
       }
       providerIds.add(providerId);
-
-      if (providerId === goose.defaultModelProviderId) {
-        defaultProvider = provider;
-      }
 
       if (
         provider.customProvider &&
@@ -216,26 +213,39 @@ export const runtimeGooseConfigSchema = z
       }
     }
 
-    if (!providerIds.has(goose.defaultModelProviderId)) {
+    if (goose.modelProviders.length === 0) {
+      if (goose.defaultModelProviderId) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["defaultModelProviderId"],
+          message:
+            "goose defaultModelProviderId must be omitted when modelProviders is empty",
+        });
+      }
+      if (goose.defaultModelId) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["defaultModelId"],
+          message:
+            "goose defaultModelId must be omitted when modelProviders is empty",
+        });
+      }
+      return;
+    }
+
+    if (!goose.defaultModelProviderId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["defaultModelProviderId"],
+        message:
+          "goose defaultModelProviderId is required when modelProviders is not empty",
+      });
+    } else if (!providerIds.has(goose.defaultModelProviderId)) {
       ctx.addIssue({
         code: "custom",
         path: ["defaultModelProviderId"],
         message: "goose defaultModelProviderId must reference modelProviders",
       });
-    }
-
-    if (goose.defaultModelId) {
-      const defaultModelId = goose.defaultModelId;
-      if (
-        !defaultProvider?.models.some((model) => model.id === defaultModelId)
-      ) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["defaultModelId"],
-          message:
-            "goose defaultModelId must reference models for default provider",
-        });
-      }
     }
   });
 
@@ -334,47 +344,9 @@ export type RuntimeConfigLoadResult = z.infer<
   typeof runtimeConfigLoadResultSchema
 >;
 
-export const DEFAULT_RUNTIME_MODEL_PROVIDER_ID = "databricks_v2";
-export const DEFAULT_RUNTIME_MODEL_ID = "goose-gpt-5-5";
-
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   schemaVersion: 1,
   goose: {
-    defaultModelProviderId: DEFAULT_RUNTIME_MODEL_PROVIDER_ID,
-    defaultModelId: DEFAULT_RUNTIME_MODEL_ID,
-    modelProviders: [
-      {
-        id: DEFAULT_RUNTIME_MODEL_PROVIDER_ID,
-        displayName: "Databricks AI Gateway",
-        description: "Databricks AI Gateway models",
-        setupMethod: "host_with_oauth_fallback",
-        nativeConnectQuery: "databricks",
-        group: "default",
-        aliases: ["databricks_v2", "databricks", "databricks-ai-gateway"],
-        models: [
-          {
-            id: DEFAULT_RUNTIME_MODEL_ID,
-            name: "GPT-5.5",
-            recommended: true,
-          },
-          {
-            id: "goose-gpt-5-6-sol",
-            name: "GPT-5.6 Sol",
-            recommended: true,
-            featured: true,
-          },
-          {
-            id: "goose-gpt-5-6-terra",
-            name: "GPT-5.6 Terra",
-            recommended: true,
-          },
-          {
-            id: "goose-gpt-5-6-luna",
-            name: "GPT-5.6 Luna",
-            recommended: true,
-          },
-        ],
-      },
-    ],
+    modelProviders: [],
   },
 };

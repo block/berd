@@ -1,4 +1,3 @@
-import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { getClient } from "@/shared/api/acpConnection";
 import { checkAllProviderStatus, listProviderSecrets } from "./api/credentials";
 import { getModelProviders } from "./providerCatalog";
@@ -7,8 +6,14 @@ import { connectedModelProviderIds } from "./lib/providerState";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
+import {
+  getStoredModelPreference,
+  setStoredModelPreference,
+} from "@/features/chat/lib/modelPreferences";
 import {
   getDefaultGooseModelId,
+  getDefaultGooseModelName,
   getDefaultGooseModelProviderId,
 } from "@/features/runtime-config/defaults";
 
@@ -49,6 +54,42 @@ export async function getIntentionalConfiguredProviderIds(
   );
 }
 
+export async function reconcileManagedDefaultProviderSelection(): Promise<{
+  providerId: string;
+  modelId?: string;
+} | null> {
+  const config = useRuntimeConfigStore.getState().config;
+  const client = await getClient();
+  const current = await client.goose.GooseUnstableDefaultsRead({});
+  const resolved = resolveManagedGooseProviderSelection(config, current);
+  if (!resolved) {
+    return null;
+  }
+
+  if (
+    current.providerId !== resolved.providerId ||
+    current.modelId !== resolved.modelId
+  ) {
+    await client.goose.GooseUnstableDefaultsSave(resolved);
+  }
+
+  const preference = getStoredModelPreference("goose");
+  const resolvedPreference = resolveManagedGooseProviderSelection(
+    config,
+    preference ?? current,
+  );
+  if (resolvedPreference?.modelId) {
+    const modelId = resolvedPreference.modelId;
+    setStoredModelPreference("goose", {
+      providerId: resolvedPreference.providerId,
+      modelId,
+      modelName: getDefaultGooseModelName(modelId),
+    });
+  }
+
+  return resolved;
+}
+
 /**
  * Recovery path for installs where a credential-backed provider is configured
  * but no backend default is saved (e.g. credentials retained across a reset).
@@ -65,11 +106,13 @@ export async function saveDefaultProviderSelectionFromConfiguredProvider(): Prom
     await checkAllProviderStatus(),
   );
   const runtimeDefaultProviderId = getDefaultGooseModelProviderId();
-  providerIds.sort(
-    (left, right) =>
-      Number(right === runtimeDefaultProviderId) -
-      Number(left === runtimeDefaultProviderId),
-  );
+  if (runtimeDefaultProviderId) {
+    providerIds.sort(
+      (left, right) =>
+        Number(right === runtimeDefaultProviderId) -
+        Number(left === runtimeDefaultProviderId),
+    );
+  }
   let lastError: unknown;
   for (const providerId of providerIds) {
     try {

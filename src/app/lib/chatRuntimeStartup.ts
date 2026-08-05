@@ -23,6 +23,7 @@ import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore"
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import {
   getIntentionalConfiguredProviderIds,
+  reconcileManagedDefaultProviderSelection,
   saveDefaultProviderSelectionFromConfiguredProvider,
 } from "@/features/providers/defaultProviderConfig";
 import { checkAllProviderStatus } from "@/features/providers/api/credentials";
@@ -224,6 +225,11 @@ export async function runChatRuntimeStartup(
 
   await loadRuntimeConfig();
   await loadSetupCatalog();
+  try {
+    await reconcileManagedDefaultProviderSelection();
+  } catch (error) {
+    console.warn("Failed to reconcile managed Goose provider defaults:", error);
+  }
   const readiness = await useDefaultProviderReadinessStore.getState().refresh();
   if (
     readiness.status === "needs_setup" &&

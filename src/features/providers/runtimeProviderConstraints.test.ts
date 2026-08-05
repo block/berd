@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { filterModelProvidersForRuntimeConfig } from "./runtimeProviderConstraints";
+
+const MANAGED_RUNTIME_CONFIG: RuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  goose: {
+    defaultModelProviderId: "databricks_v2",
+    defaultModelId: "goose-gpt-5-5",
+    modelProviders: [
+      {
+        id: "databricks_v2",
+        displayName: "Databricks AI Gateway",
+        models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+      },
+    ],
+  },
+};
 
 describe("filterModelProvidersForRuntimeConfig", () => {
   const providers = [
@@ -41,7 +57,7 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     expect(
       filterModelProvidersForRuntimeConfig(
         [...providers],
-        DEFAULT_RUNTIME_CONFIG,
+        MANAGED_RUNTIME_CONFIG,
       ),
     ).toEqual([providers[0]]);
   });
@@ -110,7 +126,7 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     expect(
       filterModelProvidersForRuntimeConfig(
         fieldsProviders,
-        DEFAULT_RUNTIME_CONFIG,
+        MANAGED_RUNTIME_CONFIG,
         { byoKeyProvidersEnabled: true },
       ),
     ).toEqual([providers[0], fieldsProviders[3]]);
@@ -123,7 +139,7 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     expect(
       filterModelProvidersForRuntimeConfig(
         fieldsProviders,
-        DEFAULT_RUNTIME_CONFIG,
+        MANAGED_RUNTIME_CONFIG,
         { byoKeyProvidersEnabled: false },
       ),
     ).toEqual([providers[0]]);
@@ -136,7 +152,7 @@ describe("filterModelProvidersForRuntimeConfig", () => {
     expect(
       filterModelProvidersForRuntimeConfig(
         fieldsProviders,
-        DEFAULT_RUNTIME_CONFIG,
+        MANAGED_RUNTIME_CONFIG,
       ),
     ).toEqual([providers[0], fieldsProviders[3]]);
   });

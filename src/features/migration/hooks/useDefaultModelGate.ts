@@ -37,6 +37,7 @@ export function useDefaultModelGate(migrationReady: boolean): void {
           ? getDefaultGooseModelName(defaultModelId)
           : undefined;
         if (
+          !defaultProviderId ||
           !defaultModelId ||
           !initial.modelMissing ||
           initial.providerId !== defaultProviderId

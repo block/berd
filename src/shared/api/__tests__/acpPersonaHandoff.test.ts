@@ -27,7 +27,7 @@ beforeEach(() => {
 
 describe("toWireProviderId", () => {
   it("translates the goose agent sentinel to the runtime default model provider", () => {
-    expect(toWireProviderId("goose")).toBe("databricks_v2");
+    expect(toWireProviderId("goose")).toBe("goose");
 
     useRuntimeConfigStore.setState({
       config: {

@@ -226,7 +226,6 @@ describe("ModelProviderRow", () => {
 
   it("shows a distribution-injected Databricks URL when expanded", async () => {
     const user = userEvent.setup();
-    const provider = DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0];
     useRuntimeConfigStore.getState().setResult({
       status: "ready",
       source: "bundledFile",
@@ -236,10 +235,12 @@ describe("ModelProviderRow", () => {
           ...DEFAULT_RUNTIME_CONFIG.goose,
           modelProviders: [
             {
-              ...provider,
+              id: "databricks_v2",
+              displayName: "Databricks AI Gateway",
               endpointEnv: {
                 DATABRICKS_HOST: "https://workspace.cloud.databricks.com",
               },
+              models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
             },
           ],
         },

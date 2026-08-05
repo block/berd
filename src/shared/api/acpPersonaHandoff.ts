@@ -35,7 +35,7 @@ export function toWireProviderId(providerId: string): string {
   const readiness = useDefaultProviderReadinessStore.getState().readiness;
   return readiness?.status === "ready"
     ? readiness.providerId
-    : getDefaultGooseModelProviderId();
+    : (getDefaultGooseModelProviderId() ?? providerId);
 }
 
 /**

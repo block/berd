@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
 
 import {
   DEFAULT_STYLE_GUIDELINES_PROMPT,
@@ -13,6 +17,37 @@ const mockPrompt = vi.fn();
 const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
+
+const managedRuntimeConfig: RuntimeConfig = {
+  schemaVersion: 1,
+  goose: {
+    defaultModelProviderId: "databricks_v2",
+    defaultModelId: "goose-gpt-5-5",
+    modelProviders: [
+      {
+        id: "databricks_v2",
+        displayName: "Databricks v2",
+        models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+      },
+      {
+        id: "other-managed",
+        displayName: "Other managed",
+        models: [{ id: "other-model", name: "Other" }],
+      },
+    ],
+  },
+};
+
+async function setRuntimeConfig(config: RuntimeConfig) {
+  const { useRuntimeConfigStore } = await import(
+    "@/shared/runtime-config/runtimeConfigStore"
+  );
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: { status: "ready", source: "appDefault", config },
+    config,
+  });
+}
 
 const GOOSE_MANAGED_PROVIDER_IDS = ["goose", "databricks_v2"] as const;
 const EXTERNAL_AGENT_PROVIDER_IDS = ["claude-acp", "codex-acp"] as const;
@@ -346,9 +381,10 @@ describe("acpSendMessage", () => {
 });
 
 describe("acpLoadSession", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
   it("restores the prior prepared session registration when replay loading fails", async () => {
@@ -422,9 +458,10 @@ describe("acpLoadSession", () => {
 });
 
 describe("acpCreateSession", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
   it("uses the ACP session id as the UI session id", async () => {
@@ -596,9 +633,10 @@ describe("acpCreateSession", () => {
 });
 
 describe("acpSetModel", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
   it("skips redundant wire calls when the model is unchanged", async () => {
@@ -629,6 +667,31 @@ describe("acpSetModel", () => {
     );
   });
 
+  it.each([
+    "claude-acp",
+    "codex-acp",
+    "copilot-acp",
+    "amp-acp",
+    "cursor-agent",
+  ])("keeps the %s harness outside Goose provider policy", async (harnessId) => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockNewSession.mockResolvedValue({ sessionId: `session-${harnessId}` });
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession(harnessId, "/tmp/project", {
+      modelId: "harness-model",
+    });
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      `session-${harnessId}`,
+      harnessId,
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      `session-${harnessId}`,
+      "harness-model",
+    );
+  });
+
   it("dedupes the model applied during acpCreateSession", async () => {
     mockNewSession.mockResolvedValue({ sessionId: "acp-session-created" });
 
@@ -642,6 +705,50 @@ describe("acpSetModel", () => {
     await acpSetModel("acp-session-created", "gpt-5.5");
     expect(mockSetModel).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects model changes for sessions that have not been prepared", async () => {
+    const { acpSetModel } = await import("../acp");
+
+    await expect(
+      acpSetModel("unknown-session", "legacy-model"),
+    ).rejects.toThrow("Session not prepared");
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("rejects model changes until a disallowed provider is re-prepared", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSetModel } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "legacy-session",
+      "databricks",
+      "/tmp/project",
+    );
+
+    await expect(
+      acpSetModel("legacy-session", "goose-gpt-5-5"),
+    ).rejects.toThrow("outside the managed Goose provider policy");
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("allows upstream models omitted from runtime recommendation metadata", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSetModel } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "other-session",
+      "other-managed",
+      "/tmp/project",
+    );
+
+    await expect(
+      acpSetModel("other-session", "new-upstream-model"),
+    ).resolves.toBeUndefined();
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "other-session",
+      "new-upstream-model",
+    );
+  });
 });
 
 describe("acpDuplicateSession", () => {
@@ -651,9 +758,10 @@ describe("acpDuplicateSession", () => {
     userSetName: false,
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
   it("delegates the session id and working dir to direct ACP", async () => {
@@ -731,9 +839,10 @@ describe("acpDuplicateSession", () => {
 });
 
 describe("acpPrepareSession", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
   it("loads the existing ACP session instead of creating a replacement", async () => {
@@ -753,6 +862,65 @@ describe("acpPrepareSession", () => {
     expect(mockNewSession).not.toHaveBeenCalled();
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
+  it("migrates a provider missing from the catalog without depending on catalog load order", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockLoadSession.mockResolvedValue(undefined);
+    const { acpPrepareSession } = await import("../acp");
+
+    await acpPrepareSession(
+      "legacy-session",
+      "missing-provider",
+      "/tmp/project",
+    );
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "legacy-session",
+      "databricks_v2",
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "legacy-session",
+      "goose-gpt-5-5",
+    );
+  });
+
+  it("does not overwrite a valid model when re-preparing the same managed provider", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpPrepareSession } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "managed-session",
+      "databricks_v2",
+      "/tmp/project",
+    );
+
+    await acpPrepareSession("managed-session", "databricks_v2", "/tmp/project");
+
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("locks Goose sessions when runtime policy is unavailable", async () => {
+    const { useRuntimeConfigStore } = await import(
+      "@/shared/runtime-config/runtimeConfigStore"
+    );
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      result: {
+        status: "unavailable",
+        source: "bundledFile",
+        reason: "missing",
+        message: "bundled policy missing",
+      },
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
+    const { acpPrepareSession } = await import("../acp");
+
+    await expect(
+      acpPrepareSession("acp-session-1", "goose", "/tmp/project"),
+    ).rejects.toThrow("Goose provider policy is unavailable");
+    expect(mockLoadSession).not.toHaveBeenCalled();
   });
 
   it("surfaces load failures instead of creating a new ACP session", async () => {

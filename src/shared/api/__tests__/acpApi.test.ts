@@ -607,7 +607,7 @@ describe("provider wire translation", () => {
     expect(mocks.newSession).toHaveBeenCalledWith({
       cwd: "/tmp/project",
       mcpServers: [],
-      _meta: { provider: "databricks_v2" },
+      _meta: { provider: "goose" },
     });
   });
 
@@ -646,7 +646,7 @@ describe("provider wire translation", () => {
     expect(mocks.setSessionConfigOption).toHaveBeenCalledWith({
       sessionId: "session-9",
       configId: "provider",
-      value: "databricks_v2",
+      value: "goose",
     });
   });
 

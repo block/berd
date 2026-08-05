@@ -5,7 +5,28 @@ import {
   runtimeConfigSourceSchema,
 } from "./schema";
 
-const defaultProvider = DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0];
+const managedProvider = {
+  id: "databricks_v2",
+  displayName: "Databricks AI Gateway",
+  description: "Databricks AI Gateway models",
+  setupMethod: "host_with_oauth_fallback" as const,
+  group: "default" as const,
+  aliases: ["databricks_v2", "databricks", "databricks-ai-gateway"],
+  nativeConnectQuery: "databricks",
+  models: [
+    { id: "goose-gpt-5-5", name: "GPT-5.5", recommended: true },
+    { id: "goose-gpt-5-6-sol", name: "GPT-5.6 Sol", featured: true },
+  ],
+};
+
+const managedRuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  goose: {
+    defaultModelProviderId: managedProvider.id,
+    defaultModelId: managedProvider.models[0].id,
+    modelProviders: [managedProvider],
+  },
+};
 
 describe("runtimeConfigSchema", () => {
   function configWithProviders(
@@ -13,9 +34,9 @@ describe("runtimeConfigSchema", () => {
     goose: Record<string, unknown> = {},
   ) {
     return {
-      ...DEFAULT_RUNTIME_CONFIG,
+      ...managedRuntimeConfig,
       goose: {
-        ...DEFAULT_RUNTIME_CONFIG.goose,
+        ...managedRuntimeConfig.goose,
         ...goose,
         modelProviders,
       },
@@ -27,7 +48,7 @@ describe("runtimeConfigSchema", () => {
   }
 
   function configWithEndpointEnv(endpointEnv: Record<string, string>) {
-    return configWithProvider({ ...defaultProvider, endpointEnv });
+    return configWithProvider({ ...managedProvider, endpointEnv });
   }
 
   function configWithCustomProvider(customProvider: Record<string, unknown>) {
@@ -77,6 +98,52 @@ describe("runtimeConfigSchema", () => {
     );
   });
 
+  it("accepts an empty managed-provider list as unrestricted policy", () => {
+    expect(runtimeConfigSchema.parse(DEFAULT_RUNTIME_CONFIG)).toEqual(
+      DEFAULT_RUNTIME_CONFIG,
+    );
+  });
+
+  it("rejects defaults when the managed-provider list is empty", () => {
+    expectRuntimeConfigIssue(
+      {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          defaultModelProviderId: "databricks_v2",
+          defaultModelId: "goose-gpt-5-5",
+          modelProviders: [],
+        },
+      },
+      ["goose", "defaultModelProviderId"],
+      /must be omitted/,
+    );
+  });
+
+  it("requires a default provider when managed providers are declared", () => {
+    expectRuntimeConfigIssue(
+      configWithProviders([managedProvider], {
+        defaultModelProviderId: undefined,
+        defaultModelId: undefined,
+      }),
+      ["goose", "defaultModelProviderId"],
+      /is required/,
+    );
+  });
+
+  it("allows a default model omitted from recommendation metadata", () => {
+    const config = {
+      ...managedRuntimeConfig,
+      goose: {
+        ...managedRuntimeConfig.goose,
+        defaultModelId: "new-upstream-model",
+      },
+    };
+
+    expect(runtimeConfigSchema.parse(config).goose.defaultModelId).toBe(
+      "new-upstream-model",
+    );
+  });
+
   it("accepts the bundledFile source variant", () => {
     // Parity with RuntimeConfigSource::BundledFile in
     // src-tauri/src/commands/runtime_config.rs: a restricted build loads the
@@ -88,23 +155,23 @@ describe("runtimeConfigSchema", () => {
   it.each([
     [
       "default provider id",
-      configWithProviders([defaultProvider], {
-        defaultModelProviderId: ` ${DEFAULT_RUNTIME_CONFIG.goose.defaultModelProviderId} `,
+      configWithProviders([managedProvider], {
+        defaultModelProviderId: ` ${managedRuntimeConfig.goose.defaultModelProviderId} `,
       }),
       ["goose", "defaultModelProviderId"],
     ],
     [
       "default model id",
-      configWithProviders([defaultProvider], {
-        defaultModelId: ` ${DEFAULT_RUNTIME_CONFIG.goose.defaultModelId} `,
+      configWithProviders([managedProvider], {
+        defaultModelId: ` ${managedRuntimeConfig.goose.defaultModelId} `,
       }),
       ["goose", "defaultModelId"],
     ],
     [
       "model provider id",
       configWithProvider({
-        ...defaultProvider,
-        id: ` ${defaultProvider.id} `,
+        ...managedProvider,
+        id: ` ${managedProvider.id} `,
       }),
       ["goose", "modelProviders", 0, "id"],
     ],
@@ -119,7 +186,7 @@ describe("runtimeConfigSchema", () => {
     [
       "fast model id",
       configWithProvider({
-        ...defaultProvider,
+        ...managedProvider,
         fastModelId: " goose-fast-model ",
       }),
       ["goose", "modelProviders", 0, "fastModelId"],
@@ -127,11 +194,11 @@ describe("runtimeConfigSchema", () => {
     [
       "model id",
       configWithProvider({
-        ...defaultProvider,
+        ...managedProvider,
         models: [
           {
-            ...defaultProvider.models[0],
-            id: ` ${defaultProvider.models[0].id} `,
+            ...managedProvider.models[0],
+            id: ` ${managedProvider.models[0].id} `,
           },
         ],
       }),
@@ -149,7 +216,7 @@ describe("runtimeConfigSchema", () => {
     expect(() =>
       runtimeConfigSchema.parse(
         configWithProvider({
-          ...defaultProvider,
+          ...managedProvider,
           fastModelId: "goose-fast-model",
         }),
       ),
@@ -160,7 +227,7 @@ describe("runtimeConfigSchema", () => {
     expect(() =>
       runtimeConfigSchema.parse(
         configWithProvider({
-          ...defaultProvider,
+          ...managedProvider,
           aliases: ["openai", " openai "],
         }),
       ),
@@ -171,7 +238,7 @@ describe("runtimeConfigSchema", () => {
     expect(() =>
       runtimeConfigSchema.parse(
         configWithProviders([
-          defaultProvider,
+          managedProvider,
           {
             id: "databricks_v2",
             displayName: "Duplicate Databricks",
@@ -186,7 +253,7 @@ describe("runtimeConfigSchema", () => {
     expect(() =>
       runtimeConfigSchema.parse(
         configWithProvider({
-          ...defaultProvider,
+          ...managedProvider,
           models: [
             { id: "goose-gpt-5-5", name: "GPT-5.5" },
             { id: "goose-gpt-5-5", name: "GPT-5.5 duplicate" },
@@ -284,20 +351,20 @@ describe("runtimeConfigSchema", () => {
   it("rejects unsupported provider setup enum values", () => {
     expect(() =>
       runtimeConfigSchema.parse(
-        configWithProvider({ ...defaultProvider, setupMethod: "magic" }),
+        configWithProvider({ ...managedProvider, setupMethod: "magic" }),
       ),
     ).toThrow(/Invalid option/);
 
     expect(() =>
       runtimeConfigSchema.parse(
-        configWithProvider({ ...defaultProvider, group: "primary" }),
+        configWithProvider({ ...managedProvider, group: "primary" }),
       ),
     ).toThrow(/Invalid option/);
 
     expect(() =>
       runtimeConfigSchema.parse(
         configWithProvider({
-          ...defaultProvider,
+          ...managedProvider,
           modelInventoryMode: "dynamic",
         }),
       ),

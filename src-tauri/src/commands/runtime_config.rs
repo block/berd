@@ -27,8 +27,6 @@ const ADMIN_CACHE_SCHEMA_VERSION: u16 = 1;
 #[cfg(feature = "admin-runtime-config")]
 const ADMIN_RUNTIME_CONFIG_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const ADMIN_OWNED_CUSTOM_PROVIDER_ID: &str = "block_openai_compatible";
-const DEFAULT_RUNTIME_PROVIDER_ID: &str = "databricks_v2";
-const DEFAULT_RUNTIME_MODEL_ID: &str = "goose-gpt-5-5";
 #[cfg(debug_assertions)]
 const BYO_KEY_PROVIDERS_ENV: &str = "VITE_BYO_KEY_PROVIDERS";
 const ALLOWED_ENDPOINT_ENV_KEYS: &[&str] = &["DATABRICKS_HOST"];
@@ -73,7 +71,8 @@ pub struct RuntimeIdentity {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeGooseConfig {
-    pub default_model_provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub default_model_provider_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub default_model_id: Option<String>,
     pub model_providers: Vec<RuntimeGooseModelProvider>,
@@ -658,11 +657,14 @@ fn runtime_config_load_result_for_local_byo_dev(
 /// scripts/buildkite/release/build-macos.sh, which deletes the same two fields.
 #[cfg(debug_assertions)]
 pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) {
+    let Some(default_provider_id) = config.goose.default_model_provider_id.as_deref() else {
+        return;
+    };
     let Some(provider) = config
         .goose
         .model_providers
         .iter_mut()
-        .find(|provider| provider.id == DEFAULT_RUNTIME_PROVIDER_ID)
+        .find(|provider| provider.id == default_provider_id)
     else {
         return;
     };
@@ -707,55 +709,9 @@ pub(crate) fn default_runtime_config() -> RuntimeConfig {
 
 pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
     RuntimeGooseConfig {
-        default_model_provider_id: DEFAULT_RUNTIME_PROVIDER_ID.to_string(),
-        default_model_id: Some(DEFAULT_RUNTIME_MODEL_ID.to_string()),
-        model_providers: vec![RuntimeGooseModelProvider {
-            id: DEFAULT_RUNTIME_PROVIDER_ID.to_string(),
-            display_name: "Databricks AI Gateway".to_string(),
-            description: Some("Databricks AI Gateway models".to_string()),
-            setup_method: Some("host_with_oauth_fallback".to_string()),
-            group: Some("default".to_string()),
-            aliases: Some(vec![
-                "databricks_v2".to_string(),
-                "databricks".to_string(),
-                "databricks-ai-gateway".to_string(),
-            ]),
-            native_connect_query: Some("databricks".to_string()),
-            custom_provider: None,
-            endpoint_env: None,
-            model_inventory_mode: None,
-            fast_model_id: None,
-            models: vec![
-                RuntimeGooseModel {
-                    id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
-                    name: "GPT-5.5".to_string(),
-                    recommended: Some(true),
-                    featured: None,
-                    context_limit: None,
-                },
-                RuntimeGooseModel {
-                    id: "goose-gpt-5-6-sol".to_string(),
-                    name: "GPT-5.6 Sol".to_string(),
-                    recommended: Some(true),
-                    featured: Some(true),
-                    context_limit: None,
-                },
-                RuntimeGooseModel {
-                    id: "goose-gpt-5-6-terra".to_string(),
-                    name: "GPT-5.6 Terra".to_string(),
-                    recommended: Some(true),
-                    featured: None,
-                    context_limit: None,
-                },
-                RuntimeGooseModel {
-                    id: "goose-gpt-5-6-luna".to_string(),
-                    name: "GPT-5.6 Luna".to_string(),
-                    recommended: Some(true),
-                    featured: None,
-                    context_limit: None,
-                },
-            ],
-        }],
+        default_model_provider_id: None,
+        default_model_id: None,
+        model_providers: vec![],
     }
 }
 
@@ -823,16 +779,33 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<(), String> {
 }
 
 fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
-    validate_runtime_id(
-        &goose.default_model_provider_id,
+    validate_optional_runtime_id(
+        goose.default_model_provider_id.as_deref(),
         "goose.defaultModelProviderId",
     )?;
     validate_optional_runtime_id(goose.default_model_id.as_deref(), "goose.defaultModelId")?;
+
     if goose.model_providers.is_empty() {
-        return Err("goose.modelProviders must not be empty".to_string());
+        if goose.default_model_provider_id.is_some() {
+            return Err(
+                "goose.defaultModelProviderId must be omitted when goose.modelProviders is empty"
+                    .to_string(),
+            );
+        }
+        if goose.default_model_id.is_some() {
+            return Err(
+                "goose.defaultModelId must be omitted when goose.modelProviders is empty"
+                    .to_string(),
+            );
+        }
+        return Ok(());
     }
+
+    let default_provider_id = goose.default_model_provider_id.as_deref().ok_or_else(|| {
+        "goose.defaultModelProviderId is required when goose.modelProviders is not empty"
+            .to_string()
+    })?;
     let mut provider_ids = HashSet::new();
-    let mut default_provider_models: Option<&Vec<RuntimeGooseModel>> = None;
     for provider in &goose.model_providers {
         validate_runtime_id(&provider.id, "goose.modelProviders.id")?;
         if !provider_ids.insert(provider.id.clone()) {
@@ -878,10 +851,6 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
             "goose.modelProviders.fastModelId",
         )?;
 
-        if provider.id == goose.default_model_provider_id {
-            default_provider_models = Some(&provider.models);
-        }
-
         let mut model_ids = HashSet::new();
         for model in &provider.models {
             validate_runtime_id(&model.id, "goose.modelProviders.models.id")?;
@@ -897,20 +866,8 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
             }
         }
     }
-    if !provider_ids.contains(&goose.default_model_provider_id) {
+    if !provider_ids.contains(default_provider_id) {
         return Err("goose.defaultModelProviderId must reference goose.modelProviders".to_string());
-    }
-    if let Some(default_model_id) = &goose.default_model_id {
-        let default_models = default_provider_models
-            .ok_or_else(|| "goose.defaultModelProviderId must have model entries".to_string())?;
-        if !default_models
-            .iter()
-            .any(|model| model.id == default_model_id.as_str())
-        {
-            return Err(
-                "goose.defaultModelId must reference models for default provider".to_string(),
-            );
-        }
     }
     Ok(())
 }
@@ -1159,6 +1116,36 @@ mod tests {
     use crate::services::distro_bundle::DistroBundleState;
     use tempfile::tempdir;
 
+    const TEST_RUNTIME_PROVIDER_ID: &str = "databricks_v2";
+    const TEST_RUNTIME_MODEL_ID: &str = "goose-gpt-5-5";
+
+    fn managed_goose_config() -> RuntimeGooseConfig {
+        RuntimeGooseConfig {
+            default_model_provider_id: Some(TEST_RUNTIME_PROVIDER_ID.to_string()),
+            default_model_id: Some(TEST_RUNTIME_MODEL_ID.to_string()),
+            model_providers: vec![RuntimeGooseModelProvider {
+                id: TEST_RUNTIME_PROVIDER_ID.to_string(),
+                display_name: "Databricks AI Gateway".to_string(),
+                description: None,
+                setup_method: None,
+                group: None,
+                aliases: None,
+                native_connect_query: None,
+                custom_provider: None,
+                endpoint_env: None,
+                model_inventory_mode: Some("refreshable".to_string()),
+                fast_model_id: None,
+                models: vec![RuntimeGooseModel {
+                    id: TEST_RUNTIME_MODEL_ID.to_string(),
+                    name: "GPT-5.5".to_string(),
+                    recommended: Some(true),
+                    featured: None,
+                    context_limit: None,
+                }],
+            }],
+        }
+    }
+
     fn valid_config() -> RuntimeConfig {
         RuntimeConfig {
             schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
@@ -1291,6 +1278,7 @@ mod tests {
             .contains("schemaVersion must be 1"));
 
         let mut invalid = valid_config();
+        invalid.goose = managed_goose_config();
         invalid.goose.model_providers[0].aliases =
             Some(vec!["databricks".to_string(), " databricks ".to_string()]);
         assert!(validate_runtime_config(&invalid)
@@ -1319,6 +1307,7 @@ mod tests {
     #[test]
     fn declared_fast_model_id_validates_and_round_trips() {
         let mut config = default_runtime_config();
+        config.goose = managed_goose_config();
         config.goose.model_providers[0].fast_model_id = Some("goose-fast-model".to_string());
         validate_runtime_config(&config).expect("declared fastModelId must validate");
 
@@ -1336,6 +1325,7 @@ mod tests {
     #[test]
     fn clear_default_databricks_provider_env_clears_endpoint_env_and_fast_model() {
         let mut config = default_runtime_config();
+        config.goose = managed_goose_config();
         config.goose.model_providers[0].fast_model_id = Some("goose-fast-model".to_string());
 
         clear_default_databricks_provider_env(&mut config);
@@ -1630,15 +1620,11 @@ mod tests {
 
     #[test]
     fn validate_goose_config_rejects_invalid_shapes() {
-        let mut goose = default_goose_config();
-        goose.model_providers.clear();
-        assert!(validate_goose_config(&goose)
-            .unwrap_err()
-            .contains("modelProviders must not be empty"));
+        validate_goose_config(&default_goose_config()).unwrap();
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers.push(RuntimeGooseModelProvider {
-            id: DEFAULT_RUNTIME_PROVIDER_ID.to_string(),
+            id: TEST_RUNTIME_PROVIDER_ID.to_string(),
             display_name: "Duplicate".to_string(),
             description: None,
             setup_method: None,
@@ -1655,23 +1641,23 @@ mod tests {
             .unwrap_err()
             .contains("duplicate provider 'databricks_v2'"));
 
-        let mut goose = default_goose_config();
-        goose.default_model_provider_id = "unknown".to_string();
+        let mut goose = managed_goose_config();
+        goose.default_model_provider_id = Some("unknown".to_string());
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("defaultModelProviderId must reference"));
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].models = vec![
             RuntimeGooseModel {
-                id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
+                id: TEST_RUNTIME_MODEL_ID.to_string(),
                 name: "GPT-5.5".to_string(),
                 recommended: None,
                 featured: None,
                 context_limit: None,
             },
             RuntimeGooseModel {
-                id: DEFAULT_RUNTIME_MODEL_ID.to_string(),
+                id: TEST_RUNTIME_MODEL_ID.to_string(),
                 name: "GPT-5.5 duplicate".to_string(),
                 recommended: None,
                 featured: None,
@@ -1682,73 +1668,74 @@ mod tests {
             .unwrap_err()
             .contains("duplicate model 'goose-gpt-5-5'"));
 
-        let mut goose = default_goose_config();
-        goose.default_model_id = Some("unknown-model".to_string());
-        assert!(validate_goose_config(&goose)
-            .unwrap_err()
-            .contains("defaultModelId must reference"));
-
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].models[0].context_limit = Some(0);
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("contextLimit must be positive"));
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].setup_method = Some("magic".to_string());
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("setupMethod has unsupported value"));
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].group = Some("primary".to_string());
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("group has unsupported value"));
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].model_inventory_mode = Some("dynamic".to_string());
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("modelInventoryMode has unsupported value"));
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].custom_provider = Some(custom_provider());
         goose.model_providers[0].id = "other_provider".to_string();
-        goose.default_model_provider_id = "other_provider".to_string();
+        goose.default_model_provider_id = Some("other_provider".to_string());
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("providerId must match"));
     }
 
     #[test]
+    fn validate_goose_config_accepts_default_model_outside_recommendation_metadata() {
+        let mut goose = managed_goose_config();
+        goose.default_model_id = Some("new-upstream-model".to_string());
+        validate_goose_config(&goose).unwrap();
+    }
+
+    #[test]
     fn validate_goose_config_rejects_ids_with_boundary_whitespace() {
-        let mut goose = default_goose_config();
-        goose.default_model_provider_id = format!(" {DEFAULT_RUNTIME_PROVIDER_ID}");
+        let mut goose = managed_goose_config();
+        goose.default_model_provider_id = Some(format!(" {TEST_RUNTIME_PROVIDER_ID}"));
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("goose.defaultModelProviderId must not have leading or trailing whitespace"));
 
-        let mut goose = default_goose_config();
-        goose.default_model_id = Some(format!("{DEFAULT_RUNTIME_MODEL_ID} "));
+        let mut goose = managed_goose_config();
+        goose.default_model_id = Some(format!("{TEST_RUNTIME_MODEL_ID} "));
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("goose.defaultModelId must not have leading or trailing whitespace"));
 
-        let mut goose = default_goose_config();
-        goose.model_providers[0].id = format!("{DEFAULT_RUNTIME_PROVIDER_ID} ");
+        let mut goose = managed_goose_config();
+        goose.model_providers[0].id = format!("{TEST_RUNTIME_PROVIDER_ID} ");
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("goose.modelProviders.id must not have leading or trailing whitespace"));
 
-        let mut goose = default_goose_config();
+        let mut goose = managed_goose_config();
         goose.model_providers[0].fast_model_id = Some("goose-fast-model ".to_string());
         assert!(validate_goose_config(&goose).unwrap_err().contains(
             "goose.modelProviders.fastModelId must not have leading or trailing whitespace"
         ));
 
-        let mut goose = default_goose_config();
-        goose.model_providers[0].models[0].id = format!(" {DEFAULT_RUNTIME_MODEL_ID}");
+        let mut goose = managed_goose_config();
+        goose.model_providers[0].models[0].id = format!(" {TEST_RUNTIME_MODEL_ID}");
         assert!(validate_goose_config(&goose).unwrap_err().contains(
             "goose.modelProviders.models.id must not have leading or trailing whitespace"
         ));

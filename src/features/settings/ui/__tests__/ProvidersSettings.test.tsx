@@ -165,7 +165,11 @@ const allModelProvidersConfig: RuntimeConfig = {
   goose: {
     ...DEFAULT_RUNTIME_CONFIG.goose,
     modelProviders: [
-      ...DEFAULT_RUNTIME_CONFIG.goose.modelProviders,
+      {
+        id: "databricks_v2",
+        displayName: "Databricks",
+        models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+      },
       {
         id: "openai",
         displayName: "OpenAI",
@@ -175,6 +179,21 @@ const allModelProvidersConfig: RuntimeConfig = {
         id: "anthropic",
         displayName: "Anthropic",
         models: [{ id: "claude-opus", name: "Claude" }],
+      },
+    ],
+  },
+};
+
+const MANAGED_RUNTIME_CONFIG: RuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  goose: {
+    defaultModelProviderId: "databricks_v2",
+    defaultModelId: "goose-gpt-5-5",
+    modelProviders: [
+      {
+        id: "databricks_v2",
+        displayName: "Databricks AI Gateway",
+        models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
       },
     ],
   },
@@ -328,9 +347,9 @@ describe("ProvidersSettings", () => {
       result: {
         status: "ready",
         source: "fakeEndpoint",
-        config: DEFAULT_RUNTIME_CONFIG,
+        config: MANAGED_RUNTIME_CONFIG,
       },
-      config: DEFAULT_RUNTIME_CONFIG,
+      config: MANAGED_RUNTIME_CONFIG,
     });
 
     renderProviders(<ProvidersSettings />);
@@ -716,9 +735,9 @@ describe("ProvidersSettings", () => {
       result: {
         status: "ready",
         source: "fakeEndpoint",
-        config: DEFAULT_RUNTIME_CONFIG,
+        config: MANAGED_RUNTIME_CONFIG,
       },
-      config: DEFAULT_RUNTIME_CONFIG,
+      config: MANAGED_RUNTIME_CONFIG,
     });
     renderProviders(<ProvidersSettings />);
 
@@ -741,7 +760,7 @@ describe("ProvidersSettings", () => {
         reason: "endpointUnavailable",
         message: "runtime config unavailable",
       },
-      config: DEFAULT_RUNTIME_CONFIG,
+      config: MANAGED_RUNTIME_CONFIG,
     });
 
     renderProviders(<ProvidersSettings />);

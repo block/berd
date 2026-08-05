@@ -63,7 +63,11 @@ export async function runMigration(): Promise<MigrationResult> {
   // 4. Seed the local chat preference before touching backend defaults so the
   //    frontend can prefer the runtime model even when provider auth or
   //    connectivity prevents saving the backend default.
-  if (defaultModelId && !getStoredModelPreference("goose")) {
+  if (
+    defaultProviderId &&
+    defaultModelId &&
+    !getStoredModelPreference("goose")
+  ) {
     setStoredModelPreference("goose", {
       providerId: defaultProviderId,
       modelId: defaultModelId,
@@ -76,13 +80,15 @@ export async function runMigration(): Promise<MigrationResult> {
   //    otherwise save the provider and let the user pick a model from
   //    the chat model picker on first run. Failures are logged and do not
   //    block the rest of migration.
-  try {
-    await client.goose.GooseUnstableDefaultsSave({
-      providerId: defaultProviderId,
-      ...(defaultModelId ? { modelId: defaultModelId } : {}),
-    });
-  } catch (error) {
-    console.error("Failed to save migrated default model:", error);
+  if (defaultProviderId) {
+    try {
+      await client.goose.GooseUnstableDefaultsSave({
+        providerId: defaultProviderId,
+        ...(defaultModelId ? { modelId: defaultModelId } : {}),
+      });
+    } catch (error) {
+      console.error("Failed to save migrated default model:", error);
+    }
   }
   useAgentStore.getState().setSelectedProvider("goose");
 

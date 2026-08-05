@@ -255,17 +255,21 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
       ...DEFAULT_RUNTIME_CONFIG,
       goose: {
         ...DEFAULT_RUNTIME_CONFIG.goose,
-        modelProviders: DEFAULT_RUNTIME_CONFIG.goose.modelProviders.map(
-          (provider) =>
-            provider.id === "databricks_v2"
-              ? {
-                  ...provider,
-                  endpointEnv: {
-                    DATABRICKS_HOST: "https://internal.example.com",
-                  },
-                }
-              : provider,
-        ),
+        defaultModelProviderId: "databricks_v2",
+        defaultModelId: "goose-gpt-5-5",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks AI Gateway",
+            endpointEnv: {
+              DATABRICKS_HOST: "https://internal.example.com",
+            },
+            models: [
+              { id: "goose-gpt-5-5", name: "GPT-5.5" },
+              { id: "goose-gpt-5-6-sol", name: "GPT-5.6 Sol" },
+            ],
+          },
+        ],
       },
     };
     useRuntimeConfigStore.setState({

@@ -81,7 +81,6 @@ describe("useProviderModels", () => {
       "databricks_v2",
     ]);
     expect(result.current.modelCacheRefreshProviderIds).toEqual([
-      "databricks_v2",
       "claude-acp",
       "codex-acp",
       "copilot-acp",
@@ -106,7 +105,6 @@ describe("useProviderModels", () => {
       "anthropic",
     ]);
     expect(result.current.modelCacheRefreshProviderIds).toEqual([
-      "databricks_v2",
       "claude-acp",
       "codex-acp",
       "copilot-acp",

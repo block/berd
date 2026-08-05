@@ -5,13 +5,28 @@ import {
   normalizeDatabricksHost,
   normalizeFastModelId,
 } from "../../../scripts/set-runtime-config-distribution";
-import { DEFAULT_RUNTIME_CONFIG } from "./schema";
+import { DEFAULT_RUNTIME_CONFIG, type RuntimeConfig } from "./schema";
 
 const HOST = "https://workspace.cloud.databricks.com";
 
+const DISTRIBUTION_RUNTIME_CONFIG: RuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  goose: {
+    defaultModelProviderId: "databricks_v2",
+    defaultModelId: "goose-gpt-5-5",
+    modelProviders: [
+      {
+        id: "databricks_v2",
+        displayName: "Databricks AI Gateway",
+        models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+      },
+    ],
+  },
+};
+
 describe("applyDistributionValues", () => {
   it("injects a validated distribution-owned host", () => {
-    const configured = applyDistributionValues(DEFAULT_RUNTIME_CONFIG, {
+    const configured = applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, {
       databricksHost: HOST,
     });
 
@@ -19,12 +34,12 @@ describe("applyDistributionValues", () => {
       DATABRICKS_HOST: HOST,
     });
     expect(
-      DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0].endpointEnv,
+      DISTRIBUTION_RUNTIME_CONFIG.goose.modelProviders[0].endpointEnv,
     ).toBeUndefined();
   });
 
   it("leaves fastModelId absent when only a host is supplied", () => {
-    const configured = applyDistributionValues(DEFAULT_RUNTIME_CONFIG, {
+    const configured = applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, {
       databricksHost: HOST,
     });
 
@@ -32,7 +47,7 @@ describe("applyDistributionValues", () => {
   });
 
   it("injects a validated distribution-owned fast model on its own", () => {
-    const configured = applyDistributionValues(DEFAULT_RUNTIME_CONFIG, {
+    const configured = applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, {
       fastModelId: "goose-claude-haiku-4-5",
     });
 
@@ -41,12 +56,12 @@ describe("applyDistributionValues", () => {
     );
     expect(configured.goose.modelProviders[0].endpointEnv).toBeUndefined();
     expect(
-      DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0].fastModelId,
+      DISTRIBUTION_RUNTIME_CONFIG.goose.modelProviders[0].fastModelId,
     ).toBeUndefined();
   });
 
   it("injects both values in a single pass", () => {
-    const configured = applyDistributionValues(DEFAULT_RUNTIME_CONFIG, {
+    const configured = applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, {
       databricksHost: HOST,
       fastModelId: "goose-claude-haiku-4-5",
     });
@@ -71,7 +86,7 @@ describe("applyDistributionValues", () => {
   ])("rejects non-canonical or unsafe host %s", (host) => {
     expect(() => normalizeDatabricksHost(host)).toThrow(/DATABRICKS_HOST/);
     expect(() =>
-      applyDistributionValues(DEFAULT_RUNTIME_CONFIG, {
+      applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, {
         databricksHost: host,
       }),
     ).toThrow(/DATABRICKS_HOST/);
@@ -90,12 +105,12 @@ describe("applyDistributionValues", () => {
   ])("rejects a %s fast model id", (_label, id) => {
     expect(() => normalizeFastModelId(id)).toThrow(/FAST_MODEL_ID/);
     expect(() =>
-      applyDistributionValues(DEFAULT_RUNTIME_CONFIG, { fastModelId: id }),
+      applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, { fastModelId: id }),
     ).toThrow(/FAST_MODEL_ID/);
   });
 
   it("accepts a served endpoint id that is not in the provider's models", () => {
-    const configured = applyDistributionValues(DEFAULT_RUNTIME_CONFIG, {
+    const configured = applyDistributionValues(DISTRIBUTION_RUNTIME_CONFIG, {
       fastModelId: "goose-claude-haiku-4-5",
     });
 

@@ -35,6 +35,21 @@ function catalogEntry(
   };
 }
 
+const MANAGED_RUNTIME_CONFIG: RuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  goose: {
+    defaultModelProviderId: "databricks_v2",
+    defaultModelId: "goose-gpt-5-5",
+    modelProviders: [
+      {
+        id: "databricks_v2",
+        displayName: "Databricks AI Gateway",
+        models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+      },
+    ],
+  },
+};
+
 describe("runtimeModelInventory", () => {
   it("preserves inline admin model metadata with featured independent of default", () => {
     const config: RuntimeConfig = {
@@ -138,7 +153,7 @@ describe("mergeRuntimeProviderCatalog", () => {
 
     const merged = mergeRuntimeProviderCatalog(
       existing,
-      DEFAULT_RUNTIME_CONFIG,
+      MANAGED_RUNTIME_CONFIG,
     );
     const ids = merged.map((entry) => entry.id);
 
@@ -226,17 +241,15 @@ describe("mergeRuntimeProviderCatalog", () => {
       ...DEFAULT_RUNTIME_CONFIG,
       goose: {
         ...DEFAULT_RUNTIME_CONFIG.goose,
-        modelProviders: DEFAULT_RUNTIME_CONFIG.goose.modelProviders.map(
-          (provider) =>
-            provider.id === "databricks_v2"
-              ? {
-                  ...provider,
-                  endpointEnv: {
-                    DATABRICKS_HOST: "https://internal.example.com",
-                  },
-                }
-              : provider,
-        ),
+        ...MANAGED_RUNTIME_CONFIG.goose,
+        modelProviders: [
+          {
+            ...MANAGED_RUNTIME_CONFIG.goose.modelProviders[0],
+            endpointEnv: {
+              DATABRICKS_HOST: "https://internal.example.com",
+            },
+          },
+        ],
       },
     };
     const [databricks] = mergeRuntimeProviderCatalog(
@@ -255,7 +268,7 @@ describe("mergeRuntimeProviderCatalog", () => {
         ...DEFAULT_RUNTIME_CONFIG.goose,
         modelProviders: [
           {
-            ...DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0],
+            ...MANAGED_RUNTIME_CONFIG.goose.modelProviders[0],
             endpointEnv: undefined,
           },
         ],
@@ -318,7 +331,7 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
   it("merges and preserves fields-bearing entries when bring-your-own-key is on", async () => {
     seedFieldsBearingEntry();
 
-    await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG, {
+    await applyRuntimeProviderConfig(MANAGED_RUNTIME_CONFIG, {
       byoKeyProvidersEnabled: true,
     });
 
@@ -332,7 +345,7 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
   it("wholesale-replaces the catalog (pre-feature behavior) when bring-your-own-key is off", async () => {
     seedFieldsBearingEntry();
 
-    await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG, {
+    await applyRuntimeProviderConfig(MANAGED_RUNTIME_CONFIG, {
       byoKeyProvidersEnabled: false,
     });
 
@@ -350,7 +363,7 @@ describe("applyRuntimeProviderConfig catalog gating", () => {
     // VITE_BYO_KEY_PROVIDERS=0), so the merge path is the default behavior.
     seedFieldsBearingEntry();
 
-    await applyRuntimeProviderConfig(DEFAULT_RUNTIME_CONFIG);
+    await applyRuntimeProviderConfig(MANAGED_RUNTIME_CONFIG);
 
     const ids = useProviderCatalogStore
       .getState()
@@ -431,7 +444,7 @@ describe("getModelCacheRefreshProviderIds", () => {
 
   it("includes model providers for bundled appDefault refresh", () => {
     expect(
-      getModelCacheRefreshProviderIds(DEFAULT_RUNTIME_CONFIG, {
+      getModelCacheRefreshProviderIds(MANAGED_RUNTIME_CONFIG, {
         defaultModelInventoryMode: "refreshable",
       }),
     ).toEqual(["databricks_v2", "codex-acp"]);
@@ -508,12 +521,12 @@ describe("getModelCacheRefreshProviderIds", () => {
   it("includes explicitly refreshable runtime model providers", () => {
     expect(
       getModelCacheRefreshProviderIds({
-        ...DEFAULT_RUNTIME_CONFIG,
+        ...MANAGED_RUNTIME_CONFIG,
         goose: {
-          ...DEFAULT_RUNTIME_CONFIG.goose,
+          ...MANAGED_RUNTIME_CONFIG.goose,
           modelProviders: [
             {
-              ...DEFAULT_RUNTIME_CONFIG.goose.modelProviders[0],
+              ...MANAGED_RUNTIME_CONFIG.goose.modelProviders[0],
               modelInventoryMode: "refreshable",
             },
           ],

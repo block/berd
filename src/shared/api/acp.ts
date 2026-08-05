@@ -11,6 +11,7 @@ import {
   getCatalogEntry,
   resolveAgentProviderCatalogId,
 } from "@/features/providers/providerCatalog";
+import { CURATED_PROVIDER_CATALOG_BY_ID } from "@/features/providers/curatedProviders";
 import {
   setActiveMessageId,
   clearActiveMessageId,
@@ -20,6 +21,8 @@ import {
   claimPersonaHandoff,
   isGooseManagedProvider,
 } from "./acpPersonaHandoff";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -153,6 +156,15 @@ export async function acpSendMessage(
   }
 
   const providerId = sessionRegistry.getPreparedProviderId(sessionId);
+  if (!providerId) {
+    throw new Error("Session not prepared. Call acpPrepareSession first.");
+  }
+  const resolvedProvider = resolveGooseSessionSelection(providerId).providerId;
+  if (resolvedProvider !== providerId) {
+    throw new Error(
+      `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before prompting.`,
+    );
+  }
 
   // Goose owns prompt assembly and accepts a real system prompt via its ACP
   // extension. External agent harnesses (Claude Code, Codex, ...) ignore that
@@ -281,6 +293,35 @@ export async function acpSteerMessage(
   );
 }
 
+function resolveGooseSessionSelection(
+  providerId: string,
+  modelId?: string | null,
+): { providerId: string; modelId?: string } {
+  // Agent harnesses are outside Goose model-provider policy. Everything else
+  // is resolved from runtime policy directly; a missing model catalog entry
+  // must not turn into an allowlist bypass while catalogs are still loading.
+  if (
+    providerId !== "goose" &&
+    CURATED_PROVIDER_CATALOG_BY_ID.get(providerId)?.category === "agent"
+  ) {
+    return { providerId, ...(modelId ? { modelId } : {}) };
+  }
+
+  const runtimeConfigState = useRuntimeConfigStore.getState();
+  if (runtimeConfigState.result.status === "unavailable") {
+    throw new Error(
+      `Goose provider policy is unavailable: ${runtimeConfigState.result.message}`,
+    );
+  }
+
+  return (
+    resolveManagedGooseProviderSelection(runtimeConfigState.config, {
+      providerId,
+      modelId,
+    }) ?? { providerId, ...(modelId ? { modelId } : {}) }
+  );
+}
+
 /** Prepare or warm an ACP session ahead of the first prompt. */
 export async function acpPrepareSession(
   sessionId: string,
@@ -293,12 +334,23 @@ export async function acpPrepareSession(
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
+  const selection = resolveGooseSessionSelection(providerId);
   const snapshots = await sessionRegistry.prepareSession(
     sessionId,
-    providerId,
+    selection.providerId,
     workingDir,
     options,
   );
+  if (selection.providerId !== providerId && selection.modelId) {
+    return mergeSessionConfigSnapshots(
+      snapshots ?? { model: null, reasoningEffort: null },
+      await sessionRegistry.applySessionModel(
+        sessionId,
+        selection.modelId,
+        options,
+      ),
+    );
+  }
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
   );
@@ -310,6 +362,9 @@ export async function acpCreateSession(
   workingDir: string,
   options: AcpCreateSessionOptions = {},
 ): Promise<AcpCreateSessionResult> {
+  const selection = resolveGooseSessionSelection(providerId, options.modelId);
+  providerId = selection.providerId;
+  options = { ...options, modelId: selection.modelId };
   // Only the "goose" sentinel should rely on backend defaults. Concrete
   // model providers must be sent even without a model so Goose does not try to
   // resolve a missing global GOOSE_PROVIDER.
@@ -368,9 +423,27 @@ export async function acpSetModel(
   modelId: string,
   options: AcpSessionConfigApplyOptions = {},
 ): Promise<AcpSessionConfigSnapshots | undefined> {
+  const providerId = sessionRegistry.getPreparedProviderId(sessionId);
+  if (!providerId) {
+    throw new Error("Session not prepared. Call acpPrepareSession first.");
+  }
+
+  const resolved = resolveGooseSessionSelection(providerId, modelId);
+  if (resolved.providerId !== providerId) {
+    throw new Error(
+      `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before setting its model.`,
+    );
+  }
+  // Runtime model inventories annotate recommendations; upstream-discovered
+  // models remain selectable for every allowed provider.
+
   // Routed through the registry so repeat applies of the unchanged model are
   // not sent over the wire (the backend rebuilds the provider on every set).
-  return sessionRegistry.applySessionModel(sessionId, modelId, options);
+  return sessionRegistry.applySessionModel(
+    sessionId,
+    resolved.modelId ?? modelId,
+    options,
+  );
 }
 
 export async function acpSetSessionConfigOption(
