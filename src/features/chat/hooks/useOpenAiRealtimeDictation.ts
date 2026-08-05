@@ -145,25 +145,6 @@ export function useOpenAiRealtimeDictation({
 
   const isEnabled = !disabled && isConfigured;
 
-  useEffect(() => {
-    let cancelled = false;
-    getOpenAiRealtimeStatus()
-      .then((status) => {
-        if (!cancelled) {
-          setIsConfigured(status.configured);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setIsConfigured(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const releaseMicrophone = useCallback(async (ownerId: string) => {
     for (
       let attempt = 1;
@@ -215,6 +196,34 @@ export function useOpenAiRealtimeDictation({
   }, [cleanupResources]);
 
   useEffect(() => cleanupResources, [cleanupResources]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsConfigured(false);
+
+    if (disabled) {
+      cleanup();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getOpenAiRealtimeStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setIsConfigured(status.configured);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsConfigured(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cleanup, disabled]);
 
   const handleRealtimeEvent = useCallback(
     (event: OpenAiRealtimeTranscriptEvent) => {

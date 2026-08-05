@@ -7,6 +7,7 @@ import {
   type ExperimentState,
   useExperimentList,
 } from "@/features/experiments/experimentPreferences";
+import { useDistroStore } from "@/features/settings/stores/distroStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import { getBuildFeatureState, type BuildFeature } from "./buildProfile";
@@ -25,14 +26,24 @@ export type ProfileCapabilityId =
   | "doctor";
 
 type CapabilitySource =
-  | { kind: "buildFeature"; feature: BuildFeature; experiment?: string }
+  | {
+      kind: "buildFeature";
+      feature: BuildFeature;
+      experiment?: string;
+      requiresKgoose?: true;
+    }
   | {
       kind: "runtimeFeature";
       feature: BuildFeature;
       toggle: RuntimeFeatureToggleKey;
       experiment?: string;
+      requiresKgoose?: true;
     }
-  | { kind: "runtimeConfigSection"; field: "feedback" | "doctor" };
+  | {
+      kind: "runtimeConfigSection";
+      field: "feedback" | "doctor";
+      requiresKgoose?: true;
+    };
 
 export type ProfileCapabilityRegistry = Record<
   ProfileCapabilityId,
@@ -44,6 +55,7 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     kind: "runtimeFeature",
     feature: "automations",
     toggle: "automations",
+    requiresKgoose: true,
   },
   builderbot: {
     kind: "runtimeFeature",
@@ -65,6 +77,7 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     kind: "runtimeFeature",
     feature: "voiceDictation",
     toggle: "voiceDictation",
+    requiresKgoose: true,
   },
   voiceConversation: {
     kind: "runtimeFeature",
@@ -76,12 +89,17 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     kind: "runtimeFeature",
     feature: "kgooseConnections",
     toggle: "kgooseConnections",
+    requiresKgoose: true,
   },
   updates: {
     kind: "buildFeature",
     feature: "updater",
   },
-  feedback: { kind: "runtimeConfigSection", field: "feedback" },
+  feedback: {
+    kind: "runtimeConfigSection",
+    field: "feedback",
+    requiresKgoose: true,
+  },
   doctor: { kind: "runtimeConfigSection", field: "doctor" },
 };
 
@@ -92,6 +110,8 @@ interface ResolveProfileCapabilitiesInput {
   experiments?: readonly Pick<ExperimentState, "id" | "enabled">[];
   runtimeConfig?: RuntimeConfig | null;
   runtimeConfigLoaded?: boolean;
+  kgooseConfigured?: boolean;
+  kgooseConfigLoaded?: boolean;
 }
 
 function isExperimentEnabled(
@@ -110,6 +130,8 @@ export function resolveProfileCapabilities({
   experiments,
   runtimeConfig,
   runtimeConfigLoaded = true,
+  kgooseConfigured = false,
+  kgooseConfigLoaded = true,
 }: ResolveProfileCapabilitiesInput): ProfileCapabilityState {
   const capabilities = {} as ProfileCapabilityState;
   const runtimeConfigReady = runtimeConfigLoaded && runtimeConfig != null;
@@ -118,9 +140,12 @@ export function resolveProfileCapabilities({
     PROFILE_CAPABILITY_REGISTRY,
   ) as ProfileCapabilityId[]) {
     const source = PROFILE_CAPABILITY_REGISTRY[id];
+    const kgooseAvailable =
+      !source.requiresKgoose || !kgooseConfigLoaded || kgooseConfigured;
 
     if (source.kind === "buildFeature") {
       capabilities[id] =
+        kgooseAvailable &&
         buildFeatures[source.feature] &&
         (!source.experiment ||
           isExperimentEnabled(experiments, source.experiment));
@@ -129,6 +154,7 @@ export function resolveProfileCapabilities({
 
     if (source.kind === "runtimeFeature") {
       capabilities[id] =
+        kgooseAvailable &&
         buildFeatures[source.feature] &&
         (!runtimeConfigReady ||
           runtimeConfig.featureToggles?.[source.toggle] !== false) &&
@@ -138,18 +164,22 @@ export function resolveProfileCapabilities({
     }
 
     capabilities[id] =
-      !runtimeConfigReady || runtimeConfig[source.field]?.enabled !== false;
+      kgooseAvailable &&
+      (!runtimeConfigReady || runtimeConfig[source.field]?.enabled !== false);
   }
 
   return capabilities;
 }
 
 export function getProfileCapabilitySnapshot(id: ProfileCapabilityId): boolean {
-  const state = useRuntimeConfigStore.getState();
+  const runtimeState = useRuntimeConfigStore.getState();
+  const distroState = useDistroStore.getState();
   return resolveProfileCapabilities({
     buildFeatures: getBuildFeatureState(),
-    runtimeConfig: state.config,
-    runtimeConfigLoaded: state.loaded,
+    runtimeConfig: runtimeState.config,
+    runtimeConfigLoaded: runtimeState.loaded,
+    kgooseConfigured: distroState.manifest.kgooseConfigured,
+    kgooseConfigLoaded: distroState.loaded,
   })[id];
 }
 
@@ -157,6 +187,10 @@ export function useProfileCapabilities(): ProfileCapabilityState {
   const experiments = useExperimentList();
   const runtimeConfig = useRuntimeConfigStore((state) => state.config);
   const runtimeConfigLoaded = useRuntimeConfigStore((state) => state.loaded);
+  const kgooseConfigured = useDistroStore(
+    (state) => state.manifest.kgooseConfigured,
+  );
+  const kgooseConfigLoaded = useDistroStore((state) => state.loaded);
 
   return useMemo(
     () =>
@@ -165,8 +199,16 @@ export function useProfileCapabilities(): ProfileCapabilityState {
         experiments,
         runtimeConfig,
         runtimeConfigLoaded,
+        kgooseConfigured,
+        kgooseConfigLoaded,
       }),
-    [runtimeConfig, runtimeConfigLoaded, experiments],
+    [
+      runtimeConfig,
+      runtimeConfigLoaded,
+      kgooseConfigured,
+      kgooseConfigLoaded,
+      experiments,
+    ],
   );
 }
 

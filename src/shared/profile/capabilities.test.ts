@@ -32,7 +32,10 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   updater: true,
 };
 
-const readyRuntimeConfig = DEFAULT_RUNTIME_CONFIG satisfies RuntimeConfig;
+const readyRuntimeConfig = {
+  ...DEFAULT_RUNTIME_CONFIG,
+  kgoose: { baseUrl: "https://kgoose.example.test" },
+} satisfies RuntimeConfig;
 
 function resolve(
   input: Partial<Parameters<typeof resolveProfileCapabilities>[0]> = {},
@@ -41,6 +44,7 @@ function resolve(
     buildFeatures: enabledBuildFeatures,
     experiments: [],
     runtimeConfig: readyRuntimeConfig,
+    kgooseConfigured: true,
     ...input,
   });
 }
@@ -208,6 +212,123 @@ describe("profile capabilities", () => {
         runtimeConfig: null,
       }).kgooseConnections,
     ).toBe(true);
+  });
+
+  it("fails Kgoose-backed capabilities closed after config sources load without an endpoint", () => {
+    expect(
+      resolve({
+        kgooseConfigured: false,
+        runtimeConfig: DEFAULT_RUNTIME_CONFIG,
+        experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
+      }),
+    ).toMatchObject({
+      automations: false,
+      voiceDictation: false,
+      voiceConversation: true,
+      kgooseConnections: false,
+      feedback: false,
+      agentToolsTip: true,
+      telemetry: true,
+      doctor: true,
+    });
+  });
+
+  it("does not gate native voice conversation on Kgoose configuration", () => {
+    expect(
+      resolve({
+        kgooseConfigured: false,
+        runtimeConfig: DEFAULT_RUNTIME_CONFIG,
+        experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
+      }).voiceConversation,
+    ).toBe(true);
+  });
+
+  it("enables Kgoose-backed capabilities for an explicit distro or environment endpoint", () => {
+    expect(
+      resolve({
+        kgooseConfigured: true,
+        runtimeConfig: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          kgoose: undefined,
+        },
+        experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
+      }),
+    ).toMatchObject({
+      automations: true,
+      voiceDictation: true,
+      voiceConversation: true,
+      kgooseConnections: true,
+      feedback: true,
+    });
+  });
+
+  it("enables Kgoose-backed capabilities for an explicit runtime endpoint", () => {
+    expect(
+      resolve({
+        kgooseConfigured: true,
+        runtimeConfig: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          kgoose: { baseUrl: "https://runtime.example.test/" },
+        },
+        experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
+      }),
+    ).toMatchObject({
+      automations: true,
+      voiceDictation: true,
+      voiceConversation: true,
+      kgooseConnections: true,
+      feedback: true,
+    });
+  });
+
+  it("does not infer configuration from malformed runtime kgoose values", () => {
+    for (const kgoose of [
+      { baseUrl: "not a URL" },
+      { baseUrl: "https://runtime.example.test/", path: "   " },
+    ]) {
+      expect(
+        resolve({
+          kgooseConfigured: false,
+          runtimeConfig: {
+            ...DEFAULT_RUNTIME_CONFIG,
+            kgoose,
+          },
+        }),
+      ).toMatchObject({
+        automations: false,
+        voiceDictation: false,
+        kgooseConnections: false,
+        feedback: false,
+      });
+    }
+  });
+
+  it("preserves build defaults until Kgoose configuration finishes loading", () => {
+    expect(
+      resolve({
+        kgooseConfigLoaded: false,
+        kgooseConfigured: false,
+      }).voiceDictation,
+    ).toBe(true);
+  });
+
+  it("does not let endpoint presence override runtime or build gates", () => {
+    expect(
+      resolve({
+        runtimeConfig: {
+          ...readyRuntimeConfig,
+          featureToggles: {
+            voiceDictation: false,
+            kgooseConnections: false,
+          },
+          feedback: { enabled: false },
+        },
+      }),
+    ).toMatchObject({
+      voiceDictation: false,
+      kgooseConnections: false,
+      feedback: false,
+    });
   });
 
   it("defaults runtime config capabilities to enabled when fields are absent", () => {

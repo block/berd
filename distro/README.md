@@ -21,13 +21,15 @@ In development, `just dev` exports `GOOSE_DISTRO_DIR` to this repository's `dist
 
 ## Manifest shape
 
-Current `distro.json` example:
+`distro.json` is optional. The public-shaped build does not commit a Block
+route manifest; an internal build may stage one into the packaged distro root.
+For local testing, a manifest can supply generic `http`/`https` values:
 
 ```json
 {
   "kgoose": {
-    "baseUrl": "https://kgoose.sqprod.co/",
-    "path": "cash-app/goose"
+    "baseUrl": "https://kgoose.example.test/",
+    "path": "example/goose"
   }
 }
 ```

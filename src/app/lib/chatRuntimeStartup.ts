@@ -123,12 +123,9 @@ export async function runChatRuntimeStartup(
 
   const loadDistroBundle = async () => {
     try {
-      const { getDistroBundle } = await import("@/shared/api/distro");
-      const manifest = await getDistroBundle();
-      distroStore.setManifest(manifest);
+      await distroStore.refresh();
     } catch (err) {
       console.error("Failed to load distro bundle on startup:", err);
-      distroStore.setManifest({ present: false });
     }
   };
 

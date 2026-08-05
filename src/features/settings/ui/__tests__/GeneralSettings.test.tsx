@@ -16,6 +16,11 @@ import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streami
 import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
 import { SESSION_COST_STORAGE_KEY } from "@/features/chat/lib/sessionCostPreference";
 import { RESPONSE_START_GUTTER_STORAGE_KEY } from "@/features/chat/lib/responseStartGutterPreference";
+import { useDistroStore } from "@/features/settings/stores/distroStore";
+import {
+  getProfileCapabilitySnapshot,
+  useProfileCapability,
+} from "@/shared/profile/capabilities";
 import {
   INITIAL_RUNTIME_CONFIG_RESULT,
   useRuntimeConfigStore,
@@ -38,12 +43,14 @@ const {
   mockLogout,
   mockOpenDialog,
   mockRuntimeConfigApi,
+  mockGetDistroBundle,
   mockSwitchAuthWorkspace,
 } = vi.hoisted(() => ({
   mockGetPlatform: vi.fn(() => "mac"),
   mockListAuthWorkspaces: vi.fn(),
   mockLogout: vi.fn(),
   mockOpenDialog: vi.fn(),
+  mockGetDistroBundle: vi.fn(),
   mockSwitchAuthWorkspace: vi.fn(),
   mockRuntimeConfigApi: {
     clearFakeRuntimeConfig: vi.fn(),
@@ -78,6 +85,10 @@ vi.mock("@/shared/api/runtimeConfig", () => ({
   setFakeRuntimeConfig: mockRuntimeConfigApi.setFakeRuntimeConfig,
 }));
 
+vi.mock("@/shared/api/distro", () => ({
+  getDistroBundle: mockGetDistroBundle,
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
@@ -106,6 +117,25 @@ function createQueryClient() {
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function CapabilityProbe() {
+  const voiceDictation = useProfileCapability("voiceDictation");
+  return (
+    <output data-testid="voice-dictation-capability">
+      {String(voiceDictation)}
+    </output>
+  );
+}
+
 function renderGeneralSettings({
   authStatus,
   onLoggedOut,
@@ -118,6 +148,7 @@ function renderGeneralSettings({
   renderWithProviders(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
+        <CapabilityProbe />
         <GeneralSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
       </ThemeProvider>
     </QueryClientProvider>,
@@ -172,6 +203,14 @@ describe("GeneralSettings appearance section", () => {
     mockRuntimeConfigApi.clearFakeRuntimeConfig.mockResolvedValue(
       INITIAL_RUNTIME_CONFIG_RESULT,
     );
+    mockGetDistroBundle.mockResolvedValue({
+      present: false,
+      kgooseConfigured: false,
+    });
+    useDistroStore.setState({
+      loaded: true,
+      manifest: { present: false, kgooseConfigured: false },
+    });
     mockListAuthWorkspaces.mockResolvedValue({
       workspaces: [],
       activeWorkspaceIdentifier: null,
@@ -818,6 +857,97 @@ describe("GeneralSettings appearance section", () => {
     expect(useRuntimeConfigStore.getState().config).toEqual(nextConfig);
     expect(toastSuccessMock).toHaveBeenCalledWith(
       "Fake endpoint response saved.",
+    );
+  });
+
+  it("recomputes Kgoose capability gates when fake runtime config is saved and cleared", async () => {
+    const user = userEvent.setup();
+    const configWithKgoose = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      kgoose: { baseUrl: "https://runtime.example.test" },
+    } satisfies RuntimeConfig;
+    mockRuntimeConfigApi.setFakeRuntimeConfig.mockResolvedValue(
+      readyRuntimeConfigResult(configWithKgoose),
+    );
+    mockGetDistroBundle
+      .mockResolvedValueOnce({ present: false, kgooseConfigured: true })
+      .mockResolvedValueOnce({ present: false, kgooseConfigured: false });
+    renderGeneralSettings();
+
+    expect(screen.getByTestId("voice-dictation-capability")).toHaveTextContent(
+      "false",
+    );
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Fake endpoint JSON" }),
+      { target: { value: JSON.stringify(configWithKgoose, null, 2) } },
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("voice-dictation-capability"),
+      ).toHaveTextContent("true");
+    });
+    expect(mockGetDistroBundle).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("voice-dictation-capability"),
+      ).toHaveTextContent("false");
+    });
+    expect(getProfileCapabilitySnapshot("voiceDictation")).toBe(false);
+    expect(mockGetDistroBundle).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores stale Kgoose refresh success and failure results", async () => {
+    const staleSuccess = deferred<{
+      present: boolean;
+      kgooseConfigured: boolean;
+    }>();
+    const currentDisabled = deferred<{
+      present: boolean;
+      kgooseConfigured: boolean;
+    }>();
+    mockGetDistroBundle
+      .mockReturnValueOnce(staleSuccess.promise)
+      .mockReturnValueOnce(currentDisabled.promise);
+    renderGeneralSettings();
+
+    const firstRefresh = useDistroStore.getState().refresh();
+    const secondRefresh = useDistroStore.getState().refresh();
+    currentDisabled.resolve({ present: false, kgooseConfigured: false });
+    await secondRefresh;
+    staleSuccess.resolve({ present: false, kgooseConfigured: true });
+    await firstRefresh;
+
+    expect(screen.getByTestId("voice-dictation-capability")).toHaveTextContent(
+      "false",
+    );
+
+    const staleFailure = deferred<{
+      present: boolean;
+      kgooseConfigured: boolean;
+    }>();
+    const currentEnabled = deferred<{
+      present: boolean;
+      kgooseConfigured: boolean;
+    }>();
+    mockGetDistroBundle
+      .mockReturnValueOnce(staleFailure.promise)
+      .mockReturnValueOnce(currentEnabled.promise);
+
+    const thirdRefresh = useDistroStore.getState().refresh();
+    const fourthRefresh = useDistroStore.getState().refresh();
+    currentEnabled.resolve({ present: false, kgooseConfigured: true });
+    await fourthRefresh;
+    staleFailure.reject(new Error("stale failure"));
+    await expect(thirdRefresh).rejects.toThrow("stale failure");
+
+    expect(screen.getByTestId("voice-dictation-capability")).toHaveTextContent(
+      "true",
     );
   });
 

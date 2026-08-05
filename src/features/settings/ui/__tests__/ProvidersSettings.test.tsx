@@ -196,7 +196,10 @@ describe("ProvidersSettings", () => {
       config: allModelProvidersConfig,
     });
     useAgentSetupStore.setState({ operations: new Map() });
-    useDistroStore.setState({ loaded: false, manifest: { present: false } });
+    useDistroStore.setState({
+      loaded: false,
+      manifest: { present: false, kgooseConfigured: false },
+    });
     mocks.listProviderSetupCatalog.mockResolvedValue([]);
     mocks.listCustomProviders.mockResolvedValue([]);
     mocks.clearAgentSetupStatus.mockResolvedValue(undefined);

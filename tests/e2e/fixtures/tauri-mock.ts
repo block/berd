@@ -121,6 +121,7 @@ export function buildInitScript(options?: {
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
       const DISTRO = {
         present: false,
+        kgooseConfigured: false,
       };
       const RUNTIME_CONFIG_RESULT = {
         status: "ready",

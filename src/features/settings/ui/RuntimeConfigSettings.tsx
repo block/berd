@@ -7,6 +7,7 @@ import {
   applyRuntimeProviderConfig,
   defaultModelInventoryModeForLoadResult,
 } from "@/features/providers/runtimeProviderConfig";
+import { useDistroStore } from "@/features/settings/stores/distroStore";
 import { rerunDoctorReport } from "@/shared/api/useDoctorReport";
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -75,12 +76,15 @@ export function RuntimeConfigSettings() {
       nextResult.status === "ready"
         ? nextResult.config
         : useRuntimeConfigStore.getState().config;
-    await applyRuntimeProviderConfig(runtimeConfig, {
-      seedModelsFresh:
-        nextResult.status === "ready" && nextResult.source === "fakeEndpoint",
-      defaultModelInventoryMode:
-        defaultModelInventoryModeForLoadResult(nextResult),
-    });
+    await Promise.all([
+      applyRuntimeProviderConfig(runtimeConfig, {
+        seedModelsFresh:
+          nextResult.status === "ready" && nextResult.source === "fakeEndpoint",
+        defaultModelInventoryMode:
+          defaultModelInventoryModeForLoadResult(nextResult),
+      }),
+      useDistroStore.getState().refresh(),
+    ]);
   }
 
   async function handleSave() {

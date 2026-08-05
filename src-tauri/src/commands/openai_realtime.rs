@@ -1,5 +1,9 @@
 #[cfg(not(feature = "no-voice-dictation"))]
-use crate::services::kgoose;
+use crate::services::kgoose::KgooseContext;
+use crate::{
+    commands::runtime_config::RuntimeConfigState,
+    services::{distro_bundle::DistroBundleState, kgoose},
+};
 use serde::Serialize;
 #[cfg(not(feature = "no-voice-dictation"))]
 use serde_json::json;
@@ -8,8 +12,7 @@ use tauri::{State, WebviewWindow};
 use super::voice_capture::VoiceCaptureState;
 
 #[cfg(not(feature = "no-voice-dictation"))]
-const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
-    "https://kgoose.sqprod.co/cash-app/goose/transcribe/v1/realtime-client-secret";
+const OPENAI_REALTIME_CLIENT_SECRETS_ENDPOINT: &str = "transcribe/v1/realtime-client-secret";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 
 #[derive(Serialize)]
@@ -38,20 +41,34 @@ fn transcription_model() -> String {
         .unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
 }
 
+fn openai_realtime_configured(
+    runtime_config: &crate::commands::runtime_config::RuntimeConfig,
+    distro_state: &DistroBundleState,
+) -> bool {
+    cfg!(not(feature = "no-voice-dictation"))
+        && kgoose::is_configured(runtime_config.kgoose.as_ref(), distro_state.kgoose_config())
+}
+
 #[tauri::command]
-pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String> {
-    // Defense in depth: a restricted build compiled with the
-    // `no-voice-dictation` feature reports "not configured" so the renderer
-    // never requests a realtime client secret. The frontend `voiceDictation`
-    // capability is the primary gate.
+pub async fn get_openai_realtime_status(
+    distro_state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
+) -> Result<OpenAiRealtimeStatus, String> {
+    let runtime_config = runtime_config_state
+        .ready_config(distro_state.inner())
+        .await?;
+
     Ok(OpenAiRealtimeStatus {
-        configured: cfg!(not(feature = "no-voice-dictation")),
+        configured: openai_realtime_configured(&runtime_config, distro_state.inner()),
         transcription_model: transcription_model(),
     })
 }
 
 #[tauri::command]
-pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
+pub async fn create_openai_realtime_session(
+    _distro_state: State<'_, DistroBundleState>,
+    _runtime_config_state: State<'_, RuntimeConfigState>,
+) -> Result<OpenAiRealtimeSession, String> {
     #[cfg(feature = "no-voice-dictation")]
     {
         Err("OpenAI realtime sessions are unsupported because voice dictation is disabled in this build.".to_string())
@@ -60,13 +77,17 @@ pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, S
     #[cfg(not(feature = "no-voice-dictation"))]
     {
         let transcription_model = transcription_model();
-
-        let value = kgoose::post_json_external_url(
-            OPENAI_REALTIME_CLIENT_SECRETS_URL,
-            json!({ "language": "en" }),
-        )
-        .await
-        .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
+        let runtime_config = _runtime_config_state
+            .ready_config(_distro_state.inner())
+            .await?;
+        let kgoose = KgooseContext::new(_distro_state.inner(), &runtime_config);
+        let value = kgoose
+            .post_json(
+                OPENAI_REALTIME_CLIENT_SECRETS_ENDPOINT,
+                json!({ "language": "en" }),
+            )
+            .await
+            .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
         let client_secret = parse_client_secret(&value)?;
 
         Ok(OpenAiRealtimeSession {
@@ -138,28 +159,73 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "no-voice-dictation")]
-    use super::create_openai_realtime_session;
-    use super::get_openai_realtime_status;
+    use super::openai_realtime_configured;
     #[cfg(not(feature = "no-voice-dictation"))]
     use super::parse_client_secret;
+    use crate::{
+        commands::runtime_config::{default_runtime_config, RuntimeConfig, RuntimeKgooseConfig},
+        services::distro_bundle::{DistroBundleState, KgooseDistroConfig},
+        test_support::env_lock,
+    };
     #[cfg(not(feature = "no-voice-dictation"))]
     use serde_json::json;
+    use std::env;
 
-    #[tokio::test]
-    async fn status_configured_tracks_voice_dictation_feature() {
-        let status = get_openai_realtime_status().await.unwrap();
-        // Configured unless the additive `no-voice-dictation` disable feature is
-        // compiled in.
-        assert_eq!(status.configured, cfg!(not(feature = "no-voice-dictation")));
+    #[test]
+    fn status_is_unconfigured_without_explicit_kgoose_endpoint() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::remove_var("KGOOSE_BASE_URL");
+        let runtime_config = default_runtime_config();
+
+        assert!(!openai_realtime_configured(
+            &runtime_config,
+            &DistroBundleState::empty_for_tests(),
+        ));
     }
 
-    #[cfg(feature = "no-voice-dictation")]
-    #[tokio::test]
-    async fn create_session_is_unsupported_when_voice_dictation_is_disabled() {
-        let result = create_openai_realtime_session().await;
+    #[test]
+    fn status_tracks_explicit_runtime_endpoint() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::remove_var("KGOOSE_BASE_URL");
+        let mut runtime_config = default_runtime_config();
+        runtime_config.kgoose = Some(RuntimeKgooseConfig {
+            base_url: Some("https://kgoose.example.test/".to_string()),
+            path: None,
+        });
 
-        assert!(matches!(result, Err(error) if error.contains("unsupported")));
+        assert_eq!(
+            openai_realtime_configured(&runtime_config, &DistroBundleState::empty_for_tests(),),
+            cfg!(not(feature = "no-voice-dictation")),
+        );
+    }
+
+    #[test]
+    fn status_tracks_explicit_distro_endpoint() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::remove_var("KGOOSE_BASE_URL");
+        let runtime_config: RuntimeConfig = default_runtime_config();
+        let distro_state = DistroBundleState::with_kgoose_for_tests(KgooseDistroConfig {
+            base_url: Some("https://kgoose.example.test/".to_string()),
+            path: None,
+        });
+
+        assert_eq!(
+            openai_realtime_configured(&runtime_config, &distro_state),
+            cfg!(not(feature = "no-voice-dictation")),
+        );
+    }
+
+    #[test]
+    fn status_tracks_explicit_environment_endpoint() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::set_var("KGOOSE_BASE_URL", "https://kgoose.example.test/");
+        let runtime_config = default_runtime_config();
+
+        assert_eq!(
+            openai_realtime_configured(&runtime_config, &DistroBundleState::empty_for_tests(),),
+            cfg!(not(feature = "no-voice-dictation")),
+        );
+        env::remove_var("KGOOSE_BASE_URL");
     }
 
     #[cfg(not(feature = "no-voice-dictation"))]

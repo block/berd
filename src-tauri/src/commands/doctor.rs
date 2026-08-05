@@ -1270,7 +1270,9 @@ async fn run_doctor_impl(
     {
         checks.push(check);
     }
-    if doctor_block_checks_enabled() && doctor_kgoose_connectivity_enabled(runtime_config) {
+    if doctor_block_checks_enabled()
+        && doctor_kgoose_connectivity_enabled(distro_state, runtime_config)
+    {
         checks.push(run_kgoose_connectivity_check(distro_state, runtime_config).await);
     }
     DoctorReport { checks }
@@ -1292,10 +1294,17 @@ fn doctor_internal_tooling_checks_enabled(runtime_config: &RuntimeConfig) -> boo
         .unwrap_or(true)
 }
 
-fn doctor_kgoose_connectivity_enabled(runtime_config: &RuntimeConfig) -> bool {
+fn doctor_kgoose_connectivity_enabled(
+    distro_state: &DistroBundleState,
+    runtime_config: &RuntimeConfig,
+) -> bool {
     doctor_config(runtime_config)
         .and_then(|doctor| doctor.kgoose_connectivity)
         .unwrap_or(true)
+        && crate::services::kgoose::is_configured(
+            runtime_config.kgoose.as_ref(),
+            distro_state.kgoose_config(),
+        )
 }
 
 fn doctor_block_checks_enabled() -> bool {
@@ -1527,6 +1536,7 @@ fn doctor_prepend_dirs(app_handle: &AppHandle) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::env_lock;
 
     fn upstream_check(id: &str) -> doctor::DoctorCheck {
         doctor::DoctorCheck {
@@ -1607,20 +1617,67 @@ mod tests {
     }
 
     #[test]
-    fn doctor_policy_comes_from_runtime_config() {
+    fn doctor_policy_and_kgoose_configuration_gate_connectivity_check() {
+        let _guard = env_lock().lock().expect("env lock");
+        env::remove_var("KGOOSE_BASE_URL");
+        let distro_state = DistroBundleState::empty_for_tests();
+
         let disabled = runtime_config_with_doctor(Some(RuntimeDoctorConfig {
             enabled: Some(false),
             kgoose_connectivity: Some(false),
             internal_tooling_checks: Some(false),
         }));
         assert!(!doctor_enabled(&disabled));
-        assert!(!doctor_kgoose_connectivity_enabled(&disabled));
+        assert!(!doctor_kgoose_connectivity_enabled(
+            &distro_state,
+            &disabled
+        ));
         assert!(!doctor_internal_tooling_checks_enabled(&disabled));
 
-        let defaulted = runtime_config_with_doctor(None);
+        let mut defaulted = runtime_config_with_doctor(None);
         assert!(doctor_enabled(&defaulted));
-        assert!(doctor_kgoose_connectivity_enabled(&defaulted));
+        assert!(!doctor_kgoose_connectivity_enabled(
+            &distro_state,
+            &defaulted
+        ));
         assert!(doctor_internal_tooling_checks_enabled(&defaulted));
+
+        defaulted.kgoose = Some(super::super::runtime_config::RuntimeKgooseConfig {
+            base_url: Some("   ".to_string()),
+            path: None,
+        });
+        assert!(!doctor_kgoose_connectivity_enabled(
+            &distro_state,
+            &defaulted
+        ));
+
+        defaulted.kgoose = Some(super::super::runtime_config::RuntimeKgooseConfig {
+            base_url: Some("ftp://kgoose.example.test/".to_string()),
+            path: None,
+        });
+        assert!(!doctor_kgoose_connectivity_enabled(
+            &distro_state,
+            &defaulted
+        ));
+
+        defaulted.kgoose = Some(super::super::runtime_config::RuntimeKgooseConfig {
+            base_url: Some("https://kgoose.example.test/".to_string()),
+            path: None,
+        });
+        assert!(doctor_kgoose_connectivity_enabled(
+            &distro_state,
+            &defaulted
+        ));
+
+        defaulted.doctor = Some(RuntimeDoctorConfig {
+            enabled: None,
+            kgoose_connectivity: Some(false),
+            internal_tooling_checks: None,
+        });
+        assert!(!doctor_kgoose_connectivity_enabled(
+            &distro_state,
+            &defaulted
+        ));
     }
 
     #[tokio::test]

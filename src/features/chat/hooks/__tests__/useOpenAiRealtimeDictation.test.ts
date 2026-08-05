@@ -72,6 +72,16 @@ let mockAudioCapture: { chunks: Int16Array[]; close: ReturnType<typeof vi.fn> };
 
 import { useOpenAiRealtimeDictation } from "../useOpenAiRealtimeDictation";
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 function setupMocks() {
   mockDataChannelListeners = {};
   mockDataChannel = {
@@ -146,6 +156,100 @@ async function renderDictationHook(
 describe("useOpenAiRealtimeDictation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe("configuration availability", () => {
+    it("rechecks status when availability changes without remounting", async () => {
+      setupMocks();
+      mockGetOpenAiRealtimeStatus
+        .mockResolvedValueOnce({ configured: true })
+        .mockResolvedValueOnce({ configured: false });
+
+      const { result, rerender } = renderHook(
+        ({ disabled }) =>
+          useOpenAiRealtimeDictation({
+            disabled,
+            onTranscriptText: vi.fn(),
+          }),
+        { initialProps: { disabled: true } },
+      );
+
+      expect(result.current.isEnabled).toBe(false);
+      expect(mockGetOpenAiRealtimeStatus).not.toHaveBeenCalled();
+
+      await act(async () => rerender({ disabled: false }));
+      expect(result.current.isEnabled).toBe(true);
+
+      await act(async () => rerender({ disabled: true }));
+      expect(result.current.isEnabled).toBe(false);
+
+      await act(async () => rerender({ disabled: false }));
+      expect(result.current.isEnabled).toBe(false);
+      expect(mockGetOpenAiRealtimeStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops active dictation when availability is disabled", async () => {
+      setupMocks();
+      const onTranscriptText = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ disabled }) =>
+          useOpenAiRealtimeDictation({ disabled, onTranscriptText }),
+        { initialProps: { disabled: false } },
+      );
+      await act(async () => {});
+      await act(async () => result.current.startRecording());
+      expect(result.current.isRecording).toBe(true);
+
+      await act(async () => rerender({ disabled: true }));
+
+      expect(result.current.isEnabled).toBe(false);
+      expect(result.current.isRecording).toBe(false);
+      expect(result.current.isStarting()).toBe(false);
+      expect(result.current.isTranscribing).toBe(false);
+      expect(mockAudioCapture.close).toHaveBeenCalledOnce();
+      expect(mockDataChannel.close).toHaveBeenCalledOnce();
+      expect(mockPeerConnection.close).toHaveBeenCalledOnce();
+      expect(mockTrack.stop).toHaveBeenCalledOnce();
+      expect(mockReleaseVoiceDictationMicrophone).toHaveBeenCalledOnce();
+    });
+
+    it("ignores stale status results after newer availability changes", async () => {
+      setupMocks();
+      const staleConfigured = createDeferred<{ configured: boolean }>();
+      mockGetOpenAiRealtimeStatus
+        .mockReturnValueOnce(staleConfigured.promise)
+        .mockResolvedValueOnce({ configured: false });
+
+      const { result, rerender } = renderHook(
+        ({ disabled }) =>
+          useOpenAiRealtimeDictation({
+            disabled,
+            onTranscriptText: vi.fn(),
+          }),
+        { initialProps: { disabled: false } },
+      );
+
+      await act(async () => rerender({ disabled: true }));
+      await act(async () => rerender({ disabled: false }));
+      expect(result.current.isEnabled).toBe(false);
+
+      await act(async () => staleConfigured.resolve({ configured: true }));
+      expect(result.current.isEnabled).toBe(false);
+
+      const staleFailure = createDeferred<{ configured: boolean }>();
+      mockGetOpenAiRealtimeStatus
+        .mockReturnValueOnce(staleFailure.promise)
+        .mockResolvedValueOnce({ configured: true });
+
+      await act(async () => rerender({ disabled: true }));
+      await act(async () => rerender({ disabled: false }));
+      await act(async () => rerender({ disabled: true }));
+      await act(async () => rerender({ disabled: false }));
+      expect(result.current.isEnabled).toBe(true);
+
+      await act(async () => staleFailure.reject(new Error("stale failure")));
+      expect(result.current.isEnabled).toBe(true);
+    });
   });
 
   describe("handleRealtimeEvent", () => {

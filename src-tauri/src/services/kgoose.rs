@@ -22,7 +22,6 @@ use tokio::time::timeout;
 const KGOOSE_BASE_URL_ENV: &str = "KGOOSE_BASE_URL";
 const KGOOSE_PATH_ENV: &str = "KGOOSE_SERVICE_PATH";
 const KGOOSE_PLAYPEN_ENV: &str = "KGOOSE_PLAYPEN";
-const DEFAULT_KGOOSE_BASE_URL: &str = "https://kgoose.stage.sqprod.co/";
 const DEFAULT_KGOOSE_PATH: &str = "cash-app/goose";
 const KGOOSE_NETWORK_ACCESS_MESSAGE: &str =
     "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again.";
@@ -140,30 +139,11 @@ pub(crate) async fn get_json_url_with_timeout(
         .map_err(|error| error.user_message())
 }
 
-/// Posts JSON to a fully resolved external URL without distro routing or playpen baggage.
-#[cfg(not(feature = "no-voice-dictation"))]
-pub(crate) async fn post_json_external_url(url: &str, body: Value) -> Result<Value, String> {
-    let url = reqwest::Url::parse(url)
-        .map_err(|error| format!("Invalid kgoose request URL {url}: {error}"))?;
-    send_json_request(json_post_request(url.clone()), url, &body).await
-}
-
 fn json_post_request(url: reqwest::Url) -> reqwest::RequestBuilder {
     client()
         .post(url)
         .header(ACCEPT, "application/json")
         .header(CONTENT_TYPE, "application/json")
-}
-
-#[cfg(not(feature = "no-voice-dictation"))]
-async fn send_json_request(
-    request: reqwest::RequestBuilder,
-    url: reqwest::Url,
-    body: &Value,
-) -> Result<Value, String> {
-    send_json_request_detailed(request, url, body)
-        .await
-        .map_err(|error| error.user_message())
 }
 
 async fn send_json_request_detailed(
@@ -618,20 +598,25 @@ fn playpen_baggage() -> Option<String> {
     env_value(KGOOSE_PLAYPEN_ENV).map(|playpen| format!("kgoose-playpen={playpen}"))
 }
 
+pub(crate) fn is_configured(
+    runtime_config: Option<&RuntimeKgooseConfig>,
+    distro_config: Option<&KgooseDistroConfig>,
+) -> bool {
+    build_url("", runtime_config, distro_config).is_ok()
+}
+
 fn build_url(
     endpoint: &str,
     runtime_config: Option<&RuntimeKgooseConfig>,
     distro_config: Option<&KgooseDistroConfig>,
 ) -> Result<reqwest::Url, String> {
-    let mut base_url = config_value(
+    let mut base_url = required_config_value(
         KGOOSE_BASE_URL_ENV,
         runtime_config.and_then(|config| config.base_url.as_deref()),
         distro_config.and_then(|config| config.base_url.as_deref()),
-        DEFAULT_KGOOSE_BASE_URL,
         "runtime config kgoose baseUrl",
         "distro kgoose baseUrl",
-        "default kgoose base URL",
-    );
+    )?;
     base_url.value =
         auth::route_kgoose_base_url_for_shared_org(&base_url.value).map_err(auth_error)?;
     let path_prefix = config_value(
@@ -669,6 +654,56 @@ fn auth_error(error: anyhow::Error) -> String {
 struct ConfigValue {
     value: String,
     label: String,
+}
+
+fn required_config_value(
+    env_name: &str,
+    runtime_value: Option<&str>,
+    distro_value: Option<&str>,
+    runtime_label: &str,
+    distro_label: &str,
+) -> Result<ConfigValue, String> {
+    optional_config_value(
+        env_name,
+        runtime_value,
+        distro_value,
+        runtime_label,
+        distro_label,
+    )
+    .ok_or_else(|| {
+        format!(
+            "kgoose is not configured; set {env_name} or provide a kgoose baseUrl in runtime or distro config"
+        )
+    })
+}
+
+fn optional_config_value(
+    env_name: &str,
+    runtime_value: Option<&str>,
+    distro_value: Option<&str>,
+    runtime_label: &str,
+    distro_label: &str,
+) -> Option<ConfigValue> {
+    if let Some(value) = env_value(env_name) {
+        return Some(ConfigValue {
+            value,
+            label: env_name.to_string(),
+        });
+    }
+
+    if let Some(value) = runtime_value.and_then(trim_non_empty) {
+        return Some(ConfigValue {
+            value,
+            label: runtime_label.to_string(),
+        });
+    }
+
+    distro_value
+        .and_then(trim_non_empty)
+        .map(|value| ConfigValue {
+            value,
+            label: distro_label.to_string(),
+        })
 }
 
 fn config_value(
@@ -738,7 +773,7 @@ fn truncate_error_body(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_url, build_url, is_access_request_error_kind,
+        build_sse_url, build_url, is_access_request_error_kind, is_configured,
         is_multipart_access_request_error_kind, kgoose_base_url_from_request_url, playpen_baggage,
         probe_url, truncate_error_body, KgooseDistroConfig, KgooseJsonError,
         KgooseRequestErrorKind, KGOOSE_BASE_URL_ENV, KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
@@ -769,14 +804,40 @@ mod tests {
     }
 
     #[test]
-    fn builds_default_kgoose_url() {
+    fn reports_unconfigured_without_explicit_kgoose_endpoint() {
         let _guard = env_lock().lock().expect("env lock");
         let _bb_home = clear_kgoose_env_and_isolate_bb_home();
 
-        assert_eq!(
-            build_url("v3/get-user-tiles", None, None).unwrap().as_str(),
-            "https://kgoose.stage.sqprod.co/cash-app/goose/v3/get-user-tiles"
-        );
+        assert!(!is_configured(None, None));
+    }
+
+    #[test]
+    fn reports_configured_for_explicit_runtime_or_distro_endpoint() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
+        let runtime_config = RuntimeKgooseConfig {
+            base_url: Some("https://runtime.example.test/".to_string()),
+            path: None,
+        };
+        let distro_config = KgooseDistroConfig {
+            base_url: Some("https://distro.example.test/".to_string()),
+            path: None,
+        };
+
+        assert!(is_configured(Some(&runtime_config), None));
+        assert!(is_configured(None, Some(&distro_config)));
+    }
+
+    #[test]
+    fn rejects_unconfigured_kgoose_url() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _bb_home = clear_kgoose_env_and_isolate_bb_home();
+
+        let error = build_url("v3/get-user-tiles", None, None).unwrap_err();
+
+        assert!(error.contains("kgoose is not configured"));
+        assert!(error.contains(KGOOSE_BASE_URL_ENV));
+        assert!(!error.contains("kgoose.stage.sqprod.co"));
     }
 
     #[test]
@@ -784,7 +845,7 @@ mod tests {
         let _guard = env_lock().lock().expect("env lock");
         let _bb_home = clear_kgoose_env_and_isolate_bb_home();
         let config = KgooseDistroConfig {
-            base_url: Some("https://kgoose.sqprod.co/base/".to_string()),
+            base_url: Some("https://kgoose.example.test/base/".to_string()),
             path: Some("/prod/path/".to_string()),
         };
 
@@ -792,7 +853,7 @@ mod tests {
             build_url("/v3/get-tile", None, Some(&config))
                 .unwrap()
                 .as_str(),
-            "https://kgoose.sqprod.co/base/prod/path/v3/get-tile"
+            "https://kgoose.example.test/base/prod/path/v3/get-tile"
         );
     }
 
@@ -805,7 +866,7 @@ mod tests {
             path: Some("/runtime/path/".to_string()),
         };
         let distro_config = KgooseDistroConfig {
-            base_url: Some("https://kgoose.sqprod.co/".to_string()),
+            base_url: Some("https://kgoose.example.test/".to_string()),
             path: Some("ignored".to_string()),
         };
 
@@ -824,7 +885,7 @@ mod tests {
         env::set_var(KGOOSE_BASE_URL_ENV, "https://example.test/base/");
         env::set_var(KGOOSE_PATH_ENV, "/custom/path/");
         let config = KgooseDistroConfig {
-            base_url: Some("https://kgoose.sqprod.co/".to_string()),
+            base_url: Some("https://kgoose.example.test/".to_string()),
             path: Some("ignored".to_string()),
         };
 
@@ -948,16 +1009,14 @@ mod tests {
     }
 
     #[test]
-    fn builds_sse_url_with_encoded_session_id() {
+    fn rejects_unconfigured_sse_url() {
         let _guard = env_lock().lock().expect("env lock");
         let _bb_home = clear_kgoose_env_and_isolate_bb_home();
 
-        assert_eq!(
-            build_sse_url("v3/get-messages-sse", "session/1", None, None)
-                .unwrap()
-                .as_str(),
-            "https://kgoose.stage.sqprod.co/cash-app/goose/v3/get-messages-sse?session_id=session%2F1"
-        );
+        let error = build_sse_url("v3/get-messages-sse", "session/1", None, None).unwrap_err();
+
+        assert!(error.contains("kgoose is not configured"));
+        assert!(!error.contains("kgoose.stage.sqprod.co"));
     }
 
     #[test]
