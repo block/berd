@@ -397,6 +397,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::agents::read_import_persona_file,
             commands::agents::read_agent_source_file,
+            commands::agents::repair_bundled_agent,
             commands::auth::auth_status,
             commands::auth::start_login,
             commands::auth::login,

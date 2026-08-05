@@ -77,6 +77,8 @@ const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
 const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
+const mockListPersonas = vi.hoisted(() => vi.fn());
+const mockRepairBundledAgent = vi.hoisted(() => vi.fn());
 const mockAutomationBuilderSave = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockListenSessionDeepLinkErrors = vi.hoisted(() => vi.fn());
@@ -405,6 +407,8 @@ vi.mock("./lib/sessionDeepLinkErrors", () => ({
 vi.mock("@/shared/api/agents", () => ({
   createPersonaSource: (...args: unknown[]) => mockCreatePersonaSource(...args),
   listPersonaSources: (...args: unknown[]) => mockListPersonaSources(...args),
+  listPersonas: (...args: unknown[]) => mockListPersonas(...args),
+  repairBundledAgent: (...args: unknown[]) => mockRepairBundledAgent(...args),
   readAgentSourceFile: (...args: unknown[]) => mockReadAgentSourceFile(...args),
   deletePersonaSource: (...args: unknown[]) => mockDeletePersonaSource(...args),
   promotePersonaSource: vi.fn().mockResolvedValue(null),
@@ -850,6 +854,10 @@ describe("AppShell global navigation", () => {
     });
     mockListPersonaSources.mockReset();
     mockListPersonaSources.mockResolvedValue([]);
+    mockListPersonas.mockReset();
+    mockListPersonas.mockResolvedValue([]);
+    mockRepairBundledAgent.mockReset();
+    mockRepairBundledAgent.mockResolvedValue(undefined);
     mockReadAgentSourceFile.mockReset();
     mockReadAgentSourceFile.mockRejectedValue(new Error("not found"));
     mockDeletePersonaSource.mockReset();
@@ -2299,6 +2307,72 @@ describe("AppShell global navigation", () => {
           },
         ],
       });
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({ personaId });
+    });
+  });
+
+  it("restores a missing bundled Berdy agent before starting a chat", async () => {
+    const personaId = "/Users/test/.agents/agents/berdy.md";
+    mockListPersonas.mockResolvedValue([
+      {
+        id: personaId,
+        displayName: "Berdy",
+        avatar: "app-avatar:gloopies-14",
+        systemPrompt: "Help people use Berd.",
+        isBuiltin: false,
+        writable: false,
+        sourceProperties: { metadata: { berdBundled: true } },
+      },
+    ]);
+    useAgentStore.setState({ personas: [], personasLoading: false });
+    renderAppShell();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ask Berdy from Home" }),
+    );
+
+    await waitFor(() => {
+      expect(mockRepairBundledAgent).toHaveBeenCalledWith("berdy.md");
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({ personaId });
+    });
+    expect(mockRepairBundledAgent.mock.invocationCallOrder[0]).toBeLessThan(
+      mockListPersonas.mock.invocationCallOrder[0],
+    );
+    expect(mockListPersonas.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAcpCreateSession.mock.invocationCallOrder[0],
+    );
+    expect(mockToastError).not.toHaveBeenCalledWith(
+      "Berdy couldn't start a chat. Try again.",
+    );
+  });
+
+  it("refreshes personas when repair reports an error after changing disk", async () => {
+    const personaId = "/Users/test/.agents/agents/berdy2.md";
+    mockRepairBundledAgent.mockRejectedValue(new Error("marker write failed"));
+    mockListPersonas.mockResolvedValue([
+      {
+        id: personaId,
+        displayName: "Berdy",
+        avatar: "app-avatar:gloopies-14",
+        systemPrompt: "Help people use Berd.",
+        isBuiltin: false,
+        writable: false,
+        sourceProperties: { metadata: { berdBundled: true } },
+      },
+    ]);
+    useAgentStore.setState({ personas: [], personasLoading: false });
+    renderAppShell();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ask Berdy from Home" }),
+    );
+
+    await waitFor(() => {
+      expect(mockListPersonas).toHaveBeenCalled();
       expect(
         useChatSessionStore.getState().getSession("created-session"),
       ).toMatchObject({ personaId });

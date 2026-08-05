@@ -1,5 +1,8 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::State;
+
+use crate::services::{bundled_agents, distro_bundle::DistroBundleState};
 
 const MAX_PERSONA_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
 const PERSONA_MARKDOWN_SUFFIX: &str = ".persona.md";
@@ -122,6 +125,17 @@ fn validate_file_size(size: u64, label: &'static str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn repair_bundled_agent(
+    file_name: String,
+    state: State<'_, DistroBundleState>,
+) -> Result<(), String> {
+    let bundle = state
+        .bundle()
+        .ok_or_else(|| "Bundled agent distribution is unavailable".to_string())?;
+    bundled_agents::repair_bundled_agent(bundle, &file_name)
 }
 
 #[tauri::command]

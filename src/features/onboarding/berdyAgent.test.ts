@@ -22,6 +22,14 @@ describe("findBerdyPersonaId", () => {
     );
   });
 
+  it("finds the fallback Berdy agent when the primary filename was occupied", () => {
+    expect(
+      findBerdyPersonaId([
+        persona({ id: "/Users/test/.agents/agents/berdy2.md" }),
+      ]),
+    ).toBe("/Users/test/.agents/agents/berdy2.md");
+  });
+
   it("does not select another agent that only shares Berdy's name", () => {
     expect(
       findBerdyPersonaId([

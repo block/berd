@@ -2629,11 +2629,47 @@ export function AppShell({
   );
 
   const handleStartChatWithBerdy = useCallback(
-    (text: string): Promise<boolean> => {
-      const personaId = findBerdyPersonaId(useAgentStore.getState().personas);
+    async (text: string): Promise<boolean> => {
+      const store = useAgentStore.getState();
+      let personaId = findBerdyPersonaId(store.personas);
+
+      if (!personaId) {
+        const { listPersonas, repairBundledAgent } = await import(
+          "@/shared/api/agents"
+        );
+        try {
+          await repairBundledAgent("berdy.md");
+        } catch (error) {
+          console.error("Failed to restore the bundled Berdy agent:", error);
+        }
+
+        try {
+          const personas = await listPersonas();
+          personaId = findBerdyPersonaId(personas);
+          const repairedBerdy = personaId
+            ? personas.find((persona) => persona.id === personaId)
+            : undefined;
+          if (repairedBerdy) {
+            useAgentStore.setState((current) => ({
+              personas: [
+                ...current.personas.filter(
+                  (persona) => persona.id !== repairedBerdy.id,
+                ),
+                repairedBerdy,
+              ],
+            }));
+          }
+        } catch (error) {
+          console.error(
+            "Failed to refresh personas after Berdy repair:",
+            error,
+          );
+        }
+      }
+
       if (!personaId) {
         toast.error(t("home:onboarding.callout.agentUnavailable"));
-        return Promise.resolve(false);
+        return false;
       }
 
       return new Promise((resolve) => {

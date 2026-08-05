@@ -78,6 +78,17 @@ describe("agents API", () => {
     mockedInvoke.mockReset();
   });
 
+  it("requests repair of a bundled agent", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const { repairBundledAgent } = await import("../agents");
+
+    await repairBundledAgent("berdy.md");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("repair_bundled_agent", {
+      fileName: "berdy.md",
+    });
+  });
+
   it("lists personas through ACP agent sources", async () => {
     mockGooseSourcesList.mockResolvedValue({
       sources: [

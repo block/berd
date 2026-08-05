@@ -806,6 +806,10 @@ export async function refreshPersonas(): Promise<Persona[]> {
   return listPersonas();
 }
 
+export async function repairBundledAgent(fileName: string): Promise<void> {
+  await invoke("repair_bundled_agent", { fileName });
+}
+
 export interface ExportResult {
   contents: string;
   filename: string;
