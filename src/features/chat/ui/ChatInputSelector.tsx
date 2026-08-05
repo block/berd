@@ -46,6 +46,7 @@ interface ChatInputSelectorProps {
   contentSide?: "top" | "right" | "bottom" | "left";
   contentAlign?: "start" | "center" | "end";
   disabled?: boolean;
+  modal?: boolean;
 }
 
 export function ChatInputSelector({
@@ -66,6 +67,7 @@ export function ChatInputSelector({
   contentSide,
   contentAlign = "start",
   disabled,
+  modal,
   triggerIconOnly = false,
 }: ChatInputSelectorProps) {
   const skipCloseAutoFocusRef = useRef(false);
@@ -79,7 +81,7 @@ export function ChatInputSelector({
     triggerVariant === "toolbar" ? ComposerActionButton : Button;
 
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu modal={modal} open={open} onOpenChange={onOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>

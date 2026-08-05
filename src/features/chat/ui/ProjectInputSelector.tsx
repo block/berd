@@ -22,6 +22,7 @@ interface ProjectInputSelectorProps {
   contentSide?: "top" | "right" | "bottom" | "left";
   contentAlign?: "start" | "center" | "end";
   disabled?: boolean;
+  modal?: boolean;
 }
 
 export function ProjectInputSelector({
@@ -38,6 +39,7 @@ export function ProjectInputSelector({
   contentSide,
   contentAlign,
   disabled,
+  modal,
   triggerIconOnly,
 }: ProjectInputSelectorProps) {
   const { t } = useTranslation("chat");
@@ -87,6 +89,7 @@ export function ProjectInputSelector({
       contentSide={contentSide}
       contentAlign={contentAlign}
       disabled={disabled}
+      modal={modal}
       sections={[
         {
           items: [

@@ -92,6 +92,8 @@ function AgentVoiceActivityIndicator() {
   );
 }
 
+type OpenToolbarMenu = "attachments" | "model" | "project" | "context";
+
 interface ChatInputToolbarProps {
   agentModelPicker: ChatInputAgentModelPicker & { enabled?: boolean };
   reasoningEffort?: ChatInputReasoningEffort;
@@ -113,7 +115,11 @@ export function ChatInputToolbar({
   const { formatNumber } = useLocaleFormatting();
   const anyVoiceDictationActive = useAnyVoiceDictationActive();
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
-  const [isContextPopoverOpen, setIsContextPopoverOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<OpenToolbarMenu | null>(null);
+  const handleMenuOpenChange = (menu: OpenToolbarMenu) => (open: boolean) => {
+    setOpenMenu((current) => (open ? menu : current === menu ? null : current));
+  };
+  const isContextPopoverOpen = openMenu === "context";
   const {
     providers = [],
     providersLoading,
@@ -278,17 +284,17 @@ export function ChatInputToolbar({
       return;
     }
 
-    setIsContextPopoverOpen(false);
+    setOpenMenu(null);
     void onCompactContext();
   };
 
   const handleOpenAutoCompactSettings = () => {
-    setIsContextPopoverOpen(false);
+    setOpenMenu(null);
     requestOpenSettings("general");
   };
 
   if (!showContextUsage && isContextPopoverOpen) {
-    setIsContextPopoverOpen(false);
+    setOpenMenu(null);
   }
 
   return (
@@ -303,7 +309,11 @@ export function ChatInputToolbar({
         className={cn("flex min-w-0 items-center gap-2", isCompact && "flex-1")}
       >
         {attachmentsEnabled && (
-          <DropdownMenu>
+          <DropdownMenu
+            modal={false}
+            open={openMenu === "attachments"}
+            onOpenChange={handleMenuOpenChange("attachments")}
+          >
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
@@ -351,7 +361,9 @@ export function ChatInputToolbar({
               modelsLoading={modelsLoading}
               modelStatusMessage={modelStatusMessage}
               onModelChange={onModelChange}
+              open={openMenu === "model"}
               onOpen={onPickerOpen}
+              onOpenChange={handleMenuOpenChange("model")}
               loading={providersLoading}
               isCompact={isCompact}
               triggerIconOnly={isCompact}
@@ -365,6 +377,9 @@ export function ChatInputToolbar({
             availableProjects={availableProjects}
             onProjectChange={onProjectChange}
             onCreateProject={onCreateProject}
+            open={openMenu === "project"}
+            onOpenChange={handleMenuOpenChange("project")}
+            modal={false}
             triggerIconOnly={isCompact}
           />
         ) : null}
@@ -381,7 +396,7 @@ export function ChatInputToolbar({
           {showContextUsage && (
             <Popover
               open={isContextPopoverOpen}
-              onOpenChange={setIsContextPopoverOpen}
+              onOpenChange={handleMenuOpenChange("context")}
             >
               <Tooltip>
                 <TooltipTrigger asChild>

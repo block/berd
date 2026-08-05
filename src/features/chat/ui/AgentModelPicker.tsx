@@ -55,6 +55,7 @@ interface AgentModelPickerProps {
   showSelectedModelInTrigger?: boolean;
   triggerTabIndex?: number;
   triggerIconOnly?: boolean;
+  open?: boolean;
   onOpen?: () => void;
   onOpenChange?: (open: boolean) => void;
   reasoningEffort?: ChatInputReasoningEffort;
@@ -166,6 +167,7 @@ export function AgentModelPicker({
   showSelectedModelInTrigger = true,
   triggerTabIndex,
   triggerIconOnly = false,
+  open: controlledOpen,
   onOpen,
   onOpenChange,
   reasoningEffort,
@@ -173,7 +175,14 @@ export function AgentModelPicker({
   contentCollisionPadding = 16,
 }: AgentModelPickerProps) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (nextOpen: boolean) => {
+    if (controlledOpen === undefined) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const modelListRef = useRef<RecommendedModelListHandle>(null);
@@ -379,7 +388,6 @@ export function AgentModelPicker({
           setResolvedContentAlign(resolveContentAlign());
         }
         setOpen(nextOpen);
-        onOpenChange?.(nextOpen);
         if (nextOpen) onOpen?.();
       }}
     >

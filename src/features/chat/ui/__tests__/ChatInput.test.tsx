@@ -3277,6 +3277,62 @@ describe("ChatInput", () => {
     expect(screen.queryByText("Attach file")).not.toBeInTheDocument();
   });
 
+  it("keeps only one dropdown menu open when switching between attach and project", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [{ id: "goose", label: "Goose" }],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [{ id: "gpt-4o", name: "GPT-4o" }],
+        }}
+        projectPicker={{
+          selectedProjectId: "project-1",
+          availableProjects: [
+            {
+              id: "project-1",
+              name: "berd",
+              workingDirs: ["/workspace/goose"],
+            },
+          ],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          attachmentsEnabled: true,
+          onAttachFiles: vi.fn(),
+          onAttachFolders: vi.fn(),
+          onSend: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    const attachTrigger = screen.getByRole("button", { name: "Attach" });
+    const projectTrigger = screen.getByRole("button", {
+      name: /select project/i,
+    });
+
+    await user.click(attachTrigger);
+    expect(screen.getByRole("menuitem", { name: "File" })).toBeInTheDocument();
+
+    await user.click(projectTrigger);
+    expect(screen.getByText("Choose a project")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "File" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(attachTrigger);
+    expect(screen.getByRole("menuitem", { name: "File" })).toBeInTheDocument();
+    expect(screen.queryByText("Choose a project")).not.toBeInTheDocument();
+  });
+
   it("restores composer tooltips after switching from attach to model", async () => {
     const user = userEvent.setup();
 
