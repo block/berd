@@ -20,6 +20,7 @@ import type {
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { Button } from "@/shared/ui/button";
 import { Textarea } from "@/shared/ui/textarea";
+import { SettingsRow } from "@/shared/ui/settings-row";
 
 function runtimeConfigForDraft(result: RuntimeConfigLoadResult): RuntimeConfig {
   return result.status === "ready" ? result.config : DEFAULT_RUNTIME_CONFIG;
@@ -143,74 +144,72 @@ export function RuntimeConfigSettings() {
   }
 
   return (
-    <div className="space-y-3 px-4 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm">{t("runtimeConfig.editorLabel")}</p>
-          <p className="mt-0.5 break-words text-xs text-muted-foreground">
-            {statusMessage}
-          </p>
+    <SettingsRow
+      layout="stacked"
+      label={t("runtimeConfig.editorLabel")}
+      description={statusMessage}
+      action={
+        <div className="space-y-3">
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => void handleRefresh()}
+              disabled={pendingAction !== null}
+            >
+              <RefreshCw className="size-3.5" />
+              {pendingAction === "refresh"
+                ? t("runtimeConfig.refreshing")
+                : t("common:actions.refresh")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => void handleClear()}
+              disabled={pendingAction !== null}
+            >
+              <Trash2 className="size-3.5" />
+              {pendingAction === "clear"
+                ? t("runtimeConfig.clearing")
+                : t("common:actions.clear")}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="xs"
+              onClick={() => void handleSave()}
+              disabled={pendingAction !== null}
+            >
+              <Save className="size-3.5" />
+              {pendingAction === "save"
+                ? t("runtimeConfig.saving")
+                : t("common:actions.save")}
+            </Button>
+          </div>
+          <label className="sr-only" htmlFor="fake-runtime-config-response">
+            {t("runtimeConfig.jsonLabel")}
+          </label>
+          <Textarea
+            id="fake-runtime-config-response"
+            variant="code"
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setError(null);
+            }}
+            aria-invalid={error ? true : undefined}
+            className="min-h-64 resize-y"
+            spellCheck={false}
+          />
+          {error ? (
+            <p className="break-words text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={() => void handleRefresh()}
-            disabled={pendingAction !== null}
-          >
-            <RefreshCw className="size-3.5" />
-            {pendingAction === "refresh"
-              ? t("runtimeConfig.refreshing")
-              : t("common:actions.refresh")}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={() => void handleClear()}
-            disabled={pendingAction !== null}
-          >
-            <Trash2 className="size-3.5" />
-            {pendingAction === "clear"
-              ? t("runtimeConfig.clearing")
-              : t("common:actions.clear")}
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="xs"
-            onClick={() => void handleSave()}
-            disabled={pendingAction !== null}
-          >
-            <Save className="size-3.5" />
-            {pendingAction === "save"
-              ? t("runtimeConfig.saving")
-              : t("common:actions.save")}
-          </Button>
-        </div>
-      </div>
-
-      <label className="sr-only" htmlFor="fake-runtime-config-response">
-        {t("runtimeConfig.jsonLabel")}
-      </label>
-      <Textarea
-        id="fake-runtime-config-response"
-        variant="code"
-        value={draft}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          setError(null);
-        }}
-        aria-invalid={error ? true : undefined}
-        className="min-h-64 resize-y"
-        spellCheck={false}
-      />
-      {error ? (
-        <p className="break-words text-xs text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+      }
+    />
   );
 }

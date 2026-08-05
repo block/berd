@@ -65,6 +65,17 @@ describe("VoiceSettings", () => {
     const view = renderWithProviders(<VoiceSettings />);
 
     expect(screen.getByText("Preparing model")).toBeInTheDocument();
+    const modelList = screen.getByTestId("voice-model-pocket").parentElement;
+    expect(modelList).toHaveClass("divide-y", "divide-border");
+    expect(modelList).not.toHaveClass("border", "rounded-md");
+    expect(screen.getByTestId("voice-model-pocket")).toHaveClass(
+      "pr-4",
+      "py-4",
+    );
+    expect(screen.getByTestId("voice-model-pocket")).not.toHaveClass(
+      "pl-4",
+      "px-4",
+    );
 
     setupState.current = setup({
       ...missing,

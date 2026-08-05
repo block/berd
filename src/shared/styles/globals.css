@@ -585,8 +585,6 @@
   /* Composer pill hover — same soft sideways cast as the sidebar panel, lifted
      closer to the pill so it remains visible at the bottom edge. */
   --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.07);
-  /* Chat composer: soft drop straight down. */
-  --shadow-chat-composer: 0 36px 60px rgba(0, 0, 0, 0.09);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
   --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
@@ -979,7 +977,6 @@
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.15);
   --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.2);
-  --shadow-chat-composer: 0 36px 60px rgba(0, 0, 0, 0.28);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
   --shadow-agent-profile-avatar: 0 18px 32px rgba(0, 0, 0, 0.42);

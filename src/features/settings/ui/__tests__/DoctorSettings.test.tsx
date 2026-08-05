@@ -98,10 +98,20 @@ describe("DoctorSettings", () => {
 
     renderDoctor();
 
-    expect(await screen.findByRole("heading", { name: "Tools" })).toBeVisible();
+    const toolsHeading = await screen.findByRole("heading", {
+      name: "Tools",
+      level: 2,
+    });
+    expect(toolsHeading).toBeVisible();
+    expect(toolsHeading).toHaveClass("text-base", "font-medium");
     expect(screen.getByText("Git")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Environment" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Environment", level: 2 }),
+    ).toBeVisible();
     expect(screen.getByText("Local Environment")).toBeVisible();
+    expect(toolsHeading.closest('[data-slot="settings-sections"]')).toHaveClass(
+      "space-y-11",
+    );
   });
 
   it("copies a report grouped by backend categories", async () => {
@@ -158,7 +168,7 @@ describe("DoctorSettings", () => {
     renderDoctor();
 
     await screen.findByText("Integration");
-    const headings = screen.getAllByRole("heading", { level: 4 });
+    const headings = screen.getAllByRole("heading", { level: 2 });
     expect(headings.map((heading) => heading.textContent)).toEqual([
       "Integrations",
       "Tools",

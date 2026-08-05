@@ -13,7 +13,7 @@ import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
 import { VoiceSettings } from "@/features/voice-conversation/ui/VoiceSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
-import { PageShell } from "@/shared/ui/page-shell";
+import { SettingsPane } from "@/shared/ui/SettingsPage";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
 import { useProfileCapability } from "@/shared/profile/capabilities";
@@ -64,7 +64,7 @@ export function SettingsView({
   }
 
   return (
-    <PageShell contentWidth="narrow" contentClassName="gap-0">
+    <SettingsPane>
       {activeSection === "providers" && (
         <ProvidersSettings
           onStartTroubleshootingChat={onStartTroubleshootingChat}
@@ -86,6 +86,6 @@ export function SettingsView({
       {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}
       {activeSection === "updates" && updatesEnabled && <UpdatesSettings />}
-    </PageShell>
+    </SettingsPane>
   );
 }

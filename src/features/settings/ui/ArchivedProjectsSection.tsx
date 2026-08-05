@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, buttonVariants } from "@/shared/ui/button";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import { SettingsSection } from "@/shared/ui/settings-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,49 +58,47 @@ export function ArchivedProjectsSection() {
 
   return (
     <>
-      <div className="space-y-3">
-        <h4 className="text-base text-foreground">
-          {t("projects.sectionTitle")}
-        </h4>
+      <SettingsSection title={t("projects.sectionTitle")}>
         {!loadingArchived && archivedProjects.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("projects.empty")}</p>
         ) : null}
         {archivedProjects.map((project) => (
-          <div
+          <SettingsRow
             key={project.id}
-            className="flex items-center justify-between gap-3 rounded-sm bg-card px-3 py-2 text-card-foreground"
-          >
-            <div className="flex min-w-0 items-center gap-2">
+            density="compact"
+            leading={
               <ProjectIcon
                 icon={project.icon}
                 color={project.color}
                 className="size-4 shrink-0 text-foreground"
                 imageClassName="size-4 shrink-0 rounded-xs"
               />
-              <span className="truncate text-sm">{project.name}</span>
-            </div>
-            <div className="flex flex-shrink-0 items-center gap-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={() => handleRestoreProject(project.id)}
-              >
-                {t("common:actions.restore")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                destructive
-                onClick={() => setDeletingProject(project)}
-              >
-                {t("common:actions.delete")}
-              </Button>
-            </div>
-          </div>
+            }
+            label={<span className="block truncate">{project.name}</span>}
+            action={
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => handleRestoreProject(project.id)}
+                >
+                  {t("common:actions.restore")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  destructive
+                  onClick={() => setDeletingProject(project)}
+                >
+                  {t("common:actions.delete")}
+                </Button>
+              </div>
+            }
+          />
         ))}
-      </div>
+      </SettingsSection>
 
       <AlertDialog
         open={!!deletingProject}

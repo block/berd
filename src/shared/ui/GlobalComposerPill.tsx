@@ -102,6 +102,7 @@ export interface GlobalComposerStarterRequest {
 
 interface GlobalComposerPillProps {
   focusRequest?: number;
+  elevated?: boolean;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
   onExpand?: (
     payload: GlobalComposerExpandPayload,
@@ -204,6 +205,7 @@ function getPreferredModel(
 
 export function GlobalComposerPill({
   focusRequest = 0,
+  elevated = false,
   onSend,
   onExpand,
   onDismiss,
@@ -1240,6 +1242,7 @@ export function GlobalComposerPill({
       className={cn(
         "global-composer-pill group relative fixed z-40 isolate flex flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-[box-shadow,opacity,transform] duration-300 ease-out hover:shadow-global-composer-pill-hover",
         placementClassName,
+        elevated && placement === "docked" && "shadow-elevated",
         placement === "centered" && "global-composer-pill-centered",
         placement === "handoff" &&
           "pointer-events-none global-composer-pill-handoff",

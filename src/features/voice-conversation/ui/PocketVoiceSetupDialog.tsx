@@ -2,7 +2,9 @@ import { Download, Headphones, Play, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
+import { SettingsRow } from "@/shared/ui/settings-row";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import { cn } from "@/shared/lib/cn";
 import {
   Dialog,
   DialogBody,
@@ -78,8 +80,10 @@ export function PocketVoiceSetupDialog({
 
 export function PocketVoiceSetupContent({
   setup,
+  presentation = "dialog",
 }: {
   setup: PocketVoiceSetup;
+  presentation?: "dialog" | "settings";
 }) {
   const { t } = useTranslation("settings");
   const { status } = setup;
@@ -94,6 +98,7 @@ export function PocketVoiceSetupContent({
   const pocketInstalled = status?.pocketInstalled ?? status?.installed ?? false;
   const parakeetInstalled =
     status?.parakeetInstalled ?? status?.installed ?? false;
+  const isSettingsPresentation = presentation === "settings";
   const models = [
     {
       model: "pocket" as const,
@@ -126,8 +131,16 @@ export function PocketVoiceSetupContent({
   ];
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-2 rounded-md border border-border p-4">
+    <div
+      className={cn("space-y-4", isSettingsPresentation && "overflow-hidden")}
+    >
+      <div
+        className={cn(
+          isSettingsPresentation
+            ? "divide-y divide-border"
+            : "space-y-2 rounded-md border border-border p-4",
+        )}
+      >
         {models.map(
           ({
             model,
@@ -139,25 +152,25 @@ export function PocketVoiceSetupContent({
             inProgress,
             modelError,
           }) => (
-            <div
+            <SettingsRow
               key={model}
               data-testid={`voice-model-${model}`}
-              className="space-y-2 border-b border-border py-3 text-sm last:border-b-0 last:pb-0 first:pt-0"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium">{label}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {installed
-                      ? t("voice.modelInstalledSize", {
-                          size: formatBytes(diskBytes ?? 0),
-                        })
-                      : t("voice.modelMissingSize", {
-                          size: formatBytes(downloadBytes),
-                        })}
-                  </p>
-                </div>
-                {inProgress ? null : installed ? (
+              className={cn(
+                !isSettingsPresentation &&
+                  "border-b border-border last:border-b-0 last:pb-0 first:pt-0",
+              )}
+              label={label}
+              description={
+                installed
+                  ? t("voice.modelInstalledSize", {
+                      size: formatBytes(diskBytes ?? 0),
+                    })
+                  : t("voice.modelMissingSize", {
+                      size: formatBytes(downloadBytes),
+                    })
+              }
+              action={
+                inProgress ? undefined : installed ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -190,110 +203,119 @@ export function PocketVoiceSetupContent({
                       ? t("voice.retryDownload")
                       : t("voice.download")}
                   </Button>
-                )}
-              </div>
-              {inProgress && modelProgress ? (
-                <div className="space-y-1" aria-live="polite">
-                  <Progress
-                    value={
-                      modelProgress.totalBytes > 0
-                        ? (modelProgress.downloadedBytes /
-                            modelProgress.totalBytes) *
-                          100
-                        : 0
-                    }
-                  />
-                  <div className="flex justify-between gap-3 text-xs text-muted-foreground">
-                    <span>
-                      {t(`voice.downloadPhase.${modelProgress.phase}`)}
-                    </span>
-                    <span>
-                      {t("voice.downloadProgress", {
-                        downloaded: formatBytes(modelProgress.downloadedBytes),
-                        total: formatBytes(modelProgress.totalBytes),
-                      })}
-                    </span>
+                )
+              }
+              details={
+                inProgress && modelProgress ? (
+                  <div className="space-y-1" aria-live="polite">
+                    <Progress
+                      value={
+                        modelProgress.totalBytes > 0
+                          ? (modelProgress.downloadedBytes /
+                              modelProgress.totalBytes) *
+                            100
+                          : 0
+                      }
+                    />
+                    <div className="flex justify-between gap-3 text-xs text-muted-foreground">
+                      <span>
+                        {t(`voice.downloadPhase.${modelProgress.phase}`)}
+                      </span>
+                      <span>
+                        {t("voice.downloadProgress", {
+                          downloaded: formatBytes(
+                            modelProgress.downloadedBytes,
+                          ),
+                          total: formatBytes(modelProgress.totalBytes),
+                        })}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ) : null}
-              {!installed && modelError ? (
-                <p className="text-xs text-destructive" role="alert">
-                  {modelError}
-                </p>
-              ) : null}
-            </div>
+                ) : !installed && modelError ? (
+                  <p className="text-xs text-destructive" role="alert">
+                    {modelError}
+                  </p>
+                ) : undefined
+              }
+            />
           ),
         )}
       </div>
 
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error || (status && pocketInstalled) ? (
+        <div className={cn("space-y-4", isSettingsPresentation && "px-4 pb-4")}>
+          {error ? (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
 
-      {status && pocketInstalled ? (
-        <>
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">
-              {t("voice.playbackSpeed")}
-            </legend>
-            <div className="flex flex-wrap gap-2">
-              {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                <Button
-                  key={speed}
-                  type="button"
-                  size="sm"
-                  variant={
-                    status.playbackSpeed === speed ? "primary" : "outline"
-                  }
-                  aria-pressed={status.playbackSpeed === speed}
-                  onClick={() => void setup.setPlaybackSpeed(speed)}
-                >
-                  {speed}×
-                </Button>
-              ))}
-            </div>
-          </fieldset>
-          <RadioGroup
-            value={status.selectedVoice}
-            onValueChange={(voiceId) => void setup.selectVoice(voiceId)}
-            className="grid grid-cols-2 gap-2"
-            aria-label={t("voice.voiceLabel")}
-          >
-            {status.voices.map((voice) => (
-              <div
-                key={voice.id}
-                data-testid={`pocket-voice-${voice.id}`}
-                className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+          {status && pocketInstalled ? (
+            <>
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">
+                  {t("voice.playbackSpeed")}
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                    <Button
+                      key={speed}
+                      type="button"
+                      size="sm"
+                      variant={
+                        status.playbackSpeed === speed ? "primary" : "outline"
+                      }
+                      aria-pressed={status.playbackSpeed === speed}
+                      onClick={() => void setup.setPlaybackSpeed(speed)}
+                    >
+                      {speed}×
+                    </Button>
+                  ))}
+                </div>
+              </fieldset>
+              <RadioGroup
+                value={status.selectedVoice}
+                onValueChange={(voiceId) => void setup.selectVoice(voiceId)}
+                className="grid grid-cols-2 gap-2"
+                aria-label={t("voice.voiceLabel")}
               >
-                <label
-                  htmlFor={`pocket-voice-${voice.id}`}
-                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
-                >
-                  <RadioGroupItem
-                    id={`pocket-voice-${voice.id}`}
-                    value={voice.id}
-                  />
-                  <span>{voice.name}</span>
-                </label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={t("voice.previewVoice", { voice: voice.name })}
-                  disabled={setup.previewingVoiceId !== null}
-                  onClick={() => void setup.previewVoice(voice.id)}
-                >
-                  <Play className="size-3.5" />
-                  {setup.previewingVoiceId === voice.id
-                    ? t("voice.playing")
-                    : t("voice.preview")}
-                </Button>
-              </div>
-            ))}
-          </RadioGroup>
-        </>
+                {status.voices.map((voice) => (
+                  <div
+                    key={voice.id}
+                    data-testid={`pocket-voice-${voice.id}`}
+                    className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                  >
+                    <label
+                      htmlFor={`pocket-voice-${voice.id}`}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                    >
+                      <RadioGroupItem
+                        id={`pocket-voice-${voice.id}`}
+                        value={voice.id}
+                      />
+                      <span>{voice.name}</span>
+                    </label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t("voice.previewVoice", {
+                        voice: voice.name,
+                      })}
+                      disabled={setup.previewingVoiceId !== null}
+                      onClick={() => void setup.previewVoice(voice.id)}
+                    >
+                      <Play className="size-3.5" />
+                      {setup.previewingVoiceId === voice.id
+                        ? t("voice.playing")
+                        : t("voice.preview")}
+                    </Button>
+                  </div>
+                ))}
+              </RadioGroup>
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       <ConfirmDialog

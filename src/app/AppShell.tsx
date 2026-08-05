@@ -4824,6 +4824,10 @@ export function AppShell({
             ) : null}
             {showGlobalComposer ? (
               <GlobalComposerPill
+                elevated={
+                  renderedLocation.view === "settings" ||
+                  renderedLocation.view === "connections"
+                }
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}
                 onExpand={handleGlobalComposerExpand}

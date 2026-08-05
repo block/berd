@@ -64,11 +64,17 @@ describe("KeyboardShortcutsSettings", () => {
     expect(screen.getByRole("button", { name: "Reset all" })).toBeDisabled();
   });
 
-  it("shows the global shortcut on macOS", () => {
+  it("shows shortcut buttons with content-hugging padding and flat keycaps", () => {
     renderWithProviders(<KeyboardShortcutsSettings />);
 
     expect(screen.getByText("Global shortcut")).toBeInTheDocument();
-    expect(getShortcutButton("Global shortcut")).toHaveTextContent("⌥Space");
+    const button = getShortcutButton("Global shortcut");
+    expect(button).toHaveTextContent("⌥Space");
+    expect(button).toHaveClass("w-fit", "px-1.5");
+    expect(button).not.toHaveClass("min-w-24");
+    for (const keycap of button.querySelectorAll('[data-slot="kbd"]')) {
+      expect(keycap).toHaveClass("shadow-none");
+    }
   });
 
   it("records a new shortcut for a command", async () => {

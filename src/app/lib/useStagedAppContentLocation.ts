@@ -15,8 +15,14 @@ export function useStagedAppContentLocation(
   const [renderedLocation, setRenderedLocation] =
     useState<AppNavigationLocation>(targetLocation);
   const pendingUpdateIdRef = useRef(0);
+  const isSettingsSectionChange =
+    renderedLocation.view === "settings" &&
+    targetLocation.view === "settings" &&
+    !areAppNavigationLocationsEqual(renderedLocation, targetLocation);
   const stageRouteContent =
-    targetLocation.view !== "chat" && targetLocation.view !== "home";
+    targetLocation.view !== "chat" &&
+    targetLocation.view !== "home" &&
+    !isSettingsSectionChange;
   const visibleRenderedLocation = stageRouteContent
     ? renderedLocation
     : targetLocation;

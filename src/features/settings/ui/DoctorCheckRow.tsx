@@ -9,6 +9,7 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { SettingsRow } from "@/shared/ui/settings-row";
 import { Spinner } from "@/shared/ui/spinner";
 import {
   AlertDialog,
@@ -90,59 +91,66 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
 
   return (
     <>
-      <div className="flex items-center gap-2.5 rounded-md bg-background px-3.5 py-2.5">
-        <Icon
-          className={cn("h-4 w-4 flex-shrink-0", STATUS_COLOR[check.status])}
-        />
-
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-sm">{check.label}</span>
-          <span className="break-words text-xs text-muted-foreground">
-            {check.message}
-          </span>
-          {check.path && (
-            <span className="break-words font-mono text-[10px] text-muted-foreground">
-              {check.main?.bundled ? t("doctor.bundledPath") : check.path}
-            </span>
-          )}
-          {check.bridgePath && (
-            <span className="break-words font-mono text-[10px] text-muted-foreground">
-              {check.bridge?.bundled
-                ? t("doctor.bundledPath")
-                : check.bridgePath}
-            </span>
-          )}
-          <AgentVersionInfo check={check} className="mt-0.5" />
-        </div>
-
-        {check.fixType && check.status !== "pass" && (
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            leftIcon={<Wrench />}
-            onClick={openInstallFixDialog}
-            className="flex-shrink-0"
-          >
-            {t("common:actions.fix")}
-          </Button>
-        )}
-
-        {check.fixUrl && check.status !== "pass" && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t("common:buttons.openFixUrl")}
-            onClick={() => {
-              if (check.fixUrl) void openUrl(check.fixUrl);
-            }}
-            className="flex-shrink-0"
-          >
-            <ExternalLink />
-          </Button>
-        )}
-      </div>
+      <SettingsRow
+        density="compact"
+        align="start"
+        leading={
+          <Icon
+            className={cn("h-4 w-4 flex-shrink-0", STATUS_COLOR[check.status])}
+          />
+        }
+        label={check.label}
+        description={
+          <>
+            <span className="block break-words">{check.message}</span>
+            {check.path ? (
+              <span className="block break-words font-mono text-[10px]">
+                {check.main?.bundled ? t("doctor.bundledPath") : check.path}
+              </span>
+            ) : null}
+            {check.bridgePath ? (
+              <span className="block break-words font-mono text-[10px]">
+                {check.bridge?.bundled
+                  ? t("doctor.bundledPath")
+                  : check.bridgePath}
+              </span>
+            ) : null}
+            <AgentVersionInfo check={check} className="mt-0.5" />
+          </>
+        }
+        action={
+          check.status !== "pass" && (check.fixType || check.fixUrl) ? (
+            <div className="flex items-center gap-1.5">
+              {check.fixType ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  leftIcon={<Wrench />}
+                  onClick={openInstallFixDialog}
+                  className="flex-shrink-0"
+                >
+                  {t("common:actions.fix")}
+                </Button>
+              ) : null}
+              {check.fixUrl ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("common:buttons.openFixUrl")}
+                  onClick={() => {
+                    if (check.fixUrl) void openUrl(check.fixUrl);
+                  }}
+                  className="flex-shrink-0"
+                >
+                  <ExternalLink />
+                </Button>
+              ) : null}
+            </div>
+          ) : undefined
+        }
+      />
 
       <AlertDialog
         open={showFixDialog}

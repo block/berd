@@ -617,7 +617,7 @@ export function ProvidersSettings({
   );
 
   return (
-    <SettingsPage>
+    <SettingsPage title={t("nav.providers")}>
       {showSetupDetourReturn ? (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-card-chat bg-foreground px-3 py-2 text-background">
           <p className="text-xs">
@@ -664,29 +664,40 @@ export function ProvidersSettings({
           </Button>
         </div>
 
-        <div className="flex flex-col gap-3">
-          {agents.map((agent) => (
-            <AgentProviderCard
+        <div>
+          {agents.map((agent, index) => (
+            <div
               key={agent.id}
-              provider={agent}
-              readiness={agentReadiness.get(agent.id)}
-              versionCheck={agentChecks.get(agent.id)}
-              statusLoading={agentStatusRefreshing}
-              onStartTroubleshootingChat={onStartTroubleshootingChat}
-              onProviderReady={handleProviderConnected}
-              expandedContent={
-                agent.id === "goose" ? modelProvidersContent : undefined
+              className={
+                agent.id === "goose"
+                  ? "border-b border-border pb-4"
+                  : index > 0 && agents[index - 1]?.id !== "goose"
+                    ? "border-t border-border"
+                    : undefined
               }
-              collapsedSupplement={
-                agent.id === "goose" ? gooseCollapsedSupplement : undefined
-              }
-              statusIndicator={
-                agent.id === "goose" ? gooseStatusIndicator : undefined
-              }
-              statusIndicatorOpensDetails={
-                agent.id === "goose" && connectedModels.length === 0
-              }
-            />
+            >
+              <AgentProviderCard
+                provider={agent}
+                readiness={agentReadiness.get(agent.id)}
+                versionCheck={agentChecks.get(agent.id)}
+                statusLoading={agentStatusRefreshing}
+                onStartTroubleshootingChat={onStartTroubleshootingChat}
+                onProviderReady={handleProviderConnected}
+                expandedContent={
+                  agent.id === "goose" ? modelProvidersContent : undefined
+                }
+                collapsedSupplement={
+                  agent.id === "goose" ? gooseCollapsedSupplement : undefined
+                }
+                statusIndicator={
+                  agent.id === "goose" ? gooseStatusIndicator : undefined
+                }
+                statusIndicatorOpensDetails={
+                  agent.id === "goose" && connectedModels.length === 0
+                }
+                presentation={agent.id === "goose" ? "card" : "row"}
+              />
+            </div>
           ))}
         </div>
       </section>

@@ -16,6 +16,10 @@ import {
 } from "@/features/settings/lib/agentVersionDisplay";
 import { DoctorCheckRow } from "./DoctorCheckRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import {
+  SettingsSection,
+  SettingsSections,
+} from "@/shared/ui/settings-section";
 
 const DOCTOR_LONG_RUNNING_HINT_DELAY_MS = 5_000;
 const DOCTOR_REPORT_TIMEOUT_SECONDS = 60;
@@ -215,7 +219,7 @@ export function DoctorSettings() {
   }, [copied, copyDebugInfo, loading, report, runChecks, setTopBarActions, t]);
 
   return (
-    <SettingsPage>
+    <SettingsPage title={t("doctor.title")}>
       <div className="space-y-6">
         {loading ? (
           <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -233,15 +237,9 @@ export function DoctorSettings() {
             ) : null}
           </div>
         ) : report ? (
-          checkGroups.map((group) => (
-            <div
-              key={group.category}
-              className="mx-auto w-full max-w-xl space-y-2"
-            >
-              <h4 className="text-xs uppercase tracking-wide text-muted-foreground">
-                {group.categoryLabel}
-              </h4>
-              <div className="space-y-2">
+          <SettingsSections>
+            {checkGroups.map((group) => (
+              <SettingsSection key={group.category} title={group.categoryLabel}>
                 {group.checks.map((check) => (
                   <DoctorCheckRow
                     key={check.id}
@@ -249,9 +247,9 @@ export function DoctorSettings() {
                     onFixed={runChecks}
                   />
                 ))}
-              </div>
-            </div>
-          ))
+              </SettingsSection>
+            ))}
+          </SettingsSections>
         ) : (
           <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
             {t("doctor.empty")}

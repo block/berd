@@ -32,7 +32,12 @@ import { useProfileCapability } from "@/shared/profile/capabilities";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
-import { PageHeader, PageShell } from "@/shared/ui/page-shell";
+import { PageHeader } from "@/shared/ui/page-shell";
+import { SettingsPane } from "@/shared/ui/SettingsPage";
+import {
+  SettingsSection,
+  SettingsSections,
+} from "@/shared/ui/settings-section";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Skeleton } from "@/shared/ui/skeleton";
 import {
@@ -40,12 +45,10 @@ import {
   isEditableExtension,
   OAuthConnectionCard,
 } from "./ConnectionCards";
-import { ConnectionDetailsDialog } from "./ConnectionDetailsDialog";
 
 const CONNECTIONS_REFETCH_INTERVAL_MS = 5_000;
 
-// Two-column card grid; collapses to one column in narrow windows.
-const connectionsGridClass = "grid grid-cols-1 gap-4 sm:grid-cols-2";
+const connectionsGridClass = "divide-y divide-border";
 
 function ConnectionsEmptyState() {
   const { t } = useTranslation("settings");
@@ -238,7 +241,6 @@ export function ConnectionsView() {
         key={gridItemKey(item)}
         entry={item.entry}
         status={item.status}
-        onSelect={() => setSelectedKey(gridItemKey(item))}
       />
     ) : (
       <ExtensionConnectionCard
@@ -248,26 +250,19 @@ export function ConnectionsView() {
         onSelect={() => {
           if (isEditableExtension(item.extension)) {
             handleConfigure(item.extension);
-            return;
           }
-          setSelectedKey(gridItemKey(item));
         }}
       />
     );
 
-  // Details dialog selection, keyed so the dialog stays in sync with live
-  // refetches (status changes, extension edits) while open.
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selectedItem = useMemo(() => {
-    if (selectedKey === null) return null;
-    return gridItems.find((item) => gridItemKey(item) === selectedKey) ?? null;
-  }, [gridItems, selectedKey]);
-
   return (
-    <PageShell contentWidth="default" contentClassName="gap-6">
+    <SettingsPane contentClassName="gap-6">
       <PageHeader
         title={t("connections.title")}
         description={t("connections.description")}
+        variant="default"
+        titleClassName="font-medium"
+        descriptionClassName="text-xs font-normal text-muted-foreground"
       />
 
       {showDisabledBanner ? (
@@ -319,35 +314,19 @@ export function ConnectionsView() {
           {t("connections.noResults")}
         </p>
       ) : (
-        <>
+        <SettingsSections>
           {activeItems.length > 0 ? (
-            <section className="space-y-3">
-              <h2 className="text-sm font-normal text-foreground">
-                {t("connections.sections.installed")}
-              </h2>
-              <div className={connectionsGridClass}>
-                {activeItems.map(renderGridItem)}
-              </div>
-            </section>
+            <SettingsSection title={t("connections.sections.installed")}>
+              {activeItems.map(renderGridItem)}
+            </SettingsSection>
           ) : null}
           {inactiveItems.length > 0 ? (
-            <section className="space-y-3">
-              <h2 className="text-sm font-normal text-foreground">
-                {t("connections.sections.available")}
-              </h2>
-              <div className={connectionsGridClass}>
-                {inactiveItems.map(renderGridItem)}
-              </div>
-            </section>
+            <SettingsSection title={t("connections.sections.available")}>
+              {inactiveItems.map(renderGridItem)}
+            </SettingsSection>
           ) : null}
-        </>
+        </SettingsSections>
       )}
-
-      <ConnectionDetailsDialog
-        item={selectedItem}
-        onClose={() => setSelectedKey(null)}
-        onReset={handleReset}
-      />
 
       {modalMode === "add" && (
         <ExtensionModal onSubmit={handleSubmit} onClose={handleModalClose} />
@@ -361,6 +340,6 @@ export function ConnectionsView() {
           onClose={handleModalClose}
         />
       )}
-    </PageShell>
+    </SettingsPane>
   );
 }

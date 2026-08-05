@@ -59,6 +59,8 @@ export type DesignSystemSection =
   | "component-separator"
   | "component-session-activity-indicator"
   | "component-settings-page"
+  | "component-settings-section"
+  | "component-settings-row"
   | "component-sheet"
   | "component-sidebar"
   | "component-skeleton"
@@ -118,6 +120,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-input", label: "Input" },
   { id: "component-label", label: "Label" },
   { id: "component-detail-page-shell", label: "Detail Page Shell" },
+  { id: "component-main-panel-layout", label: "Main Panel Layout" },
   { id: "component-popover", label: "Popover" },
   { id: "component-progress", label: "Progress" },
   { id: "component-radio-group", label: "Radio Group" },
@@ -129,6 +132,8 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
     label: "Session Activity Indicator",
   },
   { id: "component-settings-page", label: "Settings Page" },
+  { id: "component-settings-section", label: "Settings Section" },
+  { id: "component-settings-row", label: "Settings Row" },
   { id: "component-sheet", label: "Sheet" },
   { id: "component-skeleton", label: "Skeleton" },
   { id: "component-slider", label: "Slider" },
@@ -158,7 +163,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-berd-logo", label: "Berd Logo" },
   { id: "component-hover-card", label: "Hover Card" },
   { id: "component-input-otp", label: "Input OTP" },
-  { id: "component-main-panel-layout", label: "Main Panel Layout" },
   { id: "component-menubar", label: "Menubar" },
   { id: "component-navigation-menu", label: "Navigation Menu" },
   { id: "component-page-columns", label: "Page Columns" },

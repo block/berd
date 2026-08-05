@@ -197,6 +197,12 @@ function deferred<T>() {
 }
 
 describe("GlobalComposerPill", () => {
+  it("uses the elevated panel shadow when elevated and docked", () => {
+    renderGlobalComposer(vi.fn(), { elevated: true, placement: "docked" });
+
+    expect(screen.getByRole("region")).toHaveClass("shadow-elevated");
+  });
+
   beforeEach(() => {
     resetVoiceDictationShortcutControllerForTests();
     mockOpenDialog.mockReset();

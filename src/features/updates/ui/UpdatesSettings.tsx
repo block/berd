@@ -7,6 +7,7 @@ import {
 import { Button, type ButtonProps } from "@/shared/ui/button";
 import { Progress } from "@/shared/ui/progress";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { SettingsRow } from "@/shared/ui/settings-row";
 
 const STATUS_KEY: Record<UpdateStatus, string> = {
   unavailable: "unavailable",
@@ -87,94 +88,100 @@ export function UpdatesSettings() {
         : t("updates.actions.checking");
 
   return (
-    <SettingsPage contentClassName="space-y-6">
-      <section className="overflow-hidden rounded-md bg-background px-6 py-5">
-        <div className="space-y-1">
-          <div className="flex items-baseline justify-between gap-2">
-            <h4 className="text-sm text-foreground">
-              {t("updates.card.title")}
-            </h4>
-            {currentVersion ? (
+    <SettingsPage
+      title={t("updates.title")}
+      description={t("updates.description")}
+    >
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label={t("updates.card.title")}
+          description={t("updates.card.description")}
+          action={
+            currentVersion ? (
               <span className="text-xs text-muted-foreground">
                 {t("updates.card.currentVersion", {
                   version: currentVersion,
                 })}
               </span>
-            ) : null}
-          </div>
-          <p className="text-xs leading-4 text-muted-foreground">
-            {t("updates.card.description")}
-          </p>
-        </div>
+            ) : null
+          }
+        />
 
-        <div className="mt-6 flex items-center justify-between gap-6">
-          <div className="min-w-0 flex-1 text-sm leading-5">
-            {t("updates.card.checkPrompt")}
-          </div>
-          {status === "ready" ? (
-            <Button
-              type="button"
-              {...updateActionButtonProps}
-              onClick={() => void relaunch()}
-            >
-              {t("updates.actions.restart")}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              {...updateActionButtonProps}
-              onClick={() => void checkForUpdate()}
-              disabled={!enabled || isCheckDisabled(status)}
-              feedbackState={isBusy ? "loading" : "idle"}
-              loadingLabel={busyLabel}
-              preserveWidth
-            >
-              {actionLabel}
-            </Button>
-          )}
-        </div>
+        <SettingsRow
+          label={t("updates.card.checkPrompt")}
+          action={
+            status === "ready" ? (
+              <Button
+                type="button"
+                {...updateActionButtonProps}
+                onClick={() => void relaunch()}
+              >
+                {t("updates.actions.restart")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                {...updateActionButtonProps}
+                onClick={() => void checkForUpdate()}
+                disabled={!enabled || isCheckDisabled(status)}
+                feedbackState={isBusy ? "loading" : "idle"}
+                loadingLabel={busyLabel}
+                preserveWidth
+              >
+                {actionLabel}
+              </Button>
+            )
+          }
+          details={
+            status !== "idle" ? (
+              <>
+                {status === "error" ? (
+                  <div className="space-y-1 text-xs leading-4 text-destructive">
+                    <p>
+                      {errorMessage ??
+                        t(`updates.details.${STATUS_KEY[status]}`, {
+                          version: availableVersion ?? "",
+                        })}
+                    </p>
+                    {errorDetail && errorDetail !== errorMessage ? (
+                      <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                        {t("updates.errors.detail", { detail: errorDetail })}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-xs leading-4 text-muted-foreground">
+                    {t(`updates.details.${STATUS_KEY[status]}`, {
+                      version: availableVersion ?? "",
+                    })}
+                  </p>
+                )}
 
-        {status === "error" ? (
-          <div className="mt-4 space-y-1 text-xs leading-4 text-destructive">
-            <p>
-              {errorMessage ??
-                t(`updates.details.${STATUS_KEY[status]}`, {
-                  version: availableVersion ?? "",
-                })}
-            </p>
-            {errorDetail && errorDetail !== errorMessage ? (
-              <p className="whitespace-pre-wrap break-words text-muted-foreground">
-                {t("updates.errors.detail", { detail: errorDetail })}
-              </p>
-            ) : null}
-          </div>
-        ) : status !== "idle" ? (
-          <p className="mt-4 text-xs leading-4 text-muted-foreground">
-            {t(`updates.details.${STATUS_KEY[status]}`, {
-              version: availableVersion ?? "",
-            })}
-          </p>
-        ) : null}
-
-        {(status === "downloading" || status === "installing") && (
-          <div className="mt-4">
-            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-              <span>{t(`updates.progress.${STATUS_KEY[status]}`)}</span>
-              {downloadProgress != null ? (
-                <span>
-                  {t("updates.progress.percent", {
-                    progress: downloadProgress,
-                  })}
-                </span>
-              ) : null}
-            </div>
-            <Progress
-              className="mt-2"
-              value={downloadProgress ?? (status === "installing" ? 100 : 0)}
-            />
-          </div>
-        )}
-      </section>
+                {status === "downloading" || status === "installing" ? (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span>{t(`updates.progress.${STATUS_KEY[status]}`)}</span>
+                      {downloadProgress != null ? (
+                        <span>
+                          {t("updates.progress.percent", {
+                            progress: downloadProgress,
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
+                    <Progress
+                      className="mt-2"
+                      value={
+                        downloadProgress ?? (status === "installing" ? 100 : 0)
+                      }
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : undefined
+          }
+        />
+      </div>
     </SettingsPage>
   );
 }

@@ -155,6 +155,11 @@ import { Separator } from "@/shared/ui/separator";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import {
+  SettingsSection,
+  SettingsSections,
+} from "@/shared/ui/settings-section";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -325,6 +330,10 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
     "Session status feedback for running, idle, and transitional chat states.",
   "Settings Page":
     "Settings surface layout primitives for consistent page headings and content sections.",
+  "Settings Section":
+    "Settings section hierarchy with a standard H2 and 44px spacing between peer groups.",
+  "Settings Row":
+    "Aligned settings content with optional supporting copy and flexible action or detail slots.",
   Sheet:
     "Side-panel modal surfaces for secondary workflows and mobile-friendly overlays.",
   Sidebar:
@@ -2698,6 +2707,29 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
       </SettingsPage>
     </div>
   ),
+  "Settings Section": () => (
+    <SettingsSections className="w-96">
+      <SettingsSection title="Installed">
+        <SettingsRow label="Calendar" action={<Button>Configure</Button>} />
+      </SettingsSection>
+      <SettingsSection title="Available">
+        <SettingsRow label="Drive" action={<Button>Connect</Button>} />
+      </SettingsSection>
+    </SettingsSections>
+  ),
+  "Settings Row": () => (
+    <div className="w-96 divide-y divide-border">
+      <SettingsRow
+        label="Show session cost"
+        description="Display estimated running cost when available."
+        action={<Switch defaultChecked aria-label="Show session cost" />}
+      />
+      <SettingsRow
+        label="Keyboard shortcuts"
+        action={<Button variant="outline">Customize</Button>}
+      />
+    </div>
+  ),
   Sheet: () => (
     <Sheet>
       <SheetTrigger asChild>
@@ -4761,6 +4793,14 @@ function SettingsPagePage() {
   return <GenericComponentPage name="Settings Page" />;
 }
 
+function SettingsSectionPage() {
+  return <GenericComponentPage name="Settings Section" />;
+}
+
+function SettingsRowPage() {
+  return <GenericComponentPage name="Settings Row" />;
+}
+
 function SheetPage() {
   return <GenericComponentPage name="Sheet" />;
 }
@@ -5500,24 +5540,14 @@ function TypographyPage() {
         </div>
       </Surface>
       <Surface title="Role preview">
-        <div className="space-y-4">
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">
-              Future heading role
-            </p>
-            <p className="mt-1 font-display text-2xl font-normal tracking-tight">
-              Design systems should name intent, not just size.
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">
-              Future body role
-            </p>
-            <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
-              The inventory should help migrate raw utilities into roles like
-              heading, body, label, metadata, and code.
-            </p>
-          </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">
+            Future body role
+          </p>
+          <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
+            The inventory should help migrate raw utilities into roles like
+            heading, body, label, metadata, and code.
+          </p>
         </div>
       </Surface>
     </>
@@ -5675,6 +5705,10 @@ function renderSection(section: DesignSystemSection) {
       return <SessionActivityIndicatorPage />;
     case "component-settings-page":
       return <SettingsPagePage />;
+    case "component-settings-section":
+      return <SettingsSectionPage />;
+    case "component-settings-row":
+      return <SettingsRowPage />;
     case "component-sheet":
       return <SheetPage />;
     case "component-sidebar":

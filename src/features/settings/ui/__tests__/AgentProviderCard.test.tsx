@@ -174,6 +174,23 @@ describe("AgentProviderCard", () => {
     expect(screen.getByText("Model provider setup")).toBeVisible();
   });
 
+  it("gives the expandable Goose harness a neutral outline", () => {
+    const { container } = renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "goose",
+          displayName: "Goose",
+          status: "built_in",
+        })}
+        expandedContent={<div>Model providers</div>}
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-slot="expandable-card"]'),
+    ).toHaveClass("border", "border-border");
+  });
+
   it("shows the checking indicator only during the shared report's first load", async () => {
     const { rerender } = renderCard(
       <AgentProviderCard provider={createProvider()} statusLoading={true} />,
@@ -201,6 +218,60 @@ describe("AgentProviderCard", () => {
     ).toBeInTheDocument();
     // Nothing is kicked off just by rendering.
     expect(startAgentSetup).not.toHaveBeenCalled();
+  });
+
+  it("uses a settings row and neutral outline actions outside Goose", () => {
+    const { container } = renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "not_installed",
+          supportsInstall: true,
+          supportsAuth: true,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        presentation="row"
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-slot="settings-row"]'),
+    ).toBeInTheDocument();
+    const install = screen.getByRole("button", { name: /install claude/i });
+    expect(install).not.toHaveClass("text-warning");
+  });
+
+  it("aligns row details with the provider title when an icon is present", () => {
+    const { container } = renderCard(
+      <AgentProviderCard
+        provider={createProvider()}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          installSource: "brew",
+          installedVersion: "1.2.3",
+        })}
+        presentation="row"
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-slot="settings-row-details"]'),
+    ).toHaveClass("ml-10");
+  });
+
+  it("uses an outlined sign-in action", () => {
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider()}
+        statusLoading={false}
+        readiness={"not_ready" satisfies AgentProviderReadiness}
+        presentation="row"
+      />,
+    );
+
+    const signIn = screen.getByRole("button", { name: /sign in/i });
+    expect(signIn).toHaveClass("border", "border-input");
   });
 
   it("does not re-spin on a warm-cache revisit", () => {

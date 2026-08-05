@@ -39,6 +39,10 @@ const settingsLocation: AppNavigationLocation = {
   view: "settings",
   settingsSection: "general",
 };
+const otherSettingsLocation: AppNavigationLocation = {
+  view: "settings",
+  settingsSection: "notifications",
+};
 const skillsLocation: AppNavigationLocation = {
   view: "skills",
   skillId: null,
@@ -114,6 +118,16 @@ describe("useStagedAppContentLocation", () => {
 
     expect(result.current.targetLocation).toBe(homeLocation);
     expect(result.current.renderedLocation).toBe(homeLocation);
+    expect(result.current.isPreparingContent).toBe(false);
+  });
+
+  it("renders settings section changes immediately without app-level staging", () => {
+    const { result, rerender } = renderStagedLocation(settingsLocation);
+
+    rerender({ location: otherSettingsLocation });
+
+    expect(result.current.targetLocation).toBe(otherSettingsLocation);
+    expect(result.current.renderedLocation).toBe(otherSettingsLocation);
     expect(result.current.isPreparingContent).toBe(false);
   });
 

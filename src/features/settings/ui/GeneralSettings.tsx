@@ -21,6 +21,11 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import {
+  SettingsSection,
+  SettingsSections,
+} from "@/shared/ui/settings-section";
 import { Button } from "@/shared/ui/button";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useTheme } from "@/shared/theme/ThemeProvider";
@@ -86,58 +91,16 @@ interface AboutAppInfo {
   identifier: string;
 }
 
-function SettingRow({
-  label,
-  description,
-  children,
-  className,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-8 px-4 py-4",
-        className,
-      )}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="text-sm">{label}</p>
-        {description ? (
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      <div className="flex-shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function SettingsSection({
-  title,
-  children,
-}: {
-  title?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      {title ? <h4 className="text-base text-foreground">{title}</h4> : null}
-      <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
-        {children}
-      </div>
-    </section>
-  );
-}
-
 function AboutInfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-4">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right text-sm">{value}</span>
-    </div>
+    <SettingsRow
+      label={<span className="text-muted-foreground">{label}</span>}
+      action={
+        <span className="block min-w-0 truncate text-right text-sm">
+          {value}
+        </span>
+      }
+    />
   );
 }
 
@@ -174,8 +137,8 @@ export function GeneralSettings({
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
   const responseStartGutterPreference = useResponseStartGutterPreference();
-  const globalShortcutPreference = useGlobalShortcutPreference();
   const multiWorkspacePreference = useMultiWorkspacePreference();
+  const globalShortcutPreference = useGlobalShortcutPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -495,663 +458,667 @@ export function GeneralSettings({
     ) ?? [];
 
   return (
-    <SettingsPage contentClassName="space-y-8">
-      {showAccountSection ? (
-        <SettingsSection title={t("account.title")}>
-          <SettingRow
-            label={t("account.signedInAs")}
-            description={signedInAs}
-            className="items-start"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              feedbackState={loggingOut ? "loading" : "idle"}
-              loadingLabel={t("account.loggingOut")}
-              disabled={loggingOut}
-              onClick={() => void handleLogout()}
+    <SettingsPage title={t("general.title")} contentClassName="space-y-8">
+      <SettingsSections>
+        {showAccountSection ? (
+          <SettingsSection title={t("account.title")}>
+            <SettingsRow
+              label={t("account.signedInAs")}
+              description={signedInAs}
+              align="start"
             >
-              {t("account.logout")}
-            </Button>
-          </SettingRow>
-          <AboutInfoRow
-            label={t("account.organization")}
-            value={organization}
-          />
-          <SettingRow
-            label={t("account.workspace.label")}
-            description={
-              workspaceError
-                ? t("account.workspace.loadError")
-                : t("account.workspace.description")
-            }
-          >
-            {workspaceError ? (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={workspaceLoading}
-                onClick={() => void loadWorkspaces()}
+                feedbackState={loggingOut ? "loading" : "idle"}
+                loadingLabel={t("account.loggingOut")}
+                disabled={loggingOut}
+                onClick={() => void handleLogout()}
               >
-                {t("account.workspace.retry")}
+                {t("account.logout")}
               </Button>
-            ) : (
-              <Select
-                value={workspaceList?.activeWorkspaceIdentifier ?? undefined}
-                disabled={
-                  workspaceLoading ||
-                  workspaceSwitching ||
-                  selectableWorkspaces.length === 0
-                }
-                onValueChange={(value) => void handleWorkspaceSwitch(value)}
-              >
-                <SelectTrigger
-                  className="w-52"
-                  aria-label={t("account.workspace.label")}
+            </SettingsRow>
+            <AboutInfoRow
+              label={t("account.organization")}
+              value={organization}
+            />
+            <SettingsRow
+              label={t("account.workspace.label")}
+              description={
+                workspaceError
+                  ? t("account.workspace.loadError")
+                  : t("account.workspace.description")
+              }
+            >
+              {workspaceError ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={workspaceLoading}
+                  onClick={() => void loadWorkspaces()}
                 >
-                  <SelectValue
-                    placeholder={
-                      workspaceLoading
-                        ? t("account.workspace.loading")
-                        : t("account.workspace.unavailable")
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectableWorkspaces.map((workspace) => (
-                    <SelectItem
-                      key={workspace.workspaceIdentifier}
-                      value={workspace.workspaceIdentifier ?? ""}
-                    >
-                      {workspace.displayName ?? workspace.workspaceIdentifier}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </SettingRow>
-        </SettingsSection>
-      ) : null}
-
-      <SettingsSection>
-        <SettingRow
-          label={t("general.language.label")}
-          description={t("general.language.description")}
-        >
-          <Select
-            value={preference}
-            onValueChange={(value) =>
-              void setLocalePreference(value as LocalePreference)
-            }
-          >
-            <SelectTrigger className="w-full min-w-64">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="system">
-                {t("general.language.system", {
-                  language: systemLocaleLabel,
-                })}
-              </SelectItem>
-              <SelectItem value="en">
-                {t("general.language.english")}
-              </SelectItem>
-              <SelectItem value="es">
-                {t("general.language.spanish")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.artifacts.label")}
-          description={t("general.artifacts.description")}
-          className="items-start"
-        >
-          <div className="flex max-w-80 flex-col items-end gap-2">
-            <p
-              className="max-w-80 truncate text-right text-xs text-muted-foreground"
-              title={artifactRootPreference.rootPath ?? undefined}
-            >
-              {artifactRootPreference.rootPath ??
-                t("general.artifacts.loading")}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => void handleResetArtifactRoot()}
-                disabled={!artifactRootPreference.hasCustomRoot}
-              >
-                <RotateCcw className="size-3.5" />
-                {t("general.artifacts.reset")}
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                size="xs"
-                onClick={() => void handleChooseArtifactRoot()}
-              >
-                <FolderOpen className="size-3.5" />
-                {t("general.artifacts.change")}
-              </Button>
-            </div>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.terminalFallback.label")}
-          description={t("general.terminalFallback.description")}
-          className="items-start"
-        >
-          <div className="flex max-w-80 flex-col items-end gap-2">
-            <p
-              className="max-w-80 truncate text-right text-xs text-muted-foreground"
-              title={terminalFallbackPath ?? undefined}
-            >
-              {terminalFallbackPath ?? t("general.terminalFallback.loading")}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={handleResetTerminalFallbackCwd}
-                disabled={!terminalFallbackCwdPreference.hasCustomFallbackCwd}
-              >
-                <RotateCcw className="size-3.5" />
-                {t("general.terminalFallback.reset")}
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                size="xs"
-                onClick={() => void handleChooseTerminalFallbackCwd()}
-              >
-                <FolderOpen className="size-3.5" />
-                {t("general.terminalFallback.change")}
-              </Button>
-            </div>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.sessionCost.label")}
-          description={t("general.sessionCost.description")}
-        >
-          <Switch
-            checked={sessionCostPreference.enabled}
-            onCheckedChange={sessionCostPreference.setEnabled}
-            aria-label={t("general.sessionCost.label")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.responseStartGutter.label")}
-          description={t("general.responseStartGutter.description")}
-        >
-          <Switch
-            checked={responseStartGutterPreference.enabled}
-            onCheckedChange={responseStartGutterPreference.setEnabled}
-            aria-label={t("general.responseStartGutter.label")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.multiWorkspace.label")}
-          description={t("general.multiWorkspace.description")}
-        >
-          <Switch
-            checked={multiWorkspacePreference.enabled}
-            onCheckedChange={multiWorkspacePreference.setEnabled}
-            aria-label={t("general.multiWorkspace.label")}
-          />
-        </SettingRow>
-
-        {showAgentToolsTipsSetting ? (
-          <SettingRow
-            label={t("general.agentToolsTips.label")}
-            description={t("general.agentToolsTips.description")}
-          >
-            <Switch
-              checked={agentToolsTipsPreference.enabled}
-              onCheckedChange={agentToolsTipsPreference.setEnabled}
-              aria-label={t("general.agentToolsTips.label")}
-            />
-          </SettingRow>
+                  {t("account.workspace.retry")}
+                </Button>
+              ) : (
+                <Select
+                  value={workspaceList?.activeWorkspaceIdentifier ?? undefined}
+                  disabled={
+                    workspaceLoading ||
+                    workspaceSwitching ||
+                    selectableWorkspaces.length === 0
+                  }
+                  onValueChange={(value) => void handleWorkspaceSwitch(value)}
+                >
+                  <SelectTrigger
+                    className="w-52"
+                    aria-label={t("account.workspace.label")}
+                  >
+                    <SelectValue
+                      placeholder={
+                        workspaceLoading
+                          ? t("account.workspace.loading")
+                          : t("account.workspace.unavailable")
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectableWorkspaces.map((workspace) => (
+                      <SelectItem
+                        key={workspace.workspaceIdentifier}
+                        value={workspace.workspaceIdentifier ?? ""}
+                      >
+                        {workspace.displayName ?? workspace.workspaceIdentifier}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </SettingsRow>
+          </SettingsSection>
         ) : null}
 
-        <SettingRow
-          label={t("shortcuts:settings.label")}
-          description={t("shortcuts:settings.description")}
-        >
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => requestOpenSettings("shortcuts")}
+        <SettingsSection>
+          <SettingsRow
+            label={t("general.language.label")}
+            description={t("general.language.description")}
           >
-            {t("shortcuts:settings.customize")}
-          </Button>
-        </SettingRow>
+            <Select
+              value={preference}
+              onValueChange={(value) =>
+                void setLocalePreference(value as LocalePreference)
+              }
+            >
+              <SelectTrigger className="w-full min-w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="system">
+                  {t("general.language.system", {
+                    language: systemLocaleLabel,
+                  })}
+                </SelectItem>
+                <SelectItem value="en">
+                  {t("general.language.english")}
+                </SelectItem>
+                <SelectItem value="es">
+                  {t("general.language.spanish")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsRow>
 
-        {isMac ? (
-          <SettingRow
-            label={t("general.globalShortcut.label")}
-            description={t("general.globalShortcut.description")}
+          <SettingsRow
+            label={t("general.artifacts.label")}
+            description={t("general.artifacts.description")}
+            align="start"
           >
-            <Switch
-              checked={globalShortcutPreference.enabled}
-              onCheckedChange={globalShortcutPreference.setEnabled}
-              aria-label={t("general.globalShortcut.label")}
-            />
-          </SettingRow>
-        ) : null}
-
-        <SettingRow
-          label={t("general.followUpBehavior.label")}
-          description={t("general.followUpBehavior.description")}
-        >
-          <fieldset className="flex items-center gap-1">
-            <legend className="sr-only">
-              {t("general.followUpBehavior.label")}
-            </legend>
-            <Button
-              type="button"
-              aria-pressed={followUpBehavior === "queue"}
-              className="min-w-16"
-              size="sm"
-              variant={followUpBehavior === "queue" ? "primary" : "ghost"}
-              onClick={() =>
-                streamingShortcutPreference.setMode(
-                  "cmd-enter-steers" satisfies StreamingShortcutMode,
-                )
-              }
-            >
-              {t("general.followUpBehavior.queue")}
-            </Button>
-            <Button
-              type="button"
-              aria-pressed={followUpBehavior === "steer"}
-              className="min-w-16"
-              size="sm"
-              variant={followUpBehavior === "steer" ? "primary" : "ghost"}
-              onClick={() =>
-                streamingShortcutPreference.setMode(
-                  "enter-steers" satisfies StreamingShortcutMode,
-                )
-              }
-            >
-              {t("general.followUpBehavior.steer")}
-            </Button>
-          </fieldset>
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.artifactAutoOpen.label")}
-          description={t("general.artifactAutoOpen.description")}
-        >
-          <Switch
-            checked={artifactAutoOpenPreference.enabled}
-            onCheckedChange={artifactAutoOpenPreference.setEnabled}
-            aria-label={t("general.artifactAutoOpen.label")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.atMentionDefault.label")}
-          description={t("general.atMentionDefault.description")}
-        >
-          <fieldset className="flex items-center gap-1">
-            <legend className="sr-only">
-              {t("general.atMentionDefault.label")}
-            </legend>
-            <Button
-              type="button"
-              aria-pressed={atMentionDefaultCategory === "agents"}
-              className="min-w-16"
-              size="sm"
-              variant={
-                atMentionDefaultCategory === "agents" ? "primary" : "ghost"
-              }
-              onClick={() => setAtMentionDefaultCategory("agents")}
-            >
-              {t("general.atMentionDefault.agents")}
-            </Button>
-            <Button
-              type="button"
-              aria-pressed={atMentionDefaultCategory === "files"}
-              className="min-w-16"
-              size="sm"
-              variant={
-                atMentionDefaultCategory === "files" ? "primary" : "ghost"
-              }
-              onClick={() => setAtMentionDefaultCategory("files")}
-            >
-              {t("general.atMentionDefault.files")}
-            </Button>
-          </fieldset>
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection title={t("general.styleGuidelines.title")}>
-        <div className="space-y-3 px-4 py-4">
-          <div>
-            <label className="text-sm" htmlFor="style-guidelines-prompt">
-              {t("general.styleGuidelines.promptLabel")}
-            </label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("general.styleGuidelines.promptDescription")}
-            </p>
-          </div>
-          <Textarea
-            id="style-guidelines-prompt"
-            value={styleGuidelinesPromptDraft}
-            onChange={(event) =>
-              setStyleGuidelinesPromptDraft(event.currentTarget.value)
-            }
-            onBlur={handleStyleGuidelinesPromptSave}
-            placeholder={t("general.styleGuidelines.promptPlaceholder")}
-            className="min-h-52"
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={handleStyleGuidelinesPromptReset}
-            >
-              <RotateCcw className="size-3.5" />
-              {t("general.styleGuidelines.reset")}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="xs"
-              onClick={handleStyleGuidelinesPromptSave}
-              disabled={
-                styleGuidelinesPromptDraft === styleGuidelinesPreference.prompt
-              }
-            >
-              {t("general.styleGuidelines.save")}
-            </Button>
-          </div>
-        </div>
-      </SettingsSection>
-
-      {/* A restricted build compiled with the `no-bb-cli-install` Cargo feature
-          reports `unsupportedInBuild`; hide the install section entirely rather
-          than showing a button that can never install. */}
-      {!bbCliStatus?.unsupportedInBuild && (
-        <SettingsSection title={t("general.bbCli.title")}>
-          <SettingRow
-            label={t("general.bbCli.label")}
-            description={
-              bbCliStatus
-                ? `${bbCliStatus.message}. ${bbCliStatus.detail}`
-                : t("general.bbCli.description")
-            }
-            className="items-start"
-          >
-            <div className="flex flex-col items-end gap-2">
+            <div className="flex max-w-80 flex-col items-end gap-2">
+              <p
+                className="max-w-80 truncate text-right text-xs text-muted-foreground"
+                title={artifactRootPreference.rootPath ?? undefined}
+              >
+                {artifactRootPreference.rootPath ??
+                  t("general.artifacts.loading")}
+              </p>
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="ghost"
                   size="xs"
-                  onClick={() => void refreshBbCliStatus()}
-                  disabled={bbCliBusy}
+                  onClick={() => void handleResetArtifactRoot()}
+                  disabled={!artifactRootPreference.hasCustomRoot}
                 >
                   <RotateCcw className="size-3.5" />
-                  {t("general.bbCli.refresh")}
+                  {t("general.artifacts.reset")}
                 </Button>
                 <Button
                   type="button"
-                  variant={bbCliStatus?.installed ? "outline" : "primary"}
+                  variant="primary"
                   size="xs"
-                  onClick={() => void handleInstallBbCli()}
-                  disabled={bbCliBusy || bbCliStatus?.canInstall === false}
+                  onClick={() => void handleChooseArtifactRoot()}
                 >
-                  <Terminal className="size-3.5" />
-                  {bbCliInstalling
-                    ? t("general.bbCli.installing")
-                    : bbCliActionLabel}
+                  <FolderOpen className="size-3.5" />
+                  {t("general.artifacts.change")}
                 </Button>
               </div>
-              <p className="max-w-80 truncate text-right text-xs text-muted-foreground">
-                {bbCliStatus?.bundledVersion
-                  ? t("general.bbCli.version", {
-                      version: bbCliStatus.bundledVersion,
-                    })
-                  : t("general.bbCli.versionUnknown")}
-              </p>
             </div>
-          </SettingRow>
-        </SettingsSection>
-      )}
+          </SettingsRow>
 
-      <SettingsSection title={t("appearance.title")}>
-        <div className="space-y-3 px-4 py-4">
-          <div>
-            <p className="text-sm">{t("appearance.theme.label")}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("appearance.theme.description")}
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-3">
-            {(
-              [
-                {
-                  value: "system",
-                  icon: SunMoon,
-                  label: t("appearance.theme.systemLabel"),
-                  description: t("appearance.theme.systemDescription"),
-                },
-                {
-                  value: "light",
-                  icon: Sun,
-                  label: t("appearance.theme.lightLabel"),
-                },
-                {
-                  value: "dark",
-                  icon: Moon,
-                  label: t("appearance.theme.darkLabel"),
-                },
-              ] satisfies ReadonlyArray<{
-                value: "system" | "light" | "dark";
-                icon: typeof SunMoon;
-                label: string;
-                description?: string;
-              }>
-            ).map((option) => {
-              const selected = themeMode === option.value;
-              const ThemeIcon = option.icon;
-
-              return (
-                <button
-                  aria-pressed={selected}
-                  className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    selected
-                      ? "border-primary/30 bg-primary/10 text-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                  )}
-                  data-testid={`theme-option-${option.value}`}
-                  key={option.value}
-                  onClick={() => {
-                    setThemeMode(option.value);
-                  }}
-                  type="button"
-                >
-                  <ThemeIcon className="h-4 w-4 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate">{option.label}</div>
-                    {option.description ? (
-                      <div className="truncate text-xs text-muted-foreground">
-                        {option.description}
-                      </div>
-                    ) : null}
-                  </div>
-                  {selected ? (
-                    <Check className="h-4 w-4 shrink-0 text-primary" />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <SettingRow
-          label={t("appearance.animatedAvatars.label")}
-          description={t("appearance.animatedAvatars.description")}
-        >
-          <Switch
-            checked={animatedAvatarsPreference.enabled}
-            onCheckedChange={animatedAvatarsPreference.setEnabled}
-            aria-label={t("appearance.animatedAvatars.label")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("appearance.workingIndicatorAnimation.label")}
-          description={t("appearance.workingIndicatorAnimation.description")}
-        >
-          <Switch
-            checked={workingIndicatorAnimationPreference.enabled}
-            onCheckedChange={workingIndicatorAnimationPreference.setEnabled}
-            aria-label={t("appearance.workingIndicatorAnimation.label")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("appearance.homePinLabels.label")}
-          description={t("appearance.homePinLabels.description")}
-        >
-          <Switch
-            checked={homePinLabelsPreference.enabled}
-            onCheckedChange={homePinLabelsPreference.setEnabled}
-            aria-label={t("appearance.homePinLabels.label")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("appearance.primary.label")}
-          description={t("appearance.primary.description")}
-        >
-          <ColorPicker
-            value={customPrimaryColor ?? THEME_PRIMARY_PRESET_ID}
-            onChange={(value) =>
-              value === THEME_PRIMARY_PRESET_ID
-                ? resetPrimaryColor()
-                : setPrimaryColor(value)
-            }
-            label={t("appearance.primary.label")}
-            presets={primaryColorPresets}
-            customColorLabel={t("appearance.primary.custom")}
-            swatchSize="sm"
-            variant="swatches"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection title={t("storage.title")}>
-        <SettingRow
-          label={t("storage.cachedMedia.label")}
-          description={t("storage.cachedMedia.description")}
-        >
-          <Button
-            type="button"
-            variant="primary"
-            size="xs"
-            onClick={() => setClearCacheDialogOpen(true)}
+          <SettingsRow
+            label={t("general.terminalFallback.label")}
+            description={t("general.terminalFallback.description")}
+            align="start"
           >
-            <Trash2 className="size-3.5" />
-            {t("storage.cachedMedia.clear")}
-          </Button>
-        </SettingRow>
+            <div className="flex max-w-80 flex-col items-end gap-2">
+              <p
+                className="max-w-80 truncate text-right text-xs text-muted-foreground"
+                title={terminalFallbackPath ?? undefined}
+              >
+                {terminalFallbackPath ?? t("general.terminalFallback.loading")}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleResetTerminalFallbackCwd}
+                  disabled={!terminalFallbackCwdPreference.hasCustomFallbackCwd}
+                >
+                  <RotateCcw className="size-3.5" />
+                  {t("general.terminalFallback.reset")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="xs"
+                  onClick={() => void handleChooseTerminalFallbackCwd()}
+                >
+                  <FolderOpen className="size-3.5" />
+                  {t("general.terminalFallback.change")}
+                </Button>
+              </div>
+            </div>
+          </SettingsRow>
 
-        <SettingRow
-          label={t("storage.trustedDomains.label")}
-          description={t("storage.trustedDomains.description")}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">
-              {trustedDomainsCount}
-            </span>
+          <SettingsRow
+            label={t("general.sessionCost.label")}
+            description={t("general.sessionCost.description")}
+          >
+            <Switch
+              checked={sessionCostPreference.enabled}
+              onCheckedChange={sessionCostPreference.setEnabled}
+              aria-label={t("general.sessionCost.label")}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t("general.responseStartGutter.label")}
+            description={t("general.responseStartGutter.description")}
+          >
+            <Switch
+              checked={responseStartGutterPreference.enabled}
+              onCheckedChange={responseStartGutterPreference.setEnabled}
+              aria-label={t("general.responseStartGutter.label")}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t("general.multiWorkspace.label")}
+            description={t("general.multiWorkspace.description")}
+          >
+            <Switch
+              checked={multiWorkspacePreference.enabled}
+              onCheckedChange={multiWorkspacePreference.setEnabled}
+              aria-label={t("general.multiWorkspace.label")}
+            />
+          </SettingsRow>
+
+          {showAgentToolsTipsSetting ? (
+            <SettingsRow
+              label={t("general.agentToolsTips.label")}
+              description={t("general.agentToolsTips.description")}
+            >
+              <Switch
+                checked={agentToolsTipsPreference.enabled}
+                onCheckedChange={agentToolsTipsPreference.setEnabled}
+                aria-label={t("general.agentToolsTips.label")}
+              />
+            </SettingsRow>
+          ) : null}
+
+          <SettingsRow
+            label={t("shortcuts:settings.label")}
+            description={t("shortcuts:settings.description")}
+          >
             <Button
               type="button"
               variant="outline"
-              size="xs"
-              onClick={() => setTrustedDomainsDialogOpen(true)}
+              size="sm"
+              onClick={() => requestOpenSettings("shortcuts")}
             >
-              {t("storage.trustedDomains.manage")}
+              {t("shortcuts:settings.customize")}
             </Button>
-          </div>
-        </SettingRow>
-      </SettingsSection>
+          </SettingsRow>
 
-      <SettingsSection title={t("compaction.title")}>
-        <div className="flex items-start justify-between gap-4 px-4 py-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex size-6 items-center justify-center [&>*]:size-6">
-              {gooseIcon}
-            </div>
-            <span className="mt-2 block text-sm">
-              {t("compaction.goose.label")}
-            </span>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("compaction.goose.description")}
-            </p>
-          </div>
+          {isMac ? (
+            <SettingsRow
+              label={t("general.globalShortcut.label")}
+              description={t("general.globalShortcut.description")}
+            >
+              <Switch
+                checked={globalShortcutPreference.enabled}
+                onCheckedChange={globalShortcutPreference.setEnabled}
+                aria-label={t("general.globalShortcut.label")}
+              />
+            </SettingsRow>
+          ) : null}
 
-          <div className="inline-flex items-center gap-1 rounded-xs bg-success/10 px-2 py-1 text-xxs font-medium text-success">
-            <IconCheck className="size-3.5" />
-            <span>{t("compaction.goose.builtIn")}</span>
-          </div>
-        </div>
+          <SettingsRow
+            label={t("general.followUpBehavior.label")}
+            description={t("general.followUpBehavior.description")}
+          >
+            <fieldset className="flex items-center gap-1">
+              <legend className="sr-only">
+                {t("general.followUpBehavior.label")}
+              </legend>
+              <Button
+                type="button"
+                aria-pressed={followUpBehavior === "queue"}
+                className="min-w-16"
+                size="sm"
+                variant={followUpBehavior === "queue" ? "primary" : "ghost"}
+                onClick={() =>
+                  streamingShortcutPreference.setMode(
+                    "cmd-enter-steers" satisfies StreamingShortcutMode,
+                  )
+                }
+              >
+                {t("general.followUpBehavior.queue")}
+              </Button>
+              <Button
+                type="button"
+                aria-pressed={followUpBehavior === "steer"}
+                className="min-w-16"
+                size="sm"
+                variant={followUpBehavior === "steer" ? "primary" : "ghost"}
+                onClick={() =>
+                  streamingShortcutPreference.setMode(
+                    "enter-steers" satisfies StreamingShortcutMode,
+                  )
+                }
+              >
+                {t("general.followUpBehavior.steer")}
+              </Button>
+            </fieldset>
+          </SettingsRow>
 
-        <div className="px-4 py-4">
-          <GooseAutoCompactSettings />
-        </div>
-      </SettingsSection>
+          <SettingsRow
+            label={t("general.artifactAutoOpen.label")}
+            description={t("general.artifactAutoOpen.description")}
+          >
+            <Switch
+              checked={artifactAutoOpenPreference.enabled}
+              onCheckedChange={artifactAutoOpenPreference.setEnabled}
+              aria-label={t("general.artifactAutoOpen.label")}
+            />
+          </SettingsRow>
 
-      {import.meta.env.DEV ? (
-        <SettingsSection title={t("runtimeConfig.title")}>
-          <RuntimeConfigSettings />
+          <SettingsRow
+            label={t("general.atMentionDefault.label")}
+            description={t("general.atMentionDefault.description")}
+          >
+            <fieldset className="flex items-center gap-1">
+              <legend className="sr-only">
+                {t("general.atMentionDefault.label")}
+              </legend>
+              <Button
+                type="button"
+                aria-pressed={atMentionDefaultCategory === "agents"}
+                className="min-w-16"
+                size="sm"
+                variant={
+                  atMentionDefaultCategory === "agents" ? "primary" : "ghost"
+                }
+                onClick={() => setAtMentionDefaultCategory("agents")}
+              >
+                {t("general.atMentionDefault.agents")}
+              </Button>
+              <Button
+                type="button"
+                aria-pressed={atMentionDefaultCategory === "files"}
+                className="min-w-16"
+                size="sm"
+                variant={
+                  atMentionDefaultCategory === "files" ? "primary" : "ghost"
+                }
+                onClick={() => setAtMentionDefaultCategory("files")}
+              >
+                {t("general.atMentionDefault.files")}
+              </Button>
+            </fieldset>
+          </SettingsRow>
         </SettingsSection>
-      ) : null}
 
-      <SettingsSection title={t("about.title")}>
-        <AboutInfoRow
-          label={t("about.fields.name")}
-          value={appInfo?.name ?? "Berd"}
-        />
-        <AboutInfoRow
-          label={t("about.fields.version")}
-          value={appInfo?.version ?? aboutFallback}
-        />
-        <AboutInfoRow
-          label={t("about.fields.buildMode")}
-          value={
-            import.meta.env.DEV
-              ? t("about.buildModes.development")
-              : t("about.buildModes.production")
-          }
-        />
-        <AboutInfoRow
-          label={t("about.fields.tauriVersion")}
-          value={appInfo?.tauriVersion ?? aboutFallback}
-        />
-        <AboutInfoRow
-          label={t("about.fields.identifier")}
-          value={appInfo?.identifier ?? aboutFallback}
-        />
-        <AboutInfoRow label={t("about.fields.license")} value="Apache-2.0" />
-      </SettingsSection>
+        <SettingsSection title={t("general.styleGuidelines.title")}>
+          <SettingsRow
+            layout="stacked"
+            label={
+              <label htmlFor="style-guidelines-prompt">
+                {t("general.styleGuidelines.promptLabel")}
+              </label>
+            }
+            description={t("general.styleGuidelines.promptDescription")}
+            action={
+              <div className="space-y-3">
+                <Textarea
+                  id="style-guidelines-prompt"
+                  value={styleGuidelinesPromptDraft}
+                  onChange={(event) =>
+                    setStyleGuidelinesPromptDraft(event.currentTarget.value)
+                  }
+                  onBlur={handleStyleGuidelinesPromptSave}
+                  placeholder={t("general.styleGuidelines.promptPlaceholder")}
+                  className="min-h-52"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={handleStyleGuidelinesPromptReset}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {t("general.styleGuidelines.reset")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="xs"
+                    onClick={handleStyleGuidelinesPromptSave}
+                    disabled={
+                      styleGuidelinesPromptDraft ===
+                      styleGuidelinesPreference.prompt
+                    }
+                  >
+                    {t("general.styleGuidelines.save")}
+                  </Button>
+                </div>
+              </div>
+            }
+          />
+        </SettingsSection>
+
+        {/* A restricted build compiled with the `no-bb-cli-install` Cargo feature
+          reports `unsupportedInBuild`; hide the install section entirely rather
+          than showing a button that can never install. */}
+        {!bbCliStatus?.unsupportedInBuild && (
+          <SettingsSection title={t("general.bbCli.title")}>
+            <SettingsRow
+              label={t("general.bbCli.label")}
+              description={
+                bbCliStatus
+                  ? `${bbCliStatus.message}. ${bbCliStatus.detail}`
+                  : t("general.bbCli.description")
+              }
+              align="start"
+            >
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => void refreshBbCliStatus()}
+                    disabled={bbCliBusy}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {t("general.bbCli.refresh")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={bbCliStatus?.installed ? "outline" : "primary"}
+                    size="xs"
+                    onClick={() => void handleInstallBbCli()}
+                    disabled={bbCliBusy || bbCliStatus?.canInstall === false}
+                  >
+                    <Terminal className="size-3.5" />
+                    {bbCliInstalling
+                      ? t("general.bbCli.installing")
+                      : bbCliActionLabel}
+                  </Button>
+                </div>
+                <p className="max-w-80 truncate text-right text-xs text-muted-foreground">
+                  {bbCliStatus?.bundledVersion
+                    ? t("general.bbCli.version", {
+                        version: bbCliStatus.bundledVersion,
+                      })
+                    : t("general.bbCli.versionUnknown")}
+                </p>
+              </div>
+            </SettingsRow>
+          </SettingsSection>
+        )}
+
+        <SettingsSection title={t("appearance.title")}>
+          <SettingsRow
+            layout="stacked"
+            label={t("appearance.theme.label")}
+            description={t("appearance.theme.description")}
+            action={
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(
+                  [
+                    {
+                      value: "system",
+                      icon: SunMoon,
+                      label: t("appearance.theme.systemLabel"),
+                      description: t("appearance.theme.systemDescription"),
+                    },
+                    {
+                      value: "light",
+                      icon: Sun,
+                      label: t("appearance.theme.lightLabel"),
+                    },
+                    {
+                      value: "dark",
+                      icon: Moon,
+                      label: t("appearance.theme.darkLabel"),
+                    },
+                  ] satisfies ReadonlyArray<{
+                    value: "system" | "light" | "dark";
+                    icon: typeof SunMoon;
+                    label: string;
+                    description?: string;
+                  }>
+                ).map((option) => {
+                  const selected = themeMode === option.value;
+                  const ThemeIcon = option.icon;
+
+                  return (
+                    <button
+                      aria-pressed={selected}
+                      className={cn(
+                        "flex min-w-0 items-center gap-3 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        selected
+                          ? "border-primary/30 bg-primary/10 text-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      )}
+                      data-testid={`theme-option-${option.value}`}
+                      key={option.value}
+                      onClick={() => {
+                        setThemeMode(option.value);
+                      }}
+                      type="button"
+                    >
+                      <ThemeIcon className="h-4 w-4 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate">{option.label}</div>
+                        {option.description ? (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {option.description}
+                          </div>
+                        ) : null}
+                      </div>
+                      {selected ? (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            }
+          />
+
+          <SettingsRow
+            label={t("appearance.animatedAvatars.label")}
+            description={t("appearance.animatedAvatars.description")}
+          >
+            <Switch
+              checked={animatedAvatarsPreference.enabled}
+              onCheckedChange={animatedAvatarsPreference.setEnabled}
+              aria-label={t("appearance.animatedAvatars.label")}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t("appearance.workingIndicatorAnimation.label")}
+            description={t("appearance.workingIndicatorAnimation.description")}
+          >
+            <Switch
+              checked={workingIndicatorAnimationPreference.enabled}
+              onCheckedChange={workingIndicatorAnimationPreference.setEnabled}
+              aria-label={t("appearance.workingIndicatorAnimation.label")}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t("appearance.homePinLabels.label")}
+            description={t("appearance.homePinLabels.description")}
+          >
+            <Switch
+              checked={homePinLabelsPreference.enabled}
+              onCheckedChange={homePinLabelsPreference.setEnabled}
+              aria-label={t("appearance.homePinLabels.label")}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t("appearance.primary.label")}
+            description={t("appearance.primary.description")}
+          >
+            <ColorPicker
+              value={customPrimaryColor ?? THEME_PRIMARY_PRESET_ID}
+              onChange={(value) =>
+                value === THEME_PRIMARY_PRESET_ID
+                  ? resetPrimaryColor()
+                  : setPrimaryColor(value)
+              }
+              label={t("appearance.primary.label")}
+              presets={primaryColorPresets}
+              customColorLabel={t("appearance.primary.custom")}
+              swatchSize="sm"
+              variant="swatches"
+            />
+          </SettingsRow>
+        </SettingsSection>
+
+        <SettingsSection title={t("storage.title")}>
+          <SettingsRow
+            label={t("storage.cachedMedia.label")}
+            description={t("storage.cachedMedia.description")}
+          >
+            <Button
+              type="button"
+              variant="primary"
+              size="xs"
+              onClick={() => setClearCacheDialogOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              {t("storage.cachedMedia.clear")}
+            </Button>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t("storage.trustedDomains.label")}
+            description={t("storage.trustedDomains.description")}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {trustedDomainsCount}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => setTrustedDomainsDialogOpen(true)}
+              >
+                {t("storage.trustedDomains.manage")}
+              </Button>
+            </div>
+          </SettingsRow>
+        </SettingsSection>
+
+        <SettingsSection title={t("compaction.title")}>
+          <SettingsRow
+            align="start"
+            leading={
+              <div className="flex size-6 items-center justify-center [&>*]:size-6">
+                {gooseIcon}
+              </div>
+            }
+            label={t("compaction.goose.label")}
+            description={t("compaction.goose.description")}
+            action={
+              <div className="inline-flex items-center gap-1 rounded-xs bg-success/10 px-2 py-1 text-xxs font-medium text-success">
+                <IconCheck className="size-3.5" />
+                <span>{t("compaction.goose.builtIn")}</span>
+              </div>
+            }
+          />
+
+          <SettingsRow
+            layout="stacked"
+            label={t("compaction.goose.autoCompact.label")}
+            action={<GooseAutoCompactSettings />}
+          />
+        </SettingsSection>
+
+        {import.meta.env.DEV ? (
+          <SettingsSection title={t("runtimeConfig.title")}>
+            <RuntimeConfigSettings />
+          </SettingsSection>
+        ) : null}
+
+        <SettingsSection title={t("about.title")}>
+          <AboutInfoRow
+            label={t("about.fields.name")}
+            value={appInfo?.name ?? "Berd"}
+          />
+          <AboutInfoRow
+            label={t("about.fields.version")}
+            value={appInfo?.version ?? aboutFallback}
+          />
+          <AboutInfoRow
+            label={t("about.fields.buildMode")}
+            value={
+              import.meta.env.DEV
+                ? t("about.buildModes.development")
+                : t("about.buildModes.production")
+            }
+          />
+          <AboutInfoRow
+            label={t("about.fields.tauriVersion")}
+            value={appInfo?.tauriVersion ?? aboutFallback}
+          />
+          <AboutInfoRow
+            label={t("about.fields.identifier")}
+            value={appInfo?.identifier ?? aboutFallback}
+          />
+          <AboutInfoRow label={t("about.fields.license")} value="Apache-2.0" />
+        </SettingsSection>
+      </SettingsSections>
 
       <Dialog
         open={trustedDomainsDialogOpen}

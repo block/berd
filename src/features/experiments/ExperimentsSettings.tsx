@@ -26,6 +26,11 @@ import { Badge } from "@/shared/ui/badge";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import {
+  SettingsSection,
+  SettingsSections,
+} from "@/shared/ui/settings-section";
 import { Switch } from "@/shared/ui/switch";
 import { STARTER_TASKS_EXPERIMENT_ID } from "./experimentDefinitions";
 import { resetAssistiveUxMoment } from "@/shared/assistive-ux/state";
@@ -96,12 +101,11 @@ export function ExperimentsSettings({
 
     return (
       <div key={definition.id} className={rowClassName}>
-        <div className="flex items-center justify-between gap-8 px-4 py-4">
-          <div className="min-w-0 flex-1">
-            <h4
-              id={titleId}
-              className="flex min-w-0 items-center gap-1.5 text-sm font-normal"
-            >
+        <SettingsRow
+          labelId={titleId}
+          descriptionId={descriptionId}
+          label={
+            <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 truncate">{t(definition.titleKey)}</span>
               {showDefaultLabel ? (
                 <Badge
@@ -112,107 +116,110 @@ export function ExperimentsSettings({
                   {t("experiments.defaultLabel")}
                 </Badge>
               ) : null}
-            </h4>
-            <p
-              id={descriptionId}
-              className="mt-1 text-xs text-muted-foreground"
-            >
-              {t(definition.descriptionKey)}
-            </p>
-          </div>
-          {showExperimentToggle ||
-          (showResetToAuto && experiment.enabledSource === "explicit") ? (
-            <div className="flex shrink-0 items-center gap-2">
-              {showResetToAuto && experiment.enabledSource === "explicit" ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const didSave = clearExperimentEnabledOverride(
-                      definition.id,
-                      registry,
-                    );
-                    if (!didSave) {
-                      toast.error(t("experiments.saveError"));
-                      return;
-                    }
-                    if (definition.id === BERDY_ONBOARDING_EXPERIMENT_ID) {
-                      const enabled =
-                        getExperiment(definition.id, registry)?.enabled ===
-                        true;
-                      void syncOnboardingExperimentState(enabled);
-                    }
-                  }}
-                  aria-label={t("experiments.resetToAuto")}
-                >
-                  {t("experiments.resetToAuto")}
-                </Button>
-              ) : null}
-              {definition.id === STARTER_TASKS_EXPERIMENT_ID ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={t("experiments.starterTasks.resetAria")}
-                  onClick={() => {
-                    void resetStarterTasksExperience().then((didReset) => {
-                      if (!didReset) {
-                        toast.error(t("experiments.onboarding.resetAllError"));
+            </span>
+          }
+          description={t(definition.descriptionKey)}
+          action={
+            showExperimentToggle ||
+            (showResetToAuto && experiment.enabledSource === "explicit") ? (
+              <div className="flex shrink-0 items-center gap-2">
+                {showResetToAuto && experiment.enabledSource === "explicit" ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const didSave = clearExperimentEnabledOverride(
+                        definition.id,
+                        registry,
+                      );
+                      if (!didSave) {
+                        toast.error(t("experiments.saveError"));
                         return;
                       }
-                      resetAssistiveUxMoment("home.starterTasks");
-                      window.dispatchEvent(new Event("starter-tasks-reset"));
-                      toast.success(t("experiments.starterTasks.resetSuccess"));
-                    });
-                  }}
-                >
-                  {t("experiments.starterTasks.reset")}
-                </Button>
-              ) : null}
-              {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!experiment.enabled || isResettingBerdyOnboarding}
-                  onClick={async () => {
-                    setIsResettingBerdyOnboarding(true);
-                    try {
-                      const didReset = await resetOnboardingTourExperience();
-                      if (didReset) {
+                      if (definition.id === BERDY_ONBOARDING_EXPERIMENT_ID) {
+                        const enabled =
+                          getExperiment(definition.id, registry)?.enabled ===
+                          true;
+                        void syncOnboardingExperimentState(enabled);
+                      }
+                    }}
+                    aria-label={t("experiments.resetToAuto")}
+                  >
+                    {t("experiments.resetToAuto")}
+                  </Button>
+                ) : null}
+                {definition.id === STARTER_TASKS_EXPERIMENT_ID ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={t("experiments.starterTasks.resetAria")}
+                    onClick={() => {
+                      void resetStarterTasksExperience().then((didReset) => {
+                        if (!didReset) {
+                          toast.error(
+                            t("experiments.onboarding.resetAllError"),
+                          );
+                          return;
+                        }
+                        resetAssistiveUxMoment("home.starterTasks");
+                        window.dispatchEvent(new Event("starter-tasks-reset"));
                         toast.success(
-                          t("experiments.berdyOnboarding.resetSuccess"),
+                          t("experiments.starterTasks.resetSuccess"),
                         );
-                      } else {
+                      });
+                    }}
+                  >
+                    {t("experiments.starterTasks.reset")}
+                  </Button>
+                ) : null}
+                {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={!experiment.enabled || isResettingBerdyOnboarding}
+                    onClick={async () => {
+                      setIsResettingBerdyOnboarding(true);
+                      try {
+                        const didReset = await resetOnboardingTourExperience();
+                        if (didReset) {
+                          toast.success(
+                            t("experiments.berdyOnboarding.resetSuccess"),
+                          );
+                        } else {
+                          toast.error(
+                            t("experiments.berdyOnboarding.resetError"),
+                          );
+                        }
+                      } catch {
                         toast.error(
                           t("experiments.berdyOnboarding.resetError"),
                         );
+                      } finally {
+                        setIsResettingBerdyOnboarding(false);
                       }
-                    } catch {
-                      toast.error(t("experiments.berdyOnboarding.resetError"));
-                    } finally {
-                      setIsResettingBerdyOnboarding(false);
-                    }
-                  }}
-                >
-                  {t("experiments.berdyOnboarding.resetLabel")}
-                </Button>
-              ) : null}
-              {showExperimentToggle ? (
-                <Switch
-                  checked={experiment.enabled}
-                  disabled={toggleDisabled}
-                  onCheckedChange={(enabled) => {
-                    handleExperimentEnabledChange(definition, enabled);
-                  }}
-                  aria-labelledby={titleId}
-                  aria-describedby={descriptionId}
-                />
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+                    }}
+                  >
+                    {t("experiments.berdyOnboarding.resetLabel")}
+                  </Button>
+                ) : null}
+                {showExperimentToggle ? (
+                  <Switch
+                    checked={experiment.enabled}
+                    disabled={toggleDisabled}
+                    onCheckedChange={(enabled) => {
+                      handleExperimentEnabledChange(definition, enabled);
+                    }}
+                    aria-labelledby={titleId}
+                    aria-describedby={descriptionId}
+                  />
+                ) : null}
+              </div>
+            ) : undefined
+          }
+        />
         <ExperimentConfigControls
           definition={definition}
           experiment={experiment}
@@ -236,7 +243,7 @@ export function ExperimentsSettings({
   const renderExperimentCard = (definition: ExperimentDefinition) => (
     <section
       key={definition.id}
-      className="overflow-hidden rounded-md border bg-background"
+      className="border-b border-border last:border-b-0"
     >
       {renderExperimentControls(definition)}
     </section>
@@ -308,69 +315,56 @@ export function ExperimentsSettings({
   };
 
   return (
-    <SettingsPage contentClassName="space-y-3">
-      <section>
-        <div className="mb-3">
-          <h4 className="text-base text-foreground">
-            {t("experiments.title")}
-          </h4>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("experiments.description")}
-          </p>
+    <SettingsPage
+      title={t("experiments.title")}
+      description={
+        <>
+          {t("experiments.description")}
           {import.meta.env.DEV ? (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <span className="mt-1 block">
               {t("experiments.autoEnable.description")}
-            </p>
+            </span>
           ) : null}
-        </div>
-        {visibleRegistry.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            {t("experiments.emptyDescription")}
-          </p>
-        ) : (
-          <div className="space-y-6">
-            {otherDefinitions.length > 0 ? (
-              <div className="space-y-3">
-                {otherDefinitions.map(renderExperimentCard)}
+        </>
+      }
+    >
+      {visibleRegistry.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {t("experiments.emptyDescription")}
+        </p>
+      ) : (
+        <SettingsSections>
+          {otherDefinitions.length > 0 ? (
+            <SettingsSection>
+              {otherDefinitions.map(renderExperimentCard)}
+            </SettingsSection>
+          ) : null}
+          {onboardingDefinitions.length > 0 ? (
+            <SettingsSection
+              title={t("experiments.onboarding.title")}
+              titleId="onboarding-experiments-title"
+            >
+              <div className="flex items-end justify-between gap-4 pb-3">
+                <p className="text-xs text-muted-foreground">
+                  {t("experiments.onboarding.description")}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isResettingAllOnboarding}
+                  onClick={() => setResetAllConfirmationOpen(true)}
+                >
+                  {t("experiments.onboarding.resetAll")}
+                </Button>
               </div>
-            ) : null}
-            {onboardingDefinitions.length > 0 ? (
-              <section
-                aria-labelledby="onboarding-experiments-title"
-                className="overflow-hidden rounded-md border bg-background"
-              >
-                <div className="flex items-end justify-between gap-4 border-b px-4 py-4">
-                  <div>
-                    <h5
-                      id="onboarding-experiments-title"
-                      className="text-sm font-medium"
-                    >
-                      {t("experiments.onboarding.title")}
-                    </h5>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {t("experiments.onboarding.description")}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isResettingAllOnboarding}
-                    onClick={() => setResetAllConfirmationOpen(true)}
-                  >
-                    {t("experiments.onboarding.resetAll")}
-                  </Button>
-                </div>
-                <div className="divide-y">
-                  {onboardingDefinitions.map((definition) =>
-                    renderExperimentControls(definition),
-                  )}
-                </div>
-              </section>
-            ) : null}
-          </div>
-        )}
-      </section>
+              {onboardingDefinitions.map((definition) =>
+                renderExperimentControls(definition),
+              )}
+            </SettingsSection>
+          ) : null}
+        </SettingsSections>
+      )}
       <ConfirmDialog
         open={resetAllConfirmationOpen}
         onOpenChange={setResetAllConfirmationOpen}

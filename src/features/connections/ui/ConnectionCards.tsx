@@ -128,8 +128,7 @@ export function OAuthConnectionActions({
             variant="ghost"
             flush
             size={size}
-            onClick={(event) => {
-              event.stopPropagation();
+            onClick={() => {
               void disconnect(entry.provider);
             }}
           >
@@ -140,8 +139,7 @@ export function OAuthConnectionActions({
           type="button"
           variant="subtle"
           size={size}
-          onClick={(event) => {
-            event.stopPropagation();
+          onClick={() => {
             void connect(entry.provider);
           }}
         >
@@ -170,21 +168,16 @@ export function OAuthConnectionActions({
 export function OAuthConnectionCard({
   entry,
   status,
-  onSelect,
 }: {
   entry: OAuthProviderEntry;
   status: ConnectionStatus;
-  onSelect: () => void;
 }) {
-  const { t } = useTranslation("settings");
-
   return (
     <ConnectionCard
       icon={<entry.Icon className="h-4.5 w-4.5" />}
       name={entry.displayName}
+      description={entry.description}
       badge={<OAuthStatusBadge status={status} />}
-      onSelect={onSelect}
-      selectLabel={t("connections.openDetails", { name: entry.displayName })}
       action={<OAuthConnectionActions entry={entry} status={status} />}
     />
   );
@@ -195,6 +188,13 @@ export function isEditableExtension(extension: ExtensionEntry): boolean {
     (extension.type === "stdio" || extension.type === "streamable_http") &&
     !extension.bundled
   );
+}
+
+function extensionDescription(extension: ExtensionEntry): string {
+  if (extension.description) return extension.description;
+  if (extension.type === "stdio") return extension.cmd;
+  if (extension.type === "streamable_http") return extension.uri;
+  return extension.type;
 }
 
 export function ExtensionConnectionCard({
@@ -217,12 +217,7 @@ export function ExtensionConnectionCard({
     <ConnectionCard
       icon={<Link2 className="size-4.5 text-foreground" aria-hidden="true" />}
       name={displayName}
-      onSelect={onSelect}
-      selectLabel={
-        editable
-          ? t("extensions.configure", { name: displayName })
-          : t("connections.openDetails", { name: displayName })
-      }
+      description={extensionDescription(extension)}
       badge={
         showAlwaysOnWarning ? (
           <span
@@ -235,25 +230,35 @@ export function ExtensionConnectionCard({
         ) : null
       }
       action={
-        installed ? (
-          <div className="flex items-center gap-1.5">
-            {showAlwaysOnWarning ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onReset(extension.config_key);
-                }}
-                aria-label={t("extensions.alwaysOn.resetAria", {
-                  name: displayName,
-                })}
-                tooltip={t("extensions.alwaysOn.tooltip")}
-              >
-                {t("extensions.alwaysOn.reset")}
-              </Button>
-            ) : null}
+        <div className="flex items-center gap-1.5">
+          {editable ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onSelect}
+              aria-label={t("extensions.configure", { name: displayName })}
+            >
+              {t("connections.configure")}
+            </Button>
+          ) : null}
+          {installed && showAlwaysOnWarning ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => {
+                onReset(extension.config_key);
+              }}
+              aria-label={t("extensions.alwaysOn.resetAria", {
+                name: displayName,
+              })}
+              tooltip={t("extensions.alwaysOn.tooltip")}
+            >
+              {t("extensions.alwaysOn.reset")}
+            </Button>
+          ) : null}
+          {installed ? (
             <div
               className="flex h-8 w-8 items-center justify-center text-success"
               role="img"
@@ -262,8 +267,8 @@ export function ExtensionConnectionCard({
             >
               <IconCheck className="size-4" aria-hidden="true" />
             </div>
-          </div>
-        ) : null
+          ) : null}
+        </div>
       }
     />
   );

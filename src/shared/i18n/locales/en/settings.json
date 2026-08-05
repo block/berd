@@ -400,7 +400,6 @@
       "installed": "Installed",
       "available": "Available"
     },
-    "openDetails": "View {{name}} details",
     "configure": "Configure",
     "connect": "Connect",
     "reconnect": "Reconnect",

@@ -11,6 +11,7 @@ import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { ExpandableCard } from "@/shared/ui/card";
+import { SettingsRow } from "@/shared/ui/settings-row";
 import { Spinner } from "@/shared/ui/spinner";
 import {
   Collapsible,
@@ -75,6 +76,8 @@ interface AgentProviderCardProps {
   // Makes a custom status indicator an explicit shortcut into the card's
   // expandable setup details (for example, Goose's model-provider setup).
   statusIndicatorOpensDetails?: boolean;
+  /** Goose keeps its expandable harness card; other agents use SettingsRow. */
+  presentation?: "card" | "row";
 }
 
 export function AgentProviderCard({
@@ -88,6 +91,7 @@ export function AgentProviderCard({
   collapsedSupplement,
   statusIndicator,
   statusIndicatorOpensDetails = false,
+  presentation = "card",
 }: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
@@ -391,7 +395,7 @@ export function AgentProviderCard({
         leftIcon={icon}
         onClick={onClick}
         aria-label={ariaLabel}
-        className="flex-shrink-0 text-warning"
+        className="flex-shrink-0"
       >
         {label}
       </Button>
@@ -402,10 +406,10 @@ export function AgentProviderCard({
     return (
       <Button
         type="button"
-        variant="ghost"
+        variant="outline"
         size="xs"
         onClick={() => handleAuth()}
-        className="flex-shrink-0 text-muted-foreground"
+        className="flex-shrink-0"
         aria-label={t("providers.agents.signInLabel", {
           name: provider.displayName,
         })}
@@ -707,15 +711,27 @@ export function AgentProviderCard({
     openCollapsedCard();
   };
 
-  const card = (
-    <ExpandableCard
-      active={isActive}
-      interactive={canOpenCollapsedCard}
-      onClick={canOpenCollapsedCard ? handleCardSurfaceClick : undefined}
-    >
-      {cardContent}
-    </ExpandableCard>
-  );
+  const card =
+    presentation === "row" ? (
+      <SettingsRow
+        leading={icon}
+        label={provider.displayName}
+        description={provider.description}
+        align="start"
+        action={renderStatusIndicator()}
+        details={providerDetails}
+        detailsClassName={icon ? "ml-10" : undefined}
+      />
+    ) : (
+      <ExpandableCard
+        active={isActive}
+        interactive={canOpenCollapsedCard}
+        onClick={canOpenCollapsedCard ? handleCardSurfaceClick : undefined}
+        className="border border-border"
+      >
+        {cardContent}
+      </ExpandableCard>
+    );
 
   if (!collapsedSupplement) {
     return card;

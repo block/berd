@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import { SettingsSection } from "@/shared/ui/settings-section";
 import {
   type ChatSession,
   useChatSessionStore,
@@ -60,38 +62,37 @@ export function ArchivedChatsSection() {
   }
 
   return (
-    <div className="space-y-3">
-      <h4 className="text-base text-foreground">{t("chats.sectionTitle")}</h4>
+    <SettingsSection title={t("chats.sectionTitle")}>
       {!loadingArchivedChats && archivedChats.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("chats.empty")}</p>
       ) : null}
       {archivedChats.map((session) => (
-        <div
+        <SettingsRow
           key={session.id}
-          className="flex items-center justify-between gap-3 rounded-sm bg-card px-3 py-2 text-card-foreground"
-        >
-          <div className="min-w-0">
-            <div className="truncate text-sm">
+          density="compact"
+          label={
+            <span className="block truncate">
               {getDisplaySessionTitle(
                 session.title,
                 t("common:session.defaultTitle"),
               )}
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              {describeChat(session)}
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={() => handleRestoreChat(session.id)}
-            className="flex-shrink-0"
-          >
-            {t("common:actions.restore")}
-          </Button>
-        </div>
+            </span>
+          }
+          description={describeChat(session)}
+          descriptionClassName="truncate"
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => handleRestoreChat(session.id)}
+              className="flex-shrink-0"
+            >
+              {t("common:actions.restore")}
+            </Button>
+          }
+        />
       ))}
-    </div>
+    </SettingsSection>
   );
 }

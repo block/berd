@@ -4,6 +4,8 @@ import { ChevronDown } from "lucide-react";
 import { IconPlayerPlayFilled } from "@tabler/icons-react";
 import { Switch } from "@/shared/ui/switch";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { SettingsSection } from "@/shared/ui/settings-section";
+import { SettingsRow } from "@/shared/ui/settings-row";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Button } from "@/shared/ui/button";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
@@ -25,60 +27,6 @@ import { cn } from "@/shared/lib/cn";
 interface SoundOption {
   id: NotificationSoundId;
   label: string;
-}
-
-function SettingsSection({
-  title,
-  children,
-}: {
-  title?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      {title ? <h4 className="text-base text-foreground">{title}</h4> : null}
-      <div className="divide-y divide-border overflow-hidden rounded-md bg-background">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function SettingRow({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-8 px-4 py-4">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm">{label}</p>
-        {description ? (
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      <div className="flex-shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function SoundRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="px-4 pb-4 pt-0">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="mt-2 w-56">{children}</div>
-    </div>
-  );
 }
 
 function SoundSelect({
@@ -214,26 +162,32 @@ function NotificationChannelSetting({
   getPreviewAriaLabel: (soundLabel: string) => string;
 }) {
   return (
-    <div>
-      <SettingRow label={label} description={description}>
+    <SettingsRow
+      label={label}
+      description={description}
+      action={
         <Switch
           checked={checked}
           onCheckedChange={onCheckedChange}
           aria-label={label}
         />
-      </SettingRow>
-
-      {checked && (
-        <SoundRow label={soundLabel}>
-          <SoundSelect
-            value={soundValue}
-            onValueChange={onSoundChange}
-            ariaLabel={soundAriaLabel}
-            getPreviewAriaLabel={getPreviewAriaLabel}
-          />
-        </SoundRow>
-      )}
-    </div>
+      }
+      details={
+        checked ? (
+          <div className="w-56">
+            <p className="text-xs text-muted-foreground">{soundLabel}</p>
+            <div className="mt-2">
+              <SoundSelect
+                value={soundValue}
+                onValueChange={onSoundChange}
+                ariaLabel={soundAriaLabel}
+                getPreviewAriaLabel={getPreviewAriaLabel}
+              />
+            </div>
+          </div>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -251,48 +205,48 @@ export function NotificationSettings() {
   }
 
   return (
-    <SettingsPage contentClassName="space-y-8">
+    <SettingsPage title={t("notifications.title")}>
       <SettingsSection>
-        <SettingRow label={t("notifications.enabled.label")}>
+        <SettingsRow label={t("notifications.enabled.label")}>
           <Switch
             checked={prefs.enabled}
             onCheckedChange={(checked) => update({ enabled: checked })}
             aria-label={t("notifications.enabled.label")}
           />
-        </SettingRow>
+        </SettingsRow>
+
+        {prefs.enabled ? (
+          <>
+            <NotificationChannelSetting
+              label={t("notifications.inApp.label")}
+              description={t("notifications.inApp.description")}
+              checked={prefs.inApp}
+              onCheckedChange={(checked) => update({ inApp: checked })}
+              soundLabel={t("notifications.inAppSound.label")}
+              soundAriaLabel={t("notifications.inAppSound.ariaLabel")}
+              soundValue={prefs.inAppSound}
+              onSoundChange={(inAppSound) => update({ inAppSound })}
+              getPreviewAriaLabel={(sound) =>
+                t("notifications.soundPreview.ariaLabel", { sound })
+              }
+            />
+
+            <NotificationChannelSetting
+              label={t("notifications.desktop.label")}
+              description={t("notifications.desktop.description")}
+              checked={prefs.desktop}
+              onCheckedChange={(checked) => update({ desktop: checked })}
+              soundLabel={t("notifications.desktopSound.label")}
+              soundAriaLabel={t("notifications.desktopSound.ariaLabel")}
+              soundValue={prefs.desktopSound}
+              onSoundChange={(desktopSound) => update({ desktopSound })}
+              getPreviewAriaLabel={(sound) =>
+                t("notifications.soundPreview.ariaLabel", { sound })
+              }
+            />
+          </>
+        ) : null}
       </SettingsSection>
-
-      {prefs.enabled && (
-        <SettingsSection>
-          <NotificationChannelSetting
-            label={t("notifications.inApp.label")}
-            description={t("notifications.inApp.description")}
-            checked={prefs.inApp}
-            onCheckedChange={(checked) => update({ inApp: checked })}
-            soundLabel={t("notifications.inAppSound.label")}
-            soundAriaLabel={t("notifications.inAppSound.ariaLabel")}
-            soundValue={prefs.inAppSound}
-            onSoundChange={(inAppSound) => update({ inAppSound })}
-            getPreviewAriaLabel={(sound) =>
-              t("notifications.soundPreview.ariaLabel", { sound })
-            }
-          />
-
-          <NotificationChannelSetting
-            label={t("notifications.desktop.label")}
-            description={t("notifications.desktop.description")}
-            checked={prefs.desktop}
-            onCheckedChange={(checked) => update({ desktop: checked })}
-            soundLabel={t("notifications.desktopSound.label")}
-            soundAriaLabel={t("notifications.desktopSound.ariaLabel")}
-            soundValue={prefs.desktopSound}
-            onSoundChange={(desktopSound) => update({ desktopSound })}
-            getPreviewAriaLabel={(sound) =>
-              t("notifications.soundPreview.ariaLabel", { sound })
-            }
-          />
-        </SettingsSection>
-      )}
     </SettingsPage>
   );
 }

@@ -375,24 +375,42 @@ function ConnectionsPlaceholder() {
 
 function SettingsPlaceholder() {
   return (
-    <PagePlaceholder width="narrow" contentClassName="gap-8">
-      <PageHeaderPlaceholder actions={0} />
-      <div className="space-y-6">
-        {placeholderKeys.slice(0, 5).map((key) => (
-          <section
-            key={key}
-            className="rounded-md border border-border/60 bg-background/70 p-5"
-          >
-            <Skeleton className="mb-3 h-5 w-40 rounded-sm" />
-            <div className="space-y-3">
-              <Skeleton className="h-4 w-full rounded-sm" />
-              <Skeleton className="h-4 w-5/6 rounded-sm" />
-              <Skeleton className="h-9 w-full rounded-md" />
-            </div>
-          </section>
-        ))}
+    <div className="page-transition flex h-full min-h-0 flex-col px-[var(--spacing-app-panel-gutter-inline)] pt-[var(--spacing-app-panel-gutter-top)] pb-[var(--spacing-app-panel-gutter-bottom)]">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-md bg-card">
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-8 pb-app-page-bottom">
+          <div className="space-y-2">
+            <Skeleton className="h-10 w-44 rounded-sm" />
+            <Skeleton className="h-4 w-80 max-w-full rounded-sm" />
+          </div>
+
+          <div className="mt-6 space-y-11">
+            {placeholderKeys.slice(0, 4).map((key, sectionIndex) => (
+              <section key={key} className="space-y-3">
+                {sectionIndex > 0 ? (
+                  <Skeleton className="h-6 w-40 rounded-sm" />
+                ) : null}
+                <div className="divide-y divide-border">
+                  {placeholderKeys
+                    .slice(0, sectionIndex === 0 ? 4 : 3)
+                    .map((rowKey) => (
+                      <div
+                        key={`${key}-${rowKey}`}
+                        className="flex min-w-0 items-center gap-4 py-4 pr-4"
+                      >
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <Skeleton className="h-4 w-48 max-w-2/3 rounded-sm" />
+                          <Skeleton className="h-3 w-80 max-w-full rounded-sm" />
+                        </div>
+                        <Skeleton className="h-7 w-16 shrink-0 rounded-full" />
+                      </div>
+                    ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
       </div>
-    </PagePlaceholder>
+    </div>
   );
 }
 

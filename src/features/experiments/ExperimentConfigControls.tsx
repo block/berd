@@ -22,6 +22,7 @@ import {
 } from "@/shared/ui/select";
 import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
+import { SettingsRow } from "@/shared/ui/settings-row";
 
 interface ExperimentConfigControlsProps {
   definition: ExperimentDefinition;
@@ -71,78 +72,75 @@ export function ExperimentConfigControls({
             : "w-40 flex-shrink-0";
 
         return (
-          <div
+          <SettingsRow
             key={key}
-            className={
-              isStackedControl
-                ? "relative flex flex-col gap-2 py-3 pl-8 pr-4 before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']"
-                : "relative flex items-center justify-between gap-6 py-3 pl-8 pr-4 before:absolute before:top-0 before:right-4 before:left-4 before:border-t before:content-['']"
-            }
-          >
-            <div className="min-w-0 flex-1">
+            density="compact"
+            layout={isStackedControl ? "stacked" : "inline"}
+            className="relative before:absolute before:top-0 before:right-4 before:left-0 before:border-t before:content-['']"
+            label={
               <Label
                 htmlFor={controlId}
                 className="text-xs text-muted-foreground"
               >
                 {t(control.labelKey)}
               </Label>
-              {description ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {description}
-                </p>
-              ) : null}
-            </div>
-            <div className={controlContainerClassName}>
-              {control.type === "boolean" ? (
-                <Switch
-                  id={controlId}
-                  disabled={disabled}
-                  checked={Boolean(experiment.config[key])}
-                  onCheckedChange={(checked) =>
-                    handleConfigChange(key, checked)
-                  }
-                  aria-label={t(control.labelKey)}
-                />
-              ) : null}
-              {control.type === "select" ? (
-                <Select
-                  disabled={disabled}
-                  value={String(experiment.config[key])}
-                  onValueChange={(value) => handleConfigChange(key, value)}
-                >
-                  <SelectTrigger id={controlId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {control.options.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {t(option.labelKey)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-              {control.type === "number" ? (
-                <NumberExperimentControl
-                  id={controlId}
-                  control={control}
-                  disabled={disabled}
-                  value={Number(experiment.config[key])}
-                  onCommit={(value) => handleConfigChange(key, value)}
-                />
-              ) : null}
-              {control.type === "text" ? (
-                <TextExperimentControl
-                  id={controlId}
-                  disabled={disabled}
-                  multiline={control.multiline !== false}
-                  value={String(experiment.config[key])}
-                  placeholder={control.placeholderKey}
-                  onCommit={(value) => handleConfigChange(key, value)}
-                />
-              ) : null}
-            </div>
-          </div>
+            }
+            description={description}
+            descriptionClassName="mt-1"
+            actionClassName={controlContainerClassName}
+            action={
+              <>
+                {control.type === "boolean" ? (
+                  <Switch
+                    id={controlId}
+                    disabled={disabled}
+                    checked={Boolean(experiment.config[key])}
+                    onCheckedChange={(checked) =>
+                      handleConfigChange(key, checked)
+                    }
+                    aria-label={t(control.labelKey)}
+                  />
+                ) : null}
+                {control.type === "select" ? (
+                  <Select
+                    disabled={disabled}
+                    value={String(experiment.config[key])}
+                    onValueChange={(value) => handleConfigChange(key, value)}
+                  >
+                    <SelectTrigger id={controlId} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {control.options.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {t(option.labelKey)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+                {control.type === "number" ? (
+                  <NumberExperimentControl
+                    id={controlId}
+                    control={control}
+                    disabled={disabled}
+                    value={Number(experiment.config[key])}
+                    onCommit={(value) => handleConfigChange(key, value)}
+                  />
+                ) : null}
+                {control.type === "text" ? (
+                  <TextExperimentControl
+                    id={controlId}
+                    disabled={disabled}
+                    multiline={control.multiline !== false}
+                    value={String(experiment.config[key])}
+                    placeholder={control.placeholderKey}
+                    onCommit={(value) => handleConfigChange(key, value)}
+                  />
+                ) : null}
+              </>
+            }
+          />
         );
       })}
     </div>

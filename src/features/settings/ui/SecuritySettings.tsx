@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
+import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { SettingsRow } from "@/shared/ui/settings-row";
 import { Switch } from "@/shared/ui/switch";
 
 const DEFAULT_THRESHOLD = 0.8;
@@ -61,104 +63,97 @@ export function SecuritySettings() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">{t("security.title")}</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("security.description")}
-        </p>
-      </div>
-
-      <div className="space-y-4">
+    <SettingsPage
+      title={t("security.title")}
+      description={t("security.description")}
+      contentClassName="space-y-8"
+    >
+      <div className="divide-y divide-border">
         {/* Prompt Injection Detection */}
-        <div className="flex items-center justify-between rounded-lg border p-4">
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">
-                {t("security.promptInjection.label")}
-              </span>
+        <SettingsRow
+          label={
+            <span className="flex items-center gap-2">
+              {t("security.promptInjection.label")}
               <Badge variant="default">{t("security.status.active")}</Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t("security.promptInjection.description")}
-            </p>
-          </div>
-          <Switch
-            checked
-            disabled
-            aria-label={t("security.promptInjection.label")}
-          />
-        </div>
+            </span>
+          }
+          description={t("security.promptInjection.description")}
+          action={
+            <Switch
+              checked
+              disabled
+              aria-label={t("security.promptInjection.label")}
+            />
+          }
+        />
 
         {/* Command Injection Detection */}
-        <div className="flex items-center justify-between rounded-lg border p-4">
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">
-                {t("security.commandClassifier.label")}
-              </span>
+        <SettingsRow
+          label={
+            <span className="flex items-center gap-2">
+              {t("security.commandClassifier.label")}
               <Badge variant="default">{t("security.status.active")}</Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t("security.commandClassifier.description")}
-            </p>
-          </div>
-          <Switch
-            checked
-            disabled
-            aria-label={t("security.commandClassifier.label")}
-          />
-        </div>
+            </span>
+          }
+          description={t("security.commandClassifier.description")}
+          action={
+            <Switch
+              checked
+              disabled
+              aria-label={t("security.commandClassifier.label")}
+            />
+          }
+        />
 
         {/* Detection Sensitivity (threshold) */}
-        <div className="rounded-lg border p-4 space-y-3">
-          <div className="space-y-0.5">
-            <span className="text-sm font-medium">
-              {t("security.threshold.label")}
-            </span>
-            <p className="text-xs text-muted-foreground">
-              {t("security.threshold.description")}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              min={MIN_THRESHOLD}
-              max={MAX_THRESHOLD}
-              step={0.05}
-              value={threshold}
-              onChange={(event) => setThreshold(event.target.value)}
-              aria-label={t("security.threshold.label")}
-              aria-invalid={threshold !== "" && !isValid}
-              className="w-28"
-            />
-            <Button
-              type="button"
-              variant="primary"
-              size="default"
-              disabled={!isValid || !isDirty || saving}
-              onClick={handleSave}
-            >
-              {t("security.threshold.save")}
-            </Button>
-          </div>
-          {threshold !== "" && !isValid && (
-            <p className="text-xs text-destructive">
-              {t("security.threshold.rangeError")}
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            {t("security.threshold.restartHint")}
-          </p>
-        </div>
+        <SettingsRow
+          layout="stacked"
+          label={t("security.threshold.label")}
+          description={t("security.threshold.description")}
+          action={
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={MIN_THRESHOLD}
+                max={MAX_THRESHOLD}
+                step={0.05}
+                value={threshold}
+                onChange={(event) => setThreshold(event.target.value)}
+                aria-label={t("security.threshold.label")}
+                aria-invalid={threshold !== "" && !isValid}
+                className="w-28"
+              />
+              <Button
+                type="button"
+                variant="primary"
+                size="default"
+                disabled={!isValid || !isDirty || saving}
+                onClick={handleSave}
+              >
+                {t("security.threshold.save")}
+              </Button>
+            </div>
+          }
+          details={
+            <>
+              {threshold !== "" && !isValid ? (
+                <p className="text-xs text-destructive">
+                  {t("security.threshold.rangeError")}
+                </p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                {t("security.threshold.restartHint")}
+              </p>
+            </>
+          }
+        />
       </div>
 
       <p className="text-xs text-muted-foreground">
         {t("security.managedByOrg")}
-      </p>
-      <p className="text-xs text-muted-foreground">
+        <br />
         {t("security.warpNotice")}
       </p>
-    </div>
+    </SettingsPage>
   );
 }

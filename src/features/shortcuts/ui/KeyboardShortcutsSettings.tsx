@@ -23,6 +23,11 @@ import { Button } from "@/shared/ui/button";
 import { Kbd } from "@/shared/ui/kbd";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { SettingsRow } from "@/shared/ui/settings-row";
+import {
+  SettingsSection,
+  SettingsSections,
+} from "@/shared/ui/settings-section";
 
 type RowError =
   | { commandId: ShortcutCommandId; kind: "invalid" }
@@ -42,23 +47,6 @@ function rowHintId(commandId: ShortcutCommandId): string {
 
 function rowErrorId(commandId: ShortcutCommandId): string {
   return `shortcut-error-${commandId}`;
-}
-
-function SettingsSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      <h4 className="text-base text-foreground">{title}</h4>
-      <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
-        {children}
-      </div>
-    </section>
-  );
 }
 
 export function KeyboardShortcutsSettings() {
@@ -193,21 +181,21 @@ export function KeyboardShortcutsSettings() {
     const editLabel = t("settings.editLabel", { command: label });
 
     return (
-      <div key={command.id} className="px-4 py-4">
-        <div className="flex items-center justify-between gap-8">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm">{label}</p>
-            {isOverridden && defaultBinding ? (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t("settings.default", {
-                  shortcut: keyboardShortcutDisplayParts(
-                    defaultBinding.shortcut,
-                    isMac,
-                  ).join(isMac ? "" : "+"),
-                })}
-              </p>
-            ) : null}
-          </div>
+      <SettingsRow
+        key={command.id}
+        density="compact"
+        label={label}
+        description={
+          isOverridden && defaultBinding
+            ? t("settings.default", {
+                shortcut: keyboardShortcutDisplayParts(
+                  defaultBinding.shortcut,
+                  isMac,
+                ).join(isMac ? "" : "+"),
+              })
+            : undefined
+        }
+        action={
           <div className="flex flex-shrink-0 items-center gap-1.5">
             {isOverridden ? (
               <Button
@@ -227,7 +215,7 @@ export function KeyboardShortcutsSettings() {
               size="sm"
               id={editButtonId(command.id)}
               className={cn(
-                "min-w-24",
+                "w-fit px-1.5",
                 isRecording && "ring-2 ring-ring ring-offset-1",
               )}
               aria-label={
@@ -263,55 +251,57 @@ export function KeyboardShortcutsSettings() {
                 <span className="flex items-center gap-1">
                   {keyboardShortcutDisplayParts(binding.shortcut, isMac).map(
                     (part) => (
-                      <Kbd key={part}>{part}</Kbd>
+                      <Kbd key={part} className="shadow-none">
+                        {part}
+                      </Kbd>
                     ),
                   )}
                 </span>
               ) : null}
             </Button>
           </div>
-        </div>
-        {isRecording ? (
-          <p
-            id={rowHintId(command.id)}
-            role="status"
-            className="mt-2 text-xs text-muted-foreground"
-          >
-            {t("settings.recordingHint")}
-          </p>
-        ) : null}
-        {error ? (
-          <p
-            id={rowErrorId(command.id)}
-            role="alert"
-            className="mt-2 text-xs text-destructive"
-          >
-            {error.kind === "invalid"
-              ? t(
-                  command.allowUnmodified
-                    ? "settings.invalidUnmodified"
-                    : "settings.invalid",
-                )
-              : t("settings.conflict", {
-                  command: t(error.conflictDescriptionKey),
-                })}
-          </p>
-        ) : null}
-      </div>
+        }
+        details={
+          isRecording || error ? (
+            <>
+              {isRecording ? (
+                <p
+                  id={rowHintId(command.id)}
+                  role="status"
+                  className="text-xs text-muted-foreground"
+                >
+                  {t("settings.recordingHint")}
+                </p>
+              ) : null}
+              {error ? (
+                <p
+                  id={rowErrorId(command.id)}
+                  role="alert"
+                  className="text-xs text-destructive"
+                >
+                  {error.kind === "invalid"
+                    ? t(
+                        command.allowUnmodified
+                          ? "settings.invalidUnmodified"
+                          : "settings.invalid",
+                      )
+                    : t("settings.conflict", {
+                        command: t(error.conflictDescriptionKey),
+                      })}
+                </p>
+              ) : null}
+            </>
+          ) : undefined
+        }
+      />
     );
   }
 
   return (
-    <SettingsPage contentClassName="space-y-8">
-      {/* Inline transparent header, matching ProvidersSettings' sections,
-          instead of SettingsPage's sticky opaque header bar. */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-base text-foreground">{t("settings.title")}</h4>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("settings.pageDescription")}
-          </p>
-        </div>
+    <SettingsPage
+      title={t("settings.title")}
+      description={t("settings.pageDescription")}
+      actions={
         <Button
           type="button"
           variant="outline"
@@ -321,7 +311,9 @@ export function KeyboardShortcutsSettings() {
         >
           {t("settings.resetAll")}
         </Button>
-      </div>
+      }
+      contentClassName="space-y-8"
+    >
       <SearchBar
         size="pill"
         inputRef={searchInputRef}
@@ -335,14 +327,16 @@ export function KeyboardShortcutsSettings() {
           {t("settings.empty")}
         </p>
       ) : (
-        groups.map((group) => (
-          <SettingsSection
-            key={group.category}
-            title={t(`categories.${group.category}`)}
-          >
-            {group.commands.map(renderRow)}
-          </SettingsSection>
-        ))
+        <SettingsSections>
+          {groups.map((group) => (
+            <SettingsSection
+              key={group.category}
+              title={t(`categories.${group.category}`)}
+            >
+              {group.commands.map(renderRow)}
+            </SettingsSection>
+          ))}
+        </SettingsSections>
       )}
     </SettingsPage>
   );
