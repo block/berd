@@ -386,6 +386,8 @@
     },
     "berdctlCrossSessionLabel": "Enviado por Berd desde otra sesión",
     "steerLabel": "Guiado",
+    "viewMore": "Ver más",
+    "viewLess": "Ver menos",
     "voiceSpeechSpeakingLabel": "Hablando",
     "voiceSpeechSpokenLabel": "Hablado",
     "voiceSpeechInterruptedLabel": "Interrumpido",

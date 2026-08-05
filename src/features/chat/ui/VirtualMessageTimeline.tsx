@@ -1241,6 +1241,7 @@ function VirtualMessageTimelineSession({
     messageByRowId: stableMessageByRowId,
     listRootRef: searchListRootRef,
     scrollToRow: scrollRowForSearch,
+    rowStateProvider: virtualTimeline.rowStateProvider,
     backendRef: searchBackendRef,
   });
   const virtualRangeMountedRows = isBoundedVirtualMode
@@ -3466,6 +3467,17 @@ function VirtualMessageTimelineSession({
       })}
       message={row.messageId ? stableMessageByRowId.get(row.rowId) : undefined}
       isStreaming={false}
+      rowStateProvider={
+        virtualTimeline.rowStateProvider
+          ? {
+              registry: virtualTimeline.rowStateProvider.registry,
+              sessionId: virtualTimeline.rowStateProvider.sessionId,
+              sessionEpoch: virtualTimeline.rowStateProvider.sessionEpoch,
+              onRowStateChange:
+                virtualTimeline.rowStateProvider.onRowStateChange,
+            }
+          : undefined
+      }
       measureRowElement={measureOffscreenRealElement}
     />
   );

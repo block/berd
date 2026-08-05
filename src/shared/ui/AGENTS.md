@@ -57,9 +57,17 @@ these instead of restyling Button for app chrome:
 | `AgentTileButton` | subtle | Actions floating over agent/persona tiles. |
 | `GlassButton` | subtle | Controls floating over media, canvases, artwork. |
 | `JumpToLatestButton` | primary | Floating back-to-live-edge pills over streams. |
+| `DisclosureButton` | ghost | "View more" / "View less" / "View all" affordances. Pick a `surface`. |
 
 Each wrapper's recipe owns all of its interactive states; see the doc
 comment in its source for the full contract.
+
+`DisclosureButton` takes a `surface` (`default` | `sidebar` | `sidebarRow`)
+because how quiet the rest state can afford to be depends on what the button
+sits on. `default` inherits the system `ghost + flush` states and is correct on
+tinted raised surfaces like the chat user bubble; the `sidebar*` surfaces dim to
+`muted-foreground/75`, which is only legible against the page background. Do not
+use a `sidebar*` surface on a tinted surface.
 
 ### The rule (audited in CI)
 

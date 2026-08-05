@@ -1293,6 +1293,36 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Disclosure Button",
+    source: "src/shared/ui/disclosure-button.tsx",
+    description:
+      'Quiet disclosure action used for "View more", "View less", and "View all"\naffordances across the app.\n\nThe concept is surface-neutral: a ghost text button that rests quiet and\nrises on hover. Each `surface` is a *complete* recipe, because how quiet the\nrest state can afford to be depends on what the button sits on.\n\n- `default` — inherits the design system\'s `ghost + flush` states\n  (`muted-foreground` at rest, `foreground` on hover). Correct on tinted\n  raised surfaces such as the chat user bubble, where the surface itself\n  already consumes part of the contrast range.\n- `sidebar` — dims the rest state to `muted-foreground/75` and caps hover at\n  `muted-foreground`. Only legible because the sidebar sits on the page\n  background; do not reuse it on a tinted surface.\n- `sidebarRow` — `sidebar` quieting plus full-width sidebar row hover fills,\n  for disclosures that read as another row in a nav list.',
+    exports: [
+      "DisclosureButton",
+      "DisclosureButtonProps",
+      "DisclosureButtonSurface",
+    ],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "active:text-muted-foreground",
+      "hover:text-muted-foreground",
+      "text-muted-foreground/75",
+    ],
+    stateClasses: [
+      "active:bg-[var(--sidebar-row-active)]",
+      "active:text-muted-foreground",
+      "focus-visible:bg-[var(--sidebar-row-hover)]",
+      "hover:bg-[var(--sidebar-row-hover)]",
+      "hover:text-muted-foreground",
+    ],
+    sourceTokenClasses: [
+      "active:text-muted-foreground",
+      "hover:text-muted-foreground",
+      "text-muted-foreground/75",
+    ],
+  },
+  {
     name: "Drawer",
     source: "src/shared/ui/drawer.tsx",
     description: "",
@@ -2629,31 +2659,6 @@ export const designSystemComponentManifest = [
       "focus-visible:ring-ring/50",
       "text-foreground",
       "text-muted-foreground",
-    ],
-  },
-  {
-    name: "Sidebar Disclosure Button",
-    source: "src/shared/ui/sidebar-disclosure-button.tsx",
-    description: "",
-    exports: ["SidebarDisclosureButton", "SidebarDisclosureButtonProps"],
-    slots: [],
-    cva: [],
-    tokenClasses: [
-      "active:text-muted-foreground",
-      "hover:text-muted-foreground",
-      "text-muted-foreground/75",
-    ],
-    stateClasses: [
-      "active:bg-[var(--sidebar-row-active)]",
-      "active:text-muted-foreground",
-      "focus-visible:bg-[var(--sidebar-row-hover)]",
-      "hover:bg-[var(--sidebar-row-hover)]",
-      "hover:text-muted-foreground",
-    ],
-    sourceTokenClasses: [
-      "active:text-muted-foreground",
-      "hover:text-muted-foreground",
-      "text-muted-foreground/75",
     ],
   },
   {

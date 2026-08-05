@@ -387,6 +387,8 @@
     },
     "berdctlCrossSessionLabel": "Sent by Berd from another session",
     "steerLabel": "Steered",
+    "viewMore": "View more",
+    "viewLess": "View less",
     "voiceSpeechSpeakingLabel": "Speaking",
     "voiceSpeechSpokenLabel": "Spoken",
     "voiceSpeechInterruptedLabel": "Interrupted",

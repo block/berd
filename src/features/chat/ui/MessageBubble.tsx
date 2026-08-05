@@ -64,6 +64,10 @@ import { Button } from "@/shared/ui/button";
 import { LinkifiedText } from "@/shared/ui/LinkifiedText";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
+import {
+  couldOverflowUserMessagePreview,
+  UserMessageClamp,
+} from "./UserMessageClamp";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 
 interface MessageAttachmentPreviewItem {
@@ -809,6 +813,7 @@ export const MessageBubble = memo(function MessageBubble({
     .filter((c): c is TextContent => c.type === "text")
     .map((c) => c.text)
     .join("\n");
+  const renderedContent = visibleContent;
   const actionTextContent = fragmentRole
     ? rawContent
         .filter((c): c is TextContent => c.type === "text")
@@ -991,7 +996,7 @@ export const MessageBubble = memo(function MessageBubble({
           className={cn(
             "min-w-0 text-sm leading-relaxed",
             isUser
-              ? "max-h-[640px] overflow-y-auto overscroll-contain rounded-sm bg-message-user-bg px-4 py-2 leading-normal scrollbar-subtle"
+              ? "rounded-sm bg-message-user-bg px-4 py-2 leading-normal"
               : "w-full",
           )}
           onClick={handleContentClick}
@@ -1026,7 +1031,7 @@ export const MessageBubble = memo(function MessageBubble({
           {attachmentPreviewItems.length > 0 && (
             <MessageAttachmentGrid items={attachmentPreviewItems} />
           )}
-          {groupContentSections(visibleContent).map((section, sectionIdx) => {
+          {groupContentSections(renderedContent).map((section, sectionIdx) => {
             if (section.type === "toolChain") {
               const toolItems = section.items as ToolChainItem[];
               return (
@@ -1038,6 +1043,21 @@ export const MessageBubble = memo(function MessageBubble({
               );
             }
             const block = section.items[0] as MessageContent;
+            if (isUser && block.type === "text") {
+              if (!block.text.trim()) return null;
+              return couldOverflowUserMessagePreview(block.text) ? (
+                <UserMessageClamp
+                  key={`${message.id}-${section.key}`}
+                  text={block.text}
+                  stateKey={section.key}
+                />
+              ) : (
+                <LinkifiedText
+                  key={`${message.id}-${section.key}`}
+                  text={block.text}
+                />
+              );
+            }
             return (
               <div key={`${message.id}-${section.key}`}>
                 {renderContentBlock(

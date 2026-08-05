@@ -6,7 +6,7 @@ import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { SidebarDisclosureButton } from "@/shared/ui/sidebar-disclosure-button";
+import { DisclosureButton } from "@/shared/ui/disclosure-button";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
@@ -338,9 +338,9 @@ export function SidebarFlatChatsSection({
               </div>
             ))}
             {showViewAllInHistory && onNavigate ? (
-              <SidebarDisclosureButton
+              <DisclosureButton
                 type="button"
-                row
+                surface="sidebarRow"
                 onClick={() => onNavigate("session-history")}
                 className={cn(
                   "h-7 w-full justify-start rounded-sm px-3 py-1 text-sm",
@@ -348,7 +348,7 @@ export function SidebarFlatChatsSection({
                 )}
               >
                 {t("viewAllInHistory")}
-              </SidebarDisclosureButton>
+              </DisclosureButton>
             ) : null}
           </div>
         )}

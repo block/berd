@@ -108,6 +108,13 @@ export interface TranscriptDurableRowState {
   pathNoticeText?: string;
   artifactOpenError?: string;
   moreOutputsOpen?: boolean;
+  /**
+   * Whether a clamped long user message has been expanded to full height.
+   * Durable so expanding survives the row being recycled out of the
+   * virtualized viewport and scrolled back into it.
+   */
+  userMessageExpanded?: boolean;
+  userMessageExpandedBlocks?: Readonly<Record<string, boolean>>;
   copyConfirmedUntilMs?: number;
   embeddedScrollTopByKey?: Readonly<Record<string, number>>;
   activeFocusTargetId?: string;

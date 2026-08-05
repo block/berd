@@ -13,12 +13,10 @@ import {
   VIRTUAL_ROW_RESERVED_BLOCK_SIZE_ATTRIBUTE,
   type TranscriptShellMeasurementPlan,
 } from "../transcript/measurement";
-import {
-  TranscriptRowStateProvider,
-  type TranscriptRowStateRegistry,
-} from "../transcript/row-state";
+import { TranscriptRowStateProvider } from "../transcript/row-state";
 import type { TranscriptRowDescriptor } from "../transcript/projection";
 import type { TranscriptVirtualItem } from "../transcript/virtual";
+import type { TranscriptVirtualRowStateProviderConfig } from "../transcript/virtual/react/useTranscriptVirtualTimeline";
 import { AgentWorkPanel } from "./AgentWorkPanel";
 import { MessageBubble } from "./MessageBubble";
 import {
@@ -29,13 +27,6 @@ import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowS
 
 const STREAMING_ROW_ACTION_GUTTER = "0.75rem";
 const EMPTY_MESSAGE_BUBBLE_CALLBACKS: MessageBubbleCallbacks = {};
-
-interface VirtualTranscriptRowStateProviderConfig {
-  registry: TranscriptRowStateRegistry;
-  sessionId: string;
-  sessionEpoch: number;
-  onRowStateChange: () => void;
-}
 
 interface VirtualTranscriptRowProps {
   row: TranscriptRowDescriptor;
@@ -55,7 +46,7 @@ interface VirtualTranscriptRowProps {
   actionsAlwaysVisible?: boolean;
   showJumpToResponseStartHint?: boolean;
   isPulsing?: boolean;
-  rowStateProvider?: VirtualTranscriptRowStateProviderConfig;
+  rowStateProvider?: TranscriptVirtualRowStateProviderConfig;
   bubbleCallbacks?: MessageBubbleCallbacks;
   registerRowElement?: (rowId: string, element: HTMLElement | null) => void;
   measureRowElement?: (rowId: string, element: HTMLElement | null) => void;
@@ -429,6 +420,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       sessionEpoch={rowStateProvider.sessionEpoch}
       rowId={row.rowId}
       onRowStateChange={rowStateProvider.onRowStateChange}
+      onPinScrollAnchor={rowStateProvider.onPinScrollAnchor}
     >
       {rowContent}
     </TranscriptRowStateProvider>

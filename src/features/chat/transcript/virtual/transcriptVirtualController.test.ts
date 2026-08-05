@@ -43,6 +43,58 @@ describe("transcript virtual controller", () => {
     });
   });
 
+  it("holds the clicked row when an in-place disclosure grows at the bottom", () => {
+    const controller = createController({ viewportHeight: 500 });
+    acknowledge(controller, controller.setRows(makeRows(10, 100)).correction);
+
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 500,
+      anchor: { type: "bottom" },
+    });
+
+    // View-more pins the live viewport before changing row height, using the
+    // same preserve-position path as explicit user scroll intent.
+    const pinned = controller.syncViewport(
+      {
+        scrollTop: 500,
+        viewportHeight: 500,
+        widthScope: WIDTH_SCOPE,
+      },
+      {
+        source: "browser",
+        userScrollIntent: true,
+        preserveScrollPosition: true,
+      },
+    );
+
+    expect(pinned.correction).toBeNull();
+    expect(controller.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-5",
+      offsetWithinRow: 0,
+    });
+
+    const expanded = controller.applyMeasuredHeight({
+      token: tokenFor(controller, "row-9"),
+      height: 900,
+    });
+
+    expect(expanded.accepted).toBe(true);
+    // The pinned row begins above the changed row, so no corrective DOM write
+    // is needed; most importantly, bottom-follow does not request the new end.
+    expect(expanded.correction).toBeNull();
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 500,
+      anchor: {
+        type: "row",
+        rowId: "row-5",
+        offsetWithinRow: 0,
+      },
+      // Bottom follow would have requested this new end instead.
+      bottomScrollTop: 1300,
+    });
+  });
+
   it("keeps the bottom anchored when the viewport shrinks while following", () => {
     const controller = createController({ viewportHeight: 500 });
     acknowledge(controller, controller.setRows(makeRows(20, 100)).correction);

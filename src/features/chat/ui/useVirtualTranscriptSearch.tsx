@@ -10,6 +10,8 @@ import {
 } from "react";
 import type { Message } from "@/shared/types/messages";
 import type { TranscriptRowDescriptor } from "../transcript/projection";
+import { TranscriptRowStateProvider } from "../transcript/row-state";
+import type { TranscriptVirtualRowStateProviderConfig } from "../transcript/virtual/react/useTranscriptVirtualTimeline";
 import { MessageBubble } from "./MessageBubble";
 import {
   clearTranscriptSearchHighlights,
@@ -59,6 +61,7 @@ export interface VirtualTranscriptSearchOptions {
   /** Transcript content root; observed for mounted-row content drift. */
   listRootRef: RefObject<HTMLElement | null>;
   scrollToRow: (rowId: string) => boolean;
+  rowStateProvider?: TranscriptVirtualRowStateProviderConfig;
   /** Receives the backend the chat search controller delegates to. */
   backendRef: RefObject<TranscriptSearchBackend | null> | undefined;
 }
@@ -103,6 +106,7 @@ export function useVirtualTranscriptSearch({
   messageByRowId,
   listRootRef,
   scrollToRow,
+  rowStateProvider,
   backendRef,
 }: VirtualTranscriptSearchOptions): VirtualTranscriptSearchHandle {
   const rowsRef = useRef(rows);
@@ -424,6 +428,15 @@ export function useVirtualTranscriptSearch({
 
   requestTickRef.current = requestTick;
 
+  useEffect(() => {
+    if (!rowStateProvider) return;
+    return rowStateProvider.registry.subscribeToStateChanges(() => {
+      textCacheRef.current.clear();
+      countCacheRef.current.clear();
+      if (queryRef.current) requestTick();
+    });
+  }, [requestTick, rowStateProvider]);
+
   useEffect(
     () => () => {
       if (tickFrameRef.current !== null) {
@@ -575,6 +588,7 @@ export function useVirtualTranscriptSearch({
     <TranscriptSearchHarvestHost
       requests={harvestRequests}
       messageByRowId={messageByRowId}
+      rowStateProvider={rowStateProvider}
       onHarvested={handleHarvested}
     />
   );
@@ -585,6 +599,7 @@ export function useVirtualTranscriptSearch({
 interface TranscriptSearchHarvestHostProps {
   requests: readonly TranscriptRowDescriptor[];
   messageByRowId: ReadonlyMap<string, Message>;
+  rowStateProvider?: TranscriptVirtualRowStateProviderConfig;
   onHarvested: (rowId: string, revision: string, text: string) => void;
 }
 
@@ -595,9 +610,10 @@ interface TranscriptSearchHarvestHostProps {
  * unrendered. Each batch is released after its DOM settles, so async content
  * (code highlighting) lands in the harvested text.
  */
-function TranscriptSearchHarvestHost({
+export function TranscriptSearchHarvestHost({
   requests,
   messageByRowId,
+  rowStateProvider,
   onHarvested,
 }: TranscriptSearchHarvestHostProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -713,11 +729,27 @@ function TranscriptSearchHarvestHost({
             data-harvest-row-id={row.rowId}
             data-harvest-row-revision={row.renderRevision}
           >
-            <MessageBubble
-              message={message}
-              contentOverride={row.fragment?.content}
-              fragmentRole={row.fragment?.role}
-            />
+            {rowStateProvider ? (
+              <TranscriptRowStateProvider
+                registry={rowStateProvider.registry}
+                sessionId={rowStateProvider.sessionId}
+                sessionEpoch={rowStateProvider.sessionEpoch}
+                rowId={row.rowId}
+                onRowStateChange={rowStateProvider.onRowStateChange}
+              >
+                <MessageBubble
+                  message={message}
+                  contentOverride={row.fragment?.content}
+                  fragmentRole={row.fragment?.role}
+                />
+              </TranscriptRowStateProvider>
+            ) : (
+              <MessageBubble
+                message={message}
+                contentOverride={row.fragment?.content}
+                fragmentRole={row.fragment?.role}
+              />
+            )}
           </div>
         );
       })}

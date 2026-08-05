@@ -27,6 +27,12 @@ interface TranscriptRowStateContextValue {
   sessionEpoch?: number;
   getNowMs?: () => number;
   onRowStateChange?: () => void;
+  /**
+   * Pin the transcript to its current position, dropping bottom-follow, before
+   * this row changes height in place. Without it, an in-place expand while the
+   * viewport is pinned to the bottom scrolls the reader past what they revealed.
+   */
+  onPinScrollAnchor?: () => void;
 }
 
 export interface TranscriptRowStateProviderProps
@@ -53,6 +59,11 @@ export interface TranscriptRowStateAdapter {
     options?: { markRecent?: boolean },
   ) => TranscriptDurableRowState | undefined;
   markRowInteracted: (sourceId?: string) => boolean;
+  /**
+   * Pin the transcript where it sits before this row changes height in place,
+   * so an expand/collapse does not get overridden by bottom-follow.
+   */
+  pinScrollAnchor: () => void;
 }
 
 export interface TranscriptMcpActivityReporter {
@@ -90,6 +101,7 @@ export function TranscriptRowStateProvider({
   sessionEpoch,
   getNowMs,
   onRowStateChange,
+  onPinScrollAnchor,
   children,
 }: TranscriptRowStateProviderProps) {
   const value = useMemo(
@@ -100,8 +112,17 @@ export function TranscriptRowStateProvider({
       sessionEpoch,
       getNowMs,
       onRowStateChange,
+      onPinScrollAnchor,
     }),
-    [getNowMs, onRowStateChange, registry, rowId, sessionEpoch, sessionId],
+    [
+      getNowMs,
+      onPinScrollAnchor,
+      onRowStateChange,
+      registry,
+      rowId,
+      sessionEpoch,
+      sessionId,
+    ],
   );
 
   return (
@@ -186,6 +207,12 @@ export function useTranscriptRowStateAdapter(): TranscriptRowStateAdapter {
     [context],
   );
 
+  const pinScrollAnchor = useCallback<
+    TranscriptRowStateAdapter["pinScrollAnchor"]
+  >(() => {
+    context?.onPinScrollAnchor?.();
+  }, [context]);
+
   return useMemo(
     () => ({
       enabled: context !== null,
@@ -193,8 +220,16 @@ export function useTranscriptRowStateAdapter(): TranscriptRowStateAdapter {
       patchRowState,
       updateRowState,
       markRowInteracted,
+      pinScrollAnchor,
     }),
-    [context, markRowInteracted, patchRowState, rowState, updateRowState],
+    [
+      context,
+      markRowInteracted,
+      patchRowState,
+      pinScrollAnchor,
+      rowState,
+      updateRowState,
+    ],
   );
 }
 

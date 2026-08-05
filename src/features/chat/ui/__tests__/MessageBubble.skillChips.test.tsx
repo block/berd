@@ -20,7 +20,7 @@ function userMessage(text: string, overrides: Partial<Message> = {}): Message {
 
 describe("MessageBubble skill chips", () => {
   it("renders user message chips from metadata", () => {
-    render(
+    const { container } = render(
       <MessageBubble
         message={userMessage("redo the settings modal", {
           metadata: {
@@ -31,12 +31,14 @@ describe("MessageBubble skill chips", () => {
     );
 
     expect(screen.getByText("capture-task")).toBeInTheDocument();
-    expect(screen.getByText("redo the settings modal")).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-role="user-message-content"]'),
+    ).toHaveTextContent("redo the settings modal");
     expect(screen.queryByText(/Use the capture-task skill/i)).toBeNull();
   });
 
   it("renders multiple user message agent chips from metadata", () => {
-    render(
+    const { container } = render(
       <MessageBubble
         message={userMessage("compare approaches", {
           metadata: {
@@ -51,7 +53,9 @@ describe("MessageBubble skill chips", () => {
 
     expect(screen.getByText("@Reviewer")).toBeInTheDocument();
     expect(screen.getByText("Solo")).toBeInTheDocument();
-    expect(screen.getByText("compare approaches")).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-role="user-message-content"]'),
+    ).toHaveTextContent("compare approaches");
   });
 
   it("renders agent chip avatars from persona metadata", () => {

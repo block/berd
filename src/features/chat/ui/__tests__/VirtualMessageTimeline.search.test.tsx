@@ -3,6 +3,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { Message } from "@/shared/types/messages";
+import { createTranscriptRowStateRegistry } from "@/features/chat/transcript/row-state";
+import type { TranscriptVirtualRowStateProviderConfig } from "@/features/chat/transcript/virtual/react/useTranscriptVirtualTimeline";
 import { VirtualMessageTimeline } from "../VirtualMessageTimeline";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import {
@@ -19,18 +21,35 @@ const mockState = vi.hoisted(() => ({
   // controller, mirroring real windowing.
   window: { start: 0, end: Number.POSITIVE_INFINITY },
   scrollToRow: undefined as ReturnType<typeof vi.fn> | undefined,
+  rowStateProvider: undefined as
+    | TranscriptVirtualRowStateProviderConfig
+    | undefined,
 }));
 
-vi.mock("../MessageBubble", () => ({
-  MessageBubble: ({ message }: { message: Message }) => (
-    <div data-testid={`bubble-${message.id}`}>
-      {message.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join("\n")}
-    </div>
-  ),
-}));
+vi.mock("../MessageBubble", async () => {
+  const { useTranscriptRowStateAdapter } = await import(
+    "@/features/chat/transcript/row-state"
+  );
+  return {
+    MessageBubble: ({ message }: { message: Message }) => {
+      const { rowState } = useTranscriptRowStateAdapter();
+      return (
+        <div
+          data-testid={`bubble-${message.id}`}
+          data-expanded={rowState?.userMessageExpandedBlocks?.["text-0"]}
+        >
+          {message.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n")}
+          {rowState?.userMessageExpandedBlocks?.["text-0"]
+            ? " expanded-suffix"
+            : null}
+        </div>
+      );
+    },
+  };
+});
 
 vi.mock(
   "../../transcript/virtual/react/useTranscriptVirtualTimeline",
@@ -59,7 +78,7 @@ vi.mock(
             sessionId,
             window: mockState.window,
           }),
-          rowStateProvider: null,
+          rowStateProvider: mockState.rowStateProvider,
           measureRowElement: vi.fn(),
           remeasureVisibleRowsSync: vi.fn(),
           measureOffscreenShellElement: vi.fn(),
@@ -94,6 +113,7 @@ const scrollIntoViewMock = vi.fn();
 beforeEach(() => {
   registry = stubHighlightRegistry();
   mockState.scrollToRow = vi.fn(() => true);
+  mockState.rowStateProvider = undefined;
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,
@@ -127,6 +147,41 @@ function renderTimeline() {
 }
 
 describe("VirtualMessageTimeline indexed search", () => {
+  it("invalidates harvested text when durable disclosure state changes", async () => {
+    const rowStateRegistry = createTranscriptRowStateRegistry();
+    mockState.rowStateProvider = {
+      registry: rowStateRegistry,
+      sessionId: "session-1",
+      sessionEpoch: 1,
+      onRowStateChange: vi.fn(),
+    };
+    mockState.window = { start: 2, end: Number.POSITIVE_INFINITY };
+
+    const { backendRef } = renderTimeline();
+    act(() => backendRef.current?.setQuery("expanded-suffix"));
+    await waitFor(() => {
+      expect(backendRef.current?.getSnapshot().indexing).toBe(false);
+      expect(backendRef.current?.getSnapshot().total).toBe(0);
+    });
+
+    act(() => {
+      rowStateRegistry.updateRowState({
+        sessionId: "session-1",
+        sessionEpoch: 1,
+        rowId: "message:m1",
+        updater: (current) => ({
+          ...current,
+          userMessageExpandedBlocks: { "text-0": true },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(backendRef.current?.getSnapshot().indexing).toBe(false);
+      expect(backendRef.current?.getSnapshot().total).toBe(1);
+    });
+  });
+
   it("counts unmounted rows via offscreen harvest while windowing stays on", async () => {
     // Window out the first rows (date separator + first message).
     mockState.window = { start: 2, end: Number.POSITIVE_INFINITY };

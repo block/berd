@@ -11,7 +11,7 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { SidebarDisclosureButton } from "@/shared/ui/sidebar-disclosure-button";
+import { DisclosureButton } from "@/shared/ui/disclosure-button";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
@@ -490,29 +490,32 @@ export function SidebarProjectSection({
                 })}
                 {projectChats.length > MAX_VISIBLE_PROJECT_CHATS ? (
                   <div className="flex items-center pl-[38px] pr-3">
-                    <SidebarDisclosureButton
+                    <DisclosureButton
                       type="button"
+                      surface="sidebar"
                       onClick={collapseExpandedChats}
                       className={PROJECT_CHAT_DISCLOSURE_CLASS}
                     >
                       {t("showLess")}
-                    </SidebarDisclosureButton>
+                    </DisclosureButton>
                     {canOpenAllProjectChats ? (
-                      <SidebarDisclosureButton
+                      <DisclosureButton
                         type="button"
+                        surface="sidebar"
                         onClick={() => onNavigate?.("session-history")}
                         className={cn(PROJECT_CHAT_DISCLOSURE_CLASS, "ml-auto")}
                       >
                         {t("viewAllInHistory")}
-                      </SidebarDisclosureButton>
+                      </DisclosureButton>
                     ) : null}
                   </div>
                 ) : null}
               </CollapseReveal>
             ) : null}
             {canRevealLoadedChats && (
-              <SidebarDisclosureButton
+              <DisclosureButton
                 type="button"
+                surface="sidebar"
                 onClick={revealExpandedChats}
                 className={cn(
                   PROJECT_CHAT_DISCLOSURE_CLASS,
@@ -521,7 +524,7 @@ export function SidebarProjectSection({
                 )}
               >
                 {t("viewMoreChats")}
-              </SidebarDisclosureButton>
+              </DisclosureButton>
             )}
           </div>
         </CollapseReveal>

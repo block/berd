@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ClickableImage } from "@/features/chat/ui/ClickableImage";
 import type { TranscriptRowDescriptor } from "../projection";
 import {
@@ -286,6 +286,54 @@ describe("transcript row state context adapters", () => {
         protectedOffscreenRowCount: 0,
       },
     });
+  });
+
+  it("pins the scroll anchor through the row state adapter", () => {
+    const registry = createTranscriptRowStateRegistry();
+    const onPinScrollAnchor = vi.fn();
+
+    function PinProbe() {
+      const { pinScrollAnchor } = useTranscriptRowStateAdapter();
+      return (
+        <button type="button" onClick={pinScrollAnchor}>
+          pin
+        </button>
+      );
+    }
+
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId={SESSION_ID}
+        rowId={ROW_ID}
+        onPinScrollAnchor={onPinScrollAnchor}
+      >
+        <PinProbe />
+      </TranscriptRowStateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /pin/i }));
+
+    expect(onPinScrollAnchor).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps pinning inert without a virtual row context", () => {
+    function PinProbe() {
+      const { pinScrollAnchor } = useTranscriptRowStateAdapter();
+      return (
+        <button type="button" onClick={pinScrollAnchor}>
+          pin
+        </button>
+      );
+    }
+
+    // Flow (non-virtualized) transcripts render bubbles without a row context;
+    // pinning must be a no-op rather than throwing.
+    render(<PinProbe />);
+
+    expect(() =>
+      fireEvent.click(screen.getByRole("button", { name: /pin/i })),
+    ).not.toThrow();
   });
 
   it("reports image lightbox overlay state", async () => {

@@ -101,6 +101,7 @@ export interface TranscriptVirtualRowStateProviderConfig {
   sessionId: string;
   sessionEpoch: number;
   onRowStateChange: () => void;
+  onPinScrollAnchor?: () => void;
 }
 
 export interface TranscriptVirtualTimelineRowStateControls {
@@ -826,6 +827,35 @@ export function useTranscriptVirtualTimeline({
     syncMeasurementScheduler,
     shouldPreserveLiveScrollPosition,
   ]);
+
+  /**
+   * Pin the transcript to where it currently sits, dropping bottom-follow.
+   *
+   * A row that expands or collapses in place changes the transcript's total
+   * height. While the viewport is pinned to the bottom, that height change
+   * reconciles by scrolling to the *new* bottom, which throws the reader past
+   * the content they just revealed. Capturing an anchor first is the same thing
+   * the engine does when a user scrolls up by hand, so an in-place expand keeps
+   * the clicked row under the reader's eyes.
+   */
+  const pinScrollAnchor = useCallback(() => {
+    const controller = runtimeRef.current.controller;
+    if (!controller) {
+      return;
+    }
+
+    const liveViewport = readViewportGeometry(
+      containerRef.current,
+      footerHeight,
+    );
+    const result = controller.syncViewport(liveViewport, {
+      source: "browser",
+      userScrollIntent: true,
+      preserveScrollPosition: true,
+    });
+    applyCorrection(result.correction, "pin-scroll-anchor");
+    commitSnapshot();
+  }, [applyCorrection, commitSnapshot, containerRef, footerHeight]);
 
   const syncViewportFromDom = useCallback(
     (options: SyncViewportOptions = {}) => {
@@ -1566,8 +1596,9 @@ export function useTranscriptVirtualTimeline({
         sessionId,
         sessionEpoch,
         onRowStateChange: commitSnapshot,
+        onPinScrollAnchor: pinScrollAnchor,
       }) satisfies TranscriptVirtualRowStateProviderConfig,
-    [commitSnapshot, sessionEpoch, sessionId],
+    [commitSnapshot, pinScrollAnchor, sessionEpoch, sessionId],
   );
 
   return {

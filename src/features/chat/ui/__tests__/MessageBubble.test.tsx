@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { MessageBubble } from "../MessageBubble";
 import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "@/features/experiments/experimentPreferences";
+import { findTranscriptMatches } from "@/features/chat/lib/transcriptSearch";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import type {
@@ -17,6 +18,10 @@ import type {
 } from "@/shared/types/messages";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
+import {
+  TranscriptRowStateProvider,
+  createTranscriptRowStateRegistry,
+} from "@/features/chat/transcript/row-state";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 const mockPathExists = vi.hoisted(() =>
   vi.fn<(path: string) => Promise<boolean>>(),
@@ -123,6 +128,43 @@ function expectNoVisibleText(container: HTMLElement, text: string) {
   expect(visibleTextNodes).toHaveLength(0);
 }
 
+/**
+ * jsdom has no layout, so `scrollHeight` is always 0 and the clamp would never
+ * see overflow. Stub the clamp content element's scrollHeight to drive the
+ * overflow branch deterministically.
+ */
+function withUserMessageScrollHeight(scrollHeight: number) {
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.dataset.role === "user-message-clamp-content"
+        ? scrollHeight
+        : 0;
+    },
+  });
+  scrollHeightDescriptors.push(descriptor);
+}
+
+const LONG_USER_PROMPT = `very long prompt ${"details ".repeat(80)}`;
+
+const scrollHeightDescriptors: (PropertyDescriptor | undefined)[] = [];
+
+function restoreScrollHeight() {
+  while (scrollHeightDescriptors.length > 0) {
+    const descriptor = scrollHeightDescriptors.pop();
+    if (descriptor) {
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", descriptor);
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+        .scrollHeight;
+    }
+  }
+}
+
 describe("MessageBubble", () => {
   beforeEach(() => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
@@ -143,6 +185,7 @@ describe("MessageBubble", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    restoreScrollHeight();
     useProviderCatalogStore.getState().reset();
   });
 
@@ -263,7 +306,7 @@ describe("MessageBubble", () => {
     expect(assistantContent?.className).not.toContain("max-w-[85%]");
   });
 
-  it("caps user message height with internal scrolling", () => {
+  it("does not nest a scroll container inside the user bubble", () => {
     const { container } = render(
       <MessageBubble message={userMessage("long prompt")} />,
     );
@@ -272,12 +315,198 @@ describe("MessageBubble", () => {
       '[data-role="user-message"] .bg-message-user-bg',
     );
 
-    expect(userBubble).toHaveClass(
+    // The transcript scroller owns vertical scrolling; a nested scroll area
+    // would trap the wheel over long user messages.
+    expect(userBubble).not.toHaveClass(
       "max-h-[640px]",
       "overflow-y-auto",
       "overscroll-contain",
       "scrollbar-subtle",
     );
+  });
+
+  it("leaves short user messages off the clamp measurement path", () => {
+    withUserMessageScrollHeight(80);
+
+    const { container } = render(
+      <MessageBubble message={userMessage("short prompt")} />,
+    );
+
+    expect(
+      container.querySelector('[data-user-message-clamped="true"]'),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clamps an overflowing user message and expands it in place", async () => {
+    withUserMessageScrollHeight(2000);
+    const user = userEvent.setup();
+
+    const { container } = render(
+      <MessageBubble message={userMessage(LONG_USER_PROMPT)} />,
+    );
+
+    const clamp = container.querySelector('[data-role="user-message-clamp"]');
+    expect(clamp).toHaveAttribute("data-user-message-clamped", "true");
+
+    const viewMore = await screen.findByRole("button", { name: "View more" });
+    expect(viewMore).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(viewMore);
+
+    // Expanding releases the clamp entirely rather than revealing a scroller.
+    expect(clamp).toHaveAttribute("data-user-message-clamped", "false");
+    const viewLess = await screen.findByRole("button", { name: "View less" });
+    expect(viewLess).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(viewLess);
+    expect(clamp).toHaveAttribute("data-user-message-clamped", "true");
+  });
+
+  it("pins the transcript before expanding so bottom-follow cannot override it", async () => {
+    withUserMessageScrollHeight(2000);
+    const user = userEvent.setup();
+    const onPinScrollAnchor = vi.fn();
+    const registry = createTranscriptRowStateRegistry();
+
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="session-1"
+        rowId="row-1"
+        onPinScrollAnchor={onPinScrollAnchor}
+      >
+        <MessageBubble message={userMessage(LONG_USER_PROMPT)} />
+      </TranscriptRowStateProvider>,
+    );
+
+    // Expanding grows the row. While the transcript follows the bottom, that
+    // height change would reconcile to the new bottom and scroll the reader
+    // past the text they just revealed, so the row must pin first.
+    await user.click(await screen.findByRole("button", { name: "View more" }));
+    expect(onPinScrollAnchor).toHaveBeenCalledTimes(1);
+
+    // Collapsing shrinks the row and must not fling the reader either.
+    await user.click(await screen.findByRole("button", { name: "View less" }));
+    expect(onPinScrollAnchor).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps metadata and structural content outside the prose preview", () => {
+    withUserMessageScrollHeight(2000);
+
+    const { container } = render(
+      <MessageBubble
+        message={userMessage("very long prompt", {
+          content: [
+            { type: "text", text: LONG_USER_PROMPT },
+            { type: "image", data: "abc123", mimeType: "image/png" },
+          ],
+          metadata: {
+            chips: [{ type: "skill", id: "s1", label: "writing" }],
+          },
+        })}
+      />,
+    );
+
+    const clamp = container.querySelector('[data-role="user-message-clamp"]');
+    expect(clamp).not.toBeNull();
+
+    const chip = screen.getByText("writing");
+    const inlineImage = screen.getByRole("button", {
+      name: "View Attached",
+    });
+    expect(clamp?.contains(chip)).toBe(false);
+    expect(clamp?.contains(inlineImage)).toBe(false);
+  });
+
+  it("preserves interleaved user content block order", () => {
+    withUserMessageScrollHeight(80);
+
+    const { container } = render(
+      <MessageBubble
+        message={userMessage("first", {
+          content: [
+            { type: "text", text: "first" },
+            { type: "image", data: "abc123", mimeType: "image/png" },
+            { type: "text", text: "last" },
+          ],
+        })}
+      />,
+    );
+
+    const bubble = container.querySelector<HTMLElement>(".bg-message-user-bg");
+    const paragraphs = container.querySelectorAll<HTMLElement>(
+      ".bg-message-user-bg p",
+    );
+    const first = paragraphs[0];
+    const image = screen.getByRole("button", { name: "View Attached" });
+    const last = paragraphs[1];
+    expect(first.compareDocumentPosition(image)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(image.compareDocumentPosition(last)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(bubble).not.toBeNull();
+    expect(bubble).toContainElement(first);
+    expect(bubble).toContainElement(last);
+  });
+
+  it("keeps URLs inside the visible preview clickable", () => {
+    withUserMessageScrollHeight(2000);
+
+    render(
+      <MessageBubble
+        message={userMessage(
+          `Read https://example.com ${"details ".repeat(80)}`,
+        )}
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "https://example.com" }),
+    ).toBeInTheDocument();
+  });
+
+  it("find-in-conversation searches revealed preview text only", () => {
+    withUserMessageScrollHeight(2000);
+    const prefix = `visible needle ${"details ".repeat(80)}`;
+    const suffix = "concealed phrase";
+
+    const { container } = render(
+      <MessageBubble message={userMessage(`${prefix}${suffix}`)} />,
+    );
+    const clamp = container.querySelector<HTMLElement>(
+      '[data-role="user-message-clamp"]',
+    );
+    expect(clamp).not.toBeNull();
+    if (!clamp) throw new Error("Expected user message clamp");
+
+    expect(findTranscriptMatches(clamp, "visible needle")).toHaveLength(1);
+    expect(findTranscriptMatches(clamp, suffix)).toHaveLength(0);
+  });
+
+  it("does not leave URLs below the preview in the tab order", async () => {
+    withUserMessageScrollHeight(2000);
+    const user = userEvent.setup();
+
+    render(
+      <MessageBubble
+        message={userMessage(`${"details ".repeat(80)}https://example.com`)}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("link", { name: "https://example.com" }),
+    ).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: "View more" }));
+
+    expect(
+      screen.getByRole("link", { name: "https://example.com" }),
+    ).toBeInTheDocument();
   });
 
   it("renders assistant message with avatar", () => {
@@ -292,9 +521,9 @@ describe("MessageBubble", () => {
     expect(el?.className).not.toContain("flex-row-reverse");
   });
 
-  it("renders text content", () => {
+  it("renders one visible copy of short user text", () => {
     render(<MessageBubble message={userMessage("hello world")} />);
-    expect(screen.getByText("hello world")).toBeInTheDocument();
+    expect(screen.getAllByText("hello world")).toHaveLength(1);
   });
 
   it("replaces the Anthropic thinking-history 400 with a friendly notice", () => {
@@ -421,8 +650,12 @@ describe("MessageBubble", () => {
 
   it("wraps long unbroken words so the bubble cannot overflow horizontally", () => {
     const longWord = "a".repeat(160);
-    render(<MessageBubble message={userMessage(longWord)} />);
-    const paragraph = screen.getByText(longWord);
+    const { container } = render(
+      <MessageBubble message={userMessage(longWord)} />,
+    );
+    const paragraph = container.querySelector(
+      '[data-role="user-message-clamp-content"] p',
+    );
     expect(paragraph).toHaveClass("wrap-anywhere");
   });
 

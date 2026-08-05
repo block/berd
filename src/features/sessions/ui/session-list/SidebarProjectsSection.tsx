@@ -10,7 +10,7 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { SidebarDisclosureButton } from "@/shared/ui/sidebar-disclosure-button";
+import { DisclosureButton } from "@/shared/ui/disclosure-button";
 import { CollapseReveal } from "@/shared/ui/collapse-reveal";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
@@ -491,9 +491,9 @@ export function SidebarProjectsSection({
           />
         )}
         {!collapsed && onNavigate ? (
-          <SidebarDisclosureButton
+          <DisclosureButton
             type="button"
-            row
+            surface="sidebarRow"
             onClick={() => onNavigate("session-history")}
             className={cn(
               "h-7 w-full justify-start rounded-sm px-3 py-1 text-sm",
@@ -501,7 +501,7 @@ export function SidebarProjectsSection({
             )}
           >
             {t("viewAllInHistory")}
-          </SidebarDisclosureButton>
+          </DisclosureButton>
         ) : null}
       </div>
     </SidebarChatDragProvider>

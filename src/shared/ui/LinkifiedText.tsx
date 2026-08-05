@@ -5,6 +5,12 @@ import { cn } from "@/shared/lib/cn";
 export interface LinkifiedTextProps {
   /** Raw text that may contain bare http(s) URLs. */
   text: string;
+  /**
+   * Render only this prefix while still parsing URLs against the full text.
+   * A URL crossing the boundary is emitted as plain text rather than as a
+   * clickable link with a truncated destination.
+   */
+  endOffset?: number;
   className?: string;
 }
 
@@ -18,9 +24,31 @@ export interface LinkifiedTextProps {
  */
 export const LinkifiedText = memo(function LinkifiedText({
   text,
+  endOffset = text.length,
   className,
 }: LinkifiedTextProps) {
-  const segments = useMemo(() => linkifyText(text), [text]);
+  const segments = useMemo(() => {
+    const visibleSegments = [];
+    let consumed = 0;
+
+    for (const segment of linkifyText(text)) {
+      if (consumed >= endOffset) break;
+      const visibleLength = Math.min(
+        segment.value.length,
+        endOffset - consumed,
+      );
+      if (visibleLength <= 0) break;
+      const value = segment.value.slice(0, visibleLength);
+      visibleSegments.push(
+        segment.type === "link" && visibleLength === segment.value.length
+          ? { ...segment, value }
+          : { type: "text" as const, value },
+      );
+      consumed += segment.value.length;
+    }
+
+    return visibleSegments;
+  }, [endOffset, text]);
 
   const handleLinkClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
