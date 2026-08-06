@@ -1,6 +1,9 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import type { FilterResolvers } from "@/features/sessions/lib/filterSessions";
 
 const mockAcpSearchSessions = vi.fn();
 type MessageSearchResult = {
@@ -55,14 +58,35 @@ const resolvers = {
   getProjectName: () => undefined,
 };
 
+interface SessionSearchProps {
+  currentSessions: ChatSession[];
+  currentResolvers?: FilterResolvers;
+}
+
 function renderSessionSearch(hookSessions = sessions) {
-  return renderHook(() =>
-    useSessionSearch({
-      sessions: hookSessions,
-      resolvers,
-    }),
+  const queryClient = new QueryClient();
+  return renderHook<ReturnType<typeof useSessionSearch>, SessionSearchProps>(
+    ({ currentSessions, currentResolvers = resolvers }) =>
+      useSessionSearch({
+        sessions: currentSessions,
+        resolvers: currentResolvers,
+      }),
+    {
+      initialProps: { currentSessions: hookSessions },
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children),
+    },
   );
 }
+
+function searchTarget(session: ChatSession) {
+  return {
+    id: session.id,
+    stamp: `${session.updatedAt}:${session.messageCount}:`,
+  };
+}
+
+const searchOptions = { queryClient: expect.any(QueryClient) };
 
 type SearchHookResult = ReturnType<typeof renderSessionSearch>["result"];
 
@@ -139,12 +163,18 @@ describe("useSessionSearch", () => {
     await searchMore(result, [...sessions, newerSession]);
     await searchMore(result, [newerSession]);
 
-    expect(mockAcpSearchSessions).toHaveBeenNthCalledWith(1, "needle", [
-      "acp-1",
-    ]);
-    expect(mockAcpSearchSessions).toHaveBeenNthCalledWith(2, "needle", [
-      "acp-2",
-    ]);
+    expect(mockAcpSearchSessions).toHaveBeenNthCalledWith(
+      1,
+      "needle",
+      [searchTarget(sessions[0])],
+      searchOptions,
+    );
+    expect(mockAcpSearchSessions).toHaveBeenNthCalledWith(
+      2,
+      "needle",
+      [searchTarget(newerSession)],
+      searchOptions,
+    );
     expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
     expect(result.current.results.map((item) => item.session.id)).toEqual([
       "acp-2",
@@ -209,6 +239,147 @@ describe("useSessionSearch", () => {
 
     expect(result.current.results).toEqual([]);
     expect(result.current.isSearching).toBe(false);
+  });
+
+  it("keeps search identity stable when the sessions array churns", async () => {
+    const { result, rerender } = renderSessionSearch();
+    const initialSearch = result.current.search;
+    const initialSearchMore = result.current.searchMore;
+
+    rerender({
+      currentSessions: sessions.map((session) => ({ ...session })),
+    });
+
+    expect(result.current.search).toBe(initialSearch);
+    expect(result.current.searchMore).toBe(initialSearchMore);
+  });
+
+  it("keeps search identity stable when the resolvers churn", async () => {
+    const { result, rerender } = renderSessionSearch();
+    const initialSearch = result.current.search;
+    const initialSearchMore = result.current.searchMore;
+
+    // A persona or project refresh rebuilds the resolvers object without
+    // changing what it resolves.
+    rerender({
+      currentSessions: sessions,
+      currentResolvers: {
+        getPersonaName: () => undefined,
+        getProjectName: () => undefined,
+      },
+    });
+
+    expect(result.current.search).toBe(initialSearch);
+    expect(result.current.searchMore).toBe(initialSearchMore);
+  });
+
+  it("builds results with the resolvers from the latest render", async () => {
+    mockAcpSearchSessions.mockResolvedValue([]);
+    const personaSession: ChatSession = {
+      ...sessions[0],
+      title: "Untitled",
+      personaId: "persona-1",
+    };
+    const { result, rerender } = renderSessionSearch([personaSession]);
+
+    rerender({
+      currentSessions: [personaSession],
+      currentResolvers: {
+        getPersonaName: () => "Reviewer",
+        getProjectName: () => undefined,
+      },
+    });
+    await searchFor(result, "reviewer");
+
+    expect(result.current.results.map(({ session }) => session.id)).toEqual([
+      personaSession.id,
+    ]);
+  });
+
+  it("searches the sessions from the latest render, not the first", async () => {
+    mockAcpSearchSessions.mockResolvedValue([]);
+    const { result, rerender } = renderSessionSearch();
+
+    rerender({ currentSessions: [...sessions, newerSession] });
+    await searchFor(result, "needle");
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledWith(
+      "needle",
+      [searchTarget(sessions[0]), searchTarget(newerSession)],
+      searchOptions,
+    );
+  });
+
+  it("keeps content matches on screen while a re-sweep of the same query runs", async () => {
+    // A session that only matches on message content: rebuilding the results
+    // without the sweep's output drops it entirely.
+    const contentOnlySession: ChatSession = {
+      id: "acp-9",
+      title: "Untitled",
+      createdAt: "2026-04-10T12:00:00Z",
+      updatedAt: "2026-04-10T12:00:00Z",
+      messageCount: 1,
+    };
+    const messageMatch = {
+      sessionId: "acp-9",
+      snippet: "needle in message",
+      messageId: "message-9",
+      matchCount: 1,
+    };
+    mockAcpSearchSessions.mockResolvedValueOnce([messageMatch]);
+
+    const { result } = renderSessionSearch([contentOnlySession]);
+    await searchFor(result, "needle");
+
+    expect(result.current.results[0]).toMatchObject({
+      matchType: "message",
+      snippet: "needle in message",
+    });
+
+    // A membership change re-sends the same query and re-sweeps: the row must
+    // not blink out while the sweep is in flight.
+    const deferred = createDeferredPromise<MessageSearchResult[]>();
+    mockAcpSearchSessions.mockReturnValueOnce(deferred.promise);
+    await setSearchQuery(result, "needle");
+    await act(async () => {
+      void result.current.search();
+    });
+
+    expect(result.current.isSearching).toBe(true);
+    expect(result.current.results[0]).toMatchObject({
+      matchType: "message",
+      snippet: "needle in message",
+    });
+
+    deferred.resolve([messageMatch]);
+    await act(async () => {
+      await deferred.promise;
+    });
+
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-9",
+    ]);
+  });
+
+  it("drops results for sessions that left the list on a re-sweep", async () => {
+    mockAcpSearchSessions.mockResolvedValue([]);
+    const { result, rerender } = renderSessionSearch([
+      sessions[0],
+      newerSession,
+    ]);
+
+    await searchFor(result, "needle");
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-2",
+      "acp-1",
+    ]);
+
+    rerender({ currentSessions: [sessions[0]] });
+    await submitCurrentSearch(result);
+
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-1",
+    ]);
   });
 
   it("surfaces ACP error data for backend search failures", async () => {

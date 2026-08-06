@@ -39,6 +39,7 @@ import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
 import type { SessionSearchDisplayResult } from "@/features/sessions/lib/buildSessionSearchResults";
 import { useDebouncedValue } from "@/shared/hooks/useDebouncedValue";
 import { useLocaleFormatting } from "@/shared/i18n";
+import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import {
   extensionSearchIdentity,
   useExtensionSearch,
@@ -189,10 +190,39 @@ export function SearchView({
     [onOpenSettings, t, trimmedDebouncedQuery, visibleSettingsSections],
   );
 
+  // Sweeps are keyed on who is in the list and what version of them we hold,
+  // not on session object identity: store churn (title streams, unread flips,
+  // `activeRunId` notifications, the persona/project refresh) must not re-fire
+  // a full export sweep, while sessions arriving after mount (initial load,
+  // background pagination) and content changes in sessions already on screen
+  // still get swept.
+  //
+  // The keys are sorted because list order is not membership: every
+  // `loadSessions()` merge re-sorts by activity, so a background session
+  // receiving a message reshuffles the list without changing who is in it.
+  // Sorting `id:stamp` is equivalent to sorting by id, since ids are unique.
+  //
+  // Stamps are safe triggers: nothing on the frontend patches them per token or
+  // per message. `session_info_update` for meta changes leaves them alone, so
+  // they only move on the 60s/window-focus list refresh (all changed sessions
+  // batch into one store update, hence one sweep) and on the once-per-run name
+  // generation notification. Each such sweep re-exports only the sessions whose
+  // stamp actually moved — the rest are corpus-cache hits — and the hook treats
+  // a re-sent query as additive, so rendered rows stay put until it resolves.
+  const sessionSweepKey = useMemo(
+    () =>
+      visibleSessions
+        .map((session) => `${session.id}:${sessionSearchStamp(session)}`)
+        .sort()
+        .join("\n"),
+    [visibleSessions],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionSweepKey is an intentional trigger; runChatSearch reads the sessions through a ref.
   useEffect(() => {
     setChatQuery(debouncedQuery);
     void runChatSearch(debouncedQuery);
-  }, [debouncedQuery, runChatSearch, setChatQuery]);
+  }, [debouncedQuery, sessionSweepKey, runChatSearch, setChatQuery]);
 
   useEffect(() => {
     inputRef.current?.focus();

@@ -16,7 +16,11 @@ import {
   setActiveMessageId,
   clearActiveMessageId,
 } from "./acpActiveMessageTracking";
-import { searchSessionsViaExports } from "./sessionSearch";
+import {
+  searchSessionsViaExports,
+  type SessionSearchOptions,
+  type SessionSearchTarget,
+} from "./sessionSearch";
 import {
   claimPersonaHandoff,
   isGooseManagedProvider,
@@ -499,9 +503,10 @@ export async function acpListSessionsPage({
 
 export async function acpSearchSessions(
   query: string,
-  sessionIds: string[],
+  targets: SessionSearchTarget[],
+  options: SessionSearchOptions = {},
 ): Promise<AcpSessionSearchResult[]> {
-  return searchSessionsViaExports(query, sessionIds);
+  return searchSessionsViaExports(query, targets, options);
 }
 
 /**

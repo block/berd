@@ -1,7 +1,28 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { exportSession } from "./acpApi";
 
 const SNIPPET_PREFIX = 40;
 const SNIPPET_SUFFIX = 60;
+
+/** Concurrent exports per sweep. Workers claim targets in list order, so a
+ *  cache hit queued behind a full pool waits for the first slot to free — then
+ *  consecutive hits drain through it almost instantly. Left as-is because the
+ *  sweep resolves as one batch anyway: pre-resolving hits would not deliver
+ *  results any sooner. */
+const EXPORT_CONCURRENCY = 4;
+
+const CORPUS_QUERY_KEY_PREFIX = "session-search-corpus";
+/**
+ * How long a corpus survives after **its export**, not after its last read:
+ * react-query schedules the gc timer when a fetch settles and never reschedules
+ * it, and a `fetchQuery` cache hit resolves without fetching, so reads do not
+ * extend the window. Under the 5-minute default, a search page left open longer
+ * than that re-exported every session on the next keystroke. Sized instead to
+ * outlast a working session with search open; `evictSupersededCorpora` keeps
+ * the longer window from accumulating dead stamps, so the retained set is one
+ * corpus per session swept within the window.
+ */
+const CORPUS_GC_TIME_MS = 30 * 60 * 1000;
 
 type MessageRole = "user" | "assistant" | "system";
 
@@ -38,41 +59,149 @@ interface ParsedMessage {
   texts: string[];
 }
 
+export interface SessionSearchTarget {
+  id: string;
+  /** Session version; embedded in the corpus cache key so a changed session
+   *  re-exports on the next sweep while unchanged ones stay cache hits. */
+  stamp: string;
+}
+
+/**
+ * Version stamp for a session's searchable content, from fields the session
+ * store already tracks (`session_info_update` patches all three, and the
+ * periodic session-list refresh covers changes made while no notification was
+ * flowing).
+ */
+export function sessionSearchStamp(session: {
+  updatedAt: string;
+  messageCount: number;
+  lastMessageAt?: string;
+}): string {
+  return `${session.updatedAt}:${session.messageCount}:${session.lastMessageAt ?? ""}`;
+}
+
+export interface SessionSearchOptions {
+  /** Routes corpus fetches through react-query so sweeps (and simultaneous
+   *  consumers — search page, Cmd-K dialog, history) share one export per
+   *  (session, stamp). Absent, every sweep re-exports. */
+  queryClient?: QueryClient;
+}
+
 export async function searchSessionsViaExports(
   query: string,
-  sessionIds: string[],
+  targets: SessionSearchTarget[],
+  options: SessionSearchOptions = {},
 ): Promise<SessionSearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
 
-  const unique = [...new Set(sessionIds)];
-  const results: SessionSearchResult[] = [];
+  const seenIds = new Set<string>();
+  const unique: SessionSearchTarget[] = [];
+  for (const target of targets) {
+    if (seenIds.has(target.id)) continue;
+    seenIds.add(target.id);
+    unique.push(target);
+  }
 
-  for (const sessionId of unique) {
-    try {
-      const exported = await exportSession(sessionId);
-      const result = searchSession(sessionId, exported, trimmed);
-      if (result) results.push(result);
-    } catch {
-      // skip sessions that fail to export
+  const results: (SessionSearchResult | null)[] = unique.map(() => null);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < unique.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const target = unique[index];
+      try {
+        const messages = await fetchCorpus(target, options.queryClient);
+        results[index] = searchSession(target.id, messages, trimmed);
+      } catch {
+        // skip sessions that fail to export
+      }
     }
   }
 
-  return results;
+  await Promise.all(
+    Array.from({ length: Math.min(EXPORT_CONCURRENCY, unique.length) }, worker),
+  );
+
+  if (options.queryClient) evictSupersededCorpora(options.queryClient, unique);
+
+  return results.filter(
+    (result): result is SessionSearchResult => result !== null,
+  );
+}
+
+/**
+ * Drops the corpora of stamps this sweep superseded. Once a session's stamp
+ * changes nothing will ever read its old corpus again, so leaving it to gc
+ * holds the text of every intermediate version of a chatty session for the
+ * whole window. Corpora for sessions outside this sweep are left alone: the
+ * search page and the Cmd-K dialog sweep different lists and share entries.
+ */
+function evictSupersededCorpora(
+  queryClient: QueryClient,
+  targets: SessionSearchTarget[],
+): void {
+  const stampById = new Map(targets.map((target) => [target.id, target.stamp]));
+  queryClient.removeQueries({
+    queryKey: [CORPUS_QUERY_KEY_PREFIX],
+    predicate: (query) => {
+      // Never yank an entry mid-export: removal cancels the fetch, and a
+      // concurrent sweep holding a slightly older session object may be the
+      // one awaiting it.
+      if (query.state.fetchStatus !== "idle") return false;
+      const [, id, stamp] = query.queryKey as [string, string, string];
+      const currentStamp = stampById.get(id);
+      return currentStamp !== undefined && currentStamp !== stamp;
+    },
+  });
+}
+
+/**
+ * The flattened corpus is cached instead of the raw export JSON deliberately:
+ * `flattenMessages` drops tool results, thinking, and images — the bulk of a
+ * long session — so the cached value is far smaller than the export and
+ * per-keystroke matching is pure CPU against it.
+ */
+function fetchCorpus(
+  target: SessionSearchTarget,
+  queryClient: QueryClient | undefined,
+): Promise<ParsedMessage[]> {
+  if (!queryClient) return exportCorpus(target.id);
+  return queryClient.fetchQuery({
+    queryKey: [CORPUS_QUERY_KEY_PREFIX, target.id, target.stamp],
+    queryFn: () => exportCorpus(target.id),
+    // The key embeds the session version, so an entry is never stale by
+    // definition — and nothing invalidates this key, so a corpus is pinned to
+    // its stamp until the stamp changes or it is evicted. That is safe because
+    // the stamp cannot run ahead of the export: goose derives both
+    // `messageCount` (`COUNT(m.id)`) and `lastMessageAt` (`MAX(...)` over
+    // message timestamps) from the persisted messages table, and notifies
+    // after the write, so a stamp the store has seen implies the export
+    // already contains that message.
+    // `retry: false` keeps a failed export uncached (error state holds no
+    // data), so the next sweep retries it instead of treating the session as
+    // an empty corpus.
+    staleTime: Infinity,
+    gcTime: CORPUS_GC_TIME_MS,
+    retry: false,
+  });
+}
+
+async function exportCorpus(sessionId: string): Promise<ParsedMessage[]> {
+  const exported = await exportSession(sessionId);
+  const root = safeParse(exported);
+  if (!root) return [];
+  const conversation = root.conversation ?? root.messages;
+  if (!conversation) return [];
+  return flattenMessages(conversation, false);
 }
 
 function searchSession(
   sessionId: string,
-  json: string,
+  messages: ParsedMessage[],
   query: string,
 ): SessionSearchResult | null {
-  const root = safeParse(json);
-  if (!root) return null;
-
-  const conversation = root.conversation ?? root.messages;
-  if (!conversation) return null;
-
-  const messages = flattenMessages(conversation, false);
   if (!messages.length) return null;
 
   let firstMatch: {

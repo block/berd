@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,14 +12,21 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import { SearchView } from "../SearchView";
 
 const mockListSkills = vi.hoisted(() => vi.fn());
 const mockListExtensions = vi.hoisted(() => vi.fn());
 const mockGetAutomationTiles = vi.hoisted(() => vi.fn());
+const mockAcpSearchSessions = vi.hoisted(() => vi.fn());
 
 vi.mock("@/features/extensions/api/extensions", () => ({
   listExtensions: (...args: unknown[]) => mockListExtensions(...args),
+}));
+
+vi.mock("@/shared/api/acp", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/shared/api/acp")>()),
+  acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
@@ -30,6 +43,8 @@ describe("SearchView", () => {
     mockListExtensions.mockResolvedValue([]);
     mockGetAutomationTiles.mockReset();
     mockGetAutomationTiles.mockResolvedValue({ tiles: [] });
+    mockAcpSearchSessions.mockReset();
+    mockAcpSearchSessions.mockResolvedValue([]);
     mockListSkills.mockReset();
     mockListSkills.mockResolvedValue([
       {
@@ -281,6 +296,233 @@ describe("SearchView", () => {
     expect(
       await screen.findByText('No matches for "hidden midnight schedule"'),
     ).toBeInTheDocument();
+  });
+
+  it("sweeps chat search once per query and re-sweeps only on membership or stamp changes", async () => {
+    const baseSession = {
+      id: "session-1",
+      title: "Needle notes",
+      createdAt: "2026-04-10T12:00:00Z",
+      updatedAt: "2026-04-10T12:00:00Z",
+      messageCount: 1,
+    };
+    const otherSession = {
+      id: "session-2",
+      title: "Second needle",
+      createdAt: "2026-04-09T12:00:00Z",
+      updatedAt: "2026-04-09T12:00:00Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({ sessions: [baseSession, otherSession] });
+
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    fireEvent.change(input, { target: { value: "needle" } });
+
+    await waitFor(() => {
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    });
+    // Let the render/effect chain settle: an unstable search callback used to
+    // re-fire a second, discarded sweep from the query state update.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+    // Same membership and stamps, new session objects (subtitle stream, unread
+    // flip, meta-only `session_info_update`): no re-sweep.
+    const subtitledSession = { ...baseSession, subtitle: "streaming snippet" };
+    act(() => {
+      useChatSessionStore.setState({
+        sessions: [subtitledSession, { ...otherSession }],
+      });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+    // Same membership and stamps, reordered: every session-list merge re-sorts
+    // by activity, so a background session bubbling up must not count as a
+    // membership change.
+    act(() => {
+      useChatSessionStore.setState({
+        sessions: [{ ...otherSession }, subtitledSession],
+      });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+    // Persona refresh (60s timer / window focus) replaces the store array with
+    // fresh objects, changing the resolvers the search hook was handed: still
+    // no re-sweep.
+    act(() => {
+      useAgentStore.setState({
+        personas: useAgentStore
+          .getState()
+          .personas.map((persona) => ({ ...persona })),
+      });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+    // New content in a session already on screen (the periodic list refresh
+    // picking up a backend change): one re-sweep, carrying the new stamp so the
+    // changed session re-exports while the other one stays a cache hit.
+    const bumpedSession = {
+      ...subtitledSession,
+      updatedAt: "2026-04-10T13:00:00Z",
+      messageCount: 3,
+    };
+    act(() => {
+      useChatSessionStore.setState({
+        sessions: [bumpedSession, { ...otherSession }],
+      });
+    });
+    await waitFor(() => {
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
+    });
+    expect(mockAcpSearchSessions).toHaveBeenLastCalledWith(
+      "needle",
+      expect.arrayContaining([
+        {
+          id: "session-1",
+          stamp: sessionSearchStamp(bumpedSession),
+        },
+      ]),
+      expect.anything(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
+
+    // Membership change: full re-sweep (unchanged sessions are corpus-cache
+    // hits inside searchSessionsViaExports).
+    act(() => {
+      useChatSessionStore.setState({
+        sessions: [
+          bumpedSession,
+          otherSession,
+          {
+            id: "session-3",
+            title: "Third needle",
+            createdAt: "2026-04-12T12:00:00Z",
+            updatedAt: "2026-04-12T12:00:00Z",
+            messageCount: 1,
+          },
+        ],
+      });
+    });
+    await waitFor(() => {
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(3);
+    });
+    expect(mockAcpSearchSessions).toHaveBeenLastCalledWith(
+      "needle",
+      [
+        expect.objectContaining({ id: "session-1" }),
+        expect.objectContaining({ id: "session-2" }),
+        expect.objectContaining({ id: "session-3" }),
+      ],
+      expect.anything(),
+    );
+  });
+
+  it("keeps a content-only chat result rendered across a membership change", async () => {
+    // Matches "needle" only inside its messages, so it survives a re-sweep
+    // only if the results are not rebuilt from metadata alone.
+    const contentSession = {
+      id: "session-1",
+      title: "Wandering thoughts",
+      createdAt: "2026-04-10T12:00:00Z",
+      updatedAt: "2026-04-10T12:00:00Z",
+      messageCount: 1,
+    };
+    const messageMatch = {
+      sessionId: "session-1",
+      snippet: "needle in message",
+      messageId: "message-1",
+      matchCount: 1,
+    };
+    useChatSessionStore.setState({ sessions: [contentSession] });
+    mockAcpSearchSessions.mockResolvedValue([messageMatch]);
+
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    fireEvent.change(input, { target: { value: "needle" } });
+
+    // Once the debounced query has reached the sweep, the recents list is no
+    // longer what is on screen, so the row can only come from the sweep's
+    // message match.
+    await waitFor(() => {
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Wandering thoughts/ }),
+      ).toBeVisible();
+    });
+
+    // A session joining the list re-sweeps the same query. The row must not
+    // blink out while the sweep is in flight.
+    let resolveSweep: (results: (typeof messageMatch)[]) => void = () => {};
+    mockAcpSearchSessions.mockReturnValueOnce(
+      new Promise<(typeof messageMatch)[]>((resolve) => {
+        resolveSweep = resolve;
+      }),
+    );
+    act(() => {
+      useChatSessionStore.setState({
+        sessions: [
+          contentSession,
+          {
+            id: "session-2",
+            title: "Second chat",
+            createdAt: "2026-04-11T12:00:00Z",
+            updatedAt: "2026-04-11T12:00:00Z",
+            messageCount: 1,
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.getByRole("button", { name: /Wandering thoughts/ }),
+    ).toBeVisible();
+
+    await act(async () => {
+      resolveSweep([messageMatch]);
+    });
+
+    expect(
+      screen.getByRole("button", { name: /Wandering thoughts/ }),
+    ).toBeVisible();
   });
 
   it("clears the query before Escape exits search", async () => {

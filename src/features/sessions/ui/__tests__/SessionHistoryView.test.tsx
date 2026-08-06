@@ -428,9 +428,11 @@ describe("SessionHistoryView", () => {
     await userEvent.type(screen.getByRole("searchbox"), "needle{Enter}");
 
     await waitFor(() => {
-      expect(mocks.acpSearchSessions).toHaveBeenCalledWith("needle", [
-        "session-1",
-      ]);
+      expect(mocks.acpSearchSessions).toHaveBeenCalledWith(
+        "needle",
+        [expect.objectContaining({ id: "session-1" })],
+        expect.anything(),
+      );
     });
 
     setHistoryScrollMetrics();
@@ -438,9 +440,11 @@ describe("SessionHistoryView", () => {
 
     await waitFor(() => {
       expect(loadMoreSessions).toHaveBeenCalledOnce();
-      expect(mocks.acpSearchSessions).toHaveBeenCalledWith("needle", [
-        "session-2",
-      ]);
+      expect(mocks.acpSearchSessions).toHaveBeenCalledWith(
+        "needle",
+        [expect.objectContaining({ id: "session-2" })],
+        expect.anything(),
+      );
       expect(screen.getByText("Second Needle Session")).toBeInTheDocument();
     });
   });

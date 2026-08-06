@@ -1,7 +1,9 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useContext, useRef, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { acpSearchSessions } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import {
   buildSessionSearchResults,
   mergeSessionSearchResults,
@@ -21,7 +23,15 @@ function searchErrorMessage(error: unknown): string {
   return formatAcpErrorMessage(error, "Search failed");
 }
 
-type ResultApplyMode = "replace" | "merge";
+/** What a run is allowed to invalidate on screen. */
+type SweepMode =
+  /** A new query: every result of the previous one is invalid. */
+  | "query"
+  /** A re-sweep of the query already on screen, because the sessions behind it
+   *  changed — the list gained or lost one, or one of them has new content. */
+  | "resweep"
+  /** Another page of sessions for the query already on screen. */
+  | "page";
 
 type SubmittedSearch = {
   query: string;
@@ -35,6 +45,10 @@ export function useSessionSearch({
   getDisplayTitle,
   visibleMetadataOnly,
 }: UseSessionSearchOptions) {
+  // Optional so provider-less mounts (tests) fall back to uncached exports;
+  // with a client, sweeps share one corpus export per (session, stamp) across
+  // the search page, the Cmd-K dialog, and history.
+  const queryClient = useContext(QueryClientContext);
   const [query, setQuery] = useState("");
   const [submittedSearch, setSubmittedSearch] =
     useState<SubmittedSearch | null>(null);
@@ -46,38 +60,110 @@ export function useSessionSearch({
   const searchedSessionIdsRef = useRef<Set<string>>(new Set());
   const pendingSessionIdsRef = useRef<Set<string>>(new Set());
   const activeSearchesRef = useRef(0);
+  // `search` reads sessions and query through refs so its identity stays
+  // stable across store churn and query state updates: consumers key sweep
+  // effects on that identity, and an unstable callback used to re-fire a full
+  // export sweep on every session-list update plus a second, discarded sweep
+  // per keystroke (updateQuery bumps requestIdRef, orphaning the first).
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const submittedSearchRef = useRef(submittedSearch);
+  submittedSearchRef.current = submittedSearch;
+  // The display options ride the same ref for the same reason: they are only
+  // ever read inside a run, and `resolvers` is a fresh object whenever the
+  // persona or project store hands back a new array — which the persona 60s
+  // and window-focus refresh does unconditionally, so a mounted `usePersonas`
+  // consumer would otherwise re-fire consumers' sweep effects on a timer.
+  const displayOptionsRef = useRef({
+    resolvers,
+    locale,
+    getDisplayTitle,
+    visibleMetadataOnly,
+  });
+  displayOptionsRef.current = {
+    resolvers,
+    locale,
+    getDisplayTitle,
+    visibleMetadataOnly,
+  };
 
   const buildResults = useCallback(
     (
       targetSessions: ChatSession[],
       trimmed: string,
       messageResults: Awaited<ReturnType<typeof acpSearchSessions>> = [],
-    ) =>
-      buildSessionSearchResults(
+    ) => {
+      const options = displayOptionsRef.current;
+      return buildSessionSearchResults(
         targetSessions,
         trimmed,
         messageResults,
-        resolvers,
+        options.resolvers,
         {
-          locale,
-          getDisplayTitle,
-          visibleMetadataOnly,
+          locale: options.locale,
+          getDisplayTitle: options.getDisplayTitle,
+          visibleMetadataOnly: options.visibleMetadataOnly,
         },
-      ),
-    [getDisplayTitle, locale, resolvers, visibleMetadataOnly],
+      );
+    },
+    [],
   );
 
-  const applyResults = useCallback(
+  /**
+   * Metadata matches, applied before the export sweep resolves so title and
+   * filter hits render immediately. Only a new query may clear the screen: for
+   * a re-sweep these results are metadata-only, so replacing with them would
+   * drop every content match for the frames until the sweep resolves — the
+   * results flashing out and back in under the user.
+   */
+  const applyInterimResults = useCallback(
     (
-      nextResults: SessionSearchDisplayResult[],
-      mode: ResultApplyMode = "merge",
+      metadataResults: SessionSearchDisplayResult[],
+      mode: SweepMode,
+      sweptSessionIds: Set<string>,
     ) => {
-      if (mode === "replace") {
-        setResults(nextResults);
+      if (mode === "query") {
+        setResults(metadataResults);
         return;
       }
+      if (mode === "page") {
+        setResults((current) =>
+          mergeSessionSearchResults(current, metadataResults),
+        );
+        return;
+      }
+      // Re-sweep: keep what is on screen for the sessions still in the list
+      // (merged last, so an existing content match is not downgraded to a
+      // metadata one), add metadata hits for sessions that just joined, and
+      // drop the ones that left.
+      setResults((current) =>
+        mergeSessionSearchResults(
+          metadataResults,
+          current.filter((result) => sweptSessionIds.has(result.session.id)),
+        ),
+      );
+    },
+    [],
+  );
 
-      setResults((current) => mergeSessionSearchResults(current, nextResults));
+  /**
+   * The sweep's own results: authoritative for the sessions it covered, so a
+   * session that stopped matching disappears, and additive for the rest, so a
+   * `searchMore` page merged in while the sweep was running survives it.
+   */
+  const applySweptResults = useCallback(
+    (
+      nextResults: SessionSearchDisplayResult[],
+      sweptSessionIds: Set<string>,
+    ) => {
+      setResults((current) =>
+        mergeSessionSearchResults(
+          current.filter((result) => !sweptSessionIds.has(result.session.id)),
+          nextResults,
+        ),
+      );
     },
     [],
   );
@@ -87,20 +173,24 @@ export function useSessionSearch({
       requestId,
       trimmed,
       targetSessions,
-      initialApplyMode,
+      mode,
     }: {
       requestId: number;
       trimmed: string;
       targetSessions: ChatSession[];
-      initialApplyMode: ResultApplyMode;
+      mode: SweepMode;
     }): Promise<boolean> => {
       const metadataResults = buildResults(targetSessions, trimmed);
-      const sessionIds = targetSessions.map((session) => session.id);
+      const targets = targetSessions.map((session) => ({
+        id: session.id,
+        stamp: sessionSearchStamp(session),
+      }));
+      const sweptSessionIds = new Set(targets.map((target) => target.id));
 
       setError(null);
-      applyResults(metadataResults, initialApplyMode);
+      applyInterimResults(metadataResults, mode, sweptSessionIds);
 
-      if (trimmed.length < 2 || sessionIds.length === 0) {
+      if (trimmed.length < 2 || targets.length === 0) {
         return true;
       }
 
@@ -108,12 +198,17 @@ export function useSessionSearch({
       setIsSearching(true);
 
       try {
-        const messageResults = await acpSearchSessions(trimmed, sessionIds);
+        const messageResults = await acpSearchSessions(trimmed, targets, {
+          queryClient,
+        });
         if (requestIdRef.current !== requestId) {
           return false;
         }
 
-        applyResults(buildResults(targetSessions, trimmed, messageResults));
+        applySweptResults(
+          buildResults(targetSessions, trimmed, messageResults),
+          sweptSessionIds,
+        );
         return true;
       } catch (searchError) {
         if (requestIdRef.current !== requestId) {
@@ -121,7 +216,11 @@ export function useSessionSearch({
         }
 
         setError(searchErrorMessage(searchError));
-        applyResults(metadataResults);
+        // The sweep produced nothing, so leave the metadata matches standing
+        // rather than dropping content matches from an earlier one.
+        setResults((current) =>
+          mergeSessionSearchResults(current, metadataResults),
+        );
         return false;
       } finally {
         if (requestIdRef.current === requestId) {
@@ -133,7 +232,7 @@ export function useSessionSearch({
         }
       }
     },
-    [applyResults, buildResults],
+    [applyInterimResults, applySweptResults, buildResults, queryClient],
   );
 
   const clear = useCallback(() => {
@@ -141,6 +240,8 @@ export function useSessionSearch({
     searchedSessionIdsRef.current = new Set();
     pendingSessionIdsRef.current = new Set();
     activeSearchesRef.current = 0;
+    queryRef.current = "";
+    submittedSearchRef.current = null;
     setQuery("");
     setSubmittedSearch(null);
     setResults([]);
@@ -149,10 +250,21 @@ export function useSessionSearch({
   }, []);
 
   const updateQuery = useCallback((nextQuery: string) => {
+    // Re-sending the query already held is a no-op. Consumers call this on
+    // every sweep trigger, not only on keystrokes — SearchView re-sends the
+    // debounced query whenever its swept sessions change — and the reset
+    // below would drop the results of the query still on screen and orphan an
+    // in-flight sweep for nothing.
+    if (nextQuery === queryRef.current) return;
+
     requestIdRef.current += 1;
     searchedSessionIdsRef.current = new Set();
     pendingSessionIdsRef.current = new Set();
     activeSearchesRef.current = 0;
+    // Synced here as well as on render so a submit in the same tick as the
+    // update (setQuery("x"); search()) already sees the new query.
+    queryRef.current = nextQuery;
+    submittedSearchRef.current = null;
     setQuery(nextQuery);
     setSubmittedSearch(null);
     setResults([]);
@@ -162,30 +274,32 @@ export function useSessionSearch({
 
   const search = useCallback(
     async (explicitQuery?: string) => {
-      const trimmed = (explicitQuery ?? query).trim();
+      const trimmed = (explicitQuery ?? queryRef.current).trim();
       if (!trimmed) {
         clear();
         return;
       }
 
+      const targetSessions = sessionsRef.current;
+      // Re-running the query already submitted is a re-sweep, not a new
+      // search: consumers keying a sweep effect on their sessions land here
+      // whenever the list gains, loses, or updates one.
+      const mode: SweepMode =
+        submittedSearchRef.current?.query === trimmed ? "resweep" : "query";
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
       searchedSessionIdsRef.current = new Set(
-        sessions.map((session) => session.id),
+        targetSessions.map((session) => session.id),
       );
       pendingSessionIdsRef.current = new Set();
       activeSearchesRef.current = 0;
 
+      submittedSearchRef.current = { query: trimmed, requestId };
       setSubmittedSearch({ query: trimmed, requestId });
 
-      await runSearchPage({
-        requestId,
-        trimmed,
-        targetSessions: sessions,
-        initialApplyMode: "replace",
-      });
+      await runSearchPage({ requestId, trimmed, targetSessions, mode });
     },
-    [clear, query, runSearchPage, sessions],
+    [clear, runSearchPage],
   );
 
   const searchMore = useCallback(
@@ -217,7 +331,7 @@ export function useSessionSearch({
         requestId,
         trimmed,
         targetSessions: unsearchedSessions,
-        initialApplyMode: "merge",
+        mode: "page",
       });
 
       if (requestIdRef.current !== requestId) return;
