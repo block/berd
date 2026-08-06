@@ -2474,7 +2474,12 @@ describe("VirtualMessageTimeline", () => {
     const visibleTailRow = await screen.findByTestId(
       "virtual-transcript-row-message:message-79",
     );
-    expect(visibleTailRow).toHaveAttribute("data-virtual-row-visible", "true");
+    await waitFor(() =>
+      expect(visibleTailRow).toHaveAttribute(
+        "data-virtual-row-visible",
+        "true",
+      ),
+    );
     expect(visibleTailRow).toHaveAttribute(
       "data-virtual-row-selectable",
       "true",
