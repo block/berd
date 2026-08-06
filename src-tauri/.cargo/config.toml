@@ -1,0 +1,7 @@
+# MSVC reports a pre-C++11 `__cplusplus` value unless explicitly instructed to
+# expose the selected language standard. `ssstretch` uses that macro to provide
+# a C++11 `std::make_unique` fallback; without this flag the fallback conflicts
+# with MSVC's standard-library implementation and the Windows build fails.
+[env]
+CXXFLAGS_x86_64_pc_windows_msvc = "/Zc:__cplusplus"
+CXXFLAGS_aarch64_pc_windows_msvc = "/Zc:__cplusplus"

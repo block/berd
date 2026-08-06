@@ -20,6 +20,7 @@ use objc2_app_kit::{NSApplication, NSImage};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{MainThreadMarker, NSProcessInfo, NSString};
 use services::{bundled_agents, bundled_skills, distro_bundle::DistroBundleState};
+use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
@@ -93,6 +94,14 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     set_process_name();
 
+    let context = tauri::generate_context!();
+    let e2e_mode = services::e2e_mode::E2eMode::from_process_env(&context.config().identifier)
+        .unwrap_or_else(|error| panic!("invalid isolated E2E configuration: {error}"));
+    if let Some(mode) = &e2e_mode {
+        mode.enforce_process_env()
+            .unwrap_or_else(|error| panic!("failed to initialize isolated E2E mode: {error}"));
+    }
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(
@@ -121,10 +130,28 @@ pub fn run() {
         );
 
     #[cfg(feature = "app-test-driver")]
-    let builder = builder.plugin(tauri_plugin_app_test_driver::init());
+    let builder = if let Some(mode) = &e2e_mode {
+        let driver_config = tauri_plugin_app_test_driver::DriverConfig::new(
+            mode.driver_token().to_owned(),
+            mode.driver_run_root(),
+        );
+        builder.plugin(tauri_plugin_app_test_driver::init_isolated(driver_config))
+    } else {
+        builder.plugin(tauri_plugin_app_test_driver::init())
+    };
 
     #[cfg(feature = "berdctl")]
     let builder = builder.plugin(tauri_plugin_berdctl::init());
+
+    if let Some(mode) = &e2e_mode {
+        mode.log_enabled();
+    }
+
+    let builder = if let Some(mode) = e2e_mode {
+        builder.manage(mode)
+    } else {
+        builder
+    };
 
     builder
         .setup(|app| {
@@ -140,17 +167,21 @@ pub fn run() {
             // present even while a later step blocks the setup thread.
             let app_data_dir = app.path().app_data_dir()?;
 
-            let bundled_runtime_config_path = match app.path().resource_dir() {
-                Ok(resource_dir) => Some(
-                    resource_dir.join(commands::runtime_config::BUNDLED_RUNTIME_CONFIG_FILE_NAME),
-                ),
-                Err(error) => {
-                    log::warn!(
-                        "Failed to resolve resource dir for bundled runtime config: {error}"
-                    );
-                    None
-                }
-            };
+            let bundled_runtime_config_path = app
+                .try_state::<services::e2e_mode::E2eMode>()
+                .and_then(|mode| mode.runtime_config_path().map(PathBuf::from))
+                .or_else(|| match app.path().resource_dir() {
+                    Ok(resource_dir) => Some(
+                        resource_dir
+                            .join(commands::runtime_config::BUNDLED_RUNTIME_CONFIG_FILE_NAME),
+                    ),
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to resolve resource dir for bundled runtime config: {error}"
+                        );
+                        None
+                    }
+                });
 
             app.manage(commands::runtime_config::RuntimeConfigState::new(
                 app_data_dir.clone(),
@@ -241,6 +272,10 @@ pub fn run() {
             // edited a bundled agent's avatar; warming them keeps the bundled
             // avatar available regardless.
             let mut bundled_avatar_refs: Vec<String> = Vec::new();
+            let e2e_agents_dir = app
+                .try_state::<services::e2e_mode::E2eMode>()
+                .map(|mode| mode.goose_agents_dir());
+            let migrate_bundled_skills_from_home = e2e_agents_dir.is_none();
             {
                 let distro_state = app.state::<DistroBundleState>();
                 let bundled_skills_state = app
@@ -254,6 +289,7 @@ pub fn run() {
                         match bundled_skills::seed_bundled_skills(
                             &skills_bundle,
                             &skills_app_data_dir,
+                            migrate_bundled_skills_from_home,
                         ) {
                             Ok(count) if count > 0 => {
                                 log::info!("Seeded {count} bundled skill(s)");
@@ -264,7 +300,7 @@ pub fn run() {
                         bundled_skills_state.mark_ready();
                     });
 
-                    match bundled_agents::seed_bundled_agents(bundle) {
+                    match bundled_agents::seed_bundled_agents(bundle, e2e_agents_dir.as_deref()) {
                         Ok(result) => {
                             if result.seeded_count > 0 {
                                 log::info!("Seeded {} bundled agent(s)", result.seeded_count);
@@ -286,7 +322,9 @@ pub fn run() {
             // still recovered when no distro bundle is present or seeding failed.
             {
                 let mut all_avatar_refs = bundled_avatar_refs;
-                for user_ref in bundled_agents::collect_all_agent_avatar_refs() {
+                for user_ref in
+                    bundled_agents::collect_all_agent_avatar_refs(e2e_agents_dir.as_deref())
+                {
                     if !all_avatar_refs.contains(&user_ref) {
                         all_avatar_refs.push(user_ref);
                     }
@@ -552,7 +590,7 @@ pub fn run() {
             commands::skill_marketplace::install_remote_skill,
             commands::workspace_context::load_workspace_context,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| match event {
             RunEvent::Exit => {

@@ -1,6 +1,10 @@
 # Cargo features for the full dev/CI posture of the app crate.
 app_features := "berdctl,app-test-driver"
 
+# Ordinary recipe lines run in native Windows PowerShell; shebang recipes keep
+# their explicit Unix interpreter and are unaffected.
+set windows-shell := ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+
 # Default recipe
 default:
     @just --list
@@ -37,26 +41,32 @@ test-windows-dev:
 # ── Dev Environment ──────────────────────────────────────────
 
 # Sync and build the pinned managed local Goose checkout used for Berd development.
+[unix]
 goose-sync:
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
 # Regenerate the vendored ACP schema from the pinned Goose backend and rebuild the SDK (kept out of setup; mutates tracked files).
+[unix]
 sync-schema:
     ./scripts/regenerate-sdk-schema.sh
 
 # Install dependencies and build workspace packages.
+[unix]
 _setup-dev-deps:
     pnpm install
     cd sdk && pnpm build
 
+[unix]
 _install-lefthook:
     if [ -d .git ]; then lefthook install --force; else echo "Skipping lefthook install in Git worktree"; fi
 
 # Install dependencies, build workspace packages, and prepare local development hooks.
+[unix]
 _setup-no-goose: _setup-dev-deps
     just _install-lefthook
 
 # Install dependencies, build workspace packages, build managed Goose, and prepare local development hooks.
+[unix]
 setup: _setup-dev-deps
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
     just _install-lefthook
@@ -132,15 +142,17 @@ typecheck:
 
 # Format Tauri/Rust files.
 tauri-fmt:
-    cd src-tauri && cargo fmt
+    cargo fmt --manifest-path src-tauri/Cargo.toml
 
 # Check Tauri/Rust formatting.
 tauri-fmt-check:
-    cd src-tauri && cargo fmt --check
+    cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
+[unix]
 _tauri-cargo-unix *ARGS:
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && cd src-tauri && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo {{ ARGS }}
 
+[windows]
 _tauri-cargo-windows *ARGS:
     #!powershell.exe -NoProfile -ExecutionPolicy Bypass
     $ErrorActionPreference = "Stop"
@@ -158,12 +170,14 @@ _tauri-cargo-windows *ARGS:
 clippy:
     just _clippy-{{ os_family() }}
 
+[unix]
 _clippy-unix:
     just _tauri-cargo-unix clippy -- -D warnings
     just _tauri-cargo-unix clippy --features {{ app_features }} -- -D warnings
     just _tauri-cargo-unix clippy -p berdctl -- -D warnings
     just _tauri-cargo-unix clippy -p tauri-plugin-berdctl --features server -- -D warnings
 
+[windows]
 _clippy-windows:
     just _tauri-cargo-windows clippy -- -D warnings
     just _tauri-cargo-windows clippy --features {{ app_features }} -- -D warnings
@@ -178,11 +192,13 @@ build:
 tauri-check:
     just _tauri-check-{{ os_family() }}
 
+[unix]
 _tauri-check-unix:
     just _tauri-cargo-unix check
     just _tauri-cargo-unix check --features {{ app_features }}
     just _tauri-cargo-unix check -p berdctl
 
+[windows]
 _tauri-check-windows:
     just tauri-check-windows
 
@@ -190,10 +206,12 @@ _tauri-check-windows:
 tauri-test:
     just _tauri-test-{{ os_family() }}
 
+[unix]
 _tauri-test-unix:
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
 
+[windows]
 _tauri-test-windows:
     just _tauri-cargo-windows test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-windows test -p berdctl
@@ -209,20 +227,20 @@ release-scripts-test:
 
 # Build the BuilderBot CLI crate.
 bb-cli-build:
-    cd bb-cli && cargo build --locked
+    cargo build --manifest-path bb-cli/Cargo.toml --locked
 
 # Build the sq agent-tools package output.
 bb-cli-build-sq:
-    cd bb-cli && just build-sq
+    just --working-directory bb-cli build-sq
 
 # Check BuilderBot CLI formatting and clippy.
 bb-cli-lint:
-    cd bb-cli && cargo fmt --all -- --check
-    cd bb-cli && cargo clippy --locked --all-targets --all-features -- -D warnings
+    cargo fmt --manifest-path bb-cli/Cargo.toml --all -- --check
+    cargo clippy --manifest-path bb-cli/Cargo.toml --locked --all-targets --all-features -- -D warnings
 
 # Run BuilderBot CLI tests.
 bb-cli-test:
-    cd bb-cli && cargo test --locked
+    cargo test --manifest-path bb-cli/Cargo.toml --locked
 
 # Build and run the isolated, deterministic Docker acceptance harness for bb skills.
 bb-cli-docker-acceptance:
@@ -230,6 +248,7 @@ bb-cli-docker-acceptance:
     docker run --rm bb-cli-acceptance
 
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
+[unix]
 bundle:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -273,18 +292,22 @@ bundle:
     fi
 
 # Build macOS app and DMG bundles.
+[macos]
 bundle-macos:
     ./scripts/build_darwin.sh
 
 # Build Linux deb, rpm, and AppImage bundles. Must run on Linux.
+[linux]
 bundle-linux:
     ./scripts/build_linux.sh
 
 # Build Linux deb, rpm, and AppImage bundles inside Docker.
+[linux]
 bundle-linux-docker:
     ./scripts/build_linux_docker.sh
 
 # Stage the pinned Goose backend and build a release bundle with WebView devtools enabled.
+[unix]
 bundle-debug:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -329,6 +352,7 @@ test-e2e-all:
 
 # ── Run ──────────────────────────────────────────────────────
 
+[unix]
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -413,12 +437,29 @@ dev:
 
     pnpm tauri dev --features {{ app_features }} "${EXTRA_CONFIG_ARGS[@]}"
 
+[unix]
 dev-debug: dev
 
 dev-frontend:
     pnpm dev
 
+# Run the Tauri dev app with the legacy local driver by default. Pass
+# `isolated=1` to opt into authenticated, per-run state isolation.
+[unix]
+dev-e2e mode="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ mode }}" in
+      "") exec just dev ;;
+      isolated=1) exec ./scripts/dev-e2e.sh ;;
+      *)
+        echo "dev-e2e: expected isolated=1, got: {{ mode }}" >&2
+        exit 2
+        ;;
+    esac
+
 # Resolve a Goose ref/tag/sha, update goose-backend.lock.json, and refresh the SDK schema.
+[unix]
 bump-goose ref="main":
     ./scripts/update-goose-backend-lock.sh "{{ ref }}"
     just sync-schema
@@ -428,6 +469,7 @@ bump-node-runtime *ARGS:
     node scripts/update-node-runtime-lock.mjs {{ ARGS }}
 
 # Generate release notes from commits since the previous release tag (formatting guidelines: scripts/release-notes-prompt.md).
+[unix]
 release-notes from="" to="HEAD":
     FROM_REF="{{ from }}" TO_REF="{{ to }}" ./scripts/generate-release-notes.sh
 
@@ -440,10 +482,12 @@ new-command noun verb:
 clean:
     just _clean-{{ os_family() }}
 
+[unix]
 _clean-unix:
     just _tauri-cargo-unix clean
     rm -rf dist node_modules sdk/node_modules sdk/dist
 
+[windows]
 _clean-windows:
     #!powershell.exe -NoProfile -ExecutionPolicy Bypass
     $ErrorActionPreference = "Stop"
@@ -451,20 +495,13 @@ _clean-windows:
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue dist,node_modules,sdk/node_modules,sdk/dist
 
+[unix]
 stage-sidecar:
     just _stage-sidecar-{{ os_family() }}
 
+[unix]
 _stage-sidecar-unix:
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
-
-_stage-sidecar-windows:
-    #!powershell.exe -NoProfile -ExecutionPolicy Bypass
-    $ErrorActionPreference = "Stop"
-    Import-Module (Join-Path (Get-Location) "scripts/windows/WindowsDev.psm1") -Force -DisableNameChecking
-    $bash = Get-GitBashPath
-    if ([string]::IsNullOrWhiteSpace($bash)) { throw "Git Bash is required for stage-sidecar on Windows." }
-    & $bash -c 'TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh'
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 avatars-manifest source version:
     pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"
@@ -478,6 +515,7 @@ avatars-promote version:
 artifacts-manifest source version:
     pnpm artifacts:manifest -- --source="{{ source }}" --version="{{ version }}"
 
+[unix]
 artifacts-publish source version="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -491,6 +529,7 @@ artifacts-promote version:
     pnpm artifacts:promote -- --version="{{ version }}"
 
 # Delete the silent migration marker(s) so the next launch re-runs the migration.
+[unix]
 reset-migration:
     #!/usr/bin/env bash
     set -euo pipefail

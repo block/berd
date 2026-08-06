@@ -75,6 +75,15 @@ struct AppDataMigrationSummary {
 /// location. Failures are logged and non-fatal so a single locked/cache file
 /// does not prevent app startup.
 pub(crate) fn migrate_legacy_app_data<R: Runtime>(app: &AppHandle<R>) {
+    if app
+        .try_state::<crate::services::e2e_mode::E2eMode>()
+        .is_some()
+    {
+        log::info!("Skipping legacy app data migration in isolated E2E mode");
+        record_summary("skipped_e2e", &AppDataMigrationSummary::default());
+        return;
+    }
+
     let pairs = match legacy_directory_pairs(app) {
         Ok(pairs) => pairs,
         Err(error) => {
@@ -143,7 +152,9 @@ fn legacy_directory_pairs<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Director
         .map_err(|error| format!("Failed to resolve current app local data directory: {error}"))?;
 
     let current_identifier = app.config().identifier.as_str();
-    let old_identifier = legacy_identifier_for(current_identifier);
+    let old_identifier = legacy_identifier_for(current_identifier).ok_or_else(|| {
+        format!("legacy app data migration is not supported for identifier {current_identifier}")
+    })?;
 
     let old_data_dir = sibling_app_dir(&current_data_dir, current_identifier, old_identifier);
     let old_config_dir = sibling_app_dir(&current_config_dir, current_identifier, old_identifier);
@@ -177,11 +188,11 @@ fn legacy_directory_pairs<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Director
     Ok(pairs)
 }
 
-fn legacy_identifier_for(current_identifier: &str) -> &str {
+fn legacy_identifier_for(current_identifier: &str) -> Option<&'static str> {
     match current_identifier {
-        CURRENT_DEV_APP_IDENTIFIER => OLD_DEV_APP_IDENTIFIER,
-        CURRENT_APP_IDENTIFIER => OLD_APP_IDENTIFIER,
-        _ => OLD_APP_IDENTIFIER,
+        CURRENT_DEV_APP_IDENTIFIER => Some(OLD_DEV_APP_IDENTIFIER),
+        CURRENT_APP_IDENTIFIER => Some(OLD_APP_IDENTIFIER),
+        _ => None,
     }
 }
 
@@ -826,6 +837,41 @@ mod tests {
         assert_eq!(summary.copied, 0);
         assert_eq!(summary.skipped_invalid, 1);
         assert!(!current.join(CURRENT_LAYOUT_DATABASE).exists());
+    }
+
+    #[test]
+    fn migration_identifiers_are_explicit_and_unknown_identifiers_are_rejected() {
+        assert_eq!(
+            legacy_identifier_for(CURRENT_APP_IDENTIFIER),
+            Some(OLD_APP_IDENTIFIER)
+        );
+        assert_eq!(
+            legacy_identifier_for(CURRENT_DEV_APP_IDENTIFIER),
+            Some(OLD_DEV_APP_IDENTIFIER)
+        );
+        assert_eq!(legacy_identifier_for("xyz.block.berd.e2e.run-123"), None);
+        assert_eq!(legacy_identifier_for("xyz.block.unrelated"), None);
+    }
+
+    #[test]
+    fn an_e2e_identifier_cannot_select_normal_migration_sources() {
+        let temp = tempdir().unwrap();
+        let production_source = temp.path().join(OLD_APP_IDENTIFIER);
+        let dev_source = temp.path().join(OLD_DEV_APP_IDENTIFIER);
+        fs::create_dir_all(&production_source).unwrap();
+        fs::create_dir_all(&dev_source).unwrap();
+        fs::write(production_source.join("sentinel"), b"production").unwrap();
+        fs::write(dev_source.join("sentinel"), b"dev").unwrap();
+
+        let e2e_identifier = "xyz.block.berd.e2e.run-123";
+        assert_eq!(legacy_identifier_for(e2e_identifier), None);
+
+        assert_eq!(
+            fs::read(production_source.join("sentinel")).unwrap(),
+            b"production"
+        );
+        assert_eq!(fs::read(dev_source.join("sentinel")).unwrap(), b"dev");
+        assert!(!temp.path().join(e2e_identifier).exists());
     }
 
     #[test]

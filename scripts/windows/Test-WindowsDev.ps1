@@ -58,10 +58,35 @@ try {
     Assert-Equal "process args: embedded quote escaped" (Join-WindowsProcessArguments -Arguments @('say "hi"')) '"say \"hi\""'
 
     $justfile = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "justfile")
-    Assert-Equal "justfile leaves global Windows shell unset" ($justfile -notmatch '(?m)^set windows-shell') $true
-    foreach ($recipe in @("_tauri-cargo-windows", "_clean-windows", "_stage-sidecar-windows")) {
+    Assert-Equal "justfile selects PowerShell for ordinary Windows recipes" ($justfile -match '(?m)^set windows-shell := \["powershell\.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"\]$') $true
+    foreach ($recipe in @("_tauri-cargo-windows", "_clean-windows")) {
         $escapedRecipe = [regex]::Escape($recipe)
         Assert-Equal "$recipe selects PowerShell locally" ($justfile -match "(?m)^${escapedRecipe}[^:]*:\r?\n\s+#!powershell\.exe") $true
+    }
+    Assert-Equal "stage-sidecar is not advertised on Windows" ($justfile -match '(?m)^\[unix\]\r?\nstage-sidecar:') $true
+    Assert-Equal "no Git Bash stage-sidecar bridge remains" ($justfile -notmatch '(?m)^_stage-sidecar-windows:') $true
+    foreach ($recipe in @("bundle", "bundle-debug", "dev", "dev-e2e", "artifacts-publish", "reset-migration")) {
+        $escapedRecipe = [regex]::Escape($recipe)
+        Assert-Equal "$recipe stays Unix-only" ($justfile -match "(?m)^\[unix\]\r?\n${escapedRecipe}[^:]*:") $true
+        Assert-Equal "$recipe keeps an explicit bash shebang" ($justfile -match "(?m)^${escapedRecipe}[^:]*:\r?\n\s+#!/usr/bin/env bash") $true
+    }
+    foreach ($recipe in @("bootstrap-windows", "doctor-windows", "cleanup-windows", "setup-windows", "dev-windows", "tauri-check-windows", "test-windows-dev")) {
+        $escapedRecipe = [regex]::Escape($recipe)
+        Assert-Equal "$recipe is declared in the justfile" ($justfile -match "(?m)^${escapedRecipe}[^:]*:") $true
+    }
+    $windowsRecipeCommands = @{
+        "bootstrap-windows" = "scripts/windows/Bootstrap-Windows.ps1"
+        "doctor-windows" = "scripts/windows/Doctor-Windows.ps1"
+        "cleanup-windows" = "scripts/windows/Cleanup-Windows.ps1"
+        "setup-windows" = "scripts/windows/Setup-Windows.ps1"
+        "dev-windows" = "scripts/windows/Dev-Windows.ps1"
+        "tauri-check-windows" = "scripts/windows/Tauri-Check-Windows.ps1"
+        "test-windows-dev" = "scripts/windows/Test-WindowsDev.ps1"
+    }
+    foreach ($recipe in $windowsRecipeCommands.Keys) {
+        $recipePattern = [regex]::Escape($recipe)
+        $scriptPattern = [regex]::Escape($windowsRecipeCommands[$recipe])
+        Assert-Equal "$recipe dispatches through its native PowerShell script" ($justfile -match "(?m)^${recipePattern}[^:]*:\r?\n\s+powershell\.exe .* -File ${scriptPattern}") $true
     }
 
     Assert-Equal "required pnpm version accepted" (Test-PnpmVersion (Get-RequiredPnpmVersion)) $true
@@ -76,6 +101,22 @@ try {
     $port = Get-StableVitePort
     Assert-Equal "vite port within range" ($port -ge 10000 -and $port -lt 65000) $true
     Assert-Equal "vite port is stable per directory" $port (Get-StableVitePort)
+
+    $e2eRoot = Join-Path $temp "run-123"
+    $e2e = New-E2eRunContract -RunRoot $e2eRoot
+    Assert-Equal "E2E run ID derives from root" $e2e.RunId "run-123"
+    Assert-Equal "E2E identifier derives from run ID" $e2e.Identifier "xyz.block.berd.e2e.run-123"
+    Assert-Equal "E2E config stays under run root" $e2e.ConfigPath (Join-Path $e2eRoot "tauri-dev-windows.config.json")
+    Assert-Equal "E2E driver readiness stays under run root" $e2e.DriverReadyPath (Join-Path $e2eRoot "app-test-driver.json")
+    Assert-Equal "E2E generated driver token is strong ASCII" ($e2e.DriverToken -cmatch '^[a-z0-9]{64}$') $true
+    Assert-Equal "E2E generated driver tokens are per-run" ((New-E2eRunContract -RunRoot $e2eRoot).DriverToken -ne $e2e.DriverToken) $true
+    $explicitToken = "0123456789abcdef0123456789abcdef"
+    Assert-Equal "E2E explicit driver token is preserved" (New-E2eRunContract -RunRoot $e2eRoot -DriverToken $explicitToken).DriverToken $explicitToken
+    Assert-Throws "E2E relative run root rejected" { New-E2eRunContract -RunRoot "relative\run-123" }
+    Assert-Throws "E2E underscore run ID rejected" { New-E2eRunContract -RunRoot (Join-Path $temp "run_123") }
+    Assert-Throws "E2E malformed run ID rejected" { New-E2eRunContract -RunRoot (Join-Path $temp "bad.id") }
+    Assert-Throws "E2E mismatched run ID rejected" { New-E2eRunContract -RunRoot $e2eRoot -RunId "other" }
+    Assert-Throws "E2E weak driver token rejected" { New-E2eRunContract -RunRoot $e2eRoot -DriverToken "weak" }
 
     $paths = Resolve-GooseDevPaths
     Assert-Equal "default Goose repo path" $paths.Repo (Join-Path $env:GOOSE_DEV_ROOT "goose")
@@ -100,7 +141,7 @@ try {
     Assert-Equal "stamp match accepts current build" (Test-GooseStampRecordMatches -Stamp $stamp -Paths $paths -Settings $settings -BinPath $bin -LocalHead "abc123") $true
     Assert-Equal "stamp match rejects changed commit" (Test-GooseStampRecordMatches -Stamp $stamp -Paths $paths -Settings $settings -BinPath $bin -LocalHead "def456") $false
 
-    # ── Cleanup containment rules (Assert-SafeCleanupPath / Normalize-FullPath) ──
+    # â”€â”€ Cleanup containment rules (Assert-SafeCleanupPath / Normalize-FullPath) â”€â”€
     # These guard Remove-Item -Recurse in Cleanup-Windows.ps1; run them against
     # the real environment before the redirection block below.
     $insideRoot = Join-Path $temp "allowed"

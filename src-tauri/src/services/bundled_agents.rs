@@ -43,28 +43,44 @@ struct AgentMetadata {
     legacy_bundled: Option<bool>,
 }
 
-pub fn seed_bundled_agents(bundle: &DistroBundle) -> Result<SeedBundledAgentsResult, String> {
-    let Some(home_dir) = dirs::home_dir() else {
-        return Err("Failed to resolve home directory for bundled agents".to_string());
+pub fn seed_bundled_agents(
+    bundle: &DistroBundle,
+    target_root: Option<&Path>,
+) -> Result<SeedBundledAgentsResult, String> {
+    let target_root = match target_root {
+        Some(target_root) => target_root.to_path_buf(),
+        None => {
+            let Some(home_dir) = dirs::home_dir() else {
+                return Err("Failed to resolve home directory for bundled agents".to_string());
+            };
+            home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME)
+        }
     };
 
-    seed_bundled_agents_from_dir(
-        &bundle.root_dir.join(DISTRO_AGENTS_DIR_NAME),
-        &home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME),
-    )
+    seed_bundled_agents_from_dir(&bundle.root_dir.join(DISTRO_AGENTS_DIR_NAME), &target_root)
 }
 
 /// Explicitly restores one bundled agent after a user invokes a feature that
 /// depends on it. Unlike startup seeding, this may restore a previously seeded
 /// file that is now missing. It never overwrites an unmarked user-owned file.
-pub fn repair_bundled_agent(bundle: &DistroBundle, file_name: &str) -> Result<(), String> {
-    let Some(home_dir) = dirs::home_dir() else {
-        return Err("Failed to resolve home directory for bundled agents".to_string());
+pub fn repair_bundled_agent(
+    bundle: &DistroBundle,
+    target_root: Option<&Path>,
+    file_name: &str,
+) -> Result<(), String> {
+    let target_root = match target_root {
+        Some(target_root) => target_root.to_path_buf(),
+        None => {
+            let Some(home_dir) = dirs::home_dir() else {
+                return Err("Failed to resolve home directory for bundled agents".to_string());
+            };
+            home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME)
+        }
     };
 
     repair_bundled_agent_from_dir(
         &bundle.root_dir.join(DISTRO_AGENTS_DIR_NAME),
-        &home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME),
+        &target_root,
         file_name,
     )
 }
@@ -174,18 +190,23 @@ fn fallback_file_name(file_name: &str) -> Result<String, String> {
 }
 
 /// Collects `app-avatar:*` refs from all agent files in the user's agents
-/// directory. This includes both bundled and user-created agents — any `.md`
+/// directory. This includes both bundled and user-created agents â€” any `.md`
 /// file with a YAML frontmatter `avatar` field pointing to an app-avatar ref.
 ///
 /// Used at startup to warm avatar caches for all agents the user has configured,
 /// not just the bundled ones. This ensures that if avatar media was lost (e.g.
 /// after a data migration or cache clear), the home screen recovers without
 /// requiring the user to manually re-download each pack.
-pub fn collect_all_agent_avatar_refs() -> Vec<String> {
-    let Some(home_dir) = dirs::home_dir() else {
-        return Vec::new();
+pub fn collect_all_agent_avatar_refs(agents_dir: Option<&Path>) -> Vec<String> {
+    let agents_dir = match agents_dir {
+        Some(agents_dir) => agents_dir.to_path_buf(),
+        None => {
+            let Some(home_dir) = dirs::home_dir() else {
+                return Vec::new();
+            };
+            home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME)
+        }
     };
-    let agents_dir = home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME);
     collect_avatar_refs_from_dir(&agents_dir)
 }
 
@@ -210,7 +231,7 @@ fn collect_avatar_refs_from_dir(dir: &Path) -> Vec<String> {
 
 /// Reads an agent file and returns its `app-avatar:*` ref if present.
 /// Unlike `source_agent_avatar_ref`, this does not require the agent to be
-/// bundled — it works on any agent `.md` file. A read failure yields `None`
+/// bundled â€” it works on any agent `.md` file. A read failure yields `None`
 /// so one unreadable agent file doesn't abort the whole scan.
 fn agent_file_avatar_ref(agent_file: &Path) -> Option<String> {
     let contents = fs::read_to_string(agent_file).ok()?;

@@ -1,8 +1,16 @@
 import net from "node:net";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
-const PORT = Number(process.env.APP_TEST_DRIVER_PORT) || 9999;
+const ENV_PORT = process.env.APP_TEST_DRIVER_PORT;
+const TOKEN = process.env.APP_TEST_DRIVER_TOKEN;
+const RUN_ROOT = process.env.BERD_E2E_RUN_ROOT;
+const READY_FILE_NAME = "app-test-driver.json";
+const READY_TIMEOUT_MS = 30_000;
+const READY_POLL_INTERVAL_MS = 100;
 
 interface TestDriverCommand {
+  token: string;
   action: string;
   selector?: string;
   value?: string;
@@ -13,6 +21,81 @@ interface TestDriverResult {
   success: boolean;
   data?: string;
   error?: string;
+}
+
+interface DriverReady {
+  host: string;
+  port: number;
+  pid: number;
+}
+
+function parsePort(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(
+      "APP_TEST_DRIVER_PORT must be an integer between 1 and 65535",
+    );
+  }
+  return port;
+}
+
+function validateReady(value: unknown): DriverReady {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    (value as DriverReady).host !== "127.0.0.1" ||
+    !Number.isInteger((value as DriverReady).port) ||
+    (value as DriverReady).port < 1 ||
+    (value as DriverReady).port > 65_535 ||
+    !Number.isInteger((value as DriverReady).pid) ||
+    (value as DriverReady).pid < 1
+  ) {
+    throw new Error("Invalid app test driver readiness file");
+  }
+  return value as DriverReady;
+}
+
+async function resolveDriverPort({
+  port,
+  runRoot,
+}: {
+  port?: number;
+  runRoot?: string;
+}): Promise<number> {
+  if (port !== undefined) return port;
+  if (!runRoot) {
+    throw new Error(
+      "BERD_E2E_RUN_ROOT is required to discover the app test driver port",
+    );
+  }
+
+  const readyFile = path.join(runRoot, READY_FILE_NAME);
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const ready = validateReady(
+        JSON.parse(await readFile(readyFile, "utf8")),
+      );
+      try {
+        process.kill(ready.pid, 0);
+      } catch {
+        throw new Error(
+          `App test driver readiness references inactive PID ${ready.pid}`,
+        );
+      }
+      return ready.port;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, READY_POLL_INTERVAL_MS),
+      );
+    }
+  }
+  throw new Error(
+    `Timed out waiting for app test driver readiness at ${readyFile}: ${String(lastError)}`,
+  );
 }
 
 export interface TestDriver {
@@ -93,37 +176,54 @@ function send(socket: net.Socket, command: TestDriverCommand): Promise<string> {
  * Returns an object with methods for each test driver command.
  */
 export async function createTestDriver({
-  port = PORT,
+  port = parsePort(ENV_PORT),
+  token = TOKEN,
+  runRoot = RUN_ROOT,
 }: {
   port?: number;
+  token?: string;
+  runRoot?: string;
 } = {}): Promise<TestDriver> {
-  const socket = net.createConnection({ port, host: "127.0.0.1" });
+  if (!token) {
+    throw new Error(
+      "APP_TEST_DRIVER_TOKEN is required to connect to the test driver",
+    );
+  }
+  const resolvedPort = await resolveDriverPort({ port, runRoot });
+  const socket = net.createConnection({
+    port: resolvedPort,
+    host: "127.0.0.1",
+  });
 
   await new Promise<void>((resolve, reject) => {
     socket.on("connect", resolve);
     socket.on("error", (err) => {
       reject(
         new Error(
-          `Cannot connect to test driver on port ${port}. ` +
+          `Cannot connect to test driver on port ${resolvedPort}. ` +
             `Is the Tauri app running with --features app-test-driver? (${err.message})`,
         ),
       );
     });
   });
 
+  const authenticatedSend = (
+    command: Omit<TestDriverCommand, "token">,
+  ): Promise<string> => send(socket, { ...command, token });
+
   return {
     snapshot() {
-      return send(socket, { action: "snapshot" });
+      return authenticatedSend({ action: "snapshot" });
     },
     click(selector?: string, options?: { timeout?: number }) {
-      return send(socket, {
+      return authenticatedSend({
         action: "click",
         selector,
         timeout: options?.timeout,
       });
     },
     fill(selector: string, value: string, options?: { timeout?: number }) {
-      return send(socket, {
+      return authenticatedSend({
         action: "fill",
         selector,
         value,
@@ -131,17 +231,17 @@ export async function createTestDriver({
       });
     },
     getText(selector?: string, options?: { timeout?: number }) {
-      return send(socket, {
+      return authenticatedSend({
         action: "getText",
         selector,
         timeout: options?.timeout,
       });
     },
     count(selector: string) {
-      return send(socket, { action: "count", selector }).then(Number);
+      return authenticatedSend({ action: "count", selector }).then(Number);
     },
     keypress(selector?: string, key?: string, options?: { timeout?: number }) {
-      return send(socket, {
+      return authenticatedSend({
         action: "keypress",
         selector,
         value: key,
@@ -152,7 +252,7 @@ export async function createTestDriver({
       text: string,
       options?: { selector?: string; timeout?: number },
     ) {
-      return send(socket, {
+      return authenticatedSend({
         action: "waitForText",
         selector: options?.selector ?? "body",
         value: text,
@@ -160,10 +260,10 @@ export async function createTestDriver({
       });
     },
     scroll(direction?: string) {
-      return send(socket, { action: "scroll", value: direction });
+      return authenticatedSend({ action: "scroll", value: direction });
     },
     screenshot(path?: string) {
-      return send(socket, { action: "screenshot", value: path });
+      return authenticatedSend({ action: "screenshot", value: path });
     },
     close() {
       socket.end();

@@ -220,12 +220,22 @@ fn collect_skill_roots(
     provider_id: Option<&str>,
     workspace_paths: Vec<String>,
     app_skills_root: Option<&Path>,
+    personal_skills_root: Option<&Path>,
 ) -> Vec<SkillRoot> {
     let provider_dirs = provider_skill_dirs(provider_id);
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
 
-    if let Some(home) = dirs::home_dir() {
+    if let Some(personal_skills_root) = personal_skills_root {
+        add_skill_root(
+            &mut roots,
+            &mut seen_roots,
+            personal_skills_root.to_path_buf(),
+            SkillRootScope::User,
+            "Personal".to_string(),
+            None,
+        );
+    } else if let Some(home) = dirs::home_dir() {
         for relative_dir in &provider_dirs {
             add_skill_root(
                 &mut roots,
@@ -390,8 +400,14 @@ fn collect_agent_skills(
     provider_id: Option<String>,
     workspace_paths: Vec<String>,
     app_skills_root: Option<&Path>,
+    personal_skills_root: Option<&Path>,
 ) -> Vec<AgentSkillEntry> {
-    let roots = collect_skill_roots(provider_id.as_deref(), workspace_paths, app_skills_root);
+    let roots = collect_skill_roots(
+        provider_id.as_deref(),
+        workspace_paths,
+        app_skills_root,
+        personal_skills_root,
+    );
     collect_skills_from_roots(roots, provider_id.as_deref())
 }
 
@@ -406,10 +422,15 @@ pub async fn list_berd_app_skills(
         .app_data_dir()
         .map_err(|err| format!("Failed to resolve Berd app data directory: {err}"))?;
     let app_skills_root = app_data_dir.join("skills");
-    let legacy_pin_aliases =
-        crate::services::bundled_skills::migrated_legacy_skill_aliases(&app_data_dir)
-            .into_iter()
-            .collect::<HashMap<_, _>>();
+    let include_home_aliases = app
+        .try_state::<crate::services::e2e_mode::E2eMode>()
+        .is_none();
+    let legacy_pin_aliases = crate::services::bundled_skills::migrated_legacy_skill_aliases(
+        &app_data_dir,
+        include_home_aliases,
+    )
+    .into_iter()
+    .collect::<HashMap<_, _>>();
     let skills = tokio::task::spawn_blocking(move || {
         let mut roots = Vec::new();
         let mut seen_roots = HashSet::new();
@@ -444,15 +465,22 @@ pub async fn list_agent_skills(
         .app_data_dir()
         .map_err(|err| format!("Failed to resolve Berd app data directory: {err}"))?;
     let app_skills_root = app_data_dir.join("skills");
-    let legacy_pin_aliases =
-        crate::services::bundled_skills::migrated_legacy_skill_aliases(&app_data_dir)
-            .into_iter()
-            .collect::<HashMap<_, _>>();
+    let e2e_skills_root = app
+        .try_state::<crate::services::e2e_mode::E2eMode>()
+        .map(|mode| mode.goose_skills_dir());
+    let include_home_aliases = e2e_skills_root.is_none();
+    let legacy_pin_aliases = crate::services::bundled_skills::migrated_legacy_skill_aliases(
+        &app_data_dir,
+        include_home_aliases,
+    )
+    .into_iter()
+    .collect::<HashMap<_, _>>();
     let skills = tokio::task::spawn_blocking(move || {
         let mut skills = collect_agent_skills(
             request.provider_id,
             request.workspace_paths,
             Some(&app_skills_root),
+            e2e_skills_root.as_deref(),
         );
         for skill in &mut skills {
             if skill.source_kind == "app" {
@@ -533,6 +561,7 @@ mod tests {
             Some("codex-acp".to_string()),
             vec![package.to_string_lossy().into_owned()],
             None,
+            None,
         );
 
         let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
@@ -554,6 +583,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("claude-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
             None,
         );
 
@@ -583,6 +613,7 @@ mod tests {
             Some("gemini-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
             None,
+            None,
         );
 
         let matching_skills: Vec<&super::AgentSkillEntry> = skills
@@ -591,6 +622,29 @@ mod tests {
             .collect();
         assert_eq!(matching_skills.len(), 1);
         assert_eq!(matching_skills[0].description, "Agents alias skill");
+    }
+
+    #[test]
+    fn explicit_personal_root_excludes_other_home_like_roots() {
+        let tmp = TempDir::new().unwrap();
+        let isolated_root = tmp.path().join("isolated").join("skills");
+        let normal_root = tmp.path().join("home").join(".agents").join("skills");
+        write_skill(&isolated_root, "isolated", "Isolated skill");
+        write_skill(&normal_root, "normal", "Normal home skill");
+
+        let skills = collect_agent_skills(
+            Some("codex-acp".to_string()),
+            Vec::new(),
+            None,
+            Some(&isolated_root),
+        );
+
+        assert!(skills.iter().any(|skill| skill.name == "isolated"));
+        assert!(skills.iter().all(|skill| skill.name != "normal"));
+        assert_eq!(
+            std::fs::read_to_string(normal_root.join("normal").join("SKILL.md")).unwrap(),
+            "---\nname: normal\ndescription: Normal home skill\n---\n\nUse it."
+        );
     }
 
     #[cfg(unix)]
@@ -613,6 +667,7 @@ mod tests {
             Some("codex-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
             None,
+            None,
         );
 
         assert!(skills.iter().all(|skill| skill.name != "leaked"));
@@ -633,6 +688,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("codex-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
             None,
         );
 
@@ -655,6 +711,7 @@ mod tests {
         let skills = collect_agent_skills(
             Some("codex-acp".to_string()),
             vec![repo.to_string_lossy().into_owned()],
+            None,
             None,
         );
 

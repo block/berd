@@ -11,7 +11,7 @@ $script:WebView2ClientIds = @(
 )
 
 function Test-IsWindowsHost {
-    return $env:OS -eq "Windows_NT"
+    return $env:OS -eq "Windows_NT" -or [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
 }
 
 function Test-IsElevated {
@@ -69,6 +69,9 @@ function Write-WindowsDevInfo {
 function Get-CommandSource {
     param([Parameter(Mandatory = $true)][string]$Name)
     $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command -and -not [System.IO.Path]::HasExtension($Name)) {
+        $command = Get-Command "$Name.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
     if ($null -eq $command) {
         return $null
     }
@@ -136,7 +139,55 @@ function Find-RunnablePython {
     return $null
 }
 
+function Repair-WindowsProcessEnvironment {
+    # Managed launchers can provide a partial Windows environment (for
+    # example PATHEXT=.CPL with no ComSpec/SystemDrive/ProgramData). Native
+    # child processes then fail to resolve ordinary executables or expand
+    # shell-folder paths. Repair only missing/invalid process values from
+    # authoritative machine state; do not mutate persistent user settings.
+    $machinePathExt = [Environment]::GetEnvironmentVariable("PATHEXT", "Machine")
+    if (-not [string]::IsNullOrWhiteSpace($machinePathExt)) {
+        $processPathExt = [Environment]::GetEnvironmentVariable("PATHEXT", "Process")
+        $extensions = @($processPathExt -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        foreach ($requiredExtension in @(".COM", ".EXE", ".BAT", ".CMD")) {
+            if ($extensions -inotcontains $requiredExtension) {
+                [Environment]::SetEnvironmentVariable("PATHEXT", $machinePathExt, "Process")
+                break
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:ComSpec)) {
+        $comSpec = [Environment]::GetEnvironmentVariable("ComSpec", "Machine")
+        if ([string]::IsNullOrWhiteSpace($comSpec) -and -not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+            $comSpec = Join-Path $env:SystemRoot "System32\cmd.exe"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($comSpec)) {
+            [Environment]::SetEnvironmentVariable("ComSpec", $comSpec, "Process")
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:SystemDrive) -and -not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        $systemDrive = [System.IO.Path]::GetPathRoot($env:SystemRoot)
+        if (-not [string]::IsNullOrWhiteSpace($systemDrive)) {
+            [Environment]::SetEnvironmentVariable("SystemDrive", $systemDrive.TrimEnd('\'), "Process")
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:ProgramData)) {
+        $shellFolders = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders" -ErrorAction SilentlyContinue
+        $programData = Get-ObjectValue $shellFolders "Common AppData"
+        if ([string]::IsNullOrWhiteSpace($programData) -and -not [string]::IsNullOrWhiteSpace($env:SystemDrive)) {
+            $programData = Join-Path $env:SystemDrive "ProgramData"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($programData)) {
+            [Environment]::SetEnvironmentVariable("ProgramData", $programData, "Process")
+        }
+    }
+}
+
 function Update-SessionPathFromRegistry {
+    Repair-WindowsProcessEnvironment
     $pathParts = New-Object System.Collections.Generic.List[string]
     $processPath = [Environment]::GetEnvironmentVariable("Path", "Process")
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -172,28 +223,25 @@ function Invoke-CaptureCommand {
         [string]$WorkingDirectory = (Get-Location).Path
     )
 
-    $oldLocation = (Get-Location).Path
-    $oldErrorActionPreference = $ErrorActionPreference
+    $stdout = New-TemporaryFile
+    $stderr = New-TemporaryFile
     try {
-        $ErrorActionPreference = "Continue"
-        Set-Location $WorkingDirectory
-        $rawOutput = & $FilePath @ArgumentList 2>&1
-        $output = @($rawOutput | ForEach-Object {
-            if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                $_.Exception.Message
-            } else {
-                [string]$_
-            }
-        })
-        $exitCode = $LASTEXITCODE
+        $arguments = Join-WindowsProcessArguments $ArgumentList
+        $process = Start-Process -FilePath $FilePath -ArgumentList $arguments -WorkingDirectory $WorkingDirectory -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout.FullName -RedirectStandardError $stderr.FullName
+        $output = @()
+        if (Test-Path $stdout.FullName) {
+            $output += @(Get-Content $stdout.FullName -ErrorAction SilentlyContinue)
+        }
+        if (Test-Path $stderr.FullName) {
+            $output += @(Get-Content $stderr.FullName -ErrorAction SilentlyContinue)
+        }
     } finally {
-        $ErrorActionPreference = $oldErrorActionPreference
-        Set-Location $oldLocation
+        Remove-Item -LiteralPath $stdout.FullName, $stderr.FullName -Force -ErrorAction SilentlyContinue
     }
 
-    $text = ($output -join [Environment]::NewLine).Trim()
+    $text = (@($output) -join [Environment]::NewLine).Trim()
     return [pscustomobject]@{
-        ExitCode = $exitCode
+        ExitCode = $process.ExitCode
         Output = $text
         Lines = @($output)
     }
@@ -208,17 +256,20 @@ function Invoke-CheckedCommand {
     )
 
     Write-WindowsDevInfo $Label
-    $oldLocation = (Get-Location).Path
-    try {
-        Set-Location $WorkingDirectory
-        & $FilePath @ArgumentList
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Set-Location $oldLocation
+    $resolved = Get-CommandSource $FilePath
+    if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+        $FilePath = $resolved
     }
 
-    if ($exitCode -ne 0) {
-        throw "$Label failed with exit code $exitCode."
+    if ([System.IO.Path]::GetExtension($FilePath) -ieq ".cmd" -or [System.IO.Path]::GetExtension($FilePath) -ieq ".bat") {
+        $command = "`"$FilePath`" $(Join-WindowsProcessArguments $ArgumentList)"
+        $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/d /s /c `"$command`"" -WorkingDirectory $WorkingDirectory -Wait -PassThru -NoNewWindow
+    } else {
+        $arguments = Join-WindowsProcessArguments $ArgumentList
+        $process = Start-Process -FilePath $FilePath -ArgumentList $arguments -WorkingDirectory $WorkingDirectory -Wait -PassThru -NoNewWindow
+    }
+    if ($process.ExitCode -ne 0) {
+        throw "$Label failed with exit code $($process.ExitCode)."
     }
 }
 
@@ -976,6 +1027,49 @@ function Resolve-AppVersion {
     return [pscustomobject]@{ Version = $version; RichVersion = $version }
 }
 
+function New-E2eRunContract {
+    param(
+        [Parameter(Mandatory = $true)][string]$RunRoot,
+        [AllowNull()][AllowEmptyString()][string]$RunId,
+        [AllowNull()][AllowEmptyString()][string]$DriverToken
+    )
+
+    $normalizedRoot = Normalize-FullPath $RunRoot
+    $rootRunId = Split-Path -Leaf $normalizedRoot
+    if ([string]::IsNullOrWhiteSpace($RunId)) {
+        $RunId = $rootRunId
+    }
+    if ($RunId -notmatch '^[A-Za-z0-9-]{1,64}$') {
+        throw "BERD_E2E_RUN_ID must be 1-64 ASCII letters, digits, or '-'."
+    }
+    if ($rootRunId -cne $RunId) {
+        throw "BERD_E2E_RUN_ROOT must end with BERD_E2E_RUN_ID '$RunId'."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DriverToken)) {
+        $bytes = New-Object byte[] 32
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try {
+            $rng.GetBytes($bytes)
+        } finally {
+            $rng.Dispose()
+        }
+        $DriverToken = -join ($bytes | ForEach-Object { $_.ToString("x2") })
+    }
+    if ($DriverToken -cnotmatch '^[A-Za-z0-9]{32,128}$') {
+        throw "APP_TEST_DRIVER_TOKEN must be 32-128 ASCII letters or digits."
+    }
+
+    return [pscustomobject]@{
+        RunRoot = $normalizedRoot
+        RunId = $RunId
+        Identifier = "xyz.block.berd.e2e.$RunId"
+        DriverToken = $DriverToken
+        ConfigPath = Join-Path $normalizedRoot "tauri-dev-windows.config.json"
+        DriverReadyPath = Join-Path $normalizedRoot "app-test-driver.json"
+    }
+}
+
 function Get-StableVitePort {
     $path = (Get-Location).Path
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -1057,28 +1151,75 @@ function Get-VsInstallerPath {
     return (Get-CommandSource "vs_installer")
 }
 
+function Get-VisualStudioInstallPathFromInstanceState {
+    $programData = $env:ProgramData
+    if ([string]::IsNullOrWhiteSpace($programData)) {
+        $systemDrive = $env:SystemDrive
+        if ([string]::IsNullOrWhiteSpace($systemDrive)) {
+            $systemDrive = [System.IO.Path]::GetPathRoot($env:SystemRoot)
+        }
+        if ([string]::IsNullOrWhiteSpace($systemDrive)) {
+            return $null
+        }
+        $programData = Join-Path $systemDrive "ProgramData"
+    }
+    $instancesRoot = Join-Path $programData "Microsoft\VisualStudio\Packages\_Instances"
+    if (-not (Test-Path $instancesRoot -PathType Container)) {
+        return $null
+    }
+
+    # Recovery path for hosts where Visual Studio Installer state exists but
+    # vswhere returns nothing. Never guess an install path from directory names.
+    $candidates = New-Object System.Collections.Generic.List[object]
+    foreach ($stateFile in Get-ChildItem $instancesRoot -Filter "state.json" -Recurse -File -ErrorAction SilentlyContinue) {
+        try {
+            $state = Get-Content $stateFile.FullName -Raw | ConvertFrom-Json
+            $installPath = Get-ObjectValue $state "installationPath"
+            $product = Get-ObjectValue (Get-ObjectValue $state "product") "id"
+            $isComplete = Get-ObjectValue $state "isComplete"
+            $isLaunchable = Get-ObjectValue $state "isLaunchable"
+            $vsDevCmd = if ([string]::IsNullOrWhiteSpace($installPath)) { $null } else { Join-Path $installPath "Common7\Tools\VsDevCmd.bat" }
+            if ($product -eq "Microsoft.VisualStudio.Product.BuildTools" -and
+                -not [string]::IsNullOrWhiteSpace($installPath) -and
+                $isComplete -ne $false -and
+                $isLaunchable -ne $false -and
+                (Test-Path $vsDevCmd -PathType Leaf)) {
+                $candidates.Add([pscustomobject]@{
+                    InstallPath = $installPath
+                    InstalledAt = $stateFile.LastWriteTimeUtc
+                })
+            }
+        } catch {
+            continue
+        }
+    }
+
+    $selected = $candidates | Sort-Object InstalledAt -Descending | Select-Object -First 1
+    if ($null -eq $selected) {
+        return $null
+    }
+    return $selected.InstallPath
+}
 function Get-VisualStudioBuildToolsInstallPath {
     $vswhere = Get-VsWherePath
-    if ([string]::IsNullOrWhiteSpace($vswhere)) {
-        return $null
+    if (-not [string]::IsNullOrWhiteSpace($vswhere)) {
+        $result = Invoke-CaptureCommand -FilePath $vswhere -ArgumentList @("-latest", "-products", "Microsoft.VisualStudio.Product.BuildTools", "-property", "installationPath")
+        if ($result.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($result.Output)) {
+            return ($result.Output -split "`r?`n" | Select-Object -First 1).Trim()
+        }
     }
-    $result = Invoke-CaptureCommand -FilePath $vswhere -ArgumentList @("-latest", "-products", "Microsoft.VisualStudio.Product.BuildTools", "-property", "installationPath")
-    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Output)) {
-        return $null
-    }
-    return ($result.Output -split "`r?`n" | Select-Object -First 1).Trim()
+    return (Get-VisualStudioInstallPathFromInstanceState)
 }
 
 function Get-MsvcInstallPath {
     $vswhere = Get-VsWherePath
-    if ([string]::IsNullOrWhiteSpace($vswhere)) {
-        return $null
+    if (-not [string]::IsNullOrWhiteSpace($vswhere)) {
+        $result = Invoke-CaptureCommand -FilePath $vswhere -ArgumentList @("-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath")
+        if ($result.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($result.Output)) {
+            return ($result.Output -split "`r?`n" | Select-Object -First 1).Trim()
+        }
     }
-    $result = Invoke-CaptureCommand -FilePath $vswhere -ArgumentList @("-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath")
-    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Output)) {
-        return $null
-    }
-    return ($result.Output -split "`r?`n" | Select-Object -First 1).Trim()
+    return (Get-VisualStudioInstallPathFromInstanceState)
 }
 
 function Get-MsvcArch {
@@ -1100,18 +1241,78 @@ function Initialize-MsvcEnvironment {
     }
 
     $arch = Get-MsvcArch
-    $cmd = "`"$vsDevCmd`" -no_logo -arch=$arch -host_arch=$arch >nul && set"
-    $lines = & cmd.exe /s /c $cmd
-    if ($LASTEXITCODE -ne 0 -or $null -eq $lines) {
-        return $false
+    $environmentFile = New-TemporaryFile
+    try {
+        # Capturing `cmd.exe` output directly through Windows PowerShell can
+        # return no pipeline records for batch files on some hosts. Have cmd
+        # write the environment itself, then import the stable file contents.
+        $command = "call `"$vsDevCmd`" -no_logo -arch=$arch -host_arch=$arch >nul && set > `"$($environmentFile.FullName)`""
+        $arguments = "/d /s /c `"$command`""
+        $process = Start-Process cmd.exe -ArgumentList $arguments -Wait -PassThru -NoNewWindow
+        if ($process.ExitCode -ne 0) {
+            return $false
+        }
+        $lines = Get-Content $environmentFile.FullName -ErrorAction Stop
+    } finally {
+        Remove-Item -LiteralPath $environmentFile.FullName -Force -ErrorAction SilentlyContinue
     }
 
+    if ($null -eq $lines) {
+        return $false
+    }
     foreach ($line in $lines) {
         if ($line -match '^([^=]+)=(.*)$') {
             [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process")
         }
     }
+    Repair-WindowsSdkEnvironment
     return $true
+}
+
+function Repair-WindowsSdkEnvironment {
+    if (-not [string]::IsNullOrWhiteSpace($env:WindowsSdkDir) -and
+        -not [string]::IsNullOrWhiteSpace($env:WindowsSDKVersion) -and
+        $env:WindowsSDKVersion -ne "\") {
+        return
+    }
+
+    $sdk = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Microsoft SDKs\Windows\v10.0" -ErrorAction SilentlyContinue
+    if ($null -eq $sdk -or [string]::IsNullOrWhiteSpace($sdk.InstallationFolder)) {
+        return
+    }
+    $versions = Get-ChildItem (Join-Path $sdk.InstallationFolder "Include") -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName "um\Windows.h") } |
+        Sort-Object { [version]$_.Name } -Descending
+    $version = $versions | Select-Object -First 1
+    if ($null -eq $version) {
+        return
+    }
+
+    $env:WindowsSdkDir = $sdk.InstallationFolder
+    $env:WindowsSDKVersion = "$($version.Name)\"
+    $env:UniversalCRTSdkDir = $sdk.InstallationFolder
+    $env:UCRTVersion = $version.Name
+
+    $include = @(
+        (Join-Path $version.FullName "ucrt"),
+        (Join-Path $version.FullName "shared"),
+        (Join-Path $version.FullName "um"),
+        (Join-Path $version.FullName "winrt"),
+        (Join-Path $version.FullName "cppwinrt")
+    ) | Where-Object { Test-Path $_ -PathType Container }
+    $env:INCLUDE = (@($env:INCLUDE) + $include | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ";"
+
+    $libRoot = Join-Path (Join-Path $sdk.InstallationFolder "Lib") $version.Name
+    $lib = @(
+        (Join-Path $libRoot "ucrt\x64"),
+        (Join-Path $libRoot "um\x64")
+    ) | Where-Object { Test-Path $_ -PathType Container }
+    $env:LIB = (@($env:LIB) + $lib | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ";"
+
+    $sdkBin = Join-Path (Join-Path (Join-Path $sdk.InstallationFolder "bin") $version.Name) "x64"
+    if (Test-Path $sdkBin -PathType Container) {
+        $env:Path = "$sdkBin;$env:Path"
+    }
 }
 
 function Assert-MsvcEnvironment {
@@ -1327,15 +1528,29 @@ function Test-WebView2Runtime {
 }
 
 function Initialize-FnmEnvironment {
-    $fnm = Get-CommandSource "fnm"
+    $fnm = Get-CommandSource "fnm.exe"
+    if ([string]::IsNullOrWhiteSpace($fnm)) {
+        $fnm = Get-CommandSource "fnm"
+    }
     if ([string]::IsNullOrWhiteSpace($fnm)) {
         return $false
     }
-    $envScript = & $fnm env --shell powershell 2>$null
-    if ($LASTEXITCODE -ne 0 -or $null -eq $envScript) {
+
+    $stdout = New-TemporaryFile
+    $stderr = New-TemporaryFile
+    try {
+        $process = Start-Process $fnm -ArgumentList "env --shell powershell" -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout.FullName -RedirectStandardError $stderr.FullName
+        if ($process.ExitCode -ne 0) {
+            return $false
+        }
+        $envScript = Get-Content $stdout.FullName -Raw -ErrorAction Stop
+    } finally {
+        Remove-Item -LiteralPath $stdout.FullName, $stderr.FullName -Force -ErrorAction SilentlyContinue
+    }
+    if ([string]::IsNullOrWhiteSpace($envScript)) {
         return $false
     }
-    ($envScript | Out-String) | Invoke-Expression
+    $envScript | Invoke-Expression
     return $true
 }
 

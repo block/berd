@@ -41,16 +41,23 @@ impl BundledSkillsState {
     }
 }
 
-pub fn seed_bundled_skills(bundle: &DistroBundle, app_data_dir: &Path) -> Result<usize, String> {
-    let Some(home_dir) = dirs::home_dir() else {
-        return Err("Failed to resolve home directory for bundled skills".to_string());
-    };
-
+pub fn seed_bundled_skills(
+    bundle: &DistroBundle,
+    app_data_dir: &Path,
+    migrate_from_home: bool,
+) -> Result<usize, String> {
     let source_root = bundle.root_dir.join(DISTRO_SKILLS_DIR_NAME);
     let target_root = bundled_skills_target(app_data_dir);
     let seeded = seed_bundled_skills_from_dir(&source_root, &target_root)?;
-    migrate_legacy_bundled_skills(&source_root, &target_root, app_data_dir, &home_dir)?;
-    migrate_spike_bundled_skills(&source_root, &target_root, app_data_dir, &home_dir)?;
+
+    if migrate_from_home {
+        let Some(home_dir) = dirs::home_dir() else {
+            return Err("Failed to resolve home directory for bundled skills".to_string());
+        };
+        migrate_legacy_bundled_skills(&source_root, &target_root, app_data_dir, &home_dir)?;
+        migrate_spike_bundled_skills(&source_root, &target_root, app_data_dir, &home_dir)?;
+    }
+
     Ok(seeded)
 }
 
@@ -62,7 +69,13 @@ fn legacy_bundled_skills_root(home_dir: &Path) -> std::path::PathBuf {
     home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(SKILLS_DIR_NAME)
 }
 
-pub fn migrated_legacy_skill_aliases(app_data_dir: &Path) -> Vec<(String, String)> {
+pub fn migrated_legacy_skill_aliases(
+    app_data_dir: &Path,
+    include_home_aliases: bool,
+) -> Vec<(String, String)> {
+    if !include_home_aliases {
+        return Vec::new();
+    }
     let Some(home_dir) = dirs::home_dir() else {
         return Vec::new();
     };

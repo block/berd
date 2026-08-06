@@ -48,6 +48,7 @@ const GOOSE_FAST_MODEL_ENV: &str = "GOOSE_FAST_MODEL";
 pub struct GooseServeProcess {
     port: u16,
     secret_key: String,
+    process_record_dir: PathBuf,
     _child: Child,
 }
 
@@ -95,7 +96,7 @@ impl GooseServeProcess {
             }
         }
         // Clean up this app instance's stale-process record.
-        let _ = std::fs::remove_file(process_record_path());
+        let _ = std::fs::remove_file(process_record_path(&self.process_record_dir));
     }
 
     /// Kill the singleton goose serve process if it exists. Called from the
@@ -111,7 +112,10 @@ impl GooseServeProcess {
 
         // Kill any orphaned goose serve process left by a previous run
         // (e.g. tauri dev hot-reload).
-        kill_stale_serve_process().await;
+        let process_record_dir =
+            crate::services::e2e_mode::E2eMode::process_record_dir_for(&app_handle)
+                .unwrap_or_else(|| std::env::temp_dir().join(PROCESS_RECORD_DIR_NAME));
+        kill_stale_serve_process(&process_record_dir).await;
 
         let port = reserve_free_port()?;
         let secret_key = format!("berd-{}", uuid::Uuid::new_v4().simple());
@@ -184,6 +188,13 @@ impl GooseServeProcess {
             Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
             Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
         }
+        // This must be the final environment layer. Captured shell and runtime
+        // provider values are intentionally unable to redirect an E2E child
+        // back into a normal Goose root or keyring.
+        crate::services::e2e_mode::E2eMode::apply_goose_command_env_if_active(
+            &app_handle,
+            &mut command,
+        );
 
         command
             .arg("serve")
@@ -281,12 +292,13 @@ impl GooseServeProcess {
         log::info!("Goose serve is ready on port {port}");
 
         if let Some(pid) = pid {
-            write_pid_file(pid);
+            write_pid_file(&process_record_dir, pid);
         }
 
         Ok(GooseServeProcess {
             port,
             secret_key,
+            process_record_dir,
             _child: child,
         })
     }
@@ -350,14 +362,10 @@ struct ServeProcessRecord {
     serve_pid: u32,
 }
 
-fn process_record_dir() -> PathBuf {
-    std::env::temp_dir().join(PROCESS_RECORD_DIR_NAME)
-}
-
-fn process_record_path() -> PathBuf {
+fn process_record_path(dir: &Path) -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let exe_hash = fnv1a(exe.to_string_lossy().as_bytes());
-    process_record_dir().join(format!(
+    dir.join(format!(
         "{}-{exe_hash:016x}.{PROCESS_RECORD_EXTENSION}",
         std::process::id()
     ))
@@ -384,9 +392,8 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-fn write_pid_file(serve_pid: u32) {
-    let dir = process_record_dir();
-    if let Err(error) = std::fs::create_dir_all(&dir) {
+fn write_pid_file(dir: &Path, serve_pid: u32) {
+    if let Err(error) = std::fs::create_dir_all(dir) {
         log::warn!(
             "Failed to create goose serve process record dir {}: {error}",
             dir.display()
@@ -394,7 +401,7 @@ fn write_pid_file(serve_pid: u32) {
         return;
     }
 
-    let path = process_record_path();
+    let path = process_record_path(dir);
     let record = ServeProcessRecord {
         owner_pid: std::process::id(),
         serve_pid,
@@ -426,11 +433,10 @@ fn write_pid_file(serve_pid: u32) {
 /// Scan records left by previous runs and kill only true orphans: backend
 /// processes whose owning Tauri process is no longer alive. All errors are
 /// logged and swallowed so startup is never blocked.
-async fn kill_stale_serve_process() {
+async fn kill_stale_serve_process(dir: &Path) {
     remove_legacy_pid_file();
 
-    let dir = process_record_dir();
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(error) => {

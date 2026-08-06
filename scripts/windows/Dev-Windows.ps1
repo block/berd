@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$global:LASTEXITCODE = 0
 trap {
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
@@ -41,6 +42,72 @@ $tauriCargoTargetDir = Get-TauriCargoTargetDir
 $env:CARGO_TARGET_DIR = $tauriCargoTargetDir
 Write-WindowsDevInfo "Using Vite port: $env:VITE_PORT"
 Write-WindowsDevInfo "Using Tauri Cargo target dir: $env:CARGO_TARGET_DIR"
+
+$E2eMode = $env:BERD_E2E_MODE -eq "1"
+if ($E2eMode) {
+    if ([string]::IsNullOrWhiteSpace($env:BERD_E2E_RUN_ROOT)) {
+        throw "BERD_E2E_RUN_ROOT is required when BERD_E2E_MODE=1."
+    }
+    $e2e = New-E2eRunContract `
+        -RunRoot $env:BERD_E2E_RUN_ROOT `
+        -RunId $env:BERD_E2E_RUN_ID `
+        -DriverToken $env:APP_TEST_DRIVER_TOKEN
+    $env:BERD_E2E_RUN_ROOT = $e2e.RunRoot
+    $env:BERD_E2E_RUN_ID = $e2e.RunId
+    $env:APP_TEST_DRIVER_TOKEN = $e2e.DriverToken
+    [Environment]::SetEnvironmentVariable("APP_TEST_DRIVER_PORT", $null, "Process")
+    New-Item -ItemType Directory -Force -Path $e2e.RunRoot | Out-Null
+
+    $runtimeConfigPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($env:BERD_E2E_RUNTIME_CONFIG)) {
+        if (-not (Test-Path $env:BERD_E2E_RUNTIME_CONFIG -PathType Leaf)) {
+            throw "BERD_E2E_RUNTIME_CONFIG must reference an existing JSON file."
+        }
+        $runtimeConfigPath = Join-Path $e2e.RunRoot "runtime-config.json"
+        if ((Normalize-FullPath $env:BERD_E2E_RUNTIME_CONFIG) -ne (Normalize-FullPath $runtimeConfigPath)) {
+            Copy-Item -LiteralPath $env:BERD_E2E_RUNTIME_CONFIG -Destination $runtimeConfigPath
+        }
+        Get-Content -LiteralPath $runtimeConfigPath -Raw | ConvertFrom-Json | Out-Null
+        $env:BERD_E2E_RUNTIME_CONFIG = $runtimeConfigPath
+    }
+
+    $providerIdPresent = -not [string]::IsNullOrWhiteSpace($env:BERD_E2E_PROVIDER_ID)
+    $modelIdPresent = -not [string]::IsNullOrWhiteSpace($env:BERD_E2E_MODEL_ID)
+    if ($providerIdPresent -ne $modelIdPresent) {
+        throw "BERD_E2E_PROVIDER_ID and BERD_E2E_MODEL_ID must be specified together."
+    }
+
+    $gooseConfigDir = Join-Path $e2e.RunRoot "goose\config"
+    if ($providerIdPresent) {
+        New-Item -ItemType Directory -Force -Path $gooseConfigDir | Out-Null
+        $providerIdYaml = ConvertTo-Json -InputObject $env:BERD_E2E_PROVIDER_ID -Compress
+        $modelIdYaml = ConvertTo-Json -InputObject $env:BERD_E2E_MODEL_ID -Compress
+        $providerConfig = "GOOSE_PROVIDER: $providerIdYaml`nGOOSE_MODEL: $modelIdYaml`nGOOSE_DISABLE_KEYRING: true`n"
+        [System.IO.File]::WriteAllText((Join-Path $gooseConfigDir "config.yaml"), $providerConfig, [System.Text.UTF8Encoding]::new($false))
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:BERD_E2E_PROVIDER_KEY_ENV)) {
+        if ($env:BERD_E2E_PROVIDER_KEY_ENV -cnotmatch '^[A-Z][A-Z0-9_]*$') {
+            throw "BERD_E2E_PROVIDER_KEY_ENV must name an uppercase environment variable."
+        }
+        if (-not $providerIdPresent) {
+            throw "BERD_E2E_PROVIDER_ID and BERD_E2E_MODEL_ID are required with BERD_E2E_PROVIDER_KEY_ENV."
+        }
+        $providerToken = [Environment]::GetEnvironmentVariable($env:BERD_E2E_PROVIDER_KEY_ENV, "Process")
+        if ([string]::IsNullOrWhiteSpace($providerToken)) {
+            throw "$($env:BERD_E2E_PROVIDER_KEY_ENV) is required for the E2E provider bootstrap."
+        }
+        $providerTokenYaml = ConvertTo-Json -InputObject $providerToken -Compress
+        $secrets = "$($env:BERD_E2E_PROVIDER_KEY_ENV): $providerTokenYaml`n"
+        [System.IO.File]::WriteAllText((Join-Path $gooseConfigDir "secrets.yaml"), $secrets, [System.Text.UTF8Encoding]::new($false))
+        [Environment]::SetEnvironmentVariable($env:BERD_E2E_PROVIDER_KEY_ENV, $null, "Process")
+    }
+
+    Remove-Item -LiteralPath $e2e.DriverReadyPath -Force -ErrorAction SilentlyContinue
+    Write-WindowsDevInfo "Using isolated E2E run root: $($e2e.RunRoot)"
+    Write-WindowsDevInfo "Using isolated E2E identifier: $($e2e.Identifier)"
+    Write-WindowsDevInfo "App test driver will publish readiness at: $($e2e.DriverReadyPath)"
+}
 
 $version = Resolve-AppVersion
 $env:VITE_APP_VERSION = $version.RichVersion
@@ -101,7 +168,15 @@ $devConfig = @{
         }
     }
 }
-$devConfigPath = Join-Path (Resolve-GooseDevPaths).DevRoot "tauri-dev-windows.config.json"
+if ($E2eMode) {
+    $devConfig.identifier = $e2e.Identifier
+    $devConfig.productName = "Berd E2E ($($e2e.RunId))"
+}
+$devConfigPath = if ($E2eMode) {
+    $e2e.ConfigPath
+} else {
+    Join-Path (Resolve-GooseDevPaths).DevRoot "tauri-dev-windows.config.json"
+}
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $devConfigPath) | Out-Null
 # Write without a BOM: Windows PowerShell's `Set-Content -Encoding UTF8` adds
 # one, and Tauri's serde-based --config parsing rejects BOM-prefixed JSON.
@@ -109,9 +184,10 @@ $devConfigJson = $devConfig | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText($devConfigPath, $devConfigJson, [System.Text.UTF8Encoding]::new($false))
 Write-WindowsDevInfo "Using Tauri dev config: $devConfigPath"
 
-Invoke-CheckedCommand -FilePath $pnpm -ArgumentList @(
+$tauriArguments = @(
     "exec", "tauri", "dev",
     "--features", (Get-BerdAppFeatures),
     "--config", "src-tauri/tauri.dev.conf.json",
     "--config", $devConfigPath
-) -Label "pnpm exec tauri dev"
+)
+Invoke-CheckedCommand -FilePath $pnpm -ArgumentList $tauriArguments -Label "pnpm exec tauri dev"

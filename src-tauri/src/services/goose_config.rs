@@ -7,6 +7,7 @@ use std::{
 use etcetera::{choose_app_strategy, AppStrategy, AppStrategyArgs};
 
 pub(crate) const ADDITIONAL_CONFIG_FILES_ENV: &str = "GOOSE_ADDITIONAL_CONFIG_FILES";
+const GOOSE_PATH_ROOT_ENV: &str = "GOOSE_PATH_ROOT";
 pub(crate) const CONFIG_FILE_NAME: &str = "config.yaml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +19,10 @@ pub(crate) struct AdditionalConfigFiles {
 /// Resolve the upstream goose config file path. Matches
 /// `crates/goose/src/config/paths.rs::Paths::config_dir`.
 pub(crate) fn config_path() -> Result<PathBuf, String> {
+    if let Some(root) = validated_path_root(env::var_os(GOOSE_PATH_ROOT_ENV)) {
+        return Ok(root.join("config").join(CONFIG_FILE_NAME));
+    }
+
     let strategy = choose_app_strategy(AppStrategyArgs {
         top_level_domain: "Block".to_string(),
         author: "Block".to_string(),
@@ -26,6 +31,10 @@ pub(crate) fn config_path() -> Result<PathBuf, String> {
     .map_err(|err| format!("Failed to resolve goose config directory: {err}"))?;
 
     Ok(strategy.config_dir().join(CONFIG_FILE_NAME))
+}
+
+fn validated_path_root(value: Option<OsString>) -> Option<PathBuf> {
+    value.map(PathBuf::from).filter(|path| path.is_absolute())
 }
 
 pub(crate) fn additional_config_files_from_values(
@@ -78,5 +87,28 @@ fn extend_additional_config_paths(paths: &mut Vec<PathBuf>, value: &OsStr) {
 fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     if !paths.contains(&path) {
         paths.push(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_root_requires_an_absolute_path() {
+        assert_eq!(validated_path_root(None), None);
+        assert_eq!(validated_path_root(Some(OsString::new())), None);
+        assert_eq!(
+            validated_path_root(Some(OsString::from("relative/root"))),
+            None
+        );
+
+        let absolute = std::env::current_dir()
+            .unwrap()
+            .join("nonexistent-goose-root");
+        assert_eq!(
+            validated_path_root(Some(absolute.clone().into_os_string())),
+            Some(absolute)
+        );
     }
 }

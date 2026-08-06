@@ -8,6 +8,7 @@ pub mod bundled_skills;
 pub(crate) mod diagnostic_log;
 pub(crate) mod dir_env;
 pub mod distro_bundle;
+pub(crate) mod e2e_mode;
 pub(crate) mod goose_config;
 #[cfg(target_os = "macos")]
 pub(crate) mod installer_media;

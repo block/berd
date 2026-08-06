@@ -721,14 +721,22 @@ mod tests {
     }
 
     fn write_ready_runtime(root: &Path, version: &str) {
-        use std::os::unix::fs::PermissionsExt;
         let bin = install_dir(root, version, TEST_PLATFORM).join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let node = bin.join("node");
         std::fs::write(&node, node_script(version)).unwrap();
-        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
+        set_test_executable(&node);
         std::fs::write(bin.join("npm"), "").unwrap();
     }
+
+    #[cfg(unix)]
+    fn set_test_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn set_test_executable(_path: &Path) {}
 
     #[test]
     fn embedded_lock_pins_every_release_target() {
@@ -989,12 +997,11 @@ mod tests {
         assert!(!pinned_runtime_ready(root).await);
 
         // A runtime matching the real embedded pin at the pinned install dir.
-        use std::os::unix::fs::PermissionsExt;
         let bin = pinned_install_dir(root).unwrap().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let node = bin.join("node");
         std::fs::write(&node, node_script(&node_runtime_lock().version)).unwrap();
-        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
+        set_test_executable(&node);
         assert!(pinned_runtime_ready(root).await);
     }
 

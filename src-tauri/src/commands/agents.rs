@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::services::{bundled_agents, distro_bundle::DistroBundleState};
 
@@ -23,10 +23,18 @@ fn validate_import_persona_path(source_path: &str) -> Result<PathBuf, String> {
     canonicalize_path(&path, "import")
 }
 
-fn validate_agent_source_path(source_path: &str) -> Result<PathBuf, String> {
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| "Failed to resolve home directory for agent source read".to_string())?;
-    validate_agent_source_path_with_roots(source_path, &[home_dir.join(".agents").join("agents")])
+fn validate_agent_source_path(
+    source_path: &str,
+    agents_root: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let trusted_root = match agents_root {
+        Some(root) => root.to_path_buf(),
+        None => dirs::home_dir()
+            .ok_or_else(|| "Failed to resolve home directory for agent source read".to_string())?
+            .join(".agents")
+            .join("agents"),
+    };
+    validate_agent_source_path_with_roots(source_path, &[trusted_root])
 }
 
 fn validate_agent_source_path_with_roots(
@@ -129,13 +137,17 @@ fn validate_file_size(size: u64, label: &'static str) -> Result<(), String> {
 
 #[tauri::command]
 pub fn repair_bundled_agent(
+    app: tauri::AppHandle,
     file_name: String,
     state: State<'_, DistroBundleState>,
 ) -> Result<(), String> {
     let bundle = state
         .bundle()
         .ok_or_else(|| "Bundled agent distribution is unavailable".to_string())?;
-    bundled_agents::repair_bundled_agent(bundle, &file_name)
+    let e2e_agents_dir = app
+        .try_state::<crate::services::e2e_mode::E2eMode>()
+        .map(|mode| mode.goose_agents_dir());
+    bundled_agents::repair_bundled_agent(bundle, e2e_agents_dir.as_deref(), &file_name)
 }
 
 #[tauri::command]
@@ -145,8 +157,14 @@ pub fn read_import_persona_file(source_path: String) -> Result<ImportFileReadRes
 }
 
 #[tauri::command]
-pub fn read_agent_source_file(source_path: String) -> Result<ImportFileReadResult, String> {
-    let path = validate_agent_source_path(&source_path)?;
+pub fn read_agent_source_file(
+    app: tauri::AppHandle,
+    source_path: String,
+) -> Result<ImportFileReadResult, String> {
+    let e2e_agents_dir = app
+        .try_state::<crate::services::e2e_mode::E2eMode>()
+        .map(|mode| mode.goose_agents_dir());
+    let path = validate_agent_source_path(&source_path, e2e_agents_dir.as_deref())?;
     read_persona_file(path, "agent source")
 }
 
@@ -407,6 +425,40 @@ mod tests {
         );
 
         assert!(result.unwrap_err().contains("4 MB or smaller"));
+    }
+
+    #[test]
+    fn isolated_agent_root_rejects_normal_home_agent_sources() {
+        let tmp = tempdir().unwrap();
+        let isolated_root = tmp
+            .path()
+            .join("run")
+            .join("goose")
+            .join(".agents")
+            .join("agents");
+        let normal_root = tmp.path().join("home").join(".agents").join("agents");
+        std::fs::create_dir_all(&isolated_root).unwrap();
+        std::fs::create_dir_all(&normal_root).unwrap();
+        let isolated_agent = isolated_root.join("isolated.md");
+        let normal_agent = normal_root.join("normal.md");
+        std::fs::write(&isolated_agent, b"---\nname: Isolated\n---\n\nPrompt").unwrap();
+        std::fs::write(&normal_agent, b"---\nname: Normal\n---\n\nSecret").unwrap();
+
+        let isolated = validate_agent_source_path_with_roots(
+            isolated_agent.to_str().unwrap(),
+            std::slice::from_ref(&isolated_root),
+        )
+        .unwrap();
+        assert_eq!(isolated, isolated_agent.canonicalize().unwrap());
+
+        let error =
+            validate_agent_source_path_with_roots(normal_agent.to_str().unwrap(), &[isolated_root])
+                .unwrap_err();
+        assert!(error.contains("outside the trusted"));
+        assert_eq!(
+            std::fs::read_to_string(normal_agent).unwrap(),
+            "---\nname: Normal\n---\n\nSecret"
+        );
     }
 
     #[test]
