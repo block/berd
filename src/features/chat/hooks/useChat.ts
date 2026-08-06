@@ -39,7 +39,10 @@ const EMPTY_MESSAGES: Message[] = [];
 const cancellationOwnerBySession = new Map<string, symbol>();
 const cancellationPromiseBySession = new Map<string, Promise<boolean>>();
 type CompactConversationResult = "completed" | "failed" | "skipped";
-type EnsurePrepared = (personaId?: string) => Promise<boolean | undefined>;
+type EnsurePrepared = (
+  personaId?: string,
+  sessionSelection?: ChatSendOptions["sessionSelection"],
+) => Promise<boolean | undefined>;
 
 function createCompactionConfirmationMessage() {
   return createSystemNotificationMessage(
@@ -51,8 +54,11 @@ function createCompactionConfirmationMessage() {
 async function ensurePreparedForPrompt(
   ensurePrepared: EnsurePrepared | undefined,
   personaId?: string,
+  sessionSelection?: ChatSendOptions["sessionSelection"],
 ) {
-  const prepared = await ensurePrepared?.(personaId);
+  const prepared = sessionSelection
+    ? await ensurePrepared?.(personaId, sessionSelection)
+    : await ensurePrepared?.(personaId);
   if (prepared === false) {
     throw new Error(i18n.t("chat:errors.sessionPreparationSuperseded"));
   }
@@ -201,6 +207,7 @@ export function useChat(
             ensurePreparedForPrompt(
               options?.ensurePrepared,
               effectivePersonaInfo?.id,
+              sendOptions?.sessionSelection,
             ),
           onUserMessageCommitted: () => {
             const shouldClearDraft =

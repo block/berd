@@ -68,6 +68,39 @@ describe("useChat persona preparation", () => {
     mockAcpLoadSession.mockResolvedValue(undefined);
   });
 
+  it("passes a queued session selection through preparation", async () => {
+    const ensurePrepared = vi.fn().mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useChat(
+        "session-1",
+        undefined,
+        undefined,
+        { id: "persona-a", name: "Persona A" },
+        { ensurePrepared },
+      ),
+    );
+
+    await act(async () => {
+      await result.current.sendMessage(
+        "Hello",
+        { id: "persona-a" },
+        undefined,
+        {
+          sessionSelection: {
+            providerId: "databricks_v2",
+            modelId: "goose-gpt-5-6-sol",
+          },
+        },
+      );
+    });
+
+    expect(ensurePrepared).toHaveBeenCalledWith("persona-a", {
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+    });
+  });
+
   it("prepares the override persona before prompting", async () => {
     const ensurePrepared = vi.fn().mockResolvedValue(undefined);
 

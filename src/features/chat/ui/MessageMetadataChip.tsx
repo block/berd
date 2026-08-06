@@ -35,11 +35,11 @@ function getChipTitle(chip: MessageChip, chipLabel: string): string {
   }
 
   if (chip.agentRole === "active") {
-    return `${chip.label} received this message and can summon other mentioned agents as needed`;
+    return `${chip.label} received this message`;
   }
 
   if (chip.agentRole === "mentioned") {
-    return `${chip.label} is available for the main agent to consult or delegate to`;
+    return `${chip.label} was also tagged in this message`;
   }
 
   return chipLabel;

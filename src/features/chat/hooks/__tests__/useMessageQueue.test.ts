@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatState } from "@/shared/types/chat";
 import { useChatStore } from "../../stores/chatStore";
+import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { useMessageQueue } from "../useMessageQueue";
 
 describe("useMessageQueue", () => {
@@ -390,6 +391,64 @@ describe("useMessageQueue", () => {
       "with image",
       undefined,
       attachments,
+    );
+  });
+
+  it("captures the selected provider and model when queuing", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "s1",
+          title: "Chat",
+          providerId: "databricks_v2",
+          modelId: "goose-gpt-5-6-sol",
+          createdAt: "2026-08-05T00:00:00.000Z",
+          updatedAt: "2026-08-05T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useMessageQueue("s1", "streaming", vi.fn()),
+    );
+
+    act(() => {
+      result.current.enqueue("keep this model", "persona-a");
+    });
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({
+      payload: {
+        text: "keep this model",
+        personaId: "persona-a",
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+      },
+    });
+  });
+
+  it("sends a queued message with its captured provider and model", () => {
+    const sendMessage = vi.fn();
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      text: "keep queued selection",
+      personaId: "persona-a",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+    });
+
+    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "keep queued selection",
+      { id: "persona-a" },
+      undefined,
+      {
+        sessionSelection: {
+          providerId: "databricks_v2",
+          modelId: "goose-gpt-5-6-sol",
+        },
+      },
     );
   });
 

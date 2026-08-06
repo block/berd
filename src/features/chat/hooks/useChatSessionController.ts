@@ -13,7 +13,7 @@ import { INITIAL_TOKEN_STATE } from "@/shared/types/chat";
 import { useChat } from "./useChat";
 import { useAutoCompactPreferences } from "./useAutoCompactPreferences";
 import { useMessageQueue } from "./useMessageQueue";
-import { useChatStore } from "../stores/chatStore";
+import { useChatStore, type QueuedMessagePayload } from "../stores/chatStore";
 import {
   hasSessionStarted,
   useChatSessionStore,
@@ -1195,8 +1195,11 @@ export function useChatSessionController({
     },
     [getModelsForAgent],
   );
-  const prepareSessionForPersona = useCallback(
-    async (personaId?: string) => {
+  const prepareSessionForCurrentSelection = useCallback(
+    async (
+      _personaId?: string,
+      sessionSelection?: ChatSendOptions["sessionSelection"],
+    ) => {
       const activatedWorkspacePath =
         await applyPendingSessionWorkspaceActivation(stateSessionId, {
           allowRunning: true,
@@ -1207,76 +1210,33 @@ export function useChatSessionController({
         activatedWorkspacePath ??
         sessionStore.activeWorkspaceBySession[stateSessionId]?.path ??
         liveSession?.workingDir;
-      const persona = personaId
-        ? useAgentStore.getState().getPersonaById(personaId)
-        : undefined;
-      if (!persona?.provider) {
-        return selectedProvider
-          ? prepareCurrentSessionWithModel(
-              selectedProvider,
-              project,
-              preparationWorkspacePath,
-            )
-          : undefined;
+      const providerId =
+        sessionSelection?.providerId ??
+        liveSession?.providerId ??
+        selectedProvider;
+      if (!providerId) {
+        return undefined;
       }
-
-      const matchingProvider = resolvePersonaProvider(persona, providers);
-      if (!matchingProvider) {
-        return selectedProvider
-          ? prepareCurrentSessionWithModel(
-              selectedProvider,
-              project,
-              preparationWorkspacePath,
-            )
-          : undefined;
-      }
-
-      const personaModelSelection = resolvePersonaModelSelection(
-        persona,
-        matchingProvider.id,
-      );
-      if (!personaModelSelection) {
-        return prepareCurrentSession(
-          matchingProvider.id,
+      if (sessionSelection?.modelId) {
+        const workingDir = await resolveSessionCwd(
           project,
           preparationWorkspacePath,
         );
+        const result = await applyLatestSessionConfig({
+          sessionId: stateSessionId,
+          providerId,
+          workingDir,
+          modelId: sessionSelection.modelId,
+        });
+        return result.applied;
       }
-
-      const workingDir = await resolveSessionCwd(
+      return prepareCurrentSessionWithModel(
+        providerId,
         project,
         preparationWorkspacePath,
       );
-      const result = await applyLatestSessionConfig({
-        sessionId: stateSessionId,
-        providerId: matchingProvider.id,
-        workingDir,
-        modelId: personaModelSelection.id,
-      });
-      if (!result.applied) {
-        return result.applied;
-      }
-
-      useChatSessionStore.getState().patchSession(stateSessionId, {
-        workingDir,
-        providerId: matchingProvider.id,
-        modelId: personaModelSelection.id,
-        modelName: personaModelSelection.name,
-        ...(result.configOptionsSnapshot?.reasoningEffort
-          ? { reasoningEffort: result.configOptionsSnapshot.reasoningEffort }
-          : {}),
-      });
-      return true;
     },
-    [
-      prepareCurrentSession,
-      prepareCurrentSessionWithModel,
-      project,
-      providers,
-      resolvePersonaModelSelection,
-      selectedProvider,
-      stateSessionId,
-    ],
+    [prepareCurrentSessionWithModel, project, selectedProvider, stateSessionId],
   );
   const supportsSteering = selectedAgentId === STEERING_SUPPORTED_AGENT_ID;
 
@@ -1784,7 +1744,7 @@ export function useChatSessionController({
     personaInfo,
     {
       onMessageAccepted: sessionId ? handleMessageAccepted : undefined,
-      ensurePrepared: prepareSessionForPersona,
+      ensurePrepared: prepareSessionForCurrentSelection,
     },
   );
   const resolvedTokenState = tokenState ?? INITIAL_TOKEN_STATE;
@@ -2085,6 +2045,36 @@ export function useChatSessionController({
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
     ) => {
+      const captureSessionSelection = (
+        payload: QueuedMessagePayload,
+      ): QueuedMessagePayload => {
+        const liveSession = useChatSessionStore
+          .getState()
+          .getSession(stateSessionId);
+        const requestedPersona =
+          payload.personaId && payload.personaId !== selectedPersonaId
+            ? useAgentStore.getState().getPersonaById(payload.personaId)
+            : undefined;
+        const personaProvider = resolvePersonaProvider(
+          requestedPersona,
+          providers,
+        );
+        const personaModelSelection =
+          requestedPersona && personaProvider
+            ? resolvePersonaModelSelection(requestedPersona, personaProvider.id)
+            : undefined;
+        return {
+          ...payload,
+          providerId:
+            payload.providerId ??
+            personaProvider?.id ??
+            liveSession?.providerId,
+          modelId:
+            payload.modelId ??
+            personaModelSelection?.id ??
+            (personaProvider ? undefined : liveSession?.modelId),
+        };
+      };
       if (!sessionId) {
         if (readOnly) {
           return false;
@@ -2146,19 +2136,25 @@ export function useChatSessionController({
               ?.length ?? 0) > 0
           ) {
             recordDraftPreservingSubmission(sessionId, text);
-            useChatStore
-              .getState()
-              .enqueueTransportReadyMessage(stateSessionId, {
+            useChatStore.getState().enqueueTransportReadyMessage(
+              stateSessionId,
+              captureSessionSelection({
                 text,
                 personaId,
                 attachments,
                 sendOptions: deferredSendOptions,
-              });
+              }),
+            );
             return true;
           }
           const firstSend = acceptFirstSend(
             sessionId,
-            { text, personaId, attachments, sendOptions: deferredSendOptions },
+            captureSessionSelection({
+              text,
+              personaId,
+              attachments,
+              sendOptions: deferredSendOptions,
+            }),
             {
               cancelBuilderDraftPath:
                 builderSession.targetAgentPath ?? undefined,
@@ -2208,7 +2204,12 @@ export function useChatSessionController({
       if (personaId && personaId !== selectedPersonaId) {
         const firstSend = acceptFirstSend(
           sessionId,
-          { text, personaId, attachments, sendOptions },
+          captureSessionSelection({
+            text,
+            personaId,
+            attachments,
+            sendOptions,
+          }),
           { onNeedsName: onWorkspaceNameRequest },
         );
         if (firstSend.accepted) {
@@ -2234,7 +2235,12 @@ export function useChatSessionController({
           : sendOptions;
       const firstSend = acceptFirstSend(
         sessionId,
-        { text, personaId, attachments, sendOptions: preparedSendOptions },
+        captureSessionSelection({
+          text,
+          personaId,
+          attachments,
+          sendOptions: preparedSendOptions,
+        }),
         { onNeedsName: onWorkspaceNameRequest },
       );
       if (firstSend.accepted) {
@@ -2273,9 +2279,11 @@ export function useChatSessionController({
       isQueuedSendBlocked,
       onMessageAccepted,
       onWorkspaceNameRequest,
+      providers,
       queue,
       readOnly,
       recordDraftPreservingSubmission,
+      resolvePersonaModelSelection,
       session?.agentBuilderOpen,
       session?.intent,
       sessionId,

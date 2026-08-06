@@ -120,13 +120,21 @@ function mergeSessionConfigSnapshots(
 async function applyRequest(
   request: QueuedSessionConfigRequest,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
+  const prepareOptions = {
+    ...(request.forceConfigRefresh && !request.modelId
+      ? { forceConfigRefresh: true }
+      : {}),
+    ...(request.providerId === "goose" && request.modelId
+      ? { modelId: request.modelId }
+      : {}),
+  };
   let snapshots =
-    request.forceConfigRefresh && !request.modelId
+    Object.keys(prepareOptions).length > 0
       ? await acpPrepareSession(
           request.sessionId,
           request.providerId,
           request.workingDir,
-          { forceConfigRefresh: true },
+          prepareOptions,
         )
       : await acpPrepareSession(
           request.sessionId,

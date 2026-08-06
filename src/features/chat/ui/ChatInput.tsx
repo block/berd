@@ -20,7 +20,7 @@ import {
   makeRemountSafeDraftAttachments,
 } from "../lib/draftAttachments";
 import {
-  getChatInputAgentGroupLabel,
+  getChatInputAgentLabel,
   getChatInputPlaceholder,
 } from "../lib/chatInputPlaceholder";
 import {
@@ -72,7 +72,6 @@ import {
   useStreamingShortcutPreference,
 } from "../lib/streamingShortcutPreference";
 import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
-import type { Persona } from "@/shared/types/agents";
 import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 import { useVoiceDictationShortcutTarget } from "../lib/voiceDictationShortcutController";
 
@@ -322,7 +321,6 @@ export function ChatInput({
   const [internalSelectedSkills, setInternalSelectedSkills] = useState<
     ChatSkillDraft[]
   >([]);
-  const [mentionedPersonas, setMentionedPersonas] = useState<Persona[]>([]);
   const selectedSkills = selectedSkillsProp ?? internalSelectedSkills;
   const visibleSelectedSkills = scopedControls.skills ? selectedSkills : [];
   const setSelectedSkills = scopedControls.skills
@@ -502,56 +500,22 @@ export function ChatInput({
     skillProjectDirs ?? selectedProjectWorkingDirs;
   const fileMentionProjectDirs =
     fileMentionProjectDirsProp ?? selectedProjectWorkingDirs;
-  const stickyPersona = activePersona;
-  const selectedPersonasForChips = useMemo(
-    () =>
-      mentionedPersonas.length > 0
-        ? mentionedPersonas
-        : stickyPersona
-          ? [stickyPersona]
-          : [],
-    [mentionedPersonas, stickyPersona],
-  );
   const selectedMessageChips = useMemo<MessageChip[]>(
     () =>
-      selectedPersonasForChips.map((persona) => ({
-        id: persona.id,
-        label: persona.displayName,
-        agentRole: persona.id === selectedPersonaId ? "active" : "mentioned",
-        type: "agent",
-      })),
-    [selectedPersonaId, selectedPersonasForChips],
+      activePersona
+        ? [
+            {
+              id: activePersona.id,
+              label: activePersona.displayName,
+              agentRole: "active",
+              type: "agent",
+            },
+          ]
+        : [],
+    [activePersona],
   );
   const selectedMessageChipsRef = useRef(selectedMessageChips);
   selectedMessageChipsRef.current = selectedMessageChips;
-
-  // Reconcile mentioned personas inline when the active persona changes,
-  // instead of in an effect, so the chips never render a stale selection for a
-  // frame.
-  const [previousSelectedPersonaId, setPreviousSelectedPersonaId] =
-    useState(selectedPersonaId);
-  if (previousSelectedPersonaId !== selectedPersonaId) {
-    setPreviousSelectedPersonaId(selectedPersonaId);
-    if (!selectedPersonaId) {
-      setMentionedPersonas([]);
-    } else {
-      setMentionedPersonas((current) =>
-        current.length > 0 &&
-        !current.some((persona) => persona.id === selectedPersonaId)
-          ? []
-          : current,
-      );
-    }
-  }
-
-  const handlePersonaMentionAdded = useCallback((persona: Persona) => {
-    setMentionedPersonas((current) => {
-      if (current.some((selected) => selected.id === persona.id)) {
-        return current;
-      }
-      return [...current, persona];
-    });
-  }, []);
 
   const canSend = canQueueMessage;
 
@@ -598,8 +562,8 @@ export function ChatInput({
     text,
     setText,
     textareaRef,
+    activePersonaId: selectedPersonaId,
     onPersonaChange,
-    onPersonaMentionSelect: handlePersonaMentionAdded,
     onSkillMentionSelect: handleSkillMentionAdded,
     onFileMentionSelect: scopedControls.attachments
       ? handleFileMentionAttachmentSelect
@@ -746,6 +710,8 @@ export function ChatInput({
           ? onUpdateQueue(editingQueuedRecordId, {
               text: submittedText.trim() || " ",
               personaId: selectedPersonaId ?? undefined,
+              providerId: currentModelProviderId ?? selectedProvider,
+              modelId: currentModelId ?? undefined,
               attachments:
                 submittedAttachments.length > 0
                   ? submittedAttachments
@@ -801,6 +767,8 @@ export function ChatInput({
     },
     [
       clearAttachments,
+      currentModelId,
+      currentModelProviderId,
       dictation,
       editingQueuedRecordId,
       onUpdateQueue,
@@ -811,6 +779,7 @@ export function ChatInput({
       setText,
       restoredQueuedSendOptions,
       selectedPersonaId,
+      selectedProvider,
       submitRestoredQueuedMessage,
       submitChatInputMessage,
       text,
@@ -1183,13 +1152,9 @@ export function ChatInput({
   const providerDisplayName =
     providers.find((provider) => provider.id === selectedProvider)?.label ??
     formatProviderLabel(selectedProvider);
-  const agentDisplayName = getChatInputAgentGroupLabel(
-    selectedPersonasForChips.map((persona) => ({
-      id: persona.id,
-      displayName: persona.displayName,
-    })),
+  const agentDisplayName = getChatInputAgentLabel(
+    activePersona?.displayName,
     providerDisplayName,
-    selectedPersonasForChips.length > 1 ? activePersona?.id : null,
   );
   const resolvedCurrentModel = useMemo(() => {
     return (
@@ -1414,21 +1379,10 @@ export function ChatInput({
   };
 
   const handleRemovePersona = useCallback(
-    (personaId: string) => {
-      setMentionedPersonas((current) => {
-        if (current.length === 0) {
-          onPersonaChange?.(null);
-          return current;
-        }
-
-        const next = current.filter((persona) => persona.id !== personaId);
-        if (personaId === selectedPersonaId) {
-          onPersonaChange?.(next.at(-1)?.id ?? null);
-        }
-        return next;
-      });
+    (_personaId: string) => {
+      onPersonaChange?.(null);
     },
-    [onPersonaChange, selectedPersonaId],
+    [onPersonaChange],
   );
 
   const handleRemoveSkill = useCallback(
@@ -1554,8 +1508,7 @@ export function ChatInput({
               />
 
               <ChatInputSelectionChips
-                personas={selectedPersonasForChips}
-                activePersonaId={selectedPersonaId}
+                persona={activePersona}
                 skills={visibleSelectedSkills}
                 onRemovePersona={handleRemovePersona}
                 onRemoveSkill={handleRemoveSkill}

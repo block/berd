@@ -3,6 +3,7 @@ import type { ChatState } from "@/shared/types/chat";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../stores/chatStore";
+import { useChatSessionStore } from "../stores/chatSessionStore";
 import type { QueuedMessageRecord } from "../stores/chatStore";
 import type { ChatSendOptions } from "../types";
 
@@ -142,13 +143,23 @@ export function useMessageQueue(
       inFlightAttemptKeyRef.current = key;
 
       const { text, personaId, attachments, sendOptions } = payload;
+      const queuedSendOptions =
+        payload.providerId || payload.modelId
+          ? {
+              ...sendOptions,
+              sessionSelection: {
+                providerId: payload.providerId,
+                modelId: payload.modelId,
+              },
+            }
+          : sendOptions;
       const sendFn = sendMessageRef.current;
-      const sendResult = sendOptions
+      const sendResult = queuedSendOptions
         ? sendFn(
             text,
             personaId ? { id: personaId } : undefined,
             attachments,
-            sendOptions,
+            queuedSendOptions,
           )
         : sendFn(text, personaId ? { id: personaId } : undefined, attachments);
 
@@ -297,9 +308,12 @@ export function useMessageQueue(
       if (readOnly) {
         return false;
       }
+      const session = useChatSessionStore.getState().getSession(sessionId);
       return useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
         text,
         personaId,
+        providerId: session?.providerId,
+        modelId: session?.modelId,
         attachments,
         sendOptions,
       });

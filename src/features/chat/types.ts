@@ -44,6 +44,11 @@ export interface ChatSkillDraft {
 }
 
 export interface ChatSendOptions {
+  /** Internal snapshot used by delayed sends; not forwarded to ACP. */
+  sessionSelection?: {
+    providerId?: string;
+    modelId?: string;
+  };
   systemPrompt?: string;
   displayText?: string;
   assistantPrompt?: string;

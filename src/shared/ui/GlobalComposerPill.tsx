@@ -361,11 +361,7 @@ export function GlobalComposerPill({
   // handlePersonaChange) flow through this single effect.
   useEffect(() => {
     if (!selectedPersonaId) {
-      if (personaOverrideActiveRef.current) {
-        setProviderOverride(null);
-        setModelOverride(null);
-        personaOverrideActiveRef.current = false;
-      }
+      personaOverrideActiveRef.current = false;
       personaOverrideAppliedForRef.current = null;
       personaOverrideUserOverrideForRef.current = null;
       return;
@@ -733,6 +729,7 @@ export function GlobalComposerPill({
     text,
     setText,
     textareaRef,
+    activePersonaId: selectedPersonaId,
     onPersonaChange: handlePersonaChange,
     onSkillMentionSelect: handleSkillMentionSelected,
     onFileMentionSelect: handleFileMentionAttachmentSelect,
@@ -1301,8 +1298,7 @@ export function GlobalComposerPill({
       {(selectedPersona || selectedSkills.length > 0) && (
         <div className="px-2 pt-1">
           <ChatInputSelectionChips
-            personas={selectedPersona ? [selectedPersona] : []}
-            activePersonaId={selectedPersona?.id ?? null}
+            persona={selectedPersona ?? null}
             skills={selectedSkills}
             onRemovePersona={() => handlePersonaChange(null)}
             onRemoveSkill={handleRemoveSelectedSkill}

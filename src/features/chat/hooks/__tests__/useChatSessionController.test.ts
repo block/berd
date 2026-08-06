@@ -2148,11 +2148,20 @@ describe("useChatSessionController", () => {
           id: "persona-1",
           displayName: "Planner",
           systemPrompt: "Plan clearly.",
+          provider: "goose",
+          model: "goose-claude-opus-4-8",
           isBuiltin: false,
           writable: true,
         },
       ],
     });
+    mockPickerState.modelsByAgent.set("goose", [
+      {
+        id: "goose-claude-opus-4-8",
+        name: "Claude Opus 4.8",
+        providerId: "databricks_v2",
+      },
+    ]);
     useProjectStore.setState({
       projects: [
         {
@@ -2233,6 +2242,8 @@ describe("useChatSessionController", () => {
       payload: {
         text: "plan",
         personaId: "persona-1",
+        providerId: "goose",
+        modelId: "goose-claude-opus-4-8",
         sendOptions: {
           assistantPrompt: expect.stringContaining("draft-from-chat.md"),
         },
@@ -3149,6 +3160,83 @@ describe("useChatSessionController", () => {
     );
   });
 
+  it("keeps a manually selected Goose model when sending with the current persona", async () => {
+    useChatSessionStore.getState().patchSession("session-1", {
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+      modelName: "GPT-5.6 Sol",
+      personaId: "persona-1",
+    });
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Trace",
+          systemPrompt: "Debug carefully.",
+          provider: "goose",
+          model: "goose-claude-fable-5",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.modelsByAgent.set("goose", [
+      {
+        id: "goose-gpt-5-5",
+        name: "GPT-5.5",
+        providerId: "databricks_v2",
+        recommended: true,
+      },
+      {
+        id: "goose-gpt-5-6-sol",
+        name: "GPT-5.6 Sol",
+        providerId: "databricks_v2",
+      },
+      {
+        id: "goose-claude-fable-5",
+        name: "Claude Fable 5",
+        providerId: "databricks_v2",
+      },
+    ]);
+    mockAcpPrepareSession.mockReset();
+    mockAcpSetModel.mockReset();
+    mockAcpPrepareSession.mockResolvedValue(undefined);
+    mockAcpSetModel.mockResolvedValue(undefined);
+    mockUseChatSendMessage.mockImplementationOnce(
+      async (options?: {
+        ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
+      }) => {
+        await options?.ensurePrepared?.("persona-1");
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    await act(async () => {
+      await result.current.handleSend("use the selected model");
+    });
+
+    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "databricks_v2",
+      "/tmp/project",
+    );
+    expect(mockAcpSetModel).toHaveBeenCalledWith(
+      "session-1",
+      "goose-gpt-5-6-sol",
+    );
+    expect(mockAcpSetModel).not.toHaveBeenCalledWith(
+      "session-1",
+      "goose-gpt-5-5",
+    );
+    expect(mockAcpSetModel).not.toHaveBeenCalledWith(
+      "session-1",
+      "goose-claude-fable-5",
+    );
+  });
+
   it("does not let send-time preparation restore a stale model after a newer selection", async () => {
     const firstCwd = deferred<string>();
     mockResolveSessionCwd.mockReset();
@@ -3401,6 +3489,7 @@ describe("useChatSessionController", () => {
         "session-1",
         "goose",
         "/tmp/project",
+        { modelId: "goose-claude-opus-4-8" },
       );
       expect(mockAcpSetModel).toHaveBeenCalledWith(
         "session-1",
@@ -3574,15 +3663,15 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("preserves the existing session working directory when sending with a configured persona", async () => {
+  it("keeps the current configured persona model through send-time preparation", async () => {
     useChatSessionStore.setState({
       sessions: [
         {
           id: "session-1",
           title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+          providerId: "goose",
+          modelId: "goose-claude-opus-4-8",
+          modelName: "goose-claude-opus-4-8",
           personaId: "persona-1",
           workingDir: "/tmp/stored-session",
           createdAt: "2026-04-20T00:00:00.000Z",
@@ -3604,13 +3693,19 @@ describe("useChatSessionController", () => {
         },
       ],
     });
-    mockPickerState.availableModels = [
+    mockPickerState.modelsByAgent.set("goose", [
       {
         id: "goose-claude-opus-4-8",
         name: "goose-claude-opus-4-8",
-        providerId: "goose",
+        providerId: "databricks_v2",
       },
-    ];
+      {
+        id: "goose-gpt-5-5",
+        name: "GPT-5.5",
+        providerId: "databricks_v2",
+        recommended: true,
+      },
+    ]);
     mockResolveSessionCwd.mockResolvedValue("/tmp/stored-session");
     mockUseChatSendMessage.mockImplementationOnce(
       async (options?: {
@@ -3638,11 +3733,22 @@ describe("useChatSessionController", () => {
       "session-1",
       "goose",
       "/tmp/stored-session",
+      { modelId: "goose-claude-opus-4-8" },
     );
     expect(mockAcpSetModel).toHaveBeenCalledWith(
       "session-1",
       "goose-claude-opus-4-8",
     );
+    expect(mockAcpSetModel).not.toHaveBeenCalledWith(
+      "session-1",
+      "goose-gpt-5-5",
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "goose",
+      modelId: "goose-claude-opus-4-8",
+    });
   });
 
   it("falls back when a selected persona's saved model is no longer available", async () => {
@@ -3743,6 +3849,47 @@ describe("useChatSessionController", () => {
       providerId: "goose",
       modelId: "goose-claude-opus-4-8",
     });
+  });
+
+  it("removes the active persona without changing the selected model", async () => {
+    useChatSessionStore.getState().patchSession("session-1", {
+      personaId: "persona-1",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+      modelName: "GPT-5.6 Sol",
+    });
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Trace",
+          systemPrompt: "Debug carefully.",
+          provider: "goose",
+          model: "goose-claude-fable-5",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePersonaChange(null);
+    });
+
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.personaId,
+    ).toBeUndefined();
+    expect(mockAcpSetModel).not.toHaveBeenCalled();
   });
 
   it("does not apply a persona model when the persona provider cannot resolve", () => {

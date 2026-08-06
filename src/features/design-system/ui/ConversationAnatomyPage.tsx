@@ -799,8 +799,7 @@ export function ConversationAnatomyPage() {
         >
           <StatePreview label="Persona and skill chips">
             <ChatInputSelectionChips
-              personas={[samplePersona]}
-              activePersonaId={samplePersona.id}
+              persona={samplePersona}
               skills={[sampleSkill]}
               onRemovePersona={() => {}}
               onRemoveSkill={() => {}}

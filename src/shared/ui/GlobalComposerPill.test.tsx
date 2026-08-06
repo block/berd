@@ -601,6 +601,24 @@ describe("GlobalComposerPill", () => {
     expect(input).toHaveFocus();
   });
 
+  it("replaces the active persona mention instead of accumulating agents", async () => {
+    const user = userEvent.setup();
+    setPersonas();
+    renderGlobalComposer(vi.fn());
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@Res");
+    await user.click(
+      await screen.findByRole("option", { name: /research scout/i }),
+    );
+    await user.type(input, "@UX");
+    await user.click(await screen.findByRole("option", { name: /ux critic/i }));
+
+    expect(input).toHaveValue("@UX Critic ");
+    expect(screen.queryByText("Research Scout")).not.toBeInTheDocument();
+    expect(screen.getByText("UX Critic")).toBeInTheDocument();
+  });
+
   it("applies the suggested persona's provider and model to the send payload", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
@@ -952,7 +970,7 @@ describe("GlobalComposerPill", () => {
     });
   });
 
-  it("restores the default provider/model after clearing the suggested persona", async () => {
+  it("keeps the selected provider/model after clearing the suggested persona", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
       personas: [
@@ -977,7 +995,11 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello");
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      providerId: "claude-acp",
+      modelId: "claude-sonnet-4",
+      modelName: "claude-sonnet-4",
+    });
   });
 
   it("does not reselect the suggested persona after the user clears it", async () => {

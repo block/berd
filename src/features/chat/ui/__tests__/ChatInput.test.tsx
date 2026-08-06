@@ -1281,7 +1281,7 @@ describe("ChatInput", () => {
     );
   });
 
-  it("keeps multiple persona @mentions as visible agent chips", async () => {
+  it("replaces the active persona when another persona is mentioned", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();
     render(<StatefulChatInput onSend={onSend} />);
@@ -1292,11 +1292,11 @@ describe("ChatInput", () => {
     await user.type(input, "@Sol");
     await user.click(screen.getByRole("option", { name: /solo/i }));
 
-    expect(screen.getByText("@Reviewer")).toBeInTheDocument();
+    expect(screen.queryByText("@Reviewer")).not.toBeInTheDocument();
     expect(screen.getByText("Solo")).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText(
-        "Chat with Solo (can summon Reviewer), @ for agents/files, or / for skills",
+        "Chat with Solo, @ for agents/files, or / for skills",
       ),
     ).toBeInTheDocument();
 
@@ -1304,17 +1304,11 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSend).toHaveBeenCalledWith(
-      "@Reviewer @Solo compare these approaches",
+      "@Solo compare these approaches",
       "builtin-solo",
       undefined,
       {
         chips: [
-          {
-            id: "reviewer",
-            label: "Reviewer",
-            agentRole: "mentioned",
-            type: "agent",
-          },
           {
             id: "builtin-solo",
             label: "Solo",
@@ -2403,6 +2397,8 @@ describe("ChatInput", () => {
     expect(onUpdateQueue).toHaveBeenCalledWith("tail", {
       text: "updated second",
       personaId: undefined,
+      providerId: "goose",
+      modelId: undefined,
       attachments: undefined,
       sendOptions: undefined,
     });

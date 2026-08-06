@@ -1,4 +1,3 @@
-import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas } from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
@@ -110,17 +109,11 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   const payloadPersona = payload.personaId
     ? await findPersona(payload.personaId)
     : undefined;
-  const personaProvider = resolvePersonaProvider(
-    payloadPersona,
-    useAgentStore.getState().providers,
-  );
   const { providerId, persona: sessionPersona } =
     await prepareExistingSessionForBackgroundSend(sessionId, {
       preserveWorkingDir: queuedMessage.releasedFromDeferred,
-      ...(personaProvider ? { providerId: personaProvider.id } : {}),
-      ...(personaProvider && payloadPersona?.model
-        ? { modelId: payloadPersona.model }
-        : {}),
+      ...(payload.providerId ? { providerId: payload.providerId } : {}),
+      ...(payload.modelId ? { modelId: payload.modelId } : {}),
     });
   const persona = payloadPersona ?? sessionPersona;
   const session = useChatSessionStore.getState().getSession(sessionId);

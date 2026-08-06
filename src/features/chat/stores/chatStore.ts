@@ -345,6 +345,8 @@ function findLatestInterventionMessageId(messages: Message[]): string | null {
 export interface QueuedMessagePayload {
   text: string;
   personaId?: string;
+  providerId?: string;
+  modelId?: string;
   attachments?: ChatAttachmentDraft[];
   sendOptions?: ChatSendOptions;
   /** False for reliable startup handoffs that should not look user-queued. */

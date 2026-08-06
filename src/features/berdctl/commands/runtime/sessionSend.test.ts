@@ -146,7 +146,7 @@ describe("sendPromptToExistingSessionInBackground", () => {
       useChatStore.getState().messagesBySession[SESSION_ID].map(getTextContent),
     ).toEqual(["older prompt", "older answer", "new monitor event"]);
   });
-  it("applies a deferred global-composer persona's provider and model before dispatch", async () => {
+  it("uses the deferred message's captured provider and model before dispatch", async () => {
     useAgentStore.setState({
       providers: [
         { id: "goose", label: "Goose" },
@@ -179,6 +179,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
       payload: {
         text: "review this",
         personaId: "claude-reviewer",
+        providerId: "claude-acp",
+        modelId: "claude-sonnet-4",
       },
     });
 

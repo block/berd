@@ -38,8 +38,8 @@ interface MentionHandlersOptions {
   text: string;
   setText: (value: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  activePersonaId?: string | null;
   onPersonaChange?: ((id: string | null) => void) | undefined;
-  onPersonaMentionSelect?: (persona: Persona) => void;
   onSkillMentionSelect?: (skill: SkillMentionItem) => void;
   onFileMentionSelect?: (file: FileMentionItem) => void;
 }
@@ -385,8 +385,8 @@ export function useMentionHandlers({
   text,
   setText,
   textareaRef,
+  activePersonaId,
   onPersonaChange,
-  onPersonaMentionSelect,
   onSkillMentionSelect,
   onFileMentionSelect,
 }: MentionHandlersOptions) {
@@ -697,9 +697,34 @@ export function useMentionHandlers({
 
   const handlePersonaMentionSelect = useCallback(
     (persona: Persona) => {
+      const activePersona = activePersonaId
+        ? personas.find((candidate) => candidate.id === activePersonaId)
+        : undefined;
+      let nextText = text;
+      let nextMentionStartIndex = mentionStartIndex;
+      if (activePersona && activePersona.id !== persona.id) {
+        const activeMention = `@${activePersona.displayName}`;
+        const activeMentionIndex = text.indexOf(activeMention);
+        if (
+          activeMentionIndex >= 0 &&
+          activeMentionIndex !== mentionStartIndex
+        ) {
+          let removeStart = activeMentionIndex;
+          let removeEnd = activeMentionIndex + activeMention.length;
+          if (text[removeEnd] === " ") {
+            removeEnd += 1;
+          } else if (removeStart > 0 && text[removeStart - 1] === " ") {
+            removeStart -= 1;
+          }
+          nextText = `${text.slice(0, removeStart)}${text.slice(removeEnd)}`;
+          if (removeStart < mentionStartIndex) {
+            nextMentionStartIndex -= removeEnd - removeStart;
+          }
+        }
+      }
       const { newText, cursorPosition } = replaceMentionQuery(
-        text,
-        mentionStartIndex,
+        nextText,
+        nextMentionStartIndex,
         mentionQuery,
         `@${persona.displayName}`,
       );
@@ -707,15 +732,15 @@ export function useMentionHandlers({
       registerCompletedMention(persona.displayName);
       setText(newText);
       closeMention();
-      onPersonaMentionSelect?.(persona);
       onPersonaChange?.(persona.id);
     },
     [
+      activePersonaId,
+      personas,
       text,
       mentionStartIndex,
       mentionQuery,
       closeMention,
-      onPersonaMentionSelect,
       onPersonaChange,
       registerCompletedMention,
       setText,

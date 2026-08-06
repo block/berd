@@ -65,6 +65,8 @@ export interface AcpCreateSessionOptions {
 
 export interface AcpSessionConfigApplyOptions {
   forceConfigRefresh?: boolean;
+  /** Model the caller will apply as part of the same session preparation. */
+  modelId?: string | null;
 }
 
 export interface AcpCreateSessionResult {
@@ -338,7 +340,7 @@ export async function acpPrepareSession(
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  const selection = resolveGooseSessionSelection(providerId);
+  const selection = resolveGooseSessionSelection(providerId, options.modelId);
   const snapshots = await sessionRegistry.prepareSession(
     sessionId,
     selection.providerId,
