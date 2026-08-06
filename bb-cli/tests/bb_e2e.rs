@@ -3609,6 +3609,313 @@ fn bb_apps_contract_exchanges_session_and_calls_control_plane() {
 }
 
 #[test]
+fn bb_apps_create_plans_and_initializes_when_recommended() {
+    let purpose_token = "compose-create-purpose-token";
+    let session_credential = "stored-bbidentity-session";
+    let plan = json!({
+        "ok": true,
+        "app_id": "merchant-lookup",
+        "display_name": "Merchant Lookup",
+        "environment": "staging",
+        "external_url": "https://merchant-lookup--bpsites.example/",
+        "persistence": "sqlite",
+        "runtime_class": "default",
+        "initialize": {
+            "required": true,
+            "recommended": true,
+            "reason": "no active route exists"
+        }
+    });
+    let initialized = json!({
+        "ok": true,
+        "app_id": "merchant-lookup-2",
+        "renamed": true,
+        "external_url": "https://merchant-lookup-2--bpsites.example/"
+    });
+    let server = MockServer::start(vec![
+        MockResponse::json(json!({
+            "access_token": purpose_token,
+            "token_type": "Bearer",
+            "expires_in_seconds": 300
+        })),
+        MockResponse::json(plan.clone()),
+        MockResponse::json(initialized.clone()),
+    ]);
+    let temp = temp_test_dir("bb-apps-create");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        session_credential,
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "apps",
+            "create",
+            "--app-id",
+            "merchant-lookup",
+            "--name",
+            "Merchant Lookup",
+            "--environment",
+            "staging",
+            "--runtime-profile",
+            "fetch-js",
+            "--persistence",
+            "sqlite",
+            "--base-url",
+            &server.base_url,
+            "--client-version",
+            "0.2.0",
+        ])
+        .output()
+        .expect("run bb apps create");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse create output");
+    assert_eq!(response["app_id"], json!("merchant-lookup-2"));
+    assert_eq!(
+        response["external_url"],
+        json!("https://merchant-lookup-2--bpsites.example/")
+    );
+    assert_eq!(response["initialized"], json!(true));
+    assert_eq!(response["plan"], plan);
+    assert_eq!(response["initialize"], initialized);
+    assert!(!stdout.contains(session_credential));
+    assert!(!stdout.contains(purpose_token));
+    assert!(!stderr.contains(session_credential));
+    assert!(!stderr.contains(purpose_token));
+
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1].method, "POST");
+    assert_eq!(requests[1].path, "/v1/agent/apps/plan");
+    assert_eq!(
+        requests[1].body,
+        json!({
+            "app_id": "merchant-lookup",
+            "name": "Merchant Lookup",
+            "environment": "staging",
+            "runtime_profile": "fetch-js",
+            "persistence": "sqlite",
+            "client_version": "0.2.0"
+        })
+    );
+    assert_eq!(requests[2].method, "POST");
+    assert_eq!(
+        requests[2].path,
+        "/v1/agent/apps/merchant-lookup/initialize"
+    );
+    assert_eq!(
+        requests[2].body,
+        json!({
+            "name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "sqlite",
+            "runtime_class": "default"
+        })
+    );
+    for request in &requests[1..] {
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer compose-create-purpose-token")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-hotpod-agent-client-version")
+                .map(String::as_str),
+            Some("0.2.0")
+        );
+        for sensitive_header in [
+            "x-bb-session-credential",
+            "x-forwarded-user",
+            "x-forwarded-workspace-id",
+        ] {
+            assert!(!request.headers.contains_key(sensitive_header));
+        }
+    }
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_create_skips_initialize_when_plan_does_not_recommend_it() {
+    let server = MockServer::start(vec![
+        MockResponse::json(json!({
+            "access_token": "compose-create-purpose-token",
+            "token_type": "Bearer",
+            "expires_in_seconds": 300
+        })),
+        MockResponse::json(json!({
+            "ok": true,
+            "app_id": "existing-app",
+            "initialize": {"required": false, "recommended": false}
+        })),
+    ]);
+    let temp = temp_test_dir("bb-apps-create-existing");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-bbidentity-session",
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "apps",
+            "create",
+            "--app-id",
+            "existing-app",
+            "--base-url",
+            &server.base_url,
+        ])
+        .output()
+        .expect("run bb apps create for existing app");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse create output");
+    assert_eq!(response["initialized"], json!(false));
+    assert_eq!(response["initialize"], Value::Null);
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].path, "/v1/agent/apps/plan");
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_deploy_uploads_multipart_artifact_without_identity_headers() {
+    let purpose_token = "compose-deploy-purpose-token";
+    let session_credential = "stored-bbidentity-session";
+    let deploy_response = json!({
+        "ok": true,
+        "app_id": "merchant-lookup",
+        "version_id": "ver-123",
+        "deployment_id": "dpl-123",
+        "external_url": "https://merchant-lookup--bpsites.example/",
+        "readiness": {
+            "control_plane_url": "/v1/agent/apps/merchant-lookup/ready?version_id=ver-123",
+            "diagnostics_url": "/v1/agent/apps/merchant-lookup/debug?version_id=ver-123"
+        }
+    });
+    let server = MockServer::start(vec![
+        MockResponse::json(json!({
+            "access_token": purpose_token,
+            "token_type": "Bearer",
+            "expires_in_seconds": 300
+        })),
+        MockResponse::json(deploy_response.clone()),
+    ]);
+    let temp = temp_test_dir("bb-apps-deploy");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    let artifact_path = temp.join("prepared-app.tar.gz");
+    let artifact_marker = "test-hotpod-artifact-marker";
+    fs::write(&artifact_path, artifact_marker).expect("write deploy artifact");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        session_credential,
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "apps",
+            "deploy",
+            "merchant-lookup",
+            artifact_path.to_str().expect("artifact path text"),
+            "--environment",
+            "production",
+            "--version-id",
+            "ver-123",
+            "--deployment-id",
+            "dpl-123",
+            "--base-url",
+            &server.base_url,
+            "--client-version",
+            "0.2.0",
+        ])
+        .output()
+        .expect("run bb apps deploy");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse deploy output"),
+        deploy_response
+    );
+    assert!(!stdout.contains(session_credential));
+    assert!(!stdout.contains(purpose_token));
+    assert!(!stderr.contains(session_credential));
+    assert!(!stderr.contains(purpose_token));
+
+    assert_eq!(requests.len(), 2);
+    let request = &requests[1];
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, "/v1/agent/apps/merchant-lookup/deploy");
+    assert_eq!(
+        request.headers.get("authorization").map(String::as_str),
+        Some("Bearer compose-deploy-purpose-token")
+    );
+    assert_eq!(
+        request
+            .headers
+            .get("x-hotpod-agent-client-version")
+            .map(String::as_str),
+        Some("0.2.0")
+    );
+    assert!(request
+        .headers
+        .get("content-type")
+        .is_some_and(|value| value.starts_with("multipart/form-data; boundary=")));
+    for sensitive_header in [
+        "x-bb-session-credential",
+        "x-forwarded-user",
+        "x-forwarded-workspace-id",
+    ] {
+        assert!(!request.headers.contains_key(sensitive_header));
+    }
+    let body = String::from_utf8_lossy(&request.body_bytes);
+    for expected in [
+        "name=\"artifact\"; filename=\"artifact.tar.gz\"",
+        "Content-Type: application/gzip",
+        artifact_marker,
+        "name=\"environment\"\r\n\r\nproduction",
+        "name=\"version_id\"\r\n\r\nver-123",
+        "name=\"deployment_id\"\r\n\r\ndpl-123",
+    ] {
+        assert!(
+            body.contains(expected),
+            "multipart body omitted {expected:?}"
+        );
+    }
+    assert!(!body.contains("publisher"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
 fn bb_apps_contract_rejects_untrusted_origin_before_token_exchange() {
     let kgoose = MockServer::start(vec![]);
     let temp = temp_test_dir("bb-apps-untrusted-origin");
@@ -3761,6 +4068,69 @@ fn bb_apps_exchange_failure_does_not_echo_response_or_credentials() {
     let error = parse_stderr_error(&stderr);
     assert_eq!(error["error"]["code"], json!("forbidden"));
     assert_eq!(requests.len(), 1, "request should stop after exchange");
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_control_plane_failure_does_not_echo_response_details() {
+    let secret = "credential-like-control-plane-detail";
+    let server = MockServer::start(vec![
+        MockResponse::json(json!({
+            "access_token": "compose-purpose-token",
+            "token_type": "Bearer",
+            "expires_in_seconds": 300
+        })),
+        MockResponse::text(
+            400,
+            &json!({
+                "error": {"code": "invalid_app", "detail": secret},
+                "next_action": "Choose a DNS-safe app id."
+            })
+            .to_string(),
+        ),
+    ]);
+    let temp = temp_test_dir("bb-apps-control-plane-failure");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        "stored-bbidentity-session",
+        "2099-01-01T00:00:00Z",
+    );
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "apps",
+            "create",
+            "--app-id",
+            "bad/app",
+            "--base-url",
+            &server.base_url,
+            "--json",
+        ])
+        .output()
+        .expect("run failing bb apps create");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(
+        !stderr.contains(secret),
+        "stderr leaked response detail: {stderr}"
+    );
+    let error = parse_stderr_error(&stderr);
+    assert_eq!(error["error"]["code"], json!("invalid_app"));
+    assert!(error["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("Choose a DNS-safe app id.")));
+    assert_eq!(requests.len(), 2);
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 

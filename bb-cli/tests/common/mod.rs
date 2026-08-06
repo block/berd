@@ -30,6 +30,7 @@ pub struct RecordedRequest {
     pub path: String,
     pub headers: BTreeMap<String, String>,
     pub body: Value,
+    pub body_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -268,11 +269,15 @@ fn handle_connection(
     reader
         .read_exact(&mut body)
         .expect("read mock request body");
-    let body = if body.is_empty() {
+    let parsed_body = if body.is_empty() {
         Value::Null
+    } else if headers
+        .get("content-type")
+        .is_some_and(|value| value.starts_with("application/json"))
+    {
+        serde_json::from_slice::<Value>(&body).expect("json mock request body")
     } else {
-        let body = String::from_utf8(body).expect("utf8 mock request body");
-        serde_json::from_str::<Value>(&body).expect("json mock request body")
+        Value::Null
     };
 
     requests
@@ -282,7 +287,8 @@ fn handle_connection(
             method: method.to_string(),
             path: path.to_string(),
             headers,
-            body,
+            body: parsed_body,
+            body_bytes: body,
         });
 
     let response = responses

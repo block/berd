@@ -13,7 +13,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,11 +21,11 @@ use anyhow::{Context, Result};
 use builderbot_auth::auth_login::{auth_url, build_auth_http_client, playpen_baggage};
 use clap::{Arg, ArgMatches, Command};
 use fs2::FileExt;
-use reqwest::blocking::Client;
+use reqwest::blocking::{multipart, Client, RequestBuilder, Response};
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use reqwest::StatusCode;
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use super::auth::SESSION_CREDENTIAL_HEADER;
@@ -41,9 +41,14 @@ use super::skills_config::{kgoose_service_url, SkillsConfig};
 const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
 const APPS_CLIENT_VERSION_ENV_VAR: &str = "BB_APPS_CLIENT_VERSION";
 const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
+const APPS_PLAN_PATH: &str = "/v1/agent/apps/plan";
 const COMPOSE_TOKEN_EXCHANGE_PATH: &str = "/v1/auth/token/compose";
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const TOKEN_EXCHANGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+// Compose may synchronously wait up to two minutes for an initialize or
+// deploy rollout. Leave enough headroom for the response to traverse ingress
+// without weakening the tighter credential-exchange bound above.
+const CONTROL_PLANE_REQUEST_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const TOKEN_EXCHANGE_RESPONSE_MAX_BYTES: usize = 32 * 1024;
 const CONTROL_PLANE_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const COMPOSE_TOKEN_PURPOSE: &str = "compose";
@@ -64,28 +69,110 @@ pub fn command() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .disable_help_subcommand(true)
-        .subcommand(
+        .subcommand(control_plane_args(
             Command::new("contract")
                 .about(
                     "Read the control-plane contract, runtime metadata, and supported operations",
-                )
-                .arg(
-                    Arg::new("apps-base-url")
-                        .long("base-url")
-                        .visible_alias("control-plane-url")
-                        .value_name("URL")
-                        .env(APPS_BASE_URL_ENV_VAR)
-                        .required(true)
-                        .help("Approved Builderlab Compose control-plane ingress URL"),
-                )
-                .arg(
-                    Arg::new("apps-client-version")
-                        .long("client-version")
-                        .value_name("VERSION")
-                        .env(APPS_CLIENT_VERSION_ENV_VAR)
-                        .default_value(env!("CARGO_PKG_VERSION"))
-                        .help("Agent client version sent to the Compose control plane"),
                 ),
+        ))
+        .subcommand(control_plane_args(
+            Command::new("create")
+                .about("Plan and initialize an app")
+                .long_about(
+                    "Plan an app identity through Apps Platform, then initialize it only when the \
+                     returned plan marks initialization as required or recommended.",
+                )
+                .arg(
+                    Arg::new("app-id")
+                        .long("app-id")
+                        .value_name("APP_ID")
+                        .help("Requested DNS-safe app identifier; the control plane generates one when omitted"),
+                )
+                .arg(
+                    Arg::new("name")
+                        .long("name")
+                        .value_name("NAME")
+                        .help("Human-readable app name"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Compose environment to plan and initialize"),
+                )
+                .arg(
+                    Arg::new("runtime-profile")
+                        .long("runtime-profile")
+                        .value_name("PROFILE")
+                        .help("Artifact runtime profile advertised by the control-plane contract"),
+                )
+                .arg(
+                    Arg::new("persistence")
+                        .long("persistence")
+                        .value_name("MODE")
+                        .value_parser(["none", "sqlite"])
+                        .help("Requested persistence mode"),
+                ),
+        ))
+        .subcommand(control_plane_args(
+            Command::new("deploy")
+                .about("Deploy a prebuilt app artifact")
+                .long_about(
+                    "Upload a prebuilt Hot Pod artifact.tar.gz to Apps Platform. The response \
+                     includes the deployed URL and control-plane readiness and diagnostics endpoints.",
+                )
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("artifact")
+                        .value_name("ARTIFACT_TAR_GZ")
+                        .required(true)
+                        .value_parser(clap::value_parser!(PathBuf))
+                        .help("Path to the prebuilt artifact.tar.gz"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
+                )
+                .arg(
+                    Arg::new("version-id")
+                        .long("version-id")
+                        .value_name("VERSION_ID")
+                        .help("Optional idempotent version identifier"),
+                )
+                .arg(
+                    Arg::new("deployment-id")
+                        .long("deployment-id")
+                        .value_name("DEPLOYMENT_ID")
+                        .help("Optional deployment identifier"),
+                ),
+        ))
+}
+
+fn control_plane_args(command: Command) -> Command {
+    command
+        .arg(
+            Arg::new("apps-base-url")
+                .long("base-url")
+                .visible_alias("control-plane-url")
+                .value_name("URL")
+                .env(APPS_BASE_URL_ENV_VAR)
+                .required(true)
+                .help("Approved Builderlab Compose control-plane ingress URL"),
+        )
+        .arg(
+            Arg::new("apps-client-version")
+                .long("client-version")
+                .value_name("VERSION")
+                .env(APPS_CLIENT_VERSION_ENV_VAR)
+                .default_value(env!("CARGO_PKG_VERSION"))
+                .help("Agent client version sent to the Compose control plane"),
         )
 }
 
@@ -101,6 +188,8 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     runner::ensure_org_configured(config)?;
     match matches.subcommand() {
         Some(("contract", contract_matches)) => run_contract(config, contract_matches),
+        Some(("create", create_matches)) => run_create(config, create_matches),
+        Some(("deploy", deploy_matches)) => run_deploy(config, deploy_matches),
         _ => anyhow::bail!("expected an apps subcommand"),
     }
 }
@@ -117,6 +206,158 @@ fn run_contract(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let token_provider = KgoosePurposeTokenProvider::from_config(config)?;
     let contract = client.contract(&token_provider)?;
     print_json(&contract)
+}
+
+fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let (client, token_provider) = control_plane_context(config, matches)?;
+    let request = PlanRequest {
+        app_id: matches.get_one::<String>("app-id").map(String::as_str),
+        name: matches.get_one::<String>("name").map(String::as_str),
+        environment: matches.get_one::<String>("environment").map(String::as_str),
+        runtime_profile: matches
+            .get_one::<String>("runtime-profile")
+            .map(String::as_str),
+        persistence: matches.get_one::<String>("persistence").map(String::as_str),
+        client_version: client.client_version_text(),
+    };
+    let plan = client.plan(&token_provider, &request)?;
+    let app_id = required_response_string(&plan, "app_id", "Apps Platform plan")?.to_string();
+    let initialize_required = plan
+        .pointer("/initialize/required")
+        .and_then(Value::as_bool);
+    let initialize_recommended = plan
+        .pointer("/initialize/recommended")
+        .and_then(Value::as_bool);
+    if initialize_required.is_none() && initialize_recommended.is_none() {
+        anyhow::bail!(
+            "Apps Platform plan response did not include initialize.required or initialize.recommended"
+        );
+    }
+    let should_initialize =
+        initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
+    let initialize = if should_initialize {
+        let request = initialize_request_from_plan(&plan);
+        Some(client.initialize(&token_provider, &app_id, &request)?)
+    } else {
+        None
+    };
+    let (effective_app_id, effective_external_url) = match initialize.as_ref() {
+        Some(response) => (
+            required_response_string(response, "app_id", "Apps Platform initialize")?.to_string(),
+            Value::String(
+                required_response_string(response, "external_url", "Apps Platform initialize")?
+                    .to_string(),
+            ),
+        ),
+        None => (
+            app_id,
+            plan.get("external_url").cloned().unwrap_or(Value::Null),
+        ),
+    };
+    print_json(&json!({
+        "ok": true,
+        "app_id": effective_app_id,
+        "external_url": effective_external_url,
+        "initialized": initialize.is_some(),
+        "plan": plan,
+        "initialize": initialize,
+    }))
+}
+
+fn run_deploy(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let artifact = matches
+        .get_one::<PathBuf>("artifact")
+        .context("expected artifact.tar.gz path")?;
+    validate_artifact_path(artifact)?;
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let options = DeployOptions {
+        environment: matches.get_one::<String>("environment").cloned(),
+        version_id: matches.get_one::<String>("version-id").cloned(),
+        deployment_id: matches.get_one::<String>("deployment-id").cloned(),
+    };
+    let (client, token_provider) = control_plane_context(config, matches)?;
+    let response = client.deploy(&token_provider, app_id, artifact, &options)?;
+    print_json(&response)
+}
+
+fn control_plane_context(
+    config: &SkillsConfig,
+    matches: &ArgMatches,
+) -> Result<(ControlPlaneClient, KgoosePurposeTokenProvider)> {
+    let base_url = matches
+        .get_one::<String>("apps-base-url")
+        .context("expected Apps Platform control-plane URL")?;
+    let client_version = matches
+        .get_one::<String>("apps-client-version")
+        .context("expected Apps Platform client version")?;
+    let client = ControlPlaneClient::new(base_url, client_version, config.style)?;
+    let token_provider = KgoosePurposeTokenProvider::from_config(config)?;
+    Ok((client, token_provider))
+}
+
+#[derive(Serialize)]
+struct PlanRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    environment: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_profile: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    persistence: Option<&'a str>,
+    client_version: &'a str,
+}
+
+#[derive(Default)]
+struct DeployOptions {
+    environment: Option<String>,
+    version_id: Option<String>,
+    deployment_id: Option<String>,
+}
+
+fn initialize_request_from_plan(plan: &Value) -> Value {
+    let mut request = Map::new();
+    for field in ["environment", "persistence", "runtime_class"] {
+        if let Some(value) = plan.get(field).and_then(Value::as_str) {
+            if !value.is_empty() {
+                request.insert(field.to_string(), Value::String(value.to_string()));
+            }
+        }
+    }
+    if let Some(display_name) = plan.get("display_name").and_then(Value::as_str) {
+        if !display_name.is_empty() {
+            request.insert("name".to_string(), Value::String(display_name.to_string()));
+        }
+    }
+    Value::Object(request)
+}
+
+fn required_response_string<'a>(
+    value: &'a Value,
+    field: &str,
+    description: &str,
+) -> Result<&'a str> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .with_context(|| format!("{description} response did not include {field}"))
+}
+
+fn validate_artifact_path(path: &Path) -> Result<()> {
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("read Apps Platform artifact {}", path.display()))?;
+    if !metadata.is_file() {
+        anyhow::bail!(
+            "Apps Platform artifact must be a file containing a prebuilt artifact.tar.gz: {}",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 /// Supplies the short-lived Compose bearer accepted by public ingress. Keeping
@@ -171,7 +412,7 @@ impl KgoosePurposeTokenProvider {
             .transpose()?;
 
         Ok(Self {
-            client: build_auth_http_client(REQUEST_TIMEOUT)?,
+            client: build_auth_http_client(TOKEN_EXCHANGE_REQUEST_TIMEOUT)?,
             exchange_url,
             session_credential,
             session_credential_sha256,
@@ -381,13 +622,28 @@ impl ComposeCredentialProvider for KgoosePurposeTokenProvider {
 
 struct ControlPlaneClient {
     client: Client,
-    contract_url: url::Url,
+    base_url: String,
     client_version: HeaderValue,
+    client_version_text: String,
     style: Style,
 }
 
 impl ControlPlaneClient {
     fn new(base_url: &str, client_version: &str, style: Style) -> Result<Self> {
+        Self::new_with_timeout(
+            base_url,
+            client_version,
+            style,
+            CONTROL_PLANE_REQUEST_TIMEOUT,
+        )
+    }
+
+    fn new_with_timeout(
+        base_url: &str,
+        client_version: &str,
+        style: Style,
+        request_timeout: Duration,
+    ) -> Result<Self> {
         let contract_url = auth_url(base_url, APPS_CONTRACT_PATH)
             .context("build Apps Platform control-plane contract URL")?;
         if !matches!(contract_url.scheme(), "http" | "https") {
@@ -403,47 +659,159 @@ impl ControlPlaneClient {
                 "Apps Platform control-plane URL must target an approved Builderlab ingress host or loopback local development"
             );
         }
+        let client_version_text = client_version.to_string();
         let client_version = HeaderValue::from_str(client_version)
             .context("Apps Platform client version is not a valid HTTP header value")?;
         Ok(Self {
-            client: build_auth_http_client(REQUEST_TIMEOUT)?,
-            contract_url,
+            client: build_auth_http_client(request_timeout)?,
+            base_url: base_url.to_string(),
             client_version,
+            client_version_text,
             style,
         })
     }
 
-    fn contract(&self, credential_provider: &dyn ComposeCredentialProvider) -> Result<Value> {
-        let authorization = credential_provider.authorization_header()?;
-        let (mut status, mut body) = self.contract_response(authorization.clone())?;
-        if status == StatusCode::UNAUTHORIZED {
-            if let Some(replacement) =
-                credential_provider.authorization_header_after_rejection(&authorization)?
-            {
-                (status, body) = self.contract_response(replacement)?;
-            }
-        }
-        if !status.is_success() {
-            return Err(control_plane_http_failure(status, &body));
-        }
-        serde_json::from_str(&body).context("parse Apps Platform control-plane contract response")
+    fn client_version_text(&self) -> &str {
+        &self.client_version_text
     }
 
-    fn contract_response(&self, authorization: HeaderValue) -> Result<(StatusCode, String)> {
-        self.style.verbose(&format!("GET {APPS_CONTRACT_PATH}"));
-        let request = self
-            .client
-            .get(self.contract_url.clone())
+    fn contract(&self, credential_provider: &dyn ComposeCredentialProvider) -> Result<Value> {
+        let url = self.endpoint(APPS_CONTRACT_PATH)?;
+        self.authorized_json_request(
+            credential_provider,
+            "GET",
+            APPS_CONTRACT_PATH,
+            |authorization| {
+                self.standard_request(self.client.get(url.clone()), authorization)
+                    .send()
+                    .map_err(|error| network_failure("GET", APPS_CONTRACT_PATH, error))
+            },
+        )
+    }
+
+    fn plan(
+        &self,
+        credential_provider: &dyn ComposeCredentialProvider,
+        request: &PlanRequest<'_>,
+    ) -> Result<Value> {
+        let url = self.endpoint(APPS_PLAN_PATH)?;
+        self.authorized_json_request(
+            credential_provider,
+            "POST",
+            APPS_PLAN_PATH,
+            |authorization| {
+                self.standard_request(self.client.post(url.clone()), authorization)
+                    .json(request)
+                    .send()
+                    .map_err(|error| network_failure("POST", APPS_PLAN_PATH, error))
+            },
+        )
+    }
+
+    fn initialize(
+        &self,
+        credential_provider: &dyn ComposeCredentialProvider,
+        app_id: &str,
+        request: &Value,
+    ) -> Result<Value> {
+        let url = self.app_action_url(app_id, "initialize")?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential_provider, "POST", &path, |authorization| {
+            self.standard_request(self.client.post(url.clone()), authorization)
+                .json(request)
+                .send()
+                .map_err(|error| network_failure("POST", &path, error))
+        })
+    }
+
+    fn deploy(
+        &self,
+        credential_provider: &dyn ComposeCredentialProvider,
+        app_id: &str,
+        artifact: &Path,
+        options: &DeployOptions,
+    ) -> Result<Value> {
+        let url = self.app_action_url(app_id, "deploy")?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential_provider, "POST", &path, |authorization| {
+            let form = deploy_form(artifact, options)?;
+            self.standard_request(self.client.post(url.clone()), authorization)
+                .multipart(form)
+                .send()
+                .map_err(|error| network_failure("POST", &path, error))
+        })
+    }
+
+    fn endpoint(&self, path: &str) -> Result<url::Url> {
+        auth_url(&self.base_url, path)
+            .with_context(|| format!("build Apps Platform control-plane {path} URL"))
+    }
+
+    fn app_action_url(&self, app_id: &str, action: &str) -> Result<url::Url> {
+        let mut url = self.endpoint("/v1/agent/apps")?;
+        url.path_segments_mut()
+            .map_err(|_| {
+                anyhow::anyhow!("Apps Platform control-plane URL cannot contain path segments")
+            })?
+            .push(app_id)
+            .push(action);
+        Ok(url)
+    }
+
+    fn standard_request(
+        &self,
+        request: RequestBuilder,
+        authorization: HeaderValue,
+    ) -> RequestBuilder {
+        request
             .header(USER_AGENT, apps_user_agent())
             .header(ACCEPT, "application/json")
             .header(
                 HOTPOD_AGENT_CLIENT_VERSION_HEADER,
                 self.client_version.clone(),
-            );
-        let response = request
+            )
             .header(AUTHORIZATION, authorization)
-            .send()
-            .map_err(|error| network_failure("GET", APPS_CONTRACT_PATH, error))?;
+    }
+
+    fn authorized_json_request<F>(
+        &self,
+        credential_provider: &dyn ComposeCredentialProvider,
+        method: &str,
+        path: &str,
+        send: F,
+    ) -> Result<Value>
+    where
+        F: Fn(HeaderValue) -> Result<Response>,
+    {
+        let authorization = credential_provider.authorization_header()?;
+        let (mut status, mut body) =
+            self.request_response(method, path, &send, authorization.clone())?;
+        if status == StatusCode::UNAUTHORIZED {
+            if let Some(replacement) =
+                credential_provider.authorization_header_after_rejection(&authorization)?
+            {
+                (status, body) = self.request_response(method, path, &send, replacement)?;
+            }
+        }
+        if !status.is_success() {
+            return Err(control_plane_http_failure(method, path, status, &body));
+        }
+        serde_json::from_str(&body)
+            .with_context(|| format!("parse Apps Platform {method} {path} response"))
+    }
+
+    fn request_response<F>(
+        &self,
+        method: &str,
+        path: &str,
+        send: &F,
+        authorization: HeaderValue,
+    ) -> Result<(StatusCode, String)>
+    where
+        F: Fn(HeaderValue) -> Result<Response>,
+    {
+        self.style.verbose(&format!("{method} {path}"));
+        let response = send(authorization)?;
         let status = response.status();
         let body = read_limited_response_body(
             response,
@@ -451,11 +819,30 @@ impl ControlPlaneClient {
             "Apps Platform control-plane",
         )?;
         self.style.verbose(&format!(
-            "GET {APPS_CONTRACT_PATH} -> {status} ({} bytes)",
+            "{method} {path} -> {status} ({} bytes)",
             body.len()
         ));
         Ok((status, body))
     }
+}
+
+fn deploy_form(artifact: &Path, options: &DeployOptions) -> Result<multipart::Form> {
+    let artifact_part = multipart::Part::file(artifact)
+        .with_context(|| format!("open Apps Platform artifact {}", artifact.display()))?
+        .file_name("artifact.tar.gz")
+        .mime_str("application/gzip")
+        .context("set Apps Platform artifact content type")?;
+    let mut form = multipart::Form::new().part("artifact", artifact_part);
+    for (name, value) in [
+        ("environment", options.environment.as_deref()),
+        ("version_id", options.version_id.as_deref()),
+        ("deployment_id", options.deployment_id.as_deref()),
+    ] {
+        if let Some(value) = value {
+            form = form.text(name.to_string(), value.to_string());
+        }
+    }
+    Ok(form)
 }
 
 fn is_trusted_control_plane_url(url: &url::Url) -> bool {
@@ -564,7 +951,12 @@ fn exchange_http_failure(status: StatusCode) -> anyhow::Error {
     )
 }
 
-fn control_plane_http_failure(status: StatusCode, body: &str) -> anyhow::Error {
+fn control_plane_http_failure(
+    method: &str,
+    path: &str,
+    status: StatusCode,
+    body: &str,
+) -> anyhow::Error {
     let parsed = serde_json::from_str::<Value>(body).ok();
     let code = parsed
         .as_ref()
@@ -579,7 +971,7 @@ fn control_plane_http_failure(status: StatusCode, body: &str) -> anyhow::Error {
                 .or_else(|| value.pointer("/error/next_action"))
         })
         .and_then(Value::as_str);
-    let mut message = format!("GET {APPS_CONTRACT_PATH} failed with {status}");
+    let mut message = format!("{method} {path} failed with {status}");
     if let Some(next_action) = next_action {
         message.push_str("\nnext_action: ");
         message.push_str(&terminal_safe_text(next_action));
@@ -609,7 +1001,8 @@ mod tests {
         let session_credential = "test-bbidentity-session";
         let session_storage_key = SessionStorageKey::new("test", exchange_url.as_str());
         KgoosePurposeTokenProvider {
-            client: build_auth_http_client(REQUEST_TIMEOUT).expect("build HTTP client"),
+            client: build_auth_http_client(TOKEN_EXCHANGE_REQUEST_TIMEOUT)
+                .expect("build HTTP client"),
             exchange_url,
             session_credential: HeaderValue::from_static(session_credential),
             session_credential_sha256: sha256(session_credential),
@@ -793,6 +1186,227 @@ mod tests {
 
         assert_eq!(contract["contract_version"], "test");
         server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn deploy_retries_once_and_reopens_the_artifact() {
+        struct RotatingCredentialProvider;
+
+        impl ComposeCredentialProvider for RotatingCredentialProvider {
+            fn authorization_header(&self) -> Result<HeaderValue> {
+                Ok(HeaderValue::from_static("Bearer rejected-token"))
+            }
+
+            fn authorization_header_after_rejection(
+                &self,
+                rejected: &HeaderValue,
+            ) -> Result<Option<HeaderValue>> {
+                assert_eq!(rejected, HeaderValue::from_static("Bearer rejected-token"));
+                Ok(Some(HeaderValue::from_static("Bearer rotated-token")))
+            }
+        }
+
+        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
+        let artifact_path = temporary_directory.path().join("artifact.tar.gz");
+        fs::write(&artifact_path, b"retryable-artifact-marker").expect("write artifact");
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            for (index, expected_token) in ["Bearer rejected-token", "Bearer rotated-token"]
+                .into_iter()
+                .enumerate()
+            {
+                let mut request = server.recv().expect("receive deploy request");
+                assert_eq!(request.method().as_str(), "POST");
+                assert_eq!(request.url(), "/v1/agent/apps/retry-app/deploy");
+                assert_eq!(
+                    request
+                        .headers()
+                        .iter()
+                        .find(|header| header.field.equiv("Authorization"))
+                        .map(|header| header.value.as_str()),
+                    Some(expected_token)
+                );
+                let mut body = Vec::new();
+                request
+                    .as_reader()
+                    .read_to_end(&mut body)
+                    .expect("read deploy body");
+                assert!(body
+                    .windows(b"retryable-artifact-marker".len())
+                    .any(|window| window == b"retryable-artifact-marker"));
+                if index == 0 {
+                    request
+                        .respond(Response::from_string("unauthorized").with_status_code(401))
+                        .expect("reject first deploy request");
+                } else {
+                    request
+                        .respond(
+                            Response::from_string(r#"{"ok":true,"version_id":"ver-test"}"#)
+                                .with_header(
+                                    Header::from_bytes("Content-Type", "application/json")
+                                        .expect("build content type"),
+                                ),
+                        )
+                        .expect("respond to retried deploy request");
+                }
+            }
+        });
+        let client = ControlPlaneClient::new(&base_url, "1.0.0", Style::new(true, false, false))
+            .expect("build control-plane client");
+
+        let response = client
+            .deploy(
+                &RotatingCredentialProvider,
+                "retry-app",
+                &artifact_path,
+                &DeployOptions::default(),
+            )
+            .expect("retry deploy request");
+
+        assert_eq!(response["version_id"], "ver-test");
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn initialize_and_deploy_allow_delayed_rollout_responses() {
+        struct StaticCredentialProvider;
+
+        impl ComposeCredentialProvider for StaticCredentialProvider {
+            fn authorization_header(&self) -> Result<HeaderValue> {
+                Ok(HeaderValue::from_static("Bearer test-token"))
+            }
+        }
+
+        assert!(CONTROL_PLANE_REQUEST_TIMEOUT > Duration::from_secs(2 * 60));
+        assert_eq!(TOKEN_EXCHANGE_REQUEST_TIMEOUT, Duration::from_secs(30));
+
+        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
+        let artifact_path = temporary_directory.path().join("artifact.tar.gz");
+        fs::write(&artifact_path, b"delayed-rollout-artifact").expect("write artifact");
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            let initialize = server.recv().expect("receive initialize request");
+            assert_eq!(initialize.url(), "/v1/agent/apps/delayed-app/initialize");
+            thread::sleep(Duration::from_millis(75));
+            initialize
+                .respond(
+                    Response::from_string(
+                        r#"{"ok":true,"app_id":"delayed-app","external_url":"https://delayed-app.example"}"#,
+                    )
+                    .with_header(
+                        Header::from_bytes("Content-Type", "application/json")
+                            .expect("build content type"),
+                    ),
+                )
+                .expect("respond to initialize request");
+
+            let mut deploy = server.recv().expect("receive deploy request");
+            assert_eq!(deploy.url(), "/v1/agent/apps/delayed-app/deploy");
+            let mut body = Vec::new();
+            deploy
+                .as_reader()
+                .read_to_end(&mut body)
+                .expect("read deploy body");
+            assert!(body
+                .windows(b"delayed-rollout-artifact".len())
+                .any(|window| window == b"delayed-rollout-artifact"));
+            thread::sleep(Duration::from_millis(75));
+            deploy
+                .respond(
+                    Response::from_string(r#"{"ok":true,"version_id":"ver-delayed"}"#).with_header(
+                        Header::from_bytes("Content-Type", "application/json")
+                            .expect("build content type"),
+                    ),
+                )
+                .expect("respond to deploy request");
+        });
+        let client = ControlPlaneClient::new_with_timeout(
+            &base_url,
+            "1.0.0",
+            Style::new(true, false, false),
+            Duration::from_secs(1),
+        )
+        .expect("build control-plane client");
+
+        let initialized = client
+            .initialize(
+                &StaticCredentialProvider,
+                "delayed-app",
+                &json!({"environment": "staging"}),
+            )
+            .expect("wait for delayed initialize response");
+        let deployed = client
+            .deploy(
+                &StaticCredentialProvider,
+                "delayed-app",
+                &artifact_path,
+                &DeployOptions::default(),
+            )
+            .expect("wait for delayed deploy response");
+
+        assert_eq!(initialized["app_id"], "delayed-app");
+        assert_eq!(deployed["version_id"], "ver-delayed");
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn control_plane_bounds_plan_responses() {
+        struct StaticCredentialProvider;
+
+        impl ComposeCredentialProvider for StaticCredentialProvider {
+            fn authorization_header(&self) -> Result<HeaderValue> {
+                Ok(HeaderValue::from_static("Bearer test-token"))
+            }
+        }
+
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            let request = server.recv().expect("receive plan request");
+            request
+                .respond(Response::from_data(vec![
+                    b'x';
+                    CONTROL_PLANE_RESPONSE_MAX_BYTES
+                        + 1
+                ]))
+                .expect("respond with oversized plan response");
+        });
+        let client = ControlPlaneClient::new(&base_url, "1.0.0", Style::new(true, false, false))
+            .expect("build control-plane client");
+        let request = PlanRequest {
+            app_id: Some("bounded-app"),
+            name: None,
+            environment: None,
+            runtime_profile: None,
+            persistence: None,
+            client_version: "1.0.0",
+        };
+
+        let error = client
+            .plan(&StaticCredentialProvider, &request)
+            .expect_err("reject oversized plan response");
+
+        assert!(error.to_string().contains("exceeded 2097152 bytes"));
+        assert!(!error.to_string().contains("test-token"));
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn app_ids_are_encoded_as_single_path_segments() {
+        let client = ControlPlaneClient::new(
+            "http://127.0.0.1:9",
+            "1.0.0",
+            Style::new(true, false, false),
+        )
+        .expect("build control-plane client");
+
+        let url = client
+            .app_action_url("app/../../identity", "deploy")
+            .expect("build app deploy URL");
+
+        assert_eq!(url.path(), "/v1/agent/apps/app%2F..%2F..%2Fidentity/deploy");
     }
 
     #[test]
