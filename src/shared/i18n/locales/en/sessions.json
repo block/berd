@@ -1,5 +1,6 @@
 {
   "card": {
+    "export": "Export…",
     "focusWindowFailed": "Failed to focus session window",
     "open": "Open {{title}}",
     "openInNewWindow": "Open in new window",

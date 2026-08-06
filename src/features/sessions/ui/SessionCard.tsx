@@ -1,36 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Archive,
-  ArchiveRestore,
-  CopyPlus,
-  Download,
-  ExternalLink,
-  MoreHorizontal,
-  Package,
-  Pencil,
-  PinIcon,
-} from "lucide-react";
+import { MoreHorizontal, Package } from "lucide-react";
 import {
   getDisplaySessionTitle,
   getEditableSessionTitle,
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
+import { useChatStore } from "@/features/chat/stores/chatStore";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/shared/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
 import { useExclusiveMenu } from "@/shared/ui/useExclusiveMenu";
+import { SessionActionsMenuContent } from "./SessionActionsMenuItems";
 
 interface SessionCardProps {
   id: string;
@@ -62,6 +47,8 @@ interface SessionCardProps {
   isOpenInWindow?: boolean;
   onPinSelectedToHome?: () => void;
   isPinningSelectedToHome?: boolean;
+  onMarkSelectedRead?: () => void;
+  onMarkSelectedUnread?: () => void;
 }
 
 export function SessionCard({
@@ -94,6 +81,8 @@ export function SessionCard({
   isOpenInWindow = false,
   onPinSelectedToHome,
   isPinningSelectedToHome = false,
+  onMarkSelectedRead,
+  onMarkSelectedUnread,
 }: SessionCardProps) {
   const { t } = useTranslation(["sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
@@ -105,6 +94,11 @@ export function SessionCard({
     pinToHome,
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "chat", id });
+  const hasUnread = useChatStore(
+    (state) => state.sessionStateById[id]?.hasUnread ?? false,
+  );
+  const markSessionRead = useChatStore((state) => state.markSessionRead);
+  const markSessionUnread = useChatStore((state) => state.markSessionUnread);
   const inputRef = useRef<HTMLInputElement>(null);
   const displayTitle = getDisplaySessionTitle(
     title,
@@ -302,146 +296,58 @@ export function SessionCard({
             <MoreHorizontal className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          variant="inverse"
-          align="start"
-          alignOffset={-4}
-          sideOffset={4}
-        >
-          {shouldApplyToSelection && (
-            <>
-              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
-                {t("history.selectedContext", {
-                  count: selectionCount,
-                  displayCount: selectionCount,
-                })}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          {archivedAt ? (
-            <>
-              <DropdownMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  onExport?.(id);
-                }}
-              >
-                <Download className="size-3.5" />
-                {t("common:actions.export")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  onUnarchive?.(id);
-                }}
-              >
-                <ArchiveRestore className="size-3.5" />
-                {t("common:actions.restore")}
-              </DropdownMenuItem>
-            </>
-          ) : (
-            <>
-              {!shouldApplyToSelection && (
-                <>
-                  {onOpenInWindow ? (
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onOpenInWindow(id);
-                      }}
-                    >
-                      <ExternalLink className="size-3.5" />
-                      {isOpenInWindow
-                        ? t("card.openWindow")
-                        : t("card.openInNewWindow")}
-                    </DropdownMenuItem>
-                  ) : null}
-                  <DropdownMenuItem onClick={startRename}>
-                    <Pencil className="size-3.5" />
-                    {t("common:actions.rename")}
-                  </DropdownMenuItem>
-                  {onFork ? (
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onFork(id);
-                      }}
-                    >
-                      <CopyPlus className="size-3.5" />
-                      {t("common:actions.duplicate")}
-                    </DropdownMenuItem>
-                  ) : null}
-                </>
-              )}
-              <DropdownMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  if (shouldApplyToSelection) {
-                    onPinSelectedToHome?.();
-                    return;
-                  }
-                  if (isPinnedToHome) {
-                    unpinFromHome();
-                    return;
-                  }
-                  void pinToHome();
-                }}
-                disabled={
-                  shouldApplyToSelection
-                    ? isPinningSelectedToHome
-                    : isPinningToHome
-                }
-              >
-                <PinIcon
-                  className="size-3.5"
-                  fill={
-                    !shouldApplyToSelection && isPinnedToHome
-                      ? "currentColor"
-                      : "none"
-                  }
-                />
-                {shouldApplyToSelection
-                  ? isPinningSelectedToHome
-                    ? t("common:actions.pinningChat")
-                    : t("common:actions.pinChat")
-                  : isPinnedToHome
-                    ? t("common:actions.unpinChat")
-                    : isPinningToHome
-                      ? t("common:actions.pinningChat")
-                      : t("common:actions.pinChat")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  if (shouldApplyToSelection) {
-                    onExportSelected?.();
-                    return;
-                  }
-                  onExport?.(id);
-                }}
-                disabled={shouldApplyToSelection && selectionActionsDisabled}
-              >
-                <Download className="size-3.5" />
-                {t("common:actions.export")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  if (shouldApplyToSelection) {
-                    onArchiveSelected?.();
-                    return;
-                  }
-                  onArchive?.(id);
-                }}
-                disabled={shouldApplyToSelection && selectionActionsDisabled}
-              >
-                <Archive className="size-3.5" />
-                {t("common:actions.archive")}
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
+        <SessionActionsMenuContent
+          sessionId={id}
+          onClose={() => setMenuOpen(false)}
+          archived={Boolean(archivedAt)}
+          hasUnread={hasUnread}
+          isPinned={isPinnedToHome}
+          isPinning={
+            shouldApplyToSelection ? isPinningSelectedToHome : isPinningToHome
+          }
+          isOpenInWindow={isOpenInWindow}
+          selectionCount={shouldApplyToSelection ? selectionCount : 0}
+          selectionActionsDisabled={selectionActionsDisabled}
+          onMarkRead={
+            shouldApplyToSelection
+              ? onMarkSelectedRead
+              : () => markSessionRead(id)
+          }
+          onMarkUnread={
+            shouldApplyToSelection
+              ? onMarkSelectedUnread
+              : () => markSessionUnread(id)
+          }
+          onTogglePin={() => {
+            if (shouldApplyToSelection) {
+              onPinSelectedToHome?.();
+              return;
+            }
+            if (isPinnedToHome) {
+              unpinFromHome();
+              return;
+            }
+            void pinToHome();
+          }}
+          onRename={onRename ? startRename : undefined}
+          onOpenInWindow={onOpenInWindow ? () => onOpenInWindow(id) : undefined}
+          onDuplicate={onFork ? () => onFork(id) : undefined}
+          onExport={
+            shouldApplyToSelection
+              ? onExportSelected
+              : onExport
+                ? () => onExport(id)
+                : undefined
+          }
+          onArchive={
+            shouldApplyToSelection
+              ? onArchiveSelected
+              : onArchive
+                ? () => onArchive(id)
+                : undefined
+          }
+          onRestore={onUnarchive ? () => onUnarchive(id) : undefined}
+        />
       </DropdownMenu>
     </div>
   );

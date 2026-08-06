@@ -44,16 +44,10 @@ import {
   type AcpSessionInfo,
 } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import {
-  saveExportedSessionFile,
-  saveExportedSessionFiles,
-} from "@/shared/api/system";
+import { exportSessionAction } from "../lib/exportSessionAction";
+import { saveExportedSessionFiles } from "@/shared/api/system";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
-import {
-  defaultExportFilename,
-  downloadJson,
-  exportFilenameFromPath,
-} from "../lib/exportSession";
+import { defaultExportFilename, downloadJson } from "../lib/exportSession";
 import {
   areSetsEqual,
   normalizeSelectedSessionIds,
@@ -509,10 +503,6 @@ export function SessionHistoryView({
     scrollMargin: listScrollMargin,
   });
 
-  const isSessionNotFoundError = useCallback((error: unknown) => {
-    const message = formatAcpErrorMessage(error, "");
-    return message.includes("not found in sessions or threads");
-  }, []);
   const groupedVirtualItems = groupedVirtualizer.getVirtualItems();
   const searchRows = useMemo(
     () => flattenFlatSessionRows(searchResults, columns),
@@ -601,41 +591,15 @@ export function SessionHistoryView({
 
   const handleExport = useCallback(
     async (sessionId: string) => {
-      try {
-        const session = activeSessions.find((s) => s.id === sessionId);
-        const json = await acpExportSession(sessionId);
-        const filename = defaultExportFilename(session?.title ?? "session");
-        const sessionName = session
-          ? getDisplayTitle(session)
-          : defaultSessionTitle;
-
-        if (window.__TAURI_INTERNALS__) {
-          const savedPath = await saveExportedSessionFile(filename, json);
-          if (!savedPath) {
-            return;
-          }
-          const savedFilename = exportFilenameFromPath(savedPath, filename);
-          toast.success(`Exported ${sessionName} to ${savedFilename}`);
-          return;
-        }
-
-        downloadJson(json, filename);
-        toast.success(`Exported ${sessionName} to ${filename}`);
-      } catch (error) {
-        console.error("Export failed:", error);
-        if (isSessionNotFoundError(error)) {
-          removeSession(sessionId);
-        }
-        toast.error(formatAcpErrorMessage(error, "Failed to export session"));
-      }
+      const session = activeSessions.find((s) => s.id === sessionId);
+      await exportSessionAction({
+        sessionId,
+        title: session?.title ?? "session",
+        displayTitle: session ? getDisplayTitle(session) : defaultSessionTitle,
+        onNotFound: () => removeSession(sessionId),
+      });
     },
-    [
-      activeSessions,
-      defaultSessionTitle,
-      getDisplayTitle,
-      isSessionNotFoundError,
-      removeSession,
-    ],
+    [activeSessions, defaultSessionTitle, getDisplayTitle, removeSession],
   );
 
   const handleOpenInWindow = useCallback(
@@ -674,6 +638,18 @@ export function SessionHistoryView({
     await pinBatchToHome("chat", ids);
     clearSelection();
   }, [clearSelection, pinBatchToHome, selectedSessionIds]);
+
+  const handleMarkSelectedRead = useCallback(() => {
+    const markSessionRead = useChatStore.getState().markSessionRead;
+    selectedSessionIds.forEach(markSessionRead);
+    clearSelection();
+  }, [clearSelection, selectedSessionIds]);
+
+  const handleMarkSelectedUnread = useCallback(() => {
+    const markSessionUnread = useChatStore.getState().markSessionUnread;
+    selectedSessionIds.forEach(markSessionUnread);
+    clearSelection();
+  }, [clearSelection, selectedSessionIds]);
 
   const handleExportSelected = useCallback(async () => {
     const sessionIds = Array.from(selectedSessionIds);
@@ -918,6 +894,8 @@ export function SessionHistoryView({
           isOpenInWindow={isMultiWindowEnabled && session.id in openSessions}
           onPinSelectedToHome={handlePinSelectedToHome}
           isPinningSelectedToHome={isPinningBatch}
+          onMarkSelectedRead={handleMarkSelectedRead}
+          onMarkSelectedUnread={handleMarkSelectedUnread}
         />
       );
 
@@ -959,6 +937,8 @@ export function SessionHistoryView({
       handleExportSelected,
       handleOpenInWindow,
       handlePinSelectedToHome,
+      handleMarkSelectedRead,
+      handleMarkSelectedUnread,
       isInitialReveal,
       isMultiWindowEnabled,
       isPinningBatch,

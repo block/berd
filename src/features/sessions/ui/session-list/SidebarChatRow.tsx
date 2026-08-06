@@ -1,6 +1,4 @@
 import {
-  type ComponentType,
-  type CSSProperties,
   type MouseEvent,
   type ReactNode,
   useEffect,
@@ -9,18 +7,8 @@ import {
   type PointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  Archive,
-  Check,
-  Copy,
-  CopyPlus,
-  ExternalLink,
-  Mail,
-  MailOpen,
-  MoreHorizontal,
-  Pencil,
-} from "lucide-react";
-import { IconGitBranch, IconPin } from "@tabler/icons-react";
+import { Check, ExternalLink, MoreHorizontal } from "lucide-react";
+import { IconGitBranch } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   getDisplaySessionTitle,
@@ -33,9 +21,13 @@ import {
 } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { createSessionDeepLink } from "@/features/sessions/lib/sessionDeepLink";
+import { exportSessionAction } from "@/features/sessions/lib/exportSessionAction";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
+import {
+  SessionActionsContextMenuContent,
+  SessionActionsMenuContent,
+} from "@/features/sessions/ui/SessionActionsMenuItems";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import {
   clearPointerDragClickSuppression,
@@ -48,7 +40,6 @@ import { Button } from "@/shared/ui/button";
 import { TOOLTIP_DELAY } from "@/shared/ui/tooltip-delay";
 import {
   SIDEBAR_CHAT_ROW_DENSITY_CLASSES,
-  SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_ROW_ACTIVE_CLASS,
@@ -59,28 +50,8 @@ import {
   type SidebarChatRowDensity,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/shared/ui/dropdown-menu";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuLabel,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from "@/shared/ui/context-menu";
+import { DropdownMenu, DropdownMenuTrigger } from "@/shared/ui/dropdown-menu";
+import { ContextMenu, ContextMenuTrigger } from "@/shared/ui/context-menu";
 import { Input } from "@/shared/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
@@ -140,58 +111,6 @@ export function formatSidebarChatTimestamp(
   return `${Math.max(years, 1)}y`;
 }
 
-type MenuItemComponent = ComponentType<{
-  children?: ReactNode;
-  className?: string;
-  disabled?: boolean;
-  onClick?: () => void;
-  onSelect?: () => void;
-  style?: CSSProperties;
-}>;
-
-type MenuLabelComponent = ComponentType<{
-  children?: ReactNode;
-  className?: string;
-  style?: CSSProperties;
-}>;
-
-type MenuSeparatorComponent = ComponentType<{
-  className?: string;
-}>;
-
-type MenuSubComponent = ComponentType<{
-  children?: ReactNode;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}>;
-
-type MenuSubTriggerComponent = ComponentType<{
-  children?: ReactNode;
-  className?: string;
-  style?: CSSProperties;
-  onClick?: () => void;
-  onPointerMove?: (event: PointerEvent) => void;
-  onPointerLeave?: (event: PointerEvent) => void;
-}>;
-
-type MenuSubContentComponent = ComponentType<{
-  children?: ReactNode;
-  className?: string;
-  onPointerMove?: (event: PointerEvent) => void;
-}>;
-
-type RenderMenuItemsOptions = {
-  Item: MenuItemComponent;
-  Label: MenuLabelComponent;
-  Separator: MenuSeparatorComponent;
-  /** Radix Sub primitives matching the surface (dropdown vs. context menu). */
-  Sub: MenuSubComponent;
-  SubTrigger: MenuSubTriggerComponent;
-  SubContent: MenuSubContentComponent;
-  itemClassName?: string;
-  itemStyle?: CSSProperties;
-};
-
 interface SidebarChatRowProps {
   id: string;
   title: string;
@@ -222,11 +141,6 @@ interface SidebarChatRowProps {
   /** Semantic row geometry for surfaces with a compact 8px leading rail. */
   geometry?: "default" | "refreshed-primary" | "project-secondary";
   titleTone?: "default" | "muted";
-  menuContentClassName?: string;
-  menuItemClassName?: string;
-  menuItemStyle?: CSSProperties;
-  menuLabelClassName?: string;
-  menuLabelStyle?: CSSProperties;
   flatProjectName?: string;
   flatProjectIcon?: string | null;
   flatProjectColor?: string | null;
@@ -249,7 +163,6 @@ interface SidebarChatRowProps {
   onMarkUnread?: (id: string) => void;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
-  renderExtraMenuItems?: (options: RenderMenuItemsOptions) => ReactNode;
 }
 
 export function SidebarChatRow({
@@ -277,11 +190,6 @@ export function SidebarChatRow({
   leadingIcon,
   geometry = "default",
   titleTone = "default",
-  menuContentClassName,
-  menuItemClassName,
-  menuItemStyle,
-  menuLabelClassName,
-  menuLabelStyle,
   flatProjectName,
   flatProjectIcon,
   flatProjectColor,
@@ -302,7 +210,6 @@ export function SidebarChatRow({
   onMarkUnread,
   onMarkSelectedRead,
   onMarkSelectedUnread,
-  renderExtraMenuItems,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const workingIndicatorAnimationPreference =
@@ -398,7 +305,6 @@ export function SidebarChatRow({
     isMultiWindowEnabled ? s.isOpenInWindow(id) : false,
   );
   const openWindowLabel = t("actions.openInWindow");
-  const openNewWindowLabel = t("actions.openInNewWindow");
   const rowTooltipLabel = isOpenInWindow
     ? openWindowLabel
     : t("actions.renameHint");
@@ -615,29 +521,12 @@ export function SidebarChatRow({
     });
   };
 
-  const handleCopyLink = () => {
-    const link = createSessionDeepLink(id);
-    closeMenus();
-    void (async () => {
-      if (window.__TAURI_INTERNALS__) {
-        const { writeText } = await import(
-          "@tauri-apps/plugin-clipboard-manager"
-        );
-        await writeText(link);
-        return;
-      }
-
-      const clipboard = navigator.clipboard;
-      if (!clipboard?.writeText) {
-        throw new Error("Clipboard API is unavailable");
-      }
-      await clipboard.writeText(link);
-    })()
-      .then(() => toast.success(t("actions.linkCopied")))
-      .catch((error) => {
-        console.error("Failed to copy session link:", error);
-        toast.error(t("actions.copyLinkFailed"));
-      });
+  const handleExport = () => {
+    void exportSessionAction({
+      sessionId: id,
+      title,
+      displayTitle,
+    });
   };
 
   const clearPointerDragListeners = () => {
@@ -745,181 +634,49 @@ export function SidebarChatRow({
     };
   }, []);
 
-  const renderMenuItems = ({
-    Item,
-    Label,
-    Separator,
-    Sub,
-    SubTrigger,
-    SubContent,
-  }: RenderMenuItemsOptions) => (
-    <>
-      {shouldApplyToSelection && (
-        <>
-          <Label
-            className={cn(
-              "text-sm font-medium text-muted-foreground",
-              menuLabelClassName,
-            )}
-            style={menuLabelStyle}
-          >
-            {t("bulk.selectedContext", {
-              count: selectionCount,
-              displayCount: selectionCount,
-            })}
-          </Label>
-          <Separator className="mx-2 bg-popover-inverse-muted-foreground/35" />
-        </>
-      )}
-      {!shouldApplyToSelection && (
-        <>
-          {isMultiWindowEnabled ? (
-            <Item
-              className={menuItemClassName}
-              onClick={
-                isOpenInWindow ? focusExistingWindow : handleOpenInWindow
-              }
-              style={menuItemStyle}
-            >
-              <ExternalLink className="size-3.5" />
-              {isOpenInWindow ? openWindowLabel : openNewWindowLabel}
-            </Item>
-          ) : null}
-          <Item
-            className={menuItemClassName}
-            onClick={startRename}
-            style={menuItemStyle}
-          >
-            <Pencil className="size-3.5" />
-            {t("common:actions.rename")}
-          </Item>
-          {onFork ? (
-            <Item
-              className={menuItemClassName}
-              onClick={() => {
-                closeMenus();
-                onFork(id);
-              }}
-              style={menuItemStyle}
-            >
-              <CopyPlus className="size-3.5" />
-              {t("common:actions.duplicate")}
-            </Item>
-          ) : null}
-          {currentProjectId && onEditProject && hasFlatProjectColumn ? (
-            <Item
-              className={menuItemClassName}
-              onClick={() => {
-                closeMenus();
-                onEditProject(currentProjectId);
-              }}
-              style={menuItemStyle}
-            >
-              <Pencil className="size-3.5" />
-              {projectEditLabel}
-            </Item>
-          ) : null}
-          {renderExtraMenuItems?.({
-            Item,
-            Label,
-            Separator,
-            Sub,
-            SubTrigger,
-            SubContent,
-            itemClassName: menuItemClassName,
-            itemStyle: menuItemStyle,
-          })}
-        </>
-      )}
-      <Item
-        className={menuItemClassName}
-        onClick={() => {
-          if (shouldApplyToSelection) {
-            onPinSelectedToHome?.();
-            return;
-          }
+  const sessionActionsMenuProps = {
+    sessionId: id,
+    onClose: closeMenus,
+    hasUnread,
+    isPinned: isPinnedToHome,
+    isPinning: shouldApplyToSelection
+      ? isPinningSelectedToHome
+      : isPinningToHome,
+    isOpenInWindow,
+    selectionCount: shouldApplyToSelection ? selectionCount : 0,
+    selectionActionsDisabled,
+    onMarkRead: shouldApplyToSelection
+      ? onMarkSelectedRead
+      : () => onMarkRead?.(id),
+    onMarkUnread: shouldApplyToSelection
+      ? onMarkSelectedUnread
+      : () => onMarkUnread?.(id),
+    onTogglePin: shouldApplyToSelection
+      ? onPinSelectedToHome
+      : () => {
           if (isPinnedToHome) {
             unpinFromHome();
             return;
           }
           void pinToHome();
-        }}
-        disabled={
-          shouldApplyToSelection ? isPinningSelectedToHome : isPinningToHome
-        }
-        style={menuItemStyle}
-      >
-        <IconPin className="size-3.5" />
-        {shouldApplyToSelection
-          ? isPinningSelectedToHome
-            ? t("common:actions.pinningChat")
-            : t("common:actions.pinChat")
-          : isPinnedToHome
-            ? t("common:actions.unpinChat")
-            : isPinningToHome
-              ? t("common:actions.pinningChat")
-              : t("common:actions.pinChat")}
-      </Item>
-      {!shouldApplyToSelection ? (
-        <Item
-          className={menuItemClassName}
-          onClick={handleCopyLink}
-          style={menuItemStyle}
-        >
-          <Copy className="size-3.5" />
-          {t("actions.copyLink")}
-        </Item>
-      ) : null}
-      {hasUnread ? (
-        <Item
-          className={menuItemClassName}
-          onClick={() => {
-            if (shouldApplyToSelection) {
-              onMarkSelectedRead?.();
-              return;
-            }
-            onMarkRead?.(id);
-          }}
-          disabled={shouldApplyToSelection && selectionActionsDisabled}
-          style={menuItemStyle}
-        >
-          <MailOpen className="size-3.5" />
-          {t("actions.markRead")}
-        </Item>
-      ) : (
-        <Item
-          className={menuItemClassName}
-          onClick={() => {
-            if (shouldApplyToSelection) {
-              onMarkSelectedUnread?.();
-              return;
-            }
-            onMarkUnread?.(id);
-          }}
-          disabled={shouldApplyToSelection && selectionActionsDisabled}
-          style={menuItemStyle}
-        >
-          <Mail className="size-3.5" />
-          {t("actions.markUnread")}
-        </Item>
-      )}
-      <Item
-        className={menuItemClassName}
-        onClick={() => {
-          if (shouldApplyToSelection) {
-            onArchiveSelected?.();
-            return;
-          }
-          onArchive?.(id);
-        }}
-        disabled={shouldApplyToSelection && selectionActionsDisabled}
-        style={menuItemStyle}
-      >
-        <Archive className="size-3.5" />
-        {t("common:actions.archive")}
-      </Item>
-    </>
-  );
+        },
+    onRename: startRename,
+    onOpenInWindow: isMultiWindowEnabled
+      ? isOpenInWindow
+        ? focusExistingWindow
+        : handleOpenInWindow
+      : undefined,
+    onDuplicate: onFork ? () => onFork(id) : undefined,
+    editProjectLabel: projectEditLabel,
+    onEditProject:
+      currentProjectId && onEditProject && hasFlatProjectColumn
+        ? () => onEditProject(currentProjectId)
+        : undefined,
+    onExport: shouldApplyToSelection ? undefined : handleExport,
+    onArchive: shouldApplyToSelection
+      ? onArchiveSelected
+      : () => onArchive?.(id),
+  };
 
   if (editing) {
     return (
@@ -1160,46 +917,11 @@ export function SidebarChatRow({
                 <MoreHorizontal className="size-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              variant="inverse"
-              align="start"
-              alignOffset={-4}
-              sideOffset={4}
-              className={cn(
-                SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
-                "w-52",
-                menuContentClassName,
-              )}
-            >
-              {renderMenuItems({
-                Item: DropdownMenuItem as MenuItemComponent,
-                Label: DropdownMenuLabel as MenuLabelComponent,
-                Separator: DropdownMenuSeparator as MenuSeparatorComponent,
-                Sub: DropdownMenuSub as MenuSubComponent,
-                SubTrigger: DropdownMenuSubTrigger as MenuSubTriggerComponent,
-                SubContent: DropdownMenuSubContent as MenuSubContentComponent,
-              })}
-            </DropdownMenuContent>
+            <SessionActionsMenuContent {...sessionActionsMenuProps} />
           </DropdownMenu>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent
-        variant="inverse"
-        className={cn(
-          SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
-          "w-52",
-          menuContentClassName,
-        )}
-      >
-        {renderMenuItems({
-          Item: ContextMenuItem as MenuItemComponent,
-          Label: ContextMenuLabel as MenuLabelComponent,
-          Separator: ContextMenuSeparator as MenuSeparatorComponent,
-          Sub: ContextMenuSub as MenuSubComponent,
-          SubTrigger: ContextMenuSubTrigger as MenuSubTriggerComponent,
-          SubContent: ContextMenuSubContent as MenuSubContentComponent,
-        })}
-      </ContextMenuContent>
+      <SessionActionsContextMenuContent {...sessionActionsMenuProps} />
     </ContextMenu>
   );
 }

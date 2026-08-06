@@ -1035,7 +1035,7 @@ describe("SidebarChatRow", () => {
 
     fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
     fireEvent.click(
-      await screen.findByRole("menuitem", { name: /copy local link/i }),
+      await screen.findByRole("menuitem", { name: /copy chat link/i }),
     );
 
     await waitFor(() =>
@@ -1075,7 +1075,7 @@ describe("SidebarChatRow", () => {
 
     fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
     await user.click(
-      await screen.findByRole("menuitem", { name: /copy local link/i }),
+      await screen.findByRole("menuitem", { name: /copy chat link/i }),
     );
 
     expect(writeText).toHaveBeenCalledWith(
@@ -1110,7 +1110,7 @@ describe("SidebarChatRow", () => {
 
     fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
     await user.click(
-      await screen.findByRole("menuitem", { name: /copy local link/i }),
+      await screen.findByRole("menuitem", { name: /copy chat link/i }),
     );
 
     await waitFor(() =>
@@ -1147,7 +1147,7 @@ describe("SidebarChatRow", () => {
 
     fireEvent.contextMenu(row, { clientX: 128, clientY: 256 });
     await user.click(
-      await screen.findByRole("menuitem", { name: /copy local link/i }),
+      await screen.findByRole("menuitem", { name: /copy chat link/i }),
     );
 
     await waitFor(() =>
