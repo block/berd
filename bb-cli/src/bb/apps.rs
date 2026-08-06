@@ -55,7 +55,10 @@ const COMPOSE_TOKEN_PURPOSE: &str = "compose";
 const PURPOSE_TOKEN_REFRESH_SKEW: Duration = Duration::from_secs(60);
 const PURPOSE_TOKEN_REPLACEMENT_INTERVAL: Duration = Duration::from_secs(60);
 const PURPOSE_TOKEN_LOCK_FILE: &str = "apps-purpose-token.lock";
-const TRUSTED_CONTROL_PLANE_HOSTS: &[&str] = &["test.blockstaging.build", "app.builderlab.xyz"];
+const TRUSTED_CONTROL_PLANE_HOSTS: &[&str] = &[
+    "compose-ctrl.test.blockstaging.build",
+    "compose-ctrl.app.builderlab.xyz",
+];
 
 pub fn command() -> Command {
     Command::new("apps")
@@ -1064,19 +1067,37 @@ mod tests {
     fn control_plane_restricts_token_recipients() {
         let style = Style::new(true, false, false);
 
-        assert!(ControlPlaneClient::new("https://test.blockstaging.build", "1.0.0", style).is_ok());
-        assert!(ControlPlaneClient::new("https://app.builderlab.xyz", "1.0.0", style).is_ok());
+        assert!(ControlPlaneClient::new(
+            "https://compose-ctrl.test.blockstaging.build",
+            "1.0.0",
+            style
+        )
+        .is_ok());
+        assert!(
+            ControlPlaneClient::new("https://compose-ctrl.app.builderlab.xyz", "1.0.0", style,)
+                .is_ok()
+        );
         assert!(ControlPlaneClient::new("http://localhost:8080", "1.0.0", style).is_ok());
         assert!(ControlPlaneClient::new("http://127.0.0.1:8080", "1.0.0", style).is_ok());
         assert!(ControlPlaneClient::new("http://[::1]:8080", "1.0.0", style).is_ok());
 
-        let error = ControlPlaneClient::new("http://compose.example", "1.0.0", style)
-            .err()
-            .expect("reject cleartext external URL");
+        let error = ControlPlaneClient::new(
+            "http://compose-ctrl.test.blockstaging.build",
+            "1.0.0",
+            style,
+        )
+        .err()
+        .expect("reject cleartext external URL");
         assert!(error.to_string().contains("must use https"));
 
         for untrusted in [
             "https://attacker.example",
+            "https://test.blockstaging.build",
+            "https://app.builderlab.xyz",
+            "https://compose-ctrl.test.blockstaging.build.attacker.example",
+            "https://compose-ctrl.test.blockstaging.build:444",
+            "https://compose-ctrl.app.builderlab.xyz.attacker.example",
+            "https://compose-ctrl.app.builderlab.xyz:444",
             "https://test.blockstaging.build.attacker.example",
             "https://test.blockstaging.build:444",
         ] {
