@@ -10,7 +10,7 @@ import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
-import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
+import { ConnectionsSettings } from "@/features/connections/ui/ConnectionsSettings";
 import { VoiceSettings } from "@/features/voice-conversation/ui/VoiceSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { SettingsPane } from "@/shared/ui/SettingsPage";
@@ -59,12 +59,9 @@ export function SettingsView({
     void refreshDoctorReportFreshness(queryClient);
   }, [doctorEnabled, queryClient]);
 
-  if (activeSection === "connections") {
-    return <ConnectionsView />;
-  }
-
   return (
     <SettingsPane>
+      {activeSection === "connections" && <ConnectionsSettings />}
       {activeSection === "providers" && (
         <ProvidersSettings
           onStartTroubleshootingChat={onStartTroubleshootingChat}

@@ -4183,8 +4183,6 @@ export function AppShell({
             ]
           : [current("settings", "Settings")];
       }
-      case "connections":
-        return [current("connections", "Connections")];
       case "projects":
         return [current("projects", "Projects")];
       case "search":
@@ -4824,10 +4822,7 @@ export function AppShell({
             ) : null}
             {showGlobalComposer ? (
               <GlobalComposerPill
-                elevated={
-                  renderedLocation.view === "settings" ||
-                  renderedLocation.view === "connections"
-                }
+                elevated={renderedLocation.view === "settings"}
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}
                 onExpand={handleGlobalComposerExpand}

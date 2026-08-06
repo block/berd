@@ -68,8 +68,6 @@ function renderLocationPlaceholder(location: AppNavigationLocation): ReactNode {
       return <HomeCanvasPlaceholder />;
     case "settings":
       return <SettingsPlaceholder />;
-    case "connections":
-      return <ConnectionsPlaceholder />;
     case "skills":
       return location.skillId ? (
         <DetailPlaceholder tone="library" />
@@ -346,26 +344,6 @@ function SessionHistoryPlaceholder() {
               <Skeleton className="h-4 w-4/5 rounded-sm" />
             </div>
             <Skeleton className="mt-5 h-3 w-24 rounded-sm" />
-          </div>
-        ))}
-      </div>
-    </PagePlaceholder>
-  );
-}
-
-function ConnectionsPlaceholder() {
-  return (
-    <PagePlaceholder contentClassName="gap-6">
-      <PageHeaderPlaceholder actions={0} />
-      <SearchPillPlaceholder className="max-w-lg" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {placeholderKeys.slice(0, 6).map((key) => (
-          <div
-            key={key}
-            className="flex items-center gap-3 rounded-md border border-border/60 bg-background/70 p-3"
-          >
-            <Skeleton className="size-4.5 rounded-full" />
-            <Skeleton className="h-4 w-32 rounded-sm" />
           </div>
         ))}
       </div>

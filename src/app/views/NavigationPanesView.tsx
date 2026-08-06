@@ -84,7 +84,6 @@ const MAIN_NAV_SCROLL_TARGETS: ReadonlySet<AppView> = new Set([
   "home",
   "agents",
   "skills",
-  "connections",
   "automations",
   "builderbot",
   "session-history",

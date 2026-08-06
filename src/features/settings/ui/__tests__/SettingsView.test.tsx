@@ -42,6 +42,14 @@ vi.mock("@/features/voice-conversation/ui/VoiceSettings", () => ({
   VoiceSettings: () => <div>voice.settings</div>,
 }));
 
+// This mock keeps the pane-identity assertions below focused on `SettingsView`'s
+// own tree shape. It cannot see inside the real component, so the companion
+// guard that the section itself renders no pane lives in
+// `ConnectionsSettings.pane.test.tsx`.
+vi.mock("@/features/connections/ui/ConnectionsSettings", () => ({
+  ConnectionsSettings: () => <div>connections.settings</div>,
+}));
+
 function renderSettingsView(
   activeSection: ComponentProps<
     typeof SettingsView
@@ -84,5 +92,54 @@ describe("SettingsView", () => {
     renderSettingsView("voice");
 
     expect(screen.queryByText("voice.settings")).not.toBeInTheDocument();
+  });
+
+  it("renders connections inside the shared settings pane", () => {
+    renderSettingsView("connections");
+
+    expect(screen.getByText("connections.settings")).toBeInTheDocument();
+  });
+
+  // BOT-1272: `connections` used to early-return its own `SettingsPane`, so
+  // switching to/from it made the pane a different component type at the same
+  // tree position. React unmounted and remounted the pane, replaying the
+  // `page-transition` enter animation (opacity 0 -> 1) and flashing the
+  // surface underneath. Every section must render into the same pane element
+  // so section switches only swap the pane's children.
+  it("keeps the same pane element when switching to and from connections", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    // `security` is a mocked section, so this asserts pane identity without
+    // dragging in a real section's provider requirements.
+    const { container, rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <SettingsView activeSection="security" />
+      </QueryClientProvider>,
+    );
+
+    // Assert on ALL matches, not just the first: a nested second pane would
+    // still animate on mount, and `querySelector` alone would not notice it.
+    const panesOf = () =>
+      Array.from(container.querySelectorAll(".page-transition"));
+    const initialPanes = panesOf();
+    expect(initialPanes).toHaveLength(1);
+    const initialPane = initialPanes[0];
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SettingsView activeSection="connections" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("connections.settings")).toBeInTheDocument();
+    expect(panesOf()).toEqual([initialPane]);
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SettingsView activeSection="security" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("security.title")).toBeInTheDocument();
+    expect(panesOf()).toEqual([initialPane]);
   });
 });

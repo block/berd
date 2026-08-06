@@ -22,7 +22,6 @@ import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import type { ExtensionEntry } from "@/features/extensions/types";
-import { ConnectionsView } from "@/features/connections/ui/ConnectionsView";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import type { CommandOutcome } from "@/features/berdctl/navigation";
@@ -437,8 +436,6 @@ function renderRouteContent({
           onReturnToAgentDraft={onReturnToAgentDraft}
         />
       );
-    case "connections":
-      return <ConnectionsView />;
     case "automations":
       return automationsEnabled ? (
         <AutomationsWorkbench

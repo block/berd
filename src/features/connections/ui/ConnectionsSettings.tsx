@@ -33,7 +33,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { PageHeader } from "@/shared/ui/page-shell";
-import { SettingsPane } from "@/shared/ui/SettingsPage";
 import {
   SettingsSection,
   SettingsSections,
@@ -79,7 +78,7 @@ function CardSkeleton() {
 }
 
 /**
- * Top-level Connections surface: one searchable grid of every MCP the agent
+ * The Connections settings section: one searchable grid of every MCP the agent
  * can use on the user's behalf.
  *
  * Org-managed OAuth services and user-added custom MCP servers are rows in
@@ -87,8 +86,15 @@ function CardSkeleton() {
  * or linked personally is a property of the data, not a UI division. Native
  * capabilities (built-in tools like web search) are deliberately absent; see
  * `nativeCapabilities.ts`.
+ *
+ * Renders its content *without* a page wrapper: `SettingsView` renders this
+ * into the one shared `SettingsPane` that every settings section uses. Adding
+ * a pane here would make the pane a different component type at the same tree
+ * position, so React would unmount/remount it and replay the
+ * `page-transition` enter animation, flashing the surface underneath
+ * (BOT-1272). `ConnectionsSettings.pane.test.tsx` guards this.
  */
-export function ConnectionsView() {
+export function ConnectionsSettings() {
   const { t } = useTranslation("settings");
   const queryClient = useQueryClient();
   const setTopBarActions = useSetTopBarActions();
@@ -256,7 +262,7 @@ export function ConnectionsView() {
     );
 
   return (
-    <SettingsPane contentClassName="gap-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title={t("connections.title")}
         description={t("connections.description")}
@@ -340,6 +346,6 @@ export function ConnectionsView() {
           onClose={handleModalClose}
         />
       )}
-    </SettingsPane>
+    </div>
   );
 }
