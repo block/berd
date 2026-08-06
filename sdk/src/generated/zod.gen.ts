@@ -1130,15 +1130,19 @@ export const zOnboardingImportApplyResponseUnstable = z.object({
     providerDefaults: zDefaultsReadResponseUnstable.nullish()
 });
 
+export const zSessionExportFormat = z.enum(['json', 'markdown']);
+
 /**
- * Export a session as a JSON string.
+ * Export a session as a JSON or markdown string.
  */
 export const zExportSessionRequestUnstable = z.object({
-    sessionId: z.string()
+    sessionId: z.string(),
+    format: zSessionExportFormat.optional().default('json')
 });
 
 /**
- * Export session response — raw JSON of the goose session with `conversation`.
+ * Export session response — raw JSON of the goose session with `conversation`,
+ * or a markdown transcript when `format` is `markdown`.
  */
 export const zExportSessionResponseUnstable = z.object({
     data: z.string()
