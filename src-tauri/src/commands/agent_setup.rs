@@ -18,9 +18,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::services::{managed_acp_tools, managed_node, path_env};
+use crate::services::{
+    distro_bundle::DistroBundleState, managed_acp_tools, managed_node, path_env,
+};
 use doctor::FixType;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Block's internal Artifactory npm registry. Direct access to
 /// `registry.npmjs.org` is blocked by Cloudflare WARP, so npm-backed agent
@@ -30,12 +32,21 @@ use tauri::{AppHandle, Emitter, State};
 pub(crate) const BLOCK_NPM_REGISTRY_URL: &str =
     "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";
 
-pub(crate) fn npm_registry() -> Option<&'static str> {
-    if cfg!(feature = "no-block-npm-registry") {
-        None
-    } else {
-        Some(BLOCK_NPM_REGISTRY_URL)
-    }
+pub(crate) fn npm_registry(app: &AppHandle) -> Option<String> {
+    app.try_state::<DistroBundleState>()
+        .and_then(|state| npm_registry_for_distro(state.inner()))
+        .or_else(fallback_npm_registry)
+}
+
+pub(crate) fn npm_registry_for_distro(distro_state: &DistroBundleState) -> Option<String> {
+    distro_state
+        .distribution_config()
+        .map(|config| config.npm_registry_url().to_string())
+        .or_else(fallback_npm_registry)
+}
+
+fn fallback_npm_registry() -> Option<String> {
+    (!cfg!(feature = "no-block-npm-registry")).then(|| BLOCK_NPM_REGISTRY_URL.to_string())
 }
 
 /// Cap the buffered output so emitting the full snapshot on every streamed line
@@ -345,7 +356,7 @@ async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::Doctor
     let target = crate_check_id(provider_id);
     let report = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
-            npm_registry: npm_registry().map(str::to_string),
+            npm_registry: npm_registry(app),
             check_freshness: false,
             offline: false,
             env: None,
@@ -629,7 +640,7 @@ async fn run_fix(
         fix_type,
         doctor::ExecuteFixOptions {
             command_override,
-            npm_registry: npm_registry().map(str::to_string),
+            npm_registry: npm_registry(app),
             env: None,
         }
         .with_env_snapshot(setup_env_vars(app).await),

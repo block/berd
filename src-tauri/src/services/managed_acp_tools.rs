@@ -407,11 +407,12 @@ pub async fn install_managed_tool(
     managed_node::ensure_managed_node_runtime(app, &progress)
         .await
         .map_err(ManagedToolError::Node)?;
+    let npm_registry = crate::commands::agent_setup::npm_registry(app);
     install_npm_tool(
         &packages_root,
         &node_install_dir,
         &tool,
-        crate::commands::agent_setup::npm_registry(),
+        npm_registry.as_deref(),
         on_line,
     )
     .await

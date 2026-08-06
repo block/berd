@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use crate::services::distro_bundle::DistroBundleState;
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use tauri::Manager;
@@ -76,11 +77,21 @@ pub(crate) fn current_target_triple() -> Option<&'static str> {
     }
 }
 
-fn node_dist_base_url() -> &'static str {
+fn node_dist_base_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    app.try_state::<DistroBundleState>()
+        .and_then(|state| {
+            state
+                .distribution_config()
+                .map(|config| config.node_dist_base_url().to_string())
+        })
+        .unwrap_or_else(fallback_node_dist_base_url)
+}
+
+fn fallback_node_dist_base_url() -> String {
     if cfg!(feature = "no-block-npm-registry") {
-        UPSTREAM_NODE_DIST_BASE_URL
+        UPSTREAM_NODE_DIST_BASE_URL.to_string()
     } else {
-        BLOCK_NODE_DIST_BASE_URL
+        BLOCK_NODE_DIST_BASE_URL.to_string()
     }
 }
 
@@ -237,7 +248,7 @@ pub async fn ensure_managed_node_runtime<R: tauri::Runtime>(
     })?;
     ensure_managed_node_runtime_at(
         &root,
-        node_dist_base_url(),
+        &node_dist_base_url(app),
         node_runtime_lock(),
         MAX_ARCHIVE_BYTES,
         progress,
@@ -755,9 +766,9 @@ mod tests {
     #[test]
     fn base_url_follows_registry_feature() {
         if cfg!(feature = "no-block-npm-registry") {
-            assert_eq!(node_dist_base_url(), UPSTREAM_NODE_DIST_BASE_URL);
+            assert_eq!(fallback_node_dist_base_url(), UPSTREAM_NODE_DIST_BASE_URL);
         } else {
-            assert_eq!(node_dist_base_url(), BLOCK_NODE_DIST_BASE_URL);
+            assert_eq!(fallback_node_dist_base_url(), BLOCK_NODE_DIST_BASE_URL);
         }
     }
 
