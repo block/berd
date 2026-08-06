@@ -20,7 +20,10 @@ export const SIDEBAR_ROW_HEIGHT_CLASS = "h-7";
 /** Shared vertical padding for sidebar nav items and chat rows. */
 export const SIDEBAR_ROW_VERTICAL_PADDING_CLASS = "py-1";
 
-/** Shared horizontal padding for top-level sidebar rows. */
+/** Shared horizontal inset for top-level sidebar rows. */
+export const SIDEBAR_ROW_HORIZONTAL_INSET_CLASS = "mx-1.5";
+
+/** Shared horizontal padding for top-level sidebar row content. */
 export const SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS = "px-3";
 
 /** Nav row spacing; matches chat row gap and vertical rhythm. */
