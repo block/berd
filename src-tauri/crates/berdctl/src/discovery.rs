@@ -11,7 +11,7 @@ use crate::client::Failure;
 /// `PROTOCOL_VERSION` in the `tauri-plugin-berdctl` crate
 /// (src-tauri/plugins/berdctl) — the CLI does not depend on the plugin
 /// crate; bump both copies together.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Exact wording pinned by the implementation spec: the missing env var is the
 /// provenance signal that we are not running under the app.

@@ -7,6 +7,8 @@ import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
+import { useWorkspaceAttachmentSync } from "@/features/chat/hooks/useWorkspaceAttachmentSync";
+import { usePendingSessionWorkspaceActivationDrain } from "@/features/berdctl/bridge/usePendingSessionWorkspaceActivationDrain";
 import { useZoom } from "@/shared/hooks/useZoom";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
@@ -14,15 +16,22 @@ import { Toaster } from "@/shared/ui/sonner";
 
 interface SessionWindowRuntimeProps {
   queryClient: QueryClient;
+  sessionId: string;
   children: ReactNode;
 }
 
 export function SessionWindowRuntime({
   queryClient,
+  sessionId,
   children,
 }: SessionWindowRuntimeProps) {
   useZoom();
   useSessionWindowTracking();
+  useWorkspaceAttachmentSync();
+  usePendingSessionWorkspaceActivationDrain({
+    allowWindowed: true,
+    sessionId,
+  });
 
   useEffect(() => {
     const preventWindowFileNavigation = (event: DragEvent) => {

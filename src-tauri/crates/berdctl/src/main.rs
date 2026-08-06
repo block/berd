@@ -276,7 +276,18 @@ mod tests {
             ("session", "move") => vec!["--session-id", "s", "--project-id", "p"],
             ("session", "move-to-group") => vec!["--session-id", "s", "--group-id", "g"],
             ("session", "clear-project") => vec!["--session-id", "s"],
-            ("session", "set-worktree") => vec!["--session-id", "s", "--path", "/w"],
+            ("folder", "attach") | ("folder", "detach") | ("folder", "set-cwd") => {
+                vec!["--session-id", "s", "--path", "/w"]
+            }
+            ("folder", "list") => vec!["--session-id", "s"],
+            ("folder", "replace") => vec![
+                "--session-id",
+                "s",
+                "--old-path",
+                "/old",
+                "--new-path",
+                "/new",
+            ],
             ("session", "fork") => vec!["--session-id", "s"],
             ("session", "archive") => vec!["--session-id", "s"],
             ("project", "create") => vec!["--name", "n"],
@@ -591,7 +602,7 @@ sees there:
 
   session   chat sessions        create, open, list, get, rename, move,
                                   move-to-group, send, clear-project,
-                                  set-worktree, fork, archive
+                                  fork, archive
   project   projects             create, list, get, set-startup-mode, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
@@ -606,7 +617,8 @@ Usage: berdctl [OPTIONS] <COMMAND>
 
 Commands:
   session   Manage chat sessions: create, send, open, list, get, rename, move,
-            move to group, clear project, set worktree, fork, archive
+            move to group, clear project, fork, archive
+  folder    Manage attached chat folders: attach, detach, replace, set cwd, list
   project   Manage projects: create, list, get, set startup mode, archive
   agent     Manage agents (personas): create, list
   skill     Manage skills: create, list, get

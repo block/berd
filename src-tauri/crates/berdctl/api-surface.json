@@ -1,9 +1,9 @@
 {
   "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. Client-neutral wire surface of the Berd desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the berdctl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (berdctl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/berdctl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/berdctl/__tests__/apiSurface.test.ts).",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, set worktree, fork, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Only check on it later (action \"get\") if the user asks.",
@@ -382,41 +382,6 @@
             "additionalProperties": false
           }
         },
-        "set_worktree": {
-          "description": "Point a chat session at a different worktree or folder; the session's active worktree updates immediately in the app and the agent works there from the next prompt. Files and git state are not moved.",
-          "fields": [
-            {
-              "name": "session_id",
-              "required": true,
-              "kind": "string",
-              "description": "Id of the session to re-point."
-            },
-            {
-              "name": "path",
-              "required": true,
-              "kind": "string",
-              "description": "Path of the worktree (or plain folder) the session should work in; must already exist on disk. `~` is expanded.",
-              "min": 1
-            }
-          ],
-          "schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "properties": {
-              "session_id": {
-                "description": "Id of the session to re-point.",
-                "type": "string"
-              },
-              "path": {
-                "description": "Path of the worktree (or plain folder) the session should work in; must already exist on disk. `~` is expanded.",
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "required": ["session_id", "path"],
-            "additionalProperties": false
-          }
-        },
         "fork": {
           "description": "Duplicate an existing chat session, copying its full conversation history into a new session the user can continue down an independent path. The fork appears in the app's session list; the user's current view does not change.",
           "fields": [
@@ -479,6 +444,196 @@
               "discard_changes": {
                 "description": "Discard local files and changes when removing managed worktrees or branches.",
                 "type": "boolean"
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "folders": {
+      "description": "Manage folders attached to chat sessions: attach, detach, replace, set cwd, list.",
+      "actions": {
+        "attach": {
+          "description": "Register an existing folder as chat context. If the chat still uses Berd's implicit default cwd, the folder becomes cwd safely after the current turn; otherwise cwd stays unchanged. Repeating the command is safe and refreshes Git identity.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to attach to.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing absolute folder, repository, or worktree path; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to attach to.",
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "description": "Existing absolute folder, repository, or worktree path; ~ is expanded.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "detach": {
+          "description": "Remove an existing folder from chat context without deleting anything. If it is cwd, the chat safely falls back to the first remaining attachment or Berd's default cwd.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to detach from.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing attached folder, repository, or worktree path; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to detach from.",
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "description": "Existing attached folder, repository, or worktree path; ~ is expanded.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "replace": {
+          "description": "Use this for requests to switch or move the chat to a new worktree/folder. Validate first, then replace the old attachment in place without deleting anything. Replacing cwd safely moves cwd to the replacement.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to update.",
+              "min": 1
+            },
+            {
+              "name": "old_path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing attached folder path to detach; ~ is expanded.",
+              "min": 1
+            },
+            {
+              "name": "new_path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing replacement folder path to attach; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to update.",
+                "type": "string",
+                "minLength": 1
+              },
+              "old_path": {
+                "description": "Existing attached folder path to detach; ~ is expanded.",
+                "type": "string",
+                "minLength": 1
+              },
+              "new_path": {
+                "description": "Existing replacement folder path to attach; ~ is expanded.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["session_id", "old_path", "new_path"],
+            "additionalProperties": false
+          }
+        },
+        "set_cwd": {
+          "description": "Use this to select an already attached folder, or when the previous folder should remain additional context. It implicitly attaches the target and changes cwd immediately when idle or safely after the current turn.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to update.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing authorized folder to use as cwd; implicitly attached if needed.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to update.",
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "description": "Existing authorized folder to use as cwd; implicitly attached if needed.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "description": "List every attached folder with its Git identity and whether it is the chat's current working directory.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to inspect.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to inspect.",
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": ["session_id"],

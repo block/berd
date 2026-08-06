@@ -64,12 +64,12 @@ interface WorkspaceWidgetProps {
     runtime: WorkspaceGitRuntime,
     worktree: CreatedWorktree,
     context: CreatedWorkspaceWorktreeContext,
-  ) => void;
+  ) => Promise<void>;
   onSelectWorktree: (
     runtime: WorkspaceGitRuntime,
     path: string,
     branch: string | null,
-  ) => void;
+  ) => Promise<void>;
   onSwitchBranch: (
     runtime: WorkspaceGitRuntime,
     path: string,
@@ -129,12 +129,12 @@ function WorkspaceRow({
     runtime: WorkspaceGitRuntime,
     worktree: CreatedWorktree,
     context: CreatedWorkspaceWorktreeContext,
-  ) => void;
+  ) => Promise<void>;
   onSelectWorktree: (
     runtime: WorkspaceGitRuntime,
     path: string,
     branch: string | null,
-  ) => void;
+  ) => Promise<void>;
   onSwitchBranch: (
     runtime: WorkspaceGitRuntime,
     path: string,
@@ -240,8 +240,8 @@ function WorkspaceRow({
             currentPath={gitContext.actionPath}
             activeBranch={gitContext.branch}
             disabled={disabled}
-            onSelectWorktree={(path, branch) =>
-              onSelectWorktree(runtime, path, branch)
+            onSelectWorktree={async (path, branch) =>
+              await onSelectWorktree(runtime, path, branch)
             }
             onSwitchBranch={(path, branch) =>
               onSwitchBranch(runtime, path, branch)
@@ -254,8 +254,8 @@ function WorkspaceRow({
               onCreateBranch(runtime, path, name, baseBranch)
             }
             onCreateWorktree={onCreateWorktree}
-            onWorktreeCreated={(worktree, context) =>
-              onWorktreeCreated(runtime, worktree, context)
+            onWorktreeCreated={async (worktree, context) =>
+              await onWorktreeCreated(runtime, worktree, context)
             }
           />
         </div>

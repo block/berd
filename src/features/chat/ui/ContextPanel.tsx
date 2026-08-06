@@ -67,6 +67,7 @@ import {
   releaseWorkspaceSendAfterUserEdit,
 } from "@/features/chat/lib/firstWorkspaceSend";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
+import { supersedePendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import { useChatStore } from "../stores/chatStore";
 import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
 import type { WorkspaceRemovalPlan } from "./widgets/WorkspaceRowActionsMenu";
@@ -450,7 +451,7 @@ export function ContextPanel({
   );
 
   const handleWorkspaceWorktreeSelected = useCallback(
-    (
+    async (
       runtime: WorkspaceGitRuntime,
       worktreePath: string,
       branch: string | null,
@@ -477,6 +478,9 @@ export function ContextPanel({
       const replacesActiveWorkspace =
         session.activeWorkspaceId === runtime.workspace.id ||
         isSameWorkspacePath(activeContext?.path, runtime.workspace.path);
+      if (replacesActiveWorkspace) {
+        await supersedePendingSessionWorkspaceActivation(sessionId);
+      }
       patchSession(sessionId, {
         ...(replacesActiveWorkspace ? { workingDir: nextPath } : {}),
         workspaceAttachments: getWorkspaceAttachments(session).map(
@@ -574,6 +578,7 @@ export function ContextPanel({
       }
 
       await ensureDirectory(selected);
+      await supersedePendingSessionWorkspaceActivation(sessionId);
       await updateWorkingDir(sessionId, selected);
       patchSession(sessionId, { workingDir: selected });
       setActiveWorkspace(sessionId, { path: selected, branch: null });
@@ -856,7 +861,7 @@ export function ContextPanel({
   );
 
   const handleWorkspaceWorktreeCreated = useCallback(
-    (
+    async (
       runtime: WorkspaceGitRuntime,
       worktree: CreatedWorktree,
       context: CreatedWorkspaceWorktreeContext,
@@ -899,6 +904,7 @@ export function ContextPanel({
         .sessions.find((candidate) => candidate.id === sessionId);
       if (!session) return;
       const nextWorkspaceId = workspaceAttachmentIdForPath(includedPath);
+      await supersedePendingSessionWorkspaceActivation(sessionId);
       patchSession(sessionId, {
         workingDir: includedPath,
         workspaceAttachments: getWorkspaceAttachments(session).map(

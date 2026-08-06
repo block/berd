@@ -144,7 +144,10 @@ if (bootError) {
         <React.StrictMode>
           <TooltipProvider>
             <RendererErrorBoundary>
-              <SessionWindowRuntime queryClient={queryClient}>
+              <SessionWindowRuntime
+                queryClient={queryClient}
+                sessionId={decodedSessionId}
+              >
                 <SessionWindowApp sessionId={decodedSessionId} />
               </SessionWindowRuntime>
             </RendererErrorBoundary>

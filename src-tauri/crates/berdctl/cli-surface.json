@@ -3,7 +3,7 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, set worktree, fork, archive",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, fork, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -50,11 +50,6 @@
           "about": "Move a chat session out of any project",
           "afterHelp": "Example:\n  berdctl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
         },
-        "set-worktree": {
-          "action": "set_worktree",
-          "about": "Point a chat session at a different worktree or folder",
-          "afterHelp": "Worktree paths come from the repo (`git worktree list`); any existing\nfolder works. The session's current folder is in `berdctl session get`'s\nworking_dir.\n\nExample:\n  berdctl session set-worktree --session-id <session-id> \\\n    --path ~/src/repo-worktrees/my-feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"branch\": \"...\"|null}\n  \"branch\" is the branch checked out in that folder, or null for a\n  non-git folder."
-        },
         "fork": {
           "action": "fork",
           "about": "Fork a chat session into an independent copy with its history",
@@ -64,6 +59,37 @@
           "action": "archive",
           "about": "Archive a chat and clean up its Goose-managed Git resources",
           "afterHelp": "By default, the command refuses to archive when Git cleanup would discard local files or changes.\nUse --discard-changes to allow that loss. The command never opens an interactive prompt.\n\nExamples:\n  berdctl session archive --session-id <session-id>\n  berdctl session archive --session-id <session-id> --discard-changes\n\nResult:\n  {\"ok\": true} — the session was archived and eligible worktrees and branches were removed."
+        }
+      }
+    },
+    "folder": {
+      "group": "folders",
+      "about": "Manage attached chat folders: attach, detach, replace, set cwd, list",
+      "verbs": {
+        "attach": {
+          "action": "attach",
+          "about": "Attach a folder, repository, or worktree to a chat",
+          "afterHelp": "Use this after creating or adopting a folder inside a workspace root already authorized for the chat. Registered Git worktrees of an authorized repository are also allowed; select a new unrelated root in Berd first.\n\nExample:\n  berdctl folder attach --session-id <session-id> --path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null}"
+        },
+        "detach": {
+          "action": "detach",
+          "about": "Detach a folder, repository, or worktree from a chat",
+          "afterHelp": "Detach the checked-out folder to detach its branch from chat context. This does not delete anything from disk or Git.\n\nExample:\n  berdctl folder detach --session-id <session-id> --path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"detached\": true|false}"
+        },
+        "replace": {
+          "action": "replace",
+          "about": "Replace the chat's current folder with another",
+          "afterHelp": "Prefer this over set-cwd when the user says to switch or move the chat to a new worktree/folder and does not ask to retain the old folder as context. Use set-cwd to select an already attached folder or when the old attachment should remain.\n\nThe old path must be attached. For the usual switch flow, get the current cwd from `berdctl folder list` and pass it as --old-path.\n\nExample:\n  berdctl folder replace --session-id <session-id> --old-path ~/src/repo --new-path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"oldPath\": \"...\", \"newPath\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null}"
+        },
+        "set-cwd": {
+          "action": "set_cwd",
+          "about": "Select a chat folder as cwd, retaining other attachments",
+          "afterHelp": "For a request to switch or move the chat to a new worktree/folder, prefer `folder replace` so the old folder leaves context. Use this command when selecting among attachments or intentionally retaining the old folder.\n\nThe path must satisfy the same authorization rules as folder attach. Files and Git state are not moved.\n\nExample:\n  berdctl folder set-cwd --session-id <session-id> --path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null, \"status\": \"applied\"|\"pending\"}"
+        },
+        "list": {
+          "action": "list",
+          "about": "List folders attached to a chat and identify its cwd",
+          "afterHelp": "The top-level cwd is returned even when it is Berd's implicit default and is not an attached folder.\n\nExample:\n  berdctl folder list --session-id <session-id>\n\nResult:\n  {\"ok\": true, \"cwd\": \"...\", \"folders\": [{\"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null, \"cwd\": true|false}]}"
         }
       }
     },

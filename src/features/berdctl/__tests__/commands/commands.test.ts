@@ -15,6 +15,11 @@ import {
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import {
+  applyPendingSessionWorkspaceActivation,
+  getPendingSessionWorkspaceActivation,
+  queueSessionWorkspaceActivation,
+} from "@/features/chat/lib/sessionWorkspaceActivation";
+import {
   useChatSessionStore,
   type ChatSession,
 } from "@/features/chat/stores/chatSessionStore";
@@ -26,6 +31,7 @@ import { DEFAULT_PROJECT_ICON } from "@/features/projects/lib/projectIcons";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
 import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
 import { createUserMessage, getTextContent } from "@/shared/types/messages";
@@ -57,6 +63,7 @@ const mocks = vi.hoisted(() => ({
   rollbackProjectChatWorkspacePlan: vi.fn(),
   resolvePath: vi.fn(),
   checkDirectoriesExist: vi.fn(),
+  canonicalizeAuthorizedWorkspaceDirectory: vi.fn(),
   getGitState: vi.fn(),
   updateWorkingDir: vi.fn(),
   createPersona: vi.fn(),
@@ -90,7 +97,14 @@ vi.mock("@/shared/api/acpApi", () => ({
   unarchiveSession: vi.fn(),
   renameSession: vi.fn().mockResolvedValue(undefined),
   updateSessionProject: vi.fn().mockResolvedValue(undefined),
-  updateWorkingDir: (...args: unknown[]) => mocks.updateWorkingDir(...args),
+  updateWorkingDir: (
+    sessionId: string,
+    path: string,
+    beforeUpdate?: () => void,
+  ) => {
+    beforeUpdate?.();
+    return mocks.updateWorkingDir(sessionId, path);
+  },
 }));
 
 vi.mock("@/shared/api/git", () => ({
@@ -101,6 +115,8 @@ vi.mock("@/shared/api/pathResolver", () => ({
   resolvePath: (...args: unknown[]) => mocks.resolvePath(...args),
   checkDirectoriesExist: (...args: unknown[]) =>
     mocks.checkDirectoriesExist(...args),
+  canonicalizeAuthorizedWorkspaceDirectory: (...args: unknown[]) =>
+    mocks.canonicalizeAuthorizedWorkspaceDirectory(...args),
 }));
 
 vi.mock("@/shared/api/sessionSearch", () => ({
@@ -297,6 +313,7 @@ async function expectCommandError(
 }
 
 beforeEach(() => {
+  localStorage.removeItem("goose:chat-workspace-metadata");
   useChatSessionStore.setState({
     sessions: [],
     activeSessionId: null,
@@ -333,6 +350,8 @@ beforeEach(() => {
     refreshingProviderIds: new Set(),
   });
 
+  window.localStorage.clear();
+  setMultiWorkspaceEnabled(true);
   vi.clearAllMocks();
   mocks.acpGetSessionInfo.mockReset();
   mocks.acpListSessionsPage.mockReset();
@@ -529,7 +548,15 @@ describe("action schemas", () => {
       "sessions.move": { session_id: "s1", project_id: "p1" },
       "sessions.move_to_group": { session_id: "s1", group_id: "g1" },
       "sessions.clear_project": { session_id: "s1" },
-      "sessions.set_worktree": { session_id: "s1", path: "/tmp/wt" },
+      "folders.attach": { session_id: "s1", path: "/tmp/wt" },
+      "folders.detach": { session_id: "s1", path: "/tmp/wt" },
+      "folders.replace": {
+        session_id: "s1",
+        old_path: "/tmp/old",
+        new_path: "/tmp/new",
+      },
+      "folders.set_cwd": { session_id: "s1", path: "/tmp/wt" },
+      "folders.list": { session_id: "s1" },
       "sessions.fork": { session_id: "s1" },
       "sessions.archive": { session_id: "s1" },
       "projects.create": { name: "Project" },
@@ -978,6 +1005,57 @@ describe("sessions.send", () => {
         }),
       );
     });
+  });
+
+  it("applies a pending cwd switch before preparing and dispatching", async () => {
+    mockSessionFound({
+      providerId: "codex-acp",
+      workingDir: "/session/cwd",
+    });
+    queueSessionWorkspaceActivation({
+      sessionId: "session-1",
+      path: "/workspace/next",
+      branch: "feature",
+    });
+
+    let releaseUpdate: (() => void) | undefined;
+    mocks.updateWorkingDir.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseUpdate = resolve;
+        }),
+    );
+
+    const send = dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "continue there",
+      },
+      ctx,
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.updateWorkingDir).toHaveBeenCalledWith(
+        "session-1",
+        "/workspace/next",
+      );
+    });
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    releaseUpdate?.();
+    await send;
+
+    expect(mocks.resolveSessionCwd).toHaveBeenCalledWith(
+      null,
+      "/workspace/next",
+    );
+    expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "codex-acp",
+      "/resolved/cwd",
+    );
+    expect(getPendingSessionWorkspaceActivation("session-1")).toBeNull();
   });
 
   it("prepares from session metadata refreshed during hydration", async () => {
@@ -2323,55 +2401,119 @@ describe("sessions.move_to_group", () => {
   });
 });
 
-describe("sessions.set_worktree", () => {
-  it("re-points the session and mirrors the app's active worktree state", async () => {
-    mockSessionFound();
-    mocks.resolvePath.mockResolvedValue({
-      path: "/Users/me/repo-worktrees/feature",
+describe("folders.attach", () => {
+  it("attaches a classified workspace without changing the active cwd", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
     });
     mocks.getGitState.mockResolvedValue({
       isGitRepo: true,
       currentBranch: "feature",
       dirtyFileCount: 0,
       incomingCommitCount: 0,
-      worktrees: [],
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: "/repo-wt", branch: "feature", isMain: false },
+      ],
       isWorktree: true,
-      mainWorktreePath: "/Users/me/repo",
+      mainWorktreePath: "/repo",
       localBranches: ["main", "feature"],
     });
 
     const result = await dispatchCommand(
-      "sessions",
-      {
-        action: "set_worktree",
-        session_id: "session-1",
-        path: "~/repo-worktrees/feature",
-      },
+      "folders",
+      { action: "attach", session_id: "session-1", path: "/repo-wt" },
       ctx,
     );
 
     expect(result).toEqual({
       ok: true,
-      path: "/Users/me/repo-worktrees/feature",
+      path: "/repo-wt",
+      kind: "git-linked-worktree",
       branch: "feature",
     });
-    expect(mocks.updateWorkingDir).toHaveBeenCalledWith(
-      "session-1",
-      "/Users/me/repo-worktrees/feature",
-      expect.any(Function),
+    const session = useChatSessionStore.getState().getSession("session-1");
+    expect(session?.workingDir).toBe("/repo");
+    expect(session?.workspaceAttachments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/repo-wt",
+          branch: "feature",
+          usedByAgent: true,
+        }),
+      ]),
     );
-    const store = useChatSessionStore.getState();
-    expect(store.getSession("session-1")?.workingDir).toBe(
-      "/Users/me/repo-worktrees/feature",
-    );
-    expect(store.activeWorkspaceBySession["session-1"]).toEqual({
-      path: "/Users/me/repo-worktrees/feature",
-      branch: "feature",
-    });
   });
 
-  it("reports a null branch for a non-git folder", async () => {
-    mockSessionFound();
+  it("rejects a second distinct attachment while multi-workspace support is off", async () => {
+    setMultiWorkspaceEnabled(false);
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+
+    const error = await expectCommandError(
+      dispatchCommand(
+        "folders",
+        { action: "attach", session_id: "session-1", path: "/repo-wt" },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(error.message).toContain("Multi-workspace support is disabled");
+  });
+
+  it("does not attach an unverifiable path", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockRejectedValue(
+      new Error("outside allowed filesystem"),
+    );
+
+    await expectCommandError(
+      dispatchCommand(
+        "folders",
+        {
+          action: "attach",
+          session_id: "session-1",
+          path: "/private",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession("session-1")
+        ?.workspaceAttachments?.some(
+          (attachment) => attachment.path === "/private",
+        ),
+    ).toBe(false);
+  });
+  it("detaches by canonical path without changing the working directory", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    seedSessions({
+      id: "session-1",
+      title: "Test Session",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 2,
+      workingDir: "/repo",
+      workspaceAttachments: [
+        {
+          id: "path:/repo-wt",
+          path: "/repo-wt",
+          kind: "git-linked-worktree",
+          source: "selected",
+          branch: "feature",
+          usedByAgent: true,
+        },
+      ],
+    });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
     mocks.getGitState.mockResolvedValue({
       isGitRepo: false,
       currentBranch: null,
@@ -2384,182 +2526,477 @@ describe("sessions.set_worktree", () => {
     });
 
     const result = await dispatchCommand(
-      "sessions",
-      { action: "set_worktree", session_id: "session-1", path: "/tmp/plain" },
+      "folders",
+      {
+        action: "detach",
+        session_id: "session-1",
+        path: "/repo-wt/..//repo-wt",
+      },
       ctx,
     );
 
-    expect(result).toEqual({ ok: true, path: "/tmp/plain", branch: null });
+    expect(result).toEqual({
+      ok: true,
+      path: "/repo-wt",
+      detached: true,
+      cwd: "/repo",
+      cwdStatus: "unchanged",
+    });
+    const updated = useChatSessionStore.getState().getSession("session-1");
+    expect(updated?.workingDir).toBe("/repo");
     expect(
-      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
-    ).toEqual({ path: "/tmp/plain", branch: null });
+      updated?.workspaceAttachments?.some((item) => item.path === "/repo-wt"),
+    ).toBe(false);
   });
 
-  it("rejects a missing directory before touching the session", async () => {
-    mockSessionFound();
-    mocks.checkDirectoriesExist.mockResolvedValue(["/nope"]);
+  it("is idempotent when an authorized folder is not attached", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo/missing",
+    });
+    mocks.getGitState.mockResolvedValue({
+      isGitRepo: false,
+      currentBranch: null,
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: [],
+    });
+
+    await expect(
+      dispatchCommand(
+        "folders",
+        {
+          action: "detach",
+          session_id: "session-1",
+          path: "/repo/missing",
+        },
+        ctx,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      path: "/repo/missing",
+      detached: false,
+      cwd: "/repo",
+      cwdStatus: "unchanged",
+    });
+  });
+
+  it("replaces one folder with another through the folder command group", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    seedSessions({
+      id: "session-1",
+      title: "Test Session",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 2,
+      workingDir: "/repo",
+      workspaceAttachments: [
+        {
+          id: "path:/repo",
+          path: "/repo",
+          kind: "git-main-worktree",
+          source: "selected",
+          branch: "main",
+          usedByAgent: true,
+        },
+      ],
+    });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockImplementation(
+      async ({ path }: { path: string }) => ({ path }),
+    );
+    mocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "feature",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: "/repo-wt", branch: "feature", isMain: false },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "feature"],
+    });
+
+    await expect(
+      dispatchCommand(
+        "folders",
+        {
+          action: "replace",
+          session_id: "session-1",
+          old_path: "/repo",
+          new_path: "/repo-wt",
+        },
+        ctx,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      oldPath: "/repo",
+      newPath: "/repo-wt",
+      kind: "git-linked-worktree",
+      branch: "feature",
+      cwd: "/repo-wt",
+      cwdStatus: "pending",
+    });
+  });
+
+  it("refuses detach and replace for sessions owned by another window", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([
+        { sessionId: "session-1", windowLabel: "session-session-1" },
+      ]);
+
+    for (const args of [
+      { action: "detach", session_id: "session-1", path: "/repo" },
+      {
+        action: "replace",
+        session_id: "session-1",
+        old_path: "/repo",
+        new_path: "/repo-wt",
+      },
+    ] as const) {
+      const error = await expectCommandError(
+        dispatchCommand("folders", args, ctx),
+        "target_session_running",
+      );
+      expect(error.message).toContain("separate window");
+    }
+  });
+
+  it("lists attached folders and marks cwd", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    seedSessions({
+      ...makeSession({ workingDir: "/repo" }),
+      workspaceAttachments: [
+        {
+          id: "path:/repo",
+          path: "/repo",
+          kind: "git-main-worktree",
+          source: "selected",
+          branch: "main",
+          usedByAgent: true,
+        },
+        {
+          id: "path:/repo-wt",
+          path: "/repo-wt",
+          kind: "git-linked-worktree",
+          source: "selected",
+          branch: "feature",
+          usedByAgent: true,
+        },
+      ],
+    });
+
+    await expect(
+      dispatchCommand(
+        "folders",
+        { action: "list", session_id: "session-1" },
+        ctx,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      cwd: "/repo",
+      folders: [
+        { path: "/repo", kind: "git-main-worktree", branch: "main", cwd: true },
+        {
+          path: "/repo-wt",
+          kind: "git-linked-worktree",
+          branch: "feature",
+          cwd: false,
+        },
+      ],
+    });
+  });
+
+  it("set-cwd implicitly attaches and applies while idle", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+    mocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "feature",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        { path: "/repo", branch: "main", isMain: true },
+        { path: "/repo-wt", branch: "feature", isMain: false },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "feature"],
+    });
+
+    const result = await dispatchCommand(
+      "folders",
+      { action: "set_cwd", session_id: "session-1", path: "/repo-wt" },
+      ctx,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      path: "/repo-wt",
+      branch: "feature",
+      status: "applied",
+    });
+    expect(mocks.updateWorkingDir).toHaveBeenCalledWith(
+      "session-1",
+      "/repo-wt",
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-1")
+        ?.workspaceAttachments,
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "/repo-wt" })]),
+    );
+  });
+
+  it("replaces the visible attachment when set-cwd runs in single-workspace mode", async () => {
+    setMultiWorkspaceEnabled(false);
+    seedSessions({
+      ...makeSession({ workingDir: "/repo" }),
+      workspaceAttachments: [
+        {
+          id: "path:/repo",
+          path: "/repo",
+          kind: "git-main-worktree",
+          source: "selected",
+          branch: "main",
+          usedByAgent: true,
+        },
+      ],
+      activeWorkspaceId: "path:/repo",
+    });
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+
+    await dispatchCommand(
+      "folders",
+      { action: "set_cwd", session_id: "session-1", path: "/repo-wt" },
+      ctx,
+    );
+
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession("session-1")
+        ?.workspaceAttachments?.filter(
+          (attachment) => attachment.source !== "excluded",
+        )
+        .map((attachment) => attachment.path),
+    ).toEqual(["/repo-wt"]);
+  });
+
+  it("rolls back a newly attached folder when immediate set-cwd fails", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+    mocks.updateWorkingDir.mockRejectedValueOnce(
+      new Error("backend rejected cwd"),
+    );
+
+    await expect(
+      dispatchCommand(
+        "folders",
+        { action: "set_cwd", session_id: "session-1", path: "/repo-wt" },
+        ctx,
+      ),
+    ).rejects.toThrow("backend rejected cwd");
+
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession("session-1")
+        ?.workspaceAttachments?.some(
+          (attachment) => attachment.path === "/repo-wt",
+        ),
+    ).not.toBe(true);
+  });
+
+  it("rolls back only set-cwd state when the immediate update fails", async () => {
+    setMultiWorkspaceEnabled(false);
+    seedSessions({
+      ...makeSession({ workingDir: "/repo" }),
+      workspaceAttachments: [
+        {
+          id: "path:/repo",
+          path: "/repo",
+          kind: "git-main-worktree",
+          source: "selected",
+          branch: "main",
+          usedByAgent: true,
+        },
+      ],
+      activeWorkspaceId: "path:/repo",
+    });
+    useChatSessionStore.getState().setActiveWorkspace("session-1", {
+      path: "/repo",
+      branch: "main",
+    });
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+    mocks.updateWorkingDir.mockImplementationOnce(async () => {
+      useChatSessionStore.getState().attachWorkspace("session-1", {
+        path: "/concurrent",
+        source: "inferred",
+        usedByAgent: true,
+      });
+      throw new Error("backend rejected cwd");
+    });
+
+    await expect(
+      dispatchCommand(
+        "folders",
+        { action: "set_cwd", session_id: "session-1", path: "/repo-wt" },
+        ctx,
+      ),
+    ).rejects.toThrow("backend rejected cwd");
+
+    const state = useChatSessionStore.getState();
+    expect(
+      state
+        .getSession("session-1")
+        ?.workspaceAttachments?.filter(
+          (attachment) => attachment.source !== "excluded",
+        )
+        .map((attachment) => attachment.path),
+    ).toEqual(expect.arrayContaining(["/repo", "/concurrent"]));
+    expect(
+      state
+        .getSession("session-1")
+        ?.workspaceAttachments?.some(
+          (attachment) => attachment.path === "/repo-wt",
+        ),
+    ).not.toBe(true);
+    expect(state.activeWorkspaceBySession["session-1"]).toMatchObject({
+      path: "/repo",
+      branch: "main",
+    });
+  });
+
+  it("preserves a newer set-cwd attachment when an older activation fails", async () => {
+    setMultiWorkspaceEnabled(false);
+    seedSessions({
+      ...makeSession({ workingDir: "/repo" }),
+      workspaceAttachments: [
+        {
+          id: "path:/repo",
+          path: "/repo",
+          kind: "git-main-worktree",
+          source: "selected",
+          branch: "main",
+          usedByAgent: true,
+        },
+      ],
+      activeWorkspaceId: "path:/repo",
+    });
+    useChatSessionStore.getState().setActiveWorkspace("session-1", {
+      path: "/repo",
+      branch: "main",
+    });
+    mockSessionFound({ workingDir: "/repo" });
+    queueSessionWorkspaceActivation({
+      sessionId: "session-1",
+      path: "/older",
+      branch: "older",
+    });
+    let rejectOlder: ((error: Error) => void) | undefined;
+    mocks.updateWorkingDir.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectOlder = reject;
+        }),
+    );
+    const olderActivation = applyPendingSessionWorkspaceActivation("session-1");
+    await vi.waitFor(() => expect(rejectOlder).toBeTypeOf("function"));
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+
+    const newerSetCwd = dispatchCommand(
+      "folders",
+      { action: "set_cwd", session_id: "session-1", path: "/repo-wt" },
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(getPendingSessionWorkspaceActivation("session-1")).toMatchObject({
+        path: "/repo-wt",
+      }),
+    );
+    rejectOlder?.(new Error("older activation failed"));
+
+    await expect(olderActivation).rejects.toThrow("older activation failed");
+    await expect(newerSetCwd).rejects.toThrow("older activation failed");
+    expect(getPendingSessionWorkspaceActivation("session-1")).toMatchObject({
+      path: "/repo-wt",
+    });
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession("session-1")
+        ?.workspaceAttachments?.some(
+          (attachment) => attachment.path === "/repo-wt",
+        ),
+    ).toBe(true);
+    expect(
+      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
+    ).toMatchObject({ path: "/repo-wt" });
+  });
+
+  it("set-cwd queues safely while the chat is running", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    useChatStore.getState().setChatState("session-1", "streaming");
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockResolvedValue({
+      path: "/repo-wt",
+    });
+    mocks.getGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "feature",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: true,
+      mainWorktreePath: "/repo",
+      localBranches: ["main", "feature"],
+    });
+
+    await expect(
+      dispatchCommand(
+        "folders",
+        { action: "set_cwd", session_id: "session-1", path: "/repo-wt" },
+        ctx,
+      ),
+    ).resolves.toMatchObject({ status: "pending" });
+    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
+    expect(getPendingSessionWorkspaceActivation("session-1")).toMatchObject({
+      path: "/repo-wt",
+    });
+  });
+
+  it("does not detach an unverifiable path", async () => {
+    mockSessionFound({ workingDir: "/repo" });
+    mocks.canonicalizeAuthorizedWorkspaceDirectory.mockRejectedValue(
+      new Error("outside allowed filesystem"),
+    );
 
     await expectCommandError(
       dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/nope" },
+        "folders",
+        { action: "detach", session_id: "session-1", path: "/private" },
         ctx,
       ),
       "invalid_args",
     );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-  });
-
-  it("rejects an inconclusive directory probe without re-pointing the session", async () => {
-    mockSessionFound();
-    mocks.checkDirectoriesExist.mockRejectedValue(new Error("probe failed"));
-
-    const error = await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "internal_error",
-    );
-    expect(error.message).toContain("nothing was changed");
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-  });
-
-  it("refuses past the broker deadline without re-pointing the session", async () => {
-    mockSessionFound();
-
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        { deadlineMs: Date.now() + 1_000 },
-      ),
-      "timed_out",
-    );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-    expect(
-      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
-    ).toBeUndefined();
-  });
-
-  it("refuses when the session starts running during path validation", async () => {
-    // The precheck's running guard passes (idle), then a turn starts while
-    // the directory probe is in flight; the mutation-time recheck must
-    // refuse instead of re-pointing a now-running session.
-    mockSessionFound();
-    mocks.resolvePath.mockImplementationOnce(async () => {
-      useChatStore.getState().setChatState("session-1", "streaming");
-      return { path: "/tmp/wt" };
-    });
-
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "target_session_running",
-    );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-    expect(
-      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
-    ).toBeUndefined();
-  });
-
-  it("refuses when the session opens in a pop-out window during path validation", async () => {
-    mockSessionFound();
-    mocks.resolvePath.mockImplementationOnce(async () => {
-      useSessionWindowStore
-        .getState()
-        .setSnapshot([
-          { sessionId: "session-1", windowLabel: "session-win-1" },
-        ]);
-      return { path: "/tmp/wt" };
-    });
-
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "target_session_running",
-    );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-  });
-
-  it("refuses when the session starts running at the backend mutation boundary", async () => {
-    mockSessionFound();
-    mocks.updateWorkingDir.mockImplementationOnce(
-      async (
-        _sessionId: string,
-        _workingDir: string,
-        beforeUpdate?: () => void,
-      ) => {
-        // Simulate getClient() completing after a turn starts, immediately
-        // before the API wrapper dispatches the working-directory mutation.
-        useChatStore.getState().setChatState("session-1", "streaming");
-        beforeUpdate?.();
-      },
-    );
-
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "target_session_running",
-    );
-    expect(
-      useChatSessionStore.getState().activeWorkspaceBySession["session-1"],
-    ).toBeUndefined();
-    expect(
-      useChatSessionStore.getState().getSession("session-1")?.workingDir,
-    ).not.toBe("/tmp/wt");
-  });
-
-  it("refuses a running session", async () => {
-    seedSessions(makeSession({ id: "session-1" }));
-    useChatStore.getState().setChatState("session-1", "streaming");
-
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "target_session_running",
-    );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-  });
-
-  it("refuses a cancellation-pending idle session", async () => {
-    seedSessions(makeSession({ id: "session-1" }));
-    useChatStore.getState().setRunCancellationPending("session-1", true);
-
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "session-1", path: "/tmp/wt" },
-        ctx,
-      ),
-      "target_session_running",
-    );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
-  });
-
-  it("throws session_not_found for unknown sessions", async () => {
-    await expectCommandError(
-      dispatchCommand(
-        "sessions",
-        { action: "set_worktree", session_id: "missing", path: "/tmp/wt" },
-        ctx,
-      ),
-      "session_not_found",
-    );
-    expect(mocks.updateWorkingDir).not.toHaveBeenCalled();
   });
 });
 

@@ -30,7 +30,7 @@ interface WorkspaceContextPickerProps {
   currentPath: string;
   activeBranch: string | null;
   disabled?: boolean;
-  onSelectWorktree: (path: string, branch: string | null) => void;
+  onSelectWorktree: (path: string, branch: string | null) => Promise<void>;
   onSwitchBranch: (path: string, branch: string) => Promise<void>;
   onStashAndSwitch: (path: string, branch: string) => Promise<void>;
   canCreateWorktree: boolean;
@@ -49,7 +49,7 @@ interface WorkspaceContextPickerProps {
   onWorktreeCreated: (
     worktree: CreatedWorktree,
     context: CreatedWorkspaceWorktreeContext,
-  ) => void;
+  ) => Promise<void>;
 }
 
 function normalizePath(path: string) {
@@ -264,8 +264,16 @@ export function WorkspaceContextPicker({
                     className={optionClassName}
                     aria-current={isSamePath(worktree.path, currentPath)}
                     onClick={() => {
-                      onSelectWorktree(worktree.path, worktree.branch);
-                      setWorktreeOpen(false);
+                      void onSelectWorktree(worktree.path, worktree.branch)
+                        .then(() => setWorktreeOpen(false))
+                        .catch((error) =>
+                          toast.error(
+                            formatErrorMessage(
+                              error,
+                              "Could not switch worktree.",
+                            ),
+                          ),
+                        );
                     }}
                   >
                     <GitFork className="mt-0.5 size-3.5 shrink-0" />

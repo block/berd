@@ -102,13 +102,17 @@ export function requireSession(sessionId: string): ChatSession {
   return session;
 }
 
-export function refuseRunningTarget(sessionId: string, verb: string): void {
+export function refuseWindowedTarget(sessionId: string, verb: string): void {
   if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
     throw new CommandError(
       "target_session_running",
       `Refusing to ${verb} session "${sessionId}" while it is open in a separate window; close that window first or ask the user.`,
     );
   }
+}
+
+export function refuseRunningTarget(sessionId: string, verb: string): void {
+  refuseWindowedTarget(sessionId, verb);
   const runtime = useChatStore.getState().getSessionRuntime(sessionId);
   if (isSessionRunning(runtime.chatState) || runtime.isRunCancellationPending) {
     throw new CommandError(

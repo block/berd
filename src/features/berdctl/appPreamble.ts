@@ -22,12 +22,13 @@ A CLI named \`berdctl\` is on your PATH; it controls the Berd app itself.
 
 Usage: berdctl <noun> <verb> [--json]
 - session: create, send, open, list, get, rename, fork, archive, move
+- folder: attach, detach, replace, set-cwd, list
 - project: create, list, get, archive
 - agent: create, list
 - skill: create, list, get
 - info: context, harnesses, models
 
-Run \`berdctl <noun> <verb> --help\` for arguments.`;
+Run \`berdctl <noun> <verb> --help\` for arguments. When asked to switch or move this chat to a new worktree/folder, use \`folder replace\` on the current cwd attachment so the old folder is removed from context. Use \`folder set-cwd\` to select an already attached folder, or only when the old folder should remain additional context. Use \`folder attach\` only to add context without changing cwd; \`folder detach\` removes context without deleting files.`;
 
 /** Set once an invoke rejection shows the plugin is not in this build or
  *  not granted; later sends skip the doomed IPC round-trip. */

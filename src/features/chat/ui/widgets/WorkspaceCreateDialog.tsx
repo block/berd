@@ -56,7 +56,7 @@ interface WorkspaceCreateDialogProps {
   onWorktreeCreated?: (
     worktree: CreatedWorktree,
     context: CreatedWorkspaceWorktreeContext,
-  ) => void;
+  ) => Promise<void> | void;
 }
 
 function worktreePreviewPath(rootPath: string, name: string) {
@@ -189,7 +189,7 @@ export function WorkspaceCreateDialog({
         path: createdWorktree.path,
         branch: createdWorktree.branch,
       });
-      onWorktreeCreated?.(createdWorktree, {
+      await onWorktreeCreated?.(createdWorktree, {
         createdBranch: useNewBranch,
         baseBranch: useNewBranch ? baseBranch : null,
       });

@@ -29,6 +29,7 @@ bzip2 = "0.6"
 buzz-voice = { git = "https://github.com/block/buzz", rev = "b1426cac2dcc24cfd1f62abe4652ff414c3dbf14", features = ["static"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
+dunce = "1"
 doctor = { git = "https://github.com/block/builderbot", rev = "d76aaa9495c98d18252d627acb00c24c85e6d2cd" }
 etcetera = "0.11.0"
 flate2 = "1"

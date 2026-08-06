@@ -663,6 +663,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()["acp-1"]).toEqual({
         workspaceAttachments: session.workspaceAttachments,
         activeWorkspaceId: workspaceAttachmentIdForPath("/tmp/project"),
+        workingDir: "/tmp/project",
       });
     });
 
@@ -984,6 +985,7 @@ describe("chatSessionStore", () => {
           .getState()
           .getSession("acp-session")?.workspaceAttachments,
         activeWorkspaceId: null,
+        workingDir: "/tmp/main",
       });
     });
   });
@@ -1711,6 +1713,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
         workspaceAttachments: updated?.workspaceAttachments,
         activeWorkspaceId: mainAttachmentId,
+        workingDir: "/tmp/main",
       });
     });
 
@@ -1767,6 +1770,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
         workspaceAttachments: updated?.workspaceAttachments,
         activeWorkspaceId: mainAttachmentId,
+        workingDir: "/tmp/main",
       });
     });
 
@@ -1808,6 +1812,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
         workspaceAttachments: updated?.workspaceAttachments,
         activeWorkspaceId: mainAttachmentId,
+        workingDir: "/tmp/main",
       });
     });
 
@@ -1879,6 +1884,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
         workspaceAttachments: updated?.workspaceAttachments,
         activeWorkspaceId: null,
+        workingDir: "/tmp/main",
       });
     });
 
@@ -1920,6 +1926,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
         workspaceAttachments: updated?.workspaceAttachments,
         activeWorkspaceId: null,
+        workingDir: "/tmp/main",
       });
     });
 
@@ -1947,6 +1954,7 @@ describe("chatSessionStore", () => {
       expect(readPersistedWorkspaceMetadata()[session.id]).toEqual({
         workspaceAttachments: updated?.workspaceAttachments,
         activeWorkspaceId: workspaceAttachmentIdForPath("/tmp/main"),
+        workingDir: "/tmp/main",
       });
     });
   });

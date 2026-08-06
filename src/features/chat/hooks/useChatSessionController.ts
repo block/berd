@@ -47,6 +47,7 @@ import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillC
 import { setStoredModelPreference } from "../lib/modelPreferences";
 import { saveDefaultReasoningEffort } from "../lib/reasoningEffortPreferences";
 import { applyLatestSessionConfig } from "../lib/sessionConfigRequests";
+import { applyPendingSessionWorkspaceActivation } from "../lib/sessionWorkspaceActivation";
 import {
   shouldAutoCompactContext,
   supportsContextAutoCompaction,
@@ -1196,6 +1197,16 @@ export function useChatSessionController({
   );
   const prepareSessionForPersona = useCallback(
     async (personaId?: string) => {
+      const activatedWorkspacePath =
+        await applyPendingSessionWorkspaceActivation(stateSessionId, {
+          allowRunning: true,
+        });
+      const sessionStore = useChatSessionStore.getState();
+      const liveSession = sessionStore.getSession(stateSessionId);
+      const preparationWorkspacePath =
+        activatedWorkspacePath ??
+        sessionStore.activeWorkspaceBySession[stateSessionId]?.path ??
+        liveSession?.workingDir;
       const persona = personaId
         ? useAgentStore.getState().getPersonaById(personaId)
         : undefined;
@@ -1204,7 +1215,7 @@ export function useChatSessionController({
           ? prepareCurrentSessionWithModel(
               selectedProvider,
               project,
-              activeWorkspace?.path,
+              preparationWorkspacePath,
             )
           : undefined;
       }
@@ -1215,7 +1226,7 @@ export function useChatSessionController({
           ? prepareCurrentSessionWithModel(
               selectedProvider,
               project,
-              activeWorkspace?.path,
+              preparationWorkspacePath,
             )
           : undefined;
       }
@@ -1228,13 +1239,13 @@ export function useChatSessionController({
         return prepareCurrentSession(
           matchingProvider.id,
           project,
-          activeWorkspace?.path,
+          preparationWorkspacePath,
         );
       }
 
       const workingDir = await resolveSessionCwd(
         project,
-        activeWorkspace?.path ?? session?.workingDir,
+        preparationWorkspacePath,
       );
       const result = await applyLatestSessionConfig({
         sessionId: stateSessionId,
@@ -1258,14 +1269,12 @@ export function useChatSessionController({
       return true;
     },
     [
-      activeWorkspace?.path,
       prepareCurrentSession,
       prepareCurrentSessionWithModel,
       project,
       providers,
       resolvePersonaModelSelection,
       selectedProvider,
-      session?.workingDir,
       stateSessionId,
     ],
   );

@@ -14,6 +14,7 @@ import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceCont
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
+import { applyPendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import {
   formatIncludedWorkspacesPrompt,
   getWorkspaceAttachments,
@@ -53,6 +54,7 @@ export async function prepareExistingSessionForBackgroundSend(
     throw new Error("Failed to load the target session before sending.");
   }
 
+  await applyPendingSessionWorkspaceActivation(sessionId);
   const session = useChatSessionStore.getState().getSession(sessionId);
   if (!session) {
     throw new Error(`No session "${sessionId}".`);

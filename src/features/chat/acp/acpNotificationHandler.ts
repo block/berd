@@ -1,3 +1,7 @@
+import {
+  clearWorkspaceToolCallObservations,
+  observeWorkspaceToolCall,
+} from "./acpWorkspaceObservation";
 import type {
   SessionNotification,
   SessionUpdate,
@@ -237,6 +241,7 @@ export async function handleSessionNotification(
     perf.count += 1;
     handleReplay(sessionId, update);
   } else {
+    observeWorkspaceToolCall(sessionId, update);
     if (update.sessionUpdate === "agent_message_chunk") {
       recordLiveAgentMessageChunk(sessionId);
     }
@@ -884,6 +889,7 @@ export function clearMessageTracking(): void {
   clearActiveMessageTracking();
   clearReplayAssistantTracking();
   clearSkillReplayChips();
+  clearWorkspaceToolCallObservations();
 }
 
 const handler: AcpNotificationHandler = {

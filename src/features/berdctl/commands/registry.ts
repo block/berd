@@ -2,6 +2,11 @@ import type { ZodError } from "zod/v4";
 
 import { archiveProjectCommand } from "./impl/archiveProject";
 import { archiveSessionCommand } from "./impl/archiveSession";
+import { attachSessionFolderCommand } from "./impl/attachSessionFolder";
+import { detachSessionFolderCommand } from "./impl/detachSessionFolder";
+import { listSessionFoldersCommand } from "./impl/listSessionFolders";
+import { replaceSessionFolderCommand } from "./impl/replaceSessionFolder";
+import { setSessionFolderCwdCommand } from "./impl/setSessionFolderCwd";
 import { clearSessionProjectCommand } from "./impl/clearSessionProject";
 import { createAgentCommand } from "./impl/createAgent";
 import { createProjectCommand } from "./impl/createProject";
@@ -25,7 +30,6 @@ import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
 import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
-import { setSessionWorktreeCommand } from "./impl/setSessionWorktree";
 import { submitFeedbackCommand } from "./impl/submitFeedback";
 import { commandBridgeTimeoutMs } from "./timeouts";
 import { CommandError, type CommandContext, type ToolGroup } from "./types";
@@ -51,11 +55,11 @@ export const TOOL_GROUPS = {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
       "installed agent harness), send, open, list, get, rename, move, " +
-      "move to group, clear project, set worktree, fork, archive.",
+      "move to group, clear project, fork, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, set worktree, fork, archive",
+        "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, fork, archive",
       verbs: {
         create: "create",
         send: "send",
@@ -66,7 +70,6 @@ export const TOOL_GROUPS = {
         move: "move",
         "move-to-group": "move_to_group",
         "clear-project": "clear_project",
-        "set-worktree": "set_worktree",
         fork: "fork",
         archive: "archive",
       },
@@ -81,9 +84,31 @@ export const TOOL_GROUPS = {
       move: moveSessionCommand,
       move_to_group: moveSessionToGroupCommand,
       clear_project: clearSessionProjectCommand,
-      set_worktree: setSessionWorktreeCommand,
       fork: forkSessionCommand,
       archive: archiveSessionCommand,
+    },
+  },
+  folders: {
+    description:
+      "Manage folders attached to chat sessions: attach, detach, replace, set cwd, list.",
+    cli: {
+      noun: "folder",
+      about:
+        "Manage attached chat folders: attach, detach, replace, set cwd, list",
+      verbs: {
+        attach: "attach",
+        detach: "detach",
+        replace: "replace",
+        "set-cwd": "set_cwd",
+        list: "list",
+      },
+    },
+    actions: {
+      attach: attachSessionFolderCommand,
+      detach: detachSessionFolderCommand,
+      replace: replaceSessionFolderCommand,
+      set_cwd: setSessionFolderCwdCommand,
+      list: listSessionFoldersCommand,
     },
   },
   projects: {

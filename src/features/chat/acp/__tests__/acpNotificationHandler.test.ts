@@ -24,6 +24,12 @@ import { setActiveMessageId } from "@/shared/api/acpActiveMessageTracking";
 import { registerPreparedSession } from "@/shared/api/acpSessionRegistry";
 import { claimSessionPrompt } from "@/features/chat/lib/sessionPromptOwnership";
 
+const workspaceObservationMocks = vi.hoisted(() => ({
+  clearWorkspaceToolCallObservations: vi.fn(),
+  observeWorkspaceToolCall: vi.fn(),
+}));
+vi.mock("../acpWorkspaceObservation", () => workspaceObservationMocks);
+
 function createMcpAppPayload(): McpAppPayload {
   return {
     sessionId: "acp-session",
@@ -102,6 +108,8 @@ function getReplayMessage(sessionId = "acp-session") {
 
 describe("acpNotificationHandler", () => {
   beforeEach(() => {
+    workspaceObservationMocks.clearWorkspaceToolCallObservations.mockClear();
+    workspaceObservationMocks.observeWorkspaceToolCall.mockClear();
     clearMessageTracking();
     clearReplayBuffer("acp-session");
     useChatStore.setState({
@@ -124,6 +132,45 @@ describe("acpNotificationHandler", () => {
       modelSelectionIntentBySession: {},
     });
     useAgentStore.setState({ personas: [] });
+  });
+
+  it("observes live tool updates for workspace registration", async () => {
+    const update = {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-1",
+      kind: "execute",
+      status: "completed",
+      rawInput: { cwd: "/tmp/worktree" },
+    } as const;
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update,
+    } as never);
+
+    expect(
+      workspaceObservationMocks.observeWorkspaceToolCall,
+    ).toHaveBeenCalledWith("acp-session", update);
+  });
+
+  it("does not infer workspace registration while replaying history", async () => {
+    markSessionReplayLoading();
+    const update = {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-1",
+      kind: "execute",
+      status: "completed",
+      rawInput: { cwd: "/tmp/historical-worktree" },
+    } as const;
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update,
+    } as never);
+
+    expect(
+      workspaceObservationMocks.observeWorkspaceToolCall,
+    ).not.toHaveBeenCalled();
   });
 
   it("keeps tool calls that arrive before the first text chunk on the pending assistant message", async () => {

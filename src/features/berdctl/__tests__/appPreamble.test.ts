@@ -84,6 +84,20 @@ describe("BERDCTL_PREAMBLE content", () => {
     expect(BERDCTL_PREAMBLE).toContain("--help");
   });
 
+  it("routes switching to replace, selection/retention to set-cwd, and additions to attach", () => {
+    expect(BERDCTL_PREAMBLE).toContain(
+      "switch or move this chat to a new worktree/folder",
+    );
+    expect(BERDCTL_PREAMBLE).toContain("use `folder replace`");
+    expect(BERDCTL_PREAMBLE).toContain(
+      "Use `folder set-cwd` to select an already attached folder",
+    );
+    expect(BERDCTL_PREAMBLE).toContain(
+      "Use `folder attach` only to add context without changing cwd",
+    );
+    expect(BERDCTL_PREAMBLE).not.toContain("set-worktree");
+  });
+
   /**
    * Drift protection: every noun and verb the preamble names must exist in
    * the generated CLI surface. The listing is intentionally non-exhaustive

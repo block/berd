@@ -197,6 +197,11 @@ interface AttachWorkspaceOpts {
   repositoryPath?: string | null;
   worktreePath?: string | null;
   lifecycle?: WorkspaceAttachmentLifecycle | null;
+  usedByAgent?: boolean;
+}
+
+interface ReplaceWorkspaceAttachmentOpts extends AttachWorkspaceOpts {
+  oldAttachmentId: string;
 }
 
 interface ChatSessionStoreActions {
@@ -235,6 +240,10 @@ interface ChatSessionStoreActions {
   setActiveWorkspace: (sessionId: string, context: ActiveWorkspace) => void;
   clearActiveWorkspace: (sessionId: string) => void;
   attachWorkspace: (sessionId: string, workspace: AttachWorkspaceOpts) => void;
+  replaceWorkspaceAttachment: (
+    sessionId: string,
+    workspace: ReplaceWorkspaceAttachmentOpts,
+  ) => void;
   removeWorkspaceAttachment: (sessionId: string, attachmentId: string) => void;
   markWorkspaceUsedByAgent: (
     sessionId: string,
@@ -426,6 +435,7 @@ function persistWorkspaceMetadataForSession(session: ChatSession): void {
   persistChatWorkspaceMetadata(session.id, {
     workspaceAttachments: session.workspaceAttachments ?? [],
     activeWorkspaceId: session.activeWorkspaceId ?? null,
+    workingDir: session.workingDir ?? null,
   });
 }
 
@@ -1032,6 +1042,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         repositoryPath: workspace.repositoryPath,
         worktreePath: workspace.worktreePath,
         lifecycle: workspace.lifecycle,
+        usedByAgent: workspace.usedByAgent,
         makeActive: false,
       });
       sessionForWorkspacePersistence = nextSession;
@@ -1040,6 +1051,80 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         sessions: state.sessions.map((session) =>
           session.id === sessionId ? nextSession : session,
         ),
+      };
+    });
+    if (sessionForWorkspacePersistence) {
+      persistWorkspaceMetadataForSession(sessionForWorkspacePersistence);
+    }
+  },
+
+  replaceWorkspaceAttachment: (sessionId, workspace) => {
+    let sessionForWorkspacePersistence: ChatSession | null = null;
+    set((state) => {
+      const existing = state.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existing) return state;
+      const attachments = getWorkspaceAttachments(existing);
+      const oldIndex = attachments.findIndex(
+        (attachment) => attachment.id === workspace.oldAttachmentId,
+      );
+      if (oldIndex < 0) return state;
+
+      const replacementSession: ChatSession = ensureWorkspaceAttachment(
+        { ...existing, workspaceAttachments: [] as WorkspaceAttachment[] },
+        {
+          path: workspace.path,
+          source: workspace.source ?? "selected",
+          kind: workspace.kind,
+          branch: workspace.branch,
+          repositoryPath: workspace.repositoryPath,
+          worktreePath: workspace.worktreePath,
+          lifecycle: workspace.lifecycle,
+          usedByAgent: workspace.usedByAgent,
+          makeActive: false,
+        },
+      );
+      const replacement = replacementSession.workspaceAttachments?.[0];
+      if (!replacement) return state;
+      const duplicateBeforeOld = attachments
+        .slice(0, oldIndex)
+        .filter((attachment) =>
+          isSameWorkspacePath(attachment.path, replacement.path),
+        ).length;
+      const remaining = attachments.filter(
+        (attachment, index) =>
+          index === oldIndex ||
+          !isSameWorkspacePath(attachment.path, replacement.path),
+      );
+      const replacementIndex = oldIndex - duplicateBeforeOld;
+      const nextAttachments = [...remaining];
+      nextAttachments[replacementIndex] = replacement;
+      const nextSession = withWorkspaceBackfill({
+        ...existing,
+        workspaceAttachments: nextAttachments,
+        activeWorkspaceId:
+          existing.activeWorkspaceId === workspace.oldAttachmentId
+            ? replacement.id
+            : existing.activeWorkspaceId,
+      });
+      sessionForWorkspacePersistence = nextSession;
+      const active = state.activeWorkspaceBySession[sessionId];
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? nextSession : session,
+        ),
+        activeWorkspaceBySession:
+          active &&
+          isSameWorkspacePath(active.path, attachments[oldIndex]?.path)
+            ? {
+                ...state.activeWorkspaceBySession,
+                [sessionId]: {
+                  path: replacement.path,
+                  branch: replacement.branch ?? null,
+                },
+              }
+            : state.activeWorkspaceBySession,
       };
     });
     if (sessionForWorkspacePersistence) {

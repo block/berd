@@ -11,10 +11,13 @@ import {
 
 export const CHAT_WORKSPACE_METADATA_STORAGE_KEY =
   "goose:chat-workspace-metadata";
+export const CHAT_WORKSPACE_METADATA_CHANGED_EVENT =
+  "goose:chat-workspace-metadata-changed";
 
 export interface PersistedChatWorkspaceMetadata {
   workspaceAttachments: WorkspaceAttachment[];
   activeWorkspaceId?: string | null;
+  workingDir?: string | null;
 }
 
 type PersistedChatWorkspaceMetadataBySession = Record<
@@ -111,9 +114,15 @@ function normalizePersistedChatWorkspaceMetadata(
       ? raw.activeWorkspaceId
       : null;
 
+  const workingDir =
+    typeof raw.workingDir === "string" && raw.workingDir.trim()
+      ? raw.workingDir.trim()
+      : null;
+
   return {
     workspaceAttachments,
     activeWorkspaceId,
+    workingDir,
   };
 }
 
@@ -144,14 +153,29 @@ function readAllPersistedChatWorkspaceMetadata(): PersistedChatWorkspaceMetadata
   }
 }
 
+export interface ChatWorkspaceMetadataChangedDetail {
+  sessionIds: string[];
+}
+
+function dispatchWorkspaceMetadataChanged(sessionIds: string[]): void {
+  window.dispatchEvent(
+    new CustomEvent<ChatWorkspaceMetadataChangedDetail>(
+      CHAT_WORKSPACE_METADATA_CHANGED_EVENT,
+      { detail: { sessionIds } },
+    ),
+  );
+}
+
 function writeAllPersistedChatWorkspaceMetadata(
   bySession: PersistedChatWorkspaceMetadataBySession,
+  changedSessionIds: string[],
 ): void {
   if (typeof window === "undefined") return;
 
   try {
     if (Object.keys(bySession).length === 0) {
       window.localStorage.removeItem(CHAT_WORKSPACE_METADATA_STORAGE_KEY);
+      dispatchWorkspaceMetadataChanged(changedSessionIds);
       return;
     }
 
@@ -159,6 +183,7 @@ function writeAllPersistedChatWorkspaceMetadata(
       CHAT_WORKSPACE_METADATA_STORAGE_KEY,
       JSON.stringify(bySession),
     );
+    dispatchWorkspaceMetadataChanged(changedSessionIds);
   } catch {
     // localStorage may be unavailable
   }
@@ -178,12 +203,12 @@ export function persistChatWorkspaceMetadata(
   const bySession = readAllPersistedChatWorkspaceMetadata();
   if (!normalized) {
     delete bySession[sessionId];
-    writeAllPersistedChatWorkspaceMetadata(bySession);
+    writeAllPersistedChatWorkspaceMetadata(bySession, [sessionId]);
     return;
   }
 
   bySession[sessionId] = normalized;
-  writeAllPersistedChatWorkspaceMetadata(bySession);
+  writeAllPersistedChatWorkspaceMetadata(bySession, [sessionId]);
 }
 
 export function removePersistedChatWorkspaceMetadata(sessionId: string): void {
@@ -191,7 +216,50 @@ export function removePersistedChatWorkspaceMetadata(sessionId: string): void {
   if (!(sessionId in bySession)) return;
 
   delete bySession[sessionId];
-  writeAllPersistedChatWorkspaceMetadata(bySession);
+  writeAllPersistedChatWorkspaceMetadata(bySession, [sessionId]);
+}
+
+export function subscribeToChatWorkspaceMetadata(
+  listener: (sessionIds: string[] | null) => void,
+): () => void {
+  const handleChanged = (event: Event) => {
+    listener(
+      (event as CustomEvent<ChatWorkspaceMetadataChangedDetail>).detail
+        ?.sessionIds ?? null,
+    );
+  };
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== CHAT_WORKSPACE_METADATA_STORAGE_KEY) return;
+    try {
+      const before = JSON.parse(event.oldValue ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      const after = JSON.parse(event.newValue ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      const sessionIds = [
+        ...new Set([...Object.keys(before), ...Object.keys(after)]),
+      ].filter(
+        (sessionId) =>
+          JSON.stringify(before[sessionId]) !==
+          JSON.stringify(after[sessionId]),
+      );
+      listener(sessionIds);
+    } catch {
+      listener(null);
+    }
+  };
+  window.addEventListener(CHAT_WORKSPACE_METADATA_CHANGED_EVENT, handleChanged);
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    window.removeEventListener(
+      CHAT_WORKSPACE_METADATA_CHANGED_EVENT,
+      handleChanged,
+    );
+    window.removeEventListener("storage", handleStorage);
+  };
 }
 
 export function migratePersistedChatWorkspaceMetadata(
@@ -204,5 +272,8 @@ export function migratePersistedChatWorkspaceMetadata(
 
   bySession[toSessionId] = metadata;
   delete bySession[fromSessionId];
-  writeAllPersistedChatWorkspaceMetadata(bySession);
+  writeAllPersistedChatWorkspaceMetadata(bySession, [
+    fromSessionId,
+    toSessionId,
+  ]);
 }

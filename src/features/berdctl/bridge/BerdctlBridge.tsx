@@ -12,6 +12,8 @@ import {
 } from "@/features/berdctl/bridge/runtimeContext";
 import { installStartupSessionDeepLinkHandler } from "./startupDeepLinks";
 import { useBerdctlQueuedMessageDrain } from "./useBerdctlQueuedMessageDrain";
+import { usePendingSessionWorkspaceActivationDrain } from "./usePendingSessionWorkspaceActivationDrain";
+import { useWorkspaceAttachmentSync } from "@/features/chat/hooks/useWorkspaceAttachmentSync";
 
 /**
  * Null-rendering bridge between the berdctl broker (Rust plugin) and the
@@ -23,6 +25,10 @@ import { useBerdctlQueuedMessageDrain } from "./useBerdctlQueuedMessageDrain";
 export function BerdctlBridge() {
   const queryClient = useQueryClient();
 
+  // Register the workspace barrier before queue drains so an idle transition
+  // starts any pending switch before a queued prompt can claim the session.
+  useWorkspaceAttachmentSync();
+  usePendingSessionWorkspaceActivationDrain();
   useBerdctlQueuedMessageDrain();
 
   // Share the app's react-query cache with the command layer (doctor report).
