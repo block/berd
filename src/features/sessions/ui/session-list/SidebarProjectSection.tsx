@@ -24,7 +24,12 @@ import { SidebarSectionHeaderAction } from "./SidebarSectionHeader";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { CollapseReveal } from "@/shared/ui/collapse-reveal";
-import { SidebarItemMenu } from "./SidebarItemMenu";
+import { ContextMenu, ContextMenuTrigger } from "@/shared/ui/context-menu";
+import {
+  SidebarItemContextMenuContent,
+  SidebarItemMenu,
+  type SidebarItemMenuActions,
+} from "./SidebarItemMenu";
 
 const MAX_VISIBLE_PROJECT_CHATS = 5;
 const MAX_EXPANDED_PROJECT_CHATS = 20;
@@ -140,6 +145,7 @@ export function SidebarProjectSection({
   const expandExpandedChatsTimerRef = useRef<number | null>(null);
   const collapseExpandedChatsTimerRef = useRef<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
   const projectHasChats = projectChats.length > 0;
   const projectCanExpand = projectHasChats || emptyState != null;
@@ -289,116 +295,123 @@ export function SidebarProjectSection({
     projectChats.length > MAX_EXPANDED_PROJECT_CHATS &&
     onNavigate != null;
 
+  // One action set, two entry points: the row's overflow menu and right-click.
+  const projectMenuActions: SidebarItemMenuActions = {
+    onPinToHome: () => (isPinnedToHome ? unpinFromHome() : void pinToHome()),
+    pinToHomeDisabled: isPinningToHome,
+    isPinnedToHome,
+    pinToHomeLabel: isPinnedToHome
+      ? t("sidebar:actions.unpinProject")
+      : isPinningToHome
+        ? t("common:actions.pinningToHome")
+        : t("sidebar:actions.pinProject"),
+    onEdit: () => onEditProject?.(project.id),
+    onArchive: () => onArchiveProject?.(project.id),
+  };
+
   return (
     <div
       ref={dropTargetRef}
       data-sidebar-session-drop-target="project"
       data-project-id={project.id}
     >
-      <div
-        className={cn(
-          "relative flex items-center group group/chat-row rounded-sm pr-3 hover:bg-[var(--sidebar-row-hover)] focus-within:bg-[var(--sidebar-row-hover)]",
-          SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-          menuOpen && "bg-[var(--sidebar-row-active)]",
-        )}
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            if (projectCanExpand) {
-              toggleProject(project.id);
-            } else if (onOpenProject) {
-              onOpenProject(project.id);
-            } else {
-              onNavigate?.("projects");
-            }
-          }}
-          aria-expanded={projectCanExpand ? isExpanded : undefined}
-          className={cn(
-            "flex-1 min-w-0 justify-start rounded-sm",
-            SIDEBAR_NAV_ROW_SPACING_CLASS,
-            SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-            SIDEBAR_NAV_TEXT_CLASS,
-            PROJECT_ROW_TEXT_CLASS,
-          )}
-        >
-          <SidebarLeadingIcon
-            hasUnread={showProjectUnread}
-            activeLabel={t("status.chatActive")}
-            unreadLabel={t("status.unreadMessages")}
-            className="text-sidebar-foreground"
+      <ContextMenu onOpenChange={setContextMenuOpen}>
+        <ContextMenuTrigger asChild>
+          <div
+            data-sidebar-project-row
+            className={cn(
+              "relative flex items-center group group/chat-row rounded-sm pr-3 hover:bg-[var(--sidebar-row-hover)] focus-within:bg-[var(--sidebar-row-hover)]",
+              SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+              (menuOpen || contextMenuOpen) && "bg-[var(--sidebar-row-active)]",
+            )}
           >
-            {showExpansionChevron && projectCanExpand ? (
-              <>
-                <span className="group-hover/chat-row:hidden group-focus-within/chat-row:hidden">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (projectCanExpand) {
+                  toggleProject(project.id);
+                } else if (onOpenProject) {
+                  onOpenProject(project.id);
+                } else {
+                  onNavigate?.("projects");
+                }
+              }}
+              aria-expanded={projectCanExpand ? isExpanded : undefined}
+              className={cn(
+                "flex-1 min-w-0 justify-start rounded-sm",
+                SIDEBAR_NAV_ROW_SPACING_CLASS,
+                SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+                SIDEBAR_NAV_TEXT_CLASS,
+                PROJECT_ROW_TEXT_CLASS,
+              )}
+            >
+              <SidebarLeadingIcon
+                hasUnread={showProjectUnread}
+                activeLabel={t("status.chatActive")}
+                unreadLabel={t("status.unreadMessages")}
+                className="text-sidebar-foreground"
+              >
+                {showExpansionChevron && projectCanExpand ? (
+                  <>
+                    <span className="group-hover/chat-row:hidden group-focus-within/chat-row:hidden">
+                      <ProjectIcon
+                        icon={project.icon}
+                        color={project.color}
+                        projectId={project.id}
+                        imageClassName="size-[18px] rounded-[4px]"
+                      />
+                    </span>
+                    {isExpanded ? (
+                      <IconChevronDown className="hidden size-3 text-muted-foreground group-hover/chat-row:block group-focus-within/chat-row:block" />
+                    ) : (
+                      <IconChevronRight className="hidden size-3 text-muted-foreground group-hover/chat-row:block group-focus-within/chat-row:block" />
+                    )}
+                  </>
+                ) : (
                   <ProjectIcon
                     icon={project.icon}
                     color={project.color}
                     projectId={project.id}
                     imageClassName="size-[18px] rounded-[4px]"
                   />
-                </span>
-                {isExpanded ? (
-                  <IconChevronDown className="hidden size-3 text-muted-foreground group-hover/chat-row:block group-focus-within/chat-row:block" />
-                ) : (
-                  <IconChevronRight className="hidden size-3 text-muted-foreground group-hover/chat-row:block group-focus-within/chat-row:block" />
                 )}
-              </>
-            ) : (
-              <ProjectIcon
-                icon={project.icon}
-                color={project.color}
-                projectId={project.id}
-                imageClassName="size-[18px] rounded-[4px]"
+              </SidebarLeadingIcon>
+              <span className="flex-1 min-w-0 truncate text-left">
+                {project.name}
+              </span>
+            </Button>
+            <div className="translate-y-px" data-sidebar-drag-ignore>
+              <SidebarItemMenu
+                label={project.name}
+                onOpenChange={setMenuOpen}
+                {...projectMenuActions}
               />
-            )}
-          </SidebarLeadingIcon>
-          <span className="flex-1 min-w-0 truncate text-left">
-            {project.name}
-          </span>
-        </Button>
-        <div className="translate-y-px" data-sidebar-drag-ignore>
-          <SidebarItemMenu
-            label={project.name}
-            onOpenChange={setMenuOpen}
-            onPinToHome={() =>
-              isPinnedToHome ? unpinFromHome() : void pinToHome()
-            }
-            pinToHomeDisabled={isPinningToHome}
-            isPinnedToHome={isPinnedToHome}
-            pinToHomeLabel={
-              isPinnedToHome
-                ? t("sidebar:actions.unpinProject")
-                : isPinningToHome
-                  ? t("common:actions.pinningToHome")
-                  : t("sidebar:actions.pinProject")
-            }
-            onEdit={() => onEditProject?.(project.id)}
-            onArchive={() => onArchiveProject?.(project.id)}
-          />
-        </div>
-        <span data-sidebar-drag-ignore className="ml-1 flex flex-shrink-0">
-          <SidebarSectionHeaderAction
-            icon={IconEdit}
-            label={t("actions.newChatInProject")}
-            onClick={(e) => {
-              e.stopPropagation();
-              onNewChatInProject?.(project.id);
-            }}
-            revealClassName={
-              menuOpen
-                ? "visible"
-                : "invisible group-hover:visible group-focus-within:visible"
-            }
-          />
-        </span>
+            </div>
+            <span data-sidebar-drag-ignore className="ml-1 flex flex-shrink-0">
+              <SidebarSectionHeaderAction
+                icon={IconEdit}
+                label={t("actions.newChatInProject")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNewChatInProject?.(project.id);
+                }}
+                revealClassName={
+                  menuOpen || contextMenuOpen
+                    ? "visible"
+                    : "invisible group-hover:visible group-focus-within:visible"
+                }
+              />
+            </span>
 
-        {dragOver && (
-          <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
-        )}
-      </div>
+            {dragOver && (
+              <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <SidebarItemContextMenuContent {...projectMenuActions} />
+      </ContextMenu>
 
       {renderProjectChats ? (
         <CollapseReveal open={showProjectChats}>
