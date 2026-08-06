@@ -349,11 +349,12 @@ export async function createSkill(
   return skill;
 }
 
-// Several surfaces list app skills at once when a chat mounts; share the
-// in-flight request so a same-tick burst issues one IPC call. Callers that
-// must observe post-event data pass `{ fresh: true }` (threaded through by
-// `fetchBerdAppSkills`) so the shared slot is replaced instead of handing
-// back an invoke that started before the change.
+// Several surfaces list app skills at once when a chat mounts; those callers
+// pass `{ coalesce: true }` so a same-tick burst issues one IPC call. Callers
+// that must observe post-event data call plainly (the skills-layer `fresh`
+// flag, threaded through by `fetchBerdAppSkills`, translates to that), so the
+// shared slot is replaced instead of handing back an invoke that started
+// before the change.
 export const listBerdAppSkills = shareInFlight(
   async (): Promise<SkillInfo[]> => {
     if (!isDesktopRuntime()) {
@@ -461,7 +462,7 @@ export async function listSkills(
     listGooseSourceSkills(projectDirs),
     options.includeAppSkills === false
       ? []
-      : listBerdAppSkills({ fresh: options.fresh }),
+      : listBerdAppSkills({ coalesce: !options.fresh }),
   ]);
   // Goose already orders project and Personal sources by its own precedence.
   // Append Berd app skills so a same-named Personal skill wins bare-name

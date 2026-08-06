@@ -102,6 +102,8 @@ export async function saveDefaultProviderSelectionFromConfiguredProvider(): Prom
   modelId?: string;
   modelName?: string;
 } | null> {
+  // Reads plainly (no `coalesce`): this decides what to *write* as the
+  // default, and it runs after the startup readiness gate's read has settled.
   const providerIds = await getIntentionalConfiguredProviderIds(
     await checkAllProviderStatus(),
   );

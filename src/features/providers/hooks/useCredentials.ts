@@ -11,6 +11,7 @@ import { saveDefaultProviderSelection } from "@/features/providers/defaultProvid
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import type { ShareInFlightOptions } from "@/shared/lib/shareInFlight";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 
 export interface ProviderFieldSave {
@@ -51,11 +52,14 @@ export function useCredentials(): UseCredentialsReturn {
   const [credentialRevision, setCredentialRevision] = useState(0);
   const modelRefreshRunIds = useRef(new Map<string, number>());
 
-  const refreshStatuses = useCallback(async () => {
-    const nextStatuses = await checkAllProviderStatus();
-    setStatuses(nextStatuses);
-    return nextStatuses;
-  }, []);
+  const refreshStatuses = useCallback(
+    async (options?: ShareInFlightOptions) => {
+      const nextStatuses = await checkAllProviderStatus(options);
+      setStatuses(nextStatuses);
+      return nextStatuses;
+    },
+    [],
+  );
 
   const updateProviderStatus = useCallback((status: ProviderStatus) => {
     setStatuses((current) => {
@@ -68,7 +72,8 @@ export function useCredentials(): UseCredentialsReturn {
   }, []);
 
   useEffect(() => {
-    refreshStatuses()
+    // Mount probe: coalescing keeps the StrictMode double-mount to one read.
+    refreshStatuses({ coalesce: true })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [refreshStatuses]);
@@ -239,6 +244,9 @@ export function useCredentials(): UseCredentialsReturn {
 
   const completeNativeSetup = useCallback(
     async (providerId: string, result?: ProviderConfigChangeResponse) => {
+      // The sign-in just completed, so this read must observe it: a plain
+      // refresh fetches rather than joining a sibling probe that started
+      // before the write.
       const statuses = result ? undefined : await refreshStatuses();
       if (result) {
         updateProviderStatus(result.status);

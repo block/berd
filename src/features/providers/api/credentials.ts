@@ -6,6 +6,7 @@ import type {
 } from "@aaif/goose-sdk";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 import { getClient } from "@/shared/api/acpConnection";
+import { shareInFlight } from "@/shared/lib/shareInFlight";
 
 export type ProviderStatus = ProviderConfigStatusDto;
 export type ProviderFieldSaveInput = ProviderConfigFieldUpdate;
@@ -58,10 +59,17 @@ export async function listProviderSecrets(): Promise<ProviderSecretDto[]> {
   return response.secrets;
 }
 
-export async function checkAllProviderStatus(): Promise<ProviderStatus[]> {
-  const client = await getClient();
-  const response = await client.goose.GooseUnstableProvidersConfigStatus({
-    providerIds: [],
-  });
-  return response.statuses;
-}
+/**
+ * Provider configuration status for every provider. A plain call always
+ * fetches; startup gates and mount-time probes that only need a same-tick
+ * snapshot pass `{ coalesce: true }` to share one read.
+ */
+export const checkAllProviderStatus = shareInFlight(
+  async (): Promise<ProviderStatus[]> => {
+    const client = await getClient();
+    const response = await client.goose.GooseUnstableProvidersConfigStatus({
+      providerIds: [],
+    });
+    return response.statuses;
+  },
+);

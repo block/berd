@@ -208,7 +208,8 @@ export function useOpenAiRealtimeDictation({
       };
     }
 
-    getOpenAiRealtimeStatus()
+    // Sibling dictation hooks probe status in the same tick; share one IPC call.
+    getOpenAiRealtimeStatus({ coalesce: true })
       .then((status) => {
         if (!cancelled) {
           setIsConfigured(status.configured);

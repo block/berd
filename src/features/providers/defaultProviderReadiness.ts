@@ -1,6 +1,7 @@
 import { checkAllProviderStatus } from "./api/credentials";
-import { getClient } from "@/shared/api/acpConnection";
+import { readGooseDefaults } from "./api/gooseDefaults";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import type { ShareInFlightOptions } from "@/shared/lib/shareInFlight";
 
 export type DefaultProviderReadiness =
   | {
@@ -30,10 +31,16 @@ function normalizeDefault(
   return trimmed ? trimmed : undefined;
 }
 
-export async function readDefaultProviderReadiness(): Promise<DefaultProviderReadiness> {
+/**
+ * `options` reaches both shared reads below, so a startup caller can opt both
+ * into coalescing with one flag. Plain calls fetch, which is what a readiness
+ * check after a config write needs.
+ */
+export async function readDefaultProviderReadiness(
+  options?: ShareInFlightOptions,
+): Promise<DefaultProviderReadiness> {
   try {
-    const client = await getClient();
-    const defaults = await client.goose.GooseUnstableDefaultsRead({});
+    const defaults = await readGooseDefaults(options);
     const providerId = normalizeDefault(defaults.providerId);
     const modelId = normalizeDefault(defaults.modelId);
 
@@ -45,7 +52,7 @@ export async function readDefaultProviderReadiness(): Promise<DefaultProviderRea
       return { status: "needs_setup", reason: "model_missing", providerId };
     }
 
-    const statuses = await checkAllProviderStatus();
+    const statuses = await checkAllProviderStatus(options);
     const providerStatus = statuses.find(
       (status) => status.providerId === providerId,
     );

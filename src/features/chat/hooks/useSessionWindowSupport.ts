@@ -22,7 +22,8 @@ export function useSessionWindowSupport() {
     }
 
     let cancelled = false;
-    void getSessionWindowSupport()
+    // Mount probe: every simultaneously mounted row shares one IPC call.
+    void getSessionWindowSupport({ coalesce: true })
       .then((nextSupport) => {
         if (!cancelled) {
           setSupport(nextSupport);

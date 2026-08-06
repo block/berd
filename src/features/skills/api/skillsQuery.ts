@@ -107,16 +107,17 @@ export function fetchBerdAppSkills(
   options: { fresh?: boolean } = {},
 ): Promise<SkillInfo[]> {
   if (!queryClient) {
-    return listBerdAppSkills({ fresh: options.fresh });
+    return listBerdAppSkills({ coalesce: !options.fresh });
   }
   // `fresh` must reach the shareInFlight wrapper too: `cancelQueries` discards
   // the query-layer promise but does not abort the underlying invoke, so a
-  // fresh queryFn run that called `listBerdAppSkills()` bare would be handed
-  // the previous unsettled invoke and resolve with the pre-cancel snapshot.
+  // fresh queryFn run that coalesced would be handed the previous unsettled
+  // invoke and resolve with the pre-cancel snapshot. Only the mount-burst
+  // (non-fresh) path opts into sharing.
   return fetchSkillLeg(
     queryClient,
     BERD_APP_SKILLS_QUERY_KEY,
-    () => listBerdAppSkills({ fresh: options.fresh }),
+    () => listBerdAppSkills({ coalesce: !options.fresh }),
     options.fresh,
   );
 }

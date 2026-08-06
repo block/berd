@@ -63,7 +63,55 @@ export function filterStartupProvidersForRuntimeConfig(
   );
 }
 
-export async function runChatRuntimeStartup(
+let startupLatch: Promise<void> | null = null;
+
+/**
+ * Startup must run once per window, or once per login where the auth gate is
+ * on (see `resetChatRuntimeStartup`). Both callers can re-invoke while a run is
+ * in flight (StrictMode re-mount in dev, the session-window bootstrap effect
+ * re-firing on dep churn) or after it succeeded; all of them share the first
+ * run. A failed run clears the latch so `useAppStartup`'s `retry()` starts a
+ * genuine new attempt. Takes no options: the latch is first-call-wins, so
+ * per-call options would be silently ignored on every call but the first —
+ * `startChatRuntime`'s options stay private to keep that a compile error.
+ */
+export function runChatRuntimeStartup(): Promise<void> {
+  if (!startupLatch) {
+    const attempt = startChatRuntime();
+    startupLatch = attempt;
+    // Identity guard: a superseded attempt's late rejection must not null out
+    // the latch its successor installed.
+    attempt.catch(() => {
+      if (startupLatch === attempt) {
+        startupLatch = null;
+      }
+    });
+  }
+  return startupLatch;
+}
+
+/**
+ * Drop the latch so the next `runChatRuntimeStartup()` runs startup again.
+ *
+ * Logout is the one place a window's identity changes without a reload: the
+ * auth gate unmounts `AppShell` and remounts it on the next login, and the
+ * latch would otherwise hand that remount the previous account's settled run.
+ * Most of what startup loads is machine-local and identical across accounts,
+ * but the runtime config and the provider allowlist it applies are org-scoped,
+ * so a login to a different org would keep the old org's constraints until the
+ * window reloaded.
+ *
+ * Deliberately partial: the ACP client and the zustand stores are module
+ * singletons that survive the remount either way, so this restores the
+ * pre-latch "startup runs per `AppShell` mount" behavior, not a full teardown.
+ * An in-flight run is not cancelled — it keeps writing into those same stores,
+ * and the next call starts a fresh run alongside it.
+ */
+export function resetChatRuntimeStartup(): void {
+  startupLatch = null;
+}
+
+async function startChatRuntime(
   options: { hydrateMessageQueues?: boolean } = {},
 ): Promise<void> {
   const tConn = performance.now();
@@ -200,7 +248,7 @@ export async function runChatRuntimeStartup(
   const refreshProviderModels = async () => {
     const runtimeConfigResult = useRuntimeConfigStore.getState().result;
     const configuredProviderIds = await getIntentionalConfiguredProviderIds(
-      await checkAllProviderStatus(),
+      await checkAllProviderStatus({ coalesce: true }),
     );
     await modelCacheStore.refreshAllModelProviders(
       getModelCacheRefreshProviderIds(useRuntimeConfigStore.getState().config, {
@@ -230,6 +278,12 @@ export async function runChatRuntimeStartup(
   } catch (error) {
     console.warn("Failed to reconcile managed Goose provider defaults:", error);
   }
+  // Reads plainly (no `coalesce`): the reconcile above can have just written
+  // the Goose defaults this gate reads, so joining a read that started before
+  // that write would report pre-reconcile defaults and can trip the
+  // `needs_setup` recovery below into persisting a different default. The
+  // composer pill and model picker coalesce on the same slot from mount, so
+  // there is a real in-flight read to avoid here.
   const readiness = await useDefaultProviderReadinessStore.getState().refresh();
   if (
     readiness.status === "needs_setup" &&

@@ -42,6 +42,7 @@ const {
   mockListAuthWorkspaces,
   mockLogout,
   mockOpenDialog,
+  mockResetChatRuntimeStartup,
   mockRuntimeConfigApi,
   mockGetDistroBundle,
   mockSwitchAuthWorkspace,
@@ -50,6 +51,7 @@ const {
   mockListAuthWorkspaces: vi.fn(),
   mockLogout: vi.fn(),
   mockOpenDialog: vi.fn(),
+  mockResetChatRuntimeStartup: vi.fn(),
   mockGetDistroBundle: vi.fn(),
   mockSwitchAuthWorkspace: vi.fn(),
   mockRuntimeConfigApi: {
@@ -72,6 +74,12 @@ vi.mock("@/features/auth/api/auth", () => ({
   listAuthWorkspaces: mockListAuthWorkspaces,
   logout: mockLogout,
   switchAuthWorkspace: mockSwitchAuthWorkspace,
+}));
+
+// Stubbed to keep the startup module graph out of this suite; the latch's own
+// behavior is covered in src/app/lib/chatRuntimeStartup.test.ts.
+vi.mock("@/app/lib/chatRuntimeStartup", () => ({
+  resetChatRuntimeStartup: mockResetChatRuntimeStartup,
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -265,6 +273,38 @@ describe("GeneralSettings appearance section", () => {
       expect(toastSuccessMock).toHaveBeenCalledWith("Logged out.");
       expect(onLoggedOut).toHaveBeenCalledWith(nextStatus);
     });
+    // The auth gate remounts AppShell on the next login; startup has to be
+    // able to run again for that mount.
+    expect(mockResetChatRuntimeStartup).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the startup latch when logging out fails", async () => {
+    const user = userEvent.setup();
+    const onLoggedOut = vi.fn();
+    mockLogout.mockRejectedValueOnce(new Error("network down"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    renderGeneralSettings({
+      authStatus: {
+        loggedIn: true,
+        requiresOrg: false,
+        org: "test",
+        profile: "default",
+        kgooseBaseUrl: "https://test.blockstaging.build",
+      },
+      onLoggedOut,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Log out" }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        "Couldn't log out. Try again.",
+      );
+    });
+    // Still signed in and still mounted, so the completed run stays shared.
+    expect(onLoggedOut).not.toHaveBeenCalled();
+    expect(mockResetChatRuntimeStartup).not.toHaveBeenCalled();
   });
 
   it("lists and switches the active workspace", async () => {

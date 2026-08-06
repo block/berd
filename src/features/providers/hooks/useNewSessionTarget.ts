@@ -68,6 +68,8 @@ export function useNewSessionTarget() {
         request.providerId !== "goose" &&
         !readyAgentIds.has(request.providerId)
       ) {
+        // Correctness boundary: this plain read never joins a sibling probe
+        // that started before a just-completed provider save.
         const statuses = await checkAllProviderStatus();
         configuredAgentIds = new Set(
           statuses

@@ -6,6 +6,7 @@ import {
   type AuthStatus,
   type AuthWorkspaceList,
 } from "@/features/auth/api/auth";
+import { resetChatRuntimeStartup } from "@/app/lib/chatRuntimeStartup";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
@@ -283,6 +284,10 @@ export function GeneralSettings({
     setLoggingOut(true);
     try {
       const nextStatus = await logout();
+      // `onLoggedOut` flips the auth gate, which unmounts AppShell and remounts
+      // it on the next login. Clear the startup latch first so that remount
+      // re-runs startup instead of reusing this account's run.
+      resetChatRuntimeStartup();
       toast.success(t("account.logoutSuccess"));
       onLoggedOut?.(nextStatus);
     } catch (error) {

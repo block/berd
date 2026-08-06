@@ -160,7 +160,8 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     setLoading(true);
     let active = true;
     let unlisten: (() => void) | undefined;
-    void getPocketVoiceStatus()
+    // Mount probe: sibling voice surfaces share one IPC call.
+    void getPocketVoiceStatus({ coalesce: true })
       .then((next) => {
         if (active)
           setStatus((current) => mergePocketVoiceStatus(current, next));
@@ -195,7 +196,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
           : String(installError);
       setError(message);
       try {
-        const refreshed = await getPocketVoiceStatus({ fresh: true });
+        const refreshed = await getPocketVoiceStatus();
         setStatus((current) => mergePocketVoiceStatus(current, refreshed));
       } catch {
         // Preserve the actionable install error when status refresh also fails.
@@ -207,7 +208,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     setError(null);
     try {
       await selectPocketVoice(voiceId);
-      const refreshed = await getPocketVoiceStatus({ fresh: true });
+      const refreshed = await getPocketVoiceStatus();
       setStatus((current) => mergePocketVoiceStatus(current, refreshed));
     } catch (selectionError) {
       setError(String(selectionError));
@@ -218,7 +219,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     setError(null);
     try {
       await setPocketPlaybackSpeed(speed);
-      const refreshed = await getPocketVoiceStatus({ fresh: true });
+      const refreshed = await getPocketVoiceStatus();
       setStatus((current) => mergePocketVoiceStatus(current, refreshed));
     } catch (nextError) {
       setError(

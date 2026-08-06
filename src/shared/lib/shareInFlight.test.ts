@@ -12,13 +12,13 @@ function deferred<T>() {
 }
 
 describe("shareInFlight", () => {
-  it("collapses a mount burst onto one in-flight request", async () => {
+  it("collapses a mount burst of coalescing callers onto one in-flight request", async () => {
     const inFlight = deferred<string>();
     const fn = vi.fn(() => inFlight.promise);
     const shared = shareInFlight(fn);
 
-    const first = shared();
-    const second = shared();
+    const first = shared({ coalesce: true });
+    const second = shared({ coalesce: true });
     inFlight.resolve("only");
 
     await expect(first).resolves.toBe("only");
@@ -26,19 +26,19 @@ describe("shareInFlight", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it("fetches again once the shared request has settled", async () => {
+  it("fetches again for a coalescing caller once the shared request has settled", async () => {
     const fn = vi
       .fn<() => Promise<string>>()
       .mockResolvedValueOnce("first")
       .mockResolvedValueOnce("second");
     const shared = shareInFlight(fn);
 
-    await expect(shared()).resolves.toBe("first");
-    await expect(shared()).resolves.toBe("second");
+    await expect(shared({ coalesce: true })).resolves.toBe("first");
+    await expect(shared({ coalesce: true })).resolves.toBe("second");
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it("bypasses a pre-write read in flight when a caller asks for fresh", async () => {
+  it("starts a new request for a plain call while a read is in flight", async () => {
     const preWrite = deferred<string>();
     const postWrite = deferred<string>();
     const fn = vi
@@ -48,9 +48,10 @@ describe("shareInFlight", () => {
     const shared = shareInFlight(fn);
 
     // A sibling surface's read is still running (started before the write).
-    const stale = shared();
-    // The post-write refresh must not coalesce onto that pre-write read.
-    const fresh = shared({ fresh: true });
+    const stale = shared({ coalesce: true });
+    // A plain post-write read must not join it — no option required, which is
+    // what keeps a caller who has never heard of `coalesce` correct.
+    const fresh = shared();
 
     // Even if the stale read resolves last, the fresh read reflects its own
     // post-write fetch.
@@ -62,7 +63,7 @@ describe("shareInFlight", () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps sharing after a fresh request supersedes the slot", async () => {
+  it("hands a later coalescing caller the post-write read, not the superseded one", async () => {
     const preWrite = deferred<string>();
     const postWrite = deferred<string>();
     const fn = vi
@@ -71,18 +72,19 @@ describe("shareInFlight", () => {
       .mockReturnValueOnce(postWrite.promise);
     const shared = shareInFlight(fn);
 
-    shared();
-    const fresh = shared({ fresh: true });
+    shared({ coalesce: true });
+    const fresh = shared();
     // The superseded pre-write request settling must not null out the slot that
-    // now points at the fresh request; a plain caller still joins the fresh one.
+    // now points at the plain request; a coalescing caller still joins it.
     preWrite.resolve("before");
     await Promise.resolve();
-    const joiner = shared();
+    const joiner = shared({ coalesce: true });
 
     postWrite.resolve("after");
     await expect(fresh).resolves.toBe("after");
     await expect(joiner).resolves.toBe("after");
-    // Only the mount read and the fresh read fetched; the joiner reused fresh.
+    // Only the mount read and the post-write read fetched; the joiner reused
+    // the post-write one.
     expect(fn).toHaveBeenCalledTimes(2);
   });
 });

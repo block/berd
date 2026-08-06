@@ -980,7 +980,9 @@ export function GlobalComposerPill({
       try {
         const readiness =
           useDefaultProviderReadinessStore.getState().readiness ??
-          (await useDefaultProviderReadinessStore.getState().refresh());
+          (await useDefaultProviderReadinessStore
+            .getState()
+            .refresh({ coalesce: true }));
 
         if (cancelled) {
           return;

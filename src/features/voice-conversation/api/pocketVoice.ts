@@ -50,11 +50,11 @@ export interface VoiceModelDownloadProgress {
   phase: VoiceModelDownloadPhase;
 }
 
-// Voice surfaces poll this on mount from several components at once; share
-// the in-flight request so a mount burst issues one IPC call. A refresh that
+// Voice surfaces poll this on mount from several components at once and pass
+// `{ coalesce: true }` so a mount burst issues one IPC call. A refresh that
 // must observe a just-written setting (select voice / playback speed do not
 // bump statusRevision, so a stale same-revision snapshot would be accepted)
-// passes `{ fresh: true }` to bypass any pre-write read still in flight.
+// calls plainly, which never joins a pre-write read still in flight.
 export const getPocketVoiceStatus = shareInFlight(() =>
   invoke<PocketVoiceStatus>("get_pocket_voice_status"),
 );

@@ -31,8 +31,8 @@ export interface JoinSessionHandoffResult {
   snapshot?: SessionHandoffSnapshot;
 }
 
-// Every mounted `useSessionWindowSupport` asks on mount; share the in-flight
-// request so simultaneous mounts issue a single IPC call.
+// Every mounted `useSessionWindowSupport` asks on mount and passes
+// `{ coalesce: true }` so simultaneous mounts issue a single IPC call.
 export const getSessionWindowSupport = shareInFlight(() =>
   invoke<SessionWindowSupport>("get_session_window_support"),
 );

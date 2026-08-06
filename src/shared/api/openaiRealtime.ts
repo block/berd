@@ -12,8 +12,8 @@ export interface OpenAiRealtimeSession {
   transcriptionModel: string;
 }
 
-// Multiple dictation hooks check the status on mount in the same tick;
-// share the in-flight request instead of issuing duplicate IPC calls.
+// Multiple dictation hooks check the status on mount in the same tick and pass
+// `{ coalesce: true }` instead of issuing duplicate IPC calls.
 export const getOpenAiRealtimeStatus = shareInFlight(
   (): Promise<OpenAiRealtimeStatus> => invoke("get_openai_realtime_status"),
 );

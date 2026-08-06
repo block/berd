@@ -1,4 +1,4 @@
-import { getClient } from "@/shared/api/acpConnection";
+import { readGooseDefaults } from "@/features/providers/api/gooseDefaults";
 
 export interface DefaultModelStatus {
   providerId?: string;
@@ -26,8 +26,10 @@ function normalize(value: string | null | undefined): string | undefined {
  * `-32603` error string raised later by `acpPrepareSession`.
  */
 export async function readDefaultModelStatus(): Promise<DefaultModelStatus> {
-  const client = await getClient();
-  const defaults = await client.goose.GooseUnstableDefaultsRead({});
+  // Reads plainly (no `coalesce`): this decides whether to *write* repaired
+  // defaults, and `useDefaultModelGate` runs only once startup readiness and
+  // the migration gate have settled, so there is no startup read left to join.
+  const defaults = await readGooseDefaults();
   const providerId = normalize(defaults.providerId);
   const modelId = normalize(defaults.modelId);
   return {

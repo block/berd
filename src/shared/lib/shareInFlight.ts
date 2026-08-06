@@ -1,32 +1,36 @@
 export interface ShareInFlightOptions {
   /**
-   * Ignore any request already in flight and start a new one. Use right after a
-   * write whose effect this fetch must observe: a plain call would otherwise
-   * coalesce onto a sibling's read that started before the write and resolve
-   * with pre-write state. The new request becomes the shared one, so concurrent
-   * plain callers still collapse onto it.
+   * Join a request already in flight instead of starting a new one. Opt in from
+   * a startup or mount window where several surfaces read the same state in the
+   * same tick and any in-flight read is acceptable — the cost of getting this
+   * wrong is a stale read, so it is never the default.
    */
-  fresh?: boolean;
+  coalesce?: boolean;
 }
 
 /**
- * Wrap an idempotent async fn so concurrent callers share one in-flight
- * promise. Components that fetch the same backend state independently on
- * mount (StrictMode double-fires, several hooks alive in the same tick)
- * collapse to a single request; once it settles, the next call fetches
- * fresh so user-driven refreshes never see stale data.
+ * Wrap an idempotent async fn so callers that opt in with `{ coalesce: true }`
+ * share one in-flight promise. Surfaces that fetch the same backend state
+ * independently on mount (StrictMode double-fires, several hooks alive in the
+ * same tick) collapse to a single request.
+ *
+ * A plain call always fetches, so a read that must observe a just-completed
+ * write needs no option to stay correct. Every call — coalescing or not —
+ * publishes its request as the shared one, so a post-write read supersedes a
+ * pre-write read still in flight and a `coalesce` caller arriving later joins
+ * the post-write read rather than the stale one.
  */
 export function shareInFlight<T>(
   fn: () => Promise<T>,
 ): (options?: ShareInFlightOptions) => Promise<T> {
   let inFlight: Promise<T> | null = null;
   return (options) => {
-    if (options?.fresh || !inFlight) {
+    if (!options?.coalesce || !inFlight) {
       const request = Promise.resolve()
         .then(fn)
-        // Only clear the slot if it still points at this request: a `fresh`
-        // call replaces `inFlight` mid-flight, and the superseded request's
-        // settle must not null out its successor.
+        // Only clear the slot if it still points at this request: a plain call
+        // replaces `inFlight` mid-flight, and the superseded request's settle
+        // must not null out its successor.
         .finally(() => {
           if (inFlight === request) {
             inFlight = null;
