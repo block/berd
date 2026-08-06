@@ -14,6 +14,14 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROMPT_FILE="$REPO_ROOT/scripts/release-notes-prompt.md"
+RELEASE_REPOSITORY="${BERD_REPO:-${GITHUB_REPOSITORY:-}}"
+if [[ -z "$RELEASE_REPOSITORY" && -f "$REPO_ROOT/scripts/release/public-channel.json" ]]; then
+  RELEASE_REPOSITORY="$(jq -er .repository "$REPO_ROOT/scripts/release/public-channel.json")"
+fi
+if [[ -z "$RELEASE_REPOSITORY" ]]; then
+  echo "BERD_REPO must be configured for release-note publishing." >&2
+  exit 1
+fi
 
 [[ -f "$PROMPT_FILE" ]] || { echo "Missing prompt file: $PROMPT_FILE" >&2; exit 1; }
 
@@ -74,7 +82,7 @@ if [[ "$TO_REF" == "HEAD" ]]; then
 fi
 NOTES="${NOTES}
 
-**Full Changelog**: https://github.com/squareup/berd/compare/${FROM_REF}...${COMPARE_TO}"
+**Full Changelog**: https://github.com/${RELEASE_REPOSITORY}/compare/${FROM_REF}...${COMPARE_TO}"
 
 echo
 echo "$NOTES"
@@ -100,7 +108,7 @@ echo "Publishing release notes for ${TO_REF}..." >&2
 # build metadata (Buildkite build URL, app commit, pinned backend commit).
 # Editing the release replaces the whole body, so preserve the existing body
 # by appending it after the new notes.
-EXISTING_BODY="$(gh release view "$TO_REF" --repo squareup/berd --json body -q .body 2>/dev/null || true)"
+EXISTING_BODY="$(gh release view "$TO_REF" --repo "$RELEASE_REPOSITORY" --json body -q .body 2>/dev/null || true)"
 if [[ -n "$EXISTING_BODY" ]]; then
   NOTES="${NOTES}
 
@@ -112,15 +120,15 @@ fi
 # Second goose run with the developer extension enabled so the agent can use
 # the gh CLI to update the release.
 goose run --quiet --no-session --no-profile --with-builtin developer --instructions - <<EOF
-You are publishing release notes for the squareup/berd repository.
+You are publishing release notes for the configured public repository (${RELEASE_REPOSITORY}).
 
 Use the \`gh\` CLI to set the notes on the GitHub release for tag \`${TO_REF}\`:
 
-1. Verify the release exists: \`gh release view ${TO_REF} --repo squareup/berd\`.
+1. Verify the release exists: \`gh release view ${TO_REF} --repo ${RELEASE_REPOSITORY}\`.
    If it does not exist, stop and report that — do not create a release.
 2. Update only the release notes body, leaving title, tag, target, and assets
    unchanged. Write the notes below to a temp file and run:
-   \`gh release edit ${TO_REF} --repo squareup/berd --notes-file <tempfile>\`.
+   \`gh release edit ${TO_REF} --repo ${RELEASE_REPOSITORY} --notes-file <tempfile>\`.
 3. Confirm the update succeeded and print the release URL.
 
 Use the release notes below verbatim — do not edit, reformat, or summarize

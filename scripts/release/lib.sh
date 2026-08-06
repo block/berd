@@ -18,7 +18,14 @@ RELEASE_DIR="${REPO_ROOT}/release"
 APP_NAME="berd"
 APP_BUNDLE_NAME="Berd"
 
-BERD_REPO="${BERD_REPO:-squareup/berd}"
+BERD_REPO="${BERD_REPO:-${GITHUB_REPOSITORY:-}}"
+if [[ -z "$BERD_REPO" && -f "$REPO_ROOT/scripts/release/public-channel.json" ]]; then
+  BERD_REPO="$(jq -er .repository "$REPO_ROOT/scripts/release/public-channel.json")"
+fi
+if [[ -z "$BERD_REPO" ]]; then
+  echo "BERD_REPO must be configured for release publishing" >&2
+  return 1 2>/dev/null || exit 1
+fi
 
 release_input() {
   local key="$1"

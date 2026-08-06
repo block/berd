@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Download signed+notarized build artifacts from the build step, stamp the
 # release version into their filenames, and publish them as a GitHub release
-# on squareup/berd tagged v<version>.
+# on the configured public repository tagged v<version>.
 
 set -euo pipefail
 
@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/release-inputs.sh"
 load_buildkite_release_inputs version
 # shellcheck source=scripts/release/lib.sh
 source "$SCRIPT_DIR/../../release/lib.sh"
+validate_repository "$BERD_REPO"
 
 RELEASE_VERSION="$(release_input_version)"
 TAG="v${RELEASE_VERSION}"
