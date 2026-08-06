@@ -7,17 +7,27 @@ import {
   type TranscriptSelectedTextContextMenuEventDetail,
 } from "@/features/chat/transcript/row-state";
 import {
+  buildEnrichedSelectionPayload,
+  cloneSelectionContents,
+  isEditableSelectionTarget,
+  type SelectionClipboardPayload,
+  writeSelectionToClipboard,
+} from "@/shared/lib/selectionClipboard";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 
-const EDITABLE_SELECTOR =
-  'input, textarea, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]';
-
 interface SelectionSnapshot {
   markdown: string;
+  /**
+   * Enriched flavors, or `null` when the selection holds no URL worth
+   * recovering. `null` means Copy falls back to `text`, so an ordinary prose
+   * selection keeps writing plain text instead of gaining a formatted flavor.
+   */
+  payload: SelectionClipboardPayload | null;
   ranges: Range[];
   text: string;
 }
@@ -31,12 +41,6 @@ interface MenuState {
 function elementFromNode(node: Node | null): Element | null {
   if (!node) return null;
   return node instanceof Element ? node : node.parentElement;
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element && Boolean(target.closest(EDITABLE_SELECTOR))
-  );
 }
 
 export function selectionIntersectsNode(
@@ -56,16 +60,6 @@ export function selectionIntersectsNode(
   }
 
   return false;
-}
-
-function cloneSelectionContents(selection: Selection): DocumentFragment {
-  const fragment = document.createDocumentFragment();
-
-  for (let index = 0; index < selection.rangeCount; index += 1) {
-    fragment.append(selection.getRangeAt(index).cloneContents());
-  }
-
-  return fragment;
 }
 
 function cloneSelectionRanges(selection: Selection): Range[] {
@@ -367,12 +361,13 @@ function getSelectionSnapshot(selection: Selection): SelectionSnapshot | null {
   const text = selection.toString();
   if (!text.trim()) return null;
 
-  const markdown =
-    getCodeBlockSelectionMarkdown(selection) ??
-    htmlFragmentToMarkdown(cloneSelectionContents(selection), text);
+  const fragment = cloneSelectionContents(selection);
+  const codeBlockMarkdown = getCodeBlockSelectionMarkdown(selection);
+  const markdown = codeBlockMarkdown ?? htmlFragmentToMarkdown(fragment, text);
 
   return {
     markdown,
+    payload: buildEnrichedSelectionPayload(fragment, text),
     ranges: cloneSelectionRanges(selection),
     text,
   };
@@ -389,7 +384,8 @@ export function SelectedTextContextMenu() {
 
   useEffect(() => {
     const handleContextMenu = (event: MouseEvent) => {
-      if (event.defaultPrevented || isEditableTarget(event.target)) return;
+      if (event.defaultPrevented || isEditableSelectionTarget(event.target))
+        return;
 
       const selection = window.getSelection();
       const target = event.target instanceof Node ? event.target : null;
@@ -418,6 +414,49 @@ export function SelectedTextContextMenu() {
 
     return () => {
       window.removeEventListener("contextmenu", handleContextMenu);
+    };
+  }, []);
+
+  /**
+   * Native copy (Cmd/Ctrl+C, Edit > Copy) is the path most people use, and the
+   * webview's default plain-text flavor keeps only a link's visible label — so
+   * the URL is what the bug report calls "lost".
+   *
+   * The `copy` event is the right seam: `clipboardData` is writable
+   * synchronously during the event, so both flavors can be set without the
+   * permission prompt and focus requirements of `navigator.clipboard.write`.
+   *
+   * Intervene only when the selection actually holds an external link whose URL
+   * would be dropped. Selections without links, and selections inside editable
+   * fields, keep the platform's own copy behavior untouched.
+   */
+  useEffect(() => {
+    const handleCopy = (event: ClipboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (isEditableSelectionTarget(event.target)) return;
+
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) return;
+
+      const selection = window.getSelection();
+      const text = selection?.toString() ?? "";
+      if (!selection || !text.trim()) return;
+
+      const fragment = cloneSelectionContents(selection);
+      const payload = buildEnrichedSelectionPayload(fragment, text);
+      if (!payload) return;
+
+      const { html, text: plainText } = payload;
+
+      event.preventDefault();
+      clipboardData.setData("text/plain", plainText);
+      if (html) clipboardData.setData("text/html", html);
+    };
+
+    document.addEventListener("copy", handleCopy);
+
+    return () => {
+      document.removeEventListener("copy", handleCopy);
     };
   }, []);
 
@@ -473,7 +512,15 @@ export function SelectedTextContextMenu() {
         <DropdownMenuItem
           onSelect={() => {
             restoreMenuSelection();
-            void copyToClipboard(menu?.selection.text ?? "");
+            const selection = menu?.selection;
+            if (!selection) return;
+            // No recoverable URL means nothing to enrich, so keep the plain-text
+            // copy this menu item has always performed.
+            if (selection.payload) {
+              void writeSelectionToClipboard(selection.payload);
+            } else {
+              void copyToClipboard(selection.text);
+            }
           }}
         >
           <CopyIcon aria-hidden="true" />

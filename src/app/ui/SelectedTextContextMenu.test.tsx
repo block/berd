@@ -312,3 +312,284 @@ describe("SelectedTextContextMenu helpers", () => {
     expect(position).toEqual({ x: 24, y: 48 });
   });
 });
+
+function createClipboardData() {
+  const data = new Map<string, string>();
+  return {
+    getData: (type: string) => data.get(type) ?? "",
+    setData: (type: string, value: string) => {
+      data.set(type, value);
+    },
+    types: [] as string[],
+  };
+}
+
+function selectNodeContents(node: Element | null): Selection {
+  const selection = window.getSelection();
+  const range = document.createRange();
+
+  expect(node).not.toBeNull();
+  expect(selection).not.toBeNull();
+
+  range.selectNodeContents(node as Element);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+
+  return selection as Selection;
+}
+
+describe("native copy of selected links", () => {
+  afterEach(async () => {
+    cleanup();
+    await flushFocusScopeUnmount();
+    window.getSelection()?.removeAllRanges();
+    document.body.innerHTML = "";
+  });
+
+  it("keeps the url in both clipboard flavors when copying a link", () => {
+    const { container } = render(
+      <>
+        <p>
+          Read the{" "}
+          <a className="text-primary" href="https://example.com/docs">
+            docs
+          </a>{" "}
+          first
+        </p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    selectNodeContents(container.querySelector("p"));
+    const clipboardData = createClipboardData();
+
+    fireEvent.copy(container.querySelector("p") as HTMLParagraphElement, {
+      clipboardData,
+    });
+
+    expect(clipboardData.getData("text/plain")).toContain(
+      "docs (https://example.com/docs)",
+    );
+    expect(clipboardData.getData("text/html")).toContain(
+      '<a href="https://example.com/docs">docs</a>',
+    );
+  });
+
+  it("keeps the url when only the link label is selected", () => {
+    // The way people actually copy a link: double-click / drag across just the
+    // label. The selection lives inside the <a>, so the anchor is an ancestor
+    // of the range rather than part of it.
+    const { container } = render(
+      <>
+        <p>
+          Read the <a href="https://example.com/docs">docs</a> first
+        </p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    const label = container.querySelector("a")?.firstChild as Text;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(label, 0);
+    range.setEnd(label, label.length);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const clipboardData = createClipboardData();
+    fireEvent.copy(container.querySelector("a") as HTMLAnchorElement, {
+      clipboardData,
+    });
+
+    expect(clipboardData.getData("text/plain")).toBe(
+      "docs (https://example.com/docs)",
+    );
+    expect(clipboardData.getData("text/html")).toBe(
+      '<a href="https://example.com/docs">docs</a>',
+    );
+  });
+
+  it("leaves the platform copy alone when the selection has no links", () => {
+    const { container } = render(
+      <>
+        <p id="prose">Just prose with no links</p>
+        <p id="linked">
+          Read the <a href="https://example.com/docs">docs</a>
+        </p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    selectNodeContents(container.querySelector("#prose"));
+    const proseClipboard = createClipboardData();
+    fireEvent.copy(container.querySelector("#prose") as HTMLElement, {
+      clipboardData: proseClipboard,
+    });
+
+    expect(proseClipboard.getData("text/plain")).toBe("");
+    expect(proseClipboard.getData("text/html")).toBe("");
+
+    // Positive control: the same mounted listener does act on a linked
+    // selection, so the assertions above hold because the handler declined
+    // rather than because it never ran.
+    selectNodeContents(container.querySelector("#linked"));
+    const linkedClipboard = createClipboardData();
+    fireEvent.copy(container.querySelector("#linked") as HTMLElement, {
+      clipboardData: linkedClipboard,
+    });
+
+    expect(linkedClipboard.getData("text/plain")).toContain(
+      "https://example.com/docs",
+    );
+  });
+
+  it("leaves copy inside editable fields to the platform", () => {
+    const { container } = render(
+      <>
+        <div contentEditable suppressContentEditableWarning>
+          <a href="https://example.com/docs">docs</a>
+        </div>
+        <p id="outside">
+          Read the <a href="https://example.com/docs">docs</a>
+        </p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    const editable = container.querySelector("[contenteditable]");
+    selectNodeContents(editable);
+    const editableClipboard = createClipboardData();
+    fireEvent.copy(editable as HTMLElement, {
+      clipboardData: editableClipboard,
+    });
+
+    expect(editableClipboard.getData("text/plain")).toBe("");
+
+    // Positive control: an identical link outside the editable host is enriched.
+    selectNodeContents(container.querySelector("#outside"));
+    const outsideClipboard = createClipboardData();
+    fireEvent.copy(container.querySelector("#outside") as HTMLElement, {
+      clipboardData: outsideClipboard,
+    });
+
+    expect(outsideClipboard.getData("text/plain")).toContain(
+      "https://example.com/docs",
+    );
+  });
+
+  it("stops rewriting the clipboard after unmount", () => {
+    const { container, unmount } = render(
+      <>
+        <p>
+          Read the <a href="https://example.com/docs">docs</a>
+        </p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    const paragraph = container.querySelector("p") as HTMLParagraphElement;
+
+    // Positive control first: prove the listener is attached and enriching,
+    // so the post-unmount assertion cannot pass vacuously.
+    selectNodeContents(paragraph);
+    const beforeUnmount = createClipboardData();
+    fireEvent.copy(paragraph, { clipboardData: beforeUnmount });
+
+    expect(beforeUnmount.getData("text/plain")).toContain(
+      "https://example.com/docs",
+    );
+
+    unmount();
+
+    document.body.append(paragraph);
+    selectNodeContents(paragraph);
+    const afterUnmount = createClipboardData();
+    fireEvent.copy(paragraph, { clipboardData: afterUnmount });
+
+    expect(afterUnmount.getData("text/plain")).toBe("");
+  });
+});
+
+describe("context menu Copy", () => {
+  afterEach(async () => {
+    cleanup();
+    await flushFocusScopeUnmount();
+    window.getSelection()?.removeAllRanges();
+    document.body.innerHTML = "";
+  });
+
+  function stubClipboard() {
+    const write = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+
+    vi.stubGlobal(
+      "ClipboardItem",
+      class {
+        constructor(public readonly items: Record<string, Blob>) {}
+      },
+    );
+    vi.stubGlobal("navigator", { clipboard: { write, writeText } });
+
+    return { write, writeText };
+  }
+
+  async function openMenuOn(element: Element) {
+    selectNodeContents(element);
+    fireEvent.contextMenu(element, { clientX: 100, clientY: 80 });
+
+    return screen.findByRole("menuitem", { name: /^copy$/i });
+  }
+
+  it("writes plain text only when the selection has no url to recover", async () => {
+    // This item wrote Selection.toString() before rich flavors existed. A
+    // selection with nothing to enrich must keep that behavior instead of
+    // gaining a text/html flavor that pastes headings and bullets into rich
+    // targets.
+    const { write, writeText } = stubClipboard();
+    const { container } = render(
+      <>
+        <div id="prose">
+          <h1>Title</h1>
+          <p>
+            Some <strong>bold</strong> prose
+          </p>
+        </div>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    const copyItem = await openMenuOn(
+      container.querySelector("#prose") as HTMLElement,
+    );
+    fireEvent.click(copyItem);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(writeText.mock.calls[0][0]).toContain("Some bold prose");
+    expect(writeText.mock.calls[0][0]).not.toContain("<h1>");
+  });
+
+  it("writes both flavors when the selection holds a url", async () => {
+    const { write, writeText } = stubClipboard();
+    const { container } = render(
+      <>
+        <p id="linked">
+          Read the <a href="https://example.com/docs">docs</a>
+        </p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+
+    const copyItem = await openMenuOn(
+      container.querySelector("#linked") as HTMLElement,
+    );
+    fireEvent.click(copyItem);
+
+    await waitFor(() => {
+      expect(write).toHaveBeenCalledTimes(1);
+    });
+    expect(writeText).not.toHaveBeenCalled();
+  });
+});
