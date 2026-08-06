@@ -150,6 +150,24 @@ describe("experimentPreferences", () => {
     });
   });
 
+  it("keeps manual-only experiments off under development auto-enable", () => {
+    vi.stubEnv("DEV", true);
+    const manualRegistry = [
+      {
+        id: "manual",
+        titleKey: "experiments.title",
+        descriptionKey: "experiments.description",
+        defaultEnabled: false,
+        manualEnableOnly: true,
+      },
+    ] satisfies readonly ExperimentDefinition[];
+
+    expect(getExperiment("manual", manualRegistry)).toMatchObject({
+      enabled: false,
+      enabledSource: "auto",
+    });
+  });
+
   it("defaults auto-enable off in production builds", () => {
     vi.stubEnv("DEV", false);
 

@@ -6,6 +6,7 @@ export interface StarterTasksContextValue {
   visible: boolean;
   docked: boolean;
   starterProjectId: string | null;
+  omittedTaskIds: ReadonlySet<StarterTaskId>;
   onTaskSelect: (id: StarterTaskId) => void;
   onTaskToggle: (id: StarterTaskId) => void;
   onBackHome: () => void;

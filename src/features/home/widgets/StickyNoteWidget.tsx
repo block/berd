@@ -428,6 +428,7 @@ export function StickyNoteWidget({
       <StarterTaskList
         mode="canvas"
         completionState={starterTasks.completionState}
+        omittedTaskIds={starterTasks.omittedTaskIds}
         labels={{
           title: t("onboarding.starterTasks.title"),
           backHome: t("onboarding.starterTasks.backHome"),

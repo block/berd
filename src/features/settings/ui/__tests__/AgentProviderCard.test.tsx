@@ -1164,6 +1164,87 @@ describe("AgentProviderCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("auto-starts installation exactly once for a missing provider", async () => {
+    const provider = createProvider({
+      supportsInstall: true,
+      supportsAuth: false,
+      supportsAuthStatus: false,
+    });
+    const { rerender } = renderCard(
+      <AgentProviderCard
+        provider={provider}
+        statusLoading={false}
+        readiness="not_installed"
+        autoStartInstall
+        autoInstallProgressOnly
+      />,
+    );
+
+    await waitFor(() => expect(startAgentSetup).toHaveBeenCalledOnce());
+    rerender(
+      <AgentProviderCard
+        provider={provider}
+        statusLoading={false}
+        readiness="not_installed"
+        autoStartInstall
+        autoInstallProgressOnly
+      />,
+    );
+    expect(startAgentSetup).toHaveBeenCalledOnce();
+  });
+
+  it("does not restart an automatic install across a pending remount", async () => {
+    let resolveStart: ((operation: AgentSetupOperation) => void) | undefined;
+    startAgentSetup.mockImplementationOnce(
+      () =>
+        new Promise<AgentSetupOperation>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const provider = createProvider({ supportsInstall: true });
+    const first = renderCard(
+      <AgentProviderCard
+        provider={provider}
+        statusLoading={false}
+        readiness="not_installed"
+        autoStartInstall
+        autoInstallProgressOnly
+      />,
+    );
+    await waitFor(() => expect(startAgentSetup).toHaveBeenCalledOnce());
+    first.unmount();
+
+    renderCard(
+      <AgentProviderCard
+        provider={provider}
+        statusLoading={false}
+        readiness="not_installed"
+        autoStartInstall
+        autoInstallProgressOnly
+      />,
+    );
+    expect(startAgentSetup).toHaveBeenCalledOnce();
+
+    resolveStart?.(makeOperation());
+    await waitForRunning(provider.id);
+  });
+
+  it("surfaces an automatic install launch failure", async () => {
+    startAgentSetup.mockRejectedValueOnce(new Error("backend unavailable"));
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({ supportsInstall: true })}
+        statusLoading={false}
+        readiness="not_installed"
+        autoStartInstall
+        autoInstallProgressOnly
+      />,
+    );
+
+    expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
   it("can force a connected provider into a dev setup failure simulation", async () => {
     const user = userEvent.setup();
     localStorage.setItem(

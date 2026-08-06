@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { STARTER_TASKS, isStarterTaskComplete } from "./starterTasks";
+import {
+  STARTER_TASKS,
+  isStarterTaskComplete,
+  omittedStarterTasksAfterFirstRun,
+} from "./starterTasks";
 
 const incomplete = {
   "connect-provider": false,
@@ -26,5 +30,27 @@ describe("starter task model", () => {
         "build-agent",
       ),
     ).toBe(true);
+  });
+
+  it("omits provider setup only after completed onboarding handled it", () => {
+    expect(
+      omittedStarterTasksAfterFirstRun({
+        onboardingCompleted: true,
+        providerHandled: true,
+      }),
+    ).toEqual(new Set(["connect-provider"]));
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+    [false, false],
+  ])("keeps provider setup for completed=%s handled=%s", (onboardingCompleted, providerHandled) => {
+    expect(
+      omittedStarterTasksAfterFirstRun({
+        onboardingCompleted,
+        providerHandled,
+      }),
+    ).toEqual(new Set());
   });
 });

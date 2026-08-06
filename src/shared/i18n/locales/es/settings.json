@@ -250,6 +250,11 @@
       "cancel": "Cancelar",
       "confirm": "Restablecer lienzo",
       "confirming": "Restableciendo…"
+    },
+    "firstRunOnboarding": {
+      "description": "Previsualiza el nuevo flujo de incorporación de la primera instalación. El progreso sin terminar se reanuda cuando se vuelve a activar el experimento.",
+      "title": "Incorporación del primer inicio",
+      "replay": "Repetir incorporación"
     }
   },
   "general": {
@@ -549,7 +554,8 @@
         "genericSetupFailure": "La configuración tuvo un tropiezo.",
         "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal.",
         "unknownPath": "esa ruta",
-        "unknownPlatform": "otra plataforma"
+        "unknownPlatform": "otra plataforma",
+        "installStart": "No se pudo iniciar la instalación"
       },
       "fix": "Reparar",
       "fixLabel": "Reparar {{name}}",
@@ -560,7 +566,10 @@
         "installing": "Instalando {{name}}...",
         "preparingRuntime": "Preparando el entorno de Node.js...",
         "step": "Paso {{step}} de {{total}}",
-        "verifyingInstallation": "Verificando instalación..."
+        "verifyingInstallation": "Verificando instalación...",
+        "preparingProvider": "Preparando la instalación de {{name}}…",
+        "installingForBerd": "Instalando {{name}} para Berd…",
+        "installedProvider": "{{name}} se instaló correctamente."
       },
       "signIn": "Iniciar sesión",
       "signInLabel": "Iniciar sesión en {{name}}",

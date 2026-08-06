@@ -32,6 +32,8 @@ interface AvatarMediaProps {
    * there are real pixels, instead of popping in an empty box.
    */
   onReady?: () => void;
+  onLoadedData?: ReactEventHandler<HTMLVideoElement>;
+  onPlaying?: ReactEventHandler<HTMLVideoElement>;
 }
 
 const OCCASIONAL_INITIAL_DELAY_MS = { min: 750, max: 1_250 };
@@ -310,6 +312,8 @@ export const AvatarMedia = memo(function AvatarMedia({
   paused = false,
   onError,
   onReady,
+  onLoadedData,
+  onPlaying,
 }: AvatarMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { enabled: animatedAvatarsEnabled } = useAnimatedAvatarsPreference();
@@ -493,7 +497,11 @@ export const AvatarMedia = memo(function AvatarMedia({
           }
           onError?.(event);
         }}
-        onLoadedData={onReady}
+        onLoadedData={(event) => {
+          onReady?.();
+          onLoadedData?.(event);
+        }}
+        onPlaying={onPlaying}
       />
     );
   }

@@ -52,6 +52,17 @@ describe("StarterTaskList", () => {
     expect(onTaskSelect).toHaveBeenCalledWith("start-chat");
   });
 
+  it("omits tasks completed in an earlier onboarding flow", () => {
+    renderList({ omittedTaskIds: new Set(["connect-provider"]) });
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(
+      screen.queryByRole("button", {
+        name: "Open task: Connect an AI provider",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("checks completed tasks while keeping task navigation available", () => {
     renderList({
       completionState: { ...incomplete, "connect-provider": true },

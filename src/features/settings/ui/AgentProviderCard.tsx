@@ -52,6 +52,8 @@ import {
 } from "@/features/providers/lib/agentSetupFailureSimulation";
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
 
+const autoInstallStarts = new Set<string>();
+
 interface AgentProviderCardProps {
   provider: ProviderDisplayInfo;
   // Per-agent readiness derived from the shared doctor report. `undefined`
@@ -67,6 +69,7 @@ interface AgentProviderCardProps {
     request: AgentSetupTroubleshootingRequest,
   ) => void;
   onProviderReady?: (providerId: string) => void;
+  onInstallComplete?: (providerId: string) => void;
   // Optional collapsible region rendered inside the card below the header
   // row (the goose card hosts its model providers here). Purely
   // presentational: the parent owns the content.
@@ -78,6 +81,14 @@ interface AgentProviderCardProps {
   statusIndicatorOpensDetails?: boolean;
   /** Goose keeps its expandable harness card; other agents use SettingsRow. */
   presentation?: "card" | "row";
+  /** Starts installation on mount once readiness has finished loading. */
+  autoStartInstall?: boolean;
+  /** Hides the pre-install card action while an automatic install starts. */
+  autoInstallProgressOnly?: boolean;
+  /** Development-only visual setup simulation; never invokes the backend. */
+  simulateAutoInstall?: boolean;
+  /** Surface-specific card treatment; onboarding uses a white setup panel. */
+  className?: string;
 }
 
 export function AgentProviderCard({
@@ -87,11 +98,16 @@ export function AgentProviderCard({
   statusLoading = false,
   onStartTroubleshootingChat,
   onProviderReady,
+  onInstallComplete,
   expandedContent,
   collapsedSupplement,
   statusIndicator,
   statusIndicatorOpensDetails = false,
   presentation = "card",
+  autoStartInstall = false,
+  autoInstallProgressOnly = false,
+  simulateAutoInstall = false,
+  className,
 }: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
@@ -126,13 +142,20 @@ export function AgentProviderCard({
   const reportedRef = useRef(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
+  const autoInstallStartedRef = useRef(autoInstallStarts.has(provider.id));
+  const handleInstallRef = useRef<() => Promise<void>>(async () => {});
 
   const icon = getProviderIcon(provider.id, "size-6");
 
   const status = operation?.status;
   const phase = operation?.phase ?? "idle";
   const isRunning = status === "running";
-  const isActive = isRunning || finalizing;
+  const isAwaitingAutoInstall =
+    autoStartInstall &&
+    autoInstallProgressOnly &&
+    !autoInstallStartedRef.current &&
+    status == null;
+  const isActive = isRunning || finalizing || isAwaitingAutoInstall;
   const outputLines = operation?.output ?? [];
 
   // Resolve display state from the shared report, with local-only overrides
@@ -207,7 +230,7 @@ export function AgentProviderCard({
     });
   }
 
-  function handleInstall() {
+  async function handleInstall() {
     if (!supportsInstall) return;
     if (setupFailureSimulation) {
       runSimulatedFailure("install");
@@ -215,14 +238,94 @@ export function AgentProviderCard({
     }
     // Pass the pending updates so a partial install with stale binaries (the
     // "Fix" state) is brought fully current in one pass; for a plain "Install"
-    // this list is empty.
-    void startSetup(provider.id, "install", {
-      installFixType,
-      updateCommands: buildUpdateCommands(),
-      verifyInstall,
-      ...(bundledBridge ? { bundledBridge } : {}),
-    });
+    // this list is empty. The backend command is idempotent per provider, so a
+    // StrictMode remount can safely reconnect to an operation already starting.
+    try {
+      await startSetup(provider.id, "install", {
+        installFixType,
+        updateCommands: buildUpdateCommands(),
+        verifyInstall,
+        ...(bundledBridge ? { bundledBridge } : {}),
+      });
+    } catch (error) {
+      setOperation(provider.id, {
+        action: "install",
+        phase: "idle",
+        status: "failed",
+        output: [],
+        error: formatAcpErrorMessage(
+          error,
+          t("providers.agents.errors.installStart"),
+        ),
+      });
+    } finally {
+      autoInstallStarts.delete(provider.id);
+    }
   }
+
+  handleInstallRef.current = handleInstall;
+
+  useEffect(() => {
+    if (
+      !autoStartInstall ||
+      autoInstallStartedRef.current ||
+      isChecking ||
+      isRunning ||
+      finalizing ||
+      resolvedReadiness !== "not_installed" ||
+      !supportsInstall
+    ) {
+      return;
+    }
+    autoInstallStartedRef.current = true;
+    autoInstallStarts.add(provider.id);
+    if (simulateAutoInstall) {
+      setOperation(provider.id, {
+        action: "install",
+        phase: "installing",
+        status: "running",
+        output: [
+          t("providers.agents.progress.preparingProvider", {
+            name: provider.displayName,
+          }),
+          t("providers.agents.progress.installingForBerd", {
+            name: provider.displayName,
+          }),
+        ],
+        error: null,
+      });
+      window.setTimeout(() => {
+        const current = useAgentSetupStore.getState().getStatus(provider.id);
+        if (current?.status !== "running") return;
+        setOperation(provider.id, {
+          action: "install",
+          phase: "idle",
+          status: "succeeded",
+          output: [
+            t("providers.agents.progress.installedProvider", {
+              name: provider.displayName,
+            }),
+          ],
+          error: null,
+        });
+        autoInstallStarts.delete(provider.id);
+      }, 1_800);
+      return;
+    }
+    void handleInstallRef.current();
+  }, [
+    autoStartInstall,
+    isChecking,
+    isRunning,
+    finalizing,
+    resolvedReadiness,
+    supportsInstall,
+    simulateAutoInstall,
+    provider.id,
+    provider.displayName,
+    setOperation,
+    t,
+  ]);
 
   function handleUpdate() {
     if (!hasActionableUpdate) return;
@@ -272,6 +375,9 @@ export function AgentProviderCard({
         // pass so version/install-source/update badges repopulate instead of
         // blanking out.
         await rerunDoctorReport(queryClient);
+        if (action === "install") {
+          onInstallComplete?.(provider.id);
+        }
         if (action === "auth" || (action === "install" && !supportsAuth)) {
           onProviderReady?.(provider.id);
         }
@@ -303,6 +409,7 @@ export function AgentProviderCard({
     clearSetupStatus,
     setOperation,
     onProviderReady,
+    onInstallComplete,
   ]);
 
   useEffect(() => {
@@ -538,7 +645,7 @@ export function AgentProviderCard({
     if (!isActive) return null;
 
     const phaseLabel =
-      phase === "installing"
+      isAwaitingAutoInstall || phase === "installing"
         ? t("providers.agents.progress.installing", {
             name: provider.displayName,
           })
@@ -727,7 +834,7 @@ export function AgentProviderCard({
         active={isActive}
         interactive={canOpenCollapsedCard}
         onClick={canOpenCollapsedCard ? handleCardSurfaceClick : undefined}
-        className="border border-border"
+        className={cn("border border-border", className)}
       >
         {cardContent}
       </ExpandableCard>

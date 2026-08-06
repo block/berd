@@ -41,6 +41,8 @@ export interface ExperimentDefinition {
   descriptionKey: string;
   /** Default state for users without an explicit per-experiment override. */
   defaultEnabled?: boolean;
+  /** Opt-out of development's global experiment auto-enable behavior. */
+  manualEnableOnly?: boolean;
   config?: Record<string, ExperimentConfigControl>;
 }
 
@@ -60,6 +62,8 @@ export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
 export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
 
 export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
+
+export const FIRST_RUN_ONBOARDING_EXPERIMENT_ID = "first-run-onboarding";
 
 export const EXPERIMENT_DEFINITIONS = [
   {
@@ -121,5 +125,12 @@ export const EXPERIMENT_DEFINITIONS = [
     id: BERDY_ONBOARDING_EXPERIMENT_ID,
     titleKey: "experiments.berdyOnboarding.title",
     descriptionKey: "experiments.berdyOnboarding.description",
+  },
+  {
+    id: FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
+    titleKey: "experiments.firstRunOnboarding.title",
+    descriptionKey: "experiments.firstRunOnboarding.description",
+    defaultEnabled: false,
+    manualEnableOnly: true,
   },
 ] as const satisfies readonly ExperimentDefinition[];

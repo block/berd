@@ -1,0 +1,107 @@
+{
+  "shell": {
+    "goBack": "Volver"
+  },
+  "welcome": {
+    "title": "Te damos la bienvenida a Berd",
+    "projects": "Un lugar para crear proyectos",
+    "agents": "trabajar con agentes",
+    "and": "y",
+    "done": "completar tu trabajo",
+    "getStarted": "Comenzar"
+  },
+  "workTypes": {
+    "title": "¿Para qué tipo de trabajo usarás Berd?",
+    "descriptionLine1": "Elige una o más opciones y te recomendaremos",
+    "descriptionLine2": "algunos agentes de Berd para configurar.",
+    "next": "Siguiente",
+    "items": {
+      "engineering": {
+        "label": "Ingeniería",
+        "description": "Crea y mejora software."
+      },
+      "legal": {
+        "label": "Legal",
+        "description": "Investiga, revisa y redacta documentos legales."
+      },
+      "marketing": {
+        "label": "Marketing",
+        "description": "Planifica campañas y crea contenido de marketing."
+      },
+      "product": {
+        "label": "Producto",
+        "description": "Planifica y da forma a experiencias de producto."
+      },
+      "design": {
+        "label": "Diseño",
+        "description": "Explora y revisa trabajos de diseño."
+      },
+      "writing": {
+        "label": "Redacción",
+        "description": "Redacta y edita contenido claro."
+      },
+      "not-sure": {
+        "label": "No lo sé",
+        "description": "Comienza con un equipo flexible."
+      }
+    }
+  },
+  "recommendations": {
+    "title": "Tus agentes recomendados",
+    "description": "Conoce algunos agentes elegidos para tu trabajo. Puedes configurarlos más tarde.",
+    "adopting": "Añadiendo…",
+    "keep": "Conservar",
+    "skip": "Omitir por ahora",
+    "genericError": "No se pudieron añadir algunos agentes. Inténtalo de nuevo.",
+    "adoptionError": "No se pudo añadir a {{names}}. Los demás agentes se conservaron; inténtalo de nuevo para añadir el resto.",
+    "agents": {
+      "builder": {
+        "name": "Builder",
+        "description": "Un aliado práctico para implementar productos."
+      },
+      "debugger": {
+        "name": "Debugger",
+        "description": "Un investigador metódico para fallos desconcertantes."
+      },
+      "planner": {
+        "name": "Planner",
+        "description": "Un pensador estructurado para investigaciones y planes técnicos."
+      },
+      "reviewer": {
+        "name": "Reviewer",
+        "description": "Una segunda mirada cuidadosa para lograr cambios fáciles de mantener."
+      },
+      "automator": {
+        "name": "Automator",
+        "description": "Un especialista en flujos de trabajo para tareas de ingeniería repetitivas."
+      },
+      "explorer": {
+        "name": "Explorer",
+        "description": "Un compañero de investigación para sistemas y decisiones desconocidos."
+      },
+      "generalist": {
+        "name": "Generalist",
+        "description": "Un colaborador flexible para un poco de todo."
+      }
+    },
+    "partialAdoptionWarning": "Se conservaron algunos agentes, pero no se pudo añadir a {{names}}. Puedes continuar e intentarlo de nuevo más tarde."
+  },
+  "harness": {
+    "title": "Elige un proveedor para impulsar Berd",
+    "description": "Comienza con uno ahora o conecta un proveedor más tarde en Configuración.",
+    "finish": "Finalizar",
+    "install": "Instalar",
+    "skip": "Omitir por ahora",
+    "providerGroup": "Proveedor de IA"
+  },
+  "setup": {
+    "readyTitle": "{{provider}} está listo",
+    "readyDescription": "Tu proveedor está conectado y listo para usar en Berd.",
+    "finishOnboarding": "Finalizar introducción",
+    "installationComplete": "Instalación completada",
+    "installing": "Instalando",
+    "installingDescription": "Te avisaremos cuando {{provider}} esté listo para usar.",
+    "finish": "Finalizar",
+    "skip": "Omitir por ahora"
+  }
+}

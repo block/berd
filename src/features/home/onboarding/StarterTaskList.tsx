@@ -35,6 +35,7 @@ export interface StarterTaskListProps {
   onTaskToggle: (id: StarterTaskId) => void;
   onBackHome: () => void;
   onDismiss: () => void;
+  omittedTaskIds?: ReadonlySet<StarterTaskId>;
   className?: string;
 }
 
@@ -46,6 +47,7 @@ export function StarterTaskList({
   onTaskToggle,
   onBackHome,
   onDismiss,
+  omittedTaskIds = new Set(),
   className,
 }: StarterTaskListProps) {
   const noteRef = useRef<HTMLElement | null>(null);
@@ -130,6 +132,9 @@ export function StarterTaskList({
           top: overlayPosition.top,
         } satisfies CSSProperties)
       : undefined;
+  const visibleTasks = STARTER_TASKS.filter(
+    (task) => !omittedTaskIds.has(task.id),
+  );
 
   return (
     <section
@@ -186,7 +191,7 @@ export function StarterTaskList({
       </header>
 
       <ul className="mt-2 space-y-0.5">
-        {STARTER_TASKS.map((task) => {
+        {visibleTasks.map((task) => {
           const label = labels.tasks[task.id];
           const completed = isStarterTaskComplete(completionState, task.id);
 

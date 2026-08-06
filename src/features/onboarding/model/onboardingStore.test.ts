@@ -1,0 +1,202 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { INITIAL_ONBOARDING_STATE } from "./onboardingState";
+import {
+  dispatchOnboarding,
+  getOnboardingSnapshot,
+  ONBOARDING_STORAGE_KEY,
+  ONBOARDING_STORAGE_VERSION,
+  replayOnboarding,
+  resetOnboarding,
+  resetOnboardingStoreForTests,
+  subscribeToOnboarding,
+} from "./onboardingStore";
+
+describe("onboarding persistence", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetOnboardingStoreForTests();
+  });
+
+  it("persists versioned state and hydrates it on a new lifecycle", () => {
+    dispatchOnboarding({ type: "start" });
+    dispatchOnboarding({ type: "select-agent", agentId: "builder" });
+
+    const persisted = JSON.parse(
+      window.localStorage.getItem(ONBOARDING_STORAGE_KEY) ?? "null",
+    );
+    expect(persisted).toMatchObject({
+      version: ONBOARDING_STORAGE_VERSION,
+      state: { lifecycle: "in-progress", selectedAgentId: "builder" },
+    });
+
+    resetOnboardingStoreForTests();
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "in-progress",
+      selectedAgentId: "builder",
+    });
+  });
+
+  it("falls back safely for malformed or unsupported records", () => {
+    for (const value of [
+      "not json",
+      JSON.stringify({ version: ONBOARDING_STORAGE_VERSION + 1, state: {} }),
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: { step: "bogus" },
+      }),
+    ]) {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, value);
+      resetOnboardingStoreForTests();
+      expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+    }
+  });
+
+  it.each([
+    ["work type", { selectedWorkTypeIds: ["unknown-work"] }],
+    ["agent", { selectedAgentId: "unknown-agent" }],
+    ["harness", { selectedHarnessId: "unknown-harness" }],
+    ["completed harness", { completedHarnessSetupIds: ["unknown-harness"] }],
+  ])("rejects a persisted unknown %s ID", (_label, statePatch) => {
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: { ...INITIAL_ONBOARDING_STATE, ...statePatch },
+      }),
+    );
+
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+  });
+
+  it("hydrates catalog-backed IDs and deduplicates persisted arrays", () => {
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: {
+          ...INITIAL_ONBOARDING_STATE,
+          selectedWorkTypeIds: ["engineering", "engineering"],
+          selectedAgentId: "builder",
+          selectedHarnessId: "goose",
+          completedHarnessSetupIds: ["goose", "goose", "claude-acp"],
+        },
+      }),
+    );
+
+    expect(getOnboardingSnapshot()).toMatchObject({
+      selectedWorkTypeIds: ["engineering"],
+      selectedAgentId: "builder",
+      selectedHarnessId: "goose",
+      completedHarnessSetupIds: ["goose", "claude-acp"],
+    });
+  });
+
+  it.each([
+    [
+      "completed lifecycle before the complete step",
+      { lifecycle: "completed", step: "welcome" },
+    ],
+    [
+      "complete step before the completed lifecycle",
+      { lifecycle: "in-progress", step: "complete" },
+    ],
+    [
+      "setup without a selected harness",
+      {
+        lifecycle: "in-progress",
+        step: "harness-setup",
+        selectedHarnessId: null,
+      },
+    ],
+  ])("rejects %s", (_label, statePatch) => {
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: { ...INITIAL_ONBOARDING_STATE, ...statePatch },
+      }),
+    );
+
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+  });
+
+  it("does not overwrite a newer record written after hydration", () => {
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+    const newerRecord = JSON.stringify({
+      version: ONBOARDING_STORAGE_VERSION + 1,
+      state: { future: true },
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, newerRecord);
+
+    dispatchOnboarding({ type: "start" });
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(
+      newerRecord,
+    );
+    resetOnboarding();
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(
+      newerRecord,
+    );
+  });
+
+  it("does not overwrite or remove a record from a newer storage version", () => {
+    const newerRecord = JSON.stringify({
+      version: ONBOARDING_STORAGE_VERSION + 1,
+      state: { future: true },
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, newerRecord);
+
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+    dispatchOnboarding({ type: "start" });
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(
+      newerRecord,
+    );
+
+    resetOnboarding();
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(
+      newerRecord,
+    );
+  });
+
+  it("notifies subscribers for dispatch, replay, and reset", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeToOnboarding(listener);
+
+    dispatchOnboarding({ type: "complete" });
+    replayOnboarding();
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "in-progress",
+      step: "welcome",
+    });
+    resetOnboarding();
+
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBeNull();
+
+    unsubscribe();
+    dispatchOnboarding({ type: "start" });
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it("synchronizes updates delivered by the browser storage event", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeToOnboarding(listener);
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: ONBOARDING_STORAGE_KEY,
+        newValue: JSON.stringify({
+          version: ONBOARDING_STORAGE_VERSION,
+          state: {
+            ...INITIAL_ONBOARDING_STATE,
+            lifecycle: "completed",
+            step: "complete",
+          },
+        }),
+      }),
+    );
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+    unsubscribe();
+  });
+});

@@ -7,6 +7,7 @@ import {
   BERDY_ONBOARDING_EXPERIMENT_ID,
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
+  FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
   GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
   SKILL_DISCOVERY_EXPERIMENT_ID,
   STARTER_TASKS_EXPERIMENT_ID,
@@ -31,6 +32,13 @@ const resetStarterTasksExperienceMock = vi.hoisted(() =>
 const syncOnboardingExperimentStateMock = vi.hoisted(() =>
   vi.fn(async () => {}),
 );
+const replayOnboardingMock = vi.hoisted(() => vi.fn());
+const resetOnboardingMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/features/onboarding/model", () => ({
+  replayOnboarding: replayOnboardingMock,
+  resetOnboarding: resetOnboardingMock,
+}));
 
 vi.mock("@/features/onboarding/resetOnboardingTour", () => ({
   resetHomeForOnboardingExperience: resetHomeForOnboardingExperienceMock,
@@ -90,6 +98,8 @@ describe("ExperimentsSettings", () => {
     resetHomeForOnboardingExperienceMock.mockClear();
     resetStarterTasksExperienceMock.mockClear();
     syncOnboardingExperimentStateMock.mockClear();
+    replayOnboardingMock.mockClear();
+    resetOnboardingMock.mockClear();
   });
 
   afterEach(() => {
@@ -139,6 +149,7 @@ describe("ExperimentsSettings", () => {
       GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
       AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
       BERDY_ONBOARDING_EXPERIMENT_ID,
+      FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
     ]);
   });
 
@@ -177,6 +188,51 @@ describe("ExperimentsSettings", () => {
     );
 
     expect(resetHomeForOnboardingExperienceMock).toHaveBeenCalledOnce();
+    expect(resetOnboardingMock).toHaveBeenCalledOnce();
+    expect(replayOnboardingMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves first-run state when reset-all preparation fails", async () => {
+    vi.stubEnv("DEV", true);
+    resetHomeForOnboardingExperienceMock.mockResolvedValueOnce(false);
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.resetAll", { ns: "settings" }),
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.confirm", { ns: "settings" }),
+      }),
+    );
+
+    expect(resetOnboardingMock).not.toHaveBeenCalled();
+  });
+
+  it("does not show reset to auto for first-run onboarding", async () => {
+    vi.stubEnv("DEV", true);
+    window.localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        experiments: {
+          [FIRST_RUN_ONBOARDING_EXPERIMENT_ID]: { enabled: true },
+        },
+      }),
+    );
+    renderWithProviders(<ExperimentsSettings />);
+
+    const firstRunTitle = screen.getByText(
+      i18n.t("experiments.firstRunOnboarding.title", { ns: "settings" }),
+    );
+    const firstRunRow =
+      firstRunTitle.closest("[class]")?.parentElement?.parentElement;
+    expect(firstRunRow).not.toHaveTextContent(
+      i18n.t("experiments.resetToAuto", { ns: "settings" }),
+    );
   });
 
   it("resets Berdy onboarding from its experiment card", async () => {

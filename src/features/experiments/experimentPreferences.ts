@@ -305,7 +305,7 @@ function resolveExperimentState(
       ? storedPreference.enabled
       : undefined;
   const autoEnabled = resolveAutoEnabled(
-    getExperimentAutoEnable().enabled,
+    definition.manualEnableOnly ? false : getExperimentAutoEnable().enabled,
     definition.defaultEnabled,
   );
 

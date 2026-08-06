@@ -4,6 +4,7 @@ import {
   EMPTY_STARTER_TASK_COMPLETION,
   loadStarterTaskProgress,
   saveStarterTaskProgress,
+  STARTER_TASK_PROGRESS_STORAGE_KEY,
 } from "./starterTaskProgress";
 
 describe("starterTaskProgress", () => {
@@ -38,7 +39,7 @@ describe("starterTaskProgress", () => {
 
   it("falls back safely for unsupported stored data", () => {
     localStorage.setItem(
-      "goose:onboarding:starter-task-progress",
+      STARTER_TASK_PROGRESS_STORAGE_KEY,
       JSON.stringify({ version: 99, completion: { "start-chat": true } }),
     );
 

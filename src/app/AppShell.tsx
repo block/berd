@@ -182,6 +182,10 @@ import {
   isSystemNotification,
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import { FIRST_RUN_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
+import { useOnboardingState } from "@/features/onboarding/model";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
@@ -209,9 +213,10 @@ import type { TopBarBreadcrumb } from "./ui/TopBar";
 import { STARTUP_LOADING_MIN_DISPLAY_MS } from "./lib/startupLoading";
 import { StartupLoadingView } from "./ui/StartupLoadingView";
 import { deriveStarterTaskCompletion } from "@/features/home/onboarding/starterTaskCompletion";
-import type {
-  StarterTaskCompletionState,
-  StarterTaskId,
+import {
+  omittedStarterTasksAfterFirstRun,
+  type StarterTaskCompletionState,
+  type StarterTaskId,
 } from "@/features/home/onboarding/starterTasks";
 import { StarterTaskList } from "@/features/home/onboarding/StarterTaskList";
 import {
@@ -219,10 +224,10 @@ import {
   EMPTY_STARTER_TASK_COMPLETION,
   loadStarterTaskProgress,
   saveStarterTaskProgress,
+  STARTER_TASK_PROGRESS_STORAGE_KEY,
 } from "@/features/home/onboarding/starterTaskProgress";
 import { StarterTasksProvider } from "@/features/home/onboarding/StarterTasksContext";
 import { STARTER_TASKS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import {
   recordAssistiveMomentRetired,
   recordAssistiveMomentShown,
@@ -682,6 +687,21 @@ export function AppShell({
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
     useState(0);
+  const onboardingExperiment = useExperiment(
+    FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
+  );
+  const onboardingState = useOnboardingState();
+  const omittedStarterTaskIds = useMemo<ReadonlySet<StarterTaskId>>(
+    () =>
+      omittedStarterTasksAfterFirstRun({
+        onboardingCompleted: onboardingState.lifecycle === "completed",
+        providerHandled: onboardingState.completedHarnessSetupIds.length > 0,
+      }),
+    [
+      onboardingState.completedHarnessSetupIds.length,
+      onboardingState.lifecycle,
+    ],
+  );
   const starterTasksExperimentEnabled =
     useExperiment(STARTER_TASKS_EXPERIMENT_ID)?.enabled === true;
   const [starterTasksEligible, setStarterTasksEligible] = useState(() =>
@@ -717,11 +737,24 @@ export function AppShell({
       setStarterProjectId(null);
       setStarterTasksEligible(true);
     };
+    const synchronize = (event: StorageEvent) => {
+      if (
+        event.key !== STARTER_TASK_PROGRESS_STORAGE_KEY &&
+        event.key !== null
+      ) {
+        return;
+      }
+      const progress = loadStarterTaskProgress();
+      setStarterTaskOverrides(progress.completion);
+      setStarterTasksAwaitingCompletion(progress.awaiting);
+    };
     window.addEventListener("starter-tasks-reset", reset);
     window.addEventListener("starter-tasks-state-reset", reset);
+    window.addEventListener("storage", synchronize);
     return () => {
       window.removeEventListener("starter-tasks-reset", reset);
       window.removeEventListener("starter-tasks-state-reset", reset);
+      window.removeEventListener("storage", synchronize);
     };
   }, []);
   const [globalComposerPlacement, setGlobalComposerPlacement] =
@@ -4474,6 +4507,15 @@ export function AppShell({
   const starterTaskCompletion = starterTaskOverrides;
 
   useEffect(() => {
+    if (omittedStarterTaskIds.size === 0) return;
+    setStarterTasksAwaitingCompletion((awaiting) => {
+      const next = new Set(awaiting);
+      for (const taskId of omittedStarterTaskIds) next.delete(taskId);
+      return next.size === awaiting.size ? awaiting : next;
+    });
+  }, [omittedStarterTaskIds]);
+
+  useEffect(() => {
     saveStarterTaskProgress({
       completion: starterTaskOverrides,
       awaiting: starterTasksAwaitingCompletion,
@@ -4577,6 +4619,13 @@ export function AppShell({
     return (
       <StartupDiagnosticView issue={startupIssue} onRetry={startup.retry} />
     );
+  }
+
+  const shouldShowOnboarding =
+    onboardingExperiment?.enabled === true &&
+    onboardingState.lifecycle !== "completed";
+  if (shouldShowOnboarding) {
+    return <OnboardingFlow />;
   }
 
   return (
@@ -4683,6 +4732,7 @@ export function AppShell({
               visible: starterTasksVisible,
               docked: starterTasksDocked,
               starterProjectId,
+              omittedTaskIds: omittedStarterTaskIds,
               onTaskSelect: handleStarterTaskSelect,
               onTaskToggle: handleStarterTaskToggle,
               onBackHome: handleStarterTasksBackHome,
@@ -4777,6 +4827,7 @@ export function AppShell({
             {starterTasksVisible && starterTasksDocked ? (
               <StarterTaskList
                 completionState={starterTaskCompletion}
+                omittedTaskIds={omittedStarterTaskIds}
                 mode="overlay"
                 labels={{
                   title: t("home:onboarding.starterTasks.title"),

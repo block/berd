@@ -250,6 +250,11 @@
       "cancel": "Cancel",
       "confirm": "Reset canvas",
       "confirming": "Resetting…"
+    },
+    "firstRunOnboarding": {
+      "description": "Preview the new first-install onboarding flow. Unfinished progress resumes when the experiment is enabled again.",
+      "title": "First-run onboarding",
+      "replay": "Replay onboarding"
     }
   },
   "general": {
@@ -552,7 +557,8 @@
         "genericSetupFailure": "Setup hit a snag.",
         "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal.",
         "unknownPath": "that path",
-        "unknownPlatform": "another platform"
+        "unknownPlatform": "another platform",
+        "installStart": "Couldn’t start installation"
       },
       "fix": "Fix",
       "fixLabel": "Fix {{name}}",
@@ -563,7 +569,10 @@
         "installing": "Installing {{name}}...",
         "preparingRuntime": "Preparing the Node.js runtime...",
         "step": "Step {{step}} of {{total}}",
-        "verifyingInstallation": "Verifying installation..."
+        "verifyingInstallation": "Verifying installation...",
+        "preparingProvider": "Preparing the {{name}} installation…",
+        "installingForBerd": "Installing {{name}} for Berd…",
+        "installedProvider": "{{name}} installed successfully."
       },
       "signIn": "Sign in",
       "signInLabel": "Sign in to {{name}}",

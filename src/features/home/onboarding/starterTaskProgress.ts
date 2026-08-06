@@ -4,7 +4,8 @@ import {
   type StarterTaskId,
 } from "./starterTasks";
 
-const STORAGE_KEY = "goose:onboarding:starter-task-progress";
+export const STARTER_TASK_PROGRESS_STORAGE_KEY =
+  "goose:onboarding:starter-task-progress";
 const VERSION = 1;
 
 interface StoredStarterTaskProgress {
@@ -30,7 +31,7 @@ const taskIds = new Set<StarterTaskId>(STARTER_TASKS.map((task) => task.id));
 export function loadStarterTaskProgress(): StarterTaskProgress {
   try {
     const parsed: unknown = JSON.parse(
-      localStorage.getItem(STORAGE_KEY) ?? "null",
+      localStorage.getItem(STARTER_TASK_PROGRESS_STORAGE_KEY) ?? "null",
     );
     if (!parsed || typeof parsed !== "object") throw new Error("missing");
     const stored = parsed as Partial<StoredStarterTaskProgress>;
@@ -63,7 +64,7 @@ export function loadStarterTaskProgress(): StarterTaskProgress {
 export function saveStarterTaskProgress(progress: StarterTaskProgress): void {
   try {
     localStorage.setItem(
-      STORAGE_KEY,
+      STARTER_TASK_PROGRESS_STORAGE_KEY,
       JSON.stringify({
         version: VERSION,
         completion: progress.completion,
@@ -77,7 +78,7 @@ export function saveStarterTaskProgress(progress: StarterTaskProgress): void {
 
 export function clearStarterTaskProgress(): void {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STARTER_TASK_PROGRESS_STORAGE_KEY);
   } catch {
     // Reset still applies to in-memory progress when storage is unavailable.
   }

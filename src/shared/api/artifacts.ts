@@ -44,6 +44,21 @@ function avatarIdFromArtifactPath(path: string): string | undefined {
  * Returns undefined when the artifacts catalog isn't loaded yet or no matching
  * asset exists.
  */
+export function selectCollectionImageUrl(
+  artifacts: Artifacts | null | undefined,
+  collectionId: string,
+  imageId: string,
+): string | undefined {
+  if (!artifacts) return undefined;
+  const match = artifacts.assets.find(
+    (asset) =>
+      asset.kind === "collectionImage" &&
+      asset.collectionId === collectionId &&
+      avatarIdFromArtifactPath(asset.path) === imageId,
+  );
+  return match ? convertFileSrc(match.path, "asset") : undefined;
+}
+
 export function selectAvatarImageUrl(
   artifacts: Artifacts | null | undefined,
   avatarId: string,
