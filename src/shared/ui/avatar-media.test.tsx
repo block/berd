@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANIMATED_AVATARS_CHANGED_EVENT } from "@/shared/avatars/avatarPlaybackPreferences";
 import { AvatarMedia } from "./avatar-media";
@@ -187,6 +194,114 @@ describe("AvatarMedia", () => {
     expect(pauseMock).toHaveBeenCalled();
   });
 
+  it("renders the matching poster instead of loading video when animation is disabled", () => {
+    localStorage.setItem("goose:animated-avatars-enabled", "false");
+
+    render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar.png",
+        }}
+        alt="avatar"
+      />,
+    );
+
+    const image = screen.getByRole("img", { name: "avatar" });
+    expect(image.tagName).toBe("IMG");
+    expect(image).toHaveAttribute("src", "asset://localhost/avatar.png");
+  });
+
+  it("switches a failed video to its matching poster", () => {
+    const onError = vi.fn();
+    render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar.png",
+        }}
+        alt="avatar"
+        onError={onError}
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    expect(video.tagName).toBe("VIDEO");
+    fireEvent.error(video);
+
+    const image = screen.getByRole("img", { name: "avatar" });
+    expect(image.tagName).toBe("IMG");
+    expect(image).toHaveAttribute("src", "asset://localhost/avatar.png");
+    expect(onError).not.toHaveBeenCalled();
+
+    fireEvent.error(image);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets a video failure when the resolved media changes", () => {
+    const { rerender } = render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar-1.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar-1.png",
+        }}
+        alt="avatar"
+      />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "avatar" }));
+    expect(screen.getByRole("img", { name: "avatar" }).tagName).toBe("IMG");
+
+    rerender(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar-2.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar-2.png",
+        }}
+        alt="avatar"
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "avatar" }).tagName).toBe("VIDEO");
+  });
+
+  it.each([
+    "lazy-once",
+    "visible-video",
+  ] as const)("attaches %s video after animation is enabled from a poster", async (loadingStrategy) => {
+    localStorage.setItem("goose:animated-avatars-enabled", "false");
+    render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar.png",
+        }}
+        alt="avatar"
+        loadingStrategy={loadingStrategy}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "avatar" }).tagName).toBe("IMG");
+
+    dispatchAnimatedAvatarsPreference(true);
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    expect(video.tagName).toBe("VIDEO");
+    expect(observeMock).toHaveBeenCalledWith(video);
+
+    emitIntersection(true);
+
+    await waitFor(() =>
+      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
+    );
+    expect(playMock).toHaveBeenCalled();
+  });
+
   it("pauses and resumes a mounted visible video when animation preference changes", async () => {
     render(
       <AvatarMedia
@@ -210,32 +325,30 @@ describe("AvatarMedia", () => {
 
     dispatchAnimatedAvatarsPreference(true);
 
+    await waitFor(() => expect(video).toHaveAttribute("loop"));
+    emitIntersection(true);
     await waitFor(() => expect(playMock).toHaveBeenCalledTimes(2));
-    expect(video).toHaveAttribute("loop");
   });
 
-  it("does not autoplay video avatars when reduced motion is preferred", async () => {
+  it("renders the matching poster when reduced motion is preferred", () => {
     setPrefersReducedMotion(true);
 
     render(
       <AvatarMedia
-        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar.png",
+        }}
         alt="avatar"
         loadingStrategy="visible-video"
       />,
     );
 
-    const video = screen.getByRole("img", { name: "avatar" });
-
-    expect(video).not.toHaveAttribute("loop");
-
-    emitIntersection(true);
-
-    await waitFor(() =>
-      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
-    );
+    const image = screen.getByRole("img", { name: "avatar" });
+    expect(image.tagName).toBe("IMG");
+    expect(image).toHaveAttribute("src", "asset://localhost/avatar.png");
     expect(playMock).not.toHaveBeenCalled();
-    expect(pauseMock).toHaveBeenCalled();
   });
 
   it("plays occasional avatars once, then waits before replaying", async () => {
@@ -264,6 +377,31 @@ describe("AvatarMedia", () => {
 
     await act(async () => vi.advanceTimersByTime(1));
     expect(playMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels occasional playback after falling back to the poster", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar.png",
+        }}
+        alt="avatar"
+        loadingStrategy="eager"
+        playbackMode="occasional"
+      />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "avatar" }));
+    expect(screen.getByRole("img", { name: "avatar" }).tagName).toBe("IMG");
+
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(playMock).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("preloads occasional video while it is visible", async () => {

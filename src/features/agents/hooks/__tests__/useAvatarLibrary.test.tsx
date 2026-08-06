@@ -17,7 +17,9 @@ vi.mock("@/shared/api/avatars", async () => {
     ensureAvatarCollection: vi.fn(),
     cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
       src: asset.path,
-      mediaType: "image" as const,
+      mediaType: asset.mimeType.startsWith("video/")
+        ? ("video" as const)
+        : ("image" as const),
     }),
   };
 });
@@ -89,6 +91,7 @@ const collectionB = collection("b");
 describe("useAvatarLibrary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(ensureAvatarCollection).mockReset();
     vi.mocked(getAvatarCatalog).mockResolvedValue(
       catalogWithCollections([collectionA, collectionB]),
     );
@@ -166,6 +169,45 @@ describe("useAvatarLibrary", () => {
       pending.get("a")?.(cachedCollection("a"));
     });
     expect(result.current.downloadingCollectionIds.size).toBe(0);
+  });
+
+  it("keeps a poster-only collection retryable after video download failures", async () => {
+    const posterOnly = cachedCollection("a");
+    posterOnly.assets = posterOnly.assets.map((asset) => ({
+      ...asset,
+      path: asset.path.replace(".webm", ".png"),
+      mimeType: "image/png",
+    }));
+    vi.mocked(ensureAvatarCollection)
+      .mockResolvedValueOnce({
+        ...posterOnly,
+        failedAssetIds: ["a-1", "a-2"],
+        errorCode: "unavailable",
+      })
+      .mockResolvedValueOnce({
+        ...cachedCollection("a"),
+        failedAssetIds: [],
+      });
+
+    const { result } = renderHook(() => useAvatarLibrary(true));
+    await waitFor(() => expect(result.current.catalog).not.toBeNull());
+
+    await act(async () => {
+      await result.current.openCollection(collectionA);
+    });
+
+    expect(result.current.failedCollectionIds.has("a")).toBe(true);
+    expect(result.current.isCollectionCached(collectionA)).toBe(true);
+
+    await act(async () => {
+      await result.current.openCollection(collectionA);
+    });
+
+    expect(ensureAvatarCollection).toHaveBeenCalledTimes(2);
+    expect(result.current.failedCollectionIds.has("a")).toBe(false);
+    expect(result.current.cachedAvatarMediaById["a-1"].media.mediaType).toBe(
+      "video",
+    );
   });
 
   it("clears the downloading flag when a download fails", async () => {

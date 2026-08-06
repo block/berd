@@ -7,6 +7,7 @@ import {
   getAvatarCatalog,
   getAvatarLibrarySnapshot,
   getCachedAvatarCollections,
+  cachedAssetToMedia,
   getCachedAvatarForRef,
   getCachedAvatarsForRefs,
   listenAvatarCacheWarmed,
@@ -73,6 +74,20 @@ const cachedCollections = [
 describe("avatars api", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+  });
+
+  it("resolves cached video and poster paths as one avatar presentation", () => {
+    expect(
+      cachedAssetToMedia({
+        path: "/tmp/avatar.mp4",
+        mimeType: "video/mp4",
+        posterPath: "/tmp/avatar.png",
+      }),
+    ).toEqual({
+      src: "asset:///tmp/avatar.mp4",
+      mediaType: "video",
+      posterSrc: "asset:///tmp/avatar.png",
+    });
   });
 
   it("loads the library snapshot from Rust and parses the catalog", async () => {

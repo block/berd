@@ -209,10 +209,14 @@ export async function getCachedAvatarForRef({
 export function cachedAssetToMedia(asset: {
   path: string;
   mimeType: string;
+  posterPath?: string;
 }): ResolvedAvatarMedia {
   return {
     src: convertFileSrc(asset.path, "asset"),
     mediaType: mediaTypeFromMimeType(asset.mimeType),
+    ...(asset.posterPath
+      ? { posterSrc: convertFileSrc(asset.posterPath, "asset") }
+      : {}),
   };
 }
 

@@ -35,6 +35,12 @@ const validCatalog = {
           byteSize: 200,
           sha256: "b".repeat(64),
         },
+        poster: {
+          path: "poster/gloopies/gloopy-1.png",
+          mimeType: "image/png",
+          byteSize: 50,
+          sha256: "c".repeat(64),
+        },
       },
     },
   ],
@@ -64,6 +70,38 @@ describe("avatar catalog", () => {
               webm: {
                 ...validCatalog.assets[0].variants.webm,
                 path: "../gloopy-1.webm",
+              },
+            },
+          },
+        ],
+      }),
+    ).toThrow(/contents/);
+  });
+
+  it("keeps compatibility with catalogs that predate poster variants", () => {
+    const variants = { ...validCatalog.assets[0].variants };
+    delete (variants as Partial<typeof variants>).poster;
+
+    expect(
+      parseAvatarCatalog({
+        ...validCatalog,
+        assets: [{ ...validCatalog.assets[0], variants }],
+      }).assets[0].variants.poster,
+    ).toBeUndefined();
+  });
+
+  it("rejects an invalid optional poster consistently with backend validation", () => {
+    expect(() =>
+      parseAvatarCatalog({
+        ...validCatalog,
+        assets: [
+          {
+            ...validCatalog.assets[0],
+            variants: {
+              ...validCatalog.assets[0].variants,
+              poster: {
+                ...validCatalog.assets[0].variants.poster,
+                path: "../gloopy-1.png",
               },
             },
           },

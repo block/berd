@@ -14,12 +14,15 @@ export interface AvatarCatalogEntry {
   id: string;
   label: string;
   collectionId: string;
-  variants: Record<AvatarAssetFormat, AvatarVariant>;
+  variants: Record<AvatarAssetFormat, AvatarVariant> & {
+    poster?: AvatarVariant;
+  };
 }
 
 export interface ResolvedAvatarMedia {
   src: string;
   mediaType: AvatarMediaType;
+  posterSrc?: string;
 }
 
 export interface AvatarCollection {
@@ -40,6 +43,7 @@ export interface CachedAvatarAsset {
   id: string;
   path: string;
   mimeType: string;
+  posterPath?: string;
 }
 
 export interface CachedAvatarCollection {
@@ -181,7 +185,8 @@ function parseAsset(value: unknown): AvatarCatalogEntry | undefined {
 
   const webm = parseVariant(variants.webm);
   const hevc = parseVariant(variants.hevc);
-  if (!webm || !hevc) {
+  const poster = parseVariant(variants.poster);
+  if (!webm || !hevc || (variants.poster !== undefined && !poster)) {
     return undefined;
   }
 
@@ -192,6 +197,7 @@ function parseAsset(value: unknown): AvatarCatalogEntry | undefined {
     variants: {
       webm,
       hevc,
+      ...(poster ? { poster } : {}),
     },
   };
 }

@@ -34,10 +34,10 @@ function getVideoPreload(
   shouldLoadVideo: boolean,
   loadingStrategy: AvatarMediaProps["loadingStrategy"],
   playbackMode: AvatarMediaProps["playbackMode"],
+  hasPoster: boolean,
 ) {
   if (!animatedAvatarsEnabled && shouldLoadVideo) {
-    // No poster asset today, so load the video to paint frame 0.
-    return "auto";
+    return hasPoster ? "none" : "auto";
   }
 
   if (loadingStrategy === "eager") {
@@ -103,6 +103,9 @@ export const AvatarMedia = memo(function AvatarMedia({
   const { enabled: animatedAvatarsEnabled } = useAnimatedAvatarsPreference();
   const prefersReducedMotion = usePrefersReducedMotion();
   const shouldAnimateVideo = animatedAvatarsEnabled && !prefersReducedMotion;
+  const effectivePoster = poster ?? media.posterSrc;
+  const [failedVideoSrc, setFailedVideoSrc] = useState<string>();
+  const videoFailed = failedVideoSrc === media.src;
   const [shouldLoadVideo, setShouldLoadVideo] = useState(
     loadingStrategy === "eager",
   );
@@ -139,10 +142,10 @@ export const AvatarMedia = memo(function AvatarMedia({
 
     observer.observe(video);
     return () => observer.disconnect();
-  }, [loadingStrategy, media.mediaType, media.src]);
+  }, [loadingStrategy, media.mediaType, media.src, shouldAnimateVideo]);
 
   useEffect(() => {
-    if (media.mediaType !== "video") {
+    if (media.mediaType !== "video" || videoFailed) {
       return;
     }
 
@@ -212,9 +215,25 @@ export const AvatarMedia = memo(function AvatarMedia({
     media.mediaType,
     media.src,
     playbackMode,
+    videoFailed,
     shouldAnimateVideo,
     shouldLoadVideo,
   ]);
+
+  if (
+    media.mediaType === "video" &&
+    effectivePoster &&
+    (videoFailed || !shouldAnimateVideo)
+  ) {
+    return (
+      <img
+        src={effectivePoster}
+        alt={alt}
+        className={cn("aspect-square size-full object-cover", className)}
+        onError={onError}
+      />
+    );
+  }
 
   if (media.mediaType === "video") {
     const preload = getVideoPreload(
@@ -222,6 +241,7 @@ export const AvatarMedia = memo(function AvatarMedia({
       shouldLoadVideo,
       loadingStrategy,
       playbackMode,
+      Boolean(effectivePoster),
     );
 
     return (
@@ -229,7 +249,7 @@ export const AvatarMedia = memo(function AvatarMedia({
         ref={videoRef}
         loop={shouldAnimateVideo && playbackMode === "loop"}
         muted
-        poster={poster}
+        poster={effectivePoster}
         playsInline
         preload={preload}
         src={shouldLoadVideo ? media.src : undefined}
@@ -237,7 +257,13 @@ export const AvatarMedia = memo(function AvatarMedia({
         aria-label={alt || undefined}
         aria-hidden={alt ? undefined : true}
         className={cn("aspect-square size-full object-cover", className)}
-        onError={onError}
+        onError={(event) => {
+          if (effectivePoster) {
+            setFailedVideoSrc(media.src);
+            return;
+          }
+          onError?.(event);
+        }}
       />
     );
   }

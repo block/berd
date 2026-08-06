@@ -207,15 +207,10 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
 
       setErrorCode(null);
 
-      if (isCollectionCached(collection)) {
-        setFailedCollectionIds((current) => {
-          if (!current.has(collection.id)) {
-            return current;
-          }
-          const next = new Set(current);
-          next.delete(collection.id);
-          return next;
-        });
+      if (
+        isCollectionCached(collection) &&
+        !failedCollectionIds.has(collection.id)
+      ) {
         return;
       }
 
@@ -283,6 +278,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
       cachedAvatarMediaById,
       catalog,
       downloadingCollectionIds,
+      failedCollectionIds,
       isCollectionCached,
     ],
   );

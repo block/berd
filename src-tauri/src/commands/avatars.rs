@@ -22,6 +22,7 @@ const METADATA_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const ASSET_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const ASSET_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+const AVATAR_WARM_RETRY_DELAY: Duration = Duration::from_secs(5);
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
 // A `.part` file older than this is treated as an orphan left behind by a
 // crashed process and is safe to delete. It must comfortably exceed the longest
@@ -68,6 +69,8 @@ pub struct AvatarCatalogEntry {
 pub struct AvatarVariants {
     pub webm: Option<AvatarVariant>,
     pub hevc: Option<AvatarVariant>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poster: Option<AvatarVariant>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -92,6 +95,8 @@ pub struct CachedAvatarAsset {
     pub id: String,
     pub path: String,
     pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poster_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -379,10 +384,18 @@ fn cached_avatar_for_id_with_format(
     let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
         return Ok(None);
     };
+    let poster = cached_poster_asset(paths, entry)?;
     let variant = variant_for_format(entry, format)?;
     let target = media_blob_path(paths, variant)?;
-    let Some(asset) = valid_cached_asset(entry, variant, &target)? else {
-        return Ok(None);
+    let asset = match valid_cached_asset(entry, variant, &target)? {
+        Some(mut asset) => {
+            asset.poster_path = poster.as_ref().map(|poster| poster.path.clone());
+            asset
+        }
+        None => match poster {
+            Some(poster) => poster,
+            None => return Ok(None),
+        },
     };
     let catalog_version = catalog.catalog_version.clone();
     let collection_id = entry.collection_id.clone();
@@ -392,6 +405,17 @@ fn cached_avatar_for_id_with_format(
         collection_id,
         asset,
     }))
+}
+
+fn cached_poster_asset(
+    paths: &AvatarCachePaths,
+    entry: &AvatarCatalogEntry,
+) -> Result<Option<CachedAvatarAsset>, String> {
+    let Some(poster) = entry.variants.poster.as_ref() else {
+        return Ok(None);
+    };
+    let target = media_blob_path(paths, poster)?;
+    valid_cached_asset(entry, poster, &target)
 }
 
 #[tauri::command]
@@ -474,7 +498,7 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
         let mut catalog = current_catalog(&paths)
             .await
             .map_err(|error| error.to_string())?;
-        if catalog_is_missing_avatar_ids(&catalog, &avatar_ids) {
+        if catalog_needs_refresh_for_avatar_ids(&catalog, &avatar_ids) {
             match refresh_cached_catalog(&paths).await {
                 Ok(refreshed) => catalog = refreshed,
                 Err(error) => {
@@ -494,16 +518,21 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
     let format = platform_avatar_format();
     let mut warmed = 0usize;
     let mut warmed_avatar_refs = Vec::new();
+    let mut incomplete_avatar_refs = Vec::new();
 
     for avatar_id in avatar_ids {
         let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
             log::warn!("Agent avatar '{avatar_id}' was not found in the avatar catalog");
             continue;
         };
-        match ensure_entry_deduped(&client, &paths, &catalog, entry, format).await {
-            Ok(_) => {
+        match ensure_avatar_media(&client, &paths, &catalog, entry, format).await {
+            Ok((_, partial_error_code)) => {
+                let avatar_ref = format!("app-avatar:{avatar_id}");
                 warmed += 1;
-                warmed_avatar_refs.push(format!("app-avatar:{avatar_id}"));
+                warmed_avatar_refs.push(avatar_ref.clone());
+                if partial_error_code.is_some() || entry.variants.poster.is_none() {
+                    incomplete_avatar_refs.push(avatar_ref);
+                }
             }
             Err(error) => log::warn!("Failed to warm agent avatar '{avatar_id}': {error}"),
         }
@@ -518,6 +547,18 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
         }
     }
 
+    if !incomplete_avatar_refs.is_empty() {
+        let retry_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(AVATAR_WARM_RETRY_DELAY).await;
+            if let Err(error) =
+                retry_incomplete_avatar_refs(retry_app, incomplete_avatar_refs).await
+            {
+                log::warn!("Failed to retry incomplete agent avatar warm-up: {error}");
+            }
+        });
+    }
+
     // Brief lock for pruning.
     {
         let _catalog_guard = catalog_lock().lock().await;
@@ -527,10 +568,65 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
     Ok(warmed)
 }
 
-fn catalog_is_missing_avatar_ids(catalog: &AvatarCatalog, avatar_ids: &BTreeSet<String>) -> bool {
-    avatar_ids
+async fn retry_incomplete_avatar_refs(
+    app: AppHandle,
+    avatar_refs: Vec<String>,
+) -> Result<(), String> {
+    let avatar_ids = avatar_refs
         .iter()
-        .any(|avatar_id| !catalog.assets.iter().any(|entry| &entry.id == avatar_id))
+        .filter_map(|avatar_ref| parse_avatar_ref(avatar_ref).ok())
+        .collect::<BTreeSet<_>>();
+    if avatar_ids.is_empty() {
+        return Ok(());
+    }
+
+    let paths = avatar_cache_paths(&app)?;
+    let catalog = {
+        let _catalog_guard = catalog_lock().lock().await;
+        current_catalog(&paths)
+            .await
+            .map_err(|error| error.to_string())?
+    };
+    let client = asset_http_client()?;
+    let format = platform_avatar_format();
+    let mut warmed_avatar_refs = Vec::new();
+
+    for avatar_id in avatar_ids {
+        let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
+            continue;
+        };
+        if let Ok((_, partial_error_code)) =
+            ensure_avatar_media(&client, &paths, &catalog, entry, format).await
+        {
+            if partial_error_code.is_none() && entry.variants.poster.is_some() {
+                warmed_avatar_refs.push(format!("app-avatar:{avatar_id}"));
+            }
+        }
+    }
+
+    if !warmed_avatar_refs.is_empty() {
+        let payload = AvatarCacheWarmedPayload {
+            avatar_refs: warmed_avatar_refs,
+        };
+        if let Err(error) = app.emit(AVATAR_CACHE_WARMED_EVENT, payload) {
+            log::warn!("Failed to emit avatar cache retry event: {error}");
+        }
+    }
+
+    Ok(())
+}
+
+fn catalog_needs_refresh_for_avatar_ids(
+    catalog: &AvatarCatalog,
+    avatar_ids: &BTreeSet<String>,
+) -> bool {
+    avatar_ids.iter().any(|avatar_id| {
+        catalog
+            .assets
+            .iter()
+            .find(|entry| &entry.id == avatar_id)
+            .is_none_or(|entry| entry.variants.poster.is_none())
+    })
 }
 
 async fn clear_avatar_cache_paths(paths: &AvatarCachePaths) -> Result<(), String> {
@@ -757,7 +853,42 @@ impl Drop for InflightGuard<'_> {
 /// Download a single asset with deduplication. If another task is already
 /// downloading the same asset, this waits for that result instead of starting
 /// a second download.
-async fn ensure_entry_deduped(
+async fn ensure_avatar_media(
+    client: &reqwest::Client,
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    entry: &AvatarCatalogEntry,
+    format: &str,
+) -> Result<(CachedAvatarAsset, Option<AvatarErrorCode>), AvatarAssetError> {
+    // Keep the poster and platform video in one cache lifecycle. A clear waits
+    // for both attempts to finish, so it cannot delete a poster between the two
+    // downloads and leave the returned media pointing at a removed file.
+    let _download_guard = download_guard().read().await;
+
+    let (poster, poster_error_code) = if entry.variants.poster.is_some() {
+        match ensure_entry_deduped_without_download_guard(client, paths, catalog, entry, "poster")
+            .await
+        {
+            Ok(poster) => (Some(poster), None),
+            Err(error) => {
+                log::warn!("Failed to ensure avatar poster '{}': {error}", entry.id);
+                (None, Some(error.code))
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    match ensure_entry_deduped_without_download_guard(client, paths, catalog, entry, format).await {
+        Ok(mut media) => {
+            media.poster_path = poster.as_ref().map(|poster| poster.path.clone());
+            Ok((media, poster_error_code))
+        }
+        Err(error) => poster.map(|poster| (poster, Some(error.code))).ok_or(error),
+    }
+}
+
+async fn ensure_entry_deduped_without_download_guard(
     client: &reqwest::Client,
     paths: &AvatarCachePaths,
     catalog: &AvatarCatalog,
@@ -824,11 +955,6 @@ async fn ensure_entry_deduped(
                 // including cancellation, so subscribers never wait on a
                 // channel that will never receive.
                 let _guard = InflightGuard::new(&key);
-                // Hold the shared download guard across the download and
-                // placement so a concurrent clear_avatar_cache waits for us to
-                // finish (and we wait for it) instead of wiping the cache while
-                // we are still writing the media blob.
-                let _download_guard = download_guard().read().await;
                 let result = ensure_entry_download(client, catalog, variant, &target).await;
                 let _ = tx.send(result.clone());
                 result?;
@@ -1141,8 +1267,8 @@ async fn ensure_collection_assets(
             let catalog = Arc::clone(&catalog);
             async move {
                 let id = entry.id.clone();
-                match ensure_entry_deduped(&client, &paths, &catalog, &entry, format).await {
-                    Ok(asset) => Ok(asset),
+                match ensure_avatar_media(&client, &paths, &catalog, &entry, format).await {
+                    Ok((asset, error_code)) => Ok((asset, error_code)),
                     Err(error) => {
                         log::warn!("Failed to ensure avatar asset '{id}': {error}");
                         Err((id, error.code))
@@ -1160,7 +1286,17 @@ async fn ensure_collection_assets(
     let mut error_code = None;
     for result in results {
         match result {
-            Ok(asset) => assets.push(asset),
+            Ok((asset, poster_error_code)) => {
+                if let Some(code) = poster_error_code {
+                    failed_asset_ids.push(asset.id.clone());
+                    if code == AvatarErrorCode::NetworkAccess {
+                        error_code = Some(AvatarErrorCode::NetworkAccess);
+                    } else if error_code.is_none() {
+                        error_code = Some(AvatarErrorCode::Unavailable);
+                    }
+                }
+                assets.push(asset);
+            }
             Err((id, code)) => {
                 failed_asset_ids.push(id);
                 if code == AvatarErrorCode::NetworkAccess {
@@ -1229,17 +1365,21 @@ fn cached_collection_assets(
             .iter()
             .find(|entry| &entry.id == avatar_id)
             .ok_or_else(|| format!("Avatar asset not found: {avatar_id}"))?;
-        let Ok(variant) = variant_for_format(entry, format) else {
-            return Ok(None);
-        };
-        validate_variant_path(variant, format, &entry.collection_id)?;
+        let variant = variant_for_format(entry, format)?;
         let target = media_blob_path(paths, variant)?;
         // This runs on the lock-free snapshot read path, concurrently with
-        // downloads that hold no catalog lock. Only report whether the asset is
-        // cached; do not delete incomplete files or race an active download.
-        let Some(asset) = valid_cached_asset(entry, variant, &target)? else {
+        // downloads that hold no catalog lock. A poster-only avatar remains
+        // usable as a fallback, but does not make the collection fully cached:
+        // reopening the collection must retry its missing animation.
+        let Some(mut asset) = valid_cached_asset(entry, variant, &target)? else {
             return Ok(None);
         };
+        if entry.variants.poster.is_some() {
+            let Some(poster) = cached_poster_asset(paths, entry)? else {
+                return Ok(None);
+            };
+            asset.poster_path = Some(poster.path);
+        }
         assets.push(asset);
     }
 
@@ -1282,6 +1422,7 @@ fn cached_asset(
         id: entry.id.clone(),
         path: target.to_string_lossy().into_owned(),
         mime_type: variant.mime_type.clone(),
+        poster_path: None,
     }
 }
 
@@ -1315,6 +1456,11 @@ fn variant_for_format<'a>(
             .hevc
             .as_ref()
             .ok_or_else(|| format!("Avatar '{}' does not have an HEVC variant", entry.id)),
+        "poster" => entry
+            .variants
+            .poster
+            .as_ref()
+            .ok_or_else(|| format!("Avatar '{}' does not have a poster variant", entry.id)),
         _ => Err("Unsupported avatar format".to_string()),
     }
 }
@@ -1370,7 +1516,13 @@ fn validate_catalog(catalog: &AvatarCatalog) -> Result<(), String> {
         })?;
         validate_variant_path(webm, "webm", &entry.collection_id)?;
         validate_variant_path(hevc, "hevc", &entry.collection_id)?;
-        for variant in [webm, hevc] {
+        if let Some(poster) = entry.variants.poster.as_ref() {
+            validate_variant_path(poster, "poster", &entry.collection_id)?;
+        }
+        for variant in [Some(webm), Some(hevc), entry.variants.poster.as_ref()]
+            .into_iter()
+            .flatten()
+        {
             let blob = media_blob_filename(variant)?;
             match blob_metadata.get(&blob) {
                 Some((byte_size, mime_type))
@@ -1568,9 +1720,13 @@ fn migrate_legacy_media(
         let catalog = read_json_file::<AvatarCatalog>(&manifest)?;
         validate_catalog(&catalog)?;
         for entry in &catalog.assets {
-            for variant in [entry.variants.webm.as_ref(), entry.variants.hevc.as_ref()]
-                .into_iter()
-                .flatten()
+            for variant in [
+                entry.variants.webm.as_ref(),
+                entry.variants.hevc.as_ref(),
+                entry.variants.poster.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
             {
                 migrate_legacy_variant(paths, version, variant)?;
             }
@@ -1703,9 +1859,13 @@ fn prune_media_blobs(
         let catalog = read_json_file::<AvatarCatalog>(&manifest)?;
         validate_catalog(&catalog)?;
         for entry in &catalog.assets {
-            for variant in [entry.variants.webm.as_ref(), entry.variants.hevc.as_ref()]
-                .into_iter()
-                .flatten()
+            for variant in [
+                entry.variants.webm.as_ref(),
+                entry.variants.hevc.as_ref(),
+                entry.variants.poster.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
             {
                 retained.insert(media_blob_path(paths, variant)?);
             }
@@ -1854,6 +2014,8 @@ mod tests {
             path: path.to_string(),
             mime_type: if path.ends_with(".mp4") {
                 "video/mp4".to_string()
+            } else if path.ends_with(".png") {
+                "image/png".to_string()
             } else {
                 "video/webm".to_string()
             },
@@ -1879,6 +2041,7 @@ mod tests {
                 variants: AvatarVariants {
                     webm: Some(variant("webm/gloopies/gloopy-1.webm", bytes)),
                     hevc: Some(variant("hevc/gloopies/gloopy-1.mp4", bytes)),
+                    poster: None,
                 },
             }],
         }
@@ -1900,6 +2063,10 @@ mod tests {
 
     fn webm_variant(catalog: &AvatarCatalog) -> &AvatarVariant {
         catalog.assets[0].variants.webm.as_ref().unwrap()
+    }
+
+    fn add_poster(catalog: &mut AvatarCatalog, bytes: &[u8]) {
+        catalog.assets[0].variants.poster = Some(variant("poster/gloopies/gloopy-1.png", bytes));
     }
 
     fn cached_webm_target(paths: &AvatarCachePaths, catalog: &AvatarCatalog) -> PathBuf {
@@ -1928,6 +2095,7 @@ mod tests {
             variants: AvatarVariants {
                 webm: Some(webm_variant),
                 hevc: Some(variant("hevc/gloopies/gloopy-2.mp4", b"other")),
+                poster: None,
             },
         });
     }
@@ -2001,6 +2169,23 @@ mod tests {
     }
 
     #[test]
+    fn missing_posters_are_omitted_from_catalog_json() {
+        let catalog = valid_catalog(b"avatar-bytes");
+        let serialized = serde_json::to_value(catalog).unwrap();
+
+        assert!(serialized["assets"][0]["variants"].get("poster").is_none());
+    }
+
+    #[test]
+    fn catalog_integrity_rejects_invalid_optional_posters() {
+        let mut catalog = valid_catalog(b"avatar-bytes");
+        add_poster(&mut catalog, b"poster-bytes");
+        catalog.assets[0].variants.poster.as_mut().unwrap().path = "../gloopy-1.png".to_string();
+
+        assert!(validate_catalog(&catalog).is_err());
+    }
+
+    #[test]
     fn catalog_integrity_requires_both_variants() {
         let bytes = b"avatar-bytes";
         assert!(validate_catalog(&valid_catalog(bytes)).is_ok());
@@ -2025,13 +2210,16 @@ mod tests {
     }
 
     #[test]
-    fn detects_when_requested_avatar_ids_are_missing_from_cached_catalog() {
-        let catalog = valid_catalog(b"avatar-bytes");
+    fn refreshes_cached_catalogs_missing_requested_avatars_or_posters() {
+        let mut catalog = valid_catalog(b"avatar-bytes");
         let requested = BTreeSet::from(["gloopy-1".to_string()]);
-        assert!(!catalog_is_missing_avatar_ids(&catalog, &requested));
+        assert!(catalog_needs_refresh_for_avatar_ids(&catalog, &requested));
+
+        add_poster(&mut catalog, b"poster-bytes");
+        assert!(!catalog_needs_refresh_for_avatar_ids(&catalog, &requested));
 
         let requested = BTreeSet::from(["gloopy-1".to_string(), "gloopy-2".to_string()]);
-        assert!(catalog_is_missing_avatar_ids(&catalog, &requested));
+        assert!(catalog_needs_refresh_for_avatar_ids(&catalog, &requested));
     }
 
     #[test]
@@ -2082,6 +2270,37 @@ mod tests {
             .unwrap();
         assert_eq!(assets[0].path, target.to_string_lossy());
         assert!(Path::new(&assets[0].path).starts_with(&paths.media));
+    }
+
+    #[test]
+    fn cached_collection_requires_poster_when_catalog_provides_one() {
+        let video_bytes = b"avatar-bytes";
+        let poster_bytes = b"poster-bytes";
+        let mut catalog = valid_catalog(video_bytes);
+        add_poster(&mut catalog, poster_bytes);
+        let collection = &catalog.collections[0];
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, video_bytes);
+
+        assert!(
+            cached_collection_assets(&paths, &catalog, collection, "webm")
+                .unwrap()
+                .is_none(),
+            "a video-only legacy cache must reopen the collection to fetch its poster",
+        );
+
+        let poster = catalog.assets[0].variants.poster.as_ref().unwrap();
+        let poster_target = media_blob_path(&paths, poster).unwrap();
+        fs::create_dir_all(poster_target.parent().unwrap()).unwrap();
+        fs::write(&poster_target, poster_bytes).unwrap();
+
+        let assets = cached_collection_assets(&paths, &catalog, collection, "webm")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            assets[0].poster_path.as_deref(),
+            Some(poster_target.to_string_lossy().as_ref()),
+        );
     }
 
     #[test]
@@ -2288,6 +2507,98 @@ mod tests {
     }
 
     #[test]
+    fn cached_avatar_pairs_video_with_its_matching_poster() {
+        let video_bytes = b"avatar-bytes";
+        let poster_bytes = b"poster-bytes";
+        let mut catalog = valid_catalog(video_bytes);
+        add_poster(&mut catalog, poster_bytes);
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, video_bytes);
+        let poster = catalog.assets[0].variants.poster.as_ref().unwrap();
+        let poster_target = media_blob_path(&paths, poster).unwrap();
+        fs::create_dir_all(poster_target.parent().unwrap()).unwrap();
+        fs::write(&poster_target, poster_bytes).unwrap();
+
+        let cached = cached_avatar_for_id_with_format(&paths, &catalog, "gloopy-1", "webm")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(cached.asset.mime_type, "video/webm");
+        assert_eq!(
+            cached.asset.poster_path.as_deref(),
+            Some(poster_target.to_string_lossy().as_ref()),
+        );
+    }
+
+    #[tokio::test]
+    async fn paired_ensure_reports_missing_poster_as_retryable() {
+        let video_bytes = b"avatar-bytes";
+        let mut catalog = valid_catalog(video_bytes);
+        add_poster(&mut catalog, b"poster-bytes");
+        catalog.assets[0].variants.poster.as_mut().unwrap().path = "../gloopy-1.png".to_string();
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, video_bytes);
+
+        let (asset, error_code) = ensure_avatar_media(
+            &asset_http_client().unwrap(),
+            &paths,
+            &catalog,
+            &catalog.assets[0],
+            "webm",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(asset.mime_type, "video/webm");
+        assert_eq!(error_code, Some(AvatarErrorCode::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn paired_ensure_reports_missing_video_as_retryable() {
+        let poster_bytes = b"poster-bytes";
+        let mut catalog = valid_catalog(b"avatar-bytes");
+        add_poster(&mut catalog, poster_bytes);
+        catalog.assets[0].variants.webm.as_mut().unwrap().sha256 = "not-a-sha".to_string();
+        let (_dir, paths) = temp_paths();
+        let poster = catalog.assets[0].variants.poster.as_ref().unwrap();
+        let poster_target = media_blob_path(&paths, poster).unwrap();
+        fs::create_dir_all(poster_target.parent().unwrap()).unwrap();
+        fs::write(&poster_target, poster_bytes).unwrap();
+
+        let (asset, error_code) = ensure_avatar_media(
+            &asset_http_client().unwrap(),
+            &paths,
+            &catalog,
+            &catalog.assets[0],
+            "webm",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(asset.mime_type, "image/png");
+        assert_eq!(error_code, Some(AvatarErrorCode::Unavailable));
+    }
+
+    #[test]
+    fn cached_avatar_uses_matching_poster_when_video_is_unavailable() {
+        let mut catalog = valid_catalog(b"avatar-bytes");
+        add_poster(&mut catalog, b"poster-bytes");
+        let (_dir, paths) = temp_paths();
+        let poster = catalog.assets[0].variants.poster.as_ref().unwrap();
+        let poster_target = media_blob_path(&paths, poster).unwrap();
+        fs::create_dir_all(poster_target.parent().unwrap()).unwrap();
+        fs::write(&poster_target, b"poster-bytes").unwrap();
+
+        let cached = cached_avatar_for_id_with_format(&paths, &catalog, "gloopy-1", "webm")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(cached.asset.mime_type, "image/png");
+        assert_eq!(cached.asset.path, poster_target.to_string_lossy());
+        assert!(cached.asset.poster_path.is_none());
+    }
+
+    #[test]
     fn cached_avatar_batch_keeps_invalid_refs_isolated() {
         let bytes = b"avatar-bytes";
         let catalog = valid_catalog(bytes);
@@ -2396,11 +2707,14 @@ mod tests {
     #[test]
     fn pruning_keeps_referenced_blobs_and_removes_legacy_media() {
         let (_dir, paths) = temp_paths();
-        let v1 = valid_catalog(b"old-avatar");
+        let mut v1 = valid_catalog(b"old-avatar");
+        add_poster(&mut v1, b"old-poster");
         let mut v2 = valid_catalog(b"previous-avatar");
         v2.catalog_version = "v2".to_string();
+        add_poster(&mut v2, b"previous-poster");
         let mut v3 = valid_catalog(b"current-avatar");
         v3.catalog_version = "v3".to_string();
+        add_poster(&mut v3, b"current-poster");
         for catalog in [&v1, &v2, &v3] {
             let target = paths
                 .meta
@@ -2413,10 +2727,11 @@ mod tests {
             for variant in [
                 catalog.assets[0].variants.webm.as_ref().unwrap(),
                 catalog.assets[0].variants.hevc.as_ref().unwrap(),
+                catalog.assets[0].variants.poster.as_ref().unwrap(),
             ] {
                 let path = media_blob_path(&paths, variant).unwrap();
                 fs::create_dir_all(path.parent().unwrap()).unwrap();
-                fs::write(path, b"cached").unwrap();
+                fs::write(path, vec![b'x'; variant.byte_size as usize]).unwrap();
             }
         }
         let legacy_variant = webm_variant(&v2);
@@ -2435,6 +2750,11 @@ mod tests {
         assert!(migrated_blob.exists());
         assert_eq!(fs::read(&migrated_blob).unwrap(), b"previous-avatar");
         assert!(media_blob_path(&paths, webm_variant(&v3)).unwrap().exists());
+        assert!(
+            media_blob_path(&paths, v3.assets[0].variants.poster.as_ref().unwrap())
+                .unwrap()
+                .exists(),
+        );
         assert!(!paths.media.join("v2").exists());
     }
 
@@ -2621,6 +2941,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn paired_avatar_ensure_stays_inside_the_clear_guard() {
+        let video_bytes = b"avatar-bytes";
+        let poster_bytes = b"poster-bytes";
+        let mut catalog = valid_catalog(video_bytes);
+        add_poster(&mut catalog, poster_bytes);
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, video_bytes);
+        let poster = catalog.assets[0].variants.poster.as_ref().unwrap();
+        let poster_target = media_blob_path(&paths, poster).unwrap();
+        fs::create_dir_all(poster_target.parent().unwrap()).unwrap();
+        fs::write(&poster_target, poster_bytes).unwrap();
+
+        let clear = download_guard().write().await;
+        let task_paths = paths.clone();
+        let task_catalog = catalog.clone();
+        let task = tokio::spawn(async move {
+            let client = asset_http_client().unwrap();
+            ensure_avatar_media(
+                &client,
+                &task_paths,
+                &task_catalog,
+                &task_catalog.assets[0],
+                "webm",
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !task.is_finished(),
+            "paired media resolution must wait while cache clear owns the guard",
+        );
+
+        drop(clear);
+        let (asset, error_code) = task.await.unwrap().unwrap();
+        assert_eq!(asset.mime_type, "video/webm");
+        assert_eq!(
+            asset.poster_path.as_deref(),
+            Some(poster_target.to_string_lossy().as_ref())
+        );
+        assert_eq!(error_code, None);
+    }
+
+    #[tokio::test]
     async fn clear_waits_for_in_flight_downloads() {
         // A held read guard models an in-flight download; the exclusive write
         // guard that clear_avatar_cache takes must not be grantable until the
@@ -2652,7 +3015,7 @@ mod tests {
         }))
         .unwrap();
 
-        // Mirrors the follower arm in ensure_entry_deduped.
+        // Mirrors the follower arm in ensure_entry_deduped_without_download_guard.
         let error = match follower.recv().await {
             Ok(Ok(())) => panic!("expected the leader's error, not success"),
             Ok(Err(error)) => error,
