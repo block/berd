@@ -164,5 +164,71 @@
     "output": "Salida",
     "reasoning": "Razonamiento",
     "totalCost": "Costo total"
+  },
+  "workStatus": {
+    "title": "Solicitudes de incorporación",
+    "updated": "Actualizado {{time}}",
+    "collecting": "Recopilando el estado de las solicitudes…",
+    "updating": "Actualizando el estado de las solicitudes…",
+    "updatedNow": "Solicitudes actualizadas.",
+    "refreshFailed": "No se pudieron actualizar las solicitudes.",
+    "refresh": "Actualizar solicitudes",
+    "refreshing": "Actualizando solicitudes",
+    "loading": "Cargando solicitudes",
+    "resize": "Cambiar el tamaño del panel de solicitudes",
+    "openError": "No se pudo abrir la solicitud. Inténtalo de nuevo.",
+    "topBarLabel_one": "Solicitud de incorporación, {{count}} abierta",
+    "topBarLabel_other": "Solicitudes de incorporación, {{count}} abiertas",
+    "truncated": "Mostrando las primeras {{count}} solicitudes abiertas.",
+    "noProject": "Sin proyecto",
+    "empty": {
+      "title": "No hay solicitudes abiertas",
+      "description": "Las solicitudes que crees aparecerán aquí."
+    },
+    "error": {
+      "title": "Las solicitudes no están disponibles",
+      "description": "Comprueba tu conexión e intenta actualizar de nuevo.",
+      "authentication": "Inicia sesión con GitHub CLI e inténtalo de nuevo.",
+      "cliMissing": "Instala GitHub CLI para cargar las solicitudes.",
+      "timeout": "GitHub tardó demasiado en responder. Inténtalo de nuevo.",
+      "database": "Berd no pudo asociar las solicitudes con proyectos. Inténtalo de nuevo.",
+      "network": "Comprueba tu conexión e inténtalo de nuevo.",
+      "rateLimited": "GitHub está limitando las solicitudes. La actualización automática se reintentará en unos minutos.",
+      "unknown": "No se pudieron cargar las solicitudes. Inténtalo de nuevo."
+    },
+    "githubDisconnected": {
+      "title": "Conecta GitHub para ver las solicitudes",
+      "description": "Inicia sesión con GitHub CLI y luego actualiza para cargar las solicitudes creadas por ti."
+    },
+    "status": {
+      "draft": "Borrador",
+      "awaitingApproval": "Esperando aprobación",
+      "changesRequested": "Cambios solicitados",
+      "checksFailing": "Comprobaciones fallidas",
+      "checksPending": "Comprobaciones pendientes",
+      "readyToMerge": "Lista para fusionar",
+      "mergeBlocked": "Fusión bloqueada",
+      "error": "Error"
+    },
+    "preview": {
+      "ariaLabel": "Previsualizar estados de solicitudes",
+      "devOnly": "Pruebas de estado solo para desarrollo",
+      "live": "Datos reales",
+      "noPrs": "Sin solicitudes",
+      "githubDisconnected": "GitHub no conectado",
+      "connectionError": "Error de conexión",
+      "rateLimited": "Límite de solicitudes",
+      "staleError": "Datos anteriores con advertencia",
+      "truncated": "Resultados truncados",
+      "statuses": "Estados de solicitudes",
+      "titles": {
+        "draft": "Solicitud en borrador",
+        "awaitingApproval": "Esperando la aprobación del revisor",
+        "changesRequested": "El revisor solicitó cambios",
+        "checksFailing": "Las comprobaciones de integración continua están fallando",
+        "readyToMerge": "Aprobada y lista para fusionar",
+        "mergeBlocked": "La fusión está bloqueada por conflictos"
+      }
+    }
   }
 }

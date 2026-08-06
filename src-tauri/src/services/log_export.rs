@@ -81,7 +81,7 @@ pub(crate) fn resolve_log_dirs(app: &tauri::AppHandle) -> Result<LogDirs, String
     })
 }
 
-fn goose_state_dir() -> Result<PathBuf, String> {
+pub(crate) fn goose_state_dir() -> Result<PathBuf, String> {
     if let Ok(root) = std::env::var("GOOSE_PATH_ROOT") {
         let root = root.trim();
         if !root.is_empty() {
