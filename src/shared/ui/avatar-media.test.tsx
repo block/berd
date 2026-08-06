@@ -130,6 +130,24 @@ describe("AvatarMedia", () => {
     await waitFor(() => expect(video).not.toHaveAttribute("src"));
   });
 
+  it("renders stacked-alpha videos through a canvas", () => {
+    render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          alphaMode: "stacked",
+        }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+      />,
+    );
+
+    const canvas = screen.getByRole("img", { name: "avatar" });
+    expect(canvas.tagName).toBe("CANVAS");
+    expect(document.querySelector("video")).not.toHaveAttribute("src");
+  });
+
   it("keeps lazy-once video sources attached after they have become visible", async () => {
     render(
       <AvatarMedia

@@ -202,9 +202,84 @@ describe("ChatRightRail", () => {
     expect(
       screen.queryByRole("button", { name: "Context content" }),
     ).toBeNull();
-    expect(screen.getByTestId("agent-builder-rail").parentElement).toHaveStyle({
-      width: "min(506px, calc((100vw - 0px) / 2))",
-    });
+    // ChatView owns the grid width now; the builder cell must not pin its own
+    // inline width and should fill its track (min-w-0).
+    const builderCell = screen.getByTestId("agent-builder-rail").parentElement;
+    expect(builderCell?.style.width).toBe("");
+    expect(builderCell?.className).toContain("min-w-0");
+  });
+
+  it("renders the builder resize divider when the chat is not collapsed", () => {
+    const onPointerDown = vi.fn();
+    const onKeyDown = vi.fn();
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        contextVisible={false}
+        builderRailSeparatorProps={{
+          role: "separator",
+          tabIndex: 0,
+          "aria-orientation": "vertical",
+          "aria-valuenow": 50,
+          "aria-valuemin": 30,
+          "aria-valuemax": 72,
+          onPointerDown,
+          onKeyDown,
+        }}
+      />,
+    );
+
+    const divider = document.querySelector(
+      "[data-agent-builder-rail-resize-edge]",
+    );
+    expect(divider).not.toBeNull();
+    // Keyboard reachability is the point of the separator role, so assert the
+    // exposed semantics rather than just the pointer path.
+    expect(divider).toHaveAttribute("role", "separator");
+    expect(divider).toHaveAttribute("tabindex", "0");
+    expect(divider).toHaveAttribute("aria-valuenow", "50");
+    fireEvent.pointerDown(divider as Element);
+    expect(onPointerDown).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(divider as Element, { key: "ArrowLeft" });
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the builder resize divider when the chat is collapsed", () => {
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        contextVisible={false}
+        agentBuilderChatCollapsed
+        builderRailSeparatorProps={{
+          role: "separator",
+          tabIndex: 0,
+          "aria-orientation": "vertical",
+          "aria-valuenow": 50,
+          "aria-valuemin": 30,
+          "aria-valuemax": 72,
+          onPointerDown: vi.fn(),
+          onKeyDown: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(
+      document.querySelector("[data-agent-builder-rail-resize-edge]"),
+    ).toBeNull();
   });
 
   it("lets Context and a rail-docked Terminal coexist with Agent Builder", () => {

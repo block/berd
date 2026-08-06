@@ -10,10 +10,8 @@ import {
 } from "react";
 import { useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import {
-  AgentBuilderCapability,
-  AGENT_BUILDER_RAIL_DESIGN_WIDTH,
-} from "@/features/agents/capabilities/AgentBuilderCapability";
+import { AgentBuilderCapability } from "@/features/agents/capabilities/AgentBuilderCapability";
+import type { AgentBuilderRailSeparatorProps } from "@/features/chat/hooks/useResizableAgentBuilderRail";
 import { cn } from "@/shared/lib/cn";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { hasOpenKeyboardOwningLayer } from "@/app/focus/FocusRegionProvider";
@@ -44,6 +42,22 @@ interface ChatRightRailProps {
   sessionWorkingDir?: string | null;
   contextVisible: boolean;
   agentBuilderReadOnly?: boolean;
+  /**
+   * When editing an agent, whether the chat column is collapsed so the builder
+   * takes the full surface. Owned by ChatView as per-session view state.
+   */
+  agentBuilderChatCollapsed?: boolean;
+  /**
+   * Accessibility + interaction props for the builder rail's left-edge resize
+   * divider (pointer drag and keyboard nudge). Owned by ChatView, which drives
+   * the two-column grid width.
+   */
+  builderRailSeparatorProps?: AgentBuilderRailSeparatorProps;
+  /**
+   * Reopens the collapsed chat column. Surfaced as an expand control in the
+   * builder header while the chat is hidden.
+   */
+  onExpandAgentBuilderChat?: () => void;
   terminalOpen?: boolean;
   terminalController?: TerminalController;
   terminalDockPreview?: TerminalDockedPlacement | null;
@@ -72,6 +86,9 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       sessionWorkingDir,
       contextVisible,
       agentBuilderReadOnly = false,
+      agentBuilderChatCollapsed = false,
+      builderRailSeparatorProps,
+      onExpandAgentBuilderChat,
       terminalOpen = false,
       terminalController,
       terminalDockPreview,
@@ -86,7 +103,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
     },
     ref,
   ) {
-    const { t } = useTranslation("chat");
+    const { t } = useTranslation(["chat", "agents"]);
     const shouldReduceMotion = useReducedMotion();
     const reflowDuration = shouldReduceMotion ? 0 : RIGHT_RAIL_REFLOW_MS;
     const internalRailRef = useRef<HTMLDivElement | null>(null);
@@ -217,7 +234,6 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
         isDockingFromOverlay ||
         previewingClosedRail);
 
-    const agentBuilderWidth = `min(${AGENT_BUILDER_RAIL_DESIGN_WIDTH}px, calc((100vw - ${contextPanelLeftViewportOcclusionPx}px) / 2))`;
     const contextRailWidth = railPresentationVisible ? railWidth : 0;
 
     return (
@@ -229,8 +245,13 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
         }
         inert={!agentBuilderVisible && !railHostVisible ? true : undefined}
         className={cn(
-          "relative flex h-full min-h-0 shrink-0 items-stretch",
-          agentBuilderVisible && "gap-[var(--spacing-app-panel-gutter-inline)]",
+          "relative flex h-full min-h-0 items-stretch",
+          // Builder sessions live in ChatView's two-column grid, so the cell
+          // fills its track; context-only rails keep their fixed width.
+          agentBuilderVisible ? "min-w-0 flex-1" : "shrink-0",
+          agentBuilderVisible &&
+            contextRailWidth > 0 &&
+            "gap-[var(--spacing-app-panel-gutter-inline)]",
           isContextPanelCompactViewport ||
             isDockingFromOverlay ||
             previewingClosedRail
@@ -240,33 +261,59 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
             !railHostVisible &&
             "invisible pointer-events-none",
         )}
-        style={{
-          width:
-            agentBuilderVisible && contextRailWidth > 0
-              ? `calc(${agentBuilderWidth} + ${contextRailWidth}px + var(--spacing-app-panel-gutter-inline))`
-              : agentBuilderVisible
-                ? agentBuilderWidth
-                : contextRailWidth,
-          transition:
-            isResizingRail || reflowDuration === 0
-              ? "none"
-              : `width ${reflowDuration}ms cubic-bezier(0.22, 1, 0.36, 1)`,
-        }}
+        style={
+          agentBuilderVisible
+            ? undefined
+            : {
+                width: contextRailWidth,
+                transition:
+                  isResizingRail || reflowDuration === 0
+                    ? "none"
+                    : `width ${reflowDuration}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+              }
+        }
       >
         {agentBuilderVisible ? (
+          // ChatView owns the two-column grid (width, collapse, resize). This
+          // cell just fills its track and hosts the left-edge resize divider.
+          // Builder session lifecycle (save/close/draft handlers) lives in
+          // AgentBuilderCapability, not here.
           <div
             className={cn(
-              "flex h-full shrink-0 justify-center overflow-hidden",
+              "relative flex h-full min-w-0 flex-1 justify-center overflow-hidden",
               builderColumnClassName,
             )}
-            style={
-              {
-                width: agentBuilderWidth,
-                ...builderColumnStyle,
-              } as CSSProperties
-            }
+            style={builderColumnStyle}
           >
-            <AgentBuilderCapability session={session} />
+            {builderRailSeparatorProps && !agentBuilderChatCollapsed ? (
+              // Keyboard users adjust the split with arrow/Home/End keys, so
+              // this is a focusable separator rather than a pointer-only hit
+              // area. Attributes are listed explicitly rather than spread so
+              // the static a11y lint can see the separator role together with
+              // the aria-value* props it requires.
+              // biome-ignore lint/a11y/useSemanticElements: <hr> is a thematic break, not a focusable drag splitter, and its height:0 reset would collapse this hit area
+              <div
+                role="separator"
+                tabIndex={builderRailSeparatorProps.tabIndex}
+                aria-orientation={builderRailSeparatorProps["aria-orientation"]}
+                aria-valuenow={builderRailSeparatorProps["aria-valuenow"]}
+                aria-valuemin={builderRailSeparatorProps["aria-valuemin"]}
+                aria-valuemax={builderRailSeparatorProps["aria-valuemax"]}
+                onPointerDown={builderRailSeparatorProps.onPointerDown}
+                onKeyDown={builderRailSeparatorProps.onKeyDown}
+                aria-label={t("agents:builderRail.resizeRail")}
+                title={t("agents:builderRail.resizeRail")}
+                data-agent-builder-rail-resize-edge="left"
+                className="absolute top-2 bottom-2 left-0 z-30 w-3 -translate-x-1/2 cursor-col-resize bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            ) : null}
+            <AgentBuilderCapability
+              session={session}
+              fullPage={agentBuilderChatCollapsed}
+              onExpandChat={
+                agentBuilderChatCollapsed ? onExpandAgentBuilderChat : undefined
+              }
+            />
           </div>
         ) : null}
         <div

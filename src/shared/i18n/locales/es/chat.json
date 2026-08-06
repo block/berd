@@ -611,5 +611,8 @@
   "artifactChips": {
     "open": "Abrir {{name}} en el visor",
     "more": "+{{count}} más"
+  },
+  "agentBuilder": {
+    "hideChat": "Ocultar chat"
   }
 }

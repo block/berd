@@ -191,6 +191,7 @@ const rawCssColorAllowlist = new Set([
   "surface-popover-glass",
   "overlay-scrim",
   "overlay-search-scrim",
+  "overlay-avatar-field",
   "overlay-global-composer-shim",
   "overlay-global-composer-shim-peak",
   "overlay-global-composer-shim-clear",

@@ -194,6 +194,10 @@
       "description": "Dev builds enable experiments by default. Turn off individual experiments below when you need the stable path.",
       "label": "Auto-enable new experiments"
     },
+    "avatarCollectionPage": {
+      "description": "Choose agent avatars on a full-screen, pannable collection canvas instead of the inline picker in the agent builder.",
+      "title": "Avatar collection canvas"
+    },
     "builderbot": {
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
@@ -217,7 +221,7 @@
     },
     "title": "Experiments",
     "gloopieAvatarCreator": {
-      "description": "Let users create a custom gloopie avatar from the agent builder.",
+      "description": "Create a custom animated gloopie avatar from the agent builder. Generation runs on an internal service and needs Cloudflare WARP.",
       "title": "Create your own gloopie"
     },
     "starterTasks": {

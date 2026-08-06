@@ -312,6 +312,23 @@ describe("Button", () => {
     expect(button).toHaveAttribute("data-feedback-state", "success");
   });
 
+  it("keeps aria-disabled buttons focusable while blocking clicks", () => {
+    const onClick = vi.fn();
+
+    render(
+      <Button aria-disabled="true" onClick={onClick}>
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Save" });
+
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it("renders feedback inside an asChild target", () => {
     const onClick = vi.fn();
 

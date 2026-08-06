@@ -33,6 +33,16 @@ describe("avatarUrl", () => {
     expect(resolveAvatarSrc("app-avatar:../gloopy-1")).toBeUndefined();
   });
 
+  it("accepts generated user avatar refs", () => {
+    expect(isSupportedAvatarUrl("user-avatar:gloopie-1")).toBe(true);
+    expect(normalizeAvatarUrl(" user-avatar:gloopie-1 ")).toBe(
+      "user-avatar:gloopie-1",
+    );
+    expect(resolveAvatarSrc("user-avatar:gloopie-1")).toBeUndefined();
+    expect(resolveAvatarMedia("user-avatar:gloopie-1")).toBeUndefined();
+    expect(normalizeAvatarUrl("user-avatar:../secret")).toBeUndefined();
+  });
+
   it("rejects unsafe avatar URL schemes and credentials", () => {
     expect(normalizeAvatarUrl("javascript:alert(1)")).toBeUndefined();
     expect(normalizeAvatarUrl("file:///tmp/avatar.png")).toBeUndefined();

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AVATAR_CACHE_WARMED_EVENT,
   AvatarLibraryError,
+  deleteUserAvatar,
   ensureAvatarCollection,
   getAvatarCatalog,
   getAvatarLibrarySnapshot,
@@ -169,6 +170,18 @@ describe("avatars api", () => {
       catalogVersion: "v1",
       collectionId: "gloopies",
     });
+  });
+
+  it("deletes generated avatar media through the native command", async () => {
+    Object.assign(window, { __TAURI_INTERNALS__: {} });
+    invokeMock.mockResolvedValueOnce(undefined);
+
+    await deleteUserAvatar("user-avatar:gloopie-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("delete_user_avatar", {
+      avatarRef: "user-avatar:gloopie-1",
+    });
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   });
 
   it("resolves saved refs with the batched cached-only command", async () => {

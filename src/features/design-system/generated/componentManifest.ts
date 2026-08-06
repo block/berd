@@ -535,8 +535,10 @@ export const designSystemComponentManifest = [
         stateClasses: [
           "active:bg-transparent",
           "active:text-foreground",
+          "aria-disabled:opacity-50",
           "aria-expanded:bg-transparent",
           "aria-expanded:text-foreground",
+          "data-[disabled=true]:opacity-50",
           "data-[state=open]:bg-transparent",
           "data-[state=open]:text-foreground",
           "disabled:opacity-50",
@@ -618,8 +620,11 @@ export const designSystemComponentManifest = [
     stateClasses: [
       "active:bg-transparent",
       "active:text-foreground",
+      "aria-disabled",
+      "aria-disabled:opacity-50",
       "aria-expanded:bg-transparent",
       "aria-expanded:text-foreground",
+      "data-[disabled=true]:opacity-50",
       "data-[state=open]:bg-transparent",
       "data-[state=open]:text-foreground",
       "disabled:opacity-50",

@@ -1,4 +1,10 @@
-import { ArrowLeft, Check, Download, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Download,
+  RefreshCw,
+  WandSparkles,
+} from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -29,9 +35,15 @@ interface AvatarLibraryPickerProps {
    */
   selectedCollectionId?: string | null;
   onSelectCollection?: (collectionId: string | null) => void;
+  /**
+   * When provided, a "Create your own" card is rendered as the first tile in
+   * the collections grid, alongside the bundled collections. Clicking it hands
+   * off to the custom gloopie generation flow.
+   */
+  onCreateYourOwn?: () => void;
 }
 
-function getCachedAvatarMedia(
+export function getCachedAvatarMedia(
   cachedAvatarMediaById: AvatarLibraryState["cachedAvatarMediaById"],
   catalogVersion: string | undefined,
   avatarId: string,
@@ -50,6 +62,7 @@ export function AvatarLibraryPicker({
   disabled = false,
   selectedCollectionId: controlledCollectionId,
   onSelectCollection,
+  onCreateYourOwn,
 }: AvatarLibraryPickerProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isControlled = controlledCollectionId !== undefined;
@@ -206,7 +219,7 @@ export function AvatarLibraryPicker({
           key={collection.id}
           type="button"
           className={cn(
-            "flex min-w-0 flex-col items-center gap-2 rounded-sm bg-popover p-3 text-center",
+            "flex w-full items-center gap-4 rounded-xl bg-popover p-4 text-left",
             "border border-border/80 transition-colors hover:border-border hover:bg-accent",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "cursor-not-allowed opacity-60",
@@ -217,7 +230,7 @@ export function AvatarLibraryPicker({
             void library.openCollection(collection);
           }}
         >
-          <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center overflow-hidden rounded-sm bg-background">
+          <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background">
             {cachedCoverMedia ? (
               <AvatarMedia
                 media={cachedCoverMedia}
@@ -232,18 +245,22 @@ export function AvatarLibraryPicker({
               </span>
             )}
           </span>
-          <span className="min-w-0">
-            <span className="block truncate text-xs text-foreground">
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="truncate text-base text-foreground">
               {collection.label}
             </span>
-            <span className="inline-flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-              {collectionDownloading || library.cacheChecking ? (
-                <Spinner className="size-3" />
-              ) : (
-                <StatusIcon className="size-3" />
-              )}
-              {statusText}
-            </span>
+            {collectionCached ? null : (
+              <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+                {collectionDownloading || library.cacheChecking ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <StatusIcon className="size-4" />
+                )}
+                {(collectionDownloading || collectionFailed) && (
+                  <span className="text-xs">{statusText}</span>
+                )}
+              </span>
+            )}
           </span>
         </button>
       );
@@ -262,12 +279,12 @@ export function AvatarLibraryPicker({
   const renderCollectionSkeleton = (index: number) => (
     <div
       key={index}
-      className="flex min-w-0 flex-col items-center gap-2 rounded-sm bg-popover p-3 text-center"
+      className="flex w-full items-center gap-4 rounded-xl bg-popover p-4"
     >
-      <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-sm bg-background">
+      <span className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-background">
         <Spinner className="size-4 text-muted-foreground" />
       </span>
-      <span className="text-[11px] text-muted-foreground">
+      <span className="text-sm text-muted-foreground">
         {t("editor.avatarLoading")}
       </span>
     </div>
@@ -334,7 +351,29 @@ export function AvatarLibraryPicker({
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="flex flex-col gap-3">
+          {onCreateYourOwn ? (
+            <button
+              key="create-your-own"
+              type="button"
+              className={cn(
+                "flex w-full items-center gap-4 rounded-xl bg-popover p-4 text-left",
+                "border border-border/80 transition-colors",
+                "hover:border-border hover:bg-accent",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                disabled && "cursor-not-allowed opacity-60",
+              )}
+              disabled={disabled}
+              onClick={onCreateYourOwn}
+            >
+              <span className="flex size-14 shrink-0 items-center justify-center">
+                <WandSparkles className="size-6 text-foreground" />
+              </span>
+              <span className="truncate text-base text-foreground">
+                {t("editor.avatarCreateYourOwn")}
+              </span>
+            </button>
+          ) : null}
           {library.loading && avatarCollections.length === 0
             ? [0, 1, 2].map(renderCollectionSkeleton)
             : avatarCollections.map(renderCollectionButton)}

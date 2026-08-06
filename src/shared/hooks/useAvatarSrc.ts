@@ -10,7 +10,11 @@ import {
   cachedAssetToMedia,
   getCachedAvatarForRef,
 } from "@/shared/api/avatars";
-import { isAppAvatarRef, parseAvatarRef } from "@/shared/avatars/catalog";
+import {
+  isAppAvatarRef,
+  isUserAvatarRef,
+  parseAvatarRef,
+} from "@/shared/avatars/catalog";
 import { resolveAvatarMedia, resolveAvatarSrc } from "@/shared/lib/avatarUrl";
 import type { Avatar } from "@/shared/types/agents";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
@@ -82,7 +86,10 @@ export function useAvatarMediaState(
   const queryClient = useContext(QueryClientContext);
   const directMedia = useMemo(() => resolveAvatarMedia(avatar), [avatar]);
   const avatarRef = typeof avatar === "string" ? avatar.trim() : "";
-  const shouldLoadCachedAvatar = !directMedia && isAppAvatarRef(avatarRef);
+  // User-avatar refs (generated gloopies) resolve through the same cached
+  // lookup as bundled app-avatar refs.
+  const shouldLoadCachedAvatar =
+    !directMedia && (isAppAvatarRef(avatarRef) || isUserAvatarRef(avatarRef));
   const enabled = shouldLoadCachedAvatar && Boolean(queryClient);
 
   // Reactive observer on the shared per-ref cache entry: when the app-level

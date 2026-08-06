@@ -185,6 +185,7 @@ The authoritative list of raw-CSS color tokens (kept in sync with the script):
 --surface-popover-glass
 --overlay-scrim
 --overlay-search-scrim
+--overlay-avatar-field
 --overlay-global-composer-shim
 --overlay-global-composer-shim-peak
 --overlay-global-composer-shim-clear

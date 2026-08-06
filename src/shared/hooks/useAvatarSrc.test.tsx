@@ -32,9 +32,14 @@ vi.mock("@/shared/api/avatars", () => ({
     "cached-ref",
     avatarRef,
   ],
-  cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
+  cachedAssetToMedia: (asset: {
+    path: string;
+    mimeType: string;
+    alphaMode?: "stacked";
+  }) => ({
     src: `asset://${asset.path}`,
     mediaType: asset.mimeType.startsWith("video/") ? "video" : "image",
+    ...(asset.alphaMode ? { alphaMode: asset.alphaMode } : {}),
   }),
   getCachedAvatarForRef: vi.fn(),
   listenAvatarCacheWarmed: vi.fn(),
@@ -170,6 +175,36 @@ describe("useAvatarSrc", () => {
 
     expect(getCachedAvatarForRefMock).toHaveBeenCalledWith({
       avatarRef: "app-avatar:gloopy-1",
+    });
+  });
+
+  it("resolves user-avatar refs with cached-only lookup", async () => {
+    getCachedAvatarForRefMock.mockResolvedValueOnce({
+      catalogVersion: "user-generated",
+      collectionId: "generated-gloopies",
+      asset: {
+        id: "gloopie-1",
+        path: "/tmp/goose/user-avatars/gloopie-1.webm",
+        mimeType: "video/webm",
+        alphaMode: "stacked",
+      },
+    });
+
+    const { result } = renderHook(
+      () => useAvatarMediaState("user-avatar:gloopie-1"),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.media).toEqual({
+        src: "asset:///tmp/goose/user-avatars/gloopie-1.webm",
+        mediaType: "video",
+        alphaMode: "stacked",
+      });
+    });
+
+    expect(getCachedAvatarForRefMock).toHaveBeenCalledWith({
+      avatarRef: "user-avatar:gloopie-1",
     });
   });
 

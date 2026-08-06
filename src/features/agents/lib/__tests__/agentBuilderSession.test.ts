@@ -110,6 +110,15 @@ import {
   startAgentBuilderSession,
 } from "../agentBuilderSession";
 import { resetAgentBuilderSourceLifecycleForTests } from "../agentBuilderSourceLifecycle";
+import {
+  resetGloopieGenerationStoreForTests,
+  setGloopieObject,
+} from "@/features/agents/stores/gloopieGenerationStore";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+} from "@/features/experiments/experimentPreferences";
+import { GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 
@@ -179,6 +188,7 @@ describe("agentBuilderSession", () => {
     closeSession.mockClear();
     navigateChat.mockClear();
     resetAgentBuilderSourceLifecycleForTests();
+    resetGloopieGenerationStoreForTests();
     window.localStorage.clear();
     useAgentStore.getState().setProviders([], false);
   });
@@ -199,6 +209,10 @@ describe("agentBuilderSession", () => {
       targetAgentDraftState: "preparing",
       targetAgentDraftSaved: false,
     });
+    expect(mocks.patchSession).not.toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ agentBuilderChatStartCollapsed: true }),
+    );
 
     await flushDraftPreparation();
 
@@ -427,6 +441,7 @@ describe("agentBuilderSession", () => {
       expect.objectContaining({
         targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
         targetAgentSlug: "code-reviewer",
+        agentBuilderChatStartCollapsed: true,
       }),
     );
   });
@@ -453,6 +468,7 @@ describe("agentBuilderSession", () => {
       expect.objectContaining({
         targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
         targetAgentSlug: "code-reviewer",
+        agentBuilderChatStartCollapsed: true,
       }),
     );
   });
@@ -720,6 +736,40 @@ describe("agentBuilderSession", () => {
     };
     mocks.listPersonaSources.mockResolvedValue([seededDraft]);
     mocks.readAgentSourceFile.mockResolvedValue(seededDraft);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("treats in-flight gloopie work as agent builder user content", async () => {
+    addBuilderSession();
+    setGloopieObject("sess-1", "teapot");
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      true,
+    );
+  });
+
+  it("ignores gloopie work when the experiment is off", async () => {
+    // Tests run in dev mode, where auto-enable turns experiments on, so an
+    // explicit override is the only way to exercise the gated-off path. Without
+    // the gate this returns true and an empty draft would be kept alive.
+    window.localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID]: { enabled: false },
+        },
+      }),
+    );
+    addBuilderSession();
+    setGloopieObject("sess-1", "teapot");
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
 
     await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
       false,

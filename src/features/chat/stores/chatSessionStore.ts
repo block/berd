@@ -81,6 +81,11 @@ export interface ChatSession {
   targetAgentSlug?: string | null;
   targetAgentDraftState?: "preparing" | "failed" | null;
   targetAgentDraftSaved?: boolean;
+  /**
+   * Existing-agent edits open with chat collapsed, while new-agent sessions
+   * retain the default split view. This only seeds per-session view state.
+   */
+  agentBuilderChatStartCollapsed?: boolean;
 }
 
 export interface ChatSessionReasoningEffortOption {

@@ -8,7 +8,7 @@ import { Spinner } from "@/shared/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 const buttonVariants = cva(
-  "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-full text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-full text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50 data-[disabled=true]:opacity-50 aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -333,6 +333,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       tooltipSide = "top",
       disabled,
       onClick,
+      "aria-disabled": ariaDisabled,
       ...props
     },
     ref,
@@ -368,6 +369,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         : renderedChildren;
     const resolvedLeftIcon = leftIcon;
     const isLoading = feedbackState === "loading";
+    const externallyAriaDisabled =
+      ariaDisabled === true || ariaDisabled === "true";
     const resolvedDisabled = disabled || isLoading;
     const disabledTooltipLabel =
       Object.entries(props).find(([key]) => key.endsWith("-label"))?.[1] ??
@@ -490,7 +493,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           : children
         : children;
     function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
-      if (resolvedDisabled) {
+      if (resolvedDisabled || externallyAriaDisabled) {
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -522,7 +525,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         data-slot="button"
         data-feedback-state={feedbackState}
         aria-busy={isLoading}
-        aria-disabled={asChild && resolvedDisabled ? true : undefined}
+        aria-disabled={
+          asChild && resolvedDisabled
+            ? true
+            : externallyAriaDisabled
+              ? true
+              : undefined
+        }
         disabled={resolvedDisabled}
         className={cn(
           buttonVariants({

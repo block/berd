@@ -53,6 +53,8 @@ export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
 
 export const GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID = "gloopie-avatar-creator";
 
+export const AVATAR_COLLECTION_PAGE_EXPERIMENT_ID = "avatar-collection-page";
+
 export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
 
 export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
@@ -94,6 +96,26 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.voiceConversation.title",
     descriptionKey: "experiments.voiceConversation.description",
     defaultEnabled: true,
+  },
+  {
+    id: GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
+    titleKey: "experiments.gloopieAvatarCreator.title",
+    descriptionKey: "experiments.gloopieAvatarCreator.description",
+    // Lets users generate a custom animated "gloopie" avatar from the agent
+    // builder. Gated because generation calls the DAIM Apps service (requires
+    // WARP), can take minutes, and writes generated media into the user avatar
+    // store. No explicit default, so it follows the global auto-enable
+    // preference: on in dev builds, off in production.
+  },
+  {
+    id: AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
+    titleKey: "experiments.avatarCollectionPage.title",
+    descriptionKey: "experiments.avatarCollectionPage.description",
+    // Replaces the inline avatar picker in the agent builder with a
+    // full-surface, pannable collection canvas rendered as a frosted-glass
+    // takeover. Purely a UI swap over the same avatar library state; no
+    // backend authority. No explicit default, so it follows the global
+    // auto-enable preference: on in dev builds, off in production.
   },
   {
     id: BERDY_ONBOARDING_EXPERIMENT_ID,

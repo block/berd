@@ -8,6 +8,7 @@ import {
   type CSSProperties,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
@@ -38,6 +39,7 @@ import {
   useChatSessionController,
   type WorkspaceNameRequest,
 } from "../hooks/useChatSessionController";
+import { useResizableAgentBuilderRail } from "../hooks/useResizableAgentBuilderRail";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import {
   useChatSessionStore,
@@ -286,6 +288,70 @@ export function ChatView({
     isAgentBuilderOpen,
     patchSession,
   ]);
+
+  // The two-column builder layout below keys off *visibility* (main's
+  // capability model can close the builder while the session keeps its
+  // build-agent intent), so a closed builder renders as a normal chat row.
+  const isAgentBuilderSession = isAgentBuilderOpen;
+  // When editing an agent, the chat column can be collapsed so the builder rail
+  // takes the full surface. This is per-session view state that intentionally
+  // does NOT persist across app restarts. Editing an existing agent seeds the
+  // collapsed state (agentBuilderChatStartCollapsed); creating a new agent
+  // opens in the default split view. Keyed by sessionId so switching resets it.
+  // `initialized` guards against clobbering a user toggle once the session
+  // metadata (which may arrive after mount) resolves.
+  const startCollapsed = Boolean(
+    effectiveSession?.agentBuilderChatStartCollapsed,
+  );
+  const [chatCollapseState, setChatCollapseState] = useState<{
+    sessionId: string;
+    collapsed: boolean;
+    initialized: boolean;
+  }>({
+    sessionId,
+    collapsed: startCollapsed,
+    initialized: isAgentBuilderSession,
+  });
+  if (chatCollapseState.sessionId !== sessionId) {
+    setChatCollapseState({
+      sessionId,
+      collapsed: startCollapsed,
+      initialized: isAgentBuilderSession,
+    });
+  } else if (!chatCollapseState.initialized && isAgentBuilderSession) {
+    // Session metadata resolved after mount — seed from the edit hint once.
+    setChatCollapseState({
+      sessionId,
+      collapsed: startCollapsed,
+      initialized: true,
+    });
+  }
+  const isAgentBuilderChatCollapsed =
+    isAgentBuilderSession &&
+    chatCollapseState.sessionId === sessionId &&
+    chatCollapseState.collapsed;
+  const toggleAgentBuilderChat = useCallback(() => {
+    setChatCollapseState((current) =>
+      current.sessionId === sessionId
+        ? { ...current, collapsed: !current.collapsed, initialized: true }
+        : { sessionId, collapsed: true, initialized: true },
+    );
+  }, [sessionId]);
+  const {
+    railFraction: builderRailFraction,
+    isResizingRail: isResizingBuilderRail,
+    separatorProps: builderRailSeparatorProps,
+  } = useResizableAgentBuilderRail();
+  // Two-column split for agent-builder sessions is driven by an animated CSS
+  // grid template. Every state uses pure `fr` units (which interpolate) so
+  // collapse/expand and drag-resize tween smoothly without jumping:
+  //  - collapsed        → chat track goes to 0fr, builder fills the surface
+  //  - after a drag     → tracks split by the stored fraction
+  //  - default (equal)  → 50/50 split
+  const builderFraction = builderRailFraction ?? 0.5;
+  const agentBuilderGridTemplate = isAgentBuilderChatCollapsed
+    ? "0fr 1fr"
+    : `${1 - builderFraction}fr ${builderFraction}fr`;
   const isAgentBuilderTargetFailed =
     isAgentBuilderOpen && effectiveSession?.targetAgentDraftState === "failed";
   const isAgentBuilderTargetPending =
@@ -295,16 +361,21 @@ export function ChatView({
     Boolean(
       effectiveSession?.id && contextVisible && !isContextPanelCompactViewport,
     );
+  // Each column slides in from the side it lives on — chat from the left
+  // (negative offset), builder rail from the right — over a short distance
+  // with a soft stagger. The entrance should read as the panels settling
+  // into place, not flying in (BOT-1501 found the old bottom-up rise too
+  // fast and aggressive).
   const agentBuilderChatColumnStyle = isAgentBuilderOpen
     ? ({
         "--agent-builder-column-enter-delay": "0ms",
-        "--agent-builder-column-enter-y": "48px",
+        "--agent-builder-column-enter-x": "-16px",
       } as CSSProperties)
     : undefined;
   const agentBuilderRailColumnStyle = isAgentBuilderOpen
     ? ({
-        "--agent-builder-column-enter-delay": "105ms",
-        "--agent-builder-column-enter-y": "72px",
+        "--agent-builder-column-enter-delay": "90ms",
+        "--agent-builder-column-enter-x": "24px",
       } as CSSProperties)
     : undefined;
   const projectTerminalCwd = controller.project?.workingDirs?.[0] ?? null;
@@ -892,30 +963,67 @@ export function ChatView({
         sessionCwd={controller.sessionArtifactCwd}
       />
       <div
+        // The builder's resize divider measures this element to map pointer x
+        // to a column fraction. It resolves the element by this attribute
+        // rather than by counting parentElement hops, so inserting a wrapper
+        // between the divider and this grid cannot silently corrupt the math.
+        data-agent-builder-grid={isAgentBuilderSession ? "" : undefined}
         className={cn(
           // @container: the chat row is a size container so the viewer/
           // conversation min-width floors (cqw units) resolve against the
           // row's actual width — sidebar occlusion included — not the
           // viewport.
-          "@container flex h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
+          "@container h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
           !composerHandoffActive && "page-transition",
-          (effectiveHasVisibleRightRail || isArtifactViewerOpen) &&
+          // Agent-builder sessions lay out as a two-column grid so the chat can
+          // slide in/out and the builder can be resized via the grid template.
+          isAgentBuilderSession ? "grid" : "flex",
+          !isAgentBuilderSession &&
+            (effectiveHasVisibleRightRail || isArtifactViewerOpen) &&
             "gap-[var(--spacing-app-panel-gutter-inline)]",
         )}
+        style={
+          isAgentBuilderSession
+            ? ({
+                gridTemplateColumns: agentBuilderGridTemplate,
+                // Collapse the inter-column gap to 0 when the chat is hidden so
+                // the builder truly fills the surface; animate it in step with
+                // the tracks so nothing jumps.
+                columnGap: isAgentBuilderChatCollapsed
+                  ? "0px"
+                  : "var(--spacing-app-panel-gutter-inline)",
+                transition: isResizingBuilderRail
+                  ? "none"
+                  : "grid-template-columns 240ms cubic-bezier(0.22, 1, 0.36, 1), column-gap 240ms cubic-bezier(0.22, 1, 0.36, 1)",
+              } as CSSProperties)
+            : undefined
+        }
       >
         <div
           ref={chatColumnRef}
           data-chat-column
           className={cn(
-            "relative flex min-w-0 flex-1 flex-col",
-            isAgentBuilderOpen && "agent-builder-column-enter",
+            "relative flex min-w-0 flex-col",
+            !isAgentBuilderSession && "flex-1",
+            isAgentBuilderSession && "agent-builder-column-enter",
+            // While editing an agent the chat lives in a grid track that can
+            // animate to zero width; clip its contents so the slide reads
+            // cleanly. Kept mounted (not unmounted) so composer draft/focus
+            // state survives the collapse/expand toggle.
+            isAgentBuilderSession && "overflow-hidden",
           )}
+          // `inert` (vs aria-hidden) removes the collapsed chat from the tab
+          // order, pointer events, and the a11y tree in one step, so keyboard
+          // and screen-reader users can't land in the invisible zero-width
+          // panel while its focusable children stay mounted.
+          inert={isAgentBuilderChatCollapsed ? true : undefined}
           style={{
             ...agentBuilderChatColumnStyle,
             // While the viewer is open, the conversation keeps a readable
             // floor; the viewer panel is the flex child that yields (down to
-            // its own floor) when the row tightens.
-            ...(isArtifactViewerOpen
+            // its own floor) when the row tightens. Skipped for agent-builder
+            // sessions, where the grid track must be free to collapse to 0.
+            ...(isArtifactViewerOpen && !isAgentBuilderSession
               ? { minWidth: CONVERSATION_MIN_WIDTH_WITH_VIEWER }
               : null),
           }}
@@ -927,6 +1035,20 @@ export function ChatView({
               terminal.visible && !terminal.isFloating && "min-h-[280px]",
             )}
           >
+            {isAgentBuilderSession ? (
+              <button
+                type="button"
+                aria-label={t("agentBuilder.hideChat")}
+                title={t("agentBuilder.hideChat")}
+                onClick={toggleAgentBuilderChat}
+                className="absolute right-3 top-3 z-30 inline-flex size-7 items-center justify-center rounded-full bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <IconLayoutSidebarLeftCollapse
+                  className="size-4"
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
             {messageTimeline}
             {conversationAttachmentDragOver ? (
               <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-md border border-dashed border-border/80 bg-surface-glass-subtle p-6 [backdrop-filter:var(--backdrop-glass-subtle)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 [-webkit-backdrop-filter:var(--backdrop-glass-subtle)]">
@@ -981,7 +1103,9 @@ export function ChatView({
           ) : null}
         </div>
 
-        {sessionId ? <ArtifactViewerPanel sessionId={sessionId} /> : null}
+        {sessionId && !isAgentBuilderSession ? (
+          <ArtifactViewerPanel sessionId={sessionId} />
+        ) : null}
 
         <ChatRightRail
           ref={rightRailRef}
@@ -993,6 +1117,9 @@ export function ChatView({
           }
           contextVisible={contextVisible}
           agentBuilderReadOnly={isReadOnly}
+          agentBuilderChatCollapsed={isAgentBuilderChatCollapsed}
+          builderRailSeparatorProps={builderRailSeparatorProps}
+          onExpandAgentBuilderChat={toggleAgentBuilderChat}
           builderColumnClassName={
             isAgentBuilderOpen ? "agent-builder-column-enter" : undefined
           }

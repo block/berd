@@ -194,6 +194,10 @@
       "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
       "label": "Activar nuevos experimentos automáticamente"
     },
+    "avatarCollectionPage": {
+      "description": "Elige avatares de agentes en un lienzo de colección de pantalla completa y desplazable en lugar del selector integrado en el generador de agentes.",
+      "title": "Lienzo de colección de avatares"
+    },
     "builderbot": {
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
@@ -217,7 +221,7 @@
     },
     "title": "Experimentos",
     "gloopieAvatarCreator": {
-      "description": "Permite crear un avatar gloopie personalizado desde el creador de agentes.",
+      "description": "Crea un avatar gloopie animado personalizado desde el generador de agentes. La generación se ejecuta en un servicio interno y requiere Cloudflare WARP.",
       "title": "Crea tu propio gloopie"
     },
     "starterTasks": {

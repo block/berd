@@ -12,8 +12,13 @@ use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
+use uuid::Uuid;
 
 const AVATAR_CDN_BASE: &str = "https://dwwgwmfqqjotj.cloudfront.net/avatars/";
+const APP_AVATAR_REF_PREFIX: &str = "app-avatar:";
+const USER_AVATAR_REF_PREFIX: &str = "user-avatar:";
+const USER_AVATAR_CATALOG_VERSION: &str = "user-generated";
+const USER_AVATAR_COLLECTION_ID: &str = "generated-gloopies";
 const AVATAR_CACHE_WARMED_EVENT: &str = "berd:avatar-cache-warmed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -95,6 +100,8 @@ pub struct CachedAvatarAsset {
     pub id: String,
     pub path: String,
     pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poster_path: Option<String>,
 }
@@ -220,6 +227,24 @@ struct AvatarCachePaths {
     media: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+struct UserAvatarPaths {
+    meta: PathBuf,
+    media: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserAvatarManifest {
+    id: String,
+    path: String,
+    mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alpha_mode: Option<String>,
+    byte_size: u64,
+    created_at_ms: u128,
+}
+
 fn platform_avatar_format() -> &'static str {
     if cfg!(target_os = "macos") {
         "hevc"
@@ -275,7 +300,11 @@ pub async fn get_cached_avatar_for_ref(
     avatar_ref: String,
 ) -> Result<Option<CachedAvatar>, String> {
     // No lock needed: reads immutable, atomically placed media blobs.
-    let avatar_id = parse_avatar_ref(&avatar_ref)?;
+    if let Some(avatar_id) = parse_user_avatar_ref(&avatar_ref)? {
+        return cached_user_avatar_for_id(&app, &avatar_id);
+    }
+
+    let avatar_id = parse_app_avatar_ref(&avatar_ref)?;
     let paths = avatar_cache_paths(&app)?;
     let Some(catalog) = read_cached_catalog(&paths)? else {
         return Ok(None);
@@ -290,6 +319,37 @@ pub async fn get_cached_avatar_for_ref(
 }
 
 #[tauri::command]
+pub async fn delete_user_avatar(app: AppHandle, avatar_ref: String) -> Result<(), String> {
+    delete_user_avatar_by_ref(&app, &avatar_ref)
+}
+
+/// Synchronous delete for backend callers that need to clean up their own
+/// partially written avatars (for example, when a multi-option generation
+/// fails after some options were already persisted).
+pub(crate) fn delete_user_avatar_by_ref(app: &AppHandle, avatar_ref: &str) -> Result<(), String> {
+    let paths = user_avatar_paths(app)?;
+    delete_user_avatar_at(&paths, avatar_ref)
+}
+
+/// Deletes a generated avatar's media and manifest.
+///
+/// Deleting an avatar that is already gone is a success: callers clean up
+/// abandoned generations best-effort and must not fail on a double delete.
+fn delete_user_avatar_at(paths: &UserAvatarPaths, avatar_ref: &str) -> Result<(), String> {
+    let avatar_id = parse_user_avatar_ref(avatar_ref)?
+        .ok_or_else(|| "Invalid user avatar reference".to_string())?;
+    let manifest_path = paths.meta.join(format!("{avatar_id}.json"));
+    if !manifest_path.exists() {
+        return Ok(());
+    }
+
+    let manifest = read_user_avatar_manifest(paths, &avatar_id)?;
+    let media_path = user_avatar_media_path(paths, &manifest)?;
+    delete_file_if_exists(&media_path)?;
+    delete_file_if_exists(&manifest_path)
+}
+
+#[tauri::command]
 pub async fn get_cached_avatars_for_refs(
     app: AppHandle,
     avatar_refs: Vec<String>,
@@ -299,18 +359,34 @@ pub async fn get_cached_avatars_for_refs(
     }
 
     let mut parsed_refs = Vec::with_capacity(avatar_refs.len());
+    let mut resolved = HashMap::new();
     for avatar_ref in avatar_refs {
-        let avatar_id = parse_avatar_ref(&avatar_ref).ok();
-        parsed_refs.push((avatar_ref, avatar_id));
+        match parse_user_avatar_ref(&avatar_ref) {
+            Ok(Some(avatar_id)) => {
+                resolved.insert(
+                    avatar_ref,
+                    cached_user_avatar_for_id(&app, &avatar_id).unwrap_or(None),
+                );
+            }
+            Ok(None) => {
+                let avatar_id = parse_app_avatar_ref(&avatar_ref).ok();
+                parsed_refs.push((avatar_ref, avatar_id));
+            }
+            Err(_) => {
+                resolved.insert(avatar_ref, None);
+            }
+        }
     }
 
     // No lock needed: reads immutable, atomically placed media blobs.
     let paths = avatar_cache_paths(&app)?;
     let Some(catalog) = read_cached_catalog(&paths)? else {
-        return Ok(parsed_refs
-            .into_iter()
-            .map(|(avatar_ref, _)| (avatar_ref, None))
-            .collect());
+        resolved.extend(
+            parsed_refs
+                .into_iter()
+                .map(|(avatar_ref, _)| (avatar_ref, None)),
+        );
+        return Ok(resolved);
     };
 
     let format = platform_avatar_format();
@@ -322,16 +398,15 @@ pub async fn get_cached_avatars_for_refs(
             avatar_id.is_some() && cached.get(avatar_ref).is_some_and(Option::is_none)
         })
         .collect::<Vec<_>>();
-    if unresolved.is_empty() {
-        return Ok(cached);
+    if !unresolved.is_empty() {
+        let _catalog_guard = catalog_lock().lock().await;
+        prepare_legacy_media(&paths, &catalog.catalog_version)?;
+        cached.extend(cached_avatars_for_parsed_refs_with_format(
+            &paths, &catalog, unresolved, format,
+        )?);
     }
-
-    let _catalog_guard = catalog_lock().lock().await;
-    prepare_legacy_media(&paths, &catalog.catalog_version)?;
-    cached.extend(cached_avatars_for_parsed_refs_with_format(
-        &paths, &catalog, unresolved, format,
-    )?);
-    Ok(cached)
+    resolved.extend(cached);
+    Ok(resolved)
 }
 
 fn cached_avatar_for_id(
@@ -483,7 +558,7 @@ pub async fn clear_avatar_cache(app: AppHandle) -> Result<(), String> {
 pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Result<usize, String> {
     let avatar_ids = avatar_refs
         .iter()
-        .filter_map(|avatar_ref| parse_avatar_ref(avatar_ref).ok())
+        .filter_map(|avatar_ref| parse_app_avatar_ref(avatar_ref).ok())
         .collect::<BTreeSet<_>>();
     if avatar_ids.is_empty() {
         return Ok(0);
@@ -574,7 +649,7 @@ async fn retry_incomplete_avatar_refs(
 ) -> Result<(), String> {
     let avatar_ids = avatar_refs
         .iter()
-        .filter_map(|avatar_ref| parse_avatar_ref(avatar_ref).ok())
+        .filter_map(|avatar_ref| parse_app_avatar_ref(avatar_ref).ok())
         .collect::<BTreeSet<_>>();
     if avatar_ids.is_empty() {
         return Ok(());
@@ -1422,6 +1497,7 @@ fn cached_asset(
         id: entry.id.clone(),
         path: target.to_string_lossy().into_owned(),
         mime_type: variant.mime_type.clone(),
+        alpha_mode: None,
         poster_path: None,
     }
 }
@@ -1432,6 +1508,158 @@ fn avatar_cache_paths(app: &AppHandle) -> Result<AvatarCachePaths, String> {
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
     Ok(cache_paths_for_root(app_data_dir.join("avatars")))
+}
+
+fn user_avatar_paths(app: &AppHandle) -> Result<UserAvatarPaths, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+    let root = app_data_dir.join("user-avatars");
+    Ok(UserAvatarPaths {
+        meta: root.join("meta"),
+        media: root.join("media"),
+    })
+}
+
+pub(crate) fn write_user_avatar(
+    app: &AppHandle,
+    bytes: &[u8],
+    mime_type: &str,
+) -> Result<String, String> {
+    write_user_avatar_with_alpha_mode(app, bytes, mime_type, None)
+}
+
+pub(crate) fn write_user_avatar_with_alpha_mode(
+    app: &AppHandle,
+    bytes: &[u8],
+    mime_type: &str,
+    alpha_mode: Option<&str>,
+) -> Result<String, String> {
+    validate_user_avatar_alpha_mode(alpha_mode)?;
+    let extension = user_avatar_extension(mime_type)
+        .ok_or_else(|| format!("Unsupported generated avatar media type: {mime_type}"))?;
+    let id = format!("gloopie-{}", Uuid::new_v4());
+    validate_avatar_id(&id)?;
+
+    let paths = user_avatar_paths(app)?;
+    let media_relative_path = format!("{id}.{extension}");
+    let media_path = paths.media.join(&media_relative_path);
+    atomic_write(&media_path, bytes)?;
+
+    let created_at_ms = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    let manifest = UserAvatarManifest {
+        id: id.clone(),
+        path: media_relative_path,
+        mime_type: mime_type.to_string(),
+        alpha_mode: alpha_mode.map(str::to_string),
+        byte_size: bytes.len() as u64,
+        created_at_ms,
+    };
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("Failed to serialize generated avatar manifest: {error}"))?;
+    atomic_write(&paths.meta.join(format!("{id}.json")), &manifest_bytes)?;
+
+    Ok(format!("{USER_AVATAR_REF_PREFIX}{id}"))
+}
+
+pub(crate) fn read_user_avatar_bytes(
+    app: &AppHandle,
+    avatar_ref: &str,
+) -> Result<(Vec<u8>, String), String> {
+    let avatar_id = parse_user_avatar_ref(avatar_ref)?
+        .ok_or_else(|| "Invalid user avatar reference".to_string())?;
+    let paths = user_avatar_paths(app)?;
+    let manifest = read_user_avatar_manifest(&paths, &avatar_id)?;
+    let media_path = user_avatar_media_path(&paths, &manifest)?;
+    let bytes = fs::read(&media_path).map_err(|error| {
+        format!(
+            "Failed to read generated avatar media '{}': {error}",
+            media_path.display()
+        )
+    })?;
+    Ok((bytes, manifest.mime_type))
+}
+
+fn cached_user_avatar_for_id(
+    app: &AppHandle,
+    avatar_id: &str,
+) -> Result<Option<CachedAvatar>, String> {
+    let paths = user_avatar_paths(app)?;
+    let manifest_path = paths.meta.join(format!("{avatar_id}.json"));
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    let manifest = read_user_avatar_manifest(&paths, avatar_id)?;
+    let media_path = user_avatar_media_path(&paths, &manifest)?;
+    if !media_path.exists() {
+        return Ok(None);
+    }
+    Ok(Some(CachedAvatar {
+        catalog_version: USER_AVATAR_CATALOG_VERSION.to_string(),
+        collection_id: USER_AVATAR_COLLECTION_ID.to_string(),
+        asset: CachedAvatarAsset {
+            id: manifest.id,
+            path: media_path.to_string_lossy().to_string(),
+            mime_type: manifest.mime_type,
+            alpha_mode: manifest.alpha_mode,
+            poster_path: None,
+        },
+    }))
+}
+
+fn read_user_avatar_manifest(
+    paths: &UserAvatarPaths,
+    avatar_id: &str,
+) -> Result<UserAvatarManifest, String> {
+    validate_avatar_id(avatar_id)?;
+    let manifest: UserAvatarManifest =
+        read_json_file(&paths.meta.join(format!("{avatar_id}.json")))?;
+    if manifest.id != avatar_id {
+        return Err("Generated avatar manifest id mismatch".to_string());
+    }
+    validate_safe_relative_path(&manifest.path)?;
+    if user_avatar_extension(&manifest.mime_type).is_none() {
+        return Err("Generated avatar manifest has unsupported media type".to_string());
+    }
+    validate_user_avatar_alpha_mode(manifest.alpha_mode.as_deref())?;
+    Ok(manifest)
+}
+
+fn user_avatar_media_path(
+    paths: &UserAvatarPaths,
+    manifest: &UserAvatarManifest,
+) -> Result<PathBuf, String> {
+    validate_safe_relative_path(&manifest.path)?;
+    Ok(paths.media.join(&manifest.path))
+}
+
+fn user_avatar_extension(mime_type: &str) -> Option<&'static str> {
+    match mime_type
+        .split(';')
+        .next()?
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        "video/webm" => Some("webm"),
+        "video/mp4" => Some("mp4"),
+        "video/quicktime" => Some("mov"),
+        "video/x-m4v" => Some("m4v"),
+        _ => None,
+    }
+}
+
+fn validate_user_avatar_alpha_mode(value: Option<&str>) -> Result<(), String> {
+    match value {
+        Some("stacked") | None => Ok(()),
+        Some(other) => Err(format!("Unsupported generated avatar alpha mode: {other}")),
+    }
 }
 
 fn cache_paths_for_root(root: PathBuf) -> AvatarCachePaths {
@@ -1656,13 +1884,21 @@ fn validate_avatar_id(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_avatar_ref(value: &str) -> Result<String, String> {
+fn parse_app_avatar_ref(value: &str) -> Result<String, String> {
     let id = value
         .trim()
-        .strip_prefix("app-avatar:")
+        .strip_prefix(APP_AVATAR_REF_PREFIX)
         .ok_or_else(|| "Invalid app avatar reference".to_string())?;
     validate_avatar_id(id)?;
     Ok(id.to_string())
+}
+
+fn parse_user_avatar_ref(value: &str) -> Result<Option<String>, String> {
+    let Some(id) = value.trim().strip_prefix(USER_AVATAR_REF_PREFIX) else {
+        return Ok(None);
+    };
+    validate_avatar_id(id)?;
+    Ok(Some(id.to_string()))
 }
 
 fn prepare_legacy_media(
@@ -2053,6 +2289,105 @@ mod tests {
             manifest_path: Some(format!("{}/manifest.json", catalog.catalog_version)),
         };
         write_cached_catalog(paths, &latest, catalog).unwrap();
+    }
+
+    fn temp_user_avatar_paths() -> (tempfile::TempDir, UserAvatarPaths) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("user-avatars");
+        let paths = UserAvatarPaths {
+            meta: root.join("meta"),
+            media: root.join("media"),
+        };
+        fs::create_dir_all(&paths.meta).unwrap();
+        fs::create_dir_all(&paths.media).unwrap();
+        (dir, paths)
+    }
+
+    fn seed_user_avatar(paths: &UserAvatarPaths, id: &str) -> PathBuf {
+        let media_relative_path = format!("{id}.png");
+        let media_path = paths.media.join(&media_relative_path);
+        fs::write(&media_path, b"png-bytes").unwrap();
+        let manifest = UserAvatarManifest {
+            id: id.to_string(),
+            path: media_relative_path,
+            mime_type: "image/png".to_string(),
+            alpha_mode: None,
+            byte_size: 9,
+            created_at_ms: 0,
+        };
+        fs::write(
+            paths.meta.join(format!("{id}.json")),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        media_path
+    }
+
+    #[test]
+    fn delete_user_avatar_removes_media_and_manifest() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        let media_path = seed_user_avatar(&paths, "gloopie-1");
+        let manifest_path = paths.meta.join("gloopie-1.json");
+
+        delete_user_avatar_at(&paths, "user-avatar:gloopie-1").unwrap();
+
+        assert!(!media_path.exists());
+        assert!(!manifest_path.exists());
+    }
+
+    #[test]
+    fn delete_user_avatar_is_idempotent() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        seed_user_avatar(&paths, "gloopie-1");
+
+        delete_user_avatar_at(&paths, "user-avatar:gloopie-1").unwrap();
+        // Abandoned-generation cleanup can fire twice for the same ref.
+        delete_user_avatar_at(&paths, "user-avatar:gloopie-1").unwrap();
+        delete_user_avatar_at(&paths, "user-avatar:never-existed").unwrap();
+    }
+
+    #[test]
+    fn delete_user_avatar_rejects_refs_it_does_not_own() {
+        let (_dir, paths) = temp_user_avatar_paths();
+
+        // Bundled catalog avatars are not ours to delete.
+        assert!(delete_user_avatar_at(&paths, "app-avatar:gloopy-1").is_err());
+        assert!(delete_user_avatar_at(&paths, "gloopie-1").is_err());
+        assert!(delete_user_avatar_at(&paths, "user-avatar:").is_err());
+    }
+
+    #[test]
+    fn delete_user_avatar_rejects_path_traversal_in_the_ref() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        let outside = paths.meta.parent().unwrap().join("secret.json");
+        fs::write(&outside, b"keep me").unwrap();
+
+        assert!(delete_user_avatar_at(&paths, "user-avatar:../secret").is_err());
+        assert!(delete_user_avatar_at(&paths, "user-avatar:/etc/passwd").is_err());
+        assert!(outside.exists());
+    }
+
+    #[test]
+    fn delete_user_avatar_rejects_a_manifest_pointing_outside_the_media_dir() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        let escaped = paths.media.parent().unwrap().join("escaped.png");
+        fs::write(&escaped, b"keep me").unwrap();
+        let manifest = serde_json::json!({
+            "id": "gloopie-1",
+            "path": "../escaped.png",
+            "mimeType": "image/png",
+            "byteSize": 7,
+            "createdAtMs": 0,
+        });
+        fs::write(
+            paths.meta.join("gloopie-1.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        // A tampered manifest must not turn delete into arbitrary file removal.
+        assert!(delete_user_avatar_at(&paths, "user-avatar:gloopie-1").is_err());
+        assert!(escaped.exists());
     }
 
     fn temp_paths() -> (tempfile::TempDir, AvatarCachePaths) {

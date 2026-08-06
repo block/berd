@@ -193,6 +193,13 @@ export async function getCachedAvatarsForRefs({
   }
 }
 
+export async function deleteUserAvatar(avatarRef: string): Promise<void> {
+  if (!window.__TAURI_INTERNALS__) {
+    return;
+  }
+  await invoke("delete_user_avatar", { avatarRef });
+}
+
 export async function getCachedAvatarForRef({
   avatarRef,
 }: {
@@ -209,15 +216,20 @@ export async function getCachedAvatarForRef({
 export function cachedAssetToMedia(asset: {
   path: string;
   mimeType: string;
+  alphaMode?: ResolvedAvatarMedia["alphaMode"];
   posterPath?: string;
 }): ResolvedAvatarMedia {
-  return {
+  const media: ResolvedAvatarMedia = {
     src: convertFileSrc(asset.path, "asset"),
     mediaType: mediaTypeFromMimeType(asset.mimeType),
     ...(asset.posterPath
       ? { posterSrc: convertFileSrc(asset.posterPath, "asset") }
       : {}),
   };
+  if (asset.alphaMode) {
+    media.alphaMode = asset.alphaMode;
+  }
+  return media;
 }
 
 export const AVATAR_CACHE_WARMED_EVENT = "berd:avatar-cache-warmed";

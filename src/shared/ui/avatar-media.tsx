@@ -19,7 +19,19 @@ interface AvatarMediaProps {
   loadingStrategy?: "eager" | "lazy-once" | "visible-video";
   playbackMode?: "loop" | "occasional";
   poster?: string;
+  /**
+   * Hold video playback on a still frame (the first decoded frame) while
+   * true. Lets hosts drive hover-to-play fields where only the pointed-at
+   * avatar moves. Images are unaffected; `onReady` still fires.
+   */
+  paused?: boolean;
   onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
+  /**
+   * Fires once the media has actually painted something: first decoded frame
+   * for videos, load for images. Lets hosts hold entrance animations until
+   * there are real pixels, instead of popping in an empty box.
+   */
+  onReady?: () => void;
 }
 
 const OCCASIONAL_INITIAL_DELAY_MS = { min: 750, max: 1_250 };
@@ -61,6 +73,65 @@ function stopVideo(video: HTMLVideoElement) {
   video.load();
 }
 
+function paintStackedAlphaFrame(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  maskCanvas: HTMLCanvasElement,
+) {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  if (sourceWidth === 0 || sourceHeight < 2) {
+    return;
+  }
+
+  const frameHeight = Math.floor(sourceHeight / 2);
+  canvas.width = sourceWidth;
+  canvas.height = frameHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+
+  maskCanvas.width = sourceWidth;
+  maskCanvas.height = frameHeight;
+  const maskContext = maskCanvas.getContext("2d");
+  if (!maskContext) {
+    return;
+  }
+
+  context.clearRect(0, 0, sourceWidth, frameHeight);
+  context.drawImage(
+    video,
+    0,
+    0,
+    sourceWidth,
+    frameHeight,
+    0,
+    0,
+    sourceWidth,
+    frameHeight,
+  );
+  maskContext.drawImage(
+    video,
+    0,
+    frameHeight,
+    sourceWidth,
+    frameHeight,
+    0,
+    0,
+    sourceWidth,
+    frameHeight,
+  );
+
+  const color = context.getImageData(0, 0, sourceWidth, frameHeight);
+  const mask = maskContext.getImageData(0, 0, sourceWidth, frameHeight);
+  for (let index = 0; index < color.data.length; index += 4) {
+    color.data[index + 3] = mask.data[index];
+  }
+  context.putImageData(color, 0, 0);
+}
+
 function getReducedMotionMediaQuery() {
   if (typeof window.matchMedia !== "function") {
     return null;
@@ -89,6 +160,145 @@ function usePrefersReducedMotion() {
   );
 }
 
+function StackedAlphaVideo({
+  media,
+  alt,
+  className,
+  loadingStrategy,
+  poster,
+  onError,
+  onReady,
+  shouldAnimateVideo,
+}: {
+  media: ResolvedAvatarMedia;
+  alt: string;
+  className?: string;
+  loadingStrategy: AvatarMediaProps["loadingStrategy"];
+  poster?: string;
+  onError?: ReactEventHandler<HTMLVideoElement>;
+  onReady?: () => void;
+  shouldAnimateVideo: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const readyFiredRef = useRef(false);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const [shouldLoadVideo, setShouldLoadVideo] = useState(
+    loadingStrategy === "eager",
+  );
+
+  useEffect(() => {
+    if (loadingStrategy === "eager") {
+      setShouldLoadVideo(true);
+      return;
+    }
+
+    setShouldLoadVideo(false);
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      setShouldLoadVideo(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setShouldLoadVideo(true);
+          if (loadingStrategy === "lazy-once") {
+            observer.disconnect();
+          }
+        } else if (loadingStrategy === "visible-video") {
+          setShouldLoadVideo(false);
+        }
+      },
+      { rootMargin: "160px" },
+    );
+
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [loadingStrategy, media.src]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) {
+      return;
+    }
+    if (!maskCanvasRef.current) {
+      maskCanvasRef.current = document.createElement("canvas");
+    }
+    const maskCanvas = maskCanvasRef.current;
+
+    if (!shouldLoadVideo) {
+      stopVideo(video);
+      return;
+    }
+
+    let animationFrame = 0;
+    const draw = () => {
+      paintStackedAlphaFrame(video, canvas, maskCanvas);
+      // First frame with real dimensions = pixels on screen; announce once.
+      if (!readyFiredRef.current && video.videoWidth > 0) {
+        readyFiredRef.current = true;
+        onReadyRef.current?.();
+      }
+      if (shouldAnimateVideo) {
+        animationFrame = window.requestAnimationFrame(draw);
+      }
+    };
+
+    const drawWhenReady = () => {
+      window.cancelAnimationFrame(animationFrame);
+      draw();
+    };
+
+    video.addEventListener("loadeddata", drawWhenReady);
+    video.addEventListener("seeked", drawWhenReady);
+
+    if (shouldAnimateVideo) {
+      void video.play().catch(() => {});
+      draw();
+    } else {
+      video.pause();
+      drawWhenReady();
+    }
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      video.removeEventListener("loadeddata", drawWhenReady);
+      video.removeEventListener("seeked", drawWhenReady);
+    };
+  }, [media.src, shouldAnimateVideo, shouldLoadVideo]);
+
+  return (
+    <>
+      <canvas
+        ref={canvasRef}
+        role={alt ? "img" : undefined}
+        aria-label={alt || undefined}
+        aria-hidden={alt ? undefined : true}
+        className={cn("aspect-square size-full object-cover", className)}
+      />
+      <video
+        ref={videoRef}
+        loop={shouldAnimateVideo}
+        muted
+        poster={poster}
+        playsInline
+        preload={shouldLoadVideo ? "auto" : "none"}
+        src={shouldLoadVideo ? media.src : undefined}
+        className="fixed size-px opacity-0"
+        onError={onError}
+      />
+    </>
+  );
+}
+
 export const AvatarMedia = memo(function AvatarMedia({
   media,
   alt = "",
@@ -97,12 +307,15 @@ export const AvatarMedia = memo(function AvatarMedia({
   loadingStrategy = lazy ? "lazy-once" : "eager",
   playbackMode = "loop",
   poster,
+  paused = false,
   onError,
+  onReady,
 }: AvatarMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { enabled: animatedAvatarsEnabled } = useAnimatedAvatarsPreference();
   const prefersReducedMotion = usePrefersReducedMotion();
-  const shouldAnimateVideo = animatedAvatarsEnabled && !prefersReducedMotion;
+  const shouldAnimateVideo =
+    animatedAvatarsEnabled && !prefersReducedMotion && !paused;
   const effectivePoster = poster ?? media.posterSrc;
   const [failedVideoSrc, setFailedVideoSrc] = useState<string>();
   const videoFailed = failedVideoSrc === media.src;
@@ -220,6 +433,21 @@ export const AvatarMedia = memo(function AvatarMedia({
     shouldLoadVideo,
   ]);
 
+  if (media.mediaType === "video" && media.alphaMode === "stacked") {
+    return (
+      <StackedAlphaVideo
+        media={media}
+        alt={alt}
+        className={className}
+        loadingStrategy={loadingStrategy}
+        poster={poster}
+        onError={onError}
+        onReady={onReady}
+        shouldAnimateVideo={shouldAnimateVideo}
+      />
+    );
+  }
+
   if (
     media.mediaType === "video" &&
     effectivePoster &&
@@ -231,6 +459,7 @@ export const AvatarMedia = memo(function AvatarMedia({
         alt={alt}
         className={cn("aspect-square size-full object-cover", className)}
         onError={onError}
+        onLoad={onReady}
       />
     );
   }
@@ -264,6 +493,7 @@ export const AvatarMedia = memo(function AvatarMedia({
           }
           onError?.(event);
         }}
+        onLoadedData={onReady}
       />
     );
   }
@@ -274,6 +504,7 @@ export const AvatarMedia = memo(function AvatarMedia({
       alt={alt}
       className={cn("aspect-square size-full object-cover", className)}
       onError={onError}
+      onLoad={onReady}
     />
   );
 });

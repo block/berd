@@ -1,4 +1,4 @@
-import { isAppAvatarRef } from "@/shared/avatars/catalog";
+import { isAppAvatarRef, isUserAvatarRef } from "@/shared/avatars/catalog";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 
 function decodePathLikeValue(value: string): string {
@@ -38,7 +38,9 @@ export function isRemoteAvatarUrl(value: string): boolean {
 }
 
 export function isSupportedAvatarRef(value: string): boolean {
-  return isRemoteAvatarUrl(value) || isAppAvatarRef(value);
+  return (
+    isRemoteAvatarUrl(value) || isAppAvatarRef(value) || isUserAvatarRef(value)
+  );
 }
 
 export function normalizeAvatarRef(value: unknown): string | undefined {
@@ -56,7 +58,9 @@ export function resolveAvatarSrc(value: unknown): string | undefined {
     return undefined;
   }
 
-  return isAppAvatarRef(normalized) ? undefined : normalized;
+  return isAppAvatarRef(normalized) || isUserAvatarRef(normalized)
+    ? undefined
+    : normalized;
 }
 
 export function resolveAvatarMedia(
@@ -67,7 +71,7 @@ export function resolveAvatarMedia(
     return undefined;
   }
 
-  return isAppAvatarRef(normalized)
+  return isAppAvatarRef(normalized) || isUserAvatarRef(normalized)
     ? undefined
     : {
         src: normalized,

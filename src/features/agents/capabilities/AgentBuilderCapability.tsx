@@ -24,12 +24,22 @@ export const AGENT_BUILDER_RAIL_DESIGN_WIDTH =
 export interface AgentBuilderCapabilityProps {
   session: ChatSession;
   className?: string;
+  /**
+   * When the host collapses the chat column so the builder takes the full
+   * surface. Layout state is owned by the host (ChatView); the capability
+   * just forwards it to the rail's full-page render mode.
+   */
+  fullPage?: boolean;
+  /** Reopens the collapsed chat column while in full-page mode. */
+  onExpandChat?: () => void;
   onDraftPromoted?: (source: AgentSourceEntry) => void;
 }
 
 export function AgentBuilderCapability({
   session,
   className,
+  fullPage = false,
+  onExpandChat,
   onDraftPromoted,
 }: AgentBuilderCapabilityProps) {
   const { t } = useTranslation("agents");
@@ -156,6 +166,8 @@ export function AgentBuilderCapability({
       targetAgentPath={session.targetAgentPath ?? null}
       targetAgentSlug={session.targetAgentSlug ?? null}
       draftState={draftState}
+      fullPage={fullPage}
+      onExpandChat={fullPage ? onExpandChat : undefined}
       onDraftPromoted={handleDraftPromoted}
       onDraftTargetChanged={handleDraftTargetChanged}
       onRecoverMissingDraft={handleRecoverMissingDraft}

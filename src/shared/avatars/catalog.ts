@@ -1,6 +1,8 @@
 export const APP_AVATAR_REF_PREFIX = "app-avatar:" as const;
+export const USER_AVATAR_REF_PREFIX = "user-avatar:" as const;
 
 export type AvatarMediaType = "image" | "video";
+export type AvatarAlphaMode = "stacked";
 export type AvatarAssetFormat = "webm" | "hevc";
 
 export interface AvatarVariant {
@@ -22,6 +24,7 @@ export interface AvatarCatalogEntry {
 export interface ResolvedAvatarMedia {
   src: string;
   mediaType: AvatarMediaType;
+  alphaMode?: AvatarAlphaMode;
   posterSrc?: string;
 }
 
@@ -43,6 +46,7 @@ export interface CachedAvatarAsset {
   id: string;
   path: string;
   mimeType: string;
+  alphaMode?: AvatarAlphaMode;
   posterPath?: string;
 }
 
@@ -80,6 +84,24 @@ export function isAppAvatarRef(value: string): boolean {
 }
 
 export const isBundledAvatarRef = isAppAvatarRef;
+
+export function userAvatarRef(id: string): string {
+  return `${USER_AVATAR_REF_PREFIX}${id}`;
+}
+
+export function parseUserAvatarRef(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith(USER_AVATAR_REF_PREFIX)) {
+    return undefined;
+  }
+
+  const id = trimmed.slice(USER_AVATAR_REF_PREFIX.length);
+  return APP_AVATAR_ID_PATTERN.test(id) ? id : undefined;
+}
+
+export function isUserAvatarRef(value: string): boolean {
+  return parseUserAvatarRef(value) !== undefined;
+}
 
 export function mediaTypeFromMimeType(mimeType: string): AvatarMediaType {
   return mimeType.toLowerCase().startsWith("video/") ? "video" : "image";

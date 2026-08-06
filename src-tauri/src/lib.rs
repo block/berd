@@ -408,7 +408,10 @@ pub fn run() {
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::get_cached_avatars_for_refs,
+            commands::avatars::delete_user_avatar,
             commands::avatars::ensure_avatar_collection,
+            commands::gloopies::generate_gloopie_options,
+            commands::gloopies::animate_gloopie_option,
             commands::cache::clear_local_media_caches,
             commands::cli::get_bb_cli_status,
             #[cfg(not(feature = "no-bb-cli-install"))]
