@@ -10,6 +10,15 @@ export interface ManagedGooseProviderSelection {
   modelId: string | undefined;
 }
 
+export interface ManagedGooseProviderResolutionContext {
+  /** Raw, refreshed model ids for the resolved target provider. */
+  targetModelIds?: ReadonlySet<string>;
+  /** True only when targetModelIds came from a successful provider refresh. */
+  targetInventoryValidated?: boolean;
+}
+
+const DATABRICKS_V2_PROVIDER_ID = "databricks_v2";
+
 /**
  * Runtime model providers define provider policy and curated model metadata.
  * An empty list is the public/BYO contract: Berd does not own provider
@@ -44,6 +53,7 @@ function defaultManagedProviderId(goose: RuntimeGooseConfig): string {
 export function resolveManagedGooseProviderSelection(
   config: Pick<RuntimeConfig, "goose">,
   selection: GooseProviderSelection,
+  context: ManagedGooseProviderResolutionContext = {},
 ): ManagedGooseProviderSelection | null {
   const { goose } = config;
   if (goose.modelProviders.length === 0) {
@@ -54,9 +64,27 @@ export function resolveManagedGooseProviderSelection(
     (provider) => provider.id === selection.providerId,
   )?.id;
   const providerId = configuredProviderId ?? defaultManagedProviderId(goose);
-  const modelId = selection.modelId ?? goose.defaultModelId;
+  let modelId = selection.modelId ?? goose.defaultModelId;
+
+  if (
+    providerId === DATABRICKS_V2_PROVIDER_ID &&
+    modelId &&
+    shouldRepairDatabricksV2Model(modelId, context)
+  ) {
+    modelId = goose.defaultModelId;
+  }
 
   return { providerId, modelId: modelId ?? undefined };
+}
+
+function shouldRepairDatabricksV2Model(
+  modelId: string,
+  context: ManagedGooseProviderResolutionContext,
+): boolean {
+  return (
+    context.targetInventoryValidated === true &&
+    !context.targetModelIds?.has(modelId)
+  );
 }
 
 export function managedGooseSelectionChanged(

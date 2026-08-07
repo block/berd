@@ -6,7 +6,7 @@ import { connectedModelProviderIds } from "./lib/providerState";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
+import { repairManagedGooseModelSelection } from "./lib/managedModelSelectionRepair";
 import {
   getStoredModelPreference,
   setStoredModelPreference,
@@ -58,10 +58,12 @@ export async function reconcileManagedDefaultProviderSelection(): Promise<{
   providerId: string;
   modelId?: string;
 } | null> {
-  const config = useRuntimeConfigStore.getState().config;
   const client = await getClient();
   const current = await client.goose.GooseUnstableDefaultsRead({});
-  const resolved = resolveManagedGooseProviderSelection(config, current);
+  const resolved = await repairManagedGooseModelSelection(
+    current,
+    "goose_default",
+  );
   if (!resolved) {
     return null;
   }
@@ -74,9 +76,9 @@ export async function reconcileManagedDefaultProviderSelection(): Promise<{
   }
 
   const preference = getStoredModelPreference("goose");
-  const resolvedPreference = resolveManagedGooseProviderSelection(
-    config,
+  const resolvedPreference = await repairManagedGooseModelSelection(
     preference ?? current,
+    "berd_preference",
   );
   if (resolvedPreference?.modelId) {
     const modelId = resolvedPreference.modelId;

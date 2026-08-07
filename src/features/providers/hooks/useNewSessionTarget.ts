@@ -17,6 +17,7 @@ import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { resolveSupportedSessionModelPreference } from "../lib/resolveSessionModelPreference";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { resolveSelectedAgentId } from "@/features/chat/lib/agentProviderResolution";
+import { repairManagedGooseModelSelection } from "../lib/managedModelSelectionRepair";
 
 export interface EnsureNewSessionTargetOptions {
   onUnavailable?: "open_settings" | "silent";
@@ -127,6 +128,21 @@ export function useNewSessionTarget() {
             undefined,
           )),
         };
+      }
+      if (result.status === "ready") {
+        const repaired = await repairManagedGooseModelSelection(
+          result,
+          "new_session",
+        );
+        if (repaired) {
+          result = {
+            ...result,
+            ...repaired,
+            ...(repaired.modelId !== result.modelId
+              ? { modelName: repaired.modelId }
+              : {}),
+          };
+        }
       }
 
       if (result.status !== "ready" && options.onUnavailable !== "silent") {

@@ -1,5 +1,10 @@
 import { acpPrepareSession, acpSetModel } from "@/shared/api/acp";
 import type { AcpSessionConfigSnapshots } from "@/shared/api/acpSessionConfigSnapshots";
+import {
+  repairManagedGooseModelSelection,
+  type ManagedModelRepairSource,
+} from "@/features/providers/lib/managedModelSelectionRepair";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 
 export interface SessionConfigRequest {
   sessionId: string;
@@ -7,11 +12,16 @@ export interface SessionConfigRequest {
   workingDir: string;
   modelId?: string | null;
   forceConfigRefresh?: boolean;
+  repairSource?: ManagedModelRepairSource;
+  modelSelectionRequestId?: string;
 }
 
 export interface SessionConfigResult {
   applied: boolean;
   configOptionsSnapshot?: AcpSessionConfigSnapshots;
+  resolvedProviderId?: string;
+  resolvedModelId?: string;
+  repaired?: boolean;
 }
 
 interface QueuedSessionConfigRequest extends SessionConfigRequest {
@@ -84,6 +94,7 @@ function settleAppliedWaiters(
   queue: SessionConfigQueue,
   request: QueuedSessionConfigRequest,
   configOptionsSnapshot?: AcpSessionConfigSnapshots,
+  repaired = false,
 ) {
   const remaining: SessionConfigWaiter[] = [];
   for (const waiter of queue.waiters) {
@@ -96,9 +107,26 @@ function settleAppliedWaiters(
     waiter.resolve({
       applied,
       ...(applied && configOptionsSnapshot ? { configOptionsSnapshot } : {}),
+      ...(applied && repaired
+        ? {
+            repaired: true,
+            resolvedProviderId: request.providerId,
+            resolvedModelId: request.modelId ?? undefined,
+          }
+        : {}),
     });
   }
   queue.waiters = remaining;
+}
+
+function stillOwnsModelSelection(request: SessionConfigRequest): boolean {
+  const currentIntent = useChatSessionStore
+    .getState()
+    .getModelSelectionIntent(request.sessionId);
+  if (request.modelSelectionRequestId) {
+    return currentIntent?.requestId === request.modelSelectionRequestId;
+  }
+  return currentIntent == null;
 }
 
 function mergeSessionConfigSnapshots(
@@ -117,9 +145,49 @@ function mergeSessionConfigSnapshots(
   };
 }
 
-async function applyRequest(
+async function resolveSessionConfigRequest(
   request: QueuedSessionConfigRequest,
-): Promise<AcpSessionConfigSnapshots | undefined> {
+): Promise<QueuedSessionConfigRequest & { repaired: boolean }> {
+  const resolved = await repairManagedGooseModelSelection(
+    request,
+    request.repairSource ?? "session",
+  );
+  if (!resolved) return { ...request, repaired: false };
+  const repaired =
+    resolved.providerId !== request.providerId ||
+    resolved.modelId !== request.modelId;
+  if (repaired) {
+    const queue = getQueue(request.sessionId);
+    const repairedRequest = {
+      ...request,
+      providerId: resolved.providerId,
+      modelId: resolved.modelId,
+    };
+    if (queue.latest?.sequence === request.sequence) {
+      queue.latest = repairedRequest;
+    }
+    const waiter = queue.waiters.find(
+      (candidate) => candidate.sequence === request.sequence,
+    );
+    if (waiter) {
+      waiter.request = repairedRequest;
+    }
+  }
+  return {
+    ...request,
+    providerId: resolved.providerId,
+    modelId: resolved.modelId,
+    repaired,
+  };
+}
+
+async function applyRequest(
+  unresolvedRequest: QueuedSessionConfigRequest,
+): Promise<{
+  request: QueuedSessionConfigRequest & { repaired: boolean };
+  snapshots?: AcpSessionConfigSnapshots;
+}> {
+  const request = await resolveSessionConfigRequest(unresolvedRequest);
   const prepareOptions = {
     ...(request.forceConfigRefresh && !request.modelId
       ? { forceConfigRefresh: true }
@@ -151,7 +219,7 @@ async function applyRequest(
         : await acpSetModel(request.sessionId, request.modelId),
     );
   }
-  return snapshots;
+  return { request, snapshots };
 }
 
 async function drainQueue(sessionId: string, queue: SessionConfigQueue) {
@@ -163,9 +231,12 @@ async function drainQueue(sessionId: string, queue: SessionConfigQueue) {
   try {
     while (queue.latest) {
       const request = queue.latest;
+      let appliedRequest: QueuedSessionConfigRequest & { repaired: boolean };
       let configOptionsSnapshot: AcpSessionConfigSnapshots | undefined;
       try {
-        configOptionsSnapshot = await applyRequest(request);
+        const applied = await applyRequest(request);
+        appliedRequest = applied.request;
+        configOptionsSnapshot = applied.snapshots;
       } catch (error) {
         if (queue.latest?.sequence !== request.sequence) {
           continue;
@@ -181,7 +252,19 @@ async function drainQueue(sessionId: string, queue: SessionConfigQueue) {
       }
 
       queue.latest = null;
-      settleAppliedWaiters(queue, request, configOptionsSnapshot);
+      if (appliedRequest.repaired && stillOwnsModelSelection(appliedRequest)) {
+        useChatSessionStore.getState().patchSession(sessionId, {
+          providerId: appliedRequest.providerId,
+          modelId: appliedRequest.modelId ?? undefined,
+          modelName: appliedRequest.modelId ?? undefined,
+        });
+      }
+      settleAppliedWaiters(
+        queue,
+        appliedRequest,
+        configOptionsSnapshot,
+        appliedRequest.repaired && stillOwnsModelSelection(appliedRequest),
+      );
       break;
     }
   } finally {

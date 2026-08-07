@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderConfigStatusDto } from "@aaif/goose-sdk";
 import {
+  reconcileManagedDefaultProviderSelection,
   saveDefaultProviderSelection,
   saveDefaultProviderSelectionFromConfiguredProvider,
 } from "./defaultProviderConfig";
-import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import {
+  getStoredModelPreference,
+  setStoredModelPreference,
+} from "@/features/chat/lib/modelPreferences";
+import { resetManagedModelSelectionRepairCacheForTests } from "./lib/managedModelSelectionRepair";
 import { getClient } from "@/shared/api/acpConnection";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
@@ -17,6 +22,7 @@ vi.mock("@/shared/api/acpConnection", () => ({
 }));
 
 vi.mock("@/features/chat/lib/modelPreferences", () => ({
+  getStoredModelPreference: vi.fn(),
   setStoredModelPreference: vi.fn(),
 }));
 
@@ -28,9 +34,69 @@ function status(
 }
 
 const mockGetClient = vi.mocked(getClient);
+const mockGetStoredModelPreference = vi.mocked(getStoredModelPreference);
 const mockSetStoredModelPreference = vi.mocked(setStoredModelPreference);
 
 const defaultsSave = vi.fn();
+
+describe("reconcileManagedDefaultProviderSelection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetManagedModelSelectionRepairCacheForTests();
+    const managedConfig = {
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        defaultModelProviderId: "databricks_v2",
+        defaultModelId: "goose-gpt-5-5",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks v2",
+            models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      config: managedConfig,
+      result: { status: "ready", source: "endpoint", config: managedConfig },
+    });
+  });
+
+  it("repairs both Goose defaults and Berd's saved preference", async () => {
+    mockGetStoredModelPreference.mockReturnValue({
+      providerId: "databricks_v2",
+      modelId: "goose",
+      modelName: "goose",
+    });
+    const defaultsRead = vi.fn().mockResolvedValue({
+      providerId: "databricks",
+      modelId: "goose",
+    });
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableDefaultsRead: defaultsRead,
+        GooseUnstableDefaultsSave: defaultsSave,
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5"],
+        }),
+      },
+    } as never);
+
+    await reconcileManagedDefaultProviderSelection();
+
+    expect(defaultsSave).toHaveBeenCalledWith({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+    expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+      modelName: "GPT-5.5",
+    });
+  });
+});
 
 describe("saveDefaultProviderSelection", () => {
   beforeEach(() => {

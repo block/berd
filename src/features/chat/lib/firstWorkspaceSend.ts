@@ -403,7 +403,21 @@ export async function createDeferredWorkspaces(
       providerId: preparedSession.providerId ?? "goose",
       workingDir,
       modelId: preparedSession.modelId,
+      repairSource: "deferred",
     });
+    if (prepared.repaired) {
+      useChatSessionStore.getState().patchSession(resolvedSessionId, {
+        ...(prepared.resolvedProviderId
+          ? { providerId: prepared.resolvedProviderId }
+          : {}),
+        ...(prepared.resolvedModelId
+          ? {
+              modelId: prepared.resolvedModelId,
+              modelName: prepared.resolvedModelId,
+            }
+          : {}),
+      });
+    }
     resolvedSessionId = resolveDeferredSessionId(sessionId, recordId);
     record = resolvedSessionId
       ? deferredRecord(resolvedSessionId, recordId)

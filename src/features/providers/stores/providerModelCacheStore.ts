@@ -3,6 +3,7 @@ import { providerModelOptionsFromIds } from "../lib/modelRecommendations";
 import type { ModelOption } from "@/features/chat/types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { getClient } from "@/shared/api/acpConnection";
+import { notifyProviderModelInventoryInvalidated } from "../lib/providerModelInventoryEvents";
 
 const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v1";
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -135,6 +136,7 @@ function refreshVersion(providerId: string): number {
 
 function bumpRefreshVersion(providerId: string): void {
   providerRefreshVersions.set(providerId, refreshVersion(providerId) + 1);
+  notifyProviderModelInventoryInvalidated(providerId);
 }
 
 export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
@@ -209,6 +211,10 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
         return;
       }
 
+      if (options.force) {
+        notifyProviderModelInventoryInvalidated(providerId);
+      }
+
       const inFlightRefresh = inFlightRefreshes.get(providerId);
       if (inFlightRefresh) {
         if (!options.force) {
@@ -273,6 +279,7 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
           if (versionAtStart !== refreshVersion(providerId)) {
             return;
           }
+          notifyProviderModelInventoryInvalidated(providerId);
           set((state) => {
             const providers = new Map(state.providers);
             providers.set(providerId, entry);

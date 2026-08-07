@@ -87,16 +87,21 @@ export async function prepareExistingSessionForBackgroundSend(
     providerId,
     workingDir,
     modelId,
+    repairSource: options.modelId ? "queue" : "session",
   });
   if (!result.applied) {
     throw new Error("Session preparation was superseded by a newer request.");
   }
+  const resolvedProviderId = result.resolvedProviderId ?? providerId;
+  const resolvedModelId = result.resolvedModelId ?? modelId;
   useChatSessionStore.getState().patchSession(sessionId, {
     workingDir,
-    providerId,
-    ...(modelId ? { modelId, modelName: modelId } : {}),
+    providerId: resolvedProviderId,
+    ...(resolvedModelId
+      ? { modelId: resolvedModelId, modelName: resolvedModelId }
+      : {}),
   });
-  return { providerId, persona: persona ?? undefined };
+  return { providerId: resolvedProviderId, persona: persona ?? undefined };
 }
 
 export async function sendQueuedPromptToExistingSessionInBackground(

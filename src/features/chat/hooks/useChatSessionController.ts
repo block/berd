@@ -744,6 +744,7 @@ export function useChatSessionController({
         sessionId,
         providerId,
         workingDir,
+        modelSelectionRequestId: requestId,
       });
       if (!result.applied) {
         return result.applied;
@@ -841,12 +842,49 @@ export function useChatSessionController({
         providerId,
         workingDir,
         modelId: modelToApply.id,
+        modelSelectionRequestId: modelToApply.requestId,
       });
       if (!result.applied) {
         return result.applied;
       }
-      if (!modelStillCurrent()) {
+      const repairStillCurrent = () => {
+        if (!result.repaired) {
+          return modelStillCurrent();
+        }
+        const liveStore = useChatSessionStore.getState();
+        const liveIntent = liveStore.getModelSelectionIntent(sessionId);
+        if (modelToApply.requestId) {
+          return liveIntent?.requestId === modelToApply.requestId;
+        }
+        if (liveIntent) {
+          return false;
+        }
+        const latestSession = liveStore.getSession(sessionId);
+        return (
+          latestSession?.providerId === result.resolvedProviderId &&
+          latestSession?.modelId === result.resolvedModelId
+        );
+      };
+      if (!repairStillCurrent()) {
         return false;
+      }
+      if (result.repaired) {
+        useChatSessionStore.getState().patchSession(sessionId, {
+          workingDir,
+          ...(result.resolvedProviderId
+            ? { providerId: result.resolvedProviderId }
+            : {}),
+          ...(result.resolvedModelId
+            ? {
+                modelId: result.resolvedModelId,
+                modelName: result.resolvedModelId,
+              }
+            : {}),
+          ...(result.configOptionsSnapshot?.reasoningEffort
+            ? { reasoningEffort: result.configOptionsSnapshot.reasoningEffort }
+            : {}),
+        });
+        return true;
       }
 
       useChatSessionStore.getState().patchSession(sessionId, {
@@ -902,6 +940,7 @@ export function useChatSessionController({
         providerId,
         workingDir,
         modelId: modelSelection.id,
+        modelSelectionRequestId: requestId,
       });
       // applyLatestSessionConfig queues latest-only work. A newer request may
       // have superseded this one while ACP was being prepared, so only patch
@@ -920,6 +959,7 @@ export function useChatSessionController({
           workingDir,
           modelId: modelSelection.id,
           forceConfigRefresh: true,
+          modelSelectionRequestId: requestId,
         });
         if (!isCurrentModelSelectionIntent(sessionId, requestId)) {
           return false;
@@ -930,8 +970,9 @@ export function useChatSessionController({
       }
       useChatSessionStore.getState().patchSession(sessionId, {
         workingDir,
-        modelId: modelSelection.id,
-        modelName: modelSelection.name,
+        providerId: result.resolvedProviderId ?? providerId,
+        modelId: result.resolvedModelId ?? modelSelection.id,
+        modelName: result.resolvedModelId ?? modelSelection.name,
         ...(configOptionsSnapshot?.reasoningEffort
           ? { reasoningEffort: configOptionsSnapshot.reasoningEffort }
           : {}),

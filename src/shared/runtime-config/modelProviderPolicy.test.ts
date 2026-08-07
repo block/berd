@@ -58,15 +58,84 @@ describe("resolveManagedGooseProviderSelection", () => {
     ).toEqual({ providerId: "databricks_v2", modelId: "shared-model" });
   });
 
-  it("preserves an upstream model while migrating a disallowed provider", () => {
+  it("preserves a Databricks model when live inventory cannot be validated", () => {
     expect(
       resolveManagedGooseProviderSelection(managedConfig, {
         providerId: "databricks",
-        modelId: "new-upstream-model",
+        modelId: "goose",
       }),
     ).toEqual({
       providerId: "databricks_v2",
+      modelId: "goose",
+    });
+  });
+
+  it("preserves a model confirmed by the target Databricks v2 inventory", () => {
+    expect(
+      resolveManagedGooseProviderSelection(
+        managedConfig,
+        {
+          providerId: "databricks",
+          modelId: "new-upstream-model",
+        },
+        {
+          targetModelIds: new Set(["new-upstream-model"]),
+          targetInventoryValidated: true,
+        },
+      ),
+    ).toEqual({
+      providerId: "databricks_v2",
       modelId: "new-upstream-model",
+    });
+  });
+
+  it("repairs a partially migrated legacy model absent from validated v2 inventory", () => {
+    expect(
+      resolveManagedGooseProviderSelection(
+        managedConfig,
+        {
+          providerId: "databricks_v2",
+          modelId: "goose-claude-4-sonnet",
+        },
+        {
+          targetModelIds: new Set(["goose-gpt-5-5"]),
+          targetInventoryValidated: true,
+        },
+      ),
+    ).toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
+  it("repairs any selected v2 model absent from validated live inventory", () => {
+    expect(
+      resolveManagedGooseProviderSelection(
+        managedConfig,
+        {
+          providerId: "databricks_v2",
+          modelId: "any-missing-model",
+        },
+        {
+          targetModelIds: new Set(["goose-gpt-5-5"]),
+          targetInventoryValidated: true,
+        },
+      ),
+    ).toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
+  it("preserves an unknown v2 model when inventory cannot be validated", () => {
+    expect(
+      resolveManagedGooseProviderSelection(managedConfig, {
+        providerId: "databricks_v2",
+        modelId: "future-v2-model",
+      }),
+    ).toEqual({
+      providerId: "databricks_v2",
+      modelId: "future-v2-model",
     });
   });
 
