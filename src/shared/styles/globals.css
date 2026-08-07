@@ -1705,6 +1705,19 @@ body,
     color: var(--text-selection-fg);
   }
 
+  /* The queued-message pill is inverted relative to the theme (dark surface
+     in light mode), so the theme-level selection tokens would paint selected
+     text near-invisible on it. Re-scope them to the pill's own contrast
+     color. */
+  [data-slot="queued-message"] {
+    --text-selection-bg: color-mix(
+      in oklab,
+      var(--surface-chat-responding-pill-fg) 30%,
+      transparent
+    );
+    --text-selection-fg: var(--surface-chat-responding-pill-fg);
+  }
+
   /* Chat transcript find-in-page tints, painted via the CSS Custom
      Highlight API (see src/features/chat/lib/transcriptSearch.ts). */
   ::highlight(chat-search-match) {
