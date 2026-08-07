@@ -31,7 +31,7 @@ use std::time::Duration;
 use tauri::Manager;
 use tokio::io::AsyncBufReadExt;
 
-use crate::services::managed_node;
+use crate::services::{env_key, managed_node};
 
 /// Dev/bridge-developer override: a directory of bridge binaries that
 /// replaces all managed resolution (no managed tools, no shim dir, no
@@ -200,10 +200,7 @@ pub fn managed_npm_env_at(prefix: &Path) -> Vec<(String, String)> {
 /// same-named entries so a stray inherited value can never win.
 pub fn apply_managed_npm_env(vars: &mut Vec<(String, String)>, overrides: &[(String, String)]) {
     for (key, value) in overrides {
-        match vars.iter_mut().find(|(existing, _)| existing == key) {
-            Some(entry) => entry.1 = value.clone(),
-            None => vars.push((key.clone(), value.clone())),
-        }
+        env_key::upsert_vec(vars, key, value.clone());
     }
 }
 
@@ -814,7 +811,7 @@ mod tests {
             &managed_npm_env_at(Path::new("/data/npm-prefix")),
         );
 
-        assert_eq!(vars.len(), 6);
+        assert_eq!(vars.len(), if cfg!(windows) { 4 } else { 6 });
         assert_eq!(vars[0], ("PATH".to_string(), "/usr/bin".to_string()));
         assert_eq!(
             vars[1],
@@ -826,6 +823,33 @@ mod tests {
         assert!(vars
             .iter()
             .any(|(k, v)| k == "COREPACK_HOME" && v == "/data/npm-prefix/corepack"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn managed_npm_env_replaces_inherited_mixed_case_prefix() {
+        let mut vars = vec![
+            ("Path".to_string(), "C:\\Windows".to_string()),
+            ("Npm_Config_Prefix".to_string(), "C:\\stray".to_string()),
+        ];
+
+        apply_managed_npm_env(
+            &mut vars,
+            &managed_npm_env_at(Path::new("C:\\Berd Data\\npm-prefix")),
+        );
+
+        assert_eq!(
+            vars.iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case("NPM_CONFIG_PREFIX"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            vars.iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("NPM_CONFIG_PREFIX"))
+                .map(|(_, value)| value.as_str()),
+            Some("C:\\Berd Data\\npm-prefix")
+        );
     }
 
     #[test]

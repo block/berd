@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
 
-use crate::services::dir_env;
+use crate::services::{dir_env, env_key};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +68,7 @@ enum EnvSource {
     /// Try the inherited environment first and retry with captured env only for
     /// failures that plausibly depend on directory-scoped shell activation.
     Smart,
-    /// Inherited process env with inherited `GIT_*` variables stripped.
+    /// Inherited process env with repository-targeting Git controls stripped.
     Lite,
     /// Per-directory interactive-login-shell env; falls back to Lite on
     /// capture failure.
@@ -630,7 +630,8 @@ async fn apply_git_environment(
     match env_source {
         EnvSource::Smart | EnvSource::Lite => apply_lite_git_env(command),
         EnvSource::Captured => {
-            if let Some(env) = dir_env::capture_dir_env(path, capture_timeout).await {
+            if let Some(mut env) = dir_env::capture_dir_env(path, capture_timeout).await {
+                sanitize_git_env(&mut env);
                 apply_captured_git_env(command, &env);
             } else {
                 apply_lite_git_env(command);
@@ -645,18 +646,70 @@ async fn apply_git_environment(
 
 fn apply_captured_git_env(command: &mut TokioCommand, env: &HashMap<String, String>) {
     command.env_clear();
-    for (key, value) in env {
-        command.env(key, value);
-    }
+    command.envs(env);
+}
+
+/// Git transport variables Berd deliberately carries across repository
+/// boundaries. Every other inherited `GIT_*` variable is removed so newly
+/// introduced Git controls fail closed instead of bypassing a stale denylist.
+const PRESERVED_GIT_TRANSPORT_ENV_KEYS: &[&str] =
+    &["GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT"];
+
+fn sanitize_git_env(env: &mut HashMap<String, String>) {
+    env.retain(|key, _| !is_git_env_key(key) || is_preserved_git_transport_key(key));
+}
+
+fn is_git_env_key(key: &str) -> bool {
+    key.get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("GIT_"))
+}
+
+fn is_preserved_git_transport_key(key: &str) -> bool {
+    PRESERVED_GIT_TRANSPORT_ENV_KEYS
+        .iter()
+        .any(|preserved| env_key::matches(key, preserved))
 }
 
 fn apply_lite_git_env(command: &mut TokioCommand) {
-    strip_inherited_git_env(command);
-}
+    let explicit_git_env = command
+        .as_std()
+        .get_envs()
+        .filter_map(|(key, value)| {
+            let key_text = key.to_str()?;
+            is_git_env_key(key_text)
+                .then(|| (key.to_os_string(), value.map(std::ffi::OsStr::to_os_string)))
+        })
+        .collect::<Vec<_>>();
+    let explicitly_configured_transport_keys = explicit_git_env
+        .iter()
+        .filter_map(|(key, _)| {
+            key.to_str()
+                .filter(|key| is_preserved_git_transport_key(key))
+        })
+        .collect::<Vec<_>>();
+    let inherited_transport = std::env::vars().filter(|(key, _)| {
+        is_preserved_git_transport_key(key)
+            && !explicitly_configured_transport_keys
+                .iter()
+                .any(|explicit| env_key::matches(explicit, key))
+    });
 
-fn strip_inherited_git_env(command: &mut TokioCommand) {
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("GIT_") {
+    for key in std::env::vars_os()
+        .map(|(key, _)| key)
+        .chain(explicit_git_env.iter().map(|(key, _)| key.clone()))
+    {
+        if key.to_str().is_some_and(is_git_env_key) {
+            command.env_remove(key);
+        }
+    }
+    command.envs(inherited_transport);
+    for (key, value) in explicit_git_env {
+        if !key.to_str().is_some_and(is_preserved_git_transport_key) {
+            continue;
+        }
+        if let Some(value) = value {
+            command.env(key, value);
+        } else {
             command.env_remove(key);
         }
     }
@@ -664,7 +717,7 @@ fn strip_inherited_git_env(command: &mut TokioCommand) {
 
 fn force_non_interactive(command: &mut TokioCommand) {
     command.env("GIT_TERMINAL_PROMPT", "0");
-    if !has_env(command, "GIT_SSH_COMMAND") {
+    if !has_env(command, "GIT_SSH_COMMAND") && !has_env(command, "GIT_SSH") {
         command.env(
             "GIT_SSH_COMMAND",
             "ssh -o BatchMode=yes -o ConnectTimeout=10",
@@ -673,10 +726,12 @@ fn force_non_interactive(command: &mut TokioCommand) {
 }
 
 fn has_env(command: &TokioCommand, key: &str) -> bool {
-    command
-        .as_std()
-        .get_envs()
-        .any(|(env_key, value)| value.is_some() && env_key == key)
+    command.as_std().get_envs().any(|(existing_key, value)| {
+        value.is_some()
+            && existing_key
+                .to_str()
+                .is_some_and(|existing| env_key::matches(existing, key))
+    })
 }
 
 fn pin_c_locale(command: &mut TokioCommand) {
@@ -1024,14 +1079,44 @@ mod tests {
     fn captured_git_env_replaces_command_env_and_preserves_full_snapshot() {
         let mut command = TokioCommand::new("git");
         command.env("STALE_VAR", "remove-me");
-        let env = HashMap::from([
+        let mut env = HashMap::from([
             (
                 "PATH".to_string(),
                 "/repo/.hermit/bin:/repo/bin:/usr/bin".to_string(),
             ),
             ("CUSTOM_DIR_ENV".to_string(), "forwarded".to_string()),
+            ("GIT_DIR".to_string(), "/wrong/repo/.git".to_string()),
+            ("GIT_WORK_TREE".to_string(), "/wrong/repo".to_string()),
+            ("GIT_INDEX_FILE".to_string(), "/wrong/index".to_string()),
+            ("GIT_NAMESPACE".to_string(), "wrong-namespace".to_string()),
+            (
+                "GIT_CONFIG_GLOBAL".to_string(),
+                "/wrong/global.gitconfig".to_string(),
+            ),
+            (
+                "GIT_CONFIG_SYSTEM".to_string(),
+                "/wrong/system.gitconfig".to_string(),
+            ),
+            ("GIT_CEILING_DIRECTORIES".to_string(), "/repo".to_string()),
+            (
+                "GIT_DISCOVERY_ACROSS_FILESYSTEM".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "GIT_OBJECT_DIRECTORY".to_string(),
+                "/wrong/objects".to_string(),
+            ),
+            (
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES".to_string(),
+                "/wrong/alternate-objects".to_string(),
+            ),
+            (
+                "GIT_SSH_COMMAND".to_string(),
+                "/usr/local/bin/company-ssh".to_string(),
+            ),
         ]);
 
+        sanitize_git_env(&mut env);
         apply_captured_git_env(&mut command, &env);
 
         assert_eq!(
@@ -1043,42 +1128,98 @@ mod tests {
             Some(OsString::from("forwarded"))
         );
         assert_eq!(env_value(&command, "STALE_VAR"), None);
+        assert_eq!(env_value(&command, "GIT_DIR"), None);
+        assert_eq!(env_value(&command, "GIT_WORK_TREE"), None);
+        assert_eq!(env_value(&command, "GIT_INDEX_FILE"), None);
+        assert_eq!(env_value(&command, "GIT_NAMESPACE"), None);
+        assert_eq!(env_value(&command, "GIT_CONFIG_GLOBAL"), None);
+        assert_eq!(env_value(&command, "GIT_CONFIG_SYSTEM"), None);
+        assert_eq!(env_value(&command, "GIT_CEILING_DIRECTORIES"), None);
+        assert_eq!(env_value(&command, "GIT_DISCOVERY_ACROSS_FILESYSTEM"), None);
+        assert_eq!(env_value(&command, "GIT_OBJECT_DIRECTORY"), None);
+        assert_eq!(
+            env_value(&command, "GIT_ALTERNATE_OBJECT_DIRECTORIES"),
+            None
+        );
+        assert_eq!(
+            env_value(&command, "GIT_SSH_COMMAND"),
+            Some(OsString::from("/usr/local/bin/company-ssh"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn captured_windows_env_strips_mixed_case_git_controls() {
+        let mut command = TokioCommand::new("git");
+        let mut env = HashMap::from([
+            ("git_work_tree".to_string(), "C:\\wrong".to_string()),
+            (
+                "git_ssh_command".to_string(),
+                "C:\\Tools\\company-ssh.cmd".to_string(),
+            ),
+        ]);
+
+        sanitize_git_env(&mut env);
+        apply_captured_git_env(&mut command, &env);
+        force_non_interactive(&mut command);
+
+        assert_eq!(env_value(&command, "git_work_tree"), None);
+        assert_eq!(
+            env_value(&command, "git_ssh_command"),
+            Some(OsString::from("C:\\Tools\\company-ssh.cmd"))
+        );
     }
 
     #[test]
-    fn lite_git_env_strips_inherited_git_vars_without_overriding_path() {
-        let inherited_key = format!("GIT_GOOSE_TEST_{}", std::process::id());
-        std::env::set_var(&inherited_key, "unsafe");
-        struct EnvGuard(String);
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                std::env::remove_var(&self.0);
-            }
-        }
-        let _guard = EnvGuard(inherited_key.clone());
+    fn git_env_sanitizer_fails_closed_for_unknown_git_variables() {
+        let mut env = HashMap::from([
+            (
+                "GIT_FUTURE_REPOSITORY_CONTROL".to_string(),
+                "unsafe".to_string(),
+            ),
+            ("GIT_SSH_COMMAND".to_string(), "company-ssh".to_string()),
+            ("PATH".to_string(), "/usr/bin".to_string()),
+        ]);
 
-        let mut command = TokioCommand::new("git");
-        apply_lite_git_env(&mut command);
+        sanitize_git_env(&mut env);
 
-        assert_eq!(env_value(&command, "PATH"), None);
-        assert!(env_is_removed(&command, &inherited_key));
+        assert!(!env.contains_key("GIT_FUTURE_REPOSITORY_CONTROL"));
+        assert_eq!(env.get("GIT_SSH_COMMAND"), Some(&"company-ssh".to_string()));
+        assert_eq!(env.get("PATH"), Some(&"/usr/bin".to_string()));
     }
 
+    #[test]
+    fn lite_git_env_preserves_explicit_transport_and_strips_explicit_controls() {
+        let mut command = TokioCommand::new("git");
+        command.env("GIT_SSH_COMMAND", "explicit-company-ssh");
+        command.env("GIT_FUTURE_REPOSITORY_CONTROL", "unsafe");
+
+        apply_lite_git_env(&mut command);
+
+        assert_eq!(
+            env_value(&command, "GIT_SSH_COMMAND"),
+            Some(OsString::from("explicit-company-ssh"))
+        );
+        assert!(env_is_removed(&command, "GIT_FUTURE_REPOSITORY_CONTROL"));
+    }
+
+    #[test]
+    fn lite_git_env_does_not_override_path() {
+        let mut command = TokioCommand::new("git");
+        apply_lite_git_env(&mut command);
+        assert_eq!(env_value(&command, "PATH"), None);
+    }
+
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn captured_env_failure_falls_back_to_lite_env() {
-        let inherited_key = format!("GIT_GOOSE_CAPTURE_FALLBACK_TEST_{}", std::process::id());
-        std::env::set_var(&inherited_key, "unsafe");
-        struct EnvGuard(String);
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                std::env::remove_var(&self.0);
-            }
-        }
-        let _guard = EnvGuard(inherited_key.clone());
         let temp = tempfile::tempdir().expect("temp dir");
         let missing_dir = temp.path().join("missing");
 
         let mut command = TokioCommand::new("git");
+        command.env("GIT_DIR", "/wrong/repo");
+        command.env("GIT_WORK_TREE", "/wrong/worktree");
+        command.env("GIT_INDEX_FILE", "/wrong/index");
         apply_git_environment(
             &mut command,
             &missing_dir,
@@ -1087,11 +1228,165 @@ mod tests {
         )
         .await;
 
-        assert!(env_is_removed(&command, &inherited_key));
+        assert!(env_is_removed(&command, "GIT_DIR"));
+        assert!(env_is_removed(&command, "GIT_WORK_TREE"));
+        assert!(env_is_removed(&command, "GIT_INDEX_FILE"));
         assert_eq!(env_value(&command, "PATH"), None);
         assert_eq!(
             env_value(&command, "GIT_TERMINAL_PROMPT"),
             Some(OsString::from("0"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_captured_env_runs_hermit_managed_cmd_git_hook() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("Project With Spaces");
+        let hook = repo.join(".git").join("hooks").join("post-checkout");
+        let hermit_bin = repo.join(".hermit").join("bin");
+        let marker = repo.join("hermit-hook-ran.txt");
+        std::fs::create_dir_all(&repo).expect("repo");
+        let run_setup_git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .expect("run setup git");
+            assert!(
+                output.status.success(),
+                "setup git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run_setup_git(&["init", "-q"]);
+        std::fs::write(repo.join("tracked.txt"), "tracked\n").expect("tracked file");
+        run_setup_git(&["add", "tracked.txt"]);
+        run_setup_git(&[
+            "-c",
+            "user.name=Berd Test",
+            "-c",
+            "user.email=berd@example.test",
+            "commit",
+            "-qm",
+            "fixture",
+        ]);
+        std::fs::create_dir_all(&hermit_bin).expect("Hermit bin");
+        std::fs::write(
+            hermit_bin.join("hermit-hook-tool.CMD"),
+            format!("@echo off\r\n>\"{}\" echo managed\r\n", marker.display()),
+        )
+        .expect("managed CMD tool");
+        // Git for Windows runs hooks under an MSYS sh, which rewrites `/d`
+        // and `/c` into paths before cmd.exe sees them. Disable MSYS argument
+        // conversion for this invocation so cmd receives its native switches.
+        // Seed PATHEXT with `.CMD` inside the hook so this Hermit PATH test is
+        // independent of the parent runner's executable-extension policy;
+        // PATHEXT inheritance and extensionless lookup are covered by dedicated
+        // child-process regressions. `exit "$?"` ensures a failed tool lookup
+        // cannot silently pass.
+        std::fs::write(
+            &hook,
+            "#!/bin/sh\nPATHEXT=\".CMD${PATHEXT:+;$PATHEXT}\"\nexport PATHEXT\nMSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c hermit-hook-tool\nexit \"$?\"\n",
+        )
+        .expect("hook");
+        let mut command = TokioCommand::new("git");
+        command
+            .args(["checkout", "-b", "hook-test"])
+            .current_dir(&repo);
+
+        apply_git_environment(
+            &mut command,
+            &repo,
+            EnvSource::Captured,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            command
+                .as_std()
+                .get_envs()
+                .any(|(key, value)| key.eq_ignore_ascii_case("PATHEXT") && value.is_some()),
+            "captured Rust child env must carry PATHEXT; Git owns the downstream hook environment"
+        );
+        let output = command.output().await.expect("run Git hook");
+
+        assert!(
+            output.status.success(),
+            "git checkout failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(marker)
+                .expect("Hermit hook marker")
+                .trim(),
+            "managed"
+        );
+    }
+
+    /// A hook whose tool lookup fails must fail the Git operation: the fixture
+    /// above cannot be trusted unless a missing tool propagates a nonzero
+    /// status through the same native cmd boundary.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_captured_env_propagates_hook_tool_lookup_failure() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("Project With Spaces");
+        let hook = repo.join(".git").join("hooks").join("pre-commit");
+        std::fs::create_dir_all(&repo).expect("repo");
+        let run_setup_git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .expect("run setup git");
+            assert!(
+                output.status.success(),
+                "setup git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run_setup_git(&["init", "-q"]);
+        std::fs::write(
+            repo.join("tracked.txt"),
+            "tracked
+",
+        )
+        .expect("tracked file");
+        run_setup_git(&["add", "tracked.txt"]);
+        std::fs::write(
+            &hook,
+            "#!/bin/sh
+MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c berd-missing-hook-tool-fixture
+exit \"$?\"
+",
+        )
+        .expect("hook");
+        let mut command = TokioCommand::new("git");
+        command
+            .args([
+                "-c",
+                "user.name=Berd Test",
+                "-c",
+                "user.email=berd@example.test",
+                "commit",
+                "-qm",
+                "fixture",
+            ])
+            .current_dir(&repo);
+
+        apply_git_environment(
+            &mut command,
+            &repo,
+            EnvSource::Captured,
+            Duration::from_secs(5),
+        )
+        .await;
+        let output = command.output().await.expect("run Git hook");
+
+        assert!(
+            !output.status.success(),
+            "commit must fail when the hook tool lookup fails"
         );
     }
 
@@ -1241,13 +1536,40 @@ mod tests {
     }
 
     #[test]
+    fn force_non_interactive_respects_captured_git_ssh() {
+        let mut command = TokioCommand::new("git");
+        let mut env = HashMap::from([
+            (
+                "GIT_SSH".to_string(),
+                "/usr/local/bin/company-ssh".to_string(),
+            ),
+            ("GIT_SSH_VARIANT".to_string(), "ssh".to_string()),
+        ]);
+
+        sanitize_git_env(&mut env);
+        apply_captured_git_env(&mut command, &env);
+        force_non_interactive(&mut command);
+
+        assert_eq!(
+            env_value(&command, "GIT_SSH"),
+            Some(OsString::from("/usr/local/bin/company-ssh"))
+        );
+        assert_eq!(
+            env_value(&command, "GIT_SSH_VARIANT"),
+            Some(OsString::from("ssh"))
+        );
+        assert_eq!(env_value(&command, "GIT_SSH_COMMAND"), None);
+    }
+
+    #[test]
     fn force_non_interactive_respects_captured_git_ssh_command() {
         let mut command = TokioCommand::new("git");
-        let env = HashMap::from([(
+        let mut env = HashMap::from([(
             "GIT_SSH_COMMAND".to_string(),
             "/usr/local/bin/company-ssh".to_string(),
         )]);
 
+        sanitize_git_env(&mut env);
         apply_captured_git_env(&mut command, &env);
         force_non_interactive(&mut command);
 

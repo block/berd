@@ -1,12 +1,10 @@
 use std::{
     collections::HashMap,
-    io,
     path::{Path, PathBuf},
-    process::Stdio,
     sync::Mutex,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
-use tokio::{io::AsyncWriteExt, process::Command, sync::watch, time::timeout};
+use tokio::{sync::watch, time::timeout};
 
 use crate::services::shell_env;
 
@@ -159,6 +157,16 @@ pub async fn capture_home_interactive_env() -> HashMap<String, String> {
     capture_home_interactive_env_with_timeout(HOME_ENV_CAPTURE_TIMEOUT).await
 }
 
+/// Capture the environment used to launch an interactive terminal.
+///
+/// Unix shells activate directory-scoped tools during startup, so they begin
+/// with the sanitized home environment. Windows has no equivalent startup
+/// activation; its platform capture reconstructs validated project-local tool
+/// state for the requested working directory.
+pub async fn capture_terminal_env(dir: &Path) -> HashMap<String, String> {
+    platform::capture_terminal_env(dir, HOME_ENV_CAPTURE_TIMEOUT).await
+}
+
 pub async fn capture_home_interactive_env_with_timeout(
     timeout_duration: Duration,
 ) -> HashMap<String, String> {
@@ -214,172 +222,191 @@ fn put_cached(key: PathBuf, env: HashMap<String, String>) {
     );
 }
 
+#[cfg(any(windows, test))]
+fn find_project_hermit_bin_within(start: &Path, repo_root: &Path) -> Option<PathBuf> {
+    let canonical_repo = repo_root.canonicalize().ok()?;
+    let canonical_start = start.canonicalize().ok()?;
+    if !canonical_start.starts_with(&canonical_repo) {
+        return None;
+    }
+
+    for project_dir in canonical_start.ancestors() {
+        let hermit_dir = project_dir.join(".hermit");
+        let bin = hermit_dir.join("bin");
+        if bin.is_dir() {
+            let canonical_hermit = hermit_dir.canonicalize().ok()?;
+            let canonical_bin = bin.canonicalize().ok()?;
+            if canonical_hermit.starts_with(&canonical_repo)
+                && canonical_bin.starts_with(&canonical_hermit)
+            {
+                return Some(canonical_bin);
+            }
+        }
+        if project_dir == canonical_repo {
+            break;
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+#[path = "dir_env/windows.rs"]
+mod platform;
+#[cfg(not(windows))]
+#[path = "dir_env/unix.rs"]
+mod platform;
+
 async fn capture_dir_env_uncached(
     dir: &Path,
     timeout_duration: Duration,
 ) -> HashMap<String, String> {
-    let shell = resolve_shell();
-
-    match capture_dir_env_with_shell(dir, &shell, &std::env::temp_dir(), timeout_duration).await {
-        Ok(env) => env,
-        Err(error) => {
-            log::warn!("Failed to capture dir env for {}: {error}", dir.display());
-            HashMap::new()
-        }
-    }
-}
-
-fn resolve_shell() -> PathBuf {
-    std::env::var_os("SHELL")
-        .filter(|shell| !shell.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/bin/bash"))
-}
-
-fn dump_path(temp_root: &Path) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    temp_root.join(format!("goose-dir-env-{}-{nanos}", std::process::id()))
-}
-
-fn single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn dump_script(dump_path: &Path) -> String {
-    format!(
-        "env -0 > {} 2>/dev/null\nexit\n",
-        single_quote(&dump_path.to_string_lossy())
-    )
-}
-
-async fn capture_dir_env_with_shell(
-    dir: &Path,
-    shell: &Path,
-    temp_root: &Path,
-    timeout_duration: Duration,
-) -> io::Result<HashMap<String, String>> {
-    let dump_path = dump_path(temp_root);
-    let script = dump_script(&dump_path);
-
-    let mut command = Command::new(shell);
-    command
-        .current_dir(dir)
-        .env_clear()
-        .env("HOME", std::env::var("HOME").unwrap_or_default())
-        .env("USER", std::env::var("USER").unwrap_or_default())
-        .env("SHELL", shell)
-        .arg("-i")
-        .arg("-l")
-        .arg("-s")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-
-    #[cfg(unix)]
-    unsafe {
-        // SAFETY: `setsid()` is async-signal-safe.
-        command.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-
-    let mut child = command.spawn()?;
-    if let Err(error) = async {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| io::Error::other("Failed to open shell stdin for dir env capture"))?;
-        stdin.write_all(script.as_bytes()).await?;
-        stdin.flush().await
-    }
-    .await
-    {
-        let _ = child.kill().await;
-        let _ = tokio::fs::remove_file(&dump_path).await;
-        return Err(error);
-    }
-
-    let status = match timeout(timeout_duration, child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            let _ = tokio::fs::remove_file(&dump_path).await;
-            return Err(error);
-        }
-        Err(_) => {
-            let _ = child.kill().await;
-            let _ = tokio::fs::remove_file(&dump_path).await;
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("Dir env capture timed out after {:?}", timeout_duration),
-            ));
-        }
-    };
-    if !status.success() {
-        let _ = tokio::fs::remove_file(&dump_path).await;
-        return Err(io::Error::other(format!(
-            "Dir env capture exited with {status}"
-        )));
-    }
-
-    let bytes = match tokio::fs::read(&dump_path).await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            let _ = tokio::fs::remove_file(&dump_path).await;
-            return Err(error);
-        }
-    };
-    let _ = tokio::fs::remove_file(&dump_path).await;
-
-    Ok(parse_env_output(&bytes))
-}
-
-fn parse_env_output(stdout: &[u8]) -> HashMap<String, String> {
-    let mut env = HashMap::new();
-    for entry in stdout.split(|byte| *byte == 0) {
-        if entry.is_empty() {
-            continue;
-        }
-        let Ok(entry) = std::str::from_utf8(entry) else {
-            continue;
-        };
-        if let Some((key, value)) = entry.split_once('=') {
-            if !key.is_empty() {
-                env.insert(key.to_string(), value.to_string());
-            }
-        }
-    }
-    env
+    platform::capture_dir_env_uncached(dir, timeout_duration).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    use crate::services::env_key;
 
     #[test]
+    #[cfg(not(windows))]
     fn parse_env_output_handles_null_delimited() {
-        let env = parse_env_output(b"PATH=/usr/bin:/bin\0HOME=/Users/test\0\0");
+        let env = platform::parse_env_output(b"PATH=/usr/bin:/bin\0HOME=/Users/test\0\0");
         assert_eq!(env.get("PATH"), Some(&"/usr/bin:/bin".to_string()));
         assert_eq!(env.get("HOME"), Some(&"/Users/test".to_string()));
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn parse_env_output_skips_empty_keys() {
-        let env = parse_env_output(b"=empty_key\0VALID=yes\0");
+        let env = platform::parse_env_output(b"=empty_key\0VALID=yes\0");
         assert!(!env.contains_key(""));
         assert_eq!(env.get("VALID"), Some(&"yes".to_string()));
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn parse_env_output_preserves_hermit_path_entries() {
         let path = "/repo/.hermit/bin:/repo/bin:/usr/bin";
-        let env = parse_env_output(format!("PATH={path}\0").as_bytes());
+        let env = platform::parse_env_output(format!("PATH={path}\0").as_bytes());
 
         assert_eq!(env.get("PATH"), Some(&path.to_string()));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_dedupe_env_keeps_first_seen_case_and_drops_duplicates() {
+        let env = platform::dedupe_env_case_insensitive([
+            ("Path".to_string(), "C:\\first".to_string()),
+            ("PATH".to_string(), "C:\\second".to_string()),
+            ("SystemRoot".to_string(), "C:\\Windows".to_string()),
+        ]);
+
+        assert_eq!(env.get("Path"), Some(&"C:\\first".to_string()));
+        assert!(!env.contains_key("PATH"));
+        assert_eq!(env.get("SystemRoot"), Some(&"C:\\Windows".to_string()));
+        // Exactly one entry survives for the case-insensitive `path` name.
+        assert_eq!(
+            env.keys()
+                .filter(|k| k.eq_ignore_ascii_case("path"))
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_capture_drops_unvalidated_inherited_hermit_state() {
+        let inherited = std::env::join_paths([
+            PathBuf::from("C:\\unrelated\\.HERMIT\\bin"),
+            PathBuf::from("C:\\Windows\\System32"),
+        ])
+        .expect("join inherited path")
+        .to_string_lossy()
+        .into_owned();
+        let mut env = HashMap::from([
+            ("Path".to_string(), inherited),
+            ("Hermit_Env".to_string(), "C:\\unrelated".to_string()),
+            (
+                "npm_config_prefix".to_string(),
+                "C:\\unrelated\\npm".to_string(),
+            ),
+            (
+                "Npm_Config_Cache".to_string(),
+                "C:\\unrelated\\cache".to_string(),
+            ),
+            (
+                "corepack_home".to_string(),
+                "C:\\unrelated\\corepack".to_string(),
+            ),
+            (
+                "CUSTOM_TOOL_HOME".to_string(),
+                "C:\\unrelated\\.HeRmIt\\tool".to_string(),
+            ),
+        ]);
+
+        platform::strip_untrusted_windows_tool_state(&mut env);
+
+        for key in [
+            "HERMIT_ENV",
+            "NPM_CONFIG_PREFIX",
+            "NPM_CONFIG_CACHE",
+            "COREPACK_HOME",
+            "CUSTOM_TOOL_HOME",
+        ] {
+            assert!(!env
+                .keys()
+                .any(|existing| existing.eq_ignore_ascii_case(key)));
+        }
+        let paths: Vec<_> =
+            std::env::split_paths(env_key::get(&env, "PATH").expect("PATH")).collect();
+        assert_eq!(paths, vec![PathBuf::from("C:\\Windows\\System32")]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_git_discovery_uses_sanitized_path() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let untrusted_hermit_bin = temp.path().join("repo").join(".hermit").join("bin");
+        let trusted_bin = temp.path().join("trusted").join("bin");
+        std::fs::create_dir_all(&untrusted_hermit_bin).expect("untrusted Hermit bin");
+        std::fs::create_dir_all(&trusted_bin).expect("trusted bin");
+        std::fs::write(untrusted_hermit_bin.join("git.exe"), b"untrusted")
+            .expect("untrusted git fixture");
+        std::fs::write(trusted_bin.join("git.exe"), b"trusted").expect("trusted git fixture");
+        let path = std::env::join_paths([untrusted_hermit_bin, trusted_bin.clone()])
+            .expect("fixture PATH")
+            .to_string_lossy()
+            .into_owned();
+        let mut env = HashMap::from([("Path".to_string(), path)]);
+
+        platform::strip_untrusted_windows_tool_state(&mut env);
+        let git = platform::find_file_on_windows_path("git.exe", env_key::get(&env, "PATH"))
+            .expect("trusted git");
+
+        assert_eq!(git, trusted_bin.join("git.exe"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_process_env_preserves_critical_variables() {
+        // The process already inherited the Windows session environment; the
+        // capture must surface the variables child processes cannot run without.
+        let env = platform::windows_process_env_for_dir(
+            dirs::home_dir()
+                .as_deref()
+                .unwrap_or_else(|| Path::new("C:\\")),
+        );
+
+        for key in ["SystemRoot", "ComSpec", "PATHEXT"] {
+            if std::env::var_os(key).is_some() {
+                assert!(
+                    env.keys().any(|k| k.eq_ignore_ascii_case(key)),
+                    "expected captured Windows env to preserve {key}"
+                );
+            }
+        }
     }
 
     #[tokio::test]
@@ -407,6 +434,97 @@ mod tests {
             cached.get("PATH"),
             Some(&"/repo/.hermit/bin:/usr/bin".to_string())
         );
+    }
+
+    #[test]
+    fn project_hermit_discovery_is_scoped_to_the_git_repository() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("Project With Spaces");
+        let target = repo.join("nested").join("worktree");
+        let hermit_bin = repo.join(".hermit").join("bin");
+        std::fs::create_dir_all(&target).expect("target");
+        std::fs::create_dir_all(&hermit_bin).expect("hermit bin");
+
+        assert_eq!(
+            find_project_hermit_bin_within(&target, &repo),
+            Some(hermit_bin.canonicalize().expect("canonical Hermit bin"))
+        );
+    }
+
+    #[test]
+    fn project_hermit_discovery_stops_at_the_repository_boundary() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("project");
+        let target = repo.join("nested");
+        std::fs::create_dir_all(&target).expect("target");
+        std::fs::create_dir_all(temp.path().join(".hermit").join("bin"))
+            .expect("ancestor Hermit bin");
+
+        assert_eq!(find_project_hermit_bin_within(&target, &repo), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_hermit_discovery_rejects_non_repository_ancestor() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let target = temp.path().join("project").join("nested");
+        std::fs::create_dir_all(&target).expect("target");
+        std::fs::create_dir_all(temp.path().join(".hermit").join("bin"))
+            .expect("untrusted Hermit bin");
+
+        assert_eq!(platform::find_project_hermit_bin(&target), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_hermit_discovery_rejects_fake_git_marker_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        let hermit_bin = repo.join(".hermit").join("bin");
+        std::fs::create_dir_all(&hermit_bin).expect("Hermit bin");
+        std::fs::write(repo.join(".git"), "not a Git worktree marker").expect("fake Git marker");
+
+        assert_eq!(platform::find_project_hermit_bin(&repo), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_hermit_discovery_rejects_fake_git_directory() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".hermit").join("bin")).expect("Hermit bin");
+        std::fs::create_dir_all(repo.join(".git")).expect("fake Git directory");
+
+        assert_eq!(platform::find_project_hermit_bin(&repo), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_hermit_discovery_rejects_missing_worktree_git_dir() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".hermit").join("bin")).expect("Hermit bin");
+        std::fs::write(repo.join(".git"), "gitdir: ../missing-worktree\n")
+            .expect("stale worktree marker");
+
+        assert_eq!(platform::find_project_hermit_bin(&repo), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_hermit_discovery_rejects_escaping_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&repo).expect("repo");
+        std::fs::create_dir_all(outside.join("bin")).expect("outside bin");
+        std::fs::create_dir_all(repo.join(".git")).expect("git marker");
+        std::fs::write(repo.join(".git").join("HEAD"), "ref: refs/heads/main\n").expect("Git HEAD");
+        symlink(&outside, repo.join(".hermit")).expect("escaping symlink");
+
+        assert_eq!(find_project_hermit_bin_within(&repo, &repo), None);
     }
 
     #[test]
@@ -476,10 +594,14 @@ mod tests {
             "#!/bin/sh\nprintf 'STDOUT_ONLY=bad\\n'\nPATH='/repo/.hermit/bin:/usr/bin' CUSTOM_VAR='present' /bin/sh -s\n",
         );
 
-        let env =
-            capture_dir_env_with_shell(temp.path(), &shell, temp.path(), Duration::from_secs(1))
-                .await
-                .expect("capture dir env");
+        let env = platform::capture_dir_env_with_shell(
+            temp.path(),
+            &shell,
+            temp.path(),
+            Duration::from_secs(1),
+        )
+        .await
+        .expect("capture dir env");
 
         assert_eq!(env.get("CUSTOM_VAR"), Some(&"present".to_string()));
         assert_eq!(
@@ -496,12 +618,16 @@ mod tests {
         let shell = write_fake_shell(temp.path(), "#!/bin/sh\nexec sleep 5\n");
         let started = Instant::now();
 
-        let error =
-            capture_dir_env_with_shell(temp.path(), &shell, temp.path(), Duration::from_millis(50))
-                .await
-                .expect_err("hanging shell should time out");
+        let error = platform::capture_dir_env_with_shell(
+            temp.path(),
+            &shell,
+            temp.path(),
+            Duration::from_millis(50),
+        )
+        .await
+        .expect_err("hanging shell should time out");
 
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

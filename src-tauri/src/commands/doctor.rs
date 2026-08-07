@@ -16,6 +16,7 @@ use tokio::time::timeout;
 use crate::services::{
     dir_env,
     distro_bundle::DistroBundleState,
+    env_key,
     goose_config::{self, AdditionalConfigFiles},
     kgoose::{KgooseContext, KgooseProbeResult},
     managed_acp_tools, managed_node,
@@ -327,7 +328,7 @@ async fn run_local_checks(
     }
 
     let extended_path = build_extended_path_with_prepended_dirs(
-        captured_shell_env.get("PATH").map(String::as_str),
+        env_key::get(captured_shell_env, "PATH"),
         prepend_dirs,
     );
     let mut results = Vec::with_capacity(check_count);
@@ -1150,10 +1151,8 @@ async fn execute_local_fix(
     shell_env: &HashMap<String, String>,
     prepend_dirs: &[PathBuf],
 ) -> Result<(), String> {
-    let extended_path = build_extended_path_with_prepended_dirs(
-        shell_env.get("PATH").map(String::as_str),
-        prepend_dirs,
-    );
+    let extended_path =
+        build_extended_path_with_prepended_dirs(env_key::get(shell_env, "PATH"), prepend_dirs);
     let (shell, flag) = if cfg!(target_os = "windows") {
         ("cmd", "/C")
     } else {

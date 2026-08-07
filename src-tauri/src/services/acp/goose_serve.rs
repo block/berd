@@ -16,6 +16,7 @@ use crate::services::diagnostic_log::{
 };
 use crate::services::dir_env;
 use crate::services::distro_bundle::DistroBundleState;
+use crate::services::env_key;
 use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
 use crate::services::managed_acp_tools;
@@ -855,7 +856,7 @@ fn apply_shell_env_with_extended_path_inner(
     strip_databricks_host: bool,
 ) {
     let extended_path = path_env::build_extended_path_with_prepended_dirs(
-        shell_env.get("PATH").map(String::as_str),
+        env_key::get(shell_env, "PATH"),
         prepend_dirs,
     );
 
@@ -864,10 +865,10 @@ fn apply_shell_env_with_extended_path_inner(
     }
 
     for (key, value) in shell_env {
-        if key == "PATH" {
+        if env_key::matches(key, "PATH") {
             continue;
         }
-        if strip_databricks_host && key == DATABRICKS_HOST_ENV {
+        if strip_databricks_host && env_key::matches(key, DATABRICKS_HOST_ENV) {
             continue;
         }
         command.env(key, value);
@@ -1066,6 +1067,10 @@ mod tests {
         let path = env_value(&command, "PATH").expect("PATH should be set");
         let paths: Vec<_> = std::env::split_paths(&path).collect();
         assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
+        // Tool-manager shim dirs are platform-specific: Unix appends them,
+        // Windows deliberately does not (see `path_env::push_tool_manager_dirs`).
+        // Windows PATH-extension coverage lives in the `#[cfg(windows)]` tests.
+        #[cfg(not(windows))]
         assert!(paths.iter().any(|p| p.ends_with(".asdf/shims")));
 
         // Non-PATH variables are forwarded verbatim.
@@ -1073,6 +1078,92 @@ mod tests {
             env_value(&command, "LANG"),
             Some(OsString::from("en_US.UTF-8"))
         );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_goosed_child_resolves_cmd_tools_via_pathext_with_spaces() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let tools = temp.path().join("Managed Tools With Spaces");
+        std::fs::create_dir_all(&tools).expect("tool dir");
+        std::fs::write(tools.join("goosed.CMD"), "@echo off\r\necho goosed\r\n")
+            .expect("goosed CMD");
+        std::fs::write(
+            tools.join("berd-tool.cmd"),
+            "@echo off\r\necho berd-tool\r\n",
+        )
+        .expect("tool CMD");
+        let inherited = std::env::join_paths([
+            PathBuf::from(std::env::var_os("SystemRoot").expect("SystemRoot")).join("System32"),
+            tools.clone(),
+        ])
+        .expect("join inherited path")
+        .to_string_lossy()
+        .into_owned();
+        let differently_cased_tools = PathBuf::from(tools.to_string_lossy().to_ascii_uppercase());
+        let shell_env = HashMap::from([
+            ("Path".to_string(), inherited),
+            ("Pathext".to_string(), ".CMD;.EXE".to_string()),
+        ]);
+        let mut command = Command::new("cmd.exe");
+        command.args(["/d", "/c", "goosed && berd-tool"]);
+
+        apply_shell_env_with_extended_path(
+            &mut command,
+            &shell_env,
+            &[tools.clone(), differently_cased_tools],
+        );
+        let path = env_value(&command, "PATH").expect("PATH");
+        assert_eq!(
+            std::env::split_paths(&path)
+                .filter(|entry| entry
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&tools.to_string_lossy()))
+                .count(),
+            1,
+            "case-insensitive duplicate tool directories must collapse"
+        );
+        let output = command.output().await.expect("run cmd tool discovery");
+
+        assert!(
+            output.status.success(),
+            "cmd tool discovery failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("goosed"));
+        assert!(stdout.contains("berd-tool"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_goosed_env_uses_extended_inherited_path_once() {
+        let prepended = PathBuf::from("C:\\Program Files\\Berd\\bin");
+        let inherited = std::env::join_paths([PathBuf::from("C:\\Windows\\System32")])
+            .expect("join inherited path")
+            .to_string_lossy()
+            .into_owned();
+        let mut command = Command::new("goosed");
+        let shell_env = HashMap::from([("Path".to_string(), inherited)]);
+
+        apply_shell_env_with_extended_path(
+            &mut command,
+            &shell_env,
+            std::slice::from_ref(&prepended),
+        );
+
+        let logical_paths: Vec<_> = command
+            .as_std()
+            .get_envs()
+            .filter(|(key, value)| {
+                value.is_some() && key.to_string_lossy().eq_ignore_ascii_case("PATH")
+            })
+            .collect();
+        assert_eq!(logical_paths.len(), 1);
+        let paths: Vec<_> =
+            std::env::split_paths(logical_paths[0].1.expect("PATH value")).collect();
+        assert_eq!(paths.first(), Some(&prepended));
+        assert!(paths.iter().any(|path| path.ends_with("Windows\\System32")));
     }
 
     #[test]
@@ -1094,6 +1185,22 @@ mod tests {
             Some(OsString::from("en_US.UTF-8"))
         );
         assert!(env_value(&command, "PATH").is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_apply_shell_env_strips_mixed_case_databricks_host_for_byo_dev() {
+        let mut command = Command::new("goose");
+        let shell_env = HashMap::from([(
+            "Databricks_Host".to_string(),
+            "https://example.test".to_string(),
+        )]);
+
+        apply_shell_env_with_extended_path_inner(&mut command, &shell_env, &[], true);
+
+        assert!(!command.as_std().get_envs().any(|(key, value)| {
+            key.eq_ignore_ascii_case(DATABRICKS_HOST_ENV) && value.is_some()
+        }));
     }
 
     #[test]

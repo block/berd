@@ -1,4 +1,4 @@
-use crate::services::{dir_env, path_env::build_extended_path_from_path, shell_env};
+use crate::services::{dir_env, env_key, path_env::build_terminal_path, shell_env};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 #[cfg(unix)]
@@ -183,10 +183,10 @@ pub async fn start_terminal(
     on_event: Channel<TerminalEvent>,
 ) -> Result<String, String> {
     let cwd = resolve_terminal_cwd(&cwd)?;
-    let mut shell_env = dir_env::capture_home_interactive_env().await;
+    let mut shell_env = dir_env::capture_terminal_env(&cwd).await;
     add_fallback_env_vars(&mut shell_env);
     shell_env::sanitize_shell_env(&mut shell_env);
-    let extended_path = build_extended_path_from_path(shell_env.get("PATH").map(String::as_str));
+    let extended_path = build_terminal_path(env_key::get(&shell_env, "PATH"));
     let shell = resolve_shell(&shell_env);
     let terminal_id = Uuid::new_v4().to_string();
     let size = terminal_size(cols, rows);
@@ -448,18 +448,8 @@ fn resolve_shell(shell_env: &HashMap<String, String>) -> String {
 }
 
 fn add_fallback_env_vars(env: &mut HashMap<String, String>) {
-    for key in [
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "SHELL",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "TMPDIR",
-        "SSH_AUTH_SOCK",
-    ] {
-        if env.contains_key(key) {
+    for key in FALLBACK_ENV_KEYS {
+        if env.keys().any(|existing| env_key::matches(existing, key)) {
             continue;
         }
         if let Ok(value) = std::env::var(key) {
@@ -467,6 +457,40 @@ fn add_fallback_env_vars(env: &mut HashMap<String, String>) {
         }
     }
 }
+
+/// Environment variables the shell child cannot run correctly without and that
+/// a cleared child environment must have restored.
+///
+/// On Windows these are the process/user variables (`SystemRoot`, `ComSpec`,
+/// `PATHEXT`, and the user profile locations) that `cmd.exe` and native tools
+/// require; on POSIX they are the login-shell essentials.
+#[cfg(windows)]
+const FALLBACK_ENV_KEYS: &[&str] = &[
+    "SystemRoot",
+    "ComSpec",
+    "PATHEXT",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "TEMP",
+    "TMP",
+    "USERNAME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+];
+
+#[cfg(not(windows))]
+const FALLBACK_ENV_KEYS: &[&str] = &[
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "SSH_AUTH_SOCK",
+];
 
 #[cfg(test)]
 mod tests {

@@ -22,7 +22,13 @@ fn should_remove_shell_env_var(key: &str, value: &str) -> bool {
         return false;
     }
 
-    value.contains("/.hermit/") || value.ends_with("/.hermit")
+    contains_hermit_path_component(value)
+}
+
+pub(crate) fn contains_hermit_path_component(value: &str) -> bool {
+    value
+        .split(['/', '\\'])
+        .any(|component| component.eq_ignore_ascii_case(".hermit"))
 }
 
 #[cfg(test)]
@@ -47,6 +53,10 @@ mod tests {
                 "/Users/morganm/Development/repo/.hermit/node".to_string(),
             ),
             (
+                "CUSTOM_TOOL_HOME".to_string(),
+                "C:\\repo\\.HeRmIt\\tool".to_string(),
+            ),
+            (
                 "PATH".to_string(),
                 "/Users/morganm/Development/repo/.hermit/bin:/usr/bin".to_string(),
             ),
@@ -62,5 +72,6 @@ mod tests {
         assert!(!env.contains_key("HERMIT_ENV"));
         assert!(!env.contains_key("NPM_CONFIG_PREFIX"));
         assert!(!env.contains_key("COREPACK_HOME"));
+        assert!(!env.contains_key("CUSTOM_TOOL_HOME"));
     }
 }
