@@ -8,6 +8,13 @@ import { Button, type ButtonProps } from "@/shared/ui/button";
 import { Progress } from "@/shared/ui/progress";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { SettingsRow } from "@/shared/ui/settings-row";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
 
 const STATUS_KEY: Record<UpdateStatus, string> = {
   unavailable: "unavailable",
@@ -40,11 +47,14 @@ export function UpdatesSettings() {
   const {
     status,
     enabled,
+    runtime,
     availableVersion,
     downloadProgress,
     errorMessage,
     errorDetail,
+    waitingMessage,
     checkForUpdate,
+    prepareChannelSwitch,
     relaunch,
   } = useUpdaterContext();
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
@@ -66,26 +76,36 @@ export function UpdatesSettings() {
       cancelled = true;
     };
   }, []);
+
+  const runningChannel = runtime.channels.find(
+    (channel) => channel.id === runtime.runningBuild?.channelId,
+  );
   const isBusy =
     status === "checking" ||
     status === "downloading" ||
     status === "installing";
-  // The resting label and the busy label must stay distinct strings. Deriving
-  // both from one value made the button cross-fade a label onto an identical
-  // copy offset by the spinner slot, which read as garbled text (BOT-1466).
   const actionLabel =
     status === "error"
       ? t("updates.actions.retry")
       : t("updates.actions.check");
-  // The same button stays in its loading state across the whole busy run, so
-  // the busy label has to track the phase or it contradicts the progress row
-  // below it.
   const busyLabel =
     status === "downloading"
       ? t("updates.actions.downloading")
       : status === "installing"
         ? t("updates.actions.installing")
         : t("updates.actions.checking");
+  const pendingInstall = runtime.pendingInstall;
+  const isChannelSwitch =
+    pendingInstall != null &&
+    pendingInstall.sourceChannelId !== pendingInstall.targetChannelId;
+  const restartLabel = isChannelSwitch
+    ? t("updates.actions.restartToFinish", {
+        channel:
+          runtime.channels.find(
+            (channel) => channel.id === pendingInstall.targetChannelId,
+          )?.label ?? "",
+      })
+    : t("updates.actions.restart");
 
   return (
     <SettingsPage
@@ -107,6 +127,56 @@ export function UpdatesSettings() {
           }
         />
 
+        {runtime.channels.length > 0 ? (
+          <SettingsRow
+            label={t("updates.channel.title")}
+            description={
+              runtime.waitingForMain
+                ? t("updates.channel.waitingDescription")
+                : t("updates.channel.description")
+            }
+            action={
+              runtime.channels.length === 1 ? (
+                <span className="text-xs text-muted-foreground">
+                  {runningChannel?.label ?? runtime.channels[0].label}
+                </span>
+              ) : (
+                <Select
+                  value={runtime.runningBuild?.channelId}
+                  disabled={
+                    isCheckDisabled(status) || Boolean(runtime.waitingForMain)
+                  }
+                  onValueChange={(channelId) => {
+                    void prepareChannelSwitch(channelId);
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-32"
+                    aria-label={t("updates.channel.title")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {runtime.channels.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        {channel.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )
+            }
+            details={
+              runtime.notice || waitingMessage ? (
+                <p className="text-xs leading-4 text-muted-foreground">
+                  {waitingMessage ?? runtime.notice}
+                </p>
+              ) : undefined
+            }
+          />
+        ) : null}
+
         <SettingsRow
           label={t("updates.card.checkPrompt")}
           action={
@@ -116,14 +186,18 @@ export function UpdatesSettings() {
                 {...updateActionButtonProps}
                 onClick={() => void relaunch()}
               >
-                {t("updates.actions.restart")}
+                {restartLabel}
               </Button>
             ) : (
               <Button
                 type="button"
                 {...updateActionButtonProps}
                 onClick={() => void checkForUpdate()}
-                disabled={!enabled || isCheckDisabled(status)}
+                disabled={
+                  !enabled ||
+                  isCheckDisabled(status) ||
+                  Boolean(runtime.waitingForMain)
+                }
                 feedbackState={isBusy ? "loading" : "idle"}
                 loadingLabel={busyLabel}
                 preserveWidth
@@ -151,9 +225,18 @@ export function UpdatesSettings() {
                   </div>
                 ) : (
                   <p className="text-xs leading-4 text-muted-foreground">
-                    {t(`updates.details.${STATUS_KEY[status]}`, {
-                      version: availableVersion ?? "",
-                    })}
+                    {status === "ready" && isChannelSwitch
+                      ? t("updates.details.switchReady", {
+                          channel:
+                            runtime.channels.find(
+                              (channel) =>
+                                channel.id === pendingInstall.targetChannelId,
+                            )?.label ?? "",
+                          version: availableVersion ?? "",
+                        })
+                      : t(`updates.details.${STATUS_KEY[status]}`, {
+                          version: availableVersion ?? "",
+                        })}
                   </p>
                 )}
 

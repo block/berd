@@ -148,6 +148,9 @@ export function FeedbackDialog({
         attachmentFiles,
         includeLogs,
         doctorReportPromise: doctorReportRef.current,
+        titleSuffix: draft?.titleSuffix,
+        metadata: draft?.metadata,
+        labelIds: draft?.labelIds,
       });
       clearAttachments();
       setSuccess({ issueUrl: result.issueUrl });

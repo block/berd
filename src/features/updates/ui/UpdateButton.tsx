@@ -3,25 +3,30 @@ import { useTranslation } from "react-i18next";
 import { useUpdaterContext } from "@/features/updates/hooks/useUpdater";
 import { Button } from "@/shared/ui/button";
 
-/**
- * Floating update button anchored to the bottom-left of the app. It mirrors
- * the chat composer pill on the bottom-right, so the two never overlap, and it
- * lives at the app-shell level so collapsing the sidebar can't hide it. It only
- * appears once an update is downloaded and ready to apply.
- */
+/** Shell-level restart affordance shown only after an update is installed. */
 export function UpdateButton() {
   const { t } = useTranslation("settings");
-  const { status, relaunch } = useUpdaterContext();
+  const { status, runtime, relaunch } = useUpdaterContext();
 
   const shouldPreviewReadyUpdate =
     import.meta.env.DEV &&
     import.meta.env.MODE === "development" &&
     import.meta.env.VITE_PREVIEW_READY_UPDATE === "true";
   const isReady = shouldPreviewReadyUpdate || status === "ready";
+  if (!isReady) return null;
 
-  if (!isReady) {
-    return null;
-  }
+  const pendingInstall = runtime.pendingInstall;
+  const isChannelSwitch =
+    pendingInstall != null &&
+    pendingInstall.sourceChannelId !== pendingInstall.targetChannelId;
+  const pendingChannel = isChannelSwitch
+    ? runtime.channels.find(
+        (channel) => channel.id === pendingInstall.targetChannelId,
+      )
+    : undefined;
+  const label = pendingChannel
+    ? t("updates.actions.restartToFinish", { channel: pendingChannel.label })
+    : t("updates.actions.update");
 
   return (
     <div className="fixed bottom-3 left-3 z-40">
@@ -34,7 +39,7 @@ export function UpdateButton() {
           void relaunch();
         }}
       >
-        {t("updates.actions.update")}
+        {label}
       </Button>
     </div>
   );

@@ -38,6 +38,7 @@ describe("build-tauri-release-config", () => {
   async function generate(env) {
     const dir = await tempDir();
     const output = join(dir, "release.json");
+    const catalogOutput = join(dir, "release-channels.json");
     const result = run(
       "node",
       ["scripts/release/build-tauri-release-config.mjs"],
@@ -45,18 +46,21 @@ describe("build-tauri-release-config", () => {
         BERD_RELEASE_CHANNEL: "",
         BERD_UPDATER_ENDPOINT: "",
         BERD_UPDATER_PUBLIC_KEY: "",
+        BERD_RELEASE_CHANNELS_FILE: "",
+        BERD_RELEASE_CHANNEL_ID: "",
         ...env,
         TAURI_RELEASE_CONFIG_PATH: output,
+        BERD_RELEASE_CATALOG_OUTPUT: catalogOutput,
       },
     );
-    return { result, output };
+    return { result, output, catalogOutput };
   }
 
   it.each([
     "public",
     "internal",
   ])("emits one endpoint/key pair for %s", async (channel) => {
-    const { result, output } = await generate({
+    const { result, output, catalogOutput } = await generate({
       BERD_RELEASE_CHANNEL: channel,
       BERD_UPDATER_ENDPOINT: "https://updates.example.test/latest.json",
       BERD_UPDATER_PUBLIC_KEY: `${channel}-key`,
@@ -69,15 +73,172 @@ describe("build-tauri-release-config", () => {
           endpoints: ["https://updates.example.test/latest.json"],
         },
       },
+      bundle: {
+        resources: {
+          "resources/release-channels.json": "release-channels.json",
+        },
+      },
+    });
+    expect(JSON.parse(await readFile(catalogOutput, "utf8"))).toMatchObject({
+      schemaVersion: 1,
+      defaultChannel: "main",
+      runningBuild: {
+        channelId: "main",
+        compatibility: {
+          storeContractVersion: 1,
+          writesDataEpoch: 1,
+          minReadableDataEpoch: 1,
+          maxReadableDataEpoch: 1,
+        },
+      },
+      channels: [
+        {
+          id: "main",
+          label: "Main",
+          endpoint: "https://updates.example.test/latest.json",
+          pubkey: `${channel}-key`,
+          compatibility: {
+            storeContractVersion: 1,
+            writesDataEpoch: 1,
+            minReadableDataEpoch: 1,
+            maxReadableDataEpoch: 1,
+          },
+        },
+      ],
     });
   });
 
-  it("emits an empty overlay for disabled", async () => {
-    const { result, output } = await generate({
+  it("emits an empty overlay and disabled catalog for disabled", async () => {
+    const { result, output, catalogOutput } = await generate({
       BERD_RELEASE_CHANNEL: "disabled",
     });
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(await readFile(output, "utf8"))).toEqual({});
+    expect(JSON.parse(await readFile(catalogOutput, "utf8"))).toEqual({
+      schemaVersion: 1,
+      disabled: true,
+    });
+  });
+
+  it("validates and emits a finite multi-channel catalog", async () => {
+    const dir = await tempDir();
+    const source = join(dir, "channels.json");
+    await writeFile(
+      source,
+      JSON.stringify({
+        schemaVersion: 1,
+        defaultChannel: "main",
+        channels: [
+          {
+            id: "main",
+            label: "Main",
+            description: "Recommended releases",
+            endpoint: "https://updates.example.test/main/latest.json",
+            pubkey: "shared-key",
+            runningBuild: {
+              compatibility: {
+                storeContractVersion: 1,
+                writesDataEpoch: 1,
+                minReadableDataEpoch: 1,
+                maxReadableDataEpoch: 2,
+              },
+            },
+          },
+          {
+            id: "beta",
+            label: "Beta",
+            description: "New features first",
+            whatToTest: "Try the new agent builder.",
+            endpoint: "https://updates.example.test/beta/latest.json",
+            pubkey: "shared-key",
+            runningBuild: {
+              compatibility: {
+                storeContractVersion: 1,
+                writesDataEpoch: 2,
+                minReadableDataEpoch: 1,
+                maxReadableDataEpoch: 2,
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    const { result, output, catalogOutput } = await generate({
+      BERD_RELEASE_CHANNEL: "internal",
+      BERD_RELEASE_CHANNELS_FILE: source,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(await readFile(output, "utf8"))).toMatchObject({
+      plugins: {
+        updater: {
+          pubkey: "shared-key",
+          endpoints: ["https://updates.example.test/main/latest.json"],
+        },
+      },
+    });
+    expect(JSON.parse(await readFile(catalogOutput, "utf8"))).toMatchObject({
+      defaultChannel: "main",
+      runningBuild: { channelId: "main" },
+      channels: [
+        { id: "main" },
+        { id: "beta", whatToTest: "Try the new agent builder." },
+      ],
+    });
+  });
+
+  it.each([
+    [
+      "duplicate IDs",
+      (catalog) => catalog.channels.push({ ...catalog.channels[0] }),
+    ],
+    [
+      "duplicate endpoints",
+      (catalog) => {
+        catalog.channels[1].endpoint = catalog.channels[0].endpoint;
+      },
+    ],
+    [
+      "missing default",
+      (catalog) => {
+        catalog.defaultChannel = "missing";
+      },
+    ],
+    [
+      "inverted compatibility",
+      (catalog) => {
+        catalog.channels[1].runningBuild.compatibility.minReadableDataEpoch = 3;
+      },
+    ],
+  ])("rejects a catalog with %s", async (_name, mutate) => {
+    const dir = await tempDir();
+    const source = join(dir, "channels.json");
+    const catalog = {
+      schemaVersion: 1,
+      defaultChannel: "main",
+      channels: ["main", "beta"].map((id, index) => ({
+        id,
+        label: id === "main" ? "Main" : "Beta",
+        endpoint: `https://updates.example.test/${id}/latest.json`,
+        pubkey: `${id}-key`,
+        runningBuild: {
+          compatibility: {
+            storeContractVersion: 1,
+            writesDataEpoch: index + 1,
+            minReadableDataEpoch: 1,
+            maxReadableDataEpoch: 2,
+          },
+        },
+      })),
+    };
+    mutate(catalog);
+    await writeFile(source, JSON.stringify(catalog));
+
+    const { result } = await generate({
+      BERD_RELEASE_CHANNEL: "internal",
+      BERD_RELEASE_CHANNELS_FILE: source,
+    });
+    expect(result.status).not.toBe(0);
   });
 
   it.each([
@@ -128,6 +289,23 @@ describe("build-tauri-release-config", () => {
 });
 
 describe("build-macos release resource staging", () => {
+  it("requires Beta Linear routing when a Beta catalog is bundled", async () => {
+    const script = await readFile(
+      join(repo, "scripts/release/build-macos.sh"),
+      "utf8",
+    );
+    expect(script).toContain('select(.id == "beta")');
+    expect(script).toContain(
+      "beta_linear_label_id must be a Linear label UUID when the release catalog contains Beta",
+    );
+    expect(script).toContain(
+      `if [[ -z "\${BERD_RELEASE_CHANNELS_FILE:-}" && "$BERD_RELEASE_CHANNEL" == "internal"`,
+    );
+    expect(script).toContain(
+      'VITE_BETA_LINEAR_LABEL_ID="$VITE_BETA_LINEAR_LABEL_ID_VALUE"',
+    );
+  });
+
   it("invokes only resource staging scripts present in the checkout", async () => {
     const script = await readFile(
       join(repo, "scripts/release/build-macos.sh"),
@@ -163,6 +341,47 @@ describe("generate-latest-json", () => {
           signature: "signed-value",
           url: "https://github.com/squareup/berd/releases/download/berd-desktop-latest/Berd_1.2.3_darwin-aarch64.app.tar.gz",
         },
+      },
+    });
+    expect(JSON.parse(result.stdout)).not.toHaveProperty("compatibility");
+  });
+
+  it("adds complete compatibility metadata for a channel feed", async () => {
+    const dir = await tempDir();
+    const signature = join(dir, "archive.sig");
+    await writeFile(signature, "signed-value\n");
+    const result = run(
+      "scripts/release/generate-latest-json.sh",
+      [
+        "1.2.3",
+        "darwin-aarch64",
+        signature,
+        "https://updates.example.test/beta/Berd_1.2.3_darwin-aarch64.app.tar.gz",
+      ],
+      {
+        BERD_RELEASE_CHANNEL_ID: "beta",
+        BERD_ARTIFACT_SHA256: "a".repeat(64),
+        BERD_COMPATIBILITY_SIGNATURE: "signed-descriptor",
+        BERD_STORE_CONTRACT_VERSION: "1",
+        BERD_WRITES_DATA_EPOCH: "2",
+        BERD_MIN_READABLE_DATA_EPOCH: "1",
+        BERD_MAX_READABLE_DATA_EPOCH: "2",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      signedCompatibility: {
+        schemaVersion: 1,
+        channelId: "beta",
+        version: "1.2.3",
+        artifactSha256: "a".repeat(64),
+        compatibility: {
+          storeContractVersion: 1,
+          writesDataEpoch: 2,
+          minReadableDataEpoch: 1,
+          maxReadableDataEpoch: 2,
+        },
+        signature: "signed-descriptor",
       },
     });
   });

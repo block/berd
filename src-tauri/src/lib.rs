@@ -200,6 +200,8 @@ pub fn run() {
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
+            let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
+            app.manage(release_channel_state);
 
             // `LayoutState::new` opens (and creates) the layout database, so the
             // one-time legacy app-data migration must run first to copy any
@@ -555,6 +557,13 @@ pub fn run() {
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,
             commands::terminal::stop_terminal,
+            commands::updates::get_release_runtime,
+            commands::updates::check_release_update,
+            commands::updates::prepare_channel_switch,
+            commands::updates::confirm_channel_switch,
+            commands::updates::download_and_install_release,
+            commands::updates::complete_channel_switch_install,
+            commands::updates::cancel_channel_switch,
             commands::updates::finalize_update_relaunch,
             commands::pocket_voice::get_pocket_voice_status,
             commands::pocket_voice::install_voice_model,

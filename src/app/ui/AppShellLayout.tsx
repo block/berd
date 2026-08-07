@@ -17,6 +17,7 @@ import {
   SIDEBAR_COLLAPSE_TRANSITION_MS,
   SIDEBAR_RESIZE_HANDLE_INSIDE_PX,
 } from "@/shared/ui/sidebar-tokens";
+import { ChannelSwitchDialog } from "@/features/updates/ui/ChannelSwitchDialog";
 import { UpdateButton } from "@/features/updates/ui/UpdateButton";
 import { TopBar } from "./TopBar";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
@@ -384,6 +385,7 @@ export function AppShellLayout({
       </div>
 
       <UpdateButton />
+      <ChannelSwitchDialog />
 
       <CreateProjectDialog {...createProjectDialog} />
       {isDesignSystemExplorerEnabled() && showDesignSystemInspector ? (

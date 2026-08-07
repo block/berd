@@ -494,7 +494,10 @@
       "installing": "Installing...",
       "restart": "Restart to Update",
       "retry": "Try Again",
-      "update": "Update Berd"
+      "update": "Update Berd",
+      "cancel": "Cancel",
+      "restartToFinish": "Restart to finish switching to {{channel}}",
+      "switchTo": "Switch to {{channel}}"
     },
     "card": {
       "checkPrompt": "Check if a new version is available.",
@@ -505,19 +508,21 @@
     "description": "Berd checks for signed app updates in the background and waits for you to restart.",
     "details": {
       "available": "Update {{version}} is ready to download.",
-      "checking": "Checking the update channel...",
+      "checking": "Checking for updates...",
       "downloading": "Downloading the latest signed update.",
       "error": "The last update attempt failed.",
       "idle": "Berd will check automatically every few hours.",
       "installing": "Installing the downloaded update.",
       "ready": "Update {{version}} is installed and will apply after restart.",
       "unavailable": "Updates are only available in signed Tauri release builds.",
-      "upToDate": "Berd is up to date."
+      "upToDate": "Berd is up to date.",
+      "switchReady": "{{channel}} {{version}} is installed. Restart when you’re ready to finish switching."
     },
     "errors": {
       "detail": "Details: {{detail}}",
       "generic": "Update failed. Try again.",
-      "networkAccess": "Unable to check for updates. Connect to Cloudflare WARP and try again."
+      "networkAccess": "Unable to check for updates. Connect to Cloudflare WARP and try again.",
+      "switchUnavailable": "No {{channel}} release is available for this build yet."
     },
     "progress": {
       "downloading": "Downloading",
@@ -545,6 +550,29 @@
         "description": "Berd {{version}} will apply after restart.",
         "title": "Update ready"
       }
+    },
+    "channel": {
+      "title": "Release channel",
+      "description": "Choose Main for recommended releases or Beta for early features.",
+      "waitingDescription": "Beta updates are off. Berd will return to Main when a compatible release is ready.",
+      "unknown": "Current release"
+    },
+    "switchDialog": {
+      "title": "Switch to {{channel}}?",
+      "betaDescription": "Berd will download the latest beta and restart. Betas get new features first and may have rough edges. You can switch back to Main anytime — from Settings or the Beta badge.",
+      "mainDescription": "Berd will make sure everything from the beta works with Main, then download it and restart.",
+      "builds": "You’re running {{source}} {{currentVersion}}. Berd found {{target}} {{targetVersion}}.",
+      "restartLater": "You can keep working after the download and restart when you’re ready."
+    },
+    "betaBadge": {
+      "open": "Open Beta details",
+      "title": "Beta release",
+      "build": "Berd {{version}}",
+      "whatToTest": "What to test",
+      "defaultWhatToTest": "Try the newest features and report anything that feels rough.",
+      "waitingForMain": "Beta updates are off. Berd will switch to Main when a compatible release is ready.",
+      "reportIssue": "Report an issue",
+      "reportIssueUnavailable": "Beta issue reporting is not configured for this build."
     }
   },
   "projects": {

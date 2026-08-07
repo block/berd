@@ -53,6 +53,7 @@ pub async fn submit_feedback_issue(
     attachment_files: Option<Vec<FeedbackAttachmentFile>>,
     include_logs: Option<bool>,
     doctor_report: Option<DoctorReport>,
+    label_ids: Option<Vec<String>>,
 ) -> Result<Value, Value> {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -83,6 +84,7 @@ pub async fn submit_feedback_issue(
 
     let attachment_paths = normalized_attachment_paths(attachment_paths.unwrap_or_default());
     let attachment_files = attachment_files.unwrap_or_default();
+    let label_ids = normalize_label_ids(label_ids.unwrap_or_default())?;
 
     // Opt-in diagnostics. Both the log directories (resolved here because it
     // needs the AppHandle) and the doctor report — gathered up-front by the UI
@@ -112,6 +114,7 @@ pub async fn submit_feedback_issue(
                 &project_key,
                 &attachment_paths,
                 &attachment_files,
+                &label_ids,
                 log_dirs,
                 doctor_report_text,
             )
@@ -134,7 +137,7 @@ pub async fn submit_feedback_issue(
     let body = json!({
         "title": title,
         "description": description,
-        "labelIds": [],
+        "labelIds": label_ids,
         "project_key": project_key,
     });
 
@@ -144,12 +147,14 @@ pub async fn submit_feedback_issue(
         .map_err(|error| feedback_submission_error(FILE_ISSUE_ENDPOINT, &error))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_feedback_multipart_form(
     title: &str,
     description: &str,
     project_key: &str,
     attachment_paths: &[PathBuf],
     attachment_files: &[FeedbackAttachmentFile],
+    label_ids: &[String],
     log_dirs: Option<LogDirs>,
     doctor_report_text: Option<String>,
 ) -> Result<Form, Value> {
@@ -184,6 +189,9 @@ fn build_feedback_multipart_form(
         .text("title", title.to_string())
         .text("description", description.to_string())
         .text("project_key", project_key.to_string());
+    for label_id in label_ids {
+        form = form.text("label_ids", label_id.clone());
+    }
 
     for path in attachment_paths {
         let attachment = read_image_attachment(path, &mut total_size)?;
@@ -217,6 +225,36 @@ fn feedback_project_key(config: &RuntimeConfig) -> String {
         .filter(|project_key| !project_key.is_empty())
         .unwrap_or(FEEDBACK_PROJECT_KEY)
         .to_string()
+}
+
+fn normalize_label_ids(label_ids: Vec<String>) -> Result<Vec<String>, Value> {
+    let mut normalized = Vec::new();
+    let mut seen = HashSet::new();
+    for label_id in label_ids {
+        let label_id = label_id.trim();
+        if label_id.is_empty() {
+            continue;
+        }
+        if !is_uuid(label_id) {
+            return Err(feedback_error(
+                "validation",
+                "Feedback label IDs must be UUIDs",
+            ));
+        }
+        if seen.insert(label_id.to_ascii_lowercase()) {
+            normalized.push(label_id.to_string());
+        }
+    }
+    Ok(normalized)
+}
+
+fn is_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
 }
 
 fn build_log_zip_part(bytes: Vec<u8>) -> Result<Part, Value> {
@@ -470,7 +508,7 @@ fn log_feedback_failure(endpoint: &str, code: &str, kgoose_error: &kgoose::Kgoos
 #[cfg(test)]
 mod tests {
     use super::{
-        build_feedback_multipart_form, feedback_enabled, feedback_project_key,
+        build_feedback_multipart_form, feedback_enabled, feedback_project_key, normalize_label_ids,
         normalized_attachment_paths, prepare_browser_image_attachment,
         prepare_path_image_attachment, FeedbackAttachmentFile, FEEDBACK_PROJECT_KEY,
         MAX_ATTACHMENT_BASE64_CHARS,
@@ -523,6 +561,7 @@ mod tests {
             FEEDBACK_PROJECT_KEY,
             &paths,
             &[],
+            &[],
             None,
             None,
         )
@@ -552,6 +591,19 @@ mod tests {
             .expect_err("fake image should fail");
 
         assert!(error_message(&error).contains("must be an image"));
+    }
+
+    #[test]
+    fn accepts_deduplicated_uuid_label_ids_and_rejects_names() {
+        assert_eq!(
+            normalize_label_ids(vec![
+                " 12345678-1234-1234-1234-123456789abc ".to_string(),
+                "12345678-1234-1234-1234-123456789ABC".to_string(),
+            ])
+            .unwrap(),
+            vec!["12345678-1234-1234-1234-123456789abc"]
+        );
+        assert!(normalize_label_ids(vec!["Beta".to_string()]).is_err());
     }
 
     #[test]

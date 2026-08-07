@@ -14,6 +14,9 @@ export interface SubmitFeedbackReportInput {
   attachmentPaths?: string[];
   attachmentFiles?: FeedbackAttachmentFileInput[];
   doctorReportPromise?: Promise<DoctorReport | null> | null;
+  titleSuffix?: string;
+  metadata?: Record<string, string>;
+  labelIds?: string[];
   beforeSubmit?: () => void;
 }
 
@@ -42,16 +45,18 @@ export async function submitFeedbackReport(
 
   input.beforeSubmit?.();
   const result = await submitFeedbackIssue({
-    title: input.title.trim(),
+    title: `${input.title.trim()}${input.titleSuffix ?? ""}`,
     description: buildEnhancedDescription(
       input.description.trim(),
       version,
       getPlatform(),
+      input.metadata,
     ),
     attachmentPaths: input.attachmentPaths,
     attachmentFiles: input.attachmentFiles,
     includeLogs: input.includeLogs,
     doctorReport,
+    labelIds: input.labelIds,
   });
   trackFeedbackSubmitted();
   return result;
@@ -61,6 +66,7 @@ export function buildEnhancedDescription(
   description: string,
   version: string,
   platform: string,
+  metadata: Record<string, string> = {},
 ): string {
   return [
     description,
@@ -68,5 +74,6 @@ export function buildEnhancedDescription(
     "---",
     `App version: ${version}`,
     `Platform: ${platform}`,
+    ...Object.entries(metadata).map(([label, value]) => `${label}: ${value}`),
   ].join("\n");
 }

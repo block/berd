@@ -26,10 +26,16 @@
 #                     collide with the runtime env name, or an ambient
 #                     GOOSE_FAST_MODEL on the build agent would silently become
 #                     the bundled value
+#   - beta_linear_label_id: Linear label UUID for Beta reports; required when
+#                     the bundled release catalog contains a beta channel
 #   - disable_bb_cli: "true" to drop the bb CLI PATH install (adds the Cargo
 #                     no-bb-cli-install feature); default "false"
-#   - BERD_RELEASE_CHANNEL: public | internal | disabled (required)
-#   - BERD_UPDATER_PUBLIC_KEY / BERD_UPDATER_ENDPOINT: enabled-channel trust pair
+#   - BERD_RELEASE_CHANNEL: public | internal | disabled (required legacy profile)
+#   - BERD_UPDATER_PUBLIC_KEY / BERD_UPDATER_ENDPOINT: enabled legacy trust pair
+#   - BERD_RELEASE_CHANNELS_FILE: optional reviewed Main/Beta catalog; when set,
+#                     it replaces the legacy endpoint/key pair and keeps all
+#                     trust roots build-bundled
+#   - BERD_RELEASE_CHANNEL_ID: current binary channel ID inside that catalog
 #
 # An official build — the default, with all of the above unset — is byte-for-
 # byte the build this script ran before custom builds existed: features =
@@ -61,6 +67,13 @@ CUSTOM_BUNDLED_AGENTS_VALUE="${CUSTOM_BUNDLED_AGENTS:-$(default_bundled_agents "
 DISABLE_BB_CLI="$(release_input disable_bb_cli 2>/dev/null || echo false)"
 DATABRICKS_HOST_VALUE="$(release_input databricks_host 2>/dev/null || true)"
 FAST_MODEL_ID_VALUE="$(release_input fast_model_id 2>/dev/null || true)"
+BETA_LINEAR_LABEL_ID_VALUE="$(release_input beta_linear_label_id 2>/dev/null || true)"
+if [[ -n "${BERD_RELEASE_CHANNELS_FILE:-}" ]] && jq -e '.channels[] | select(.id == "beta")' "$BERD_RELEASE_CHANNELS_FILE" >/dev/null; then
+  [[ "$BETA_LINEAR_LABEL_ID_VALUE" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || {
+    echo "beta_linear_label_id must be a Linear label UUID when the release catalog contains Beta" >&2
+    exit 1
+  }
+fi
 
 # Build kind controls product customization; updater channel is an independent,
 # explicit trust contract. The internal Buildkite pipeline selects `internal`,
@@ -81,7 +94,7 @@ fi
 export BERD_RELEASE_CHANNEL
 # Keep the existing internal Buildkite secret usable while the secret name is
 # migrated; all downstream code sees only the BERD_* contract.
-if [[ "$BERD_RELEASE_CHANNEL" == "internal" && -z "${BERD_UPDATER_PUBLIC_KEY:-}" && -n "${GOOSE2_UPDATER_PUBLIC_KEY:-}" ]]; then
+if [[ -z "${BERD_RELEASE_CHANNELS_FILE:-}" && "$BERD_RELEASE_CHANNEL" == "internal" && -z "${BERD_UPDATER_PUBLIC_KEY:-}" && -n "${GOOSE2_UPDATER_PUBLIC_KEY:-}" ]]; then
   export BERD_UPDATER_PUBLIC_KEY="$GOOSE2_UPDATER_PUBLIC_KEY"
 fi
 
@@ -95,6 +108,7 @@ VITE_AUTH_GATE_VALUE=0
 VITE_BYO_KEY_PROVIDERS_VALUE=0
 VITE_SECURITY_ML_VALUE=1
 VITE_UPDATER_ENABLED_VALUE="$UPDATER_ENABLED"
+VITE_BETA_LINEAR_LABEL_ID_VALUE="$BETA_LINEAR_LABEL_ID_VALUE"
 VITE_EXTRA_ENV=()
 
 RUNTIME_CONFIG="src-tauri/resources/runtime-config.json"
@@ -104,7 +118,7 @@ set_vite_env() {
   local value="$2"
 
   case "$key" in
-    VITE_APP_VERSION|VITE_ENVIRONMENT|VITE_UPDATER_ENABLED)
+    VITE_APP_VERSION|VITE_ENVIRONMENT|VITE_UPDATER_ENABLED|VITE_BETA_LINEAR_LABEL_ID)
       echo "custom_vite_env cannot override release-owned key: $key" >&2
       return 1
       ;;
@@ -445,6 +459,7 @@ env \
   VITE_BYO_KEY_PROVIDERS="$VITE_BYO_KEY_PROVIDERS_VALUE" \
   VITE_SECURITY_ML="$VITE_SECURITY_ML_VALUE" \
   VITE_UPDATER_ENABLED="$VITE_UPDATER_ENABLED_VALUE" \
+  VITE_BETA_LINEAR_LABEL_ID="$VITE_BETA_LINEAR_LABEL_ID_VALUE" \
   ${VITE_EXTRA_ENV[@]+"${VITE_EXTRA_ENV[@]}"} \
   pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features "$CARGO_FEATURES" \
     --config src-tauri/tauri.release.conf.json

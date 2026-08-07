@@ -22,6 +22,10 @@ vi.mock("@/features/updates/ui/UpdateButton", () => ({
   UpdateButton: () => null,
 }));
 
+vi.mock("@/features/updates/ui/ChannelSwitchDialog", () => ({
+  ChannelSwitchDialog: () => null,
+}));
+
 vi.mock("./TopBar", () => ({
   TopBar: () => <header>Top bar</header>,
 }));

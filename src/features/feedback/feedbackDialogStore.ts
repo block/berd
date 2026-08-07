@@ -4,6 +4,9 @@ export interface FeedbackDraft {
   title: string;
   description: string;
   includeLogs: boolean;
+  titleSuffix?: string;
+  metadata?: Record<string, string>;
+  labelIds?: string[];
 }
 
 interface FeedbackDialogState {

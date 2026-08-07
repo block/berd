@@ -1,5 +1,10 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/features/updates/ui/BetaBadge", () => ({
+  BetaBadge: () => null,
+}));
+
 import { TopBar } from "@/app/ui/TopBar";
 
 // Mirrors the semantics of Tauri's injected drag script

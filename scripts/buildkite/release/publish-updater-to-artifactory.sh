@@ -49,6 +49,23 @@ DIGEST_SRC="$ARCHIVE_SRC.sha256"
 [[ -f "$ARCHIVE_SRC" ]] || { echo "Missing $ARCHIVE_SRC" >&2; exit 1; }
 [[ -f "$SIGNATURE_SRC" ]] || { echo "Missing $SIGNATURE_SRC" >&2; exit 1; }
 [[ -f "$DIGEST_SRC" ]] || { echo "Missing $DIGEST_SRC" >&2; exit 1; }
+ARTIFACT_SHA256="$(awk 'NR == 1 {print $1}' "$DIGEST_SRC")"
+[[ "$ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid updater digest" >&2; exit 1; }
+if [[ -n "${BERD_RELEASE_CHANNEL_ID:-}" ]]; then
+  : "${GOOSE2_TAURI_SIGNING_PRIVATE_KEY:?required for compatibility descriptor}"
+  : "${GOOSE2_TAURI_SIGNING_PRIVATE_KEY_PASSWORD:?required for compatibility descriptor}"
+  export BERD_ARTIFACT_SHA256="$ARTIFACT_SHA256"
+  BERD_COMPATIBILITY_SIGNATURE="$(
+    TAURI_SIGNING_PRIVATE_KEY="$GOOSE2_TAURI_SIGNING_PRIVATE_KEY" \
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$GOOSE2_TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+      "$REPO_ROOT/scripts/release/sign-compatibility-descriptor.sh" \
+        "$RELEASE_VERSION" "$BERD_RELEASE_CHANNEL_ID" "$ARTIFACT_SHA256"
+  )"
+  export BERD_COMPATIBILITY_SIGNATURE
+fi
+[[ -f "$ARCHIVE_SRC" ]] || { echo "Missing $ARCHIVE_SRC" >&2; exit 1; }
+[[ -f "$SIGNATURE_SRC" ]] || { echo "Missing $SIGNATURE_SRC" >&2; exit 1; }
+[[ -f "$DIGEST_SRC" ]] || { echo "Missing $DIGEST_SRC" >&2; exit 1; }
 
 ARCHIVE_URL="$ARTIFACTORY_BASE/$VERSION_PATH/$ARCHIVE_NAME"
 SIGNATURE_URL="$ARCHIVE_URL.sig"

@@ -42,6 +42,7 @@ mime_guess = "2"
 futures-util = "0.3"
 nucleo-matcher = "0.3"
 percent-encoding = "2"
+minisign-verify = "0.2.5"
 plist = "1"
 portable-pty = "0.9.0"
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "multipart", "rustls", "stream"] }
@@ -72,6 +73,7 @@ tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
+time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1.50.0", features = ["full"] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }

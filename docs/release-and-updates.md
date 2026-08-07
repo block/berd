@@ -188,3 +188,27 @@ Generated `src-tauri/tauri.release.conf.json` is gitignored.
 | `scripts/set-runtime-config-distribution.ts` | injects the optional distribution-owned Databricks host and fast model into bundled runtime config |
 | `src/features/updates/hooks/UpdaterProvider.tsx` | update checks/download/install/restart UI state |
 | `src-tauri/src/lib.rs` | conditionally registers updater plugin from baked config |
+
+## Bundled Main/Beta catalogs
+
+A distribution may replace the legacy one-channel profile with
+`BERD_RELEASE_CHANNELS_FILE`, a reviewed schema-v1 catalog of finite channel
+IDs. Each entry carries its HTTPS manifest endpoint, updater public key,
+display metadata, and compatibility range. `BERD_RELEASE_CHANNEL_ID`
+identifies the binary being built. Endpoint and key values never cross the
+renderer boundary; channel checks resolve an ID in Rust.
+
+Channel switches use a durable `release-channel-state.json` plus a monotonic
+`release-store-marker.json` in app data. The marker advances to the running
+build's write epoch before Berd opens its layout database. A target release must
+carry `signedCompatibility`, signed by that channel's updater key and bound to
+channel ID, version, archive SHA-256, and readable/write epochs. Rust verifies
+the descriptor, downloads and updater-verifies the archive, checks its SHA-256,
+and only then installs it. An incompatible target stops intake from the old
+feed and waits on the selected feed without running older code over newer data.
+
+Catalogs containing `beta` require `beta_linear_label_id` (a Linear label UUID)
+at build time. Beta reports reuse Berd's feedback dialog, include the running
+version/channel in the ticket title and description, and attach that label.
+Main/Beta activation remains subject to the release lane's non-promoting signed
+rehearsal and promotion approvals.

@@ -291,6 +291,11 @@ jobs:
     env:
       TAG: ${{ needs.setup.outputs.tag }}
       SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+      BERD_RELEASE_CHANNEL_ID: "main"
+      BERD_STORE_CONTRACT_VERSION: "1"
+      BERD_WRITES_DATA_EPOCH: "1"
+      BERD_MIN_READABLE_DATA_EPOCH: "1"
+      BERD_MAX_READABLE_DATA_EPOCH: "1"
       BERD_PUBLIC_UPDATER_PUBLIC_KEY: ${{ vars.BERD_PUBLIC_UPDATER_PUBLIC_KEY }}
     steps:
       - name: Check out verified source
@@ -334,6 +339,8 @@ jobs:
       - name: Download, validate, and promote staged updater
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           scripts/release/github/promote-public-updater.sh "$TAG" "$SOURCE_SHA" "$RUNNER_TEMP/promotion-summary.md"

@@ -29,6 +29,7 @@ describe("feedback api", () => {
       attachmentFiles: [],
       includeLogs: false,
       doctorReport: null,
+      labelIds: [],
     });
 
     mockInvoke.mockResolvedValueOnce({
@@ -68,6 +69,7 @@ describe("feedback api", () => {
       ],
       includeLogs: false,
       doctorReport: null,
+      labelIds: [],
     });
   });
 

@@ -14,11 +14,48 @@ vi.mock("@tauri-apps/api/app", () => ({
 type MockUpdaterState = {
   status: UpdateStatus;
   enabled: boolean;
+  runtime: {
+    enabled: boolean;
+    channels: Array<{ id: string; label: string; description?: string }>;
+    defaultChannelId?: string;
+    selectedFeed?: string;
+    runningBuild?: {
+      channelId: string;
+      version: string;
+      compatibility: {
+        storeContractVersion: number;
+        writesDataEpoch: number;
+        minReadableDataEpoch: number;
+        maxReadableDataEpoch: number;
+      };
+    };
+    pendingInstall?: {
+      transitionId: string;
+      sourceChannelId: string;
+      targetChannelId: string;
+      targetVersion: string;
+      targetArtifactSha256: string;
+      targetCompatibility: {
+        storeContractVersion: number;
+        writesDataEpoch: number;
+        minReadableDataEpoch: number;
+        maxReadableDataEpoch: number;
+      };
+      installed: boolean;
+    };
+    waitingForMain?: { sourceChannelId: string; targetChannelId: string };
+    notice?: string;
+  };
   availableVersion: string | null;
   downloadProgress: number | null;
   errorMessage: string | null;
   errorDetail: string | null;
+  preparedSwitch: null;
+  waitingMessage: string | null;
   checkForUpdate: ReturnType<typeof vi.fn>;
+  prepareChannelSwitch: ReturnType<typeof vi.fn>;
+  cancelPreparedSwitch: ReturnType<typeof vi.fn>;
+  confirmPreparedSwitch: ReturnType<typeof vi.fn>;
   downloadAndInstall: ReturnType<typeof vi.fn>;
   relaunch: ReturnType<typeof vi.fn>;
 };
@@ -35,11 +72,32 @@ function setUpdaterState(overrides: Partial<MockUpdaterState> = {}) {
   updaterMock.state = {
     status: "idle",
     enabled: true,
+    runtime: {
+      enabled: true,
+      channels: [{ id: "main", label: "Main" }],
+      defaultChannelId: "main",
+      selectedFeed: "main",
+      runningBuild: {
+        channelId: "main",
+        version: "1.2.3",
+        compatibility: {
+          storeContractVersion: 1,
+          writesDataEpoch: 1,
+          minReadableDataEpoch: 1,
+          maxReadableDataEpoch: 1,
+        },
+      },
+    },
     availableVersion: null,
     downloadProgress: null,
     errorMessage: null,
     errorDetail: null,
+    preparedSwitch: null,
+    waitingMessage: null,
     checkForUpdate: vi.fn(),
+    prepareChannelSwitch: vi.fn(),
+    cancelPreparedSwitch: vi.fn(),
+    confirmPreparedSwitch: vi.fn(),
     downloadAndInstall: vi.fn(),
     relaunch: vi.fn(),
     ...overrides,
@@ -102,9 +160,7 @@ describe("UpdatesSettings", () => {
     renderWithProviders(<UpdatesSettings />);
 
     expect(screen.getByRole("button", { name: "Checking..." })).toBeDisabled();
-    expect(
-      screen.getByText("Checking the update channel..."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Checking for updates...")).toBeInTheDocument();
   });
 
   it("renders the up-to-date state", () => {
@@ -191,6 +247,100 @@ describe("UpdatesSettings", () => {
     expect(
       screen.queryByRole("button", { name: "Checking..." }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows the running channel and prepares a switch without mutating it", async () => {
+    const user = userEvent.setup();
+    const state = setUpdaterState({
+      runtime: {
+        enabled: true,
+        channels: [
+          { id: "main", label: "Main" },
+          { id: "beta", label: "Beta" },
+        ],
+        defaultChannelId: "main",
+        selectedFeed: "main",
+        runningBuild: {
+          channelId: "main",
+          version: "1.2.3",
+          compatibility: {
+            storeContractVersion: 1,
+            writesDataEpoch: 1,
+            minReadableDataEpoch: 1,
+            maxReadableDataEpoch: 2,
+          },
+        },
+      },
+    });
+
+    renderWithProviders(<UpdatesSettings />);
+
+    const select = screen.getByRole("combobox", { name: "Release channel" });
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    select.focus();
+    await user.keyboard("{Enter}{ArrowDown}{Enter}");
+    if (originalScrollIntoView) {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    }
+
+    expect(state.prepareChannelSwitch).toHaveBeenCalledWith("beta");
+    expect(state.runtime.runningBuild?.channelId).toBe("main");
+  });
+
+  it("uses truthful restart copy for a staged channel switch", () => {
+    setUpdaterState({
+      status: "ready",
+      availableVersion: "1.3.0",
+      runtime: {
+        enabled: true,
+        channels: [
+          { id: "main", label: "Main" },
+          { id: "beta", label: "Beta" },
+        ],
+        defaultChannelId: "main",
+        selectedFeed: "beta",
+        runningBuild: {
+          channelId: "main",
+          version: "1.2.3",
+          compatibility: {
+            storeContractVersion: 1,
+            writesDataEpoch: 1,
+            minReadableDataEpoch: 1,
+            maxReadableDataEpoch: 2,
+          },
+        },
+        pendingInstall: {
+          transitionId: "transition",
+          sourceChannelId: "main",
+          targetChannelId: "beta",
+          targetVersion: "1.3.0",
+          targetArtifactSha256: "a".repeat(64),
+          targetCompatibility: {
+            storeContractVersion: 1,
+            writesDataEpoch: 2,
+            minReadableDataEpoch: 1,
+            maxReadableDataEpoch: 2,
+          },
+          installed: true,
+        },
+      },
+    });
+
+    renderWithProviders(<UpdatesSettings />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Restart to finish switching to Beta",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Beta 1.3.0 is installed. Restart when you’re ready to finish switching.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows the raw error detail alongside the friendly summary", () => {

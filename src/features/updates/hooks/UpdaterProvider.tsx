@@ -10,10 +10,8 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type {
-  DownloadEvent,
-  Update as TauriUpdate,
-} from "@tauri-apps/plugin-updater";
+import type { Update as TauriUpdate } from "@tauri-apps/plugin-updater";
+import { Update as TauriUpdateResource } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 
@@ -28,6 +26,71 @@ export type UpdateStatus =
   | "ready"
   | "error";
 
+export interface ReleaseChannelInfo {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface CompatibilityDescriptor {
+  storeContractVersion: number;
+  writesDataEpoch: number;
+  minReadableDataEpoch: number;
+  maxReadableDataEpoch: number;
+}
+
+export interface RunningBuildInfo {
+  channelId: string;
+  version: string;
+  compatibility: CompatibilityDescriptor;
+  whatToTest?: string;
+}
+
+export interface PendingInstall {
+  transitionId: string;
+  sourceChannelId: string;
+  targetChannelId: string;
+  targetVersion: string;
+  targetArtifactSha256: string;
+  targetCompatibility: CompatibilityDescriptor;
+  installed: boolean;
+}
+
+export interface WaitingForMain {
+  sourceChannelId: string;
+  targetChannelId: string;
+}
+
+export interface ReleaseRuntime {
+  enabled: boolean;
+  channels: ReleaseChannelInfo[];
+  defaultChannelId?: string;
+  selectedFeed?: string;
+  runningBuild?: RunningBuildInfo;
+  pendingInstall?: PendingInstall;
+  waitingForMain?: WaitingForMain;
+  notice?: string;
+}
+
+export interface PreparedChannelSwitch {
+  channelId: string;
+  channelLabel: string;
+  version: string;
+  currentVersion: string;
+  body?: string;
+}
+
+type ReleaseUpdateMetadata = {
+  rid: number;
+  currentVersion: string;
+  version: string;
+  date?: string;
+  body?: string;
+  rawJson: Record<string, unknown>;
+  targetChannelId: string;
+  targetChannelLabel: string;
+};
+
 type CheckForUpdateOptions = {
   background?: boolean;
   quiet?: boolean;
@@ -36,11 +99,17 @@ type CheckForUpdateOptions = {
 type UpdaterContextValue = {
   status: UpdateStatus;
   enabled: boolean;
+  runtime: ReleaseRuntime;
   availableVersion: string | null;
   downloadProgress: number | null;
   errorMessage: string | null;
   errorDetail: string | null;
+  preparedSwitch: PreparedChannelSwitch | null;
+  waitingMessage: string | null;
   checkForUpdate: (options?: CheckForUpdateOptions) => Promise<void>;
+  prepareChannelSwitch: (channelId: string) => Promise<void>;
+  cancelPreparedSwitch: () => void;
+  confirmPreparedSwitch: () => Promise<void>;
   downloadAndInstall: () => Promise<void>;
   relaunch: () => Promise<void>;
 };
@@ -52,13 +121,16 @@ type UpdaterProviderProps = {
 };
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const CHECK_TIMEOUT_MS = 10_000;
 const ACTIVE_UPDATE_STATUSES = new Set<UpdateStatus>([
   "available",
   "downloading",
   "installing",
   "ready",
 ]);
+const DISABLED_RUNTIME: ReleaseRuntime = {
+  enabled: false,
+  channels: [],
+};
 
 const UpdaterContext = createContext<UpdaterContextValue | undefined>(
   undefined,
@@ -87,29 +159,82 @@ function initialStatus() {
   return isUpdaterEnabled() ? "idle" : "unavailable";
 }
 
+const PREVIEW_COMPATIBILITY: CompatibilityDescriptor = {
+  storeContractVersion: 1,
+  writesDataEpoch: 2,
+  minReadableDataEpoch: 1,
+  maxReadableDataEpoch: 2,
+};
+
+function previewRuntimeFromQuery(): ReleaseRuntime | null {
+  if (!import.meta.env.DEV || typeof window === "undefined") return null;
+  const preview =
+    new URLSearchParams(window.location.search).get("releaseChannelPreview") ??
+    import.meta.env.VITE_RELEASE_CHANNEL_PREVIEW;
+  if (preview !== "main" && preview !== "beta") return null;
+  return {
+    enabled: true,
+    channels: [
+      { id: "main", label: "Main", description: "Recommended releases" },
+      { id: "beta", label: "Beta", description: "New features first" },
+    ],
+    defaultChannelId: "main",
+    selectedFeed: preview,
+    runningBuild: {
+      channelId: preview,
+      version: import.meta.env.VITE_APP_VERSION ?? "preview",
+      compatibility: PREVIEW_COMPATIBILITY,
+      whatToTest:
+        preview === "beta"
+          ? "Try the newest features and report anything that feels rough."
+          : undefined,
+    },
+  };
+}
+
+function updateFromMetadata(metadata: ReleaseUpdateMetadata): TauriUpdate {
+  return new TauriUpdateResource(metadata);
+}
+
 export function UpdaterProvider({
   children,
   checkIntervalMs = CHECK_INTERVAL_MS,
   runStartupCheck = true,
 }: UpdaterProviderProps) {
   const { t } = useTranslation("settings");
-  const enabled = isUpdaterEnabled();
-  const [status, setStatus] = useState<UpdateStatus>(initialStatus);
+  const previewRuntime = useMemo(previewRuntimeFromQuery, []);
+  const nativeUpdaterEnabled = isUpdaterEnabled();
+  const enabled = nativeUpdaterEnabled || previewRuntime !== null;
+  const [runtime, setRuntime] = useState<ReleaseRuntime>(
+    previewRuntime ?? DISABLED_RUNTIME,
+  );
+  const [status, setStatus] = useState<UpdateStatus>(
+    previewRuntime ? "idle" : initialStatus,
+  );
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [preparedSwitch, setPreparedSwitch] =
+    useState<PreparedChannelSwitch | null>(null);
+  const [waitingMessage, setWaitingMessage] = useState<string | null>(null);
 
   const statusRef = useRef<UpdateStatus>(status);
   const updateRef = useRef<TauriUpdate | null>(null);
+  const updateRidRef = useRef<number | null>(null);
+  const switchUpdateRef = useRef<TauriUpdate | null>(null);
+  const switchUpdateRidRef = useRef<number | null>(null);
   const checkPromiseRef = useRef<Promise<void> | null>(null);
   const installPromiseRef = useRef<Promise<void> | null>(null);
-  const downloadedBytesRef = useRef(0);
-  const downloadTotalBytesRef = useRef<number | null>(null);
 
   const setStatusValue = useCallback((nextStatus: UpdateStatus) => {
     statusRef.current = nextStatus;
     setStatus(nextStatus);
+  }, []);
+
+  const clearErrors = useCallback(() => {
+    setErrorMessage(null);
+    setErrorDetail(null);
   }, []);
 
   const recordError = useCallback(
@@ -117,8 +242,6 @@ export function UpdaterProvider({
       const detail = getErrorMessage(error);
       console.warn(`[updater] ${detail}`);
       setErrorMessage(fallbackMessage);
-      // Keep the raw detail separate so the pane can show what actually
-      // failed alongside the friendly summary, while the toast stays short.
       setErrorDetail(detail || null);
       setStatusValue("error");
       toast.error(t("updates.toast.error.title"), {
@@ -130,6 +253,20 @@ export function UpdaterProvider({
     [setStatusValue, t],
   );
 
+  const refreshRuntime = useCallback(async () => {
+    if (previewRuntime) {
+      setRuntime(previewRuntime);
+      return previewRuntime;
+    }
+    if (!nativeUpdaterEnabled) {
+      setRuntime(DISABLED_RUNTIME);
+      return DISABLED_RUNTIME;
+    }
+    const nextRuntime = await invoke<ReleaseRuntime>("get_release_runtime");
+    setRuntime(nextRuntime);
+    return nextRuntime;
+  }, [nativeUpdaterEnabled, previewRuntime]);
+
   const relaunch = useCallback(async () => {
     if (!enabled) {
       setStatusValue("unavailable");
@@ -137,12 +274,6 @@ export function UpdaterProvider({
     }
 
     try {
-      // The updater installs into the bundle's existing path, so an install
-      // still carrying a legacy name (e.g. "Goose 2.app") would keep that
-      // name after every update. The backend renames such bundles to Berd.app
-      // in place and relaunches from the renamed path itself; it reports
-      // false when no rename applies (canonical or user-customized names),
-      // in which case the standard restart below is used.
       try {
         if (await invoke<boolean>("finalize_update_relaunch")) {
           return;
@@ -161,54 +292,42 @@ export function UpdaterProvider({
     }
   }, [enabled, recordError, setStatusValue]);
 
+  const clearPendingSwitch = useCallback(async (transitionId?: string) => {
+    if (!transitionId) return;
+    try {
+      const nextRuntime = await invoke<ReleaseRuntime>(
+        "cancel_channel_switch",
+        { request: { transitionId } },
+      );
+      setRuntime(nextRuntime);
+    } catch (error) {
+      console.warn(
+        `[updater] failed to clear channel transition: ${getErrorMessage(error)}`,
+      );
+    }
+  }, []);
+
   const downloadAndInstallUpdate = useCallback(
-    async (update: TauriUpdate) => {
+    async (rid: number, transitionId?: string) => {
       if (installPromiseRef.current) {
         return installPromiseRef.current;
       }
 
       const installPromise = (async () => {
-        setErrorMessage(null);
-        setErrorDetail(null);
-        downloadedBytesRef.current = 0;
-        downloadTotalBytesRef.current = null;
+        clearErrors();
         setDownloadProgress(null);
         setStatusValue("downloading");
 
         try {
-          await update.downloadAndInstall((event: DownloadEvent) => {
-            if (event.event === "Started") {
-              downloadedBytesRef.current = 0;
-              downloadTotalBytesRef.current = event.data.contentLength ?? null;
-              setDownloadProgress(event.data.contentLength ? 0 : null);
-              setStatusValue("downloading");
-              return;
-            }
-
-            if (event.event === "Progress") {
-              downloadedBytesRef.current += event.data.chunkLength;
-              const totalBytes = downloadTotalBytesRef.current;
-              setDownloadProgress(
-                totalBytes
-                  ? Math.min(
-                      99,
-                      Math.round(
-                        (downloadedBytesRef.current / totalBytes) * 100,
-                      ),
-                    )
-                  : null,
-              );
-              setStatusValue("downloading");
-              return;
-            }
-
-            setDownloadProgress(100);
-            setStatusValue("installing");
-          });
-
+          const nextRuntime = await invoke<ReleaseRuntime>(
+            "download_and_install_release",
+            { rid, transitionId: transitionId ?? null },
+          );
+          setRuntime(nextRuntime);
           setDownloadProgress(100);
           setStatusValue("ready");
         } catch (error) {
+          await clearPendingSwitch(transitionId);
           recordError(error);
         }
       })();
@@ -222,7 +341,7 @@ export function UpdaterProvider({
         }
       }
     },
-    [recordError, setStatusValue],
+    [clearErrors, clearPendingSwitch, recordError, setStatusValue],
   );
 
   const downloadAndInstall = useCallback(async () => {
@@ -230,14 +349,30 @@ export function UpdaterProvider({
       setStatusValue("unavailable");
       return;
     }
-
     const update = updateRef.current;
-    if (!update) {
-      return;
+    const rid = updateRidRef.current;
+    if (update && rid != null) {
+      await downloadAndInstallUpdate(rid);
     }
-
-    await downloadAndInstallUpdate(update);
   }, [downloadAndInstallUpdate, enabled, setStatusValue]);
+
+  const handleCheckError = useCallback(
+    async (error: unknown, options: CheckForUpdateOptions) => {
+      if (options.quiet) {
+        console.warn(`[updater] check failed: ${getErrorMessage(error)}`);
+        setStatusValue("idle");
+        return;
+      }
+      const probe = await probeKgooseConnectivity();
+      recordError(
+        error,
+        probe?.likelyWarpFailure
+          ? t("updates.errors.networkAccess")
+          : t("updates.errors.generic"),
+      );
+    },
+    [recordError, setStatusValue, t],
+  );
 
   const checkForUpdate = useCallback(
     async (options: CheckForUpdateOptions = {}) => {
@@ -245,63 +380,40 @@ export function UpdaterProvider({
         setStatusValue("unavailable");
         return;
       }
-
       const currentStatus = statusRef.current;
       if (
         currentStatus === "checking" ||
         ACTIVE_UPDATE_STATUSES.has(currentStatus)
       ) {
-        if (options.background) {
-          return;
-        }
+        if (options.background) return;
         return (
           checkPromiseRef.current ?? installPromiseRef.current ?? undefined
         );
       }
-
-      if (checkPromiseRef.current) {
-        return checkPromiseRef.current;
-      }
+      if (checkPromiseRef.current) return checkPromiseRef.current;
 
       const checkPromise = (async () => {
-        setErrorMessage(null);
-        setErrorDetail(null);
+        clearErrors();
         setDownloadProgress(null);
         setStatusValue("checking");
-
         try {
-          const { check } = await import("@tauri-apps/plugin-updater");
-          const update = await check({ timeout: CHECK_TIMEOUT_MS });
-
-          if (!update) {
+          const metadata = await invoke<ReleaseUpdateMetadata | null>(
+            "check_release_update",
+          );
+          if (!metadata) {
             updateRef.current = null;
             setAvailableVersion(null);
             setStatusValue("up-to-date");
             return;
           }
-
+          const update = updateFromMetadata(metadata);
           updateRef.current = update;
+          updateRidRef.current = metadata.rid;
           setAvailableVersion(update.version);
           setStatusValue("available");
-          await downloadAndInstallUpdate(update);
+          await downloadAndInstallUpdate(metadata.rid);
         } catch (error) {
-          if (options.quiet) {
-            console.warn(`[updater] check failed: ${getErrorMessage(error)}`);
-            setStatusValue("idle");
-            return;
-          }
-
-          // The updater manifest sits behind Cloudflare WARP, but not every
-          // check failure is a connectivity problem. Probe the shared
-          // behind-WARP endpoint so we only steer the user to WARP when the
-          // failure actually looks like a VPN/access issue.
-          const probe = await probeKgooseConnectivity();
-          recordError(
-            error,
-            probe?.likelyWarpFailure
-              ? t("updates.errors.networkAccess")
-              : t("updates.errors.generic"),
-          );
+          await handleCheckError(error, options);
         }
       })();
 
@@ -314,56 +426,206 @@ export function UpdaterProvider({
         }
       }
     },
-    [downloadAndInstallUpdate, enabled, recordError, setStatusValue, t],
+    [
+      clearErrors,
+      downloadAndInstallUpdate,
+      enabled,
+      handleCheckError,
+      setStatusValue,
+    ],
   );
+
+  const prepareChannelSwitch = useCallback(
+    async (channelId: string) => {
+      if (previewRuntime) {
+        const target = previewRuntime.channels.find(
+          (channel) => channel.id === channelId,
+        );
+        if (!target || channelId === previewRuntime.runningBuild?.channelId) {
+          return;
+        }
+        setPreparedSwitch({
+          channelId,
+          channelLabel: target.label,
+          version: "preview-target",
+          currentVersion: previewRuntime.runningBuild?.version ?? "preview",
+        });
+        return;
+      }
+      if (!enabled || channelId === runtime.runningBuild?.channelId) return;
+      if (checkPromiseRef.current || installPromiseRef.current) return;
+
+      const checkPromise = (async () => {
+        clearErrors();
+        setWaitingMessage(null);
+        setStatusValue("checking");
+        try {
+          const metadata = await invoke<ReleaseUpdateMetadata | null>(
+            "prepare_channel_switch",
+            { request: { channelId } },
+          );
+          if (!metadata) {
+            throw new Error(
+              t("updates.errors.switchUnavailable", {
+                channel: runtime.channels.find(
+                  (channel) => channel.id === channelId,
+                )?.label,
+              }),
+            );
+          }
+          switchUpdateRef.current = updateFromMetadata(metadata);
+          switchUpdateRidRef.current = metadata.rid;
+          setPreparedSwitch({
+            channelId: metadata.targetChannelId,
+            channelLabel: metadata.targetChannelLabel,
+            version: metadata.version,
+            currentVersion: metadata.currentVersion,
+            body: metadata.body,
+          });
+          setStatusValue("idle");
+        } catch (error) {
+          await handleCheckError(error, {});
+        }
+      })();
+      checkPromiseRef.current = checkPromise;
+      try {
+        await checkPromise;
+      } finally {
+        if (checkPromiseRef.current === checkPromise) {
+          checkPromiseRef.current = null;
+        }
+      }
+    },
+    [
+      clearErrors,
+      enabled,
+      handleCheckError,
+      previewRuntime,
+      runtime.channels,
+      runtime.runningBuild?.channelId,
+      setStatusValue,
+      t,
+    ],
+  );
+
+  const cancelPreparedSwitch = useCallback(() => {
+    setPreparedSwitch(null);
+    switchUpdateRef.current = null;
+    switchUpdateRidRef.current = null;
+  }, []);
+
+  const confirmPreparedSwitch = useCallback(async () => {
+    const prepared = preparedSwitch;
+    if (previewRuntime) {
+      setPreparedSwitch(null);
+      return;
+    }
+    const update = switchUpdateRef.current;
+    const rid = switchUpdateRidRef.current;
+    if (!prepared || !update || rid == null) return;
+    try {
+      clearErrors();
+      const result = await invoke<{
+        runtime: ReleaseRuntime;
+        waitingMessage?: string;
+      }>("confirm_channel_switch", {
+        request: {
+          channelId: prepared.channelId,
+          version: prepared.version,
+        },
+      });
+      setRuntime(result.runtime);
+      setPreparedSwitch(null);
+      switchUpdateRef.current = null;
+      switchUpdateRidRef.current = null;
+      if (result.waitingMessage) {
+        setWaitingMessage(result.waitingMessage);
+        setStatusValue("idle");
+        return;
+      }
+      const transitionId = result.runtime.pendingInstall?.transitionId;
+      if (!transitionId) {
+        throw new Error("Berd could not record the release switch safely.");
+      }
+      setAvailableVersion(prepared.version);
+      await downloadAndInstallUpdate(rid, transitionId);
+    } catch (error) {
+      recordError(error);
+    }
+  }, [
+    clearErrors,
+    downloadAndInstallUpdate,
+    preparedSwitch,
+    previewRuntime,
+    recordError,
+    setStatusValue,
+  ]);
 
   useEffect(() => {
     if (!enabled) {
+      setRuntime(DISABLED_RUNTIME);
       setStatusValue("unavailable");
       return;
     }
-
-    if (statusRef.current === "unavailable") {
-      setStatusValue("idle");
-    }
-  }, [enabled, setStatusValue]);
+    let cancelled = false;
+    void refreshRuntime()
+      .then((nextRuntime) => {
+        if (!cancelled && nextRuntime.pendingInstall?.installed) {
+          setAvailableVersion(nextRuntime.pendingInstall.targetVersion);
+          setStatusValue("ready");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) recordError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, recordError, refreshRuntime, setStatusValue]);
 
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
+    if (!nativeUpdaterEnabled) return;
     if (runStartupCheck) {
       void checkForUpdate({ background: true, quiet: true });
     }
-
     const interval = window.setInterval(() => {
       void checkForUpdate({ background: true, quiet: true });
     }, checkIntervalMs);
-
     return () => window.clearInterval(interval);
-  }, [checkForUpdate, checkIntervalMs, enabled, runStartupCheck]);
+  }, [checkForUpdate, checkIntervalMs, nativeUpdaterEnabled, runStartupCheck]);
 
   const value = useMemo<UpdaterContextValue>(
     () => ({
       status,
-      enabled,
+      enabled: enabled && runtime.enabled,
+      runtime,
       availableVersion,
       downloadProgress,
       errorMessage,
       errorDetail,
+      preparedSwitch,
+      waitingMessage,
       checkForUpdate,
+      prepareChannelSwitch,
+      cancelPreparedSwitch,
+      confirmPreparedSwitch,
       downloadAndInstall,
       relaunch,
     }),
     [
       status,
       enabled,
+      runtime,
       availableVersion,
       downloadProgress,
       errorMessage,
       errorDetail,
+      preparedSwitch,
+      waitingMessage,
       checkForUpdate,
+      prepareChannelSwitch,
+      cancelPreparedSwitch,
+      confirmPreparedSwitch,
       downloadAndInstall,
       relaunch,
     ],

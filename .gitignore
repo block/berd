@@ -64,5 +64,6 @@ coverage/
 # scripts/prepare-berdctl-sidecar.sh, and scripts/prepare-bb-cli-resource.sh)
 src-tauri/binaries/
 
-# Generated release config (created by scripts/build-tauri-release-config.mjs)
+# Generated release config and catalog (created by scripts/release/build-tauri-release-config.mjs)
 src-tauri/tauri.release.conf.json
+src-tauri/resources/release-channels.json

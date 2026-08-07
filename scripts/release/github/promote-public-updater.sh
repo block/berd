@@ -42,6 +42,15 @@ for path in "$WORK_DIR/$ARCHIVE_NAME" "$WORK_DIR/$ARCHIVE_NAME.sig" "$WORK_DIR/$
 done
 
 EXPECTED_DIGEST="$(awk 'NR == 1 {print $1}' "$WORK_DIR/$ARCHIVE_NAME.sha256")"
+if [[ -n "${BERD_RELEASE_CHANNEL_ID:-}" ]]; then
+  : "${TAURI_SIGNING_PRIVATE_KEY:?TAURI_SIGNING_PRIVATE_KEY is required for compatibility signing}"
+  export BERD_ARTIFACT_SHA256="$EXPECTED_DIGEST"
+  BERD_COMPATIBILITY_SIGNATURE="$(
+    "$REPO_ROOT/scripts/release/sign-compatibility-descriptor.sh" \
+      "$VERSION" "$BERD_RELEASE_CHANNEL_ID" "$EXPECTED_DIGEST"
+  )"
+  export BERD_COMPATIBILITY_SIGNATURE
+fi
 ACTUAL_DIGEST="$(shasum -a 256 "$WORK_DIR/$ARCHIVE_NAME" | awk '{print $1}')"
 [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ && "$ACTUAL_DIGEST" == "$EXPECTED_DIGEST" ]] || {
   echo "staged updater digest mismatch" >&2

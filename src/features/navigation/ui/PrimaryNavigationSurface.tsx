@@ -342,6 +342,7 @@ export const PrimaryNavigationSurface = forwardRef<
                 return (
                   <SidebarNavItem
                     key={item.id}
+                    navId={`settings-${item.id}`}
                     icon={item.icon}
                     label={t(`settings:${item.labelKey}`)}
                     collapsed={navCollapsed}

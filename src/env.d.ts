@@ -17,6 +17,8 @@ declare global {
     /** @deprecated use VITE_BERD_G2_BASE_URL. */
     readonly VITE_GOOSE_INTERNAL_G2_BASE_URL?: string;
     readonly VITE_PREVIEW_READY_UPDATE?: string;
+    readonly VITE_BETA_LINEAR_LABEL_ID?: string;
+    readonly VITE_RELEASE_CHANNEL_PREVIEW?: string;
   }
 }
 

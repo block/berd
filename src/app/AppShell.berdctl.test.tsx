@@ -124,6 +124,14 @@ vi.mock("@/features/updates/ui/UpdateButton", () => ({
   UpdateButton: () => null,
 }));
 
+vi.mock("@/features/updates/ui/ChannelSwitchDialog", () => ({
+  ChannelSwitchDialog: () => null,
+}));
+
+vi.mock("@/features/updates/ui/BetaBadge", () => ({
+  BetaBadge: () => null,
+}));
+
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
     readyAgentIds: new Set(["goose"]),

@@ -491,7 +491,10 @@
       "installing": "Instalando...",
       "restart": "Reiniciar",
       "retry": "Intentar de nuevo",
-      "update": "Actualizar Berd"
+      "update": "Actualizar Berd",
+      "cancel": "Cancelar",
+      "restartToFinish": "Reiniciar para terminar el cambio a {{channel}}",
+      "switchTo": "Cambiar a {{channel}}"
     },
     "card": {
       "checkPrompt": "Busca si hay una nueva versión disponible.",
@@ -502,19 +505,21 @@
     "description": "Berd comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
     "details": {
       "available": "La actualización {{version}} está lista para descargarse.",
-      "checking": "Comprobando el canal de actualizaciones...",
+      "checking": "Buscando actualizaciones...",
       "downloading": "Descargando la actualización firmada más reciente.",
       "error": "El último intento de actualización falló.",
       "idle": "Berd buscará actualizaciones automáticamente cada pocas horas.",
       "installing": "Instalando la actualización descargada.",
       "ready": "La actualización {{version}} está instalada y se aplicará al reiniciar.",
       "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
-      "upToDate": "Berd está actualizado."
+      "upToDate": "Berd está actualizado.",
+      "switchReady": "{{channel}} {{version}} está instalado. Reinicia cuando quieras terminar el cambio."
     },
     "errors": {
       "detail": "Detalles: {{detail}}",
       "generic": "La actualización falló. Inténtalo de nuevo.",
-      "networkAccess": "No se pudo buscar actualizaciones. Conéctate a Cloudflare WARP e inténtalo de nuevo."
+      "networkAccess": "No se pudo buscar actualizaciones. Conéctate a Cloudflare WARP e inténtalo de nuevo.",
+      "switchUnavailable": "Todavía no hay una versión {{channel}} disponible para esta compilación."
     },
     "progress": {
       "downloading": "Descargando",
@@ -542,6 +547,29 @@
         "description": "Berd {{version}} se aplicará al reiniciar.",
         "title": "Actualización lista"
       }
+    },
+    "channel": {
+      "title": "Versión de lanzamiento",
+      "description": "Elige Main para las versiones recomendadas o Beta para probar funciones antes.",
+      "waitingDescription": "Las actualizaciones beta están desactivadas. Berd volverá a Main cuando haya una versión compatible.",
+      "unknown": "Versión actual"
+    },
+    "switchDialog": {
+      "title": "¿Cambiar a {{channel}}?",
+      "betaDescription": "Berd descargará la beta más reciente y se reiniciará. Las betas reciben funciones nuevas primero y pueden tener detalles por pulir. Puedes volver a Main en cualquier momento desde Ajustes o la insignia Beta.",
+      "mainDescription": "Berd comprobará que todo lo de la beta funcione con Main, luego la descargará y se reiniciará.",
+      "builds": "Estás usando {{source}} {{currentVersion}}. Berd encontró {{target}} {{targetVersion}}.",
+      "restartLater": "Puedes seguir trabajando después de la descarga y reiniciar cuando quieras."
+    },
+    "betaBadge": {
+      "open": "Abrir detalles de Beta",
+      "title": "Versión beta",
+      "build": "Berd {{version}}",
+      "whatToTest": "Qué probar",
+      "defaultWhatToTest": "Prueba las funciones más recientes e informa de cualquier detalle que necesite pulirse.",
+      "waitingForMain": "Las actualizaciones beta están desactivadas. Berd cambiará a Main cuando haya una versión compatible.",
+      "reportIssue": "Informar de un problema",
+      "reportIssueUnavailable": "Los informes de problemas beta no están configurados para esta compilación."
     }
   },
   "projects": {

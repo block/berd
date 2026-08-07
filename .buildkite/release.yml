@@ -3,6 +3,11 @@ agents:
 
 env:
   BERD_RELEASE_CHANNEL: "internal"
+  BERD_RELEASE_CHANNEL_ID: "main"
+  BERD_STORE_CONTRACT_VERSION: "1"
+  BERD_WRITES_DATA_EPOCH: "1"
+  BERD_MIN_READABLE_DATA_EPOCH: "1"
+  BERD_MAX_READABLE_DATA_EPOCH: "1"
   BERD_UPDATER_ENDPOINT: "https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json"
   APPLE_TEAM_ID: "EYF346PHUG"
 

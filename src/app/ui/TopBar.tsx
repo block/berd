@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { BetaBadge } from "@/features/updates/ui/BetaBadge";
 import { cn } from "@/shared/lib/cn";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
@@ -147,6 +148,7 @@ export function TopBar({
       </div>
       <div className="flex shrink-0 items-center gap-3 text-app-top-bar-control-fg [&_svg]:size-[length:var(--text-app-top-bar-icon)]">
         {viewActions}
+        <BetaBadge />
 
         {onSearchClick ? (
           <TopBarIconButton

@@ -1,6 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@/features/updates/ui/BetaBadge", () => ({
+  BetaBadge: () => null,
+}));
+
 import { TopBar } from "../TopBar";
 
 function renderTopBar(props: Partial<Parameters<typeof TopBar>[0]> = {}) {

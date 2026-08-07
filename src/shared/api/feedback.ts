@@ -8,6 +8,7 @@ export interface SubmitFeedbackIssueInput {
   attachmentFiles?: FeedbackAttachmentFileInput[];
   includeLogs?: boolean;
   doctorReport?: DoctorReport | null;
+  labelIds?: string[];
 }
 
 export interface FeedbackAttachmentFileInput {
@@ -46,6 +47,7 @@ export async function submitFeedbackIssue(
       attachmentFiles: input.attachmentFiles ?? [],
       includeLogs: input.includeLogs ?? false,
       doctorReport: input.doctorReport ?? null,
+      labelIds: input.labelIds ?? [],
     });
   } catch (error) {
     throw normalizeFeedbackSubmissionError(error);
