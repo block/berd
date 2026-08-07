@@ -318,6 +318,7 @@ async fn run_local_checks(
     distro_config_path: Option<&Path>,
     captured_shell_env: &HashMap<String, String>,
     prepend_dirs: &[PathBuf],
+    sq_agent_tools_enabled: bool,
 ) -> Vec<DoctorCheck> {
     let check_count =
         registry.path_checks.len() + registry.command_checks.len() + registry.custom_checks.len();
@@ -335,6 +336,9 @@ async fn run_local_checks(
         results.push(run_local_path_check(check, &extended_path).await);
     }
     for check in registry.command_checks {
+        if check.meta.id == "sq-agent-tools" && !sq_agent_tools_enabled {
+            continue;
+        }
         results.push(run_local_command_check(check, &extended_path).await);
     }
     for check in registry.custom_checks {
@@ -1249,16 +1253,14 @@ async fn run_doctor_impl(
         .bundle()
         .and_then(|bundle| bundle.config_path.as_deref());
     if doctor_internal_tooling_checks_enabled(runtime_config) {
-        let mut local_checks = run_local_checks(
+        let local_checks = run_local_checks(
             registry,
             distro_config_path,
             &captured_shell_env,
             prepend_dirs,
+            doctor_block_checks_enabled() && doctor_sq_agent_tools_enabled(distro_state),
         )
         .await;
-        if !doctor_block_checks_enabled() {
-            local_checks.retain(|check| check.id != "sq-agent-tools");
-        }
         checks.extend(local_checks);
     }
     if let Some(check) = run_node_runtime_check(
@@ -1305,6 +1307,12 @@ fn doctor_kgoose_connectivity_enabled(
             runtime_config.kgoose.as_ref(),
             distro_state.kgoose_config(),
         )
+}
+
+fn doctor_sq_agent_tools_enabled(distro_state: &DistroBundleState) -> bool {
+    distro_state
+        .diagnostics_config()
+        .is_some_and(|diagnostics| diagnostics.enables("sq-agent-tools"))
 }
 
 fn doctor_block_checks_enabled() -> bool {
@@ -1641,6 +1649,11 @@ mod tests {
             &defaulted
         ));
         assert!(doctor_internal_tooling_checks_enabled(&defaulted));
+        assert!(!doctor_sq_agent_tools_enabled(&distro_state));
+        let internal_diagnostics = DistroBundleState::with_diagnostics_for_tests(vec![
+            crate::services::distro_bundle::DiagnosticsCheck::SqAgentTools,
+        ]);
+        assert!(doctor_sq_agent_tools_enabled(&internal_diagnostics));
 
         defaulted.kgoose = Some(super::super::runtime_config::RuntimeKgooseConfig {
             base_url: Some("   ".to_string()),
@@ -1733,6 +1746,56 @@ mod tests {
 
         assert_eq!(check.category, "agents");
         assert_eq!(check.category_label, "Agents");
+    }
+
+    #[tokio::test]
+    async fn absent_diagnostics_policy_never_runs_sq_agent_tools() {
+        let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
+        let results = run_local_checks(
+            &LOCAL_DOCTOR_REGISTRY,
+            None,
+            &shell_env,
+            &[],
+            doctor_sq_agent_tools_enabled(&DistroBundleState::empty_for_tests()),
+        )
+        .await;
+
+        assert!(results.iter().all(|check| check.id != "sq-agent-tools"));
+        assert!(results.iter().any(|check| check.id == "goose-config"));
+    }
+
+    #[tokio::test]
+    async fn diagnostics_policy_controls_sq_agent_tools_execution() {
+        let (command, args): (&str, &[&str]) = if cfg!(target_os = "windows") {
+            ("cmd", &["/C", "echo policy-enabled"])
+        } else {
+            ("sh", &["-c", "printf policy-enabled"])
+        };
+        let checks = [LocalCommandCheck {
+            meta: LocalCheckMeta {
+                id: "sq-agent-tools",
+                ..fixture_meta()
+            },
+            command,
+            args,
+            pass_message_suffix: None,
+            fail_message: "command failed",
+        }];
+        let registry = LocalDoctorRegistry {
+            path_checks: &[],
+            command_checks: &checks,
+            custom_checks: &[],
+        };
+        let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
+
+        let disabled = run_local_checks(&registry, None, &shell_env, &[], false).await;
+        let enabled = run_local_checks(&registry, None, &shell_env, &[], true).await;
+
+        assert!(disabled.is_empty());
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].id, "sq-agent-tools");
+        assert_eq!(enabled[0].status, CheckStatus::Pass);
+        assert_eq!(enabled[0].message.trim(), "policy-enabled");
     }
 
     #[test]
@@ -1849,7 +1912,7 @@ mod tests {
         };
 
         let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
-        let results = run_local_checks(&registry, None, &shell_env, &[]).await;
+        let results = run_local_checks(&registry, None, &shell_env, &[], true).await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "fixture-check");
@@ -1881,7 +1944,7 @@ mod tests {
         };
 
         let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
-        let results = run_local_checks(&registry, None, &shell_env, &[]).await;
+        let results = run_local_checks(&registry, None, &shell_env, &[], true).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message.trim(), "command-output");
@@ -1938,7 +2001,7 @@ mod tests {
         };
 
         let shell_env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap())]);
-        let results = run_local_checks(&registry, None, &shell_env, &[]).await;
+        let results = run_local_checks(&registry, None, &shell_env, &[], true).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message, "path found");

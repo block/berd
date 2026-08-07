@@ -17,6 +17,7 @@ const MAX_MARKETPLACE_TEMPLATE_LENGTH: usize = 2_048;
 pub struct DistroManifest {
     pub app_version: Option<String>,
     pub kgoose: Option<KgooseDistroConfig>,
+    pub diagnostics: Option<DiagnosticsDistroConfig>,
     pub distribution: Option<DistributionDistroConfig>,
     pub marketplace: Option<MarketplaceDistroConfig>,
 }
@@ -25,6 +26,32 @@ pub struct DistroManifest {
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceDistroConfig {
     pub skill_url_template: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagnosticsCheck {
+    SqAgentTools,
+}
+
+impl DiagnosticsCheck {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::SqAgentTools => "sq-agent-tools",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiagnosticsDistroConfig {
+    checks: Vec<DiagnosticsCheck>,
+}
+
+impl DiagnosticsDistroConfig {
+    pub fn enables(&self, check_id: &str) -> bool {
+        self.checks.iter().any(|check| check.id() == check_id)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -100,6 +127,24 @@ impl DistroBundleState {
                 manifest: DistroManifest {
                     app_version: None,
                     kgoose: Some(kgoose),
+                    diagnostics: None,
+                    distribution: None,
+                },
+            }),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_diagnostics_for_tests(checks: Vec<DiagnosticsCheck>) -> Self {
+        Self {
+            bundle: Some(DistroBundle {
+                root_dir: PathBuf::new(),
+                config_path: None,
+                bin_dir: None,
+                manifest: DistroManifest {
+                    app_version: None,
+                    kgoose: None,
+                    diagnostics: Some(DiagnosticsDistroConfig { checks }),
                     distribution: None,
                     marketplace: None,
                 },
@@ -137,6 +182,12 @@ impl DistroBundleState {
         self.bundle
             .as_ref()
             .and_then(|bundle| bundle.manifest.kgoose.as_ref())
+    }
+
+    pub fn diagnostics_config(&self) -> Option<&DiagnosticsDistroConfig> {
+        self.bundle
+            .as_ref()
+            .and_then(|bundle| bundle.manifest.diagnostics.as_ref())
     }
 
     pub fn distribution_config(&self) -> Option<&DistributionDistroConfig> {
@@ -333,6 +384,7 @@ mod tests {
                         base_url: Some("https://kgoose.example.test/".to_string()),
                         path: None,
                     }),
+                    diagnostics: None,
                     distribution: None,
                     marketplace: None,
                 },
@@ -358,6 +410,36 @@ mod tests {
         assert_eq!(bundle.bin_dir.as_deref(), Some(bin_dir.as_path()));
         assert!(bundle.manifest.app_version.is_none());
         assert!(bundle.manifest.kgoose.is_none());
+        assert!(bundle.manifest.diagnostics.is_none());
+    }
+
+    #[test]
+    fn parses_closed_diagnostics_checks() {
+        let manifest = parse_manifest(r#"{"diagnostics":{"checks":["sqAgentTools"]}}"#)
+            .expect("known diagnostic check should parse");
+        let diagnostics = manifest
+            .diagnostics
+            .as_ref()
+            .expect("diagnostics should be present");
+        assert!(diagnostics.enables("sq-agent-tools"));
+        assert!(!diagnostics.enables("arbitrary-command"));
+        assert_eq!(
+            serde_json::to_value(&manifest).expect("diagnostics should serialize")["diagnostics"],
+            serde_json::json!({"checks": ["sqAgentTools"]})
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_diagnostics_checks_and_fields() {
+        for json in [
+            r#"{"diagnostics":{"checks":["shellCommand"]}}"#,
+            r#"{"diagnostics":{"checks":[],"command":"sq agent-tools --version"}}"#,
+        ] {
+            assert!(
+                parse_manifest(json).is_err(),
+                "manifest should fail: {json}"
+            );
+        }
     }
 
     #[test]
