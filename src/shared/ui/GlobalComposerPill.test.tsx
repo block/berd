@@ -1141,17 +1141,14 @@ describe("GlobalComposerPill", () => {
   it("sends the selected reasoning effort from the mini composer", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer(vi.fn(), {
-      reasoningEffort: {
-        config: {
-          configId: "thinking_effort",
-          currentValue: "high",
-          options: [
-            { id: "low", name: "low" },
-            { id: "medium", name: "medium" },
-            { id: "high", name: "high" },
-          ],
-        },
-        onChange: vi.fn(),
+      reasoningEffortConfig: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "low" },
+          { id: "medium", name: "medium" },
+          { id: "high", name: "high" },
+        ],
       },
     });
 
@@ -1163,6 +1160,89 @@ describe("GlobalComposerPill", () => {
       reasoningEffort: {
         configId: "thinking_effort",
         value: "high",
+      },
+    });
+  });
+
+  it("keeps a picked reasoning effort local to the composer until it is sent", async () => {
+    const user = userEvent.setup();
+    const onSend = renderGlobalComposer(vi.fn(), {
+      reasoningEffortConfig: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "low" },
+          { id: "medium", name: "medium" },
+          { id: "high", name: "high" },
+        ],
+      },
+    });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "Think a little");
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(await screen.findByText("Low"));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Think a little", {
+      reasoningEffort: {
+        configId: "thinking_effort",
+        value: "low",
+      },
+    });
+  });
+
+  it("drops a picked reasoning effort the refreshed config no longer offers", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <GlobalComposerPill
+        onSend={onSend}
+        reasoningEffortConfig={{
+          configId: "thinking_effort",
+          currentValue: "medium",
+          options: [
+            { id: "low", name: "low" },
+            { id: "medium", name: "medium" },
+            { id: "high", name: "high" },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "Think hard");
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(await screen.findByText("High"));
+    await user.keyboard("{Escape}");
+
+    // Same configId, narrower option set: the backend refreshed the config for
+    // the same model while the pick was live.
+    rerender(
+      <GlobalComposerPill
+        onSend={onSend}
+        reasoningEffortConfig={{
+          configId: "thinking_effort",
+          currentValue: "medium",
+          options: [
+            { id: "low", name: "low" },
+            { id: "medium", name: "medium" },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Think hard", {
+      reasoningEffort: {
+        configId: "thinking_effort",
+        value: "medium",
       },
     });
   });
@@ -1191,17 +1271,14 @@ describe("GlobalComposerPill", () => {
         : [],
     );
     const onSend = renderGlobalComposer(vi.fn(), {
-      reasoningEffort: {
-        config: {
-          configId: "thinking_effort",
-          currentValue: "high",
-          options: [
-            { id: "low", name: "low" },
-            { id: "medium", name: "medium" },
-            { id: "high", name: "high" },
-          ],
-        },
-        onChange: vi.fn(),
+      reasoningEffortConfig: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "low" },
+          { id: "medium", name: "medium" },
+          { id: "high", name: "high" },
+        ],
       },
       reasoningEffortModelSelection: {
         providerId: "openai",

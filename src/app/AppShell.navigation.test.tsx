@@ -259,6 +259,33 @@ function selectCodexProvider() {
   });
 }
 
+/**
+ * Seeds the project the mock sidebar's "Sidebar new project 2 chat" button
+ * targets, so clicking it runs the real createNewProjectDraft path. No
+ * workspaces or working dirs, which keeps the multi-workspace startup branch
+ * and the missing-folder probe out of the way.
+ */
+function seedSidebarProject() {
+  useProjectStore.setState({
+    projects: [
+      {
+        id: "project-2",
+        path: "/tmp/project-2",
+        name: "Project Two",
+        description: "",
+        prompt: "",
+        icon: "folder",
+        color: "blue",
+        projectWorkspaces: [],
+        workingDirs: [],
+        useWorktrees: false,
+        order: 0,
+        archivedAt: null,
+      },
+    ],
+  });
+}
+
 vi.mock("@/shared/profile/buildProfile", () => ({
   getBuildFeatureState: () => ({
     authGate: false,
@@ -2358,6 +2385,70 @@ describe("AppShell global navigation", () => {
     );
   });
 
+  it("navigates to the new chat from the docked Home composer without waiting on provider readiness", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
+    });
+    // Never resolves: the provider probe must not gate navigation.
+    mockCheckAllProviderStatus.mockImplementation(
+      () => new Promise<never>(() => {}),
+    );
+    // Never resolves either, so the chat view can only be reached optimistically
+    // — before the backend session behind the draft exists.
+    mockAcpCreateSession.mockImplementation(() => new Promise<never>(() => {}));
+    window.localStorage.setItem("goose:home-session-id", "home-session");
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "home-session",
+          title: "New Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "gpt-4o",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+    renderAppShell();
+
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    // Pin the entry point: this covers the docked send, not the centered
+    // composer's handoff path.
+    expect(textbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "docked",
+    );
+    fireEvent.change(textbox, { target: { value: "start optimistically" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    const activeSessionId = useChatSessionStore.getState().activeSessionId;
+    expect(activeSessionId).not.toBe("home-session");
+    // The chat page is showing a local draft whose backend session is still
+    // being created, with the send queued against it.
+    expect(
+      useChatSessionStore.getState().getSession(activeSessionId ?? ""),
+    ).toMatchObject({ creationState: "pending" });
+    expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+      [activeSessionId ?? ""]: [
+        {
+          payload: { text: "start optimistically" },
+        },
+      ],
+    });
+    // Nothing was sent to the Home session.
+    expect(
+      useChatStore.getState().queuedMessageBySession["home-session"],
+    ).toBeUndefined();
+  });
+
   it("refreshes personas when repair reports an error after changing disk", async () => {
     const personaId = "/Users/test/.agents/agents/berdy2.md";
     mockRepairBundledAgent.mockRejectedValue(new Error("marker write failed"));
@@ -2384,6 +2475,239 @@ describe("AppShell global navigation", () => {
       expect(
         useChatSessionStore.getState().getSession("created-session"),
       ).toMatchObject({ personaId });
+    });
+  });
+
+  it("navigates to a project chat without waiting on provider readiness", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
+    });
+    // Never resolves: the provider probe must not gate navigation.
+    mockCheckAllProviderStatus.mockImplementation(
+      () => new Promise<never>(() => {}),
+    );
+    // Never resolves either, so the chat view can only be reached optimistically
+    // — before the backend session behind the draft exists.
+    mockAcpCreateSession.mockImplementation(() => new Promise<never>(() => {}));
+    seedSidebarProject();
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    // The chat page is showing a local draft whose backend session is still
+    // being created.
+    const activeSessionId = useChatSessionStore.getState().activeSessionId;
+    expect(
+      useChatSessionStore.getState().getSession(activeSessionId ?? ""),
+    ).toMatchObject({ creationState: "pending", projectId: "project-2" });
+  });
+
+  it("does not create a project chat when BYO default provider setup is required", async () => {
+    requireByoDefaultProviderSetup();
+    seedSidebarProject();
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "providers",
+    );
+    // The synchronous gate still bails before any draft exists.
+    expect(useChatSessionStore.getState().sessions).toEqual([]);
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("writes the picked reasoning effort to a reused draft whose stored value is unconfirmed", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "openai", isConfigured: true },
+    ]);
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: { modelId: "gpt-4o", modelName: "gpt-4o", providerId: "openai" },
+      }),
+    );
+    window.localStorage.setItem("goose:home-session-id", "home-session");
+    const reasoningEffortOptions = [
+      { id: "low", name: "Low" },
+      { id: "medium", name: "Medium" },
+    ];
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "home-session",
+          title: "New Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "gpt-4o",
+          reasoningEffort: {
+            configId: "reasoning_effort",
+            currentValue: "medium",
+            options: reasoningEffortOptions,
+          },
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+        },
+        {
+          // An empty chat whose stored effort only reflects an optimistic
+          // write from its own composer — the backend set may still be in
+          // flight, or may have already failed and rolled back.
+          id: "draft-1",
+          title: "New Chat",
+          // The agent the resolved new-session target names, so this draft is
+          // the reuse candidate.
+          providerId: "goose",
+          modelId: "gpt-4o",
+          modelName: "gpt-4o",
+          reasoningEffort: {
+            configId: "reasoning_effort",
+            currentValue: "low",
+            options: reasoningEffortOptions,
+          },
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+    useChatStore.setState({ draftsBySession: { "draft-1": "half typed" } });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    fireEvent.change(textbox, { target: { value: "think less" } });
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(await screen.findByText("Low"));
+    await user.keyboard("{Escape}");
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    // The draft is reused because its stored effort matches the pick, so the
+    // send still has to confirm that value with the backend.
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe("draft-1");
+    });
+    await waitFor(() => {
+      expect(mockAcpSetSessionConfigOption).toHaveBeenCalledWith(
+        "draft-1",
+        "reasoning_effort",
+        "low",
+      );
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("applies the docked composer reasoning effort to the new chat instead of the Home session", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "openai", isConfigured: true },
+    ]);
+    mockAcpCreateSession.mockResolvedValue({
+      sessionId: "created-session",
+      configOptionsSnapshot: {
+        reasoningEffort: {
+          configId: "reasoning_effort",
+          currentValue: "medium",
+          options: [
+            { id: "low", name: "Low" },
+            { id: "medium", name: "Medium" },
+          ],
+        },
+      },
+    });
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: { modelId: "gpt-4o", modelName: "gpt-4o", providerId: "openai" },
+      }),
+    );
+    window.localStorage.setItem("goose:home-session-id", "home-session");
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "home-session",
+          title: "New Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "gpt-4o",
+          reasoningEffort: {
+            configId: "reasoning_effort",
+            currentValue: "medium",
+            options: [
+              { id: "low", name: "Low" },
+              { id: "medium", name: "Medium" },
+            ],
+          },
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+    const user = userEvent.setup();
+    renderAppShell();
+
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    fireEvent.change(textbox, { target: { value: "think less" } });
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(await screen.findByText("Low"));
+    await user.keyboard("{Escape}");
+
+    // The selection is composer-local: nothing is written to the idle Home
+    // session, so no backend state has to be confirmed before sending.
+    expect(mockAcpSetSessionConfigOption).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("home-session")?.reasoningEffort
+        ?.currentValue,
+    ).toBe("medium");
+
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    // It reaches the created session before its queued first send is released.
+    await waitFor(() => {
+      expect(mockAcpSetSessionConfigOption).toHaveBeenCalledWith(
+        "created-session",
+        "reasoning_effort",
+        "low",
+      );
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+        "created-session": [
+          {
+            payload: { text: "think less" },
+          },
+        ],
+      });
     });
   });
 
@@ -2618,6 +2942,21 @@ describe("AppShell global navigation", () => {
     vi.useFakeTimers();
     const configUpdate = deferred<Record<string, never>>();
     mockAcpSetSessionConfigOption.mockReturnValue(configUpdate.promise);
+    // The created session reports a different effort than the composer sends,
+    // so applying it is a real round trip rather than a skipped no-op.
+    mockAcpCreateSession.mockResolvedValue({
+      sessionId: "created-session",
+      configOptionsSnapshot: {
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "low",
+          options: [
+            { id: "low", name: "low" },
+            { id: "high", name: "high" },
+          ],
+        },
+      },
+    });
     window.localStorage.setItem("goose:home-session-id", "home-session");
 
     try {
@@ -2645,10 +2984,20 @@ describe("AppShell global navigation", () => {
         reasoningEffort: undefined,
         messageCount: 1,
       };
+      // Its effort differs from the requested one, so it is not a reuse
+      // candidate and the send goes through a fresh draft.
       const reusableDraft: ChatSession = {
         ...homeSession,
         id: "reusable-draft",
         title: "New Chat",
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "low",
+          options: [
+            { id: "low", name: "low" },
+            { id: "high", name: "high" },
+          ],
+        },
       };
       useChatSessionStore.setState({
         sessions: [homeSession, activeSession, reusableDraft],

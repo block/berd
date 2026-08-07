@@ -110,7 +110,10 @@ interface GlobalComposerPillProps {
   onDismiss?: () => void;
   onHandoffStart?: (rect: GlobalComposerHandoffRect) => void;
   suggestedPersonaId?: string | null;
-  reasoningEffort?: ChatInputReasoningEffort;
+  // Supplies the effort options for the picker. The selected value is
+  // composer-local and travels with the send, so choosing an effort never
+  // writes to a backend session.
+  reasoningEffortConfig?: ReasoningEffortConfig;
   reasoningEffortModelSelection?: {
     providerId?: string | null;
     modelId?: string | null;
@@ -137,6 +140,8 @@ interface ModelSelection {
   modelId: string;
   modelName: string;
 }
+
+type ReasoningEffortConfig = NonNullable<ChatInputReasoningEffort["config"]>;
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
 
@@ -211,7 +216,7 @@ export function GlobalComposerPill({
   onDismiss,
   onHandoffStart,
   suggestedPersonaId = null,
-  reasoningEffort,
+  reasoningEffortConfig,
   reasoningEffortModelSelection,
   onModelSelectionChange,
   placement = "docked",
@@ -243,6 +248,17 @@ export function GlobalComposerPill({
     null,
   );
   const [selectedSkills, setSelectedSkills] = useState<ChatSkillDraft[]>([]);
+  // The composer's own reasoning-effort pick, applied at send time rather than
+  // written back to the Home session. It only takes effect while its configId
+  // matches the live config and its value is still one of that config's
+  // options (see `activeReasoningEffort`), so a refreshed option set cannot
+  // send a value the backend no longer accepts. Provider/model switches clear
+  // it outright, and the model-mismatch gate hides effort entirely when the
+  // pill's model diverges from the session the config came from.
+  const [reasoningEffortSelection, setReasoningEffortSelection] = useState<{
+    configId: string;
+    value: string;
+  } | null>(null);
   const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
   const [voiceStartPending, setVoiceStartPending] = useState(false);
   const personas = useAgentStore(selectPersonas);
@@ -500,6 +516,7 @@ export function GlobalComposerPill({
     setModelOverride(null);
     setSelectedProjectId(null);
     setSelectedPersonaId(null);
+    setReasoningEffortSelection(null);
     personaSelectionSourceRef.current = "none";
     userTouchedRoutePersonaRef.current = false;
     personaOverrideActiveRef.current = false;
@@ -548,6 +565,8 @@ export function GlobalComposerPill({
       personaOverrideActiveRef.current = false;
       setProviderOverride(providerId);
       setModelOverride(null);
+      // The effort options belong to the previous model's config.
+      setReasoningEffortSelection(null);
       onModelSelectionChange?.(null);
       setSelectedProvider(providerId);
     },
@@ -560,6 +579,7 @@ export function GlobalComposerPill({
       personaOverrideActiveRef.current = false;
       setProviderOverride(selection.providerId);
       setModelOverride(selection);
+      setReasoningEffortSelection(null);
       onModelSelectionChange?.({
         providerId: selection.providerId,
         modelId: selection.modelId,
@@ -639,38 +659,71 @@ export function GlobalComposerPill({
     [projects, selectedProjectId],
   );
   const effectiveModelSelection = modelOverride ?? defaultModelSelection;
-  const activeReasoningEffort = useMemo(() => {
-    if (!reasoningEffort?.config) {
+  const handleReasoningEffortChange = useCallback(
+    (value: string) => {
+      const configId = reasoningEffortConfig?.configId;
+      if (!configId) {
+        return;
+      }
+      setReasoningEffortSelection({ configId, value });
+    },
+    [reasoningEffortConfig?.configId],
+  );
+  const activeReasoningEffort = useMemo<
+    ChatInputReasoningEffort | undefined
+  >(() => {
+    const config = reasoningEffortConfig;
+    if (!config) {
       return undefined;
     }
 
     const effortProviderId = reasoningEffortModelSelection?.providerId;
     const effortModelId = reasoningEffortModelSelection?.modelId;
-    if (!effortProviderId && !effortModelId) {
-      return reasoningEffort;
+    if (effortProviderId || effortModelId) {
+      const selectedProviderId =
+        effectiveModelSelection?.providerId ?? selectedProviderForPicker;
+      const selectedModelId = effectiveModelSelection?.modelId;
+      const providerMatches =
+        !effortProviderId ||
+        !selectedProviderId ||
+        selectedProviderId === effortProviderId;
+      const modelMatches =
+        !effortModelId || !selectedModelId || selectedModelId === effortModelId;
+      if (!providerMatches || !modelMatches) {
+        return undefined;
+      }
     }
 
-    const selectedProviderId =
-      effectiveModelSelection?.providerId ?? selectedProviderForPicker;
-    const selectedModelId = effectiveModelSelection?.modelId;
-    const providerMatches =
-      !effortProviderId ||
-      !selectedProviderId ||
-      selectedProviderId === effortProviderId;
-    const modelMatches =
-      !effortModelId || !selectedModelId || selectedModelId === effortModelId;
-
-    return providerMatches && modelMatches ? reasoningEffort : undefined;
+    // The pick only applies while it still names an option in the live
+    // snapshot, so the value that travels with a send is always a member of
+    // the config it travels with — no matter which path last refreshed it.
+    const selectionApplies =
+      reasoningEffortSelection?.configId === config.configId &&
+      config.options.some(
+        (option) => option.id === reasoningEffortSelection.value,
+      );
+    const selectedValue = selectionApplies
+      ? reasoningEffortSelection.value
+      : config.currentValue;
+    return {
+      config:
+        selectedValue === config.currentValue
+          ? config
+          : { ...config, currentValue: selectedValue },
+      onChange: handleReasoningEffortChange,
+    };
   }, [
     effectiveModelSelection?.modelId,
     effectiveModelSelection?.providerId,
-    reasoningEffort,
+    handleReasoningEffortChange,
+    reasoningEffortConfig,
     reasoningEffortModelSelection?.modelId,
     reasoningEffortModelSelection?.providerId,
+    reasoningEffortSelection,
     selectedProviderForPicker,
   ]);
   useEffect(() => {
-    const config = reasoningEffort?.config;
+    const config = reasoningEffortConfig;
     const effortProviderId = reasoningEffortModelSelection?.providerId;
     const effortModelId = reasoningEffortModelSelection?.modelId;
     const selectedProviderId =
@@ -698,7 +751,7 @@ export function GlobalComposerPill({
     activeReasoningEffort?.config,
     effectiveModelSelection?.modelId,
     effectiveModelSelection?.providerId,
-    reasoningEffort?.config,
+    reasoningEffortConfig,
     reasoningEffortModelSelection?.modelId,
     reasoningEffortModelSelection?.providerId,
     selectedProviderForPicker,
@@ -901,18 +954,8 @@ export function GlobalComposerPill({
           return;
         }
 
-        setText("");
-        clearAttachments();
-        setProviderOverride(null);
-        setModelOverride(null);
-        setSelectedProjectId(null);
-        setSelectedPersonaId(null);
-        personaSelectionSourceRef.current = "none";
-        userTouchedRoutePersonaRef.current = false;
-        personaOverrideActiveRef.current = false;
-        personaOverrideAppliedForRef.current = null;
-        personaOverrideUserOverrideForRef.current = null;
-        setSelectedSkills([]);
+        clearSentContent();
+        clearComposerSelections();
       })
       .catch((error) => {
         console.error("Failed to expand global composer:", error);
@@ -924,7 +967,8 @@ export function GlobalComposerPill({
     activeReasoningEffort?.config,
     attachmentWorkPending,
     attachments,
-    clearAttachments,
+    clearComposerSelections,
+    clearSentContent,
     expandPending,
     handoffActive,
     modelOverride,

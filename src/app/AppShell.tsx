@@ -411,8 +411,13 @@ async function applyReasoningEffortToSession(
     patchSessionId?: string;
   } = {},
 ) {
+  // Only a caller-supplied snapshot is backend-confirmed — it comes straight
+  // from session/new. The store value can be an optimistic write from a chat
+  // composer pick whose config set is still in flight, and a reused draft
+  // matches on exactly that value, so it can't stand in for confirmation.
+  const confirmedReasoningEffort = options.currentReasoningEffort;
   const currentReasoningEffort =
-    options.currentReasoningEffort ?? readSessionReasoningEffort(sessionId);
+    confirmedReasoningEffort ?? readSessionReasoningEffort(sessionId);
   if (!currentReasoningEffort) {
     return;
   }
@@ -426,6 +431,17 @@ async function applyReasoningEffortToSession(
         }
       : currentReasoningEffort;
   patchSessionReasoningEffort(patchSessionId, optimisticReasoningEffort);
+
+  // The backend already reports the requested value, so the write would be a
+  // no-op round trip — and on the first-send path it sits between session/new
+  // and the queued send being released.
+  if (
+    confirmedReasoningEffort &&
+    confirmedReasoningEffort.configId === reasoningEffort.configId &&
+    confirmedReasoningEffort.currentValue === reasoningEffort.value
+  ) {
+    return;
+  }
 
   try {
     const configOptionsSnapshot = await acpSetSessionConfigOption(
@@ -772,6 +788,7 @@ export function AppShell({
     useState<GlobalComposerHandoffRect | null>(null);
   const globalComposerHandoffTimeoutRef = useRef<number | null>(null);
   const globalComposerRouteSwapTimeoutRef = useRef<number | null>(null);
+  const providerSetupRedirectSessionIdRef = useRef<string | null>(null);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
   const [builderbotRoute, setBuilderbotRoute] =
@@ -1601,6 +1618,10 @@ export function AppShell({
             modelId: requestedPreference.modelId,
           });
           if (target.status !== "ready") {
+            // ensureNewSessionTarget has already sent the user to Providers
+            // settings for this draft; record it so the deferred route swap
+            // doesn't undo that.
+            providerSetupRedirectSessionIdRef.current = session.id;
             throw new Error(t("settings:providers.setupRequired.toast"));
           }
 
@@ -2180,6 +2201,7 @@ export function AppShell({
       project: ProjectInfo,
       options: ProjectChatDraftOptions = {},
     ) => {
+      const tStart = performance.now();
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
@@ -2225,6 +2247,9 @@ export function AppShell({
         setActiveSession(existingDraft.id);
         setActiveView("chat");
         setChatActiveSession(existingDraft.id);
+        perfLog(
+          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+        );
         return existingDraft;
       }
       const asIs =
@@ -2249,6 +2274,9 @@ export function AppShell({
       setActiveSession(session.id);
       setActiveView("chat");
       setChatActiveSession(session.id);
+      perfLog(
+        `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+      );
       startDraftSessionCreation({
         session,
         sessionModelPreference,
@@ -2543,37 +2571,6 @@ export function AppShell({
     ],
   );
 
-  const handleGlobalComposerReasoningEffortChange = useCallback(
-    (value: string) => {
-      if (!homeSessionId || !homeSession?.reasoningEffort) {
-        return;
-      }
-      const current = homeSession.reasoningEffort;
-      if (current.currentValue === value) {
-        return;
-      }
-
-      patchSession(homeSessionId, {
-        reasoningEffort: {
-          ...current,
-          currentValue: value,
-        },
-      });
-
-      void acpSetSessionConfigOption(
-        homeSessionId,
-        current.configId,
-        value,
-      ).catch((error) => {
-        console.error("Failed to set Home reasoning effort:", error);
-        patchSession(homeSessionId, {
-          reasoningEffort: current,
-        });
-      });
-    },
-    [homeSession?.reasoningEffort, homeSessionId, patchSession],
-  );
-
   const handleGlobalComposerModelSelectionChange = useCallback(
     (selection: GlobalComposerModelSelection | null) => {
       if (!homeSessionId || !selection) {
@@ -2784,6 +2781,15 @@ export function AppShell({
             globalComposerRouteSwapTimeoutRef.current = window.setTimeout(
               () => {
                 globalComposerRouteSwapTimeoutRef.current = null;
+                // The background probe can fail inside this delay and send the
+                // user to Providers settings; swapping the route now would yank
+                // them back to a draft that failed for the reason they are
+                // being asked to fix.
+                if (providerSetupRedirectSessionIdRef.current === session.id) {
+                  providerSetupRedirectSessionIdRef.current = null;
+                  resetGlobalComposerTransition();
+                  return;
+                }
                 activateDeferredChatSession(session.id);
               },
               GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS,
@@ -4887,10 +4893,7 @@ export function AppShell({
                 onStarterRequestConsumed={
                   handleGlobalComposerStarterRequestConsumed
                 }
-                reasoningEffort={{
-                  config: homeSession?.reasoningEffort,
-                  onChange: handleGlobalComposerReasoningEffortChange,
-                }}
+                reasoningEffortConfig={homeSession?.reasoningEffort}
                 reasoningEffortModelSelection={{
                   providerId: homeSession?.providerId,
                   modelId: homeSession?.modelId,
