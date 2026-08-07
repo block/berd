@@ -425,7 +425,8 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 TARGET_TRIPLE="aarch64-apple-darwin"
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
-./scripts/prepare-acp-tools-resource.sh "$TARGET_TRIPLE"
+# ACP bridges are installed into the managed Node runtime on demand; they are
+# no longer staged as build resources.
 ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
 ./scripts/prepare-catch-sidecar.sh "$TARGET_TRIPLE"

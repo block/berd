@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -117,6 +124,23 @@ describe("build-tauri-release-config", () => {
   ])("fails closed for %s", async (_name, env) => {
     const { result } = await generate(env);
     expect(result.status).not.toBe(0);
+  });
+});
+
+describe("build-macos release resource staging", () => {
+  it("invokes only resource staging scripts present in the checkout", async () => {
+    const script = await readFile(
+      join(repo, "scripts/release/build-macos.sh"),
+      "utf8",
+    );
+    const stagingScripts = [
+      ...script.matchAll(/\.\/scripts\/(prepare-[a-z0-9-]+\.sh)/g),
+    ].map((match) => match[1]);
+
+    expect(stagingScripts).not.toHaveLength(0);
+    await Promise.all(
+      stagingScripts.map((path) => access(join(repo, "scripts", path))),
+    );
   });
 });
 
