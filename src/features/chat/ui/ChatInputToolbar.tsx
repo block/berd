@@ -133,6 +133,7 @@ export function ChatInputToolbar({
     modelStatusMessage = null,
     onModelChange,
     onPickerOpen,
+    providerColumnMode,
     enabled: agentModelPickerEnabled = true,
   } = agentModelPicker;
   const {
@@ -368,6 +369,7 @@ export function ChatInputToolbar({
               isCompact={isCompact}
               triggerIconOnly={isCompact}
               reasoningEffort={reasoningEffort}
+              providerColumnMode={providerColumnMode}
             />
           )}
 

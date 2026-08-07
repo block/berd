@@ -258,6 +258,7 @@ export function ChatInput({
     modelStatusMessage = null,
     onModelChange,
     onPickerOpen,
+    providerColumnMode,
   } = agentModelPicker ?? {};
   const {
     selectedProjectId = null,
@@ -1658,6 +1659,7 @@ export function ChatInput({
                   modelStatusMessage,
                   onModelChange,
                   onPickerOpen,
+                  providerColumnMode,
                 }}
                 projectPicker={{
                   enabled:

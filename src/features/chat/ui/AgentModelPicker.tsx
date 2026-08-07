@@ -6,7 +6,12 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { IconAiAgents, IconCheck, IconChevronDown } from "@tabler/icons-react";
+import {
+  IconAiAgents,
+  IconArrowsExchange,
+  IconCheck,
+  IconChevronDown,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { cn } from "@/shared/lib/cn";
@@ -61,8 +66,15 @@ interface AgentModelPickerProps {
   reasoningEffort?: ChatInputReasoningEffort;
   contentAlign?: PopoverContentAlign | "smart";
   contentCollisionPadding?: number;
+  providerColumnMode?: ProviderColumnMode;
 }
 
+/**
+ * In existing sessions a provider switch can recreate the session, so the
+ * column is gated behind an explicit reveal instead of sitting next to the
+ * model list. New-chat composers keep it always visible.
+ */
+type ProviderColumnMode = "visible" | "gated";
 type ReasoningEffortConfig = NonNullable<ChatInputReasoningEffort["config"]>;
 type PopoverContentAlign = NonNullable<
   ComponentProps<typeof PopoverContent>["align"]
@@ -173,6 +185,7 @@ export function AgentModelPicker({
   reasoningEffort,
   contentAlign = "start",
   contentCollisionPadding = 16,
+  providerColumnMode = "visible",
 }: AgentModelPickerProps) {
   const { t } = useTranslation("chat");
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -186,6 +199,8 @@ export function AgentModelPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const modelListRef = useRef<RecommendedModelListHandle>(null);
+  const [providerRevealed, setProviderRevealed] = useState(false);
+  const [modelBrowsing, setModelBrowsing] = useState(false);
   const [resolvedContentAlign, setResolvedContentAlign] =
     useState<PopoverContentAlign>("start");
   const [latchedReasoningEffortConfig, setLatchedReasoningEffortConfig] =
@@ -332,10 +347,50 @@ export function AgentModelPicker({
   const handleModelSelect = (model: ModelOption) => {
     onModelChange?.(model.id, model);
   };
+
+  // Re-gate the provider column when the popover closes, so every reopen
+  // starts from the compact layout.
+  useEffect(() => {
+    if (!open) {
+      setProviderRevealed(false);
+      setModelBrowsing(false);
+    }
+  }, [open]);
+
+  const showAgentColumn = providerColumnMode === "visible" || providerRevealed;
+  // A sole ready agent leaves nothing to reveal, but a sole not-ready agent
+  // still needs the footer: the hidden column's Connect/Install row is the
+  // only setup path from this picker.
+  const hasAgentNeedingSetup = agents.some(
+    (agent) => agent.readiness && agent.readiness !== "ready",
+  );
+  // Browsing the full model list (search or "View more") is a model-picking
+  // task; the reveal button would swap the whole popover out from under it.
+  const showSwitchProviderFooter =
+    providerColumnMode === "gated" &&
+    !providerRevealed &&
+    !modelBrowsing &&
+    (agents.length > 1 || hasAgentNeedingSetup);
   const showReasoningEffortColumn = showReasoningEffort;
-  const pickerWidth = showReasoningEffortColumn
+  const isWidePicker = showReasoningEffortColumn && showAgentColumn;
+  const pickerWidth = isWidePicker
     ? PICKER_WIDTH_EXPANDED_PX
     : PICKER_WIDTH_COMPACT_PX;
+
+  // Land keyboard focus in the revealed column, since the reveal button that
+  // held focus unmounts with it.
+  useEffect(() => {
+    if (!providerRevealed) {
+      return;
+    }
+
+    const agentColumn = contentRef.current?.querySelector('[data-col="agent"]');
+    const target =
+      agentColumn?.querySelector<HTMLElement>("button[data-selected]") ??
+      agentColumn?.querySelector<HTMLElement>("button");
+    target?.focus();
+  }, [providerRevealed]);
+
   useEffect(() => {
     logReasoningEffortInfo("model picker gate", {
       open,
@@ -439,16 +494,38 @@ export function AgentModelPicker({
         align={resolvedContentAlign}
         collisionPadding={contentCollisionPadding}
         className={cn(
-          "h-[min(24rem,50vh)] overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
-          showReasoningEffortColumn ? "w-[37.25rem]" : "w-[26.25rem]",
+          // Fit the content up to the cap instead of pinning the height, so the
+          // gated single-column layout has no dead vertical space below the
+          // model list.
+          "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
+          isWidePicker ? "w-[37.25rem]" : "w-[26.25rem]",
         )}
         onOpenAutoFocus={(e) => {
+          // Prefer the selected row of the first visible column, then that
+          // column's first enabled row, then the reveal footer. Without the
+          // fallbacks a gated picker with no selected model (loading, empty,
+          // or nothing chosen yet) would leave focus on the trigger, where the
+          // arrow-key handler below never engages.
+          const content = contentRef.current;
+          const visibleColumn = "[data-col]:not([data-hidden='true'])";
+          const target =
+            content?.querySelector<HTMLElement>(
+              `${visibleColumn} button[data-selected]:not(:disabled)`,
+            ) ??
+            content?.querySelector<HTMLElement>(
+              `${visibleColumn} button[data-picker-nav-item]:not(:disabled)`,
+            ) ??
+            content?.querySelector<HTMLElement>(
+              "button[data-picker-footer-action]:not(:disabled)",
+            );
+          // Nothing focusable: leave Radix's default content focus in place so
+          // keyboard users still land inside the popover.
+          if (!target) {
+            return;
+          }
+
           e.preventDefault();
-          contentRef.current
-            ?.querySelector<HTMLElement>(
-              '[data-col="agent"] button[data-selected]',
-            )
-            ?.focus();
+          target.focus();
         }}
         onEscapeKeyDown={(e) => {
           if (modelListRef.current?.closeSearch()) {
@@ -514,153 +591,179 @@ export function AgentModelPicker({
           }
         }}
       >
-        <div className="flex h-full items-stretch overflow-hidden">
-          {/* Agent column */}
-          <div
-            data-col="agent"
-            className="flex min-h-0 w-[11.75rem] shrink-0 overflow-hidden p-1"
-          >
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
-                {t("toolbar.agent")}
-              </div>
-              <ScrollArea className="min-h-0 min-w-0 flex-1">
-                <div className="space-y-0.5 p-1">
-                  {agents.map((agent) => {
-                    const isSelected = agent.id === selectedAgentId;
-                    const isReady =
-                      !agent.readiness || agent.readiness === "ready";
-                    const setupLabel =
-                      agent.setupAction === "install"
-                        ? t("toolbar.install")
-                        : t("toolbar.connect");
-                    const agentIcon = getProviderIcon(agent.id, "size-4");
-
-                    return (
-                      <PickerItem
-                        key={agent.id}
-                        onClick={() => handleAgentSelect(agent)}
-                        selected={isSelected}
-                        data-selected={isSelected || undefined}
-                        className={cn(
-                          "group justify-between",
-                          !isReady &&
-                            "opacity-40 hover:opacity-100 focus-visible:opacity-100",
-                        )}
-                      >
-                        {agentIcon ? (
-                          <span className="shrink-0">{agentIcon}</span>
-                        ) : null}
-                        <span className="min-w-0 flex-1 truncate">
-                          {agent.label}
-                        </span>
-                        {!isReady ? (
-                          <Button
-                            asChild
-                            variant="outline"
-                            size="xxs"
-                            className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                          >
-                            <span>{setupLabel}</span>
-                          </Button>
-                        ) : isSelected ? (
-                          <IconCheck className="size-4 shrink-0 text-muted-foreground" />
-                        ) : null}
-                      </PickerItem>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            </div>
-          </div>
-
-          {/* Model column */}
-          <div
-            data-col="model"
-            className={cn(
-              "flex min-h-0 min-w-0 overflow-hidden p-1",
-              "ml-1 w-56 shrink-0",
-            )}
-          >
-            {modelsLoading ? (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
-                  {t("toolbar.model")}
-                </div>
-                {displayModelLabel ? (
-                  <div className="space-y-0.5 p-1">
-                    <PickerItem selected disabled>
-                      <div className="min-w-0 flex-1 truncate">
-                        {displayModelLabel}
-                      </div>
-                      <Spinner className="size-3.5 shrink-0" />
-                    </PickerItem>
-                  </div>
-                ) : (
-                  <div className="flex min-h-0 flex-1 items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-                    <Spinner className="size-4" />
-                    <span>{t("toolbar.loadingModels")}</span>
-                  </div>
-                )}
-              </div>
-            ) : displayedModels.length > 0 ? (
-              <RecommendedModelList
-                key={selectedAgentId}
-                ref={modelListRef}
-                models={displayedModels}
-                currentModelId={currentModelId}
-                currentModelProviderId={currentModelProviderId}
-                selectedAgentId={selectedAgentId}
-                onModelSelect={handleModelSelect}
-                t={t}
-              />
-            ) : (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
-                  {t("toolbar.model")}
-                </div>
-                <div className="px-2 py-2">
-                  <div className="text-sm text-muted-foreground">
-                    {modelStatusMessage ??
-                      displayModelLabel ??
-                      t("toolbar.noModelsAvailable")}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div
-            data-col="reasoning"
-            data-hidden={!showReasoningEffortColumn}
-            aria-hidden={!showReasoningEffortColumn}
-            className={cn(
-              "min-h-0 min-w-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
-              showReasoningEffortColumn
-                ? "w-[11rem] opacity-100"
-                : "pointer-events-none w-0 opacity-0",
-            )}
-          >
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 flex-1 items-stretch overflow-hidden">
+            {/* Agent column — collapsed while gated */}
             <div
+              data-col="agent"
+              data-hidden={!showAgentColumn}
+              aria-hidden={!showAgentColumn}
               className={cn(
-                "flex h-full w-[11rem] min-w-0 p-1 pl-2 transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.2,0,0,1)]",
-                showReasoningEffortColumn
-                  ? "translate-x-0 opacity-100 delay-75"
-                  : "-translate-x-1 opacity-0 delay-0",
+                "min-h-0 min-w-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
+                showAgentColumn
+                  ? "w-[11.75rem] opacity-100"
+                  : "pointer-events-none w-0 opacity-0",
               )}
             >
-              {renderedReasoningEffortConfig ? (
-                <ReasoningEffortList
-                  config={renderedReasoningEffortConfig}
-                  disabled={
-                    isReasoningEffortPending || !showReasoningEffortColumn
-                  }
-                  onChange={reasoningEffort?.onChange}
+              <div className="flex h-full w-[11.75rem] min-w-0 p-1">
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
+                    {t("toolbar.agent")}
+                  </div>
+                  <ScrollArea className="min-h-0 min-w-0 flex-1">
+                    <div className="space-y-0.5 p-1">
+                      {agents.map((agent) => {
+                        const isSelected = agent.id === selectedAgentId;
+                        const isReady =
+                          !agent.readiness || agent.readiness === "ready";
+                        const setupLabel =
+                          agent.setupAction === "install"
+                            ? t("toolbar.install")
+                            : t("toolbar.connect");
+                        const agentIcon = getProviderIcon(agent.id, "size-4");
+
+                        return (
+                          <PickerItem
+                            key={agent.id}
+                            onClick={() => handleAgentSelect(agent)}
+                            selected={isSelected}
+                            tabIndex={showAgentColumn ? undefined : -1}
+                            className={cn(
+                              "group justify-between",
+                              !isReady &&
+                                "opacity-40 hover:opacity-100 focus-visible:opacity-100",
+                            )}
+                          >
+                            {agentIcon ? (
+                              <span className="shrink-0">{agentIcon}</span>
+                            ) : null}
+                            <span className="min-w-0 flex-1 truncate">
+                              {agent.label}
+                            </span>
+                            {!isReady ? (
+                              <Button
+                                asChild
+                                variant="outline"
+                                size="xxs"
+                                className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                              >
+                                <span>{setupLabel}</span>
+                              </Button>
+                            ) : isSelected ? (
+                              <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                            ) : null}
+                          </PickerItem>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+            </div>
+
+            {/* Model column */}
+            <div
+              data-col="model"
+              className={cn(
+                "flex min-h-0 min-w-0 overflow-hidden p-1",
+                showAgentColumn ? "ml-1 w-56 shrink-0" : "flex-1",
+              )}
+            >
+              {modelsLoading ? (
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
+                    {t("toolbar.model")}
+                  </div>
+                  {displayModelLabel ? (
+                    <div className="space-y-0.5 p-1">
+                      <PickerItem selected disabled>
+                        <div className="min-w-0 flex-1 truncate">
+                          {displayModelLabel}
+                        </div>
+                        <Spinner className="size-3.5 shrink-0" />
+                      </PickerItem>
+                    </div>
+                  ) : (
+                    <div className="flex min-h-0 flex-1 items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
+                      <Spinner className="size-4" />
+                      <span>{t("toolbar.loadingModels")}</span>
+                    </div>
+                  )}
+                </div>
+              ) : displayedModels.length > 0 ? (
+                <RecommendedModelList
+                  key={selectedAgentId}
+                  ref={modelListRef}
+                  models={displayedModels}
+                  currentModelId={currentModelId}
+                  currentModelProviderId={currentModelProviderId}
+                  selectedAgentId={selectedAgentId}
+                  onModelSelect={handleModelSelect}
+                  onBrowseChange={setModelBrowsing}
                   t={t}
                 />
-              ) : null}
+              ) : (
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
+                    {t("toolbar.model")}
+                  </div>
+                  <div className="px-2 py-2">
+                    <div className="text-sm text-muted-foreground">
+                      {modelStatusMessage ??
+                        displayModelLabel ??
+                        t("toolbar.noModelsAvailable")}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div
+              data-col="reasoning"
+              data-hidden={!showReasoningEffortColumn}
+              aria-hidden={!showReasoningEffortColumn}
+              className={cn(
+                "min-h-0 min-w-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
+                showReasoningEffortColumn
+                  ? "w-[11rem] opacity-100"
+                  : "pointer-events-none w-0 opacity-0",
+              )}
+            >
+              <div
+                className={cn(
+                  "flex h-full w-[11rem] min-w-0 p-1 pl-2 transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.2,0,0,1)]",
+                  showReasoningEffortColumn
+                    ? "translate-x-0 opacity-100 delay-75"
+                    : "-translate-x-1 opacity-0 delay-0",
+                )}
+              >
+                {renderedReasoningEffortConfig ? (
+                  <ReasoningEffortList
+                    config={renderedReasoningEffortConfig}
+                    disabled={
+                      isReasoningEffortPending || !showReasoningEffortColumn
+                    }
+                    onChange={reasoningEffort?.onChange}
+                    t={t}
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
+
+          {showSwitchProviderFooter ? (
+            <div className="shrink-0 border-t px-1 py-1">
+              <button
+                type="button"
+                data-picker-footer-action
+                onClick={() => setProviderRevealed(true)}
+                className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <IconArrowsExchange className="size-3.5" />
+                <span>{t("toolbar.switchAgent")}</span>
+              </button>
+            </div>
+          ) : null}
         </div>
       </PopoverContent>
     </Popover>

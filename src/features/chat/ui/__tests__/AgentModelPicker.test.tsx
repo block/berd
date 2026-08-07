@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -973,5 +974,316 @@ describe("AgentModelPicker", () => {
     );
 
     expect(screen.getByText("No models available")).toBeInTheDocument();
+  });
+
+  describe("gated provider column", () => {
+    const renderGated = ({
+      agents = AGENTS,
+      onAgentChange = vi.fn(),
+      currentModelId = "gpt-4o",
+      currentModelName = "GPT-4o",
+      availableModels = [{ id: "gpt-4o", name: "GPT-4o" }],
+    }: Partial<
+      Pick<
+        ComponentProps<typeof AgentModelPicker>,
+        | "agents"
+        | "onAgentChange"
+        | "currentModelId"
+        | "currentModelName"
+        | "availableModels"
+      >
+    > = {}) =>
+      render(
+        <AgentModelPicker
+          agents={agents}
+          selectedAgentId="goose"
+          onAgentChange={onAgentChange}
+          currentModelId={currentModelId}
+          currentModelName={currentModelName}
+          availableModels={availableModels}
+          onModelChange={vi.fn()}
+          providerColumnMode="gated"
+        />,
+      );
+
+    // Enough non-recommended models for the search and "View more" affordances.
+    const BROWSABLE_MODELS = [
+      { id: "gpt-4o", name: "GPT-4o", recommended: true },
+      { id: "o3-mini", name: "o3 mini" },
+      { id: "o4-mini", name: "o4 mini" },
+    ];
+
+    const openPicker = (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+
+    it("collapses the agent column behind a switch-agent button", async () => {
+      const user = userEvent.setup();
+      renderGated();
+
+      await openPicker(user);
+
+      const agentColumn = document.querySelector('[data-col="agent"]');
+      expect(agentColumn).toHaveAttribute("data-hidden", "true");
+      for (const item of agentColumn?.querySelectorAll("button") ?? []) {
+        expect(item).toHaveAttribute("tabindex", "-1");
+      }
+      expect(screen.queryByRole("button", { name: "Claude Code" })).toBeNull();
+      expect(
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("focuses the selected model row on open", async () => {
+      const user = userEvent.setup();
+      renderGated();
+
+      await openPicker(user);
+
+      expect(
+        document.querySelector('[data-col="model"] button[data-selected]'),
+      ).toHaveFocus();
+    });
+
+    it("focuses the first model row when nothing is selected", async () => {
+      const user = userEvent.setup();
+      renderGated({
+        currentModelId: null,
+        currentModelName: null,
+        availableModels: [
+          { id: "gpt-4o", name: "GPT-4o" },
+          { id: "claude-sonnet", name: "Claude Sonnet" },
+        ],
+      });
+
+      await openPicker(user);
+
+      expect(
+        document.querySelector('[data-col="model"] button[data-selected]'),
+      ).toBeNull();
+      expect(
+        document.querySelector(
+          '[data-col="model"] button[data-picker-nav-item]',
+        ),
+      ).toHaveFocus();
+    });
+
+    it("focuses the switch-agent button when there are no models", async () => {
+      const user = userEvent.setup();
+      renderGated({
+        currentModelId: null,
+        currentModelName: null,
+        availableModels: [],
+      });
+
+      await openPicker(user);
+
+      expect(
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toHaveFocus();
+    });
+
+    it("hides the switch-agent button while searching models", async () => {
+      const user = userEvent.setup();
+      renderGated({ availableModels: BROWSABLE_MODELS });
+
+      await openPicker(user);
+      await user.click(screen.getByRole("button", { name: /search models/i }));
+
+      expect(
+        screen.queryByRole("button", { name: /switch agent/i }),
+      ).toBeNull();
+
+      await user.keyboard("{Escape}");
+
+      expect(
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("hides the switch-agent button while browsing all models", async () => {
+      const user = userEvent.setup();
+      renderGated({ availableModels: BROWSABLE_MODELS });
+
+      await openPicker(user);
+      await user.click(screen.getByRole("button", { name: /view more/i }));
+
+      expect(
+        screen.queryByRole("button", { name: /switch agent/i }),
+      ).toBeNull();
+
+      await user.keyboard("{Escape}");
+      await waitFor(() => {
+        expect(document.querySelector('[data-col="model"]')).toBeNull();
+      });
+      await openPicker(user);
+
+      expect(
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("reveals the agent column and still switches providers", async () => {
+      const user = userEvent.setup();
+      const onAgentChange = vi.fn();
+      renderGated({ onAgentChange });
+
+      await openPicker(user);
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
+        "false",
+      );
+      expect(
+        screen.queryByRole("button", { name: /switch agent/i }),
+      ).toBeNull();
+      expect(
+        document.querySelector('[data-col="agent"] button[data-selected]'),
+      ).toHaveFocus();
+
+      await user.click(screen.getByRole("button", { name: "Claude Code" }));
+
+      expect(onAgentChange).toHaveBeenCalledWith("claude-acp");
+    });
+
+    it("re-gates the agent column on the next open", async () => {
+      const user = userEvent.setup();
+      renderGated();
+
+      await openPicker(user);
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
+        "false",
+      );
+
+      await user.keyboard("{Escape}");
+      await waitFor(() => {
+        expect(document.querySelector('[data-col="agent"]')).toBeNull();
+      });
+
+      await openPicker(user);
+
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
+        "true",
+      );
+      expect(
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("stays compact while collapsed and widens on reveal", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="gpt-5.5"
+          currentModelName="GPT 5.5"
+          availableModels={[{ id: "gpt-5.5", name: "GPT 5.5" }]}
+          onModelChange={vi.fn()}
+          providerColumnMode="gated"
+          reasoningEffort={{
+            config: {
+              configId: "thinking_effort",
+              currentValue: "medium",
+              options: [
+                { id: "low", name: "low" },
+                { id: "medium", name: "medium" },
+                { id: "high", name: "high" },
+              ],
+            },
+            onChange: vi.fn(),
+          }}
+        />,
+      );
+
+      await openPicker(user);
+
+      const content = document.querySelector('[data-slot="popover-content"]');
+      expect(content).toHaveClass("w-[26.25rem]");
+
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+
+      expect(content).toHaveClass("w-[37.25rem]");
+    });
+
+    it("hides the switch-agent button when the only agent is ready", async () => {
+      const user = userEvent.setup();
+      renderGated({ agents: [{ id: "goose", label: "Goose" }] });
+
+      await openPicker(user);
+
+      expect(
+        screen.queryByRole("button", { name: /switch agent/i }),
+      ).toBeNull();
+    });
+
+    it("keeps the switch-agent button when the only agent needs setup", async () => {
+      const user = userEvent.setup();
+      const openSettings = vi.fn();
+      window.addEventListener(OPEN_SETTINGS_EVENT, openSettings);
+      renderGated({
+        agents: [
+          {
+            id: "goose",
+            label: "Goose",
+            readiness: "not_ready",
+            setupAction: "connect",
+          },
+        ],
+      });
+
+      await openPicker(user);
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
+        "false",
+      );
+      const goose = screen.getByRole("button", { name: /goose/i });
+      expect(goose).toHaveTextContent("Connect");
+
+      await user.click(goose);
+
+      expect(openSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: { section: "providers" } }),
+      );
+      window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
+    });
+
+    it("keeps the agent column visible by default", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="gpt-4o"
+          currentModelName="GPT-4o"
+          availableModels={[{ id: "gpt-4o", name: "GPT-4o" }]}
+          onModelChange={vi.fn()}
+        />,
+      );
+
+      await openPicker(user);
+
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
+        "false",
+      );
+      expect(
+        screen.queryByRole("button", { name: /switch agent/i }),
+      ).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Claude Code" }),
+      ).toBeInTheDocument();
+    });
   });
 });

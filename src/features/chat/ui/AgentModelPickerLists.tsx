@@ -87,6 +87,12 @@ interface ModelListProps {
   currentModelProviderId: string | null;
   selectedAgentId: string;
   onModelSelect: (model: ModelOption) => void;
+  /**
+   * Reports whether the list has left the recommended view for the full model
+   * list (search or "View more"), so the picker can hide affordances that
+   * would interrupt browsing.
+   */
+  onBrowseChange?: (browsing: boolean) => void;
   t: (key: string) => string;
 }
 
@@ -104,6 +110,7 @@ export const RecommendedModelList = forwardRef<
     currentModelProviderId,
     selectedAgentId,
     onModelSelect,
+    onBrowseChange,
     t,
   },
   ref,
@@ -156,6 +163,19 @@ export const RecommendedModelList = forwardRef<
       searchButtonRef.current?.focus();
     }
   }, [searchOpen]);
+
+  // One effect covers every path into and out of the full list: open/close
+  // search, "View more", and the `resetView` that follows a selection.
+  const browsing = searchOpen || showAll;
+  useEffect(() => {
+    onBrowseChange?.(browsing);
+  }, [browsing, onBrowseChange]);
+  // Unmounting (agent switch, models cleared) leaves no view to browse.
+  useEffect(() => {
+    return () => {
+      onBrowseChange?.(false);
+    };
+  }, [onBrowseChange]);
 
   const visibleModels = useMemo(() => {
     if (!searchOpen && !showAll) {

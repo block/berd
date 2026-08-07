@@ -134,6 +134,11 @@ export interface ChatInputAgentModelPicker {
   modelStatusMessage?: string | null;
   onModelChange?: (modelId: string, model?: ModelOption) => void;
   onPickerOpen?: () => void;
+  /**
+   * "gated" hides the agent column behind a "Switch agent" button, for
+   * surfaces where changing agent can recreate an existing session.
+   */
+  providerColumnMode?: "visible" | "gated";
 }
 
 export interface ChatInputProjectPicker {

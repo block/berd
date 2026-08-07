@@ -835,6 +835,9 @@ export function ChatView({
             modelStatusMessage: controller.modelStatusMessage,
             onModelChange: controller.handleModelChange,
             onPickerOpen: controller.handlePickerOpen,
+            // Switching provider in a live session can recreate it, so keep the
+            // provider column behind an explicit reveal.
+            providerColumnMode: "gated",
           }}
           reasoningEffort={{
             config: controller.reasoningEffort,
