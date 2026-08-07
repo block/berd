@@ -148,6 +148,19 @@ describe("ToolCallAdapter — expanded body", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the MCP acronym uppercase instead of sentence-casing it", () => {
+    renderAdapter({
+      name: "mcp: berd-extension-manager  enable extension",
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /MCP: berd-extension-manager enable extension/,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Mcp:/)).not.toBeInTheDocument();
+  });
+
   it("shows the text result when expanded", () => {
     renderAdapter({ open: true, structuredContent: undefined });
     expect(screen.getByText(/created \/project\/output\.md/i)).toBeVisible();

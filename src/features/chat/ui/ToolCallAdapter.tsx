@@ -311,7 +311,8 @@ function sentenceCaseToolTitle(name: string): string {
     /^shell(?=\s*(?:·|$))/i,
     "Running command",
   );
-  return shellTitle.charAt(0).toLocaleUpperCase() + shellTitle.slice(1);
+  const acronymTitle = shellTitle.replace(/^mcp(?=\s*(?::|·|$))/i, "MCP");
+  return acronymTitle.charAt(0).toLocaleUpperCase() + acronymTitle.slice(1);
 }
 
 function splitHeaderTitleByPath(name: string, fileLabel: string) {
