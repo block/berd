@@ -61,6 +61,7 @@ import { ChatInputSelectionChips } from "./ChatInputSelectionChips";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
+import { normalizeSessionExecutionTarget } from "../lib/sessionExecutionTarget";
 import { resolveAgentToolsCapabilityTips } from "../lib/agentToolsCapabilities";
 import { useAgentToolsTipsPreference } from "../lib/agentToolsTipPreferences";
 import { getImageFilesFromClipboardItems } from "../lib/clipboardAttachments";
@@ -253,6 +254,7 @@ export function ChatInput({
     currentModelId = null,
     currentModelProviderId = null,
     currentModel,
+    currentExecutionTarget,
     availableModels = [],
     modelsLoading = false,
     modelStatusMessage = null,
@@ -706,13 +708,24 @@ export function ChatInput({
         restoredQueuedSendOptions && submittedSkills.length === 0
           ? restoredQueuedSendOptions
           : null;
+      const executionTarget =
+        currentExecutionTarget ??
+        normalizeSessionExecutionTarget({
+          harnessId: selectedProvider,
+          modelProviderId:
+            currentModelId == null
+              ? undefined
+              : (currentModelProviderId ??
+                (selectedProvider === "goose" ? undefined : selectedProvider)),
+          modelId: currentModelId,
+          modelName: currentModel,
+        });
       const accepted =
         editingQueuedRecordId && onUpdateQueue
           ? onUpdateQueue(editingQueuedRecordId, {
               text: submittedText.trim() || " ",
               personaId: selectedPersonaId ?? undefined,
-              providerId: currentModelProviderId ?? selectedProvider,
-              modelId: currentModelId ?? undefined,
+              executionTarget,
               attachments:
                 submittedAttachments.length > 0
                   ? submittedAttachments
@@ -768,6 +781,8 @@ export function ChatInput({
     },
     [
       clearAttachments,
+      currentExecutionTarget,
+      currentModel,
       currentModelId,
       currentModelProviderId,
       dictation,

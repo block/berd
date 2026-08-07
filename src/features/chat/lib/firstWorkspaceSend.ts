@@ -16,13 +16,16 @@ import {
   getWorkspaceAttachments,
   isSameWorkspacePath,
 } from "./workspaceAttachments";
-import { applyLatestSessionConfig } from "./sessionConfigRequests";
+import { transitionSessionTarget } from "./sessionTargetCoordinator";
 import {
   useChatStore,
   type QueuedMessagePayload,
   type QueuedMessageRecord,
 } from "../stores/chatStore";
 import { useChatSessionStore } from "../stores/chatSessionStore";
+
+export const UNRESOLVED_DEFERRED_SEND_ERROR =
+  "Select a model before sending to this unresolved session.";
 
 export interface DeferredWorkspaceSend {
   type: "workspace-first-send";
@@ -204,7 +207,7 @@ export function releaseDeferredWorkspaceSend(
   const session = useChatSessionStore.getState().getSession(resolvedSessionId);
   if (
     !record ||
-    !session ||
+    !session?.executionTarget ||
     (!sendAnyway &&
       !workspaceAttachmentsEqualConfiguration(
         record.state.desired,
@@ -398,26 +401,21 @@ export async function createDeferredWorkspaces(
       .getState()
       .getSession(resolvedSessionId);
     if (!preparedSession) return;
-    const prepared = await applyLatestSessionConfig({
-      sessionId: resolvedSessionId,
-      providerId: preparedSession.providerId ?? "goose",
-      workingDir,
-      modelId: preparedSession.modelId,
-      repairSource: "deferred",
-    });
-    if (prepared.repaired) {
-      useChatSessionStore.getState().patchSession(resolvedSessionId, {
-        ...(prepared.resolvedProviderId
-          ? { providerId: prepared.resolvedProviderId }
-          : {}),
-        ...(prepared.resolvedModelId
-          ? {
-              modelId: prepared.resolvedModelId,
-              modelName: prepared.resolvedModelId,
-            }
-          : {}),
-      });
+    if (!preparedSession.executionTarget) {
+      useChatStore
+        .getState()
+        .updateDeferredMessage(resolvedSessionId, recordId, {
+          ...record.state,
+          status: "held",
+          error: UNRESOLVED_DEFERRED_SEND_ERROR,
+        });
+      return;
     }
+    const prepared = await transitionSessionTarget({
+      sessionId: resolvedSessionId,
+      target: preparedSession.executionTarget,
+      workingDir,
+    });
     resolvedSessionId = resolveDeferredSessionId(sessionId, recordId);
     record = resolvedSessionId
       ? deferredRecord(resolvedSessionId, recordId)

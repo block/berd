@@ -143,16 +143,12 @@ export function useMessageQueue(
       inFlightAttemptKeyRef.current = key;
 
       const { text, personaId, attachments, sendOptions } = payload;
-      const queuedSendOptions =
-        payload.providerId || payload.modelId
-          ? {
-              ...sendOptions,
-              sessionSelection: {
-                providerId: payload.providerId,
-                modelId: payload.modelId,
-              },
-            }
-          : sendOptions;
+      const queuedSendOptions = payload.executionTarget
+        ? {
+            ...sendOptions,
+            sessionSelection: payload.executionTarget,
+          }
+        : sendOptions;
       const sendFn = sendMessageRef.current;
       const sendResult = queuedSendOptions
         ? sendFn(
@@ -308,12 +304,13 @@ export function useMessageQueue(
       if (readOnly) {
         return false;
       }
-      const session = useChatSessionStore.getState().getSession(sessionId);
+      const executionTarget = useChatSessionStore
+        .getState()
+        .getSession(sessionId)?.executionTarget;
       return useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
         text,
         personaId,
-        providerId: session?.providerId,
-        modelId: session?.modelId,
+        executionTarget,
         attachments,
         sendOptions,
       });

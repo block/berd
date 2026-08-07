@@ -23,7 +23,6 @@ function resetStores(): void {
     hasMoreSessions: false,
     isRightRailOpen: false,
     activeWorkspaceBySession: {},
-    modelSelectionIntentBySession: {},
   });
   useChatStore.setState({
     messagesBySession: {},

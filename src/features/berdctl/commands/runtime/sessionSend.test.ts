@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   acpLoadSession: vi.fn(),
   acpPrepareSession: vi.fn(),
   acpSendMessage: vi.fn(),
-  acpSetModel: vi.fn(),
+  resolveSessionCwd: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -29,10 +29,31 @@ vi.mock("@/shared/api/acp", () => ({
   acpLoadSession: (...args: unknown[]) => mocks.acpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
   acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
-  acpSetModel: (...args: unknown[]) => mocks.acpSetModel(...args),
 }));
 
+vi.mock(
+  "@/features/projects/lib/sessionCwdSelection",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/features/projects/lib/sessionCwdSelection")
+    >()),
+    resolveSessionCwd: (...args: unknown[]) => mocks.resolveSessionCwd(...args),
+  }),
+);
+
 const SESSION_ID = "old-monitor-session";
+const INITIAL_TARGET = {
+  harnessId: "goose",
+  modelProviderId: "databricks_v2",
+  modelId: "goose-gpt-5-5",
+  modelName: "GPT-5.5",
+} as const;
+const UPDATED_TARGET = {
+  harnessId: "goose",
+  modelProviderId: "databricks_v2",
+  modelId: "goose-gpt-5-6-sol",
+  modelName: "GPT-5.6 Sol",
+} as const;
 
 async function emitHistoricalReplay(sessionId: string): Promise<void> {
   await handleSessionNotification({
@@ -74,7 +95,7 @@ describe("sendPromptToExistingSessionInBackground", () => {
         {
           id: SESSION_ID,
           title: "Old monitored session",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           createdAt: "2026-07-10T00:00:00.000Z",
           updatedAt: "2026-07-10T00:00:00.000Z",
           messageCount: 2,
@@ -88,8 +109,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
     useAgentStore.setState({ personas: [] });
 
     mocks.acpGetSessionInfo.mockResolvedValue(null);
-    mocks.acpSetModel.mockResolvedValue(undefined);
     mocks.acpSendMessage.mockResolvedValue(undefined);
+    mocks.resolveSessionCwd.mockResolvedValue("/tmp/project");
   });
 
   it("buffers a first-load ACP replay before appending a berd-monitor prompt", async () => {
@@ -164,9 +185,13 @@ describe("sendPromptToExistingSessionInBackground", () => {
         },
       ],
     });
+    useChatSessionStore.getState().replaceSessionExecutionTarget(SESSION_ID, {
+      harnessId: "claude-acp",
+      modelProviderId: "claude-acp",
+      modelId: "claude-sonnet-4",
+      modelName: "claude-sonnet-4",
+    });
     useChatSessionStore.getState().patchSession(SESSION_ID, {
-      providerId: "goose",
-      modelId: "old-goose-model",
       personaId: "claude-reviewer",
     });
     mocks.acpLoadSession.mockResolvedValue(undefined);
@@ -179,8 +204,12 @@ describe("sendPromptToExistingSessionInBackground", () => {
       payload: {
         text: "review this",
         personaId: "claude-reviewer",
-        providerId: "claude-acp",
-        modelId: "claude-sonnet-4",
+        executionTarget: {
+          harnessId: "claude-acp",
+          modelProviderId: "claude-acp",
+          modelId: "claude-sonnet-4",
+          modelName: "claude-sonnet-4",
+        },
       },
     });
 
@@ -188,10 +217,7 @@ describe("sendPromptToExistingSessionInBackground", () => {
       SESSION_ID,
       "claude-acp",
       expect.any(String),
-    );
-    expect(mocks.acpSetModel).toHaveBeenCalledWith(
-      SESSION_ID,
-      "claude-sonnet-4",
+      { modelId: "claude-sonnet-4" },
     );
     expect(mocks.acpSendMessage).toHaveBeenCalledWith(
       SESSION_ID,
@@ -203,8 +229,245 @@ describe("sendPromptToExistingSessionInBackground", () => {
     );
     expect(useChatSessionStore.getState().getSession(SESSION_ID)).toMatchObject(
       {
-        providerId: "claude-acp",
-        modelId: "claude-sonnet-4",
+        executionTarget: {
+          harnessId: "claude-acp",
+          modelProviderId: "claude-acp",
+          modelId: "claude-sonnet-4",
+          modelName: "claude-sonnet-4",
+        },
+      },
+    );
+  });
+
+  it("does not prepare or dispatch an unresolved queued session", async () => {
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, undefined);
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession.mockResolvedValue(undefined);
+    const queuedMessage = {
+      kind: "transport-ready",
+      recordId: "unresolved-send",
+      payload: { text: "keep the backend model" },
+    } as const;
+
+    await expect(
+      sendQueuedPromptToExistingSessionInBackground(SESSION_ID, queuedMessage),
+    ).rejects.toThrow(
+      "Select a model before sending to this unresolved session.",
+    );
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+
+    useChatSessionStore.getState().replaceSessionExecutionTarget(SESSION_ID, {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "gpt-5.6",
+      modelName: "GPT-5.6",
+    });
+    await sendQueuedPromptToExistingSessionInBackground(
+      SESSION_ID,
+      queuedMessage,
+    );
+
+    expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      "openai",
+      "/tmp/project",
+      { modelId: "gpt-5.6" },
+    );
+    expect(mocks.acpSendMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "keep the backend model",
+      expect.any(Object),
+    );
+  });
+
+  it("does not restore a queued target after the UI selects a newer model", async () => {
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, INITIAL_TARGET);
+    const queuedMessage = {
+      kind: "transport-ready",
+      recordId: "deferred-model-send",
+      releasedFromDeferred: true,
+      payload: {
+        text: "keep the selected model",
+        executionTarget: INITIAL_TARGET,
+      },
+    } as const;
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, UPDATED_TARGET);
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession.mockResolvedValue(undefined);
+
+    await expect(
+      sendQueuedPromptToExistingSessionInBackground(SESSION_ID, queuedMessage),
+    ).rejects.toThrow(
+      "Session preparation was superseded by a newer selection.",
+    );
+
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalledWith(
+      SESSION_ID,
+      INITIAL_TARGET.modelProviderId,
+      expect.any(String),
+      { modelId: INITIAL_TARGET.modelId },
+    );
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession(SESSION_ID)?.executionTarget,
+    ).toEqual(UPDATED_TARGET);
+  });
+
+  it("does not restore a queued target after the UI clears its selection", async () => {
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, INITIAL_TARGET);
+    const queuedMessage = {
+      kind: "transport-ready",
+      recordId: "deferred-cleared-model-send",
+      releasedFromDeferred: true,
+      payload: {
+        text: "keep the selection unresolved",
+        executionTarget: INITIAL_TARGET,
+      },
+    } as const;
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, undefined);
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession.mockResolvedValue(undefined);
+
+    await expect(
+      sendQueuedPromptToExistingSessionInBackground(SESSION_ID, queuedMessage),
+    ).rejects.toThrow(
+      "Session preparation was superseded by a newer selection.",
+    );
+
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().getSession(SESSION_ID)).toMatchObject(
+      {
+        executionTarget: undefined,
+        executionTargetSource: "ui",
+      },
+    );
+  });
+
+  it("uses the latest UI target after background preparation yields", async () => {
+    let resolveCwd: ((workingDir: string) => void) | undefined;
+    mocks.resolveSessionCwd.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveCwd = resolve;
+      }),
+    );
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession.mockResolvedValue(undefined);
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, INITIAL_TARGET);
+
+    const send = sendPromptToExistingSessionInBackground(
+      SESSION_ID,
+      "use the latest model",
+    );
+    await vi.waitFor(() => {
+      expect(mocks.resolveSessionCwd).toHaveBeenCalledTimes(1);
+    });
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, UPDATED_TARGET);
+    resolveCwd?.("/tmp/project");
+
+    await send;
+
+    expect(mocks.acpPrepareSession.mock.calls.at(-1)).toEqual([
+      SESSION_ID,
+      "databricks_v2",
+      "/tmp/project",
+      { modelId: "goose-gpt-5-6-sol" },
+    ]);
+    expect(
+      useChatSessionStore.getState().getSession(SESSION_ID)?.executionTarget,
+    ).toEqual(UPDATED_TARGET);
+  });
+
+  it("does not commit a stale target when the UI changes during preparation", async () => {
+    let resolvePrepare: (() => void) | undefined;
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolvePrepare = resolve;
+        }),
+      );
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, INITIAL_TARGET);
+
+    const send = sendPromptToExistingSessionInBackground(
+      SESSION_ID,
+      "keep the newer model",
+    );
+    await vi.waitFor(() => {
+      expect(mocks.acpPrepareSession).toHaveBeenCalledTimes(2);
+    });
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, UPDATED_TARGET);
+    resolvePrepare?.();
+
+    await expect(send).rejects.toThrow(
+      "Session preparation was superseded by a newer selection.",
+    );
+    expect(
+      useChatSessionStore.getState().getSession(SESSION_ID)?.executionTarget,
+    ).toEqual(UPDATED_TARGET);
+  });
+
+  it("does not commit a queued target when the UI clears during preparation", async () => {
+    let resolvePrepare: (() => void) | undefined;
+    mocks.acpLoadSession.mockResolvedValue(undefined);
+    mocks.acpPrepareSession.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolvePrepare = resolve;
+      }),
+    );
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, INITIAL_TARGET);
+    const queuedMessage = {
+      kind: "transport-ready",
+      recordId: "deferred-cleared-during-prepare",
+      releasedFromDeferred: true,
+      payload: {
+        text: "do not restore the queued model",
+        executionTarget: INITIAL_TARGET,
+      },
+    } as const;
+
+    const send = sendQueuedPromptToExistingSessionInBackground(
+      SESSION_ID,
+      queuedMessage,
+    );
+    await vi.waitFor(() => {
+      expect(mocks.acpPrepareSession).toHaveBeenCalledTimes(1);
+    });
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, undefined);
+    resolvePrepare?.();
+
+    await expect(send).rejects.toThrow(
+      "Session preparation was superseded by a newer selection.",
+    );
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().getSession(SESSION_ID)).toMatchObject(
+      {
+        executionTarget: undefined,
+        executionTargetSource: "ui",
       },
     );
   });

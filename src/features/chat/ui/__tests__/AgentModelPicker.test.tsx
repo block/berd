@@ -185,9 +185,14 @@ describe("AgentModelPicker", () => {
         selectedAgentId="goose"
         onAgentChange={vi.fn()}
         currentModelId="goose-claude-opus-4-8"
-        currentModelProviderId="goose"
+        currentModelProviderId="databricks_v2"
         currentModelName="goose-claude-opus-4-8"
         availableModels={[
+          {
+            id: "goose-claude-opus-4-8",
+            name: "Claude Opus 4.8",
+            providerId: "databricks_v2",
+          },
           {
             id: "gpt-5.5",
             name: "GPT 5.5",
@@ -214,6 +219,67 @@ describe("AgentModelPicker", () => {
     expect(
       explicitModel.querySelector(".tabler-icon-check"),
     ).toBeInTheDocument();
+  });
+
+  it("does not synthesize an external harness model into Goose", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="synthetic-model"
+        currentModelProviderId="codex-acp"
+        currentModelName="synthetic-model"
+        availableModels={[
+          {
+            id: "goose-gpt-5-5",
+            name: "GPT-5.5",
+            providerId: "databricks_v2",
+            recommended: true,
+          },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /synthetic-model/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /GPT-5\.5/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an unresolved raw model id in the trigger instead of the recommended model", () => {
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="claude-fable"
+        currentModelProviderId="databricks_v2"
+        currentModelName="claude-fable"
+        availableModels={[
+          {
+            id: "goose-gpt-5-5",
+            name: "GPT-5.5",
+            providerId: "databricks_v2",
+            recommended: true,
+          },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("claude-fable");
+    expect(trigger).not.toHaveTextContent("GPT-5.5");
   });
 
   it("uses a stored human model name before models resolve", () => {

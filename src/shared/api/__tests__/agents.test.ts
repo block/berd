@@ -284,7 +284,8 @@ describe("agents API", () => {
       displayName: "Scout",
       avatar: "https://example.test/scout.png",
       systemPrompt: "Research carefully.",
-      provider: "openai",
+      provider: "goose",
+      modelProviderId: "openai",
       model: "gpt-4.1",
     });
 
@@ -295,7 +296,8 @@ describe("agents API", () => {
       content: "Research carefully.",
       target: { scope: "global" },
       properties: {
-        provider: "openai",
+        provider: "goose",
+        modelProviderId: "openai",
         model: "gpt-4.1",
         avatar: "https://example.test/scout.png",
       },
@@ -751,7 +753,8 @@ Research carefully.
       content: "Research carefully.",
       target: { scope: "global" },
       properties: {
-        provider: "openai",
+        provider: "goose",
+        modelProviderId: "openai",
         model: "gpt-4.1",
         avatar: "https://example.test/scout.png",
         sprout: {
@@ -871,12 +874,38 @@ Research carefully.
     expect(mockGooseSourcesCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         properties: {
-          provider: "bedrock",
+          provider: "goose",
+          modelProviderId: "bedrock",
           model: "anthropic.claude:v1",
           sprout: {
             name: "scout",
           },
         },
+      }),
+    );
+  });
+
+  it("keeps agent harness prefixes separate from model providers", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = `---
+name: scout
+model: codex:gpt-5.6
+---
+
+Research carefully.
+`;
+
+    await importPersonas(raw, "scout.persona.md");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          provider: "codex-acp",
+          modelProviderId: null,
+          model: "gpt-5.6",
+        }),
       }),
     );
   });

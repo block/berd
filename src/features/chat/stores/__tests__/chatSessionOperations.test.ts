@@ -33,7 +33,6 @@ function resetStore() {
     isLoading: false,
     hasHydratedSessions: false,
     activeWorkspaceBySession: {},
-    modelSelectionIntentBySession: {},
   });
 }
 
@@ -156,9 +155,12 @@ describe("chatSessionOperations", () => {
       ];
       seedSession({
         projectId: null,
-        providerId: "openai",
-        modelId: "gpt-5.4",
-        modelName: "GPT 5.4",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.4",
+          modelName: "GPT 5.4",
+        },
         workingDir: "/tmp/old",
         workspaceAttachments,
         activeWorkspaceId: "path:/tmp/other",
@@ -175,9 +177,12 @@ describe("chatSessionOperations", () => {
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
         projectId: "project-new",
-        providerId: "openai",
-        modelId: "gpt-5.4",
-        modelName: "GPT 5.4",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.4",
+          modelName: "GPT 5.4",
+        },
         workingDir: "/tmp/old",
         workspaceAttachments,
         activeWorkspaceId: "path:/tmp/other",
@@ -219,7 +224,7 @@ describe("chatSessionOperations", () => {
     it("moves a session back to no project", async () => {
       seedSession({
         projectId: "project-old",
-        providerId: "goose",
+        executionTarget: { harnessId: "goose" },
         workingDir: "/tmp/current",
       });
       mockUpdateSessionProject.mockResolvedValue(undefined);

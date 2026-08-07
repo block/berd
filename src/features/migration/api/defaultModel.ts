@@ -1,4 +1,5 @@
 import { readGooseDefaults } from "@/features/providers/api/gooseDefaults";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 export interface DefaultModelStatus {
   providerId?: string;
@@ -31,7 +32,7 @@ export async function readDefaultModelStatus(): Promise<DefaultModelStatus> {
   // the migration gate have settled, so there is no startup read left to join.
   const defaults = await readGooseDefaults();
   const providerId = normalize(defaults.providerId);
-  const modelId = normalize(defaults.modelId);
+  const modelId = normalizeConcreteModelId(normalize(defaults.modelId));
   return {
     providerId,
     modelId,

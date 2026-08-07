@@ -3,13 +3,14 @@ import {
   reasoningEffortConfigLogFields,
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 export interface AcpModelConfigSnapshot {
   modelId: string;
   modelName: string;
 }
 
-export interface AcpSessionConfigSelectOption {
+interface AcpSessionConfigSelectOption {
   id: string;
   name?: string;
   description?: string;
@@ -28,10 +29,17 @@ export interface AcpSessionConfigSnapshots {
   reasoningEffort: AcpReasoningEffortConfigSnapshot | null;
 }
 
+interface AcpSessionExecutionConfigSnapshot {
+  providerId: string;
+  modelId: string;
+}
+
 export interface AcpSessionConfigSnapshotContext {
   origin: "notification" | "response";
+  requestId?: string;
   providerId?: string;
   modelId?: string;
+  reasoningEffortValue?: string;
 }
 
 export interface AcpSessionConfigSnapshotHandlers {
@@ -53,10 +61,6 @@ export function setSessionConfigSnapshotHandlers(
   handlers: AcpSessionConfigSnapshotHandlers,
 ): void {
   snapshotHandlers = handlers;
-}
-
-export function clearSessionConfigSnapshotHandlers(): void {
-  snapshotHandlers = {};
 }
 
 export function applySessionConfigOptionsSnapshot(
@@ -81,6 +85,7 @@ export function dispatchSessionConfigSnapshots(
   logReasoningEffortInfo("snapshot dispatch", {
     sessionId: shortLogId(sessionId),
     origin: context.origin,
+    requestId: context.requestId ? shortLogId(context.requestId) : null,
     providerId: context.providerId ?? null,
     modelId: context.modelId ?? null,
     hasModelSnapshot: Boolean(snapshots.model),
@@ -132,6 +137,20 @@ export function readSessionConfigOptionsSnapshots(
   };
 }
 
+export function readSessionExecutionConfigSnapshot(
+  source: unknown,
+): AcpSessionExecutionConfigSnapshot | null {
+  const provider = getSelectConfigOption(
+    source,
+    (option) => option.id === "provider" || option.category === "provider",
+  );
+  const model = getModelConfigSnapshot(source);
+  if (!provider || !model) {
+    return null;
+  }
+  return { providerId: provider.currentValue, modelId: model.modelId };
+}
+
 function getModelConfigSnapshot(
   source: unknown,
 ): AcpModelConfigSnapshot | null {
@@ -143,11 +162,15 @@ function getModelConfigSnapshot(
     return null;
   }
 
-  const modelName =
-    modelOption.options.find((model) => model.id === modelOption.currentValue)
-      ?.name ?? modelOption.currentValue;
+  const modelId = normalizeConcreteModelId(modelOption.currentValue);
+  if (!modelId) {
+    return null;
+  }
 
-  return { modelId: modelOption.currentValue, modelName };
+  const modelName =
+    modelOption.options.find((model) => model.id === modelId)?.name ?? modelId;
+
+  return { modelId, modelName };
 }
 
 function getReasoningEffortConfigSnapshot(

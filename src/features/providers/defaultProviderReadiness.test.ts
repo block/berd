@@ -52,14 +52,18 @@ describe("readDefaultProviderReadiness", () => {
     });
   });
 
-  it("requires setup when the default model is missing", async () => {
-    mockDefaults({ providerId: "openai", modelId: null });
+  it.each([
+    ["missing", "openai", null],
+    ["the Goose harness sentinel", "databricks_v2", "goose"],
+  ])("requires setup when the default model is %s", async (_, providerId, modelId) => {
+    mockDefaults({ providerId, modelId });
 
     await expect(readDefaultProviderReadiness()).resolves.toEqual({
       status: "needs_setup",
       reason: "model_missing",
-      providerId: "openai",
+      providerId,
     });
+    expect(mockCheckAllProviderStatus).not.toHaveBeenCalled();
   });
 
   it("requires setup when the default provider is unconfigured", async () => {

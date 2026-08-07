@@ -15,7 +15,18 @@ const createAgentSchema = z
       .optional()
       .describe("Provider of the model the agent should use."),
   })
-  .strict();
+  .strict()
+  .refine((args) => !args.model || Boolean(args.provider), {
+    message: "provider is required when model is set",
+    path: ["provider"],
+  })
+  .refine(
+    (args) => !args.model || args.provider?.trim().toLowerCase() !== "goose",
+    {
+      message: "provider must identify the concrete model provider",
+      path: ["provider"],
+    },
+  );
 
 export const createAgentCommand = defineCommand({
   effect: "create",
@@ -41,6 +52,7 @@ Result:
       displayName: args.name,
       systemPrompt: args.system_prompt,
       provider: args.provider,
+      modelProviderId: args.model ? args.provider : undefined,
       model: args.model,
     });
     useAgentStore.getState().addPersona(persona);

@@ -400,8 +400,12 @@ describe("useMessageQueue", () => {
         {
           id: "s1",
           title: "Chat",
-          providerId: "databricks_v2",
-          modelId: "goose-gpt-5-6-sol",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "goose-gpt-5-6-sol",
+            modelName: "GPT-5.6 Sol",
+          },
           createdAt: "2026-08-05T00:00:00.000Z",
           updatedAt: "2026-08-05T00:00:00.000Z",
           messageCount: 1,
@@ -422,34 +426,14 @@ describe("useMessageQueue", () => {
       payload: {
         text: "keep this model",
         personaId: "persona-a",
-        providerId: "databricks_v2",
-        modelId: "goose-gpt-5-6-sol",
-      },
-    });
-  });
-
-  it("sends a queued message with its captured provider and model", () => {
-    const sendMessage = vi.fn();
-    useChatStore.getState().enqueueTransportReadyMessage("s1", {
-      text: "keep queued selection",
-      personaId: "persona-a",
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-6-sol",
-    });
-
-    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
-
-    expect(sendMessage).toHaveBeenCalledWith(
-      "keep queued selection",
-      { id: "persona-a" },
-      undefined,
-      {
-        sessionSelection: {
-          providerId: "databricks_v2",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
           modelId: "goose-gpt-5-6-sol",
+          modelName: "GPT-5.6 Sol",
         },
       },
-    );
+    });
   });
 
   it("preserves personaId when auto-sending", () => {

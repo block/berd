@@ -41,7 +41,7 @@ function seedSession(messageCount: number) {
       {
         id: "session-1",
         title: "Chat",
-        providerId: "goose",
+        executionTarget: { harnessId: "goose" },
         createdAt: "2026-04-21T00:00:00.000Z",
         updatedAt: "2026-04-21T00:00:00.000Z",
         messageCount,
@@ -181,7 +181,7 @@ describe("recoverStrandedProviderSession", () => {
         modelSelection: {
           id: "claude-sonnet-4",
           name: "Claude Sonnet 4",
-          providerId: "anthropic",
+          modelProviderId: "anthropic",
           source: "explicit",
         },
         recreateSessionForProvider,

@@ -93,7 +93,10 @@ export function resolveDisplayModelLabel({
     return modelName;
   }
 
-  return getExplicitModelIdLabel(selectedModelId);
+  return (
+    getExplicitModelIdLabel(selectedModelId) ??
+    (availableModels.length > 0 ? selectedModelId : null)
+  );
 }
 
 export function resolvePickerTriggerLabel({

@@ -1,6 +1,9 @@
 import type { AcpProvider } from "@/shared/api/acp";
 import type { Persona } from "@/shared/types/agents";
-import { normalizeProviderKey } from "@/features/providers/providerCatalog";
+import {
+  normalizeProviderKey,
+  resolveModelProviderCatalogIdStrict,
+} from "@/features/providers/providerCatalog";
 
 const IMPLICIT_GOOSE_PROVIDER: AcpProvider = { id: "goose", label: "Goose" };
 
@@ -16,7 +19,7 @@ const IMPLICIT_GOOSE_PROVIDER: AcpProvider = { id: "goose", label: "Goose" };
  * on a resolved provider so a model is never paired with a mismatched provider.
  */
 export function resolvePersonaProvider(
-  persona: Pick<Persona, "provider"> | null | undefined,
+  persona: Pick<Persona, "provider" | "model"> | null | undefined,
   providers: AcpProvider[],
 ): AcpProvider | undefined {
   const personaProvider = persona?.provider?.trim();
@@ -25,6 +28,9 @@ export function resolvePersonaProvider(
   }
 
   const normalizedPersonaProvider = normalizeProviderKey(personaProvider);
+  if (persona?.model && resolveModelProviderCatalogIdStrict(personaProvider)) {
+    return IMPLICIT_GOOSE_PROVIDER;
+  }
   const matchingProvider = providers.find(
     (provider) =>
       provider.id === personaProvider ||

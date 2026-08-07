@@ -8,6 +8,7 @@ import { compareSessionsByActivityDesc } from "@/features/chat/lib/sessionActivi
 import { normalizeAcpTitle } from "@/features/chat/lib/sessionTitle";
 import { withWorkspaceBackfill } from "@/features/chat/lib/workspaceAttachments";
 import { loadPersistedChatWorkspaceMetadata } from "@/features/chat/stores/workspaceAttachmentPersistence";
+import { executionTargetFromGooseServeSession } from "@/features/chat/lib/gooseServeExecutionTarget";
 
 interface SessionPageState {
   sessions: ChatSession[];
@@ -21,13 +22,17 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
   const persistedWorkspaceMetadata = loadPersistedChatWorkspaceMetadata(
     session.sessionId,
   );
+  const executionTarget = executionTargetFromGooseServeSession({
+    providerId: session.providerId ?? undefined,
+    modelId: session.modelId ?? undefined,
+  });
   return withWorkspaceBackfill({
     id: session.sessionId,
     title: normalizeAcpTitle(session.title) ?? "Untitled",
     projectId: session.projectId ?? undefined,
-    providerId: session.providerId ?? undefined,
+    executionTarget,
+    executionTargetSource: executionTarget ? "acp" : undefined,
     personaId: session.personaId ?? undefined,
-    modelId: session.modelId ?? undefined,
     workingDir: session.workingDir ?? undefined,
     workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
     activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
@@ -66,16 +71,26 @@ function mergeSessionMetadata(
     }
 
     const existing = byId.get(loadedSession.id);
-    const modelName =
-      existing?.modelId === session.modelId ? existing?.modelName : undefined;
+    // ACP list/get metadata is discovery state. Once the renderer owns a
+    // provider/model selection, preserve the complete tuple so an older list
+    // response cannot replace a newer picker choice. A selection-less pinned
+    // placeholder still hydrates from ACP on first resolution.
+    const preserveUiTarget = existing?.executionTargetSource === "ui";
+    const executionTarget = preserveUiTarget
+      ? existing.executionTarget
+      : session.executionTarget;
+    const executionTargetSource = preserveUiTarget
+      ? existing.executionTargetSource
+      : session.executionTargetSource;
     const personaId = session.personaId ?? existing?.personaId;
     byId.set(
       session.id,
       withWorkspaceBackfill({
         ...existing,
         ...session,
+        executionTarget,
+        executionTargetSource,
         personaId,
-        modelName,
         workspaceAttachments:
           existing?.workspaceAttachments ?? session.workspaceAttachments,
         activeWorkspaceId:

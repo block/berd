@@ -48,7 +48,6 @@ describe("useActiveProjectTint", () => {
       hasHydratedSessions: true,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
     useProjectStore.setState({
       projects: [],

@@ -1,5 +1,6 @@
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { getStoredModelPreferenceForProvider } from "./modelPreferences";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 interface SessionModelPreferenceOptions {
   providerId: string;
@@ -22,11 +23,12 @@ export function resolveSessionModelPreference({
   providerId,
   preferredModel,
 }: SessionModelPreferenceOptions): SessionModelPreference {
-  if (preferredModel) {
+  const concretePreferredModel = normalizeConcreteModelId(preferredModel);
+  if (concretePreferredModel) {
     return {
       providerId,
-      modelId: preferredModel,
-      modelName: preferredModel,
+      modelId: concretePreferredModel,
+      modelName: concretePreferredModel,
     };
   }
 

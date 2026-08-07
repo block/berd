@@ -133,7 +133,6 @@ describe("AppShell startup diagnostics", () => {
       hasHydratedSessions: false,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
     useAgentStore.setState({
       selectedProvider: "goose",

@@ -8,14 +8,12 @@ const mockAcpSendMessage = vi.fn();
 const mockAcpCancelSession = vi.fn();
 const mockAcpLoadSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
-const mockAcpSetModel = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
   acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
-  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
 import { useChat } from "../useChat";
@@ -26,7 +24,6 @@ describe("useChat skill chips", () => {
     mockAcpCancelSession.mockReset();
     mockAcpLoadSession.mockReset();
     mockAcpPrepareSession.mockReset();
-    mockAcpSetModel.mockReset();
     mockAcpSendMessage.mockResolvedValue(undefined);
     useChatStore.setState({
       messagesBySession: {},

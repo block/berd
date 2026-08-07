@@ -88,16 +88,20 @@ describe("useChat persona preparation", () => {
         undefined,
         {
           sessionSelection: {
-            providerId: "databricks_v2",
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
             modelId: "goose-gpt-5-6-sol",
+            modelName: "goose-gpt-5-6-sol",
           },
         },
       );
     });
 
     expect(ensurePrepared).toHaveBeenCalledWith("persona-a", {
-      providerId: "databricks_v2",
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
       modelId: "goose-gpt-5-6-sol",
+      modelName: "goose-gpt-5-6-sol",
     });
   });
 

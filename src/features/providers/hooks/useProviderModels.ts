@@ -8,7 +8,10 @@ import { getProviderModelSelectionHint } from "../modelSelectionHints";
 import { isGooseModelProviderId } from "../lib/modelRecommendations";
 import { defaultModelInventoryModeForLoadResult } from "../runtimeProviderConfig";
 import { useProviderCatalogStore } from "../stores/providerCatalogStore";
-import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
+import {
+  isCachedModelInventoryAuthoritative,
+  useProviderModelCacheStore,
+} from "../stores/providerModelCacheStore";
 
 const EMPTY_MODELS: ModelOption[] = [];
 
@@ -79,6 +82,12 @@ export function useProviderModels() {
     [providers],
   );
 
+  const isModelInventoryAuthoritative = useCallback(
+    (providerId: string) =>
+      isCachedModelInventoryAuthoritative(providers.get(providerId)),
+    [providers],
+  );
+
   const getModelsForAgent = useCallback(
     (agentId: string) => {
       if (agentId !== "goose") {
@@ -132,6 +141,7 @@ export function useProviderModels() {
     modelCacheRefreshProviderIds,
     getModelsForAgent,
     getModelsForProvider,
+    isModelInventoryAuthoritative,
     refreshProviderModels,
     refreshAllModelProviders,
     isRefreshingProvider,

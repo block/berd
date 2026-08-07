@@ -12,7 +12,6 @@ function resetStore() {
     hasMoreSessions: false,
     isRightRailOpen: false,
     activeWorkspaceBySession: {},
-    modelSelectionIntentBySession: {},
   });
 }
 

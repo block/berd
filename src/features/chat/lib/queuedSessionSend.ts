@@ -4,7 +4,6 @@ import type { Persona } from "@/shared/types/agents";
 import { listProjects } from "@/features/projects/api/projects";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
-import { GOOSE_PROVIDER_ID } from "@/shared/api/acpPersonaHandoff";
 import { listSkills } from "@/features/skills/api/skills";
 import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillChatPrompt";
 import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
@@ -12,15 +11,23 @@ import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext"
 import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
-import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
+import { transitionSessionTarget } from "@/features/chat/lib/sessionTargetCoordinator";
 import { applyPendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import {
   formatIncludedWorkspacesPrompt,
   getWorkspaceAttachments,
 } from "@/features/chat/lib/workspaceAttachments";
 import { formatWorkspaceInstructionsPrompt } from "@/features/chat/lib/workspaceContextPrompt";
-import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  type ChatSession,
+  useChatSessionStore,
+} from "@/features/chat/stores/chatSessionStore";
 import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
+import {
+  sameSessionExecutionTarget,
+  type SessionExecutionTarget,
+} from "@/features/chat/lib/sessionExecutionTarget";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 
 async function findPersona(personaId: string): Promise<Persona> {
   const cached = useAgentStore.getState().getPersonaById(personaId);
@@ -37,15 +44,46 @@ async function findPersona(personaId: string): Promise<Persona> {
   return persona;
 }
 
+function targetMatchesOrMaterializes(
+  actual: SessionExecutionTarget | undefined,
+  expected: SessionExecutionTarget,
+): boolean {
+  return (
+    sameSessionExecutionTarget(actual, expected) ||
+    (expected.modelId === undefined &&
+      actual?.harnessId === expected.harnessId &&
+      actual.modelProviderId === expected.modelProviderId)
+  );
+}
+
+function assertSessionExecutionTarget(
+  sessionId: string,
+  expectedTarget: SessionExecutionTarget,
+): void {
+  if (
+    targetMatchesOrMaterializes(
+      useChatSessionStore.getState().getSession(sessionId)?.executionTarget,
+      expectedTarget,
+    )
+  ) {
+    return;
+  }
+  throw new Error("Session preparation was superseded by a newer selection.");
+}
+
+function hasUiOwnedUnresolvedTarget(session?: ChatSession): boolean {
+  return session?.executionTargetSource === "ui" && !session.executionTarget;
+}
+
 export async function prepareExistingSessionForBackgroundSend(
   sessionId: string,
   options: {
     preserveWorkingDir?: boolean;
-    providerId?: string;
-    modelId?: string;
+    executionTarget?: SessionExecutionTarget;
   } = {},
 ): Promise<{
   providerId: string;
+  executionTarget: SessionExecutionTarget;
   persona?: Pick<Persona, "id" | "displayName" | "systemPrompt">;
 }> {
   const loaded = await loadSessionMessages(sessionId);
@@ -58,9 +96,6 @@ export async function prepareExistingSessionForBackgroundSend(
   if (!session) {
     throw new Error(`No session "${sessionId}".`);
   }
-  const providerId =
-    options.providerId ?? session.providerId ?? GOOSE_PROVIDER_ID;
-  const modelId = options.modelId ?? session.modelId;
   const [project, persona] = await Promise.all([
     session.projectId
       ? listProjects().then((projects) => {
@@ -81,27 +116,52 @@ export async function prepareExistingSessionForBackgroundSend(
     : (useChatSessionStore.getState().activeWorkspaceBySession[sessionId]
         ?.path ?? session.workingDir);
   const workingDir = await resolveSessionCwd(project, activeWorkspacePath);
+  const liveSessionAtSubmit = useChatSessionStore
+    .getState()
+    .getSession(sessionId);
+  const liveTargetAtSubmit = liveSessionAtSubmit?.executionTarget;
+  if (
+    options.executionTarget &&
+    (hasUiOwnedUnresolvedTarget(liveSessionAtSubmit) ||
+      (liveTargetAtSubmit &&
+        !sameSessionExecutionTarget(
+          options.executionTarget,
+          liveTargetAtSubmit,
+        )))
+  ) {
+    throw new Error("Session preparation was superseded by a newer selection.");
+  }
+  const executionTarget = options.executionTarget ?? liveTargetAtSubmit;
+  if (!executionTarget) {
+    throw new Error(
+      "Select a model before sending to this unresolved session.",
+    );
+  }
+  const { providerId } =
+    gooseServeSelectionFromExecutionTarget(executionTarget);
+  if (!providerId) {
+    throw new Error("Session execution target requires a provider boundary.");
+  }
 
-  const result = await applyLatestSessionConfig({
+  const result = await transitionSessionTarget({
     sessionId,
-    providerId,
+    target: executionTarget,
     workingDir,
-    modelId,
-    repairSource: options.modelId ? "queue" : "session",
   });
   if (!result.applied) {
-    throw new Error("Session preparation was superseded by a newer request.");
+    throw new Error("Session preparation was superseded by a newer selection.");
   }
-  const resolvedProviderId = result.resolvedProviderId ?? providerId;
-  const resolvedModelId = result.resolvedModelId ?? modelId;
-  useChatSessionStore.getState().patchSession(sessionId, {
-    workingDir,
+  const preparedExecutionTarget = result.target;
+  const { providerId: resolvedProviderId } =
+    gooseServeSelectionFromExecutionTarget(preparedExecutionTarget);
+  if (!resolvedProviderId) {
+    throw new Error("Session execution target requires a provider boundary.");
+  }
+  return {
     providerId: resolvedProviderId,
-    ...(resolvedModelId
-      ? { modelId: resolvedModelId, modelName: resolvedModelId }
-      : {}),
-  });
-  return { providerId: resolvedProviderId, persona: persona ?? undefined };
+    executionTarget: preparedExecutionTarget,
+    persona: persona ?? undefined,
+  };
 }
 
 export async function sendQueuedPromptToExistingSessionInBackground(
@@ -114,12 +174,16 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   const payloadPersona = payload.personaId
     ? await findPersona(payload.personaId)
     : undefined;
-  const { providerId, persona: sessionPersona } =
-    await prepareExistingSessionForBackgroundSend(sessionId, {
-      preserveWorkingDir: queuedMessage.releasedFromDeferred,
-      ...(payload.providerId ? { providerId: payload.providerId } : {}),
-      ...(payload.modelId ? { modelId: payload.modelId } : {}),
-    });
+  const {
+    providerId,
+    executionTarget: preparedExecutionTarget,
+    persona: sessionPersona,
+  } = await prepareExistingSessionForBackgroundSend(sessionId, {
+    preserveWorkingDir: queuedMessage.releasedFromDeferred,
+    ...(payload.executionTarget
+      ? { executionTarget: payload.executionTarget }
+      : {}),
+  });
   const persona = payloadPersona ?? sessionPersona;
   const session = useChatSessionStore.getState().getSession(sessionId);
   const sendOptions = payload.sendOptions ?? {};
@@ -148,6 +212,7 @@ export async function sendQueuedPromptToExistingSessionInBackground(
         formatAvailableSkillsCatalogPrompt(skills),
       )
     : undefined;
+  assertSessionExecutionTarget(sessionId, preparedExecutionTarget);
   await sendPromptInBackground(
     sessionId,
     payload.text,
@@ -160,5 +225,6 @@ export async function sendQueuedPromptToExistingSessionInBackground(
     payload.attachments,
     beforeUserMessageCommitted,
     onUserMessageCommitted,
+    () => assertSessionExecutionTarget(sessionId, preparedExecutionTarget),
   );
 }

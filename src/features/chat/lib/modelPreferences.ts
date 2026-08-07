@@ -1,4 +1,8 @@
-import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
+import {
+  canonicalProviderCatalogId,
+  resolveAgentProviderCatalogIdStrict,
+} from "@/features/providers/providerCatalog";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 const MODEL_PREFERENCES_STORAGE_KEY = "goose:preferredModelsByAgent";
 
@@ -9,6 +13,52 @@ export interface StoredModelPreference {
 }
 
 type StoredModelPreferences = Record<string, StoredModelPreference>;
+
+function canonicalAgentId(agentId: string): string {
+  return resolveAgentProviderCatalogIdStrict(agentId) ?? agentId;
+}
+
+function canonicalModelProviderId(providerId: string): string | undefined {
+  if (!providerId || providerId === "goose") {
+    return undefined;
+  }
+  return canonicalProviderCatalogId(providerId);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseStoredModelPreferences(value: unknown): StoredModelPreferences {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const preferences: StoredModelPreferences = {};
+  for (const [storedAgentId, candidate] of Object.entries(value)) {
+    if (!isRecord(candidate)) continue;
+    const agentId = canonicalAgentId(storedAgentId);
+    const modelId =
+      typeof candidate.modelId === "string"
+        ? normalizeConcreteModelId(candidate.modelId)
+        : undefined;
+    const storedProviderId =
+      typeof candidate.providerId === "string"
+        ? canonicalModelProviderId(candidate.providerId)
+        : undefined;
+    const providerId =
+      storedProviderId ?? (agentId === "goose" ? undefined : agentId);
+    if (!modelId) continue;
+
+    preferences[agentId] = {
+      modelId,
+      modelName:
+        typeof candidate.modelName === "string" ? candidate.modelName : modelId,
+      ...(providerId ? { providerId } : {}),
+    };
+  }
+  return preferences;
+}
 
 function readStoredModelPreferences(): StoredModelPreferences {
   if (typeof window === "undefined") {
@@ -21,12 +71,7 @@ function readStoredModelPreferences(): StoredModelPreferences {
       return {};
     }
 
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object") {
-      return {};
-    }
-
-    return parsed as StoredModelPreferences;
+    return parseStoredModelPreferences(JSON.parse(stored));
   } catch {
     return {};
   }
@@ -57,7 +102,7 @@ function persistStoredModelPreferences(
 export function getStoredModelPreference(
   agentId: string,
 ): StoredModelPreference | null {
-  return readStoredModelPreferences()[agentId] ?? null;
+  return readStoredModelPreferences()[canonicalAgentId(agentId)] ?? null;
 }
 
 export function getStoredModelPreferenceForProvider(
@@ -77,12 +122,22 @@ export function setStoredModelPreference(
   preference: StoredModelPreference,
 ): void {
   const next = readStoredModelPreferences();
-  next[agentId] = preference;
+  const canonicalId = canonicalAgentId(agentId);
+  const modelId = normalizeConcreteModelId(preference.modelId);
+  const providerId = preference.providerId
+    ? canonicalModelProviderId(preference.providerId)
+    : undefined;
+  if (!modelId || !providerId) {
+    delete next[canonicalId];
+    persistStoredModelPreferences(next);
+    return;
+  }
+  next[canonicalId] = { ...preference, modelId, providerId };
   persistStoredModelPreferences(next);
 }
 
 export function clearStoredModelPreference(agentId: string): void {
   const next = readStoredModelPreferences();
-  delete next[agentId];
+  delete next[canonicalAgentId(agentId)];
   persistStoredModelPreferences(next);
 }

@@ -8,7 +8,10 @@ const mockRefreshAgentProviderStatus = vi.fn();
 const mockUseAgentProviderStatus = vi.fn();
 
 vi.mock("@/features/providers/hooks/useProviderModels", () => ({
-  useProviderModels: () => mockUseProviderModels(),
+  useProviderModels: () => ({
+    isModelInventoryAuthoritative: () => false,
+    ...mockUseProviderModels(),
+  }),
 }));
 
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
@@ -61,7 +64,7 @@ describe("useAgentModelPickerState", () => {
       result.current.handleProviderChange("goose");
     });
 
-    expect(onProviderSelected).toHaveBeenCalledWith("goose");
+    expect(onProviderSelected).toHaveBeenCalledWith("goose", []);
   });
 
   it("treats goose as a no-op only when goose is already selected", () => {

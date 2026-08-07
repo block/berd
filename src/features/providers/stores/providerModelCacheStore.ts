@@ -33,6 +33,7 @@ interface ProviderModelCacheActions {
     options?: { fresh?: boolean; runtimeManagedProviderIds?: Set<string> },
   ) => void;
   getModelsForProvider: (providerId: string) => ModelOption[];
+  isModelInventoryAuthoritative: (providerId: string) => boolean;
   getError: (providerId: string) => string | null;
   refreshProviderModels: (
     providerId: string,
@@ -120,14 +121,19 @@ async function fetchProviderSupportedModels(
   return response.models;
 }
 
+export function isCachedModelInventoryAuthoritative(
+  entry: CachedProviderModels | undefined,
+): boolean {
+  return entry != null && (entry.runtimeManaged || entry.fetchedAt > 0);
+}
+
 function isStale(entry: CachedProviderModels | undefined): boolean {
-  if (!entry) {
+  if (!entry || !isCachedModelInventoryAuthoritative(entry)) {
     return true;
   }
-  if (entry.runtimeManaged) {
-    return false;
-  }
-  return Date.now() - entry.fetchedAt > MODEL_CACHE_TTL_MS;
+  return (
+    !entry.runtimeManaged && Date.now() - entry.fetchedAt > MODEL_CACHE_TTL_MS
+  );
 }
 
 function refreshVersion(providerId: string): number {
@@ -195,6 +201,9 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
 
     getModelsForProvider: (providerId) =>
       get().providers.get(providerId)?.models ?? [],
+
+    isModelInventoryAuthoritative: (providerId) =>
+      isCachedModelInventoryAuthoritative(get().providers.get(providerId)),
 
     getError: (providerId) => get().providers.get(providerId)?.error ?? null,
 

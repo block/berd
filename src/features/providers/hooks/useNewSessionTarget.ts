@@ -86,10 +86,7 @@ export function useNewSessionTarget() {
       });
       const storedModelPreference = getStoredModelPreference(persistedAgentId);
       const supportedStoredPreference = storedModelPreference
-        ? await resolveSupportedSessionModelPreference(
-            persistedAgentId,
-            undefined,
-          )
+        ? await resolveSupportedSessionModelPreference(persistedAgentId)
         : null;
       const persistedModelPreference = supportedStoredPreference?.modelId
         ? {
@@ -123,10 +120,7 @@ export function useNewSessionTarget() {
       ) {
         result = {
           ...result,
-          ...(await resolveSupportedSessionModelPreference(
-            result.providerId,
-            undefined,
-          )),
+          ...(await resolveSupportedSessionModelPreference(result.providerId)),
         };
       }
       if (result.status === "ready") {

@@ -94,7 +94,7 @@ describe("useReleasedQueuedMessageDrain", () => {
     ).toBeUndefined();
   });
 
-  it("retains the released payload when background preparation fails", async () => {
+  it("parks a failed released payload in a visible terminal state", async () => {
     const released = releasedRecord();
     mocks.sendQueuedPromptToExistingSessionInBackground.mockRejectedValueOnce(
       new Error("preparation rejected"),
@@ -115,9 +115,20 @@ describe("useReleasedQueuedMessageDrain", () => {
         expect.any(Function),
       );
     });
-    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toEqual(
-      [released],
-    );
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"]?.[0],
+      ).toMatchObject({
+        kind: "deferred",
+        recordId: released.recordId,
+        payload: released.payload,
+        state: {
+          type: "workspace-first-send",
+          status: "failed",
+          error: expect.any(String),
+        },
+      });
+    });
   });
 
   it("scopes released draining to the renderer that owns each session", async () => {

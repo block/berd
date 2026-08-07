@@ -13,11 +13,9 @@ import type { AgentPickerOption, ModelOption } from "../types";
 interface UseAgentModelPickerStateOptions {
   providers: AcpProvider[];
   selectedProvider?: string;
-  onProviderSelected: (providerId: string) => void;
+  onProviderSelected: (providerId: string, models: ModelOption[]) => void;
   onModelSelected?: (model: ModelOption) => void;
 }
-
-const EMPTY_MODELS: ModelOption[] = [];
 
 export function useAgentModelPickerState({
   providers,
@@ -31,6 +29,7 @@ export function useAgentModelPickerState({
     configuredModelProviderIds,
     modelCacheRefreshProviderIds,
     getModelsForAgent,
+    isModelInventoryAuthoritative: isProviderModelInventoryAuthoritative,
     refreshAllModelProviders,
     isRefreshingProvider,
     getError,
@@ -112,26 +111,36 @@ export function useAgentModelPickerState({
   ]);
 
   const availableModels = useMemo(
-    () => getModelsForAgent(selectedAgentId) ?? EMPTY_MODELS,
+    () => getModelsForAgent(selectedAgentId),
     [getModelsForAgent, selectedAgentId],
   );
 
-  const providerIdsForSelectedAgent =
-    selectedAgentId === "goose"
-      ? configuredModelProviderIds
-      : [selectedAgentId];
+  const providerIdsForSelectedAgent = useMemo(
+    () =>
+      selectedAgentId === "goose"
+        ? configuredModelProviderIds
+        : [selectedAgentId],
+    [configuredModelProviderIds, selectedAgentId],
+  );
 
-  const modelsLoading = useMemo(() => {
-    if (availableModels.length > 0) {
-      return false;
-    }
+  const isModelInventoryAuthoritative = useCallback(
+    (providerId?: string) => {
+      const providerIds = providerId
+        ? [providerId]
+        : providerIdsForSelectedAgent;
+      return (
+        providerIds.length > 0 &&
+        providerIds.every(isProviderModelInventoryAuthoritative)
+      );
+    },
+    [isProviderModelInventoryAuthoritative, providerIdsForSelectedAgent],
+  );
 
-    return providerIdsForSelectedAgent.some(isRefreshingProvider);
-  }, [
-    availableModels.length,
-    isRefreshingProvider,
-    providerIdsForSelectedAgent,
-  ]);
+  const isRefreshingModels =
+    providerIdsForSelectedAgent.some(isRefreshingProvider);
+  const modelsLoading =
+    isRefreshingModels &&
+    (availableModels.length === 0 || !isModelInventoryAuthoritative());
 
   const modelStatusMessage = useMemo(() => {
     if (availableModels.length > 0) {
@@ -154,9 +163,9 @@ export function useAgentModelPickerState({
         return;
       }
 
-      onProviderSelected(providerId);
+      onProviderSelected(providerId, getModelsForAgent(providerId));
     },
-    [onProviderSelected, readyAgentIds, selectedProvider],
+    [getModelsForAgent, onProviderSelected, readyAgentIds, selectedProvider],
   );
 
   const handleModelChange = useCallback(
@@ -203,6 +212,7 @@ export function useAgentModelPickerState({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,

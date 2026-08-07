@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { acpCreateSession, acpListSessionsPage } from "@/shared/api/acp";
 import type {
-  Session,
   WorkspaceAttachment,
   WorkspaceAttachmentLifecycle,
   WorkspaceAttachmentKind,
@@ -34,6 +33,13 @@ import {
   persistChatWorkspaceMetadata,
   removePersistedChatWorkspaceMetadata,
 } from "./workspaceAttachmentPersistence";
+import {
+  materializeSessionExecutionModel,
+  normalizeSessionExecutionTarget,
+  sameSessionExecutionTarget,
+  type SessionExecutionTarget,
+} from "@/features/chat/lib/sessionExecutionTarget";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 
 const RIGHT_RAIL_OPEN_STORAGE_KEY = "goose:right-rail-open";
 const LEGACY_CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
@@ -54,10 +60,9 @@ export interface ChatSession {
   id: string;
   title: string;
   projectId?: string | null;
-  providerId?: string;
+  executionTarget?: SessionExecutionTarget;
+  executionTargetSource?: "ui" | "acp";
   personaId?: string;
-  modelId?: string;
-  modelName?: string;
   reasoningEffort?: ChatSessionReasoningEffortConfig;
   workingDir?: string | null;
   workspaceAttachments?: WorkspaceAttachment[];
@@ -123,19 +128,6 @@ export interface ActiveWorkspace {
   branch: string | null;
 }
 
-export interface ModelSelectionIntent {
-  requestId: string;
-  kind: "model" | "provider";
-  providerId?: string;
-  modelId?: string;
-  modelName?: string;
-  previousProviderId?: string;
-  previousModelId?: string;
-  previousModelName?: string;
-  /** Agent whose future-chat preference should be updated after this model reaches ACP. */
-  preferenceAgentId?: string;
-}
-
 export function hasSessionStarted(
   session: Pick<
     ChatSession,
@@ -178,19 +170,16 @@ interface ChatSessionStoreState {
   hasMoreSessions: boolean;
   isRightRailOpen: boolean;
   activeWorkspaceBySession: Record<string, ActiveWorkspace>;
-  modelSelectionIntentBySession: Record<string, ModelSelectionIntent>;
   archiveMutationBySessionId: ArchiveMutationBySessionId;
 }
 
 interface CreateSessionOpts {
   title?: string;
   projectId?: string;
-  providerId?: string;
+  executionTarget?: SessionExecutionTarget;
   personaId?: string;
   workingDir?: string;
   workspaceAttachments?: WorkspaceAttachment[];
-  modelId?: string;
-  modelName?: string;
   deferProviderSetup?: boolean;
 }
 
@@ -209,20 +198,28 @@ interface ReplaceWorkspaceAttachmentOpts extends AttachWorkspaceOpts {
   oldAttachmentId: string;
 }
 
+export type ChatSessionPatch = Partial<
+  Omit<ChatSession, "executionTarget" | "executionTargetSource">
+>;
+
+type ChatSessionPromotionPatch = ChatSessionPatch & {
+  executionTarget?: SessionExecutionTarget;
+};
+
 interface ChatSessionStoreActions {
   createSession: (opts?: CreateSessionOpts) => Promise<ChatSession>;
   createDraftSession: (opts?: CreateSessionOpts) => ChatSession;
   promoteDraftSession: (
     draftSessionId: string,
     backendSessionId: string,
-    patch?: Partial<ChatSession>,
+    patch?: ChatSessionPromotionPatch,
   ) => void;
   markSessionCreationFailed: (id: string, error: string) => void;
   resetSessionCreation: (id: string) => void;
   ensurePinnedSessionPlaceholder: (id: string) => void;
   loadSessions: () => Promise<void>;
   loadMoreSessions: () => Promise<void>;
-  patchSession: (id: string, patch: Partial<ChatSession>) => void;
+  patchSession: (id: string, patch: ChatSessionPatch) => void;
   updateSessionSubtitleFromText: (sessionId: string, text: string) => void;
   addSession: (session: ChatSession) => void;
   removeSession: (id: string) => void;
@@ -255,15 +252,14 @@ interface ChatSessionStoreActions {
     path?: string | null,
     source?: WorkspaceAttachmentSource,
   ) => void;
-  switchSessionProvider: (sessionId: string, providerId: string) => void;
-  beginModelSelectionIntent: (
+  replaceSessionExecutionTarget: (
     sessionId: string,
-    intent: ModelSelectionIntent,
+    target: SessionExecutionTarget | undefined,
   ) => void;
-  getModelSelectionIntent: (
+  hydrateSessionExecutionTarget: (
     sessionId: string,
-  ) => ModelSelectionIntent | undefined;
-  clearModelSelectionIntent: (sessionId: string, requestId?: string) => void;
+    target: SessionExecutionTarget,
+  ) => void;
 
   getSession: (id: string) => ChatSession | undefined;
   getActiveSession: () => ChatSession | null;
@@ -274,6 +270,49 @@ export type ChatSessionStore = ChatSessionStoreState & ChatSessionStoreActions;
 
 function patchIncludesReasoningEffort(patch: Partial<ChatSession>): boolean {
   return Object.hasOwn(patch, "reasoningEffort");
+}
+
+function sameReasoningEffortConfig(
+  left: ChatSessionReasoningEffortConfig | undefined,
+  right: ChatSessionReasoningEffortConfig | undefined,
+): boolean {
+  return (
+    left === right ||
+    (left !== undefined &&
+      right !== undefined &&
+      left.configId === right.configId &&
+      left.currentValue === right.currentValue &&
+      left.options.length === right.options.length &&
+      left.options.every(
+        (option, index) =>
+          option.id === right.options[index]?.id &&
+          option.name === right.options[index]?.name,
+      ))
+  );
+}
+
+function withExecutionTarget(
+  session: ChatSession,
+  executionTarget: SessionExecutionTarget | undefined,
+  source: "ui" | "acp",
+): ChatSession {
+  const identityChanged = !sameSessionExecutionTarget(
+    session.executionTarget,
+    executionTarget,
+  );
+  if (
+    !identityChanged &&
+    session.executionTarget?.modelName === executionTarget?.modelName &&
+    session.executionTargetSource === source
+  ) {
+    return session;
+  }
+  return {
+    ...session,
+    executionTarget,
+    executionTargetSource: source,
+    ...(identityChanged ? { reasoningEffort: undefined } : {}),
+  };
 }
 
 function getArchiveMutationDesiredArchivedAt(
@@ -444,27 +483,6 @@ function persistWorkspaceMetadataForSession(session: ChatSession): void {
   });
 }
 
-export function sessionToChatSession(session: Session): ChatSession {
-  return withWorkspaceBackfill({
-    id: session.id,
-    title: session.title,
-    projectId: session.projectId,
-    providerId: session.providerId,
-    personaId: session.personaId,
-    modelId: session.modelId,
-    modelName: session.modelName,
-    workingDir: session.workingDir,
-    workspaceAttachments: session.workspaceAttachments,
-    activeWorkspaceId: session.activeWorkspaceId,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    lastMessageAt: session.lastMessageAt,
-    archivedAt: session.archivedAt,
-    messageCount: session.messageCount,
-    userSetName: session.userSetName,
-  });
-}
-
 export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -475,7 +493,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   hasMoreSessions: false,
   isRightRailOpen: loadRightRailOpenPreference(),
   activeWorkspaceBySession: {},
-  modelSelectionIntentBySession: {},
   archiveMutationBySessionId: {},
 
   createSession: async (opts) => {
@@ -483,31 +500,44 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       throw new Error("createSession requires a working directory");
     }
     const now = new Date().toISOString();
-    const providerId = opts.providerId ?? "goose";
+    const requestedExecutionTarget = normalizeSessionExecutionTarget(
+      opts.executionTarget ?? { harnessId: "goose" },
+    );
+    const gooseServeSelection = gooseServeSelectionFromExecutionTarget(
+      requestedExecutionTarget,
+    );
+    const providerId = gooseServeSelection.providerId ?? "goose";
+    const requestedModelId = requestedExecutionTarget.modelId;
     const { sessionId, configOptionsSnapshot } = await acpCreateSession(
       providerId,
       opts.workingDir,
       {
         personaId: opts.personaId,
-        modelId: opts.modelId,
+        modelId: requestedModelId,
         projectId: opts.projectId,
-        deferProviderSetup: opts.deferProviderSetup ?? opts.modelId == null,
+        deferProviderSetup: opts.deferProviderSetup ?? requestedModelId == null,
       },
     );
     logReasoningEffortInfo("createSession acp resolved", {
       sessionId: shortLogId(sessionId),
       providerId,
-      modelId: opts.modelId ?? null,
+      modelId: requestedModelId ?? null,
       hasReasoningEffort: Boolean(configOptionsSnapshot?.reasoningEffort),
     });
+    const executionTarget =
+      !requestedModelId && configOptionsSnapshot?.model
+        ? (materializeSessionExecutionModel(
+            requestedExecutionTarget,
+            configOptionsSnapshot.model,
+          ) ?? requestedExecutionTarget)
+        : requestedExecutionTarget;
     const chatSession: ChatSession = withWorkspaceBackfill({
       id: sessionId,
       title: opts.title ?? DEFAULT_CHAT_TITLE,
       projectId: opts.projectId,
-      providerId,
+      executionTarget,
+      executionTargetSource: "ui",
       personaId: opts.personaId,
-      modelId: opts.modelId ?? configOptionsSnapshot?.model?.modelId,
-      modelName: opts.modelName ?? configOptionsSnapshot?.model?.modelName,
       reasoningEffort: configOptionsSnapshot?.reasoningEffort ?? undefined,
       workingDir: opts.workingDir,
       workspaceAttachments: opts.workspaceAttachments,
@@ -526,7 +556,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     logReasoningEffortInfo("createSession inserted", {
       sessionId: shortLogId(sessionId),
       providerId,
-      modelId: opts.modelId ?? null,
+      modelId: requestedModelId ?? null,
       hasReasoningEffort: Boolean(chatSession.reasoningEffort),
     });
     persistWorkspaceMetadataForSession(chatSession);
@@ -538,16 +568,17 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       throw new Error("createDraftSession requires a working directory");
     }
     const now = new Date().toISOString();
-    const providerId = opts.providerId ?? "goose";
+    const executionTarget = normalizeSessionExecutionTarget(
+      opts.executionTarget ?? { harnessId: "goose" },
+    );
     const id = crypto.randomUUID();
     const chatSession: ChatSession = withWorkspaceBackfill({
       id,
       title: opts.title ?? DEFAULT_CHAT_TITLE,
       projectId: opts.projectId,
-      providerId,
+      executionTarget,
+      executionTargetSource: "ui",
       personaId: opts.personaId,
-      modelId: opts.modelId,
-      modelName: opts.modelName,
       workingDir: opts.workingDir,
       workspaceAttachments: opts.workspaceAttachments,
       createdAt: now,
@@ -583,9 +614,28 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       }
 
       const existing = state.sessions[existingIndex];
+      const executionTargetWasPatched = Object.hasOwn(patch, "executionTarget");
+      const executionTarget = executionTargetWasPatched
+        ? patch.executionTarget
+          ? normalizeSessionExecutionTarget(patch.executionTarget)
+          : undefined
+        : existing.executionTarget;
+      const executionTargetChanged = !sameSessionExecutionTarget(
+        existing.executionTarget,
+        executionTarget,
+      );
+      let executionTargetSource = existing.executionTargetSource;
+      if (executionTargetWasPatched) {
+        executionTargetSource = "ui";
+      }
       const promotedBase: ChatSession = {
         ...existing,
         ...patch,
+        executionTarget,
+        executionTargetSource,
+        ...(executionTargetChanged && !patchIncludesReasoningEffort(patch)
+          ? { reasoningEffort: undefined }
+          : {}),
         id: backendSessionId,
         creationState: undefined,
         creationError: undefined,
@@ -632,14 +682,13 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         .map((session) => (session.id === draftSessionId ? promoted : session));
       const { [draftSessionId]: workspace, ...remainingWorkspaces } =
         state.activeWorkspaceBySession;
-      const { [draftSessionId]: intent, ...remainingIntents } =
-        state.modelSelectionIntentBySession;
 
       logReasoningEffortInfo("promoteDraftSession applied", {
         draftSessionId: shortLogId(draftSessionId),
         backendSessionId: shortLogId(backendSessionId),
-        providerId: promoted.providerId ?? null,
-        modelId: promoted.modelId ?? null,
+        harnessId: promoted.executionTarget?.harnessId ?? null,
+        modelProviderId: promoted.executionTarget?.modelProviderId ?? null,
+        modelId: promoted.executionTarget?.modelId ?? null,
         patchIncludesReasoningEffort: patchIncludesReasoningEffort(patch),
         ...reasoningEffortConfigLogFields("previous", existing.reasoningEffort),
         ...reasoningEffortConfigLogFields("promoted", promoted.reasoningEffort),
@@ -656,12 +705,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
               [backendSessionId]: workspace,
             }
           : remainingWorkspaces,
-        modelSelectionIntentBySession: intent
-          ? {
-              ...remainingIntents,
-              [backendSessionId]: intent,
-            }
-          : remainingIntents,
       };
     });
     if (promotedForPersistence) {
@@ -769,6 +812,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   patchSession: (id, patch) => {
+    if (Object.hasOwn(patch, "executionTarget")) {
+      throw new Error(
+        "Use replaceSessionExecutionTarget to change session execution state.",
+      );
+    }
     const includesReasoningEffort = patchIncludesReasoningEffort(patch);
     let sessionForWorkspacePersistence: ChatSession | null = null;
     set((state) => {
@@ -783,9 +831,21 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         }
         return state;
       }
+      const reasoningEffortUnchanged =
+        includesReasoningEffort &&
+        sameReasoningEffortConfig(
+          existing.reasoningEffort,
+          patch.reasoningEffort,
+        );
+      if (reasoningEffortUnchanged && Object.keys(patch).length === 1) {
+        return state;
+      }
+      const effectivePatch = reasoningEffortUnchanged
+        ? { ...patch, reasoningEffort: existing.reasoningEffort }
+        : patch;
       const mergedBase: ChatSession = {
         ...existing,
-        ...patch,
+        ...effectivePatch,
         updatedAt: patch.updatedAt ?? existing.updatedAt,
       };
       const merged =
@@ -895,8 +955,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
 
       const { [id]: _workspace, ...activeWorkspaceBySession } =
         state.activeWorkspaceBySession;
-      const { [id]: _intent, ...modelSelectionIntentBySession } =
-        state.modelSelectionIntentBySession;
       const { [id]: _mutation, ...archiveMutationBySessionId } =
         state.archiveMutationBySessionId;
 
@@ -905,7 +963,6 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         activeSessionId:
           state.activeSessionId === id ? null : state.activeSessionId,
         activeWorkspaceBySession,
-        modelSelectionIntentBySession,
         archiveMutationBySessionId,
       };
     });
@@ -1229,87 +1286,49 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     }
   },
 
-  switchSessionProvider: (sessionId, providerId) => {
+  replaceSessionExecutionTarget: (sessionId, target) => {
+    const normalizedTarget = target
+      ? normalizeSessionExecutionTarget(target)
+      : undefined;
     set((state) => {
-      const existing = state.sessions.find((s) => s.id === sessionId);
-      if (!existing) return state;
-      if (
-        existing.providerId === providerId &&
-        existing.modelId === undefined &&
-        existing.modelName === undefined
-      ) {
+      const existing = state.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existing) {
         return state;
       }
-      logReasoningEffortInfo("switchSessionProvider clears reasoningEffort", {
-        sessionId: shortLogId(sessionId),
-        previousProviderId: existing.providerId ?? null,
-        nextProviderId: providerId,
-        hadReasoningEffort: Boolean(existing.reasoningEffort),
-        ...reasoningEffortConfigLogFields("previous", existing.reasoningEffort),
-      });
+      const replacement = withExecutionTarget(existing, normalizedTarget, "ui");
+      if (replacement === existing) {
+        return state;
+      }
       return {
         sessions: state.sessions.map((session) =>
-          session.id === sessionId
-            ? {
-                ...session,
-                providerId,
-                modelId: undefined,
-                modelName: undefined,
-                reasoningEffort: undefined,
-                updatedAt: session.updatedAt,
-              }
-            : session,
+          session.id === sessionId ? replacement : session,
         ),
       };
     });
   },
 
-  beginModelSelectionIntent: (sessionId, intent) => {
-    logReasoningEffortInfo("beginModelSelectionIntent", {
-      sessionId: shortLogId(sessionId),
-      requestId: shortLogId(intent.requestId),
-      intentKind: intent.kind,
-      providerId: intent.providerId ?? null,
-      modelId: intent.modelId ?? null,
-      previousProviderId: intent.previousProviderId ?? null,
-      previousModelId: intent.previousModelId ?? null,
-    });
-    set((state) => ({
-      modelSelectionIntentBySession: {
-        ...state.modelSelectionIntentBySession,
-        [sessionId]: intent,
-      },
-    }));
-  },
-
-  getModelSelectionIntent: (sessionId) =>
-    get().modelSelectionIntentBySession[sessionId],
-
-  clearModelSelectionIntent: (sessionId, requestId) => {
-    const current = get().modelSelectionIntentBySession[sessionId];
-    if (!current || (requestId && current.requestId !== requestId)) {
-      logReasoningEffortInfo("clearModelSelectionIntent skipped", {
-        sessionId: shortLogId(sessionId),
-        requestedRequestId: shortLogId(requestId),
-        currentRequestId: shortLogId(current?.requestId),
-        currentIntentKind: current?.kind ?? null,
-      });
-      return;
-    }
-
-    logReasoningEffortInfo("clearModelSelectionIntent", {
-      sessionId: shortLogId(sessionId),
-      requestId: shortLogId(current.requestId),
-      intentKind: current.kind,
-      providerId: current.providerId ?? null,
-      modelId: current.modelId ?? null,
-    });
+  hydrateSessionExecutionTarget: (sessionId, target) => {
+    const normalizedTarget = normalizeSessionExecutionTarget(target);
     set((state) => {
-      const modelSelectionIntentBySession = {
-        ...state.modelSelectionIntentBySession,
+      const existing = state.sessions.find(
+        (session) => session.id === sessionId,
+      );
+      if (!existing || existing.executionTargetSource === "ui") {
+        return state;
+      }
+      const replacement = withExecutionTarget(
+        existing,
+        normalizedTarget,
+        "acp",
+      );
+      if (replacement === existing) return state;
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId ? replacement : session,
+        ),
       };
-      delete modelSelectionIntentBySession[sessionId];
-      return { modelSelectionIntentBySession };
     });
   },
 

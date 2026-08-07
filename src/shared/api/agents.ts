@@ -9,6 +9,7 @@ import type {
   Avatar,
 } from "@/shared/types/agents";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
+import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import {
   isPersonaMarkdownImportFileName,
   isSupportedPersonaImportFileName,
@@ -28,6 +29,7 @@ const PORTABLE_SPROUT_FRONTMATTER_KEYS = new Set([
 export type AgentSourceProperties = {
   [key: string]: unknown;
   provider?: string | null;
+  modelProviderId?: string | null;
   model?: string | null;
   avatar?: string | null;
   draft?: boolean;
@@ -98,6 +100,9 @@ function personaProperties(
 ): AgentSourceProperties {
   const properties: AgentSourceProperties = {};
   if (request.provider) properties.provider = request.provider;
+  if (request.modelProviderId) {
+    properties.modelProviderId = request.modelProviderId;
+  }
   if (request.model) properties.model = request.model;
 
   const avatar = avatarToProperty(request.avatar);
@@ -108,7 +113,10 @@ function personaProperties(
 
 function applyOptionalProperty(
   properties: AgentSourceProperties,
-  key: keyof Pick<AgentSourceProperties, "provider" | "model" | "avatar">,
+  key: keyof Pick<
+    AgentSourceProperties,
+    "provider" | "modelProviderId" | "model" | "avatar"
+  >,
   value: string | null | undefined,
 ): void {
   if (value === undefined) {
@@ -130,6 +138,7 @@ function mergedPersonaProperties(
   const properties: AgentSourceProperties = { ...(existing ?? {}) };
 
   applyOptionalProperty(properties, "provider", request.provider);
+  applyOptionalProperty(properties, "modelProviderId", request.modelProviderId);
   applyOptionalProperty(properties, "model", request.model);
   applyOptionalProperty(
     properties,
@@ -208,7 +217,16 @@ function personaModelProperty(
     return undefined;
   }
 
-  const provider = propertyToString(properties?.provider);
+  const harnessId = propertyToString(properties?.provider);
+  const modelProviderId = propertyToString(properties?.modelProviderId);
+  let provider = modelProviderId;
+  if (
+    !provider &&
+    harnessId &&
+    resolveAgentProviderCatalogIdStrict(harnessId) !== "goose"
+  ) {
+    provider = harnessId;
+  }
   return provider ? `${provider}:${model}` : model;
 }
 
@@ -325,6 +343,23 @@ function splitPersonaModel(model: string): {
   return provider ? { provider, model: modelId } : { model: modelId };
 }
 
+function applyPersonaModelProperty(
+  properties: AgentSourceProperties,
+  value: string,
+): void {
+  const { provider, model } = splitPersonaModel(value);
+  if (provider) {
+    const harnessId = resolveAgentProviderCatalogIdStrict(provider);
+    applyOptionalProperty(properties, "provider", harnessId ?? "goose");
+    applyOptionalProperty(
+      properties,
+      "modelProviderId",
+      harnessId ? null : provider,
+    );
+  }
+  applyOptionalProperty(properties, "model", model);
+}
+
 function unsupportedSproutFrontmatter(
   frontmatter: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -372,6 +407,11 @@ function legacyPersonaProperties(
     properties,
     "provider",
     propertyToString(parsed.provider),
+  );
+  applyOptionalProperty(
+    properties,
+    "modelProviderId",
+    propertyToString(parsed.modelProviderId),
   );
   applyOptionalProperty(properties, "model", propertyToString(parsed.model));
   applyOptionalProperty(
@@ -444,9 +484,7 @@ function personaMarkdownProperties(
   const properties: AgentSourceProperties = {};
   const model = propertyToString(parsed.model);
   if (model) {
-    const split = splitPersonaModel(model);
-    applyOptionalProperty(properties, "provider", split.provider);
-    applyOptionalProperty(properties, "model", split.model);
+    applyPersonaModelProperty(properties, model);
   }
   applyOptionalProperty(
     properties,
@@ -514,9 +552,7 @@ function agentSourceFromMarkdownFile(
   const properties: AgentSourceProperties = { ...(fallback?.properties ?? {}) };
   const model = propertyToString(parsed.model);
   if (model) {
-    const split = splitPersonaModel(model);
-    applyOptionalProperty(properties, "provider", split.provider);
-    applyOptionalProperty(properties, "model", split.model);
+    applyPersonaModelProperty(properties, model);
   }
   applyOptionalProperty(
     properties,
@@ -560,6 +596,7 @@ function toPersona(source: AgentSourceEntry): Persona {
     avatar: propertyToAvatar(source.properties?.avatar),
     systemPrompt: source.content,
     provider: propertyToString(source.properties?.provider),
+    modelProviderId: propertyToString(source.properties?.modelProviderId),
     model: propertyToString(source.properties?.model),
     isBuiltin: !writable,
     writable,

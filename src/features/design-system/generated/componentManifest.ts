@@ -1588,7 +1588,6 @@ export const designSystemComponentManifest = [
       "GlobalComposeOptions",
       "GlobalComposerExpandPayload",
       "GlobalComposerHandoffRect",
-      "GlobalComposerModelSelection",
       "GlobalComposerPill",
       "GlobalComposerStarterRequest",
     ],

@@ -13,7 +13,12 @@ export type { PersonaSourcePatch } from "@/features/agents/lib/agentBuilderSourc
 const POLL_MS = 750;
 const FLUSH_DEBOUNCE_MS = 400;
 const MISSING_GRACE_POLLS = 4;
-const LOCAL_BUILDER_PROPERTY_KEYS = ["avatar", "provider", "model"] as const;
+const LOCAL_BUILDER_PROPERTY_KEYS = [
+  "avatar",
+  "provider",
+  "modelProviderId",
+  "model",
+] as const;
 
 type PersonaSourceError = "missing" | "parse" | "load" | null;
 

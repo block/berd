@@ -728,12 +728,16 @@ export function ChatView({
           surface="bare"
           innerBareSurface
           queuedMessageAccessory={
-            !isReadOnly &&
-            deferredWorkspaceStartup.worktreeCount > 0 &&
-            (controller.deferredWorkspaceRecord?.state.status === "choice" ||
-              controller.deferredWorkspaceRecord?.state.status === "naming" ||
-              controller.deferredWorkspaceRecord?.state.status ===
-                "creating") ? (
+            controller.unresolvedDeferredSend ? (
+              <p className="text-xs text-destructive" role="alert">
+                {controller.deferredWorkspaceError}
+              </p>
+            ) : !isReadOnly &&
+              deferredWorkspaceStartup.worktreeCount > 0 &&
+              (controller.deferredWorkspaceRecord?.state.status === "choice" ||
+                controller.deferredWorkspaceRecord?.state.status === "naming" ||
+                controller.deferredWorkspaceRecord?.state.status ===
+                  "creating") ? (
               <WorkspaceSetupChoice
                 state={controller.deferredWorkspaceRecord.state.status}
                 worktreeCount={deferredWorkspaceStartup.worktreeCount}
@@ -787,6 +791,7 @@ export function ChatView({
             onCancelQueueEdit: controller.queue.cancelEditing,
             onSendQueue:
               !isReadOnly &&
+              !controller.unresolvedDeferredSend &&
               (controller.deferredWorkspaceRecord?.state.status === "failed" ||
                 controller.deferredWorkspaceRecord?.state.status === "held") &&
               effectiveSession?.creationState !== "failed"
@@ -830,6 +835,7 @@ export function ChatView({
             currentModelId: controller.currentModelId,
             currentModelProviderId: controller.currentModelProviderId,
             currentModel: controller.currentModelName ?? undefined,
+            currentExecutionTarget: controller.currentExecutionTarget,
             availableModels: controller.availableModels,
             modelsLoading: controller.modelsLoading,
             modelStatusMessage: controller.modelStatusMessage,

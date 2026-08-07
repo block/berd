@@ -1,70 +1,192 @@
 import * as acpApi from "./acpApi";
-import type { AcpSessionConfigSnapshots } from "./acpSessionConfigSnapshots";
+import { invalidateClientConnection } from "./acpConnection";
+import {
+  readSessionExecutionConfigSnapshot,
+  type AcpSessionConfigSnapshotContext,
+  type AcpSessionConfigSnapshots,
+} from "./acpSessionConfigSnapshots";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   logReasoningEffortInfo,
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
-interface PreparedSession {
+export interface AcpSessionExecutionSelection {
   providerId: string;
-  workingDir: string;
-  /**
-   * Last model id this window successfully applied via setModel. Tracked so
-   * repeat applies of the same model skip the wire call.
-   */
+  /** Last model this window observed ACP acknowledge successfully. */
   modelId?: string;
 }
 
-interface PrepareSessionOptions {
-  forceConfigRefresh?: boolean;
+interface PreparedSession {
+  workingDir: string;
+  executionSelection?: AcpSessionExecutionSelection;
 }
 
-interface ApplySessionModelOptions {
+interface SessionConfigMutationOptions {
   forceConfigRefresh?: boolean;
+  requestId?: string;
 }
+
+const SESSION_MUTATION_TIMEOUT_MS = 60_000;
 
 const prepared = new Map<string, PreparedSession>();
+const mutationQueues = new Map<
+  string,
+  { latestSequence: number; tail: Promise<void> }
+>();
+let nextMutationSequence = 1;
+
+function clonePreparedSession(
+  entry: PreparedSession | undefined,
+): PreparedSession | undefined {
+  return entry
+    ? {
+        ...entry,
+        executionSelection: entry.executionSelection
+          ? { ...entry.executionSelection }
+          : undefined,
+      }
+    : undefined;
+}
+
+function replaceExecutionSelection(
+  entry: PreparedSession,
+  providerId: string,
+  modelId?: string,
+): void {
+  entry.executionSelection = {
+    providerId,
+    ...(modelId ? { modelId } : {}),
+  };
+}
+
+async function runBoundedSessionMutation<T>(
+  sessionId: string,
+  mutation: Promise<T>,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let didTimeOut = false;
+  try {
+    return await Promise.race([
+      mutation,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          didTimeOut = true;
+          reject(
+            new Error(
+              `ACP operation timed out for session ${sessionId.slice(0, 8)}. Reconnect and retry.`,
+            ),
+          );
+        }, SESSION_MUTATION_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    if (didTimeOut) {
+      prepared.delete(sessionId);
+      await invalidateClientConnection().catch((invalidationError) => {
+        console.error(
+          "Failed to invalidate timed-out ACP connection:",
+          invalidationError,
+        );
+      });
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function serializeSessionMutation<T>(
+  sessionId: string,
+  mutation: (isLatest: () => boolean) => Promise<T>,
+  bounded = true,
+): Promise<T> {
+  let queue = mutationQueues.get(sessionId);
+  if (!queue) {
+    queue = { latestSequence: 0, tail: Promise.resolve() };
+    mutationQueues.set(sessionId, queue);
+  }
+
+  const sequence = nextMutationSequence++;
+  queue.latestSequence = sequence;
+  const execute = () => mutation(() => queue?.latestSequence === sequence);
+  const result = queue.tail.then(() =>
+    bounded ? runBoundedSessionMutation(sessionId, execute()) : execute(),
+  );
+  const tail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  queue.tail = tail;
+  void tail.then(() => {
+    if (mutationQueues.get(sessionId)?.tail === tail) {
+      mutationQueues.delete(sessionId);
+    }
+  });
+  return result;
+}
 
 export async function prepareSession(
   sessionId: string,
   providerId: string,
   workingDir: string,
-  options: PrepareSessionOptions = {},
+  options: SessionConfigMutationOptions = {},
+): Promise<AcpSessionConfigSnapshots | undefined> {
+  return serializeSessionMutation(sessionId, () =>
+    prepareSessionNow(sessionId, providerId, workingDir, options),
+  );
+}
+
+async function prepareSessionNow(
+  sessionId: string,
+  providerId: string,
+  workingDir: string,
+  options: SessionConfigMutationOptions,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
-
   const existing = prepared.get(sessionId);
   if (existing) {
     const tReuse = performance.now();
     let changed = false;
     let snapshots: AcpSessionConfigSnapshots | undefined;
+    const existingProviderId = existing.executionSelection?.providerId;
     logReasoningEffortInfo("prepareSession reuse", {
       sessionId: shortLogId(sessionId),
-      existingProviderId: existing.providerId,
+      existingProviderId: existingProviderId ?? null,
       requestedProviderId: providerId,
-      providerChanged: existing.providerId !== providerId,
+      providerChanged: existingProviderId !== providerId,
       workingDirChanged: existing.workingDir !== workingDir,
-      cachedModelId: existing.modelId ?? null,
+      cachedModelId: existing.executionSelection?.modelId ?? null,
     });
     if (existing.workingDir !== workingDir) {
       await acpApi.updateWorkingDir(sessionId, workingDir);
       existing.workingDir = workingDir;
       changed = true;
     }
-    if (existing.providerId !== providerId || options.forceConfigRefresh) {
+    if (existingProviderId !== providerId || options.forceConfigRefresh) {
       const tProv = performance.now();
-      snapshots = await acpApi.setProvider(sessionId, providerId);
+      try {
+        snapshots = await acpApi.setProvider(sessionId, providerId, {
+          requestId: options.requestId,
+        });
+      } catch (error) {
+        // Goose can apply the provider and then fail while building the
+        // response snapshot. The complete backend pair is unknown until the
+        // UI selection is prepared again.
+        existing.executionSelection = undefined;
+        throw error;
+      }
       perfLog(
         `[perf:prepare] ${sid} reuse setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
       );
-      if (existing.providerId !== providerId) {
-        existing.providerId = providerId;
-        // A provider change rebuilds the backend provider with that provider's
-        // default model, so the last model we applied no longer reflects
-        // backend state.
-        delete existing.modelId;
-      }
+      replaceExecutionSelection(
+        existing,
+        providerId,
+        normalizeConcreteModelId(snapshots?.model?.modelId),
+      );
       changed = true;
     }
     perfLog(
@@ -84,12 +206,23 @@ export async function prepareSession(
   );
 
   const tProv = performance.now();
-  const snapshots = await acpApi.setProvider(sessionId, providerId);
+  const snapshots = await acpApi.setProvider(sessionId, providerId, {
+    requestId: options.requestId,
+  });
   perfLog(
     `[perf:prepare] ${sid} registry setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
   );
 
-  const entry = { providerId, workingDir };
+  const acknowledgedModelId = normalizeConcreteModelId(
+    snapshots?.model?.modelId,
+  );
+  const entry = {
+    workingDir,
+    executionSelection: {
+      providerId,
+      ...(acknowledgedModelId ? { modelId: acknowledgedModelId } : {}),
+    },
+  };
   prepared.set(sessionId, entry);
 
   return snapshots;
@@ -102,15 +235,35 @@ export async function prepareSession(
 export async function applySessionModel(
   sessionId: string,
   modelId: string,
-  options: ApplySessionModelOptions = {},
+  options: SessionConfigMutationOptions = {},
+): Promise<AcpSessionConfigSnapshots | undefined> {
+  const concreteModelId = normalizeConcreteModelId(modelId);
+  if (!concreteModelId) {
+    throw new Error(`Invalid model id: ${modelId}`);
+  }
+  return serializeSessionMutation(sessionId, () =>
+    applySessionModelNow(sessionId, concreteModelId, options),
+  );
+}
+
+async function applySessionModelNow(
+  sessionId: string,
+  modelId: string,
+  options: SessionConfigMutationOptions,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const entry = prepared.get(sessionId);
-  if (entry?.modelId === modelId && !options.forceConfigRefresh) {
+  const executionSelection = entry?.executionSelection;
+  if (!entry || !executionSelection) {
+    throw new Error(
+      "Session not prepared. Prepare the provider before its model.",
+    );
+  }
+  if (executionSelection.modelId === modelId && !options.forceConfigRefresh) {
     logReasoningEffortInfo("applySessionModel skipped unchanged", {
       sessionId: shortLogId(sessionId),
       modelId,
-      providerId: entry.providerId,
+      providerId: executionSelection.providerId,
     });
     perfLog(`[perf:prepare] ${sid} skip setModel(${modelId}) — unchanged`);
     return;
@@ -121,56 +274,163 @@ export async function applySessionModel(
     logReasoningEffortInfo("applySessionModel start", {
       sessionId: shortLogId(sessionId),
       modelId,
-      providerId: entry?.providerId ?? null,
+      providerId: executionSelection.providerId,
     });
-    snapshots = await acpApi.setModel(sessionId, modelId);
+    snapshots = await acpApi.setModel(sessionId, modelId, {
+      providerId: executionSelection.providerId,
+      requestId: options.requestId,
+    });
   } catch (error) {
     // Drop the cached value so the next attempt retries over the wire.
-    if (entry) {
-      delete entry.modelId;
-    }
+    replaceExecutionSelection(entry, executionSelection.providerId);
     throw error;
   }
 
-  if (entry) {
-    entry.modelId = modelId;
+  const acknowledgedModelId = snapshots?.model
+    ? normalizeConcreteModelId(snapshots.model.modelId)
+    : modelId;
+  replaceExecutionSelection(
+    entry,
+    executionSelection.providerId,
+    acknowledgedModelId,
+  );
+  if (acknowledgedModelId !== modelId) {
+    throw new Error(
+      `ACP acknowledged model ${acknowledgedModelId ?? "<none>"} instead of requested model ${modelId}`,
+    );
   }
   logReasoningEffortInfo("applySessionModel complete", {
     sessionId: shortLogId(sessionId),
     modelId,
-    providerId: entry?.providerId ?? null,
+    providerId: executionSelection.providerId,
     hasReasoningEffortSnapshot: Boolean(snapshots?.reasoningEffort),
   });
   return snapshots;
 }
 
+export async function configureSession(
+  sessionId: string,
+  providerId: string,
+  workingDir: string,
+  modelId?: string,
+  options: SessionConfigMutationOptions = {},
+): Promise<AcpSessionConfigSnapshots | undefined> {
+  const concreteModelId = normalizeConcreteModelId(modelId);
+  if (modelId && !concreteModelId) {
+    throw new Error(`Invalid model id: ${modelId}`);
+  }
+  return serializeSessionMutation(sessionId, async () => {
+    let snapshots = await prepareSessionNow(
+      sessionId,
+      providerId,
+      workingDir,
+      concreteModelId ? {} : options,
+    );
+    if (concreteModelId) {
+      snapshots =
+        (await applySessionModelNow(sessionId, concreteModelId, options)) ??
+        snapshots;
+    }
+    return snapshots;
+  });
+}
+
+export function applySessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+  context: Omit<AcpSessionConfigSnapshotContext, "origin"> = {},
+): Promise<AcpSessionConfigSnapshots> {
+  return serializeSessionMutation(sessionId, () =>
+    acpApi.setSessionConfigOption(sessionId, configId, value, context),
+  );
+}
+
 export function isSessionPrepared(sessionId: string): boolean {
-  return prepared.has(sessionId);
+  return Boolean(prepared.get(sessionId)?.executionSelection);
 }
 
 /** Provider id the session is currently prepared against, if known. */
 export function getPreparedProviderId(sessionId: string): string | undefined {
-  return prepared.get(sessionId)?.providerId;
+  return prepared.get(sessionId)?.executionSelection?.providerId;
+}
+
+/** Run prompt setup and transport without allowing session config to interleave. */
+export function runPreparedSessionPrompt<T>(
+  sessionId: string,
+  prompt: (providerId: string) => Promise<T>,
+): Promise<T> {
+  return serializeSessionMutation(
+    sessionId,
+    () => {
+      const providerId =
+        prepared.get(sessionId)?.executionSelection?.providerId;
+      if (!providerId) {
+        throw new Error("Session not prepared. Call acpPrepareSession first.");
+      }
+      return prompt(providerId);
+    },
+    false,
+  );
+}
+
+export async function loadSession(
+  sessionId: string,
+  workingDir: string,
+): Promise<{
+  response: Awaited<ReturnType<typeof acpApi.loadSession>>;
+  isCurrent: boolean;
+  executionSelection?: AcpSessionExecutionSelection;
+}> {
+  return serializeSessionMutation(
+    sessionId,
+    async (isLatest) => {
+      const response = await acpApi.loadSession(sessionId, workingDir);
+      const isCurrentResult = isLatest();
+      const executionSnapshot = readSessionExecutionConfigSnapshot(response);
+      prepared.set(sessionId, {
+        workingDir,
+        executionSelection: executionSnapshot ?? undefined,
+      });
+      return {
+        response,
+        isCurrent: isCurrentResult,
+        executionSelection: executionSnapshot ?? undefined,
+      };
+    },
+    false,
+  );
 }
 
 export function registerPreparedSession(
   sessionId: string,
   providerId: string,
   workingDir: string,
+  modelId?: string,
 ): () => void {
-  const previousEntry = prepared.get(sessionId);
-  const entry = { providerId, workingDir };
+  const previousEntry = clonePreparedSession(prepared.get(sessionId));
+  const acknowledgedModelId = normalizeConcreteModelId(modelId);
+  const entry: PreparedSession = {
+    workingDir,
+    executionSelection: {
+      providerId,
+      ...(acknowledgedModelId ? { modelId: acknowledgedModelId } : {}),
+    },
+  };
 
   prepared.set(sessionId, entry);
   logReasoningEffortInfo("registerPreparedSession", {
     sessionId: shortLogId(sessionId),
     providerId,
     hadPreviousEntry: Boolean(previousEntry),
-    previousProviderId: previousEntry?.providerId ?? null,
-    previousModelId: previousEntry?.modelId ?? null,
+    previousProviderId: previousEntry?.executionSelection?.providerId ?? null,
+    previousModelId: previousEntry?.executionSelection?.modelId ?? null,
   });
 
   return () => {
+    if (prepared.get(sessionId) !== entry) {
+      return;
+    }
     prepared.delete(sessionId);
     if (previousEntry) {
       prepared.set(sessionId, previousEntry);

@@ -19,6 +19,7 @@ import { useProviderSelection } from "@/features/agents/hooks/useProviderSelecti
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
 import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
+import { resolvePersonaModel } from "@/features/agents/lib/resolvePersonaModel";
 import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
@@ -35,6 +36,11 @@ import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import {
+  normalizeSessionExecutionTarget,
+  sameSessionExecutionTarget,
+  type SessionExecutionTarget,
+} from "@/features/chat/lib/sessionExecutionTarget";
 import { makeRemountSafeDraftAttachments } from "@/features/chat/lib/draftAttachments";
 import type {
   ChatInputReasoningEffort,
@@ -44,16 +50,12 @@ import type {
 } from "@/features/chat/types";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { cn } from "@/shared/lib/cn";
 import { isInteractiveElement } from "@/shared/lib/isInteractiveElement";
-import {
-  logReasoningEffortInfo,
-  reasoningEffortConfigLogFields,
-} from "@/shared/lib/reasoningEffortDiagnostics";
 import { Button } from "@/shared/ui/button";
 import { ComposerActionButton } from "@/shared/ui/composer-action-button";
-import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
@@ -61,9 +63,7 @@ import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 import { useVoiceDictationShortcutTarget } from "@/features/chat/lib/voiceDictationShortcutController";
 
 export interface GlobalComposeOptions {
-  providerId?: string;
-  modelId?: string;
-  modelName?: string;
+  executionTarget?: SessionExecutionTarget;
   projectId?: string | null;
   attachments?: ChatAttachmentDraft[];
   personaId?: string | null;
@@ -78,12 +78,6 @@ export interface GlobalComposerExpandPayload {
   text: string;
   selectedSkills: ChatSkillDraft[];
   options?: GlobalComposeOptions;
-}
-
-export interface GlobalComposerModelSelection {
-  providerId: string;
-  modelId: string;
-  modelName: string;
 }
 
 export interface GlobalComposerHandoffRect {
@@ -110,17 +104,9 @@ interface GlobalComposerPillProps {
   onDismiss?: () => void;
   onHandoffStart?: (rect: GlobalComposerHandoffRect) => void;
   suggestedPersonaId?: string | null;
-  // Supplies the effort options for the picker. The selected value is
-  // composer-local and travels with the send, so choosing an effort never
-  // writes to a backend session.
-  reasoningEffortConfig?: ReasoningEffortConfig;
-  reasoningEffortModelSelection?: {
-    providerId?: string | null;
-    modelId?: string | null;
-  };
-  onModelSelectionChange?: (
-    selection: GlobalComposerModelSelection | null,
-  ) => void;
+  reasoningEffort?: ChatInputReasoningEffort;
+  currentExecutionTarget?: SessionExecutionTarget | null;
+  onExecutionTargetChange?: (target: SessionExecutionTarget | null) => void;
   placement?: "docked" | "centered" | "handoff";
   mainLeftOffsetPx?: number;
   handoffSourceRect?: GlobalComposerHandoffRect | null;
@@ -135,13 +121,27 @@ interface GlobalComposerPillProps {
 }
 
 interface ModelSelection {
-  providerId: string;
-  providerName: string;
+  modelProviderId: string;
   modelId: string;
   modelName: string;
 }
 
-type ReasoningEffortConfig = NonNullable<ChatInputReasoningEffort["config"]>;
+function executionTargetForSelection(
+  harnessId: string,
+  model: ModelSelection | null,
+  selectedProviderId: string,
+): SessionExecutionTarget {
+  return normalizeSessionExecutionTarget({
+    harnessId,
+    modelProviderId:
+      model?.modelProviderId ??
+      (harnessId === "goose" && selectedProviderId !== harnessId
+        ? selectedProviderId
+        : undefined),
+    modelId: model?.modelId,
+    modelName: model?.modelName,
+  });
+}
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
 
@@ -173,10 +173,9 @@ function modelOptionToSelection(
   model: ModelOption,
   fallbackProviderId: string,
 ): ModelSelection {
-  const providerId = model.providerId ?? fallbackProviderId;
+  const modelProviderId = model.providerId ?? fallbackProviderId;
   return {
-    providerId,
-    providerName: model.providerName ?? formatProviderLabel(providerId),
+    modelProviderId,
     modelId: model.id,
     modelName: getModelName(model),
   };
@@ -216,9 +215,9 @@ export function GlobalComposerPill({
   onDismiss,
   onHandoffStart,
   suggestedPersonaId = null,
-  reasoningEffortConfig,
-  reasoningEffortModelSelection,
-  onModelSelectionChange,
+  reasoningEffort,
+  currentExecutionTarget,
+  onExecutionTargetChange,
   placement = "docked",
   mainLeftOffsetPx = 0,
   handoffSourceRect,
@@ -248,20 +247,10 @@ export function GlobalComposerPill({
     null,
   );
   const [selectedSkills, setSelectedSkills] = useState<ChatSkillDraft[]>([]);
-  // The composer's own reasoning-effort pick, applied at send time rather than
-  // written back to the Home session. It only takes effect while its configId
-  // matches the live config and its value is still one of that config's
-  // options (see `activeReasoningEffort`), so a refreshed option set cannot
-  // send a value the backend no longer accepts. Provider/model switches clear
-  // it outright, and the model-mismatch gate hides effort entirely when the
-  // pill's model diverges from the session the config came from.
-  const [reasoningEffortSelection, setReasoningEffortSelection] = useState<{
-    configId: string;
-    value: string;
-  } | null>(null);
   const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
   const [voiceStartPending, setVoiceStartPending] = useState(false);
   const personas = useAgentStore(selectPersonas);
+  const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerElement, setContainerElement] =
@@ -340,8 +329,6 @@ export function GlobalComposerPill({
     ((providerOverride !== null || modelOverride !== null) &&
       !personaOverrideActiveRef.current);
   const handoffActive = placement === "handoff";
-  const canSend =
-    hasSendableContent && !attachmentWorkPending && !handoffActive;
 
   // Adopt the route-suggested persona inline as the route, draft, or selection
   // changes — instead of in an effect — so the composer never paints a stale
@@ -369,91 +356,6 @@ export function GlobalComposerPill({
     setSelectedPersonaId(suggestedPersonaId);
     personaSelectionSourceRef.current = "route";
   }
-
-  // Seed the provider/model overrides from the selected persona so the picker
-  // display and the send payload reflect the persona's configured provider and
-  // model — mirroring useChatSessionController.handlePersonaChange. Both entry
-  // points that adopt a persona (the route adoption block above and
-  // handlePersonaChange) flow through this single effect.
-  useEffect(() => {
-    if (!selectedPersonaId) {
-      personaOverrideActiveRef.current = false;
-      personaOverrideAppliedForRef.current = null;
-      personaOverrideUserOverrideForRef.current = null;
-      return;
-    }
-
-    // Drop overrides seeded from a previously selected persona before bailing
-    // out, so a stale provider/model can't ship with the new persona. Gated on
-    // the active ref, so user-chosen overrides and fresh selections are left
-    // untouched.
-    const clearPersonaOverride = () => {
-      if (personaOverrideActiveRef.current) {
-        setProviderOverride(null);
-        setModelOverride(null);
-        personaOverrideActiveRef.current = false;
-      }
-    };
-
-    const persona = personas.find(
-      (candidate) => candidate.id === selectedPersonaId,
-    );
-    const personaOverrideIdentity = [
-      selectedPersonaId,
-      persona?.provider ?? "",
-      persona?.model ?? "",
-    ].join("\u0000");
-    const appliedOverride = personaOverrideAppliedForRef.current;
-
-    if (personaOverrideUserOverrideForRef.current === selectedPersonaId) {
-      return;
-    }
-
-    if (
-      appliedOverride?.personaId === selectedPersonaId &&
-      appliedOverride.identity === personaOverrideIdentity
-    ) {
-      return;
-    }
-
-    if (!persona?.provider) {
-      // Persona has no configured provider: the global default is correct.
-      // Settle the latch so we don't reconsider this persona.
-      clearPersonaOverride();
-      personaOverrideAppliedForRef.current = {
-        personaId: selectedPersonaId,
-        identity: personaOverrideIdentity,
-      };
-      return;
-    }
-
-    const matchingProvider = resolvePersonaProvider(persona, providers);
-    // Providers may still be loading; clear any stale override and leave the
-    // default selection in place, but do not settle the latch so we retry once
-    // they arrive. Gate the model on a matching provider so the two never
-    // drift apart.
-    if (!matchingProvider) {
-      clearPersonaOverride();
-      return;
-    }
-
-    setProviderOverride(matchingProvider.id);
-    setModelOverride(
-      persona.model
-        ? {
-            providerId: matchingProvider.id,
-            providerName: matchingProvider.label,
-            modelId: persona.model,
-            modelName: persona.model,
-          }
-        : null,
-    );
-    personaOverrideActiveRef.current = true;
-    personaOverrideAppliedForRef.current = {
-      personaId: selectedPersonaId,
-      identity: personaOverrideIdentity,
-    };
-  }, [personas, providers, selectedPersonaId]);
 
   useEffect(() => {
     if (focusRequest <= lastFocusRequestRef.current) {
@@ -516,7 +418,6 @@ export function GlobalComposerPill({
     setModelOverride(null);
     setSelectedProjectId(null);
     setSelectedPersonaId(null);
-    setReasoningEffortSelection(null);
     personaSelectionSourceRef.current = "none";
     userTouchedRoutePersonaRef.current = false;
     personaOverrideActiveRef.current = false;
@@ -547,11 +448,14 @@ export function GlobalComposerPill({
   }, []);
 
   const placeholder = t("globalPill.placeholder");
-  const selectedProviderForPicker = providerOverride ?? selectedProvider;
+  const selectedProviderForPicker =
+    providerOverride ?? currentExecutionTarget?.harnessId ?? selectedProvider;
   const {
     selectedAgentId,
     pickerAgents,
     availableModels,
+    getModelsForAgent,
+    isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,
@@ -560,14 +464,18 @@ export function GlobalComposerPill({
   } = useAgentModelPickerState({
     providers,
     selectedProvider: selectedProviderForPicker,
-    onProviderSelected: (providerId) => {
+    onProviderSelected: (providerId, providerModels) => {
       personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
+      const nextModel = getPreferredModel(providerModels, providerId);
+      const nextTarget = executionTargetForSelection(
+        providerId,
+        nextModel,
+        providerId,
+      );
+      onExecutionTargetChange?.(nextTarget);
       setProviderOverride(providerId);
-      setModelOverride(null);
-      // The effort options belong to the previous model's config.
-      setReasoningEffortSelection(null);
-      onModelSelectionChange?.(null);
+      setModelOverride(nextModel);
       setSelectedProvider(providerId);
     },
     onModelSelected: (model) => {
@@ -577,17 +485,109 @@ export function GlobalComposerPill({
       );
       personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
-      setProviderOverride(selection.providerId);
+      onExecutionTargetChange?.(
+        executionTargetForSelection(
+          selectedAgentId,
+          selection,
+          selectedProviderForPicker,
+        ),
+      );
+      setProviderOverride(selectedAgentId);
       setModelOverride(selection);
-      setReasoningEffortSelection(null);
-      onModelSelectionChange?.({
-        providerId: selection.providerId,
-        modelId: selection.modelId,
-        modelName: selection.modelName,
-      });
-      setSelectedProvider(selection.providerId);
+      setSelectedProvider(selectedAgentId);
     },
   });
+
+  const personaExecutionSelection = useMemo(() => {
+    if (!selectedPersona?.provider) return null;
+    const harness = resolvePersonaProvider(selectedPersona, providers);
+    if (!harness) return { harness: undefined, model: undefined };
+    return {
+      harness,
+      model: resolvePersonaModel(
+        selectedPersona,
+        harness.id,
+        getModelsForAgent(harness.id),
+        catalogEntries,
+      ),
+    };
+  }, [catalogEntries, getModelsForAgent, providers, selectedPersona]);
+  const hasUnresolvedPersonaTarget = Boolean(
+    selectedPersonaId &&
+      personaOverrideUserOverrideForRef.current !== selectedPersonaId &&
+      (selectedPersona?.provider || selectedPersona?.model) &&
+      (!personaExecutionSelection?.harness ||
+        (selectedPersona.model && !personaExecutionSelection.model)),
+  );
+
+  useEffect(() => {
+    if (!selectedPersonaId) {
+      personaOverrideActiveRef.current = false;
+      personaOverrideAppliedForRef.current = null;
+      personaOverrideUserOverrideForRef.current = null;
+      return;
+    }
+    if (personaOverrideUserOverrideForRef.current === selectedPersonaId) {
+      return;
+    }
+
+    const clearPersonaOverride = () => {
+      if (!personaOverrideActiveRef.current) return;
+      setProviderOverride(null);
+      setModelOverride(null);
+      personaOverrideActiveRef.current = false;
+    };
+    const persona = selectedPersona;
+    const identity = [
+      selectedPersonaId,
+      persona?.provider,
+      persona?.modelProviderId,
+      persona?.model,
+    ].join("\u0000");
+    const appliedOverride = personaOverrideAppliedForRef.current;
+    if (
+      appliedOverride?.personaId === selectedPersonaId &&
+      appliedOverride.identity === identity
+    ) {
+      return;
+    }
+
+    if (!persona?.provider) {
+      clearPersonaOverride();
+      personaOverrideAppliedForRef.current = {
+        personaId: selectedPersonaId,
+        identity,
+      };
+      return;
+    }
+
+    const harness = personaExecutionSelection?.harness;
+    if (!harness) {
+      clearPersonaOverride();
+      return;
+    }
+    const model = personaExecutionSelection?.model;
+    if (persona.model && !model) {
+      clearPersonaOverride();
+      return;
+    }
+
+    setProviderOverride(harness.id);
+    setModelOverride(
+      model
+        ? {
+            modelProviderId: model.modelProviderId,
+            modelId: model.modelId,
+            modelName: model.modelName,
+          }
+        : null,
+    );
+    personaOverrideActiveRef.current = true;
+    personaOverrideAppliedForRef.current = {
+      personaId: selectedPersonaId,
+      identity,
+    };
+  }, [personaExecutionSelection, selectedPersona, selectedPersonaId]);
 
   const concreteSelectedProviderId =
     resolveAgentProviderCatalogIdStrict(selectedProviderForPicker) == null
@@ -605,15 +605,19 @@ export function GlobalComposerPill({
         !concreteSelectedProviderId ||
         storedPreference.providerId === concreteSelectedProviderId;
 
-      if (matchingModel || storedSelectionCompatible) {
-        const providerId =
-          matchingModel?.providerId ??
-          storedPreference.providerId ??
-          selectedProviderForPicker;
+      if (
+        matchingModel ||
+        (storedSelectionCompatible &&
+          (availableModels.length === 0 ||
+            !isModelInventoryAuthoritative(storedPreference.providerId)))
+      ) {
+        const modelProviderId =
+          matchingModel?.providerId ?? storedPreference.providerId;
+        if (!modelProviderId || modelProviderId === "goose") {
+          return null;
+        }
         return {
-          providerId,
-          providerName:
-            matchingModel?.providerName ?? formatProviderLabel(providerId),
+          modelProviderId,
           modelId: storedPreference.modelId,
           modelName:
             matchingModel != null
@@ -626,16 +630,24 @@ export function GlobalComposerPill({
     if (
       gooseDefaultSelection &&
       (!concreteSelectedProviderId ||
-        gooseDefaultSelection.providerId === concreteSelectedProviderId)
+        gooseDefaultSelection.modelProviderId === concreteSelectedProviderId)
     ) {
       const matchingDefault = findMatchingModel(
         availableModels,
         gooseDefaultSelection.modelId,
-        gooseDefaultSelection.providerId,
+        gooseDefaultSelection.modelProviderId,
       );
-      return matchingDefault
-        ? modelOptionToSelection(matchingDefault, selectedProviderForPicker)
-        : gooseDefaultSelection;
+      if (matchingDefault) {
+        return modelOptionToSelection(
+          matchingDefault,
+          selectedProviderForPicker,
+        );
+      }
+      if (
+        !isModelInventoryAuthoritative(gooseDefaultSelection.modelProviderId)
+      ) {
+        return gooseDefaultSelection;
+      }
     }
 
     const compatibleModels = concreteSelectedProviderId
@@ -651,6 +663,7 @@ export function GlobalComposerPill({
     availableModels,
     concreteSelectedProviderId,
     gooseDefaultSelection,
+    isModelInventoryAuthoritative,
     selectedAgentId,
     selectedProviderForPicker,
   ]);
@@ -658,76 +671,74 @@ export function GlobalComposerPill({
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
-  const effectiveModelSelection = modelOverride ?? defaultModelSelection;
-  const handleReasoningEffortChange = useCallback(
-    (value: string) => {
-      const configId = reasoningEffortConfig?.configId;
-      if (!configId) {
-        return;
-      }
-      setReasoningEffortSelection({ configId, value });
-    },
-    [reasoningEffortConfig?.configId],
-  );
-  const activeReasoningEffort = useMemo<
-    ChatInputReasoningEffort | undefined
-  >(() => {
-    const config = reasoningEffortConfig;
-    if (!config) {
-      return undefined;
+  const controlledModelSelection = useMemo<ModelSelection | null>(() => {
+    if (!currentExecutionTarget?.modelId) {
+      return null;
     }
 
-    const effortProviderId = reasoningEffortModelSelection?.providerId;
-    const effortModelId = reasoningEffortModelSelection?.modelId;
-    if (effortProviderId || effortModelId) {
-      const selectedProviderId =
-        effectiveModelSelection?.providerId ?? selectedProviderForPicker;
-      const selectedModelId = effectiveModelSelection?.modelId;
-      const providerMatches =
-        !effortProviderId ||
-        !selectedProviderId ||
-        selectedProviderId === effortProviderId;
-      const modelMatches =
-        !effortModelId || !selectedModelId || selectedModelId === effortModelId;
-      if (!providerMatches || !modelMatches) {
-        return undefined;
-      }
-    }
-
-    // The pick only applies while it still names an option in the live
-    // snapshot, so the value that travels with a send is always a member of
-    // the config it travels with — no matter which path last refreshed it.
-    const selectionApplies =
-      reasoningEffortSelection?.configId === config.configId &&
-      config.options.some(
-        (option) => option.id === reasoningEffortSelection.value,
-      );
-    const selectedValue = selectionApplies
-      ? reasoningEffortSelection.value
-      : config.currentValue;
     return {
-      config:
-        selectedValue === config.currentValue
-          ? config
-          : { ...config, currentValue: selectedValue },
-      onChange: handleReasoningEffortChange,
+      modelProviderId: currentExecutionTarget.modelProviderId,
+      modelId: currentExecutionTarget.modelId,
+      modelName: currentExecutionTarget.modelName,
     };
-  }, [
-    effectiveModelSelection?.modelId,
-    effectiveModelSelection?.providerId,
-    handleReasoningEffortChange,
-    reasoningEffortConfig,
-    reasoningEffortModelSelection?.modelId,
-    reasoningEffortModelSelection?.providerId,
-    reasoningEffortSelection,
-    selectedProviderForPicker,
-  ]);
+  }, [currentExecutionTarget]);
+  const hasLocalExecutionOverride =
+    providerOverride !== null || modelOverride !== null;
+  const effectiveModelSelection =
+    modelOverride ??
+    (!hasLocalExecutionOverride && currentExecutionTarget !== undefined
+      ? controlledModelSelection
+      : defaultModelSelection);
+  const localExecutionTarget = useMemo(
+    () =>
+      hasLocalExecutionOverride || currentExecutionTarget === undefined
+        ? executionTargetForSelection(
+            selectedAgentId,
+            effectiveModelSelection,
+            selectedProviderForPicker,
+          )
+        : undefined,
+    [
+      currentExecutionTarget,
+      effectiveModelSelection,
+      hasLocalExecutionOverride,
+      selectedAgentId,
+      selectedProviderForPicker,
+    ],
+  );
+  const personaSelectionOverridden =
+    personaOverrideUserOverrideForRef.current === selectedPersonaId;
+  const effectiveExecutionTarget =
+    !personaSelectionOverridden && personaExecutionSelection?.harness
+      ? normalizeSessionExecutionTarget({
+          harnessId: personaExecutionSelection.harness.id,
+          modelProviderId: personaExecutionSelection.model?.modelProviderId,
+          modelId: personaExecutionSelection.model?.modelId,
+          modelName: personaExecutionSelection.model?.modelName,
+        })
+      : (localExecutionTarget ?? currentExecutionTarget ?? undefined);
+  const canSend =
+    hasSendableContent &&
+    Boolean(effectiveExecutionTarget) &&
+    !attachmentWorkPending &&
+    !handoffActive &&
+    !hasUnresolvedPersonaTarget;
+
   useEffect(() => {
-    const config = reasoningEffortConfig;
-    const effortProviderId = reasoningEffortModelSelection?.providerId;
-    const effortModelId = reasoningEffortModelSelection?.modelId;
+    if (
+      localExecutionTarget &&
+      sameSessionExecutionTarget(currentExecutionTarget, localExecutionTarget)
+    ) {
+      setProviderOverride(null);
+      setModelOverride(null);
+    }
+  }, [currentExecutionTarget, localExecutionTarget]);
+
+  const reasoningEffortSelectionMatch = useMemo(() => {
+    const effortProviderId = currentExecutionTarget?.modelProviderId;
+    const effortModelId = currentExecutionTarget?.modelId;
     const selectedProviderId =
-      effectiveModelSelection?.providerId ?? selectedProviderForPicker;
+      effectiveModelSelection?.modelProviderId ?? selectedProviderForPicker;
     const selectedModelId = effectiveModelSelection?.modelId;
     const providerMatches =
       !effortProviderId ||
@@ -736,26 +747,27 @@ export function GlobalComposerPill({
     const modelMatches =
       !effortModelId || !selectedModelId || selectedModelId === effortModelId;
 
-    logReasoningEffortInfo("global composer gate", {
-      hasConfig: Boolean(config),
-      visible: Boolean(activeReasoningEffort?.config),
-      effortProviderId: effortProviderId ?? null,
-      effortModelId: effortModelId ?? null,
-      selectedProviderId: selectedProviderId ?? null,
-      selectedModelId: selectedModelId ?? null,
+    return {
+      effortProviderId,
+      effortModelId,
+      selectedProviderId,
+      selectedModelId,
       providerMatches,
       modelMatches,
-      ...reasoningEffortConfigLogFields("config", config),
-    });
+    };
   }, [
-    activeReasoningEffort?.config,
     effectiveModelSelection?.modelId,
-    effectiveModelSelection?.providerId,
-    reasoningEffortConfig,
-    reasoningEffortModelSelection?.modelId,
-    reasoningEffortModelSelection?.providerId,
+    effectiveModelSelection?.modelProviderId,
+    currentExecutionTarget?.modelId,
+    currentExecutionTarget?.modelProviderId,
     selectedProviderForPicker,
   ]);
+  const activeReasoningEffort =
+    reasoningEffort?.config &&
+    reasoningEffortSelectionMatch.providerMatches &&
+    reasoningEffortSelectionMatch.modelMatches
+      ? reasoningEffort
+      : undefined;
 
   const {
     mentionOpen,
@@ -787,7 +799,7 @@ export function GlobalComposerPill({
     onSkillMentionSelect: handleSkillMentionSelected,
     onFileMentionSelect: handleFileMentionAttachmentSelect,
     skillProviderId:
-      modelOverride?.providerId ??
+      modelOverride?.modelProviderId ??
       providerOverride ??
       selectedProviderForPicker,
   });
@@ -822,14 +834,7 @@ export function GlobalComposerPill({
       if (attachments.length > 0) {
         options.attachments = attachments;
       }
-      if (providerOverride) {
-        options.providerId = providerOverride;
-      }
-      if (modelOverride) {
-        options.providerId = modelOverride.providerId;
-        options.modelId = modelOverride.modelId;
-        options.modelName = modelOverride.modelName;
-      }
+      options.executionTarget = effectiveExecutionTarget;
       if (selectedProjectId) {
         options.projectId = selectedProjectId;
       }
@@ -848,7 +853,7 @@ export function GlobalComposerPill({
         null,
         {
           providerId:
-            modelOverride?.providerId ??
+            modelOverride?.modelProviderId ??
             providerOverride ??
             selectedProviderForPicker,
         },
@@ -872,11 +877,7 @@ export function GlobalComposerPill({
         clearSentContent();
       }
 
-      if (Object.keys(options).length > 0) {
-        onSend(messageText, options);
-      } else {
-        onSend(messageText);
-      }
+      onSend(messageText, options);
       if (placement !== "centered") {
         clearSentContent();
         clearComposerSelections();
@@ -887,6 +888,7 @@ export function GlobalComposerPill({
       attachments,
       clearComposerSelections,
       clearSentContent,
+      effectiveExecutionTarget,
       modelOverride,
       onHandoffStart,
       onSend,
@@ -920,14 +922,7 @@ export function GlobalComposerPill({
     if (remountSafeAttachments.length > 0) {
       options.attachments = remountSafeAttachments;
     }
-    if (providerOverride) {
-      options.providerId = providerOverride;
-    }
-    if (modelOverride) {
-      options.providerId = modelOverride.providerId;
-      options.modelId = modelOverride.modelId;
-      options.modelName = modelOverride.modelName;
-    }
+    options.executionTarget = effectiveExecutionTarget;
     if (selectedProjectId) {
       options.projectId = selectedProjectId;
     }
@@ -944,7 +939,7 @@ export function GlobalComposerPill({
     const payload: GlobalComposerExpandPayload = {
       text,
       selectedSkills,
-      options: Object.keys(options).length > 0 ? options : undefined,
+      options,
     };
 
     setExpandPending(true);
@@ -969,12 +964,11 @@ export function GlobalComposerPill({
     attachments,
     clearComposerSelections,
     clearSentContent,
+    effectiveExecutionTarget,
     expandPending,
     handoffActive,
-    modelOverride,
     onExpand,
     onHandoffStart,
-    providerOverride,
     selectedPersonaId,
     selectedProjectId,
     selectedSkills,
@@ -1042,8 +1036,7 @@ export function GlobalComposerPill({
         setGooseDefaultSelection(
           modelId
             ? {
-                providerId,
-                providerName: formatProviderLabel(providerId),
+                modelProviderId: providerId,
                 modelId,
                 modelName: modelId,
               }
@@ -1111,7 +1104,8 @@ export function GlobalComposerPill({
   const handleStartVoiceConversation = useCallback(async () => {
     if (
       !voiceConversation?.enabled ||
-      selectedAgentId !== "goose" ||
+      !effectiveExecutionTarget ||
+      effectiveExecutionTarget.harnessId !== "goose" ||
       voiceStartPending ||
       handoffActive ||
       attachmentWorkPending ||
@@ -1125,15 +1119,7 @@ export function GlobalComposerPill({
     if (remountSafeAttachments.length > 0) {
       options.attachments = remountSafeAttachments;
     }
-    const selectedGooseModel = effectiveModelSelection;
-    // `selectedAgentId === "goose"` is the ACP route. Model options may carry
-    // a concrete catalog provider for filtering, but using that as the session
-    // provider creates a non-Goose chat whose voice controller cannot bind.
-    options.providerId = "goose";
-    if (selectedGooseModel) {
-      options.modelId = selectedGooseModel.modelId;
-      options.modelName = selectedGooseModel.modelName;
-    }
+    options.executionTarget = effectiveExecutionTarget;
     if (selectedProjectId) options.projectId = selectedProjectId;
     if (selectedPersonaId) options.personaId = selectedPersonaId;
     if (activeReasoningEffort?.config) {
@@ -1148,7 +1134,7 @@ export function GlobalComposerPill({
       const accepted = await voiceConversation.onStart({
         text,
         selectedSkills,
-        options: Object.keys(options).length > 0 ? options : undefined,
+        options,
       });
       if (!accepted) return;
       clearSentContent();
@@ -1165,9 +1151,8 @@ export function GlobalComposerPill({
     clearComposerSelections,
     clearSentContent,
     dictationOwnsMicrophone,
+    effectiveExecutionTarget,
     handoffActive,
-    effectiveModelSelection,
-    selectedAgentId,
     selectedPersonaId,
     selectedProjectId,
     selectedSkills,
@@ -1547,7 +1532,9 @@ export function GlobalComposerPill({
             selectedAgentId={selectedAgentId}
             onAgentChange={handleProviderChange}
             currentModelId={effectiveModelSelection?.modelId ?? null}
-            currentModelProviderId={effectiveModelSelection?.providerId ?? null}
+            currentModelProviderId={
+              effectiveModelSelection?.modelProviderId ?? null
+            }
             currentModelName={effectiveModelSelection?.modelName ?? null}
             availableModels={availableModels}
             modelsLoading={modelsLoading}

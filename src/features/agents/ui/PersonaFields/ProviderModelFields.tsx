@@ -22,11 +22,21 @@ export interface ProviderModelFieldsClasses {
   statusMessage?: string;
 }
 
+interface ProviderModelSelection {
+  modelId: string;
+  modelProviderId: string;
+}
+
+function modelOptionValue(modelId: string, providerId: string): string {
+  return JSON.stringify([providerId, modelId]);
+}
+
 export interface ProviderModelFieldsProps {
   provider: ProviderType | "";
+  modelProviderId?: string;
   model: string;
   onProviderChange: (next: ProviderType | "") => void;
-  onModelChange: (next: string) => void;
+  onModelChange: (selection: ProviderModelSelection | null) => void;
   builderSessionId?: string;
   isReadOnly?: boolean;
   /** When true, fields render side-by-side; otherwise stacked (rail). */
@@ -36,6 +46,7 @@ export interface ProviderModelFieldsProps {
 
 export function ProviderModelFields({
   provider,
+  modelProviderId,
   model,
   onProviderChange,
   onModelChange,
@@ -55,11 +66,23 @@ export function ProviderModelFields({
     ? (agentReadiness.get(provider) ?? "not_ready")
     : "ready";
   const isSelectedProviderReady = selectedProviderReadiness === "ready";
-  const hasSavedModelOutsideInventory =
-    Boolean(model) && !availableModels.some((entry) => entry.id === model);
-  const modelSelectValue = hasSavedModelOutsideInventory
-    ? `__saved__:${model}`
-    : model || "__none__";
+  const selectedModel = availableModels.find(
+    (entry) =>
+      entry.id === model &&
+      (!modelProviderId ||
+        !entry.providerId ||
+        entry.providerId === modelProviderId),
+  );
+  const hasSavedModelOutsideInventory = Boolean(model) && !selectedModel;
+  let modelSelectValue = "__none__";
+  if (selectedModel) {
+    modelSelectValue = modelOptionValue(
+      selectedModel.id,
+      selectedModel.providerId ?? provider,
+    );
+  } else if (hasSavedModelOutsideInventory) {
+    modelSelectValue = `__saved__:${model}`;
+  }
   const getProviderSetupLabel = (
     readiness: "ready" | "not_installed" | "not_ready",
   ) =>
@@ -99,9 +122,6 @@ export function ProviderModelFields({
                 ? ("" as ProviderType | "")
                 : (v as ProviderType);
             onProviderChange(nextProvider);
-            if (nextProvider !== provider) {
-              onModelChange("");
-            }
           }}
           disabled={isReadOnly}
         >
@@ -160,14 +180,29 @@ export function ProviderModelFields({
           value={modelSelectValue}
           onValueChange={(value: string) => {
             if (value === "__none__") {
-              onModelChange("");
+              onModelChange(null);
               return;
             }
             if (value.startsWith("__saved__:")) {
-              onModelChange(value.slice("__saved__:".length));
+              if (modelProviderId) {
+                onModelChange({
+                  modelId: value.slice("__saved__:".length),
+                  modelProviderId,
+                });
+              }
               return;
             }
-            onModelChange(value);
+            const selected = availableModels.find(
+              (entry) =>
+                modelOptionValue(entry.id, entry.providerId ?? provider) ===
+                value,
+            );
+            if (selected) {
+              onModelChange({
+                modelId: selected.id,
+                modelProviderId: selected.providerId ?? provider,
+              });
+            }
           }}
           disabled={isReadOnly || !provider || !isSelectedProviderReady}
         >
@@ -195,7 +230,13 @@ export function ProviderModelFields({
               </SelectItem>
             )}
             {availableModels.map((modelOption) => (
-              <SelectItem key={modelOption.id} value={modelOption.id}>
+              <SelectItem
+                key={`${modelOption.providerId ?? provider}:${modelOption.id}`}
+                value={modelOptionValue(
+                  modelOption.id,
+                  modelOption.providerId ?? provider,
+                )}
+              >
                 {modelOption.displayName ?? modelOption.name}
               </SelectItem>
             ))}

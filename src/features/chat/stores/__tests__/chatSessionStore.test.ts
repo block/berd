@@ -1,3 +1,5 @@
+import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
+import { beginModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionInfo } from "@/shared/api/acp";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
@@ -6,6 +8,7 @@ import {
   getIncludedWorkspaceAttachments,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
+import { targetFromAgentModelSelection } from "@/features/chat/lib/sessionExecutionTarget";
 import {
   CHAT_WORKSPACE_METADATA_STORAGE_KEY,
   type PersistedChatWorkspaceMetadata,
@@ -73,7 +76,6 @@ function resetStore() {
     hasMoreSessions: false,
     isRightRailOpen: false,
     activeWorkspaceBySession: {},
-    modelSelectionIntentBySession: {},
     archiveMutationBySessionId: {},
   });
 }
@@ -618,11 +620,13 @@ describe("chatSessionStore", () => {
 
       const session = await useChatSessionStore.getState().createSession({
         title: "New Chat",
-        providerId: "openai",
+        executionTarget: targetFromAgentModelSelection("goose", {
+          modelProviderId: "openai",
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        }),
         projectId: "project-1",
         personaId: "persona-1",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
         workingDir: "/tmp/project",
       });
 
@@ -640,10 +644,13 @@ describe("chatSessionStore", () => {
         id: "acp-1",
         title: "New Chat",
         projectId: "project-1",
-        providerId: "openai",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        },
         personaId: "persona-1",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
         workingDir: "/tmp/project",
       });
       expect(session.workspaceAttachments).toEqual([
@@ -667,6 +674,23 @@ describe("chatSessionStore", () => {
       });
     });
 
+    it("does not attach an ACP default model to an unqualified Goose harness", async () => {
+      mocks.acpCreateSession.mockResolvedValue({
+        sessionId: "acp-1",
+        configOptionsSnapshot: {
+          model: { modelId: "gpt-5.5", modelName: "GPT-5.5" },
+          reasoningEffort: null,
+        },
+      });
+
+      const session = await useChatSessionStore.getState().createSession({
+        executionTarget: { harnessId: "goose" },
+        workingDir: "/tmp/project",
+      });
+
+      expect(session.executionTarget).toEqual({ harnessId: "goose" });
+    });
+
     it("seeds reasoning effort from ACP session creation config", async () => {
       mocks.acpCreateSession.mockResolvedValue({
         sessionId: "acp-1",
@@ -685,7 +709,10 @@ describe("chatSessionStore", () => {
       });
 
       const session = await useChatSessionStore.getState().createSession({
-        providerId: "openai",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+        },
         workingDir: "/tmp/project",
       });
 
@@ -716,10 +743,12 @@ describe("chatSessionStore", () => {
     it("creates a local draft session without touching ACP", () => {
       const session = useChatSessionStore.getState().createDraftSession({
         title: "New Chat",
-        providerId: "openai",
+        executionTarget: targetFromAgentModelSelection("goose", {
+          modelProviderId: "openai",
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        }),
         projectId: "project-1",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
         workingDir: "/tmp/project",
       });
 
@@ -727,9 +756,12 @@ describe("chatSessionStore", () => {
       expect(session).toMatchObject({
         title: "New Chat",
         projectId: "project-1",
-        providerId: "openai",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        },
         workingDir: "/tmp/project",
         messageCount: 0,
         creationState: "pending",
@@ -754,7 +786,10 @@ describe("chatSessionStore", () => {
         id: "local-session",
         title: "New Chat",
         projectId: "project-1",
-        providerId: "openai",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+        },
         workingDir: "/tmp/project",
         creationState: "pending",
       });
@@ -763,29 +798,26 @@ describe("chatSessionStore", () => {
         activeWorkspaceBySession: {
           "local-session": { path: "/tmp/project", branch: "main" },
         },
-        modelSelectionIntentBySession: {
-          "local-session": {
-            requestId: "request-1",
-            kind: "model",
-            providerId: "openai",
-            modelId: "gpt-4.1",
-          },
-        },
       });
 
       useChatSessionStore
         .getState()
         .promoteDraftSession("local-session", "acp-session", {
-          modelId: "gpt-4.1",
-          modelName: "GPT-4.1",
+          executionTarget: targetFromAgentModelSelection("goose", {
+            modelProviderId: "openai",
+            modelId: "gpt-4.1",
+            modelName: "GPT-4.1",
+          }),
         });
 
       const state = useChatSessionStore.getState();
       expect(state.getSession("local-session")).toBeUndefined();
       expect(state.getSession("acp-session")).toMatchObject({
         id: "acp-session",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
+        executionTarget: {
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        },
         creationState: undefined,
         creationError: undefined,
       });
@@ -793,10 +825,30 @@ describe("chatSessionStore", () => {
       expect(state.activeWorkspaceBySession).toEqual({
         "acp-session": { path: "/tmp/project", branch: "main" },
       });
-      expect(state.modelSelectionIntentBySession).toHaveProperty("acp-session");
-      expect(state.modelSelectionIntentBySession).not.toHaveProperty(
-        "local-session",
-      );
+    });
+
+    it("keeps UI ownership when promotion explicitly clears the target", () => {
+      seedSession({
+        id: "local-session",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        },
+        executionTargetSource: "acp",
+        creationState: "pending",
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("local-session", "acp-session", {
+          executionTarget: undefined,
+        });
+
+      const promoted = useChatSessionStore.getState().getSession("acp-session");
+      expect(promoted?.executionTarget).toBeUndefined();
+      expect(promoted?.executionTargetSource).toBe("ui");
     });
 
     it("preserves builder metadata when promoting an optimistic draft session", () => {
@@ -931,7 +983,10 @@ describe("chatSessionStore", () => {
     it("keeps a stable client session id when promoting a draft session", () => {
       const draft = useChatSessionStore.getState().createDraftSession({
         title: "New Chat",
-        providerId: "openai",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+        },
         workingDir: "/tmp/project",
       });
 
@@ -950,7 +1005,10 @@ describe("chatSessionStore", () => {
     it("persists draft workspace attachments under the real ACP session id when promoting", () => {
       const draft = useChatSessionStore.getState().createDraftSession({
         title: "New Chat",
-        providerId: "openai",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+        },
         workingDir: "/tmp/main",
         workspaceAttachments: [
           {
@@ -1068,10 +1126,13 @@ describe("chatSessionStore", () => {
       expect(sessions[0].title).toBe("ACP Session 1");
       expect(sessions[0].messageCount).toBe(4);
       expect(sessions[0].lastMessageAt).toBe("2026-04-05T00:00:00.000Z");
-      expect(sessions[0].providerId).toBe("openai");
+      expect(sessions[0].executionTarget).toMatchObject({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4.1",
+      });
       expect(sessions[0].projectId).toBe("project-123");
       expect(sessions[0].personaId).toBe("persona-1");
-      expect(sessions[0].modelId).toBe("gpt-4.1");
       expect(sessions[0].workingDir).toBe("/tmp/acp-1");
       expect(sessions[0].workspaceAttachments).toEqual([
         {
@@ -1099,7 +1160,7 @@ describe("chatSessionStore", () => {
         id: "session-1",
         title: "Tagged chat",
         personaId: "persona-1",
-        providerId: "goose",
+        executionTarget: { harnessId: "goose" },
         updatedAt: "2026-04-01T00:00:00.000Z",
       });
 
@@ -1122,6 +1183,108 @@ describe("chatSessionStore", () => {
       ).toMatchObject({
         personaId: "persona-1",
         updatedAt: "2026-04-02T00:00:00.000Z",
+      });
+    });
+
+    it("preserves the UI-owned provider and model pair when ACP refresh metadata is stale", async () => {
+      const staleRefresh = createDeferredPromise<ReturnType<typeof mockPage>>();
+      seedSession({
+        id: "session-1",
+        title: "Fable chat",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-gpt-5-5",
+          modelName: "GPT-5.5",
+        },
+        updatedAt: "2026-04-01T00:00:00.000Z",
+      });
+      mocks.acpListSessionsPage.mockReturnValue(staleRefresh.promise);
+
+      const load = useChatSessionStore.getState().loadSessions();
+      useChatSessionStore.getState().replaceSessionExecutionTarget(
+        "session-1",
+        targetFromAgentModelSelection("goose", {
+          modelProviderId: "databricks_v2",
+          modelId: "goose-claude-fable-5",
+          modelName: "Claude Fable 5",
+        }),
+      );
+      staleRefresh.resolve(
+        mockPage([
+          makeAcpSession({
+            sessionId: "session-1",
+            title: "Fable chat",
+            providerId: "goose",
+            modelId: "goose-gpt-5-5",
+            updatedAt: "2026-04-02T00:00:00.000Z",
+          }),
+        ]),
+      );
+
+      await load;
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-claude-fable-5",
+          modelName: "Claude Fable 5",
+        },
+        updatedAt: "2026-04-02T00:00:00.000Z",
+      });
+    });
+
+    it("does not restore an old provider model while a provider switch owns an empty model", async () => {
+      seedSession({
+        id: "session-1",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+        },
+      });
+      beginModelSelectionIntent("session-1", {
+        requestId: "provider-request-1",
+        target: { harnessId: "goose", modelProviderId: "anthropic" },
+        previousTarget: targetFromAgentModelSelection("goose", {
+          modelProviderId: "databricks_v2",
+          modelId: "goose-gpt-5-5",
+          modelName: "GPT-5.5",
+        }),
+      });
+
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage([
+          makeAcpSession({
+            sessionId: "session-1",
+            providerId: "databricks_v2",
+            modelId: "goose-gpt-5-5",
+          }),
+        ]),
+      );
+
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+        },
+      });
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.executionTarget
+          ?.modelId,
+      ).toBeUndefined();
+      expect(getModelSelectionIntent("session-1")).toMatchObject({
+        requestId: "provider-request-1",
+        target: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+        },
       });
     });
 
@@ -1228,6 +1391,25 @@ describe("chatSessionStore", () => {
       expect(state.activeSessionId).toBe("older-loaded-session");
       expect(state.sessionPageCursor).toBe("cursor-2");
       expect(state.hasMoreSessions).toBe(true);
+    });
+
+    it("does not hydrate the Goose provider sentinel as a model", async () => {
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage([
+          makeAcpSession({
+            sessionId: "legacy-session",
+            providerId: "databricks_v2",
+            modelId: "goose",
+          }),
+        ]),
+      );
+
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("legacy-session")
+          ?.executionTarget?.modelId,
+      ).toBeUndefined();
     });
 
     it("preserves a pending optimistic archive when ACP returns stale unarchived state", async () => {
@@ -1557,8 +1739,6 @@ describe("chatSessionStore", () => {
       seedSession({
         id: "acp-1",
         title: "Old Title",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
         updatedAt: "2026-04-01T00:00:00.000Z",
       });
       mocks.acpListSessionsPage.mockResolvedValue(
@@ -1567,13 +1747,11 @@ describe("chatSessionStore", () => {
             sessionId: "acp-1",
             title: "Updated Title",
             updatedAt: "2026-04-03T00:00:00.000Z",
-            modelId: "gpt-4.1",
           }),
           makeAcpSession({
             sessionId: "acp-1",
             title: "Duplicate Title",
             updatedAt: "2026-04-04T00:00:00.000Z",
-            modelId: "gpt-4.1",
           }),
         ]),
       );
@@ -1586,23 +1764,7 @@ describe("chatSessionStore", () => {
         id: "acp-1",
         title: "Duplicate Title",
         updatedAt: "2026-04-04T00:00:00.000Z",
-        modelId: "gpt-4.1",
-        modelName: "GPT-4.1",
       });
-      mocks.acpListSessionsPage.mockResolvedValue(
-        mockPage([
-          makeAcpSession({
-            sessionId: "acp-1",
-            modelId: "gpt-5.4",
-          }),
-        ]),
-      );
-
-      await useChatSessionStore.getState().loadSessions();
-
-      const session = useChatSessionStore.getState().getSession("acp-1");
-      expect(session?.modelId).toBe("gpt-5.4");
-      expect(session?.modelName).toBeUndefined();
     });
   });
 
@@ -1622,6 +1784,34 @@ describe("chatSessionStore", () => {
         projectId: "new-project",
         updatedAt: originalUpdatedAt,
       });
+    });
+
+    it("suppresses structurally unchanged reasoning effort patches", () => {
+      const reasoningEffort = {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [{ id: "high", name: "High" }],
+      };
+      const session = seedSession({ reasoningEffort });
+      const storedReasoningEffort = useChatSessionStore
+        .getState()
+        .getSession(session.id)?.reasoningEffort;
+      const listener = vi.fn();
+      const unsubscribe = useChatSessionStore.subscribe(listener);
+
+      useChatSessionStore.getState().patchSession(session.id, {
+        reasoningEffort: {
+          configId: reasoningEffort.configId,
+          currentValue: reasoningEffort.currentValue,
+          options: reasoningEffort.options.map((option) => ({ ...option })),
+        },
+      });
+      unsubscribe();
+
+      expect(listener).not.toHaveBeenCalled();
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.reasoningEffort,
+      ).toBe(storedReasoningEffort);
     });
 
     it("updates updatedAt when explicitly provided in patch", () => {
@@ -2025,12 +2215,15 @@ describe("chatSessionStore", () => {
     });
   });
 
-  describe("provider switching", () => {
-    it("clears the selected model when switching providers", () => {
+  describe("execution target", () => {
+    it("replaces the complete target atomically and clears stale reasoning", () => {
       const session = seedSession({
-        providerId: "openai",
-        modelId: "gpt-4o",
-        modelName: "GPT-4o",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+        },
         reasoningEffort: {
           configId: "thinking_effort",
           currentValue: "high",
@@ -2038,15 +2231,176 @@ describe("chatSessionStore", () => {
         },
       });
 
-      useChatSessionStore
-        .getState()
-        .switchSessionProvider(session.id, "anthropic");
+      useChatSessionStore.getState().replaceSessionExecutionTarget(session.id, {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-opus-4-6",
+        modelName: "Claude Opus 4.6",
+      });
 
       const updated = useChatSessionStore.getState().getSession(session.id);
-      expect(updated?.providerId).toBe("anthropic");
-      expect(updated?.modelId).toBeUndefined();
-      expect(updated?.modelName).toBeUndefined();
+      expect(updated?.executionTarget).toEqual({
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-opus-4-6",
+        modelName: "Claude Opus 4.6",
+      });
+      expect(updated).not.toHaveProperty("providerId");
+      expect(updated).not.toHaveProperty("modelId");
       expect(updated?.reasoningEffort).toBeUndefined();
+    });
+
+    it("does not retain model state when replacing with a provider-only target", () => {
+      const session = seedSession({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+        },
+      });
+
+      useChatSessionStore.getState().replaceSessionExecutionTarget(session.id, {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+      });
+
+      const updated = useChatSessionStore.getState().getSession(session.id);
+      expect(updated?.executionTarget).toEqual({
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+      });
+    });
+
+    it("keeps an explicit UI clear authoritative over later ACP hydration", () => {
+      const session = seedSession({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+        },
+        executionTargetSource: "acp",
+      });
+
+      const store = useChatSessionStore.getState();
+      store.replaceSessionExecutionTarget(session.id, undefined);
+      store.hydrateSessionExecutionTarget(session.id, {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-fable-5",
+        modelName: "Claude Fable 5",
+      });
+
+      expect(
+        useChatSessionStore.getState().getSession(session.id),
+      ).toMatchObject({ executionTargetSource: "ui" });
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.executionTarget,
+      ).toBeUndefined();
+    });
+
+    it("does not allow generic patches to bypass target replacement", () => {
+      const session = seedSession({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+        },
+      });
+
+      expect(() =>
+        useChatSessionStore.getState().patchSession(session.id, {
+          // @ts-expect-error Execution targets have a dedicated atomic action.
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "anthropic",
+          },
+        }),
+      ).toThrow("Use replaceSessionExecutionTarget");
+    });
+
+    it("preserves reasoning when only the model label changes", () => {
+      const reasoningEffort = {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [{ id: "high", name: "High" }],
+      };
+      const session = seedSession({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.5",
+          modelName: "gpt-5.5",
+        },
+        reasoningEffort,
+      });
+
+      useChatSessionStore.getState().replaceSessionExecutionTarget(session.id, {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-5.5",
+        modelName: "GPT-5.5",
+      });
+
+      expect(
+        useChatSessionStore.getState().getSession(session.id),
+      ).toMatchObject({
+        executionTarget: { modelName: "GPT-5.5" },
+        reasoningEffort,
+      });
+    });
+
+    it("installs a selection intent and its target in one state transition", () => {
+      const session = seedSession({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.5",
+          modelName: "GPT-5.5",
+        },
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [{ id: "high", name: "High" }],
+        },
+      });
+      const observedStates: ReturnType<typeof useChatSessionStore.getState>[] =
+        [];
+      const unsubscribe = useChatSessionStore.subscribe((state) => {
+        observedStates.push(state);
+      });
+
+      beginModelSelectionIntent(session.id, {
+        requestId: "request-1",
+        target: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+          modelId: "claude-fable-5",
+          modelName: "Claude Fable 5",
+        },
+        previousTarget: session.executionTarget,
+      });
+      unsubscribe();
+
+      expect(observedStates).toHaveLength(1);
+      expect(observedStates[0]?.getSession(session.id)).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+          modelId: "claude-fable-5",
+          modelName: "Claude Fable 5",
+        },
+      });
+      expect(
+        observedStates[0]?.getSession(session.id)?.reasoningEffort,
+      ).toBeUndefined();
+      expect(getModelSelectionIntent(session.id)).toMatchObject({
+        requestId: "request-1",
+        target: {
+          modelProviderId: "anthropic",
+          modelId: "claude-fable-5",
+        },
+      });
     });
   });
 

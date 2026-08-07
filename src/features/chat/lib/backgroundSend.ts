@@ -28,6 +28,7 @@ export function sendPromptInBackground(
   attachments?: ChatAttachmentDraft[],
   beforeUserMessageCommitted?: () => void,
   onUserMessageCommitted?: () => void,
+  validateExecutionTarget?: () => void,
 ): Promise<void> {
   const systemPrompt = composeSystemPrompt(
     formatPersonaSystemPrompt(persona),
@@ -51,6 +52,7 @@ export function sendPromptInBackground(
     providerId,
     beforeUserMessageCommitted,
     onUserMessageCommitted,
+    prepare: validateExecutionTarget,
     background: true,
   }).catch((error) => {
     // dispatchPrompt has already recorded the failure in the session

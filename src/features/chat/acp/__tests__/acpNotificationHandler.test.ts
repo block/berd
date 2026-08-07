@@ -1,3 +1,4 @@
+import { beginModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -129,7 +130,6 @@ describe("acpNotificationHandler", () => {
       hasHydratedSessions: true,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
     useAgentStore.setState({ personas: [] });
   });
@@ -1060,22 +1060,30 @@ describe("acpNotificationHandler", () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
     });
-    useChatSessionStore.getState().beginModelSelectionIntent("acp-session", {
+    beginModelSelectionIntent("acp-session", {
       requestId: "request-1",
-      kind: "model",
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
-      previousProviderId: "openai",
-      previousModelId: "gpt-4o",
-      previousModelName: "GPT-4o",
+      target: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
+      previousTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "GPT-4o",
+      },
     });
 
     await handleSessionNotification({
@@ -1089,18 +1097,70 @@ describe("acpNotificationHandler", () => {
     expect(
       useChatSessionStore.getState().getSession("acp-session"),
     ).toMatchObject({
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
+  });
+
+  it("does not let a default model snapshot overwrite the UI selection after the intent settles", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+        modelName: "GPT-5.6 Sol",
+      },
+      executionTargetSource: "ui",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 1,
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createModelConfigUpdate("goose-gpt-5-5", [
+        { value: "goose-gpt-5-5", name: "GPT-5.5" },
+        { value: "goose-gpt-5-6-sol", name: "GPT-5.6 Sol" },
+      ]),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).toMatchObject({
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+        modelName: "GPT-5.6 Sol",
+      },
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Dropped divergent ACP model config snapshot",
+      expect.objectContaining({
+        localModelId: "goose-gpt-5-6-sol",
+        snapshotModelId: "goose-gpt-5-5",
+      }),
+    );
+    warnSpy.mockRestore();
   });
 
   it("updates the display name from a matching backend model snapshot", async () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "openai",
-      modelId: "gpt-4o",
-      modelName: "gpt-4o",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "gpt-4o",
+      },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
@@ -1116,8 +1176,12 @@ describe("acpNotificationHandler", () => {
     expect(
       useChatSessionStore.getState().getSession("acp-session"),
     ).toMatchObject({
-      modelId: "gpt-4o",
-      modelName: "GPT-4o Latest",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "GPT-4o Latest",
+      },
     });
   });
 
@@ -1125,7 +1189,7 @@ describe("acpNotificationHandler", () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "openai",
+      executionTarget: { harnessId: "goose", modelProviderId: "openai" },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
@@ -1141,8 +1205,12 @@ describe("acpNotificationHandler", () => {
     expect(
       useChatSessionStore.getState().getSession("acp-session"),
     ).toMatchObject({
-      modelId: "gpt-4o",
-      modelName: "GPT-4o",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "GPT-4o",
+      },
     });
   });
 
@@ -1150,7 +1218,7 @@ describe("acpNotificationHandler", () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
@@ -1181,7 +1249,12 @@ describe("acpNotificationHandler", () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "goose",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "gpt-4o",
+      },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
@@ -1201,7 +1274,12 @@ describe("acpNotificationHandler", () => {
     expect(
       useChatSessionStore.getState().getSession("acp-session"),
     ).toMatchObject({
-      modelId: "gpt-4o",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "GPT-4o",
+      },
       reasoningEffort: {
         configId: "thinking_effort",
         currentValue: "high",
@@ -1214,17 +1292,28 @@ describe("acpNotificationHandler", () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "goose",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
     });
-    useChatSessionStore.getState().beginModelSelectionIntent("acp-session", {
+    beginModelSelectionIntent("acp-session", {
       requestId: "model-request-1",
-      kind: "model",
-      modelId: "gpt-5.5",
-      previousModelId: "claude-opus-4-8",
-      previousModelName: "Claude Opus 4.8",
+      target: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "gpt-5.5",
+        modelName: "gpt-5.5",
+      },
+      previousTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "claude-opus-4-8",
+        modelName: "Claude Opus 4.8",
+      },
     });
 
     await handleSessionNotification({
@@ -1249,18 +1338,20 @@ describe("acpNotificationHandler", () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",
       title: "Chat",
-      providerId: "anthropic",
+      executionTarget: { harnessId: "goose", modelProviderId: "anthropic" },
       createdAt: "2026-04-20T00:00:00.000Z",
       updatedAt: "2026-04-20T00:00:00.000Z",
       messageCount: 0,
     });
-    useChatSessionStore.getState().beginModelSelectionIntent("acp-session", {
+    beginModelSelectionIntent("acp-session", {
       requestId: "provider-request-1",
-      kind: "provider",
-      providerId: "anthropic",
-      previousProviderId: "openai",
-      previousModelId: "gpt-4o",
-      previousModelName: "GPT-4o",
+      target: { harnessId: "goose", modelProviderId: "anthropic" },
+      previousTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        modelName: "GPT-4o",
+      },
     });
 
     await handleSessionNotification({
@@ -1273,8 +1364,10 @@ describe("acpNotificationHandler", () => {
     expect(
       useChatSessionStore.getState().getSession("acp-session"),
     ).not.toMatchObject({
-      modelId: "gpt-4o",
-      modelName: "GPT-4o",
+      executionTarget: expect.objectContaining({
+        modelId: "gpt-4o",
+        modelName: "GPT-4o",
+      }),
     });
     expect(warnSpy).toHaveBeenCalledWith(
       "Dropped divergent ACP model config snapshot",

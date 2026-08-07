@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  clearSessionConfigSnapshotHandlers,
-  setSessionConfigSnapshotHandlers,
-} from "../acpSessionConfigSnapshots";
+import { setSessionConfigSnapshotHandlers } from "../acpSessionConfigSnapshots";
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
@@ -596,7 +593,7 @@ describe("provider wire translation", () => {
     });
     mocks.newSession.mockResolvedValue({ sessionId: "session-9" });
     mocks.setSessionConfigOption.mockResolvedValue(undefined);
-    clearSessionConfigSnapshotHandlers();
+    setSessionConfigSnapshotHandlers({});
   });
 
   it("sends the default model provider when newSession is given the goose sentinel", async () => {
@@ -756,6 +753,7 @@ describe("provider wire translation", () => {
       {
         origin: "response",
         providerId: "codex-acp",
+        modelId: "claude-opus-4-8",
       },
     );
     expect(applyReasoningEffortConfigSnapshot).toHaveBeenCalledWith(
@@ -772,6 +770,7 @@ describe("provider wire translation", () => {
       {
         origin: "response",
         providerId: "codex-acp",
+        modelId: "claude-opus-4-8",
       },
     );
   });

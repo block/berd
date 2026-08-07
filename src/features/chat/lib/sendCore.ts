@@ -75,7 +75,7 @@ export interface SendCoreOptions {
    * Runs between the "thinking" and "streaming" transitions; a throw routes
    * through the shared error path.
    */
-  prepare?: () => Promise<void>;
+  prepare?: () => void | Promise<void>;
   signal?: AbortSignal;
   /** Fires immediately before the user message is committed to local stores. */
   beforeUserMessageCommitted?: () => void;

@@ -13,6 +13,7 @@ const getSessionSchema = TOOL_GROUPS.sessions.actions.get.schema;
 const listSessionsSchema = TOOL_GROUPS.sessions.actions.list.schema;
 const renameSessionSchema = TOOL_GROUPS.sessions.actions.rename.schema;
 const moveSessionSchema = TOOL_GROUPS.sessions.actions.move.schema;
+const createAgentSchema = TOOL_GROUPS.agents.actions.create.schema;
 const createSkillSchema = TOOL_GROUPS.skills.actions.create.schema;
 
 // Strict-mode (unknown-key rejection) for EVERY action schema is covered in
@@ -114,6 +115,27 @@ describe("berdctl command schema bounds", () => {
     expect(
       moveSessionSchema.safeParse({ session_id: "s1", project_id: "p1" })
         .success,
+    ).toBe(true);
+  });
+
+  it("agents.create requires a concrete provider for a model", () => {
+    const base = { name: "reviewer", system_prompt: "review code" };
+    expect(
+      createAgentSchema.safeParse({ ...base, model: "gpt-5.6" }).success,
+    ).toBe(false);
+    expect(
+      createAgentSchema.safeParse({
+        ...base,
+        provider: "goose",
+        model: "gpt-5.6",
+      }).success,
+    ).toBe(false);
+    expect(
+      createAgentSchema.safeParse({
+        ...base,
+        provider: "openai",
+        model: "gpt-5.6",
+      }).success,
     ).toBe(true);
   });
 

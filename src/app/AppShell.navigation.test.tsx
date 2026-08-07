@@ -1,3 +1,5 @@
+import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
+import { beginModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import {
   act,
   fireEvent,
@@ -35,7 +37,10 @@ import {
 } from "@/features/experiments/experimentPreferences";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
+import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -51,7 +56,6 @@ import type { AppShellContent as AppShellContentType } from "./ui/AppShellConten
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
 const mockAcpPrepareSession = vi.hoisted(() => vi.fn());
-const mockAcpSetModel = vi.hoisted(() => vi.fn());
 const mockAcpSetSessionConfigOption = vi.hoisted(() => vi.fn());
 const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
 const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
@@ -62,6 +66,7 @@ const mockListExtensions = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockPathExists = vi.hoisted(() => vi.fn());
 const mockCheckAllProviderStatus = vi.hoisted(() => vi.fn());
+const mockRepairManagedGooseModelSelection = vi.hoisted(() => vi.fn());
 const gitMocks = vi.hoisted(() => ({
   countBranchCommitsNotInBase: vi.fn(),
   hasIgnoredFiles: vi.fn(),
@@ -172,7 +177,7 @@ function makeManagedWorktreeSession(
   return {
     id: "session-1",
     title: branch,
-    providerId: "goose",
+    executionTarget: { harnessId: "goose" },
     workingDir: worktreePath,
     workspaceAttachments: [
       {
@@ -259,31 +264,48 @@ function selectCodexProvider() {
   });
 }
 
-/**
- * Seeds the project the mock sidebar's "Sidebar new project 2 chat" button
- * targets, so clicking it runs the real createNewProjectDraft path. No
- * workspaces or working dirs, which keeps the multi-workspace startup branch
- * and the missing-folder probe out of the way.
- */
-function seedSidebarProject() {
-  useProjectStore.setState({
-    projects: [
+function setResolvingPersona(
+  model?: string,
+  provider = "databricks_v2",
+  modelProviderId?: string,
+) {
+  useAgentStore.setState({
+    selectedProvider: "goose",
+    providers: [
+      { id: "goose", label: "Goose" },
+      { id: "databricks_v2", label: "Databricks AI Gateway" },
+    ],
+    personas: [
       {
-        id: "project-2",
-        path: "/tmp/project-2",
-        name: "Project Two",
-        description: "",
-        prompt: "",
-        icon: "folder",
-        color: "blue",
-        projectWorkspaces: [],
-        workingDirs: [],
-        useWorktrees: false,
-        order: 0,
-        archivedAt: null,
+        id: "persona-resolves",
+        displayName: "Reviewer",
+        systemPrompt: "Review code.",
+        provider,
+        ...(modelProviderId ? { modelProviderId } : {}),
+        ...(model ? { model } : {}),
+        isBuiltin: false,
+        writable: true,
       },
     ],
   });
+}
+
+function seedProviderModels(
+  providerId: string,
+  models: Array<{ id: string; name: string; recommended?: boolean }>,
+) {
+  useProviderModelCacheStore.getState().seedRuntimeModels(
+    new Map([
+      [
+        providerId,
+        models.map((model) => ({
+          ...model,
+          displayName: model.name,
+          providerId,
+        })),
+      ],
+    ]),
+  );
 }
 
 vi.mock("@/shared/profile/buildProfile", () => ({
@@ -393,10 +415,14 @@ vi.mock("@/features/chat/lib/externalAgentReadiness", () => ({
     mockIsExternalAgentReady(...args),
 }));
 
+vi.mock("@/features/providers/lib/managedModelSelectionRepair", () => ({
+  repairManagedGooseModelSelection: (...args: unknown[]) =>
+    mockRepairManagedGooseModelSelection(...args),
+}));
+
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
-  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
   acpSetSessionConfigOption: (...args: unknown[]) =>
     mockAcpSetSessionConfigOption(...args),
   acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
@@ -798,6 +824,10 @@ describe("AppShell global navigation", () => {
   });
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
+    mockRepairManagedGooseModelSelection.mockReset();
+    mockRepairManagedGooseModelSelection.mockImplementation(
+      async (selection: unknown) => selection,
+    );
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     mockBuildFeatures.byoKeyProviders = false;
@@ -816,28 +846,31 @@ describe("AppShell global navigation", () => {
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
     mockAcpPrepareSession.mockReset();
     mockAcpPrepareSession.mockResolvedValue({});
-    mockAcpSetModel.mockReset();
-    mockAcpSetModel.mockResolvedValue({});
     mockAcpSetSessionConfigOption.mockReset();
     mockAcpSetSessionConfigOption.mockResolvedValue({});
     mockAcpListSessionsPage.mockReset();
     mockAcpListSessionsPage.mockImplementation(async () => ({
-      sessions: useChatSessionStore.getState().sessions.map((session) => ({
-        sessionId: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
-        createdAt: session.createdAt,
-        lastMessageAt: session.lastMessageAt ?? null,
-        archivedAt: session.archivedAt ?? null,
-        userSetName: session.userSetName ?? false,
-        messageCount: session.messageCount,
-        subtitle: session.subtitle ?? null,
-        workingDir: session.workingDir ?? null,
-        projectId: session.projectId ?? null,
-        providerId: session.providerId ?? null,
-        modelId: session.modelId ?? null,
-        personaId: session.personaId ?? null,
-      })),
+      sessions: useChatSessionStore.getState().sessions.map((session) => {
+        const selection = gooseServeSelectionFromExecutionTarget(
+          session.executionTarget,
+        );
+        return {
+          sessionId: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          createdAt: session.createdAt,
+          lastMessageAt: session.lastMessageAt ?? null,
+          archivedAt: session.archivedAt ?? null,
+          userSetName: session.userSetName ?? false,
+          messageCount: session.messageCount,
+          subtitle: session.subtitle ?? null,
+          workingDir: session.workingDir ?? null,
+          projectId: session.projectId ?? null,
+          providerId: selection.providerId ?? null,
+          modelId: selection.modelId ?? null,
+          personaId: session.personaId ?? null,
+        };
+      }),
       nextCursor: null,
     }));
     mockAcpArchiveSession.mockReset();
@@ -925,7 +958,6 @@ describe("AppShell global navigation", () => {
       hasHydratedSessions: false,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
       archiveMutationBySessionId: {},
     });
     useAgentStore.setState({
@@ -939,6 +971,12 @@ describe("AppShell global navigation", () => {
     useDefaultProviderReadinessStore.setState({
       readiness: { status: "ready", providerId: "goose" },
     });
+    useProviderModelCacheStore.setState({
+      providers: new Map(),
+      refreshingProviderIds: new Set(),
+      runtimeManagedProviderIds: new Set(),
+    });
+    useProviderCatalogStore.getState().reset();
     setReadyRuntimeConfig();
   });
 
@@ -965,6 +1003,332 @@ describe("AppShell global navigation", () => {
         "--project-tint",
       ),
     ).toBe("transparent");
+  });
+
+  it("repairs an obsolete managed model before creating Home", async () => {
+    setReadyRuntimeConfig({
+      schemaVersion: 1,
+      goose: {
+        defaultModelProviderId: "databricks_v2",
+        defaultModelId: "goose-gpt-5-5",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks",
+            models: [
+              { id: "goose-gpt-5-5", name: "GPT-5.5" },
+              { id: "legacy-v1-model", name: "Legacy" },
+            ],
+          },
+        ],
+      },
+    });
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "legacy-v1-model",
+      },
+    });
+    mockRepairManagedGooseModelSelection.mockResolvedValue({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+    useChatSessionStore.setState({ hasHydratedSessions: true });
+
+    renderAppShell();
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "goose-gpt-5-5" }),
+      );
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalledWith(
+      "databricks_v2",
+      "~/goose artifacts",
+      expect.objectContaining({ modelId: "legacy-v1-model" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("created-session"),
+    ).toMatchObject({
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+  });
+
+  it("keeps a newer Home picker choice while managed repair is pending", async () => {
+    const repair = deferred<{
+      providerId: string;
+      modelId: string;
+    }>();
+    setReadyRuntimeConfig({
+      schemaVersion: 1,
+      goose: {
+        defaultModelProviderId: "databricks_v2",
+        defaultModelId: "goose-gpt-5-5",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks",
+            models: [
+              { id: "goose-gpt-5-5", name: "GPT-5.5" },
+              { id: "goose-gpt-5-6", name: "GPT-5.6" },
+              { id: "legacy-v1-model", name: "Legacy" },
+            ],
+          },
+        ],
+      },
+    });
+    seedProviderModels("databricks_v2", [
+      { id: "goose-gpt-5-5", name: "GPT-5.5" },
+      { id: "goose-gpt-5-6", name: "GPT-5.6" },
+    ]);
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "legacy-v1-model",
+      },
+    });
+    mockRepairManagedGooseModelSelection
+      .mockReturnValueOnce(repair.promise)
+      .mockImplementation(
+        async (selection: { providerId?: string; modelId?: string }) => ({
+          providerId: selection.providerId ?? "databricks_v2",
+          modelId: selection.modelId ?? "goose-gpt-5-5",
+        }),
+      );
+    useChatSessionStore.setState({ hasHydratedSessions: true });
+    const user = userEvent.setup();
+
+    renderAppShell();
+
+    await user.click(screen.getByPlaceholderText("Start a conversation"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "GPT-5.6" }));
+
+    await act(async () => {
+      repair.resolve({
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      });
+      await repair.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "goose-gpt-5-6" }),
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("created-session"),
+    ).toMatchObject({
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6",
+      },
+    });
+  });
+
+  it("keeps a fresh-start picker selection when Home appears with its default model", async () => {
+    const homeCreation = deferred<{
+      sessionId: string;
+      configOptionsSnapshot: {
+        model: { modelId: string; modelName: string };
+      };
+    }>();
+    seedProviderModels("databricks_v2", [
+      { id: "goose-gpt-5-5", name: "GPT-5.5", recommended: true },
+      { id: "goose-gpt-5-6", name: "GPT-5.6", recommended: true },
+    ]);
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+    useChatSessionStore.setState({ hasHydratedSessions: true });
+    mockAcpCreateSession.mockReturnValueOnce(homeCreation.promise);
+    const user = userEvent.setup();
+
+    renderAppShell();
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "goose-gpt-5-5" }),
+      );
+    });
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
+
+    await user.click(screen.getByPlaceholderText("Start a conversation"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "GPT-5.6" }));
+    expect(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    ).toHaveTextContent("GPT-5.6");
+
+    await act(async () => {
+      homeCreation.resolve({
+        sessionId: "home-session",
+        configOptionsSnapshot: {
+          model: { modelId: "goose-gpt-5-5", modelName: "GPT-5.5" },
+        },
+      });
+      await homeCreation.promise;
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("home-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-gpt-5-6",
+          modelName: "GPT-5.6",
+        },
+      });
+    });
+    expect(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    ).toHaveTextContent("GPT-5.6");
+  });
+
+  it("keeps an external agent as the Home model harness", async () => {
+    selectCodexProvider();
+    mockAgentStatus.readyAgentIds = new Set(["codex-acp"]);
+    seedProviderModels("codex-acp", [
+      { id: "gpt-5.5", name: "GPT-5.5", recommended: true },
+    ]);
+    useChatSessionStore.setState({ hasHydratedSessions: true });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({ executionTarget: { harnessId: "codex-acp" } });
+    });
+    await user.click(screen.getByPlaceholderText("Start a conversation"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "GPT-5.5" }));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "codex-acp",
+          modelProviderId: "codex-acp",
+          modelId: "gpt-5.5",
+        },
+      });
+    });
+  });
+
+  it("does not reseed an explicitly unresolved Home session", async () => {
+    window.localStorage.setItem("goose:home-session-id", "home-unresolved");
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "home-unresolved",
+          title: "Home",
+          executionTargetSource: "ui",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-08-06T00:00:00.000Z",
+          updatedAt: "2026-08-06T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+
+    renderAppShell();
+    await screen.findByPlaceholderText("Start a conversation");
+
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    const unresolved = useChatSessionStore
+      .getState()
+      .getSession("home-unresolved");
+    expect(unresolved?.executionTarget).toBeUndefined();
+    expect(unresolved?.executionTargetSource).toBe("ui");
+  });
+
+  it("preserves a UI-owned provider-only Home target", async () => {
+    window.localStorage.setItem("goose:home-session-id", "home-provider");
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "openai", isConfigured: true },
+    ]);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "home-provider",
+          title: "Home",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
+          executionTargetSource: "ui",
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-08-06T00:00:00.000Z",
+          updatedAt: "2026-08-06T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+
+    renderAppShell();
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "home-provider",
+        "openai",
+        "~/goose artifacts",
+        expect.any(Object),
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("home-provider"),
+    ).toMatchObject({
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+      },
+      executionTargetSource: "ui",
+    });
   });
 
   it("does not create a chat when BYO default provider setup is required", async () => {
@@ -1004,23 +1368,7 @@ describe("AppShell global navigation", () => {
 
   it("allows a configured concrete provider when the BYO default is missing", async () => {
     requireByoDefaultProviderSetup();
-    useAgentStore.setState({
-      selectedProvider: "goose",
-      providers: [
-        { id: "goose", label: "Goose" },
-        { id: "databricks_v2", label: "Databricks AI Gateway" },
-      ],
-      personas: [
-        {
-          id: "persona-resolves",
-          displayName: "Reviewer",
-          systemPrompt: "Review code.",
-          provider: "databricks_v2",
-          isBuiltin: false,
-          writable: true,
-        },
-      ],
-    });
+    setResolvingPersona();
     mockCheckAllProviderStatus.mockResolvedValue([
       { providerId: "databricks_v2", isConfigured: true },
     ]);
@@ -1043,6 +1391,63 @@ describe("AppShell global navigation", () => {
         projectId: undefined,
       },
     );
+  });
+
+  it("uses a configured explicit Goose model provider when Goose defaults need setup", async () => {
+    requireByoDefaultProviderSetup();
+    setResolvingPersona("goose-model", "goose", "databricks_v2");
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "databricks_v2", isConfigured: true },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with resolving agent" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "databricks_v2",
+      "~/goose artifacts",
+      {
+        deferProviderSetup: false,
+        modelId: "goose-model",
+        projectId: undefined,
+      },
+    );
+  });
+
+  it("blocks an unconfigured explicit Goose model provider when the Goose default is ready", async () => {
+    mockBuildFeatures.byoKeyProviders = true;
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "openai",
+        modelId: "gpt-4o",
+      },
+    });
+    setResolvingPersona("goose-model", "goose", "databricks_v2");
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "openai", isConfigured: true },
+      { providerId: "databricks_v2", isConfigured: false },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with resolving agent" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "providers",
+    );
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
   it("starts general chats with the resolved provider when a stored agent is unavailable", async () => {
@@ -1094,6 +1499,35 @@ describe("AppShell global navigation", () => {
         projectId: undefined,
       },
     );
+  });
+
+  it("materializes an external ACP default model when promoting a draft", async () => {
+    selectCodexProvider();
+    mockAgentStatus.readyAgentIds = new Set(["codex-acp"]);
+    mockAcpCreateSession.mockResolvedValueOnce({
+      sessionId: "created-session",
+      configOptionsSnapshot: {
+        model: { modelId: "gpt-5.5", modelName: "GPT-5.5" },
+        reasoningEffort: null,
+      },
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "codex-acp",
+          modelProviderId: "codex-acp",
+          modelId: "gpt-5.5",
+          modelName: "GPT-5.5",
+        },
+      });
+    });
   });
 
   it("preserves the stored model for a ready external ACP agent", async () => {
@@ -1254,7 +1688,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "missing-session",
       title: "Missing cwd chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "/missing/session",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -1362,7 +1796,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -1398,7 +1832,7 @@ describe("AppShell global navigation", () => {
   it("renders session-to-session chat changes immediately", async () => {
     const user = userEvent.setup();
     const sessionBase = {
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -1431,7 +1865,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -1498,7 +1932,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "Pinned chat",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: "~/goose artifacts",
           createdAt: "2026-06-09T00:00:00.000Z",
           updatedAt: "2026-06-09T00:00:00.000Z",
@@ -1539,7 +1973,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "Plain chat",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: "/tmp/plain-chat",
           createdAt: "2026-07-10T00:00:00.000Z",
           updatedAt: "2026-07-10T00:00:00.000Z",
@@ -1581,7 +2015,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "CLI reject",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: worktreePath,
           workspaceAttachments: [
             {
@@ -1648,7 +2082,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "CLI discard",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: worktreePath,
           workspaceAttachments: [
             {
@@ -1714,7 +2148,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Dirty chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: worktreePath,
       workspaceAttachments: [
         {
@@ -1805,7 +2239,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "Inspect fails",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: worktreePath,
           workspaceAttachments: [
             {
@@ -1871,7 +2305,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "Ignored files",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: worktreePath,
           workspaceAttachments: [
             {
@@ -2034,7 +2468,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -2069,7 +2503,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -2109,7 +2543,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -2147,7 +2581,7 @@ describe("AppShell global navigation", () => {
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       updatedAt: "2026-06-09T00:00:00.000Z",
@@ -2393,70 +2827,6 @@ describe("AppShell global navigation", () => {
     );
   });
 
-  it("navigates to the new chat from the docked Home composer without waiting on provider readiness", async () => {
-    mockBuildFeatures.byoKeyProviders = true;
-    useDefaultProviderReadinessStore.setState({
-      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
-    });
-    // Never resolves: the provider probe must not gate navigation.
-    mockCheckAllProviderStatus.mockImplementation(
-      () => new Promise<never>(() => {}),
-    );
-    // Never resolves either, so the chat view can only be reached optimistically
-    // — before the backend session behind the draft exists.
-    mockAcpCreateSession.mockImplementation(() => new Promise<never>(() => {}));
-    window.localStorage.setItem("goose:home-session-id", "home-session");
-    useChatSessionStore.setState((state) => ({
-      sessions: [
-        {
-          id: "home-session",
-          title: "New Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "gpt-4o",
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 0,
-        },
-        ...state.sessions,
-      ],
-    }));
-    renderAppShell();
-
-    const textbox = await screen.findByPlaceholderText("Start a conversation");
-    // Pin the entry point: this covers the docked send, not the centered
-    // composer's handoff path.
-    expect(textbox.closest("[data-placement]")).toHaveAttribute(
-      "data-placement",
-      "docked",
-    );
-    fireEvent.change(textbox, { target: { value: "start optimistically" } });
-    fireEvent.keyDown(textbox, { key: "Enter" });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    const activeSessionId = useChatSessionStore.getState().activeSessionId;
-    expect(activeSessionId).not.toBe("home-session");
-    // The chat page is showing a local draft whose backend session is still
-    // being created, with the send queued against it.
-    expect(
-      useChatSessionStore.getState().getSession(activeSessionId ?? ""),
-    ).toMatchObject({ creationState: "pending" });
-    expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
-      [activeSessionId ?? ""]: [
-        {
-          payload: { text: "start optimistically" },
-        },
-      ],
-    });
-    // Nothing was sent to the Home session.
-    expect(
-      useChatStore.getState().queuedMessageBySession["home-session"],
-    ).toBeUndefined();
-  });
-
   it("refreshes personas when repair reports an error after changing disk", async () => {
     const personaId = "/Users/test/.agents/agents/berdy2.md";
     mockRepairBundledAgent.mockRejectedValue(new Error("marker write failed"));
@@ -2483,239 +2853,6 @@ describe("AppShell global navigation", () => {
       expect(
         useChatSessionStore.getState().getSession("created-session"),
       ).toMatchObject({ personaId });
-    });
-  });
-
-  it("navigates to a project chat without waiting on provider readiness", async () => {
-    mockBuildFeatures.byoKeyProviders = true;
-    useDefaultProviderReadinessStore.setState({
-      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
-    });
-    // Never resolves: the provider probe must not gate navigation.
-    mockCheckAllProviderStatus.mockImplementation(
-      () => new Promise<never>(() => {}),
-    );
-    // Never resolves either, so the chat view can only be reached optimistically
-    // — before the backend session behind the draft exists.
-    mockAcpCreateSession.mockImplementation(() => new Promise<never>(() => {}));
-    seedSidebarProject();
-    const user = userEvent.setup();
-    renderAppShell();
-
-    await user.click(
-      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    // The chat page is showing a local draft whose backend session is still
-    // being created.
-    const activeSessionId = useChatSessionStore.getState().activeSessionId;
-    expect(
-      useChatSessionStore.getState().getSession(activeSessionId ?? ""),
-    ).toMatchObject({ creationState: "pending", projectId: "project-2" });
-  });
-
-  it("does not create a project chat when BYO default provider setup is required", async () => {
-    requireByoDefaultProviderSetup();
-    seedSidebarProject();
-    const user = userEvent.setup();
-    renderAppShell();
-
-    await user.click(
-      screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
-    });
-    expect(screen.getByTestId("settings-section")).toHaveTextContent(
-      "providers",
-    );
-    // The synchronous gate still bails before any draft exists.
-    expect(useChatSessionStore.getState().sessions).toEqual([]);
-    expect(mockAcpCreateSession).not.toHaveBeenCalled();
-  });
-
-  it("writes the picked reasoning effort to a reused draft whose stored value is unconfirmed", async () => {
-    mockBuildFeatures.byoKeyProviders = true;
-    useDefaultProviderReadinessStore.setState({
-      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
-    });
-    mockCheckAllProviderStatus.mockResolvedValue([
-      { providerId: "openai", isConfigured: true },
-    ]);
-    window.localStorage.setItem(
-      "goose:preferredModelsByAgent",
-      JSON.stringify({
-        goose: { modelId: "gpt-4o", modelName: "gpt-4o", providerId: "openai" },
-      }),
-    );
-    window.localStorage.setItem("goose:home-session-id", "home-session");
-    const reasoningEffortOptions = [
-      { id: "low", name: "Low" },
-      { id: "medium", name: "Medium" },
-    ];
-    useChatSessionStore.setState((state) => ({
-      sessions: [
-        {
-          id: "home-session",
-          title: "New Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "gpt-4o",
-          reasoningEffort: {
-            configId: "reasoning_effort",
-            currentValue: "medium",
-            options: reasoningEffortOptions,
-          },
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 0,
-        },
-        {
-          // An empty chat whose stored effort only reflects an optimistic
-          // write from its own composer — the backend set may still be in
-          // flight, or may have already failed and rolled back.
-          id: "draft-1",
-          title: "New Chat",
-          // The agent the resolved new-session target names, so this draft is
-          // the reuse candidate.
-          providerId: "goose",
-          modelId: "gpt-4o",
-          modelName: "gpt-4o",
-          reasoningEffort: {
-            configId: "reasoning_effort",
-            currentValue: "low",
-            options: reasoningEffortOptions,
-          },
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 0,
-        },
-        ...state.sessions,
-      ],
-    }));
-    useChatStore.setState({ draftsBySession: { "draft-1": "half typed" } });
-    const user = userEvent.setup();
-    renderAppShell();
-
-    const textbox = await screen.findByPlaceholderText("Start a conversation");
-    fireEvent.change(textbox, { target: { value: "think less" } });
-    await user.click(
-      screen.getByRole("button", { name: /choose agent and model/i }),
-    );
-    await user.click(await screen.findByText("Low"));
-    await user.keyboard("{Escape}");
-    fireEvent.keyDown(textbox, { key: "Enter" });
-
-    // The draft is reused because its stored effort matches the pick, so the
-    // send still has to confirm that value with the backend.
-    await waitFor(() => {
-      expect(useChatSessionStore.getState().activeSessionId).toBe("draft-1");
-    });
-    await waitFor(() => {
-      expect(mockAcpSetSessionConfigOption).toHaveBeenCalledWith(
-        "draft-1",
-        "reasoning_effort",
-        "low",
-      );
-    });
-    expect(mockAcpCreateSession).not.toHaveBeenCalled();
-  });
-
-  it("applies the docked composer reasoning effort to the new chat instead of the Home session", async () => {
-    mockBuildFeatures.byoKeyProviders = true;
-    useDefaultProviderReadinessStore.setState({
-      readiness: { status: "ready", providerId: "openai", modelId: "gpt-4o" },
-    });
-    mockCheckAllProviderStatus.mockResolvedValue([
-      { providerId: "openai", isConfigured: true },
-    ]);
-    mockAcpCreateSession.mockResolvedValue({
-      sessionId: "created-session",
-      configOptionsSnapshot: {
-        reasoningEffort: {
-          configId: "reasoning_effort",
-          currentValue: "medium",
-          options: [
-            { id: "low", name: "Low" },
-            { id: "medium", name: "Medium" },
-          ],
-        },
-      },
-    });
-    window.localStorage.setItem(
-      "goose:preferredModelsByAgent",
-      JSON.stringify({
-        goose: { modelId: "gpt-4o", modelName: "gpt-4o", providerId: "openai" },
-      }),
-    );
-    window.localStorage.setItem("goose:home-session-id", "home-session");
-    useChatSessionStore.setState((state) => ({
-      sessions: [
-        {
-          id: "home-session",
-          title: "New Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "gpt-4o",
-          reasoningEffort: {
-            configId: "reasoning_effort",
-            currentValue: "medium",
-            options: [
-              { id: "low", name: "Low" },
-              { id: "medium", name: "Medium" },
-            ],
-          },
-          workingDir: "~/goose artifacts",
-          createdAt: "2026-06-09T00:00:00.000Z",
-          updatedAt: "2026-06-09T00:00:00.000Z",
-          messageCount: 0,
-        },
-        ...state.sessions,
-      ],
-    }));
-    const user = userEvent.setup();
-    renderAppShell();
-
-    const textbox = await screen.findByPlaceholderText("Start a conversation");
-    fireEvent.change(textbox, { target: { value: "think less" } });
-    await user.click(
-      screen.getByRole("button", { name: /choose agent and model/i }),
-    );
-    await user.click(await screen.findByText("Low"));
-    await user.keyboard("{Escape}");
-
-    // The selection is composer-local: nothing is written to the idle Home
-    // session, so no backend state has to be confirmed before sending.
-    expect(mockAcpSetSessionConfigOption).not.toHaveBeenCalled();
-    expect(
-      useChatSessionStore.getState().getSession("home-session")?.reasoningEffort
-        ?.currentValue,
-    ).toBe("medium");
-
-    fireEvent.keyDown(textbox, { key: "Enter" });
-
-    // It reaches the created session before its queued first send is released.
-    await waitFor(() => {
-      expect(mockAcpSetSessionConfigOption).toHaveBeenCalledWith(
-        "created-session",
-        "reasoning_effort",
-        "low",
-      );
-    });
-    await waitFor(() => {
-      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
-        "created-session": [
-          {
-            payload: { text: "think less" },
-          },
-        ],
-      });
     });
   });
 
@@ -2858,7 +2995,7 @@ describe("AppShell global navigation", () => {
       const session: ChatSession = {
         id: "session-1",
         title: "Active chat",
-        providerId: "goose",
+        executionTarget: { harnessId: "goose" },
         workingDir: "~/goose artifacts",
         createdAt: "2026-06-09T00:00:00.000Z",
         updatedAt: "2026-06-09T00:00:00.000Z",
@@ -2901,7 +3038,7 @@ describe("AppShell global navigation", () => {
       const session: ChatSession = {
         id: "session-1",
         title: "Active chat",
-        providerId: "goose",
+        executionTarget: { harnessId: "goose" },
         workingDir: "~/goose artifacts",
         createdAt: "2026-06-09T00:00:00.000Z",
         updatedAt: "2026-06-09T00:00:00.000Z",
@@ -2950,28 +3087,13 @@ describe("AppShell global navigation", () => {
     vi.useFakeTimers();
     const configUpdate = deferred<Record<string, never>>();
     mockAcpSetSessionConfigOption.mockReturnValue(configUpdate.promise);
-    // The created session reports a different effort than the composer sends,
-    // so applying it is a real round trip rather than a skipped no-op.
-    mockAcpCreateSession.mockResolvedValue({
-      sessionId: "created-session",
-      configOptionsSnapshot: {
-        reasoningEffort: {
-          configId: "thinking_effort",
-          currentValue: "low",
-          options: [
-            { id: "low", name: "low" },
-            { id: "high", name: "high" },
-          ],
-        },
-      },
-    });
     window.localStorage.setItem("goose:home-session-id", "home-session");
 
     try {
       const homeSession: ChatSession = {
         id: "home-session",
         title: "Home",
-        providerId: "goose",
+        executionTarget: { harnessId: "goose" },
         workingDir: "~/goose artifacts",
         reasoningEffort: {
           configId: "thinking_effort",
@@ -2992,20 +3114,10 @@ describe("AppShell global navigation", () => {
         reasoningEffort: undefined,
         messageCount: 1,
       };
-      // Its effort differs from the requested one, so it is not a reuse
-      // candidate and the send goes through a fresh draft.
       const reusableDraft: ChatSession = {
         ...homeSession,
         id: "reusable-draft",
         title: "New Chat",
-        reasoningEffort: {
-          configId: "thinking_effort",
-          currentValue: "low",
-          options: [
-            { id: "low", name: "low" },
-            { id: "high", name: "high" },
-          ],
-        },
       };
       useChatSessionStore.setState({
         sessions: [homeSession, activeSession, reusableDraft],
@@ -3128,18 +3240,15 @@ describe("AppShell global navigation", () => {
     const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
 
     act(() => {
-      const sessionStore = useChatSessionStore.getState();
-      sessionStore.patchSession(draftSessionId, {
-        providerId: "codex-acp",
+      const target = {
+        harnessId: "codex-acp",
+        modelProviderId: "codex-acp",
         modelId: "gpt-5.4-mini",
         modelName: "GPT-5.4 mini",
-      });
-      sessionStore.beginModelSelectionIntent(draftSessionId, {
+      } as const;
+      beginModelSelectionIntent(draftSessionId, {
         requestId: "pending-model",
-        kind: "model",
-        providerId: "codex-acp",
-        modelId: "gpt-5.4-mini",
-        modelName: "GPT-5.4 mini",
+        target,
         preferenceAgentId: "codex-acp",
       });
       pendingSession.resolve({ sessionId: "created-session" });
@@ -3150,6 +3259,7 @@ describe("AppShell global navigation", () => {
         "created-session",
         "codex-acp",
         "~/goose artifacts",
+        expect.objectContaining({ modelId: "gpt-5.4-mini" }),
       );
     });
     act(() => pendingPrepare.resolve({}));
@@ -3158,9 +3268,12 @@ describe("AppShell global navigation", () => {
       expect(
         useChatSessionStore.getState().getSession("created-session"),
       ).toMatchObject({
-        providerId: "codex-acp",
-        modelId: "gpt-5.4-mini",
-        modelName: "GPT-5.4 mini",
+        executionTarget: {
+          harnessId: "codex-acp",
+          modelProviderId: "codex-acp",
+          modelId: "gpt-5.4-mini",
+          modelName: "GPT-5.4 mini",
+        },
       });
     });
     expect(
@@ -3172,8 +3285,88 @@ describe("AppShell global navigation", () => {
         providerId: "codex-acp",
       },
     });
+    expect(getModelSelectionIntent("created-session")).toBeUndefined();
+  });
+
+  it("adopts a repaired pending draft selection before promotion", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    mockRepairManagedGooseModelSelection.mockImplementation(
+      async (selection: { providerId?: string; modelId?: string }) =>
+        selection.modelId === "legacy-v1-model"
+          ? { providerId: "databricks_v2", modelId: "goose-gpt-5-5" }
+          : selection,
+    );
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+
+    act(() => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget(draftSessionId, {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "legacy-v1-model",
+          modelName: "Legacy",
+        });
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "created-session",
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "goose-gpt-5-5" }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-gpt-5-5",
+          modelName: "goose-gpt-5-5",
+        },
+      });
+    });
+  });
+
+  it("does not restore a draft target after the UI explicitly clears it", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+
+    act(() => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget(draftSessionId, undefined);
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("created-session");
+      expect(
+        useChatSessionStore.getState().getSession(draftSessionId),
+      ).toMatchObject({
+        creationState: "failed",
+        executionTarget: undefined,
+        executionTargetSource: "ui",
+      });
+    });
     expect(
-      useChatSessionStore.getState().getModelSelectionIntent("created-session"),
+      useChatSessionStore.getState().getSession("created-session"),
     ).toBeUndefined();
   });
 
@@ -3188,9 +3381,14 @@ describe("AppShell global navigation", () => {
     await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
     const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
     act(() => {
-      useChatSessionStore.getState().patchSession(draftSessionId, {
-        providerId: "codex-acp",
-      });
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget(draftSessionId, {
+          harnessId: "codex-acp",
+          modelProviderId: "codex-acp",
+          modelId: "gpt-5.4-mini",
+          modelName: "GPT-5.4 mini",
+        });
       pendingSession.resolve({ sessionId: "created-session" });
     });
 
@@ -3810,7 +4008,7 @@ describe("AppShell global navigation", () => {
         {
           id: "session-1",
           title: "New agent",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           workingDir: "~/goose artifacts",
           createdAt: "2026-06-09T00:00:00.000Z",
           updatedAt: "2026-06-09T00:00:00.000Z",
@@ -4411,22 +4609,25 @@ describe("AppShell global navigation", () => {
     ).toBe("var(--color-pill-blue)");
   });
 
-  it("forwards a persona's provider and model when the provider resolves", async () => {
+  it("repairs an explicit persona model before creating its session", async () => {
+    setResolvingPersona("legacy-v1-model");
     useAgentStore.setState({
-      selectedProvider: "goose",
-      providers: [{ id: "goose", label: "Goose" }],
-      personas: [
-        {
-          id: "persona-resolves",
-          displayName: "Reviewer",
-          systemPrompt: "Review code.",
-          provider: "goose",
-          model: "goose-model",
-          isBuiltin: false,
-          writable: true,
-        },
+      selectedProvider: "codex-acp",
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+        { id: "databricks_v2", label: "Databricks AI Gateway" },
       ],
     });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "databricks_v2", isConfigured: true },
+    ]);
+    mockRepairManagedGooseModelSelection.mockImplementation(
+      async (selection: { providerId?: string; modelId?: string }) =>
+        selection.modelId === "legacy-v1-model"
+          ? { providerId: "databricks_v2", modelId: "goose-gpt-5-5" }
+          : selection,
+    );
     const user = userEvent.setup();
     renderAppShell();
 
@@ -4436,7 +4637,50 @@ describe("AppShell global navigation", () => {
 
     await waitFor(() => {
       expect(mockAcpCreateSession).toHaveBeenCalledWith(
-        "goose",
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "goose-gpt-5-5" }),
+      );
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalledWith(
+      "databricks_v2",
+      "~/goose artifacts",
+      expect.objectContaining({ modelId: "legacy-v1-model" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("created-session"),
+    ).toMatchObject({
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+  });
+
+  it("forwards a persona's provider and model when the provider resolves", async () => {
+    setResolvingPersona("goose-model");
+    useAgentStore.setState({
+      selectedProvider: "codex-acp",
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+        { id: "databricks_v2", label: "Databricks AI Gateway" },
+      ],
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "databricks_v2", isConfigured: true },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with resolving agent" }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "databricks_v2",
         "~/goose artifacts",
         {
           deferProviderSetup: false,
@@ -4445,9 +4689,62 @@ describe("AppShell global navigation", () => {
         },
       );
     });
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-model",
+        },
+      });
+    });
   });
 
-  it("does not forward a persona's model when its provider does not resolve", async () => {
+  it("qualifies a Goose persona model from provider inventory", async () => {
+    setResolvingPersona("custom-model", "goose");
+    seedProviderModels("databricks_v2", [
+      { id: "custom-model", name: "Custom model" },
+    ]);
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "databricks_v2", isConfigured: true },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with resolving agent" }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "custom-model" }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "custom-model",
+        },
+      });
+    });
+  });
+
+  it("does not create a session when a persona target cannot resolve", async () => {
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "goose-default",
+      },
+    });
     useAgentStore.setState({
       selectedProvider: "goose",
       providers: [{ id: "goose", label: "Goose" }],
@@ -4470,35 +4767,11 @@ describe("AppShell global navigation", () => {
       screen.getByRole("button", { name: "Start chat with unresolved agent" }),
     );
 
-    await waitFor(() => {
-      expect(mockAcpCreateSession).toHaveBeenCalledWith(
-        "goose",
-        "~/goose artifacts",
-        {
-          deferProviderSetup: false,
-          modelId: undefined,
-          projectId: undefined,
-        },
-      );
-    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
   it("tags a Home agent starter in the composer instead of opening a blank chat", async () => {
-    useAgentStore.setState({
-      selectedProvider: "goose",
-      providers: [{ id: "goose", label: "Goose" }],
-      personas: [
-        {
-          id: "persona-resolves",
-          displayName: "Reviewer",
-          systemPrompt: "Review code.",
-          provider: "goose",
-          model: "goose-model",
-          isBuiltin: false,
-          writable: true,
-        },
-      ],
-    });
+    setResolvingPersona("goose-model");
     const user = userEvent.setup();
     renderAppShell();
 
@@ -4564,21 +4837,10 @@ describe("AppShell global navigation", () => {
   });
 
   it("expands the Home composer into a full chat with the current draft context", async () => {
-    useAgentStore.setState({
-      selectedProvider: "goose",
-      providers: [{ id: "goose", label: "Goose" }],
-      personas: [
-        {
-          id: "persona-resolves",
-          displayName: "Reviewer",
-          systemPrompt: "Review code.",
-          provider: "goose",
-          model: "goose-model",
-          isBuiltin: false,
-          writable: true,
-        },
-      ],
-    });
+    setResolvingPersona("goose-model");
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "databricks_v2", isConfigured: true },
+    ]);
     useProjectStore.setState({
       projects: [
         {
@@ -4624,7 +4886,12 @@ describe("AppShell global navigation", () => {
         id: "created-session",
         projectId: "project-1",
         personaId: "persona-resolves",
-        modelId: "goose-model",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-model",
+          modelName: "goose-model",
+        },
       });
       expect(useChatStore.getState().draftsBySession).toMatchObject({
         "created-session": "expand this",
@@ -4641,21 +4908,7 @@ describe("AppShell global navigation", () => {
   });
 
   it("applies later Home starters after consuming the previous starter request", async () => {
-    useAgentStore.setState({
-      selectedProvider: "goose",
-      providers: [{ id: "goose", label: "Goose" }],
-      personas: [
-        {
-          id: "persona-resolves",
-          displayName: "Reviewer",
-          systemPrompt: "Review code.",
-          provider: "goose",
-          model: "goose-model",
-          isBuiltin: false,
-          writable: true,
-        },
-      ],
-    });
+    setResolvingPersona("goose-model");
     useProjectStore.setState({
       projects: [
         {
@@ -4946,7 +5199,7 @@ describe("AppShell global navigation", () => {
   it("cycles sessions with Ctrl+Tab and Ctrl+Shift+Tab", async () => {
     const user = userEvent.setup();
     const sessionBase = {
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
       createdAt: "2026-06-09T00:00:00.000Z",
       messageCount: 1,

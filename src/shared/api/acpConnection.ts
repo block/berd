@@ -60,6 +60,7 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 
 let clientPromise: Promise<GooseClient> | null = null;
 let resolvedClient: GooseClient | null = null;
+let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
 
 function createClientCallbacks(): () => Client {
   return () => ({
@@ -91,22 +92,46 @@ function createClientCallbacks(): () => Client {
   });
 }
 
-function monitorConnection(client: GooseClient): void {
+function monitorConnection(
+  client: GooseClient,
+  stream: ReturnType<typeof createWebSocketStream>,
+): void {
+  const clearCurrentConnection = () => {
+    if (activeStream !== stream) {
+      return;
+    }
+    resolvedClient = null;
+    clientPromise = null;
+    activeStream = null;
+  };
   client.closed
     .then(() => {
       console.warn(
         "[acp] Connection closed. Will reconnect on next getClient().",
       );
-      resolvedClient = null;
-      clientPromise = null;
+      clearCurrentConnection();
     })
     .catch(() => {
       console.warn(
         "[acp] Connection error. Will reconnect on next getClient().",
       );
-      resolvedClient = null;
-      clientPromise = null;
+      clearCurrentConnection();
     });
+}
+
+/**
+ * Abort the current transport after an ACP request exceeds its liveness bound.
+ * A timed-out request leaves the connection state unknowable; reconnecting is
+ * safer than allowing later mutations to race work still running remotely.
+ */
+export async function invalidateClientConnection(): Promise<void> {
+  const stream = activeStream;
+  activeStream = null;
+  resolvedClient = null;
+  clientPromise = null;
+  if (stream) {
+    await stream.writable.abort();
+  }
 }
 
 async function initializeConnection(): Promise<GooseClient> {
@@ -142,6 +167,7 @@ async function initializeConnection(): Promise<GooseClient> {
 
   const tStream = performance.now();
   const stream = createWebSocketStream(wsUrl);
+  activeStream = stream;
 
   const client = new GooseClient(createClientCallbacks(), stream);
   perfLog(
@@ -168,7 +194,7 @@ async function initializeConnection(): Promise<GooseClient> {
     `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
   );
 
-  monitorConnection(client);
+  monitorConnection(client, stream);
 
   return client;
 }

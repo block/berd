@@ -273,6 +273,7 @@ export function AgentsView({
           avatar: persona.avatar ?? undefined,
           systemPrompt: persona.systemPrompt,
           provider: persona.provider,
+          modelProviderId: persona.modelProviderId,
           model: persona.model,
         });
         toast.success(t("editor.duplicated"));

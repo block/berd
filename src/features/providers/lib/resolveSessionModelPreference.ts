@@ -5,8 +5,41 @@ import {
 } from "@/features/chat/lib/sessionModelPreference";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
-import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
+import {
+  getProviderCatalog,
+  resolveAgentProviderCatalogIdStrict,
+} from "@/features/providers/providerCatalog";
 import { checkAllProviderStatus } from "@/features/providers/api/credentials";
+import {
+  resolveConcreteModelProviderId,
+  resolveModelProviderId,
+} from "./modelProviderResolution";
+
+export function resolveCachedGooseModelProviderId(
+  modelId: string,
+): string | null {
+  const modelCache = useProviderModelCacheStore.getState();
+  const readiness = useDefaultProviderReadinessStore.getState().readiness;
+  const hintedModelProviderId =
+    readiness?.status === "ready" && readiness.modelId === modelId
+      ? readiness.providerId
+      : undefined;
+  const models = [...modelCache.providers].flatMap(([providerId, entry]) =>
+    entry.models.map((model) => ({
+      ...model,
+      providerId: model.providerId ?? providerId,
+    })),
+  );
+  return (
+    resolveModelProviderId({
+      harnessId: "goose",
+      modelId,
+      hintedModelProviderId,
+      models,
+      catalogEntries: getProviderCatalog(),
+    }) ?? null
+  );
+}
 
 function gooseDefaultPreference(): SessionModelPreference | null {
   const readiness = useDefaultProviderReadinessStore.getState().readiness;
@@ -51,13 +84,33 @@ async function isProviderDisconnected(providerId: string): Promise<boolean> {
 
 export async function resolveSupportedSessionModelPreference(
   providerId: string,
-  _unusedInventoryEntries: unknown,
   preferredModel?: string,
 ): Promise<SessionModelPreference> {
   let sessionModelPreference = resolveSessionModelPreference({
     providerId,
     preferredModel,
   });
+
+  if (
+    providerId === "goose" &&
+    sessionModelPreference.modelId &&
+    !resolveConcreteModelProviderId(
+      sessionModelPreference.providerId,
+      "goose",
+      getProviderCatalog(),
+    )
+  ) {
+    const modelProviderId = resolveCachedGooseModelProviderId(
+      sessionModelPreference.modelId,
+    );
+    if (!modelProviderId) {
+      return { providerId };
+    }
+    sessionModelPreference = {
+      ...sessionModelPreference,
+      providerId: modelProviderId,
+    };
+  }
 
   if (providerId === "goose" && !sessionModelPreference.modelId) {
     sessionModelPreference = gooseDefaultPreference() ?? sessionModelPreference;
@@ -67,11 +120,14 @@ export async function resolveSupportedSessionModelPreference(
     return sessionModelPreference;
   }
 
-  const models = useProviderModelCacheStore
-    .getState()
-    .getModelsForProvider(sessionModelPreference.providerId);
+  const modelCache = useProviderModelCacheStore.getState();
+  const models = modelCache.getModelsForProvider(
+    sessionModelPreference.providerId,
+  );
 
-  if (models.length > 0) {
+  if (
+    modelCache.isModelInventoryAuthoritative(sessionModelPreference.providerId)
+  ) {
     return sanitizeSessionModelPreference(sessionModelPreference, { models });
   }
 

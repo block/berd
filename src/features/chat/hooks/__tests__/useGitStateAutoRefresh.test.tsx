@@ -38,7 +38,6 @@ function resetStores() {
     hasMoreSessions: false,
     isRightRailOpen: false,
     activeWorkspaceBySession: {},
-    modelSelectionIntentBySession: {},
     archiveMutationBySessionId: {},
   });
 }

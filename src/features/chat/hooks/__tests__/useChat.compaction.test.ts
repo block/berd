@@ -16,7 +16,6 @@ vi.mock("@/shared/api/acp", () => ({
   acpCancelSession: vi.fn(),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   acpPrepareSession: vi.fn(),
-  acpSetModel: vi.fn(),
 }));
 
 import { useChat } from "../useChat";

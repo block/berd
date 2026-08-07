@@ -2,6 +2,7 @@ import { checkAllProviderStatus } from "./api/credentials";
 import { readGooseDefaults } from "./api/gooseDefaults";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import type { ShareInFlightOptions } from "@/shared/lib/shareInFlight";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 export type DefaultProviderReadiness =
   | {
@@ -42,7 +43,9 @@ export async function readDefaultProviderReadiness(
   try {
     const defaults = await readGooseDefaults(options);
     const providerId = normalizeDefault(defaults.providerId);
-    const modelId = normalizeDefault(defaults.modelId);
+    const modelId = normalizeConcreteModelId(
+      normalizeDefault(defaults.modelId),
+    );
 
     if (!providerId) {
       return { status: "needs_setup", reason: "missing_defaults" };

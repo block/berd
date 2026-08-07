@@ -111,6 +111,20 @@ describe("resolveNewSessionTarget", () => {
     });
   });
 
+  it("accepts the provider already verified by default readiness", () => {
+    expect(
+      resolveNewSessionTarget(snapshot(), {
+        providerId: "openai",
+        modelId: "gpt-4o",
+      }),
+    ).toMatchObject({
+      status: "ready",
+      providerId: "openai",
+      modelId: "gpt-4o",
+      provenance: "explicit",
+    });
+  });
+
   it("uses the stored new-chat model without replacing the Goose harness", () => {
     expect(
       resolveNewSessionTarget(

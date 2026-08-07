@@ -6,6 +6,7 @@ import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
 import { completeReplayAssistantMessage } from "@/features/chat/acp/acpReplayAssistant";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
+  type ChatSessionPatch,
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
@@ -32,6 +33,11 @@ import {
   getWorkspaceAttachments,
   isSameWorkspacePath,
 } from "@/features/chat/lib/workspaceAttachments";
+import { executionTargetFromGooseServeSession } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  hydrateSessionTarget,
+  transitionSessionTarget,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 
 export function clearIdleStreamingMessageAfterReplay(
   sessionId: string,
@@ -255,11 +261,14 @@ async function performSessionMessagesLoad(
       }
     }
     if (sessionInfo) {
-      const sessionPatch: Partial<ChatSession> = {
-        projectId: sessionInfo.projectId ?? undefined,
+      const sessionStore = useChatSessionStore.getState();
+      const hydratedTarget = executionTargetFromGooseServeSession({
         providerId: sessionInfo.providerId ?? undefined,
-        personaId: sessionInfo.personaId ?? undefined,
         modelId: sessionInfo.modelId ?? undefined,
+      });
+      const sessionPatch: ChatSessionPatch = {
+        projectId: sessionInfo.projectId ?? undefined,
+        personaId: sessionInfo.personaId ?? undefined,
         archivedAt: sessionInfo.archivedAt ?? undefined,
         messageCount: sessionInfo.messageCount,
         subtitle: sessionInfo.subtitle ?? undefined,
@@ -278,7 +287,10 @@ async function performSessionMessagesLoad(
       if (sessionInfo.lastMessageAt !== null) {
         sessionPatch.lastMessageAt = sessionInfo.lastMessageAt;
       }
-      useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
+      sessionStore.patchSession(sessionId, sessionPatch);
+      if (hydratedTarget) {
+        hydrateSessionTarget(sessionId, hydratedTarget);
+      }
     }
     const session = useChatSessionStore.getState().getSession(sessionId);
     const project = session?.projectId
@@ -288,7 +300,30 @@ async function performSessionMessagesLoad(
       : null;
     const { workingDir, missingCwdWarning } =
       await resolveWorkingDirForSessionLoad(session, project);
-    await acpLoadSession(sessionId, workingDir);
+    const loadedSelection = await acpLoadSession(sessionId, workingDir);
+    const loadedTarget = loadedSelection
+      ? executionTargetFromGooseServeSession(loadedSelection)
+      : undefined;
+    if (loadedTarget) {
+      hydrateSessionTarget(sessionId, loadedTarget);
+    }
+    const liveTarget = useChatSessionStore
+      .getState()
+      .getSession(sessionId)?.executionTarget;
+    if (liveTarget) {
+      try {
+        await transitionSessionTarget({
+          sessionId,
+          target: liveTarget,
+          workingDir: missingCwdWarning
+            ? workingDir
+            : (session?.workingDir ?? workingDir),
+          prepareWorkingDir: workingDir,
+        });
+      } catch (error) {
+        console.warn("Failed to prepare loaded session selection:", error);
+      }
+    }
     const tFlush = performance.now();
     const buffer = getAndDeleteReplayBuffer(sessionId);
     const replayMessages = buffer ? sanitizeReplayMessages(buffer) : undefined;

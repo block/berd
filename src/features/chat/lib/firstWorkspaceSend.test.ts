@@ -30,14 +30,14 @@ vi.mock("@/features/projects/lib/projectChatWorkspaces", async (original) => {
     rollbackProjectChatWorkspacePlan: vi.fn(),
   };
 });
-vi.mock("./sessionConfigRequests", () => ({
-  applyLatestSessionConfig: vi.fn(),
+vi.mock("./sessionTargetCoordinator", () => ({
+  transitionSessionTarget: vi.fn(),
 }));
 import {
   planProjectChatWorkspaces,
   rollbackProjectChatWorkspacePlan,
 } from "@/features/projects/lib/projectChatWorkspaces";
-import { applyLatestSessionConfig } from "./sessionConfigRequests";
+import { transitionSessionTarget } from "./sessionTargetCoordinator";
 
 const workspace: ProjectWorkspace = {
   id: "app",
@@ -75,7 +75,7 @@ function session(attachments: WorkspaceAttachment[] = []) {
     id: "s1",
     title: "Chat",
     projectId: project.id,
-    providerId: "goose",
+    executionTarget: { harnessId: "goose" },
     workingDir: "/repo/app",
     workspaceAttachments: attachments,
     createdAt: "now",
@@ -212,8 +212,10 @@ describe("first workspace send", () => {
   });
 
   it("uses Skip to prepare the existing checkout and releases the same record", async () => {
-    vi.mocked(applyLatestSessionConfig).mockResolvedValueOnce({
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
       applied: true,
+      target: { harnessId: "goose" },
     });
     acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
     const before = useChatStore.getState().queuedMessageBySession.s1?.[0];
@@ -292,7 +294,7 @@ describe("first workspace send", () => {
 
     await createDeferredWorkspaces("s1", record.recordId, "feature");
 
-    expect(applyLatestSessionConfig).not.toHaveBeenCalled();
+    expect(transitionSessionTarget).not.toHaveBeenCalled();
     expect(useChatSessionStore.getState().getSession("s1")?.workingDir).toBe(
       "/user-choice",
     );
@@ -310,8 +312,10 @@ describe("first workspace send", () => {
       workingDir: "/repo/app",
       workspaceAttachments: [selected],
     });
-    vi.mocked(applyLatestSessionConfig).mockResolvedValueOnce({
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
       applied: true,
+      target: { harnessId: "goose" },
     });
     useChatSessionStore.setState({
       sessions: [
@@ -337,14 +341,17 @@ describe("first workspace send", () => {
         useChatSessionStore.getState().getSession("s1")?.workspaceAttachments,
       ).toEqual([selected]);
     });
-    expect(applyLatestSessionConfig).not.toHaveBeenCalled();
+    expect(transitionSessionTarget).not.toHaveBeenCalled();
 
     useChatStore.getState().promoteSessionId("s1", "backend-s1");
     useChatSessionStore.getState().promoteDraftSession("s1", "backend-s1");
     await creating;
 
-    expect(applyLatestSessionConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "backend-s1" }),
+    expect(transitionSessionTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "backend-s1",
+        target: { harnessId: "goose" },
+      }),
     );
     expect(
       useChatStore.getState().queuedMessageBySession["backend-s1"]?.[0],
@@ -427,8 +434,14 @@ describe("first workspace send", () => {
   });
 
   it("keeps a creating deferred message paused when setup finishes during editing", async () => {
-    let finishApply: ((value: { applied: true }) => void) | undefined;
-    vi.mocked(applyLatestSessionConfig).mockReturnValueOnce(
+    let finishApply:
+      | ((value: {
+          status: "committed";
+          applied: true;
+          target: { harnessId: "goose" };
+        }) => void)
+      | undefined;
+    vi.mocked(transitionSessionTarget).mockReturnValueOnce(
       new Promise((resolve) => {
         finishApply = resolve;
       }),
@@ -438,13 +451,17 @@ describe("first workspace send", () => {
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
     const creating = createDeferredWorkspaces("s1", record.recordId, null);
-    await vi.waitFor(() => expect(applyLatestSessionConfig).toHaveBeenCalled());
+    await vi.waitFor(() => expect(transitionSessionTarget).toHaveBeenCalled());
     expect(
       useChatStore
         .getState()
         .setQueuedMessageEditing("s1", record.recordId, true),
     ).toBe(true);
-    finishApply?.({ applied: true });
+    finishApply?.({
+      status: "committed",
+      applied: true,
+      target: { harnessId: "goose" },
+    });
     await creating;
 
     expect(
@@ -474,8 +491,10 @@ describe("first workspace send", () => {
   });
 
   it("releases the accepted message after Use as-is succeeds", async () => {
-    vi.mocked(applyLatestSessionConfig).mockResolvedValueOnce({
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
       applied: true,
+      target: { harnessId: "goose" },
     });
     acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
@@ -491,13 +510,67 @@ describe("first workspace send", () => {
     });
   });
 
+  it("holds an unresolved deferred send instead of preparing Goose", async () => {
+    useChatSessionStore.setState({
+      sessions: [{ ...session(), executionTarget: undefined }],
+    });
+    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    if (record?.kind !== "deferred") throw new Error("missing deferred record");
+
+    await createDeferredWorkspaces("s1", record.recordId, null);
+
+    expect(transitionSessionTarget).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({
+      kind: "deferred",
+      recordId: record.recordId,
+      state: {
+        status: "held",
+        error: "Select a model before sending to this unresolved session.",
+      },
+    });
+
+    useChatSessionStore.getState().replaceSessionExecutionTarget("s1", {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "gpt-5.6",
+      modelName: "GPT-5.6",
+    });
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
+      applied: true,
+      target: { harnessId: "goose" },
+    });
+
+    await createDeferredWorkspaces("s1", record.recordId, null);
+
+    expect(transitionSessionTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "s1",
+        target: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.6",
+          modelName: "GPT-5.6",
+        },
+      }),
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({ kind: "transport-ready", recordId: record.recordId });
+  });
+
   it("continues workspace creation when called with a promoted draft id", async () => {
     vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce({
       workingDir: "/repo/app",
       workspaceAttachments: [selected],
     });
-    vi.mocked(applyLatestSessionConfig).mockResolvedValueOnce({
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
       applied: true,
+      target: { harnessId: "goose" },
     });
     useChatSessionStore.setState({
       sessions: [
@@ -524,9 +597,26 @@ describe("first workspace send", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["backend-s1"]?.[0],
     ).toMatchObject({ kind: "transport-ready" });
-    expect(applyLatestSessionConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "backend-s1" }),
+    expect(transitionSessionTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "backend-s1",
+        target: { harnessId: "goose" },
+      }),
     );
+  });
+
+  it("refuses to release an unresolved deferred send", () => {
+    useChatSessionStore.setState({
+      sessions: [{ ...session(), executionTarget: undefined }],
+    });
+    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    if (record?.kind !== "deferred") throw new Error("missing deferred record");
+
+    expect(releaseDeferredWorkspaceSend("s1", record.recordId, true)).toBe(
+      false,
+    );
+    expect(useChatStore.getState().queuedMessageBySession.s1?.[0]).toBe(record);
   });
 
   it("releases failure only by Send anyway or an explicit matching user edit", () => {

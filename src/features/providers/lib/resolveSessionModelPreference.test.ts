@@ -10,7 +10,11 @@ vi.mock("@/features/providers/api/credentials", () => ({
 
 const mockCheckAllProviderStatus = vi.mocked(checkAllProviderStatus);
 
-function setCachedModels(providerId: string, models: string[]) {
+function setCachedModels(
+  providerId: string,
+  models: string[],
+  fetchedAt = Date.now(),
+) {
   useProviderModelCacheStore.setState({
     providers: new Map([
       [
@@ -18,7 +22,7 @@ function setCachedModels(providerId: string, models: string[]) {
         {
           providerId,
           models: models.map((id) => ({ id, name: id, providerId })),
-          fetchedAt: Date.now(),
+          fetchedAt,
         },
       ],
     ]),
@@ -61,7 +65,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     });
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -69,11 +73,53 @@ describe("resolveSupportedSessionModelPreference", () => {
     });
   });
 
+  it.each([
+    {
+      name: "the Goose sentinel",
+      modelId: "goose",
+      expected: {
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+        modelName: "goose-gpt-5-5",
+      },
+    },
+    {
+      name: "a model without its provider",
+      modelId: "legacy-model",
+      expected: { providerId: "goose" },
+    },
+  ])("does not reuse $name from a legacy preference", async ({
+    modelId,
+    expected,
+  }) => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId,
+          modelName: modelId,
+        },
+      }),
+    );
+    setCachedModels("databricks_v2", ["goose-gpt-5-5"]);
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+
+    await expect(
+      resolveSupportedSessionModelPreference("goose"),
+    ).resolves.toEqual(expected);
+  });
+
   it("preserves a stored model when cached models are missing", async () => {
     setStoredPreference("goose", "openai");
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -81,9 +127,76 @@ describe("resolveSupportedSessionModelPreference", () => {
     });
   });
 
+  it("canonicalizes a stored model-provider alias", async () => {
+    setStoredPreference("goose", "databricks");
+
+    await expect(
+      resolveSupportedSessionModelPreference("goose"),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
+    });
+  });
+
+  it("qualifies a legacy Goose model from a unique provider inventory", async () => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: { modelId: "gpt-5.4", modelName: "GPT-5.4" },
+      }),
+    );
+    setCachedModels("openai", ["gpt-5.4"]);
+
+    await expect(
+      resolveSupportedSessionModelPreference("goose"),
+    ).resolves.toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
+    });
+  });
+
+  it("drops an unqualified Goose model when provider inventory is ambiguous", async () => {
+    useProviderModelCacheStore.setState({
+      providers: new Map(
+        ["openai", "anthropic"].map((providerId) => [
+          providerId,
+          {
+            providerId,
+            models: [{ id: "shared-model", name: "Shared", providerId }],
+            fetchedAt: Date.now(),
+          },
+        ]),
+      ),
+    });
+
+    await expect(
+      resolveSupportedSessionModelPreference("goose", "shared-model"),
+    ).resolves.toEqual({ providerId: "goose" });
+  });
+
+  it("qualifies an unlisted Goose model from the matching default", async () => {
+    useDefaultProviderReadinessStore.setState({
+      readiness: {
+        status: "ready",
+        providerId: "databricks_v2",
+        modelId: "custom-model",
+      },
+    });
+
+    await expect(
+      resolveSupportedSessionModelPreference("goose", "custom-model"),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "custom-model",
+      modelName: "custom-model",
+    });
+  });
+
   it("preserves a preferred model when cached models are missing", async () => {
     await expect(
-      resolveSupportedSessionModelPreference("openai", new Map(), "gpt-5.4"),
+      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -95,7 +208,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     setCachedModels("openai", []);
 
     await expect(
-      resolveSupportedSessionModelPreference("openai", undefined, "gpt-5.4"),
+      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -107,9 +220,21 @@ describe("resolveSupportedSessionModelPreference", () => {
     setCachedModels("openai", ["gpt-5.3"]);
 
     await expect(
-      resolveSupportedSessionModelPreference("openai", undefined, "gpt-5.4"),
+      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
     ).resolves.toEqual({
       providerId: "openai",
+    });
+  });
+
+  it("preserves a selected model while a populated cache is provisional", async () => {
+    setCachedModels("openai", ["gpt-5.3"], 0);
+
+    await expect(
+      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
+    ).resolves.toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "gpt-5.4",
     });
   });
 
@@ -117,7 +242,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     setCachedModels("openai", ["gpt-5.4"]);
 
     await expect(
-      resolveSupportedSessionModelPreference("openai", undefined, "gpt-5.4"),
+      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -132,7 +257,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     ]);
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "goose",
     });
@@ -152,7 +277,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     ]);
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "databricks_v2",
       modelId: "goose-gpt-5-5",
@@ -167,7 +292,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     ]);
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -180,7 +305,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     mockCheckAllProviderStatus.mockRejectedValue(new Error("offline"));
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",
@@ -199,7 +324,7 @@ describe("resolveSupportedSessionModelPreference", () => {
     });
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("goose"),
     ).resolves.toEqual({
       providerId: "openai",
       modelId: "gpt-5.4",

@@ -53,7 +53,6 @@ describe("liveStreamingUpdates", () => {
       hasHydratedSessions: true,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
   });
 

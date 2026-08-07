@@ -85,7 +85,7 @@ vi.mock("../useResolvedAgentModelPicker", () => ({
     effectiveModelSelection: {
       id: "gpt-4o",
       name: "GPT-4o",
-      providerId: "openai",
+      modelProviderId: "openai",
       source: "explicit" as const,
     },
   }),
@@ -157,9 +157,12 @@ describe("useChatSessionController compaction behavior", () => {
         {
           id: "session-1",
           title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           createdAt: "2026-04-20T00:00:00.000Z",
           updatedAt: "2026-04-20T00:00:00.000Z",
           messageCount: 0,
@@ -314,9 +317,9 @@ describe("useChatSessionController compaction behavior", () => {
     useChatStore
       .getState()
       .replaceTokenState("session-1", mockTokenState, true);
-    useChatSessionStore.getState().patchSession("session-1", {
-      providerId: "goose",
-    });
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget("session-1", { harnessId: "goose" });
 
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
@@ -374,8 +377,10 @@ describe("useChatSessionController compaction behavior", () => {
     useChatStore
       .getState()
       .replaceTokenState("session-1", mockTokenState, true);
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget("session-1", { harnessId: "goose" });
     useChatSessionStore.getState().patchSession("session-1", {
-      providerId: "goose",
       personaId: "persona-b",
     });
 
@@ -411,7 +416,9 @@ describe("useChatSessionController compaction behavior", () => {
           id: "persona-a",
           displayName: "Persona A",
           systemPrompt: "",
-          provider: "openai",
+          provider: "goose",
+          modelProviderId: "openai",
+          model: "gpt-4o",
           isBuiltin: false,
           writable: true,
           createdAt: "",

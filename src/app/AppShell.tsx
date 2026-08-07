@@ -76,6 +76,7 @@ import {
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
+import { resolvePersonaModel } from "@/features/agents/lib/resolvePersonaModel";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
@@ -112,7 +113,18 @@ import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/Aut
 import { AppShellLayout } from "./ui/AppShellLayout";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { AppShellContent } from "./ui/AppShellContent";
-import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
+import {
+  transferSessionTargetOwnership,
+  transitionSessionTarget,
+} from "@/features/chat/lib/sessionTargetCoordinator";
+import {
+  beginModelSelectionIntent,
+  getModelSelectionIntent,
+  clearCurrentModelSelectionIntent,
+  createModelSelectionRequestId,
+  isCurrentModelSelectionIntent,
+  showModelSwitchErrorToast,
+} from "@/features/chat/model-selection/modelSelectionIntent";
 import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { archiveSession as archiveSessionApi } from "@/shared/api/acpApi";
 import {
@@ -147,7 +159,20 @@ import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
 import { useNewSessionTarget } from "@/features/providers/hooks/useNewSessionTarget";
 import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
+import {
+  getProviderCatalog,
+  resolveAgentProviderCatalogIdStrict,
+} from "@/features/providers/providerCatalog";
+import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  isModelExecutionTarget,
+  materializeSessionExecutionModel,
+  normalizeSessionExecutionTarget,
+  sameSessionExecutionTarget,
+  type SessionExecutionTarget,
+} from "@/features/chat/lib/sessionExecutionTarget";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
 import { findBerdyPersonaId } from "@/features/onboarding/berdyAgent";
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
@@ -170,7 +195,6 @@ import {
   GlobalComposerPill,
   type GlobalComposerExpandPayload,
   type GlobalComposerHandoffRect,
-  type GlobalComposerModelSelection,
   type GlobalComposerStarterRequest,
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
@@ -252,12 +276,31 @@ type DraftSessionCreationReady = {
   >["configOptionsSnapshot"];
 };
 type ProjectChatDraftOptions = {
-  providerId?: string;
-  modelId?: string;
-  modelName?: string;
+  executionTarget?: SessionExecutionTarget;
   reuseExistingDraft?: boolean;
   reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
 };
+
+function executionTargetFromModelPreference(
+  harnessId: string,
+  preference: ResolvedSessionModelPreference,
+): SessionExecutionTarget {
+  const canApplyModel =
+    !preference.modelId ||
+    harnessId !== "goose" ||
+    (preference.providerId !== "goose" &&
+      !resolveAgentProviderCatalogIdStrict(preference.providerId));
+  return normalizeSessionExecutionTarget({
+    harnessId,
+    modelProviderId:
+      canApplyModel &&
+      (preference.modelId || preference.providerId !== harnessId)
+        ? preference.providerId
+        : undefined,
+    modelId: canApplyModel ? preference.modelId : undefined,
+    modelName: canApplyModel ? preference.modelName : undefined,
+  });
+}
 
 interface PendingSessionWorkspaceCleanupConfirmation {
   worktreeCount: number;
@@ -411,18 +454,17 @@ async function applyReasoningEffortToSession(
     patchSessionId?: string;
   } = {},
 ) {
-  // Only a caller-supplied snapshot is backend-confirmed — it comes straight
-  // from session/new. The store value can be an optimistic write from a chat
-  // composer pick whose config set is still in flight, and a reused draft
-  // matches on exactly that value, so it can't stand in for confirmation.
-  const confirmedReasoningEffort = options.currentReasoningEffort;
   const currentReasoningEffort =
-    confirmedReasoningEffort ?? readSessionReasoningEffort(sessionId);
+    options.currentReasoningEffort ?? readSessionReasoningEffort(sessionId);
   if (!currentReasoningEffort) {
     return;
   }
 
   const patchSessionId = options.patchSessionId ?? sessionId;
+  const targetAtRequest =
+    useChatSessionStore.getState().getSession(patchSessionId)
+      ?.executionTarget ??
+    useChatSessionStore.getState().getSession(sessionId)?.executionTarget;
   const optimisticReasoningEffort =
     currentReasoningEffort.configId === reasoningEffort.configId
       ? {
@@ -431,32 +473,41 @@ async function applyReasoningEffortToSession(
         }
       : currentReasoningEffort;
   patchSessionReasoningEffort(patchSessionId, optimisticReasoningEffort);
-
-  // The backend already reports the requested value, so the write would be a
-  // no-op round trip — and on the first-send path it sits between session/new
-  // and the queued send being released.
-  if (
-    confirmedReasoningEffort &&
-    confirmedReasoningEffort.configId === reasoningEffort.configId &&
-    confirmedReasoningEffort.currentValue === reasoningEffort.value
-  ) {
-    return;
-  }
+  const requestIsCurrent = () => {
+    const liveSession = useChatSessionStore
+      .getState()
+      .getSession(patchSessionId);
+    return (
+      sameSessionExecutionTarget(
+        liveSession?.executionTarget,
+        targetAtRequest,
+      ) &&
+      liveSession?.reasoningEffort?.configId ===
+        optimisticReasoningEffort.configId &&
+      liveSession.reasoningEffort.currentValue ===
+        optimisticReasoningEffort.currentValue
+    );
+  };
+  const { providerId, modelId } =
+    gooseServeSelectionFromExecutionTarget(targetAtRequest);
 
   try {
     const configOptionsSnapshot = await acpSetSessionConfigOption(
       sessionId,
       reasoningEffort.configId,
       reasoningEffort.value,
+      { providerId, modelId, reasoningEffortValue: reasoningEffort.value },
     );
-    if (configOptionsSnapshot.reasoningEffort) {
+    if (configOptionsSnapshot.reasoningEffort && requestIsCurrent()) {
       patchSessionReasoningEffort(
         patchSessionId,
         configOptionsSnapshot.reasoningEffort,
       );
     }
   } catch (error) {
-    patchSessionReasoningEffort(patchSessionId, currentReasoningEffort);
+    if (requestIsCurrent()) {
+      patchSessionReasoningEffort(patchSessionId, currentReasoningEffort);
+    }
     throw error;
   }
 }
@@ -788,7 +839,6 @@ export function AppShell({
     useState<GlobalComposerHandoffRect | null>(null);
   const globalComposerHandoffTimeoutRef = useRef<number | null>(null);
   const globalComposerRouteSwapTimeoutRef = useRef<number | null>(null);
-  const providerSetupRedirectSessionIdRef = useRef<string | null>(null);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
   const [builderbotRoute, setBuilderbotRoute] =
@@ -812,6 +862,12 @@ export function AppShell({
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
+  const [globalComposerExecutionTarget, setGlobalComposerExecutionTarget] =
+    useState<SessionExecutionTarget | null | undefined>(undefined);
+  const globalComposerExecutionTargetRef = useRef(
+    globalComposerExecutionTarget,
+  );
+  globalComposerExecutionTargetRef.current = globalComposerExecutionTarget;
   const replaceNextNavigationEntryRef = useRef(false);
   const navigationHistoryRef = useRef<AppNavigationHistory>({
     entries: [
@@ -932,6 +988,44 @@ export function AppShell({
   const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
   const { selectedProvider } = useProviderSelection();
   const ensureNewSessionTarget = useNewSessionTarget();
+  const resolveSessionCreationTarget = useCallback(
+    async (
+      options: Pick<ProjectChatDraftOptions, "executionTarget">,
+    ): Promise<SessionExecutionTarget | undefined> => {
+      const requestedTarget = options.executionTarget;
+      const requestedSelection = requestedTarget
+        ? gooseServeSelectionFromExecutionTarget(requestedTarget)
+        : undefined;
+      const resolution = await ensureNewSessionTarget(
+        requestedTarget
+          ? {
+              providerId:
+                requestedSelection?.providerId ?? requestedTarget.harnessId,
+              modelId: requestedSelection?.modelId,
+            }
+          : {},
+      );
+      if (resolution.status !== "ready") {
+        return undefined;
+      }
+      if (requestedTarget) {
+        return executionTargetFromModelPreference(
+          requestedTarget.harnessId,
+          resolution,
+        );
+      }
+
+      const modelPreference = await resolveSupportedSessionModelPreference(
+        resolution.providerId,
+        resolution.modelId,
+      );
+      return executionTargetFromModelPreference(
+        resolution.providerId,
+        modelPreference,
+      );
+    },
+    [ensureNewSessionTarget],
+  );
   const { readyAgentIds } = useAgentProviderStatus();
   const defaultProviderReadinessStatus = useDefaultProviderReadinessStore(
     (state) => state.readiness?.status,
@@ -1076,7 +1170,6 @@ export function AppShell({
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
   );
-  const homeComposerReasoningRefreshKeyRef = useRef<string | null>(null);
   const hydratingPinnedSessionIdsRef = useRef<Set<string>>(new Set());
 
   const hydratePinnedChatSessions = useCallback(
@@ -1233,6 +1326,13 @@ export function AppShell({
   const homeSession = homeSessionId
     ? sessions.find((session) => session.id === homeSessionId)
     : undefined;
+  const hasHomeSession = homeSession != null;
+  const currentGlobalComposerExecutionTarget =
+    globalComposerExecutionTarget === undefined
+      ? homeSession
+        ? (homeSession.executionTarget ?? null)
+        : undefined
+      : globalComposerExecutionTarget;
   const targetLocation = useMemo(
     () =>
       getAppNavigationLocation(
@@ -1371,141 +1471,188 @@ export function AppShell({
     const request = (async () => {
       const currentProvider = () => selectedProviderRef.current ?? "goose";
 
-      // Resolve the provider to use after an async gap. If the user changed
-      // their selection while we were awaiting (liveProvider differs from what
-      // it was before the await), prefer the live value; otherwise use the
-      // model-preference resolution result.
-      const resolveProviderAfterAwait = (
-        providerAtStart: string,
-        sessionModelPreference: { providerId: string },
-      ): string => {
-        const liveProvider = currentProvider();
-        return liveProvider !== providerAtStart
-          ? liveProvider
-          : sessionModelPreference.providerId;
-      };
-
       if (
         homeSession &&
         !homeSession.archivedAt &&
         homeSession.messageCount === 0
       ) {
-        const providerAtStart = currentProvider();
-        const sessionModelPreference =
-          await resolveSupportedSessionModelPreference(
-            providerAtStart,
-            undefined,
-          );
         const project = homeSession.projectId
           ? (projects.find(
               (candidate) => candidate.id === homeSession.projectId,
             ) ?? null)
           : null;
         const workingDir = await resolveSessionCwd(project);
-        const resolvedProviderId = resolveProviderAfterAwait(
-          providerAtStart,
-          sessionModelPreference,
-        );
-        const modelIdToApply =
-          resolvedProviderId === sessionModelPreference.providerId
-            ? sessionModelPreference.modelId
-            : undefined;
         const readLiveHomeSession = () =>
           useChatSessionStore.getState().getSession(homeSession.id) ??
           homeSession;
         const liveHomeSession = readLiveHomeSession();
-        // Once a provider+model is set, don't let stored preferences re-seed
-        // on model refreshes — that would clobber explicit user picks.
-        if (liveHomeSession.providerId && liveHomeSession.modelId) {
+        const bootstrapTarget = liveHomeSession.executionTarget;
+        const uiOwnsBootstrapTarget =
+          liveHomeSession.executionTargetSource === "ui";
+        if (uiOwnsBootstrapTarget && !bootstrapTarget) {
+          return liveHomeSession;
+        }
+        // UI ownership preserves provider-only targets and explicit clears as
+        // well as full model selections. ACP model snapshots are also stable
+        // bootstrap targets; neither path may be re-seeded from preferences.
+        if (
+          bootstrapTarget &&
+          (uiOwnsBootstrapTarget || isModelExecutionTarget(bootstrapTarget))
+        ) {
+          const bootstrapSelection =
+            gooseServeSelectionFromExecutionTarget(bootstrapTarget);
           const target = await ensureNewSessionTarget(
             {
-              providerId: liveHomeSession.providerId,
-              modelId: liveHomeSession.modelId,
+              providerId:
+                bootstrapSelection.providerId ?? bootstrapTarget.harnessId,
+              modelId: bootstrapSelection.modelId,
             },
             { onUnavailable: "silent" },
           );
           if (target.status !== "ready") return liveHomeSession;
-          const result = await applyLatestSessionConfig({
+          if (
+            !sameSessionExecutionTarget(
+              readLiveHomeSession().executionTarget,
+              bootstrapTarget,
+            )
+          ) {
+            return readLiveHomeSession();
+          }
+          const validatedBootstrapTarget = executionTargetFromModelPreference(
+            bootstrapTarget.harnessId,
+            target,
+          );
+          const result = await transitionSessionTarget({
             sessionId: homeSession.id,
-            providerId: liveHomeSession.providerId,
+            target: validatedBootstrapTarget,
             workingDir,
-            modelId: liveHomeSession.modelId,
-            forceConfigRefresh: !liveHomeSession.reasoningEffort,
+            requireReasoningEffort: !liveHomeSession.reasoningEffort,
           });
           if (!result.applied) {
             return liveHomeSession;
           }
-          patchSession(homeSession.id, {
-            workingDir,
-            ...(result.configOptionsSnapshot?.reasoningEffort
-              ? {
-                  reasoningEffort: result.configOptionsSnapshot.reasoningEffort,
-                }
-              : {}),
-          });
+          if (
+            !sameSessionExecutionTarget(
+              readLiveHomeSession().executionTarget,
+              bootstrapTarget,
+            )
+          ) {
+            return readLiveHomeSession();
+          }
           return readLiveHomeSession();
         }
+
+        const harnessAtStart = currentProvider();
+        const sessionModelPreference =
+          await resolveSupportedSessionModelPreference(harnessAtStart);
+        const resolvedHarnessId = currentProvider();
+        const targetToApply =
+          resolvedHarnessId === harnessAtStart
+            ? executionTargetFromModelPreference(
+                resolvedHarnessId,
+                sessionModelPreference,
+              )
+            : normalizeSessionExecutionTarget({
+                harnessId: resolvedHarnessId,
+              });
         if (
-          liveHomeSession.providerId === resolvedProviderId &&
+          sameSessionExecutionTarget(
+            liveHomeSession.executionTarget,
+            targetToApply,
+          ) &&
           liveHomeSession.workingDir === workingDir &&
-          modelIdToApply == null
+          !targetToApply.modelProviderId
         ) {
           return liveHomeSession;
         }
+        const targetSelection =
+          gooseServeSelectionFromExecutionTarget(targetToApply);
         const target = await ensureNewSessionTarget(
-          {},
+          {
+            providerId: targetSelection.providerId ?? targetToApply.harnessId,
+            modelId: targetSelection.modelId,
+          },
           { onUnavailable: "silent" },
         );
         if (target.status !== "ready") return liveHomeSession;
-        const result = await applyLatestSessionConfig({
-          sessionId: homeSession.id,
-          providerId: target.providerId,
-          workingDir,
-          modelId: target.modelId,
-          forceConfigRefresh: !liveHomeSession.reasoningEffort,
-        });
-        if (!result.applied) {
-          return homeSession;
+        if (
+          !sameSessionExecutionTarget(
+            readLiveHomeSession().executionTarget,
+            bootstrapTarget,
+          )
+        ) {
+          return readLiveHomeSession();
         }
-
-        const shouldClearHomeModel =
-          target.providerId !== homeSession.providerId || !target.modelId;
-        patchSession(homeSession.id, {
-          providerId: target.providerId,
-          workingDir,
-          modelId:
-            target.modelId ??
-            (shouldClearHomeModel ? undefined : homeSession.modelId),
-          modelName:
-            target.modelId != null
-              ? target.modelName
-              : shouldClearHomeModel
-                ? undefined
-                : homeSession.modelName,
-          ...(result.configOptionsSnapshot?.reasoningEffort
-            ? {
-                reasoningEffort: result.configOptionsSnapshot.reasoningEffort,
-              }
-            : {}),
-        });
-        return (
-          useChatSessionStore.getState().getSession(homeSession.id) ??
-          homeSession
+        const validatedTargetToApply = executionTargetFromModelPreference(
+          targetToApply.harnessId,
+          target,
         );
+        const requestId = createModelSelectionRequestId();
+        beginModelSelectionIntent(homeSession.id, {
+          requestId,
+          target: validatedTargetToApply,
+          previousTarget: bootstrapTarget,
+        });
+
+        try {
+          const result = await transitionSessionTarget({
+            sessionId: homeSession.id,
+            target: validatedTargetToApply,
+            workingDir,
+            requireReasoningEffort: !liveHomeSession.reasoningEffort,
+            requestId,
+          });
+          const intentStillMatches = clearCurrentModelSelectionIntent(
+            homeSession.id,
+            requestId,
+          );
+          if (!result.applied || !intentStillMatches) {
+            return readLiveHomeSession();
+          }
+          return readLiveHomeSession();
+        } catch (error) {
+          if (clearCurrentModelSelectionIntent(homeSession.id, requestId)) {
+            useChatSessionStore
+              .getState()
+              .replaceSessionExecutionTarget(homeSession.id, bootstrapTarget);
+          }
+          throw error;
+        }
       }
 
+      const composerTargetAtStart = globalComposerExecutionTargetRef.current;
       const workingDir = await resolveSessionCwd(null);
+      const harnessId = currentProvider();
+      const sessionModelPreference =
+        await resolveSupportedSessionModelPreference(harnessId);
+      const executionTarget = executionTargetFromModelPreference(
+        harnessId,
+        sessionModelPreference,
+      );
+      const executionSelection =
+        gooseServeSelectionFromExecutionTarget(executionTarget);
       const target = await ensureNewSessionTarget(
-        {},
+        {
+          providerId:
+            executionSelection.providerId ?? executionTarget.harnessId,
+          modelId: executionSelection.modelId,
+        },
         { onUnavailable: "silent" },
       );
       if (target.status !== "ready") return null;
+      const finalComposerTarget = globalComposerExecutionTargetRef.current;
+      const resolvedExecutionTarget =
+        finalComposerTarget !== composerTargetAtStart
+          ? (finalComposerTarget ??
+            normalizeSessionExecutionTarget({ harnessId: currentProvider() }))
+          : executionTargetFromModelPreference(
+              executionTarget.harnessId,
+              target,
+            );
       const session = await createSession({
         title: DEFAULT_CHAT_TITLE,
-        providerId: target.providerId,
+        executionTarget: resolvedExecutionTarget,
         workingDir,
-        modelId: target.modelId,
-        modelName: target.modelName,
       });
       setHomeSessionId(session.id);
       return session;
@@ -1523,7 +1670,6 @@ export function AppShell({
     createSession,
     hasHydratedSessions,
     homeSession,
-    patchSession,
     projects,
     sessionsLoading,
     ensureNewSessionTarget,
@@ -1550,14 +1696,14 @@ export function AppShell({
   const startDraftSessionCreation = useCallback(
     ({
       session,
-      sessionModelPreference,
+      sessionExecutionTarget,
       workingDir,
       projectId,
       onReady,
       onCreationFailed,
     }: {
       session: ChatSession;
-      sessionModelPreference: MaybePromise<ResolvedSessionModelPreference>;
+      sessionExecutionTarget: SessionExecutionTarget;
       workingDir: MaybePromise<string>;
       projectId?: string;
       onReady?: (result: DraftSessionCreationReady) => Promise<void> | void;
@@ -1565,6 +1711,18 @@ export function AppShell({
     }) => {
       let hasHandledCreationFailure = false;
       let createdBackendSessionId: string | null = null;
+      const resolveDraftTarget = (
+        draft: ChatSession | undefined,
+        fallback: SessionExecutionTarget,
+      ): SessionExecutionTarget => {
+        if (draft?.executionTarget) return draft.executionTarget;
+        if (draft?.executionTargetSource === "ui") {
+          throw new Error(
+            "Select a model before creating this unresolved session.",
+          );
+        }
+        return fallback;
+      };
       const handleCreationFailure = async (
         error: unknown,
       ): Promise<unknown | null> => {
@@ -1596,53 +1754,34 @@ export function AppShell({
             : String(cleanupError);
         return `${message} Workspace cleanup also failed: ${cleanupMessage}`;
       };
-      void Promise.all([
-        Promise.resolve(sessionModelPreference),
-        Promise.resolve(workingDir),
-      ])
-        .then(async ([resolvedSessionModelPreference, resolvedWorkingDir]) => {
+      void Promise.resolve(workingDir)
+        .then(async (resolvedWorkingDir) => {
           const liveDraft = useChatSessionStore
             .getState()
             .getSession(session.id);
-          const requestedPreference = liveDraft
-            ? {
-                providerId:
-                  liveDraft.providerId ??
-                  resolvedSessionModelPreference.providerId,
-                modelId: liveDraft.modelId,
-                modelName: liveDraft.modelName,
-              }
-            : resolvedSessionModelPreference;
-          const target = await ensureNewSessionTarget({
-            providerId: requestedPreference.providerId,
-            modelId: requestedPreference.modelId,
-          });
-          if (target.status !== "ready") {
-            // ensureNewSessionTarget has already sent the user to Providers
-            // settings for this draft; record it so the deferred route swap
-            // doesn't undo that.
-            providerSetupRedirectSessionIdRef.current = session.id;
-            throw new Error(t("settings:providers.setupRequired.toast"));
-          }
-
-          const creationPreference = {
-            providerId: target.providerId,
-            modelId: requestedPreference.modelId,
-            modelName: requestedPreference.modelName,
-          };
-          return acpCreateSession(target.providerId, resolvedWorkingDir, {
-            projectId,
-            modelId: creationPreference.modelId,
-            // The draft is already interactive. Construct its provider now so
-            // a selection made while creation is in flight can be applied to
-            // the backend session as soon as it exists.
-            deferProviderSetup: false,
-          }).then(({ sessionId, configOptionsSnapshot }) => {
+          const requestedTarget = resolveDraftTarget(
+            liveDraft,
+            sessionExecutionTarget,
+          );
+          const creationSelection =
+            gooseServeSelectionFromExecutionTarget(requestedTarget);
+          return acpCreateSession(
+            creationSelection.providerId ?? requestedTarget.harnessId,
+            resolvedWorkingDir,
+            {
+              projectId,
+              modelId: requestedTarget.modelId,
+              // The draft is already interactive. Construct its provider now so
+              // a selection made while creation is in flight can be applied to
+              // the backend session as soon as it exists.
+              deferProviderSetup: false,
+            },
+          ).then(({ sessionId, configOptionsSnapshot }) => {
             createdBackendSessionId = sessionId;
             return {
               sessionId,
               configOptionsSnapshot,
-              sessionModelPreference: creationPreference,
+              sessionExecutionTarget: requestedTarget,
               workingDir: resolvedWorkingDir,
             };
           });
@@ -1651,7 +1790,7 @@ export function AppShell({
           async ({
             sessionId,
             configOptionsSnapshot,
-            sessionModelPreference,
+            sessionExecutionTarget,
             workingDir,
           }) => {
             const sessionStore = useChatSessionStore.getState();
@@ -1664,42 +1803,58 @@ export function AppShell({
               );
               return;
             }
-            let appliedPreference = sessionModelPreference;
+            let appliedTarget = sessionExecutionTarget;
             let resolvedConfigOptionsSnapshot = configOptionsSnapshot;
             const reconcileLatestDraftSelection = async () => {
               while (true) {
                 const liveDraft = useChatSessionStore
                   .getState()
                   .getSession(session.id);
-                const latestPreference = liveDraft
-                  ? {
-                      providerId:
-                        liveDraft.providerId ?? appliedPreference.providerId,
-                      modelId: liveDraft.modelId,
-                      modelName: liveDraft.modelName,
-                    }
-                  : appliedPreference;
-                if (
-                  latestPreference.providerId ===
-                    appliedPreference.providerId &&
-                  latestPreference.modelId === appliedPreference.modelId
-                ) {
-                  return latestPreference;
+                const latestTarget = resolveDraftTarget(
+                  liveDraft,
+                  appliedTarget,
+                );
+                if (sameSessionExecutionTarget(latestTarget, appliedTarget)) {
+                  return latestTarget;
                 }
-                const result = await applyLatestSessionConfig({
+                const result = await transitionSessionTarget({
                   sessionId,
-                  providerId: latestPreference.providerId,
+                  target: latestTarget,
                   workingDir,
-                  modelId: latestPreference.modelId,
                 });
                 if (!result.applied) {
                   throw new Error(
                     "Draft session selection was superseded during creation.",
                   );
                 }
+                const effectiveTarget = result.resolvedTarget ?? latestTarget;
                 resolvedConfigOptionsSnapshot =
                   result.configOptionsSnapshot ?? resolvedConfigOptionsSnapshot;
-                appliedPreference = latestPreference;
+                if (
+                  result.resolvedTarget &&
+                  !sameSessionExecutionTarget(
+                    result.resolvedTarget,
+                    latestTarget,
+                  )
+                ) {
+                  const liveDraftAfterRepair = useChatSessionStore
+                    .getState()
+                    .getSession(session.id);
+                  if (
+                    sameSessionExecutionTarget(
+                      liveDraftAfterRepair?.executionTarget,
+                      latestTarget,
+                    )
+                  ) {
+                    useChatSessionStore
+                      .getState()
+                      .replaceSessionExecutionTarget(
+                        session.id,
+                        result.resolvedTarget,
+                      );
+                  }
+                }
+                appliedTarget = effectiveTarget;
               }
             };
 
@@ -1719,7 +1874,14 @@ export function AppShell({
                 };
               }
             }
-            const latestPreference = await reconcileLatestDraftSelection();
+            const latestTarget = await reconcileLatestDraftSelection();
+            const promotedTarget =
+              !latestTarget.modelId && resolvedConfigOptionsSnapshot?.model
+                ? (materializeSessionExecutionModel(
+                    latestTarget,
+                    resolvedConfigOptionsSnapshot.model,
+                  ) ?? latestTarget)
+                : latestTarget;
 
             const sessionStoreAfterReady = useChatSessionStore.getState();
             const latestSessionAfterReady = sessionStoreAfterReady.getSession(
@@ -1751,33 +1913,29 @@ export function AppShell({
             };
             const shouldRemainActive =
               sessionStoreAfterReady.activeSessionId === session.id;
-            const pendingSelectionIntent =
-              sessionStoreAfterReady.getModelSelectionIntent(session.id);
+            const pendingSelectionIntent = getModelSelectionIntent(session.id);
             if (
-              pendingSelectionIntent?.kind === "model" &&
-              pendingSelectionIntent.preferenceAgentId &&
-              pendingSelectionIntent.modelId
+              pendingSelectionIntent &&
+              isModelExecutionTarget(pendingSelectionIntent.target) &&
+              pendingSelectionIntent.preferenceAgentId
             ) {
               setStoredModelPreference(
                 pendingSelectionIntent.preferenceAgentId,
                 {
-                  modelId: pendingSelectionIntent.modelId,
-                  modelName:
-                    pendingSelectionIntent.modelName ??
-                    pendingSelectionIntent.modelId,
-                  providerId: pendingSelectionIntent.providerId,
+                  modelId: pendingSelectionIntent.target.modelId,
+                  modelName: pendingSelectionIntent.target.modelName,
+                  providerId: pendingSelectionIntent.target.modelProviderId,
                 },
               );
-              sessionStoreAfterReady.clearModelSelectionIntent(
+              clearCurrentModelSelectionIntent(
                 session.id,
                 pendingSelectionIntent.requestId,
               );
             }
             promoteChatSessionId(session.id, sessionId);
+            transferSessionTargetOwnership(session.id, sessionId);
             promoteDraftSession(session.id, sessionId, {
-              providerId: latestPreference.providerId,
-              modelId: latestPreference.modelId,
-              modelName: latestPreference.modelName,
+              executionTarget: promotedTarget,
               workingDir,
               ...latestSessionPatch,
               ...(resolvedConfigOptionsSnapshot?.reasoningEffort
@@ -1881,7 +2039,6 @@ export function AppShell({
       replaceNavigationSessionId,
       setActiveSession,
       setChatActiveSession,
-      ensureNewSessionTarget,
     ],
   );
 
@@ -1933,6 +2090,10 @@ export function AppShell({
 
         const chatStore = useChatStore.getState();
         for (const session of failedSessions) {
+          const sessionExecutionTarget = session.executionTarget;
+          if (!sessionExecutionTarget) {
+            continue;
+          }
           // Drop the stale missing-folder error notification so the retry
           // doesn't stack a duplicate, then clear the runtime + creation error.
           const messages = chatStore.messagesBySession[session.id] ?? [];
@@ -1950,32 +2111,16 @@ export function AppShell({
           chatStore.setError(session.id, null);
           resetSessionCreation(session.id);
 
-          const providerId = session.providerId ?? selectedProvider ?? "goose";
-          const resolvedPreference =
-            await resolveSupportedSessionModelPreference(
-              providerId,
-              undefined,
-              session.modelId ?? undefined,
-            );
-          const sessionModelPreference =
-            session.modelName && resolvedPreference.modelId === session.modelId
-              ? { ...resolvedPreference, modelName: session.modelName }
-              : resolvedPreference;
           startDraftSessionCreation({
             session,
-            sessionModelPreference,
+            sessionExecutionTarget,
             workingDir: resolveSessionCwd(updatedProject),
             projectId: updatedProject.id,
           });
         }
       })();
     },
-    [
-      fetchProjects,
-      resetSessionCreation,
-      selectedProvider,
-      startDraftSessionCreation,
-    ],
+    [fetchProjects, resetSessionCreation, startDraftSessionCreation],
   );
   retryFailedSessionsForProjectRef.current = retryFailedSessionsForProject;
 
@@ -1986,9 +2131,7 @@ export function AppShell({
       options: {
         activate?: boolean;
         reuseExistingDraft?: boolean;
-        providerId?: string;
-        modelId?: string;
-        modelName?: string;
+        executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
       } = {},
     ) => {
@@ -1997,18 +2140,9 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewTab start (project=${project?.id ?? "none"})`,
       );
-      const requestedProviderId =
-        options.providerId ?? selectedProvider ?? "goose";
-      const target = await ensureNewSessionTarget(
-        options.providerId
-          ? { providerId: requestedProviderId, modelId: options.modelId }
-          : {},
-      );
-      if (target.status !== "ready") return undefined;
-      const sessionModelPreference =
-        options.modelName && target.modelId === options.modelId
-          ? { ...target, modelName: options.modelName }
-          : target;
+      const sessionExecutionTarget =
+        await resolveSessionCreationTarget(options);
+      if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       // New chats always start at the project default folder; worktree
@@ -2022,8 +2156,7 @@ export function AppShell({
         request: {
           title,
           projectId: project?.id,
-          providerId: sessionModelPreference.providerId,
-          modelId: sessionModelPreference.modelId,
+          executionTarget: sessionExecutionTarget,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
         allowDraftReuse: options.reuseExistingDraft !== false,
@@ -2050,10 +2183,8 @@ export function AppShell({
         const session = await createSession({
           title,
           projectId: project?.id,
-          providerId: sessionModelPreference.providerId,
+          executionTarget: sessionExecutionTarget,
           workingDir,
-          modelId: sessionModelPreference.modelId,
-          modelName: sessionModelPreference.modelName,
         });
         perfLog(
           `[perf:newtab] ${session.id.slice(0, 8)} created session in ${(performance.now() - tStart).toFixed(1)}ms`,
@@ -2065,10 +2196,8 @@ export function AppShell({
       const session = createDraftSession({
         title,
         projectId: project?.id,
-        providerId: sessionModelPreference.providerId,
+        executionTarget: sessionExecutionTarget,
         workingDir: optimisticWorkingDir,
-        modelId: sessionModelPreference.modelId,
-        modelName: sessionModelPreference.modelName,
       });
       clearSettingsSectionUrl();
       setActiveSession(session.id);
@@ -2079,7 +2208,7 @@ export function AppShell({
       );
       startDraftSessionCreation({
         session,
-        sessionModelPreference,
+        sessionExecutionTarget,
         workingDir: resolveSessionCwd(project),
         projectId: project?.id,
         onReady: applyReasoningEffortAfterDraftCreation(
@@ -2090,13 +2219,12 @@ export function AppShell({
       return session;
     },
     [
-      selectedProvider,
       createSession,
       createDraftSession,
+      resolveSessionCreationTarget,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
-      ensureNewSessionTarget,
     ],
   );
 
@@ -2201,22 +2329,12 @@ export function AppShell({
       project: ProjectInfo,
       options: ProjectChatDraftOptions = {},
     ) => {
-      const tStart = performance.now();
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
-      const requestedProviderId =
-        options.providerId ?? selectedProvider ?? "goose";
-      const target = await ensureNewSessionTarget(
-        options.providerId
-          ? { providerId: requestedProviderId, modelId: options.modelId }
-          : {},
-      );
-      if (target.status !== "ready") return undefined;
-      const sessionModelPreference =
-        options.modelName && target.modelId === options.modelId
-          ? { ...target, modelName: options.modelName }
-          : target;
+      const sessionExecutionTarget =
+        await resolveSessionCreationTarget(options);
+      if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const needsStartup =
@@ -2233,8 +2351,7 @@ export function AppShell({
         request: {
           title,
           projectId: project.id,
-          providerId: sessionModelPreference.providerId,
-          modelId: sessionModelPreference.modelId,
+          executionTarget: sessionExecutionTarget,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
         allowDraftReuse: options.reuseExistingDraft !== false && !needsStartup,
@@ -2247,9 +2364,6 @@ export function AppShell({
         setActiveSession(existingDraft.id);
         setActiveView("chat");
         setChatActiveSession(existingDraft.id);
-        perfLog(
-          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
-        );
         return existingDraft;
       }
       const asIs =
@@ -2259,10 +2373,8 @@ export function AppShell({
       const session = createDraftSession({
         title,
         projectId: project.id,
-        providerId: sessionModelPreference.providerId,
+        executionTarget: sessionExecutionTarget,
         workingDir: getOptimisticSessionCwd(project),
-        modelId: sessionModelPreference.modelId,
-        modelName: sessionModelPreference.modelName,
         workspaceAttachments: needsStartup
           ? asIs?.workspaceAttachments.filter(
               (_, index) =>
@@ -2274,12 +2386,9 @@ export function AppShell({
       setActiveSession(session.id);
       setActiveView("chat");
       setChatActiveSession(session.id);
-      perfLog(
-        `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
-      );
       startDraftSessionCreation({
         session,
-        sessionModelPreference,
+        sessionExecutionTarget,
         workingDir: resolveSessionCwd(project),
         projectId: project.id,
         onReady: applyReasoningEffortAfterDraftCreation(
@@ -2290,13 +2399,12 @@ export function AppShell({
       return session;
     },
     [
-      selectedProvider,
       createDraftSession,
+      resolveSessionCreationTarget,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
       workspaceRepository.mode,
-      ensureNewSessionTarget,
     ],
   );
 
@@ -2305,9 +2413,7 @@ export function AppShell({
       title = DEFAULT_CHAT_TITLE,
       project?: ProjectInfo,
       options: {
-        providerId?: string;
-        modelId?: string;
-        modelName?: string;
+        executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
       } = {},
     ) => {
@@ -2315,18 +2421,9 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createBackgroundDraftChat start (project=${project?.id ?? "none"})`,
       );
-      const requestedProviderId =
-        options.providerId ?? selectedProvider ?? "goose";
-      const target = await ensureNewSessionTarget(
-        options.providerId
-          ? { providerId: requestedProviderId, modelId: options.modelId }
-          : {},
-      );
-      if (target.status !== "ready") return undefined;
-      const sessionModelPreference =
-        options.modelName && target.modelId === options.modelId
-          ? { ...target, modelName: options.modelName }
-          : target;
+      const sessionExecutionTarget =
+        await resolveSessionCreationTarget(options);
+      if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const existingDraft = findExistingDraft({
@@ -2338,8 +2435,7 @@ export function AppShell({
         request: {
           title,
           projectId: project?.id,
-          providerId: sessionModelPreference.providerId,
-          modelId: sessionModelPreference.modelId,
+          executionTarget: sessionExecutionTarget,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
       });
@@ -2358,17 +2454,15 @@ export function AppShell({
       const session = createDraftSession({
         title,
         projectId: project?.id,
-        providerId: sessionModelPreference.providerId,
+        executionTarget: sessionExecutionTarget,
         workingDir: optimisticWorkingDir,
-        modelId: sessionModelPreference.modelId,
-        modelName: sessionModelPreference.modelName,
       });
       perfLog(
         `[perf:newtab] ${session.id.slice(0, 8)} created background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
       );
       startDraftSessionCreation({
         session,
-        sessionModelPreference,
+        sessionExecutionTarget,
         workingDir: resolveSessionCwd(project),
         projectId: project?.id,
         onReady: applyReasoningEffortAfterDraftCreation(
@@ -2379,10 +2473,9 @@ export function AppShell({
       return session;
     },
     [
-      selectedProvider,
       createDraftSession,
+      resolveSessionCreationTarget,
       startDraftSessionCreation,
-      ensureNewSessionTarget,
     ],
   );
 
@@ -2539,23 +2632,43 @@ export function AppShell({
           persona,
           agentState.providers,
         );
-        const providerId = matchingProvider?.id;
-        const modelId = matchingProvider
-          ? (persona?.model ?? undefined)
+        const harnessId = matchingProvider?.id ?? persona?.provider;
+        const cachedModels = [
+          ...useProviderModelCacheStore.getState().providers,
+        ].flatMap(([providerId, entry]) =>
+          entry.models.map((model) => ({
+            ...model,
+            providerId: model.providerId ?? providerId,
+          })),
+        );
+        const personaModel =
+          persona && harnessId
+            ? resolvePersonaModel(
+                persona,
+                harnessId,
+                cachedModels,
+                getProviderCatalog(),
+              )
+            : undefined;
+        if (persona?.model && !personaModel) {
+          toast.error(t("settings:providers.setupRequired.toast"));
+          return;
+        }
+        const executionTarget = harnessId
+          ? normalizeSessionExecutionTarget({
+              harnessId,
+              modelProviderId: personaModel?.modelProviderId,
+              modelId: personaModel?.modelId,
+              modelName: personaModel?.modelName,
+            })
           : undefined;
 
         void createNewTab(DEFAULT_CHAT_TITLE, undefined, {
-          providerId,
-          modelId,
-          modelName: modelId,
+          executionTarget,
         })
           .then((session) => {
             if (!session) return;
-            patchSession(session.id, {
-              ...(providerId ? { providerId } : {}),
-              ...(modelId ? { modelId, modelName: modelId } : {}),
-              personaId: agentId,
-            });
+            patchSession(session.id, { personaId: agentId });
           })
           .catch((error) => {
             console.error("Failed to start chat with agent:", error);
@@ -2568,25 +2681,69 @@ export function AppShell({
       createNewTab,
       patchSession,
       guardAppNavigation,
+      t,
     ],
   );
 
-  const handleGlobalComposerModelSelectionChange = useCallback(
-    (selection: GlobalComposerModelSelection | null) => {
-      if (!homeSessionId || !selection) {
+  const handleGlobalComposerReasoningEffortChange = useCallback(
+    (value: string) => {
+      if (!homeSessionId || !homeSession?.reasoningEffort) {
+        return;
+      }
+      const current = homeSession.reasoningEffort;
+      if (current.currentValue === value) {
         return;
       }
 
-      const refreshKey = [
-        homeSessionId,
-        selection.providerId,
-        selection.modelId,
-      ].join("\u0000");
-      homeComposerReasoningRefreshKeyRef.current = refreshKey;
+      patchSession(homeSessionId, {
+        reasoningEffort: {
+          ...current,
+          currentValue: value,
+        },
+      });
 
-      const liveHomeSession =
-        useChatSessionStore.getState().getSession(homeSessionId) ?? homeSession;
-      const project = liveHomeSession?.projectId
+      const targetAtRequest = homeSession.executionTarget;
+      const { providerId, modelId } =
+        gooseServeSelectionFromExecutionTarget(targetAtRequest);
+      void acpSetSessionConfigOption(homeSessionId, current.configId, value, {
+        providerId,
+        modelId,
+        reasoningEffortValue: value,
+      }).catch((error) => {
+        const liveSession = useChatSessionStore
+          .getState()
+          .getSession(homeSessionId);
+        if (
+          !sameSessionExecutionTarget(
+            liveSession?.executionTarget,
+            targetAtRequest,
+          ) ||
+          liveSession?.reasoningEffort?.currentValue !== value
+        ) {
+          return;
+        }
+        console.error("Failed to set Home reasoning effort:", error);
+        patchSession(homeSessionId, {
+          reasoningEffort: current,
+        });
+      });
+    },
+    [
+      homeSession?.executionTarget,
+      homeSession?.reasoningEffort,
+      homeSessionId,
+      patchSession,
+    ],
+  );
+
+  const syncGlobalComposerExecutionTargetToHome = useCallback(
+    (sessionId: string, requestedTarget: SessionExecutionTarget) => {
+      const sessionStore = useChatSessionStore.getState();
+      const liveHomeSession = sessionStore.getSession(sessionId);
+      if (!liveHomeSession) {
+        return undefined;
+      }
+      const project = liveHomeSession.projectId
         ? (useProjectStore
             .getState()
             .projects.find(
@@ -2594,61 +2751,95 @@ export function AppShell({
             ) ?? null)
         : null;
 
-      patchSession(homeSessionId, {
-        providerId: selection.providerId,
-        modelId: selection.modelId,
-        modelName: selection.modelName,
-        reasoningEffort: undefined,
+      const requestId = createModelSelectionRequestId();
+      const target = normalizeSessionExecutionTarget(requestedTarget);
+      beginModelSelectionIntent(sessionId, {
+        requestId,
+        target,
+        previousTarget: liveHomeSession.executionTarget,
       });
 
       void (async () => {
         try {
           const workingDir = await resolveSessionCwd(
             project,
-            liveHomeSession?.workingDir,
+            liveHomeSession.workingDir,
           );
-          const result = await applyLatestSessionConfig({
-            sessionId: homeSessionId,
-            providerId: selection.providerId,
+          if (!isCurrentModelSelectionIntent(sessionId, requestId)) {
+            return;
+          }
+          const result = await transitionSessionTarget({
+            sessionId,
+            target,
             workingDir,
-            modelId: selection.modelId,
-            forceConfigRefresh: true,
+            requireReasoningEffort: true,
+            requestId,
           });
-          if (
-            !result.applied ||
-            homeComposerReasoningRefreshKeyRef.current !== refreshKey
-          ) {
+          const intentStillMatches = clearCurrentModelSelectionIntent(
+            sessionId,
+            requestId,
+          );
+          if (!result.applied || !intentStillMatches) {
             return;
           }
 
-          const currentHomeSession = useChatSessionStore
-            .getState()
-            .getSession(homeSessionId);
-          if (
-            currentHomeSession?.providerId !== selection.providerId ||
-            currentHomeSession.modelId !== selection.modelId
-          ) {
-            return;
+          if (!sameSessionExecutionTarget(result.target, target)) {
+            setGlobalComposerExecutionTarget(result.target);
           }
-
-          const reasoningEffort = result.configOptionsSnapshot?.reasoningEffort;
-          if (!reasoningEffort) {
-            return;
-          }
-
-          patchSession(homeSessionId, {
-            workingDir,
-            reasoningEffort,
-          });
         } catch (error) {
+          if (clearCurrentModelSelectionIntent(sessionId, requestId)) {
+            const previousTarget = liveHomeSession.executionTarget;
+            useChatSessionStore
+              .getState()
+              .replaceSessionExecutionTarget(sessionId, previousTarget);
+            setGlobalComposerExecutionTarget(previousTarget ?? null);
+            showModelSwitchErrorToast({
+              modelName: target.modelName ?? target.modelId ?? target.harnessId,
+              fallbackModelName:
+                liveHomeSession.executionTarget?.modelName ??
+                liveHomeSession.executionTarget?.modelId ??
+                null,
+            });
+          }
           console.error(
-            "Failed to refresh Home reasoning effort for selected model:",
+            "Failed to apply the selected Home execution target:",
             error,
           );
         }
       })();
+
+      return () => {
+        clearCurrentModelSelectionIntent(sessionId, requestId);
+      };
     },
-    [homeSession, homeSessionId, patchSession],
+    [],
+  );
+
+  useEffect(() => {
+    if (!globalComposerExecutionTarget || !homeSessionId || !hasHomeSession) {
+      return;
+    }
+
+    return syncGlobalComposerExecutionTargetToHome(
+      homeSessionId,
+      globalComposerExecutionTarget,
+    );
+  }, [
+    globalComposerExecutionTarget,
+    hasHomeSession,
+    homeSessionId,
+    syncGlobalComposerExecutionTargetToHome,
+  ]);
+
+  const handleGlobalComposerExecutionTargetChange = useCallback(
+    (target: SessionExecutionTarget | null) => {
+      globalComposerExecutionTargetRef.current = target;
+      setGlobalComposerExecutionTarget(target);
+      if (!target && homeSessionId) {
+        clearCurrentModelSelectionIntent(homeSessionId);
+      }
+    },
+    [homeSessionId],
   );
 
   const handleGlobalCompose = useCallback(
@@ -2683,25 +2874,12 @@ export function AppShell({
       }
 
       const chatOptions = {
-        providerId: options?.providerId,
-        modelId: options?.modelId,
-        modelName: options?.modelName,
+        executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
       };
       const acceptGlobalFirstSend = async (session: ChatSession) => {
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
 
-        if (options?.providerId || options?.modelId) {
-          patchSession(sessionId, {
-            ...(options.providerId ? { providerId: options.providerId } : {}),
-            ...(options.modelId
-              ? {
-                  modelId: options.modelId,
-                  modelName: options.modelName ?? options.modelId,
-                }
-              : {}),
-          });
-        }
         if (options?.personaId) {
           patchSession(sessionId, { personaId: options.personaId });
         }
@@ -2781,15 +2959,6 @@ export function AppShell({
             globalComposerRouteSwapTimeoutRef.current = window.setTimeout(
               () => {
                 globalComposerRouteSwapTimeoutRef.current = null;
-                // The background probe can fail inside this delay and send the
-                // user to Providers settings; swapping the route now would yank
-                // them back to a draft that failed for the reason they are
-                // being asked to fix.
-                if (providerSetupRedirectSessionIdRef.current === session.id) {
-                  providerSetupRedirectSessionIdRef.current = null;
-                  resetGlobalComposerTransition();
-                  return;
-                }
                 activateDeferredChatSession(session.id);
               },
               GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS,
@@ -2896,9 +3065,7 @@ export function AppShell({
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
       const chatOptions = {
-        providerId: options?.providerId,
-        modelId: options?.modelId,
-        modelName: options?.modelName,
+        executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
       };
 
@@ -2918,17 +3085,8 @@ export function AppShell({
         }
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
 
-        if (options?.providerId || options?.modelId || options?.personaId) {
-          patchSession(sessionId, {
-            ...(options.providerId ? { providerId: options.providerId } : {}),
-            ...(options.modelId
-              ? {
-                  modelId: options.modelId,
-                  modelName: options.modelName ?? options.modelId,
-                }
-              : {}),
-            ...(options.personaId ? { personaId: options.personaId } : {}),
-          });
+        if (options?.personaId) {
+          patchSession(sessionId, { personaId: options.personaId });
         }
 
         if (options?.reasoningEffort) {
@@ -3007,9 +3165,7 @@ export function AppShell({
       const chatOptions = {
         activate: false,
         reuseExistingDraft: false,
-        providerId: options?.providerId,
-        modelId: options?.modelId,
-        modelName: options?.modelName,
+        executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
       };
 
@@ -3111,7 +3267,9 @@ export function AppShell({
   const handleStartProviderTroubleshootingChat = useCallback(
     (request: AgentSetupTroubleshootingRequest) => {
       guardAppNavigation(() => {
-        void createNewTab(request.title, undefined, { providerId: "goose" })
+        void createNewTab(request.title, undefined, {
+          executionTarget: { harnessId: "goose" },
+        })
           .then((session) => {
             if (!session) return;
             useChatStore.getState().enqueueTransportReadyMessage(session.id, {
@@ -4893,13 +5051,13 @@ export function AppShell({
                 onStarterRequestConsumed={
                   handleGlobalComposerStarterRequestConsumed
                 }
-                reasoningEffortConfig={homeSession?.reasoningEffort}
-                reasoningEffortModelSelection={{
-                  providerId: homeSession?.providerId,
-                  modelId: homeSession?.modelId,
+                reasoningEffort={{
+                  config: homeSession?.reasoningEffort,
+                  onChange: handleGlobalComposerReasoningEffortChange,
                 }}
-                onModelSelectionChange={
-                  handleGlobalComposerModelSelectionChange
+                currentExecutionTarget={currentGlobalComposerExecutionTarget}
+                onExecutionTargetChange={
+                  handleGlobalComposerExecutionTargetChange
                 }
                 voiceConversation={
                   capabilities.voiceConversation

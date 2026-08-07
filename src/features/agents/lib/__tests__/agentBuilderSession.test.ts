@@ -95,6 +95,7 @@ vi.mock("@/shared/api/agents", () => ({
 
 vi.mock("@/features/runtime-config/defaults", () => ({
   getDefaultGooseModelId: () => "goose-gpt-5-5",
+  getDefaultGooseModelProviderId: () => "databricks_v2",
 }));
 
 import {
@@ -332,9 +333,9 @@ describe("agentBuilderSession", () => {
   it("seeds the draft with the stored goose provider and model preference", async () => {
     window.localStorage.setItem("goose:defaultProvider", "goose");
     setStoredModelPreference("goose", {
-      modelId: "goose-gpt-5-5",
-      modelName: "GPT-5.5",
-      providerId: "goose",
+      modelId: "goose-claude-sonnet-4-6",
+      modelName: "Claude Sonnet 4.6",
+      providerId: "databricks_v2",
     });
     mocks.createPersonaSource.mockResolvedValue(draftSource);
 
@@ -347,7 +348,8 @@ describe("agentBuilderSession", () => {
           draft: true,
           builderSessionId: "sess-1",
           provider: "goose",
-          model: "goose-gpt-5-5",
+          modelProviderId: "databricks_v2",
+          model: "goose-claude-sonnet-4-6",
         }),
       }),
     );
@@ -358,7 +360,7 @@ describe("agentBuilderSession", () => {
     setStoredModelPreference("goose", {
       modelId: "goose-claude-sonnet-4-6",
       modelName: "Claude Sonnet 4.6",
-      providerId: "goose",
+      providerId: "databricks_v2",
     });
     mocks.createPersonaSource.mockResolvedValue(draftSource);
 
@@ -369,6 +371,7 @@ describe("agentBuilderSession", () => {
       expect.objectContaining({
         properties: expect.objectContaining({
           provider: "databricks_v2",
+          modelProviderId: "databricks_v2",
           model: "goose-claude-sonnet-4-6",
         }),
       }),
@@ -398,6 +401,7 @@ describe("agentBuilderSession", () => {
       expect.objectContaining({
         properties: expect.objectContaining({
           provider: "openai",
+          modelProviderId: "openai",
           model: "gpt-5",
         }),
       }),
@@ -416,6 +420,7 @@ describe("agentBuilderSession", () => {
           draft: true,
           builderSessionId: "sess-1",
           provider: "goose",
+          modelProviderId: "databricks_v2",
           model: "goose-gpt-5-5",
         }),
       }),

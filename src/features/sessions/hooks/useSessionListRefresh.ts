@@ -15,9 +15,9 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
  * Mirrors the periodic + focus pattern used by `usePersonas` for persona
  * disk refresh.
  *
- * `loadSessions()` is idempotent — see `mergeSessionMetadata` in
- * `chatSessionStore.ts`. It merges by session id, preserving in-memory
- * state (active session, unsaved drafts, runtime metadata).
+ * `loadSessions()` merges by session id. ACP refreshes update persisted
+ * metadata, while the renderer-owned provider/model selection remains
+ * authoritative for sessions already present in memory.
  */
 const REFRESH_INTERVAL_MS = 60_000;
 

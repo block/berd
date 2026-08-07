@@ -62,8 +62,9 @@ export function HomeComposer({
           ? undefined
           : controller.queue.cancelEditing,
         onSendQueue:
-          controller.deferredWorkspaceRecord?.state.status === "failed" ||
-          controller.deferredWorkspaceRecord?.state.status === "held"
+          !controller.unresolvedDeferredSend &&
+          (controller.deferredWorkspaceRecord?.state.status === "failed" ||
+            controller.deferredWorkspaceRecord?.state.status === "held")
             ? controller.sendDeferredAnyway
             : undefined,
         onDismissQueue: deferredWorkspaceInFlight
@@ -74,6 +75,13 @@ export function HomeComposer({
           controller.chatState === "streaming" ||
           controller.chatState === "thinking",
       }}
+      queuedMessageAccessory={
+        controller.unresolvedDeferredSend ? (
+          <p className="text-xs text-destructive" role="alert">
+            {controller.deferredWorkspaceError}
+          </p>
+        ) : undefined
+      }
       initialValue={controller.draftValue}
       initialAttachments={controller.draftAttachments}
       onDraftChange={controller.handleDraftChange}
@@ -93,6 +101,7 @@ export function HomeComposer({
         currentModelId: controller.currentModelId,
         currentModelProviderId: controller.currentModelProviderId,
         currentModel: controller.currentModelName ?? undefined,
+        currentExecutionTarget: controller.currentExecutionTarget,
         availableModels: controller.availableModels,
         modelsLoading: controller.modelsLoading,
         modelStatusMessage: controller.modelStatusMessage,

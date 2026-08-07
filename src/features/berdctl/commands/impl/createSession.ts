@@ -93,6 +93,7 @@ Result:
       },
       { berdctlCrossSessionSendOptions },
       { GOOSE_PROVIDER_ID },
+      { normalizeSessionExecutionTarget, targetFromAgentModelSelection },
       { findPersonaOrThrow },
       { findProjectOrThrow },
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
@@ -103,6 +104,7 @@ Result:
       import("@/features/projects/lib/projectChatWorkspaces"),
       import("../runtime/sessionSend"),
       import("@/shared/api/acpPersonaHandoff"),
+      import("@/features/chat/lib/sessionExecutionTarget"),
       import("../runtime/agents"),
       import("../runtime/projects"),
       import("../runtime/providers"),
@@ -124,11 +126,12 @@ Result:
     // known and the id is not in it. On goose a model belongs to a model
     // provider (anthropic, openai, ...), so a match also resolves the
     // provider the session should run against — mirroring the in-app picker.
-    let providerId = args.harness_id;
+    let modelProviderId =
+      harnessId === GOOSE_PROVIDER_ID ? undefined : harnessId;
     if (args.model_id && models) {
       const match = models.find((model) => model.model_id === args.model_id);
       if (match) {
-        providerId = match.provider ?? providerId;
+        modelProviderId = match.provider ?? modelProviderId;
       } else if (models.length > 0) {
         throw new CommandError(
           "model_not_found",
@@ -136,6 +139,19 @@ Result:
         );
       }
     }
+    if (args.model_id && !modelProviderId && harnessId === GOOSE_PROVIDER_ID) {
+      throw new CommandError(
+        "model_not_found",
+        `Could not resolve a provider for model "${args.model_id}"; list models with \`berdctl info models\` and retry.`,
+      );
+    }
+    const executionTarget = args.model_id
+      ? targetFromAgentModelSelection(harnessId, {
+          modelProviderId: modelProviderId ?? harnessId,
+          modelId: args.model_id,
+          modelName: args.model_id,
+        })
+      : normalizeSessionExecutionTarget({ harnessId });
     const requiresStartupName = Boolean(
       project && projectRequiresStartupWorkspaceName(project),
     );
@@ -178,9 +194,8 @@ Result:
       session = await useChatSessionStore.getState().createSession({
         workingDir,
         projectId: args.project_id,
-        providerId,
+        executionTarget,
         personaId: persona?.id,
-        modelId: args.model_id,
         workspaceAttachments: workspacePlan?.workspaceAttachments,
         deferProviderSetup: false,
       });

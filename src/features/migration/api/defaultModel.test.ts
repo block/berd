@@ -32,33 +32,22 @@ describe("readDefaultModelStatus", () => {
     });
   });
 
-  it("treats an empty string model id as missing", async () => {
-    mockGooseDefaultsRead.mockResolvedValue({
-      providerId: "databricks",
-      modelId: "",
-    });
+  it.each([
+    ["an empty", "", "databricks"],
+    ["a null", null, "databricks"],
+    ["a whitespace-only", "   ", "databricks"],
+    ["the Goose harness sentinel", "goose", "databricks_v2"],
+  ])("treats %s model id as missing", async (_, modelId, providerId) => {
+    mockGooseDefaultsRead.mockResolvedValue({ providerId, modelId });
 
     const { readDefaultModelStatus } = await import("./defaultModel");
     const status = await readDefaultModelStatus();
 
     expect(status).toEqual({
-      providerId: "databricks",
+      providerId,
       modelId: undefined,
       modelMissing: true,
     });
-  });
-
-  it("treats a null model id as missing", async () => {
-    mockGooseDefaultsRead.mockResolvedValue({
-      providerId: "databricks",
-      modelId: null,
-    });
-
-    const { readDefaultModelStatus } = await import("./defaultModel");
-    const status = await readDefaultModelStatus();
-
-    expect(status.modelMissing).toBe(true);
-    expect(status.modelId).toBeUndefined();
   });
 
   it("does not flag modelMissing when the provider itself is unset", async () => {
@@ -75,18 +64,5 @@ describe("readDefaultModelStatus", () => {
       modelId: undefined,
       modelMissing: false,
     });
-  });
-
-  it("trims whitespace-only ids to undefined", async () => {
-    mockGooseDefaultsRead.mockResolvedValue({
-      providerId: "databricks",
-      modelId: "   ",
-    });
-
-    const { readDefaultModelStatus } = await import("./defaultModel");
-    const status = await readDefaultModelStatus();
-
-    expect(status.modelMissing).toBe(true);
-    expect(status.modelId).toBeUndefined();
   });
 });

@@ -100,6 +100,34 @@ describe("providerModelCacheStore", () => {
     expect(mocks.supportedModelsList).not.toHaveBeenCalled();
   });
 
+  it("keeps refreshable runtime models provisional until discovery succeeds", async () => {
+    const configuredModel = seededModel({ id: "goose-gpt-5-5" });
+    useProviderModelCacheStore
+      .getState()
+      .seedRuntimeModels(new Map([["databricks_v2", [configuredModel]]]), {
+        runtimeManagedProviderIds: new Set(),
+      });
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(false);
+
+    mocks.supportedModelsList.mockResolvedValueOnce({
+      models: ["goose-gpt-5-5", "goose-claude-fable"],
+    });
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(true);
+  });
+
   it("preserves bundled metadata while refreshing the available model list", async () => {
     const configuredModel = seededModel({
       id: "goose-gpt-5-6-sol",

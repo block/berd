@@ -14,6 +14,7 @@ import { getClient, interceptSessionNotifications } from "./acpConnection";
 import {
   applySessionConfigOptionsSnapshot,
   readSessionConfigOptionsSnapshots,
+  type AcpSessionConfigSnapshotContext,
   type AcpSessionConfigSnapshots,
 } from "./acpSessionConfigSnapshots";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -214,6 +215,7 @@ export async function forkSession(
 export async function setModel(
   sessionId: string,
   modelId: string,
+  context: { providerId?: string; requestId?: string } = {},
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
@@ -236,7 +238,8 @@ export async function setModel(
   });
   applySessionConfigOptionsSnapshot(sessionId, response, {
     origin: "response",
-    modelId,
+    ...context,
+    modelId: snapshots.model?.modelId ?? modelId,
   });
   perfLog(
     `[perf:api] ${sid} setModel(${modelId}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
@@ -248,6 +251,7 @@ export async function setSessionConfigOption(
   sessionId: string,
   configId: string,
   value: string,
+  context: Omit<AcpSessionConfigSnapshotContext, "origin"> = {},
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
@@ -271,6 +275,7 @@ export async function setSessionConfigOption(
   });
   applySessionConfigOptionsSnapshot(sessionId, response, {
     origin: "response",
+    ...context,
   });
   perfLog(
     `[perf:api] ${sid} setSessionConfigOption(${configId}=${value}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
@@ -281,6 +286,7 @@ export async function setSessionConfigOption(
 export async function setProvider(
   sessionId: string,
   providerId: string,
+  context: { requestId?: string } = {},
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
@@ -305,7 +311,9 @@ export async function setProvider(
   });
   applySessionConfigOptionsSnapshot(sessionId, response, {
     origin: "response",
+    ...context,
     providerId,
+    modelId: snapshots.model?.modelId,
   });
   perfLog(
     `[perf:api] ${sid} setProvider(${providerId}→${wireProvider}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,

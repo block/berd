@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { QueuedMessageRecord } from "./chatStore";
+import type { QueuedMessagePayload, QueuedMessageRecord } from "./chatStore";
 import type { DeferredWorkspaceSend } from "../lib/firstWorkspaceSend";
+import {
+  normalizeSessionExecutionTarget,
+  type SessionExecutionTarget,
+} from "../lib/sessionExecutionTarget";
+import { executionTargetFromGooseServeSession } from "../lib/gooseServeExecutionTarget";
 
 const QUEUES_STORAGE_KEY = "goose:chat-message-queues:v1";
 let nativeWriteChain = Promise.resolve();
@@ -39,10 +44,11 @@ function normalizeQueuedRecord(
   record: QueuedMessageRecord,
 ): QueuedMessageRecord {
   const { editing: _editing, restored: _restored, ...persisted } = record;
+  const normalizedPayload = normalizeQueuedPayload(persisted.payload);
   const restoredPayload =
-    persisted.payload.showInComposer === false
-      ? { ...persisted.payload, showInComposer: true }
-      : persisted.payload;
+    normalizedPayload.showInComposer === false
+      ? { ...normalizedPayload, showInComposer: true }
+      : normalizedPayload;
   if (persisted.kind !== "deferred") {
     return { ...persisted, payload: restoredPayload, restored: true };
   }
@@ -66,6 +72,58 @@ function normalizeQueuedRecord(
     ...persisted,
     payload: restoredPayload,
     restored: true,
+  };
+}
+
+function normalizeQueuedPayload(
+  payload: QueuedMessagePayload,
+): QueuedMessagePayload {
+  const legacy = payload as QueuedMessagePayload & {
+    providerId?: unknown;
+    modelId?: unknown;
+    executionTarget?: unknown;
+  };
+  const {
+    providerId: legacyProviderId,
+    modelId: legacyModelId,
+    executionTarget: rawTarget,
+    ...rest
+  } = legacy;
+
+  let executionTarget: SessionExecutionTarget | undefined;
+  if (rawTarget && typeof rawTarget === "object") {
+    const candidate = rawTarget as unknown as Record<string, unknown>;
+    if (typeof candidate.harnessId === "string") {
+      try {
+        executionTarget = normalizeSessionExecutionTarget({
+          harnessId: candidate.harnessId,
+          modelProviderId:
+            typeof candidate.modelProviderId === "string"
+              ? candidate.modelProviderId
+              : undefined,
+          modelId:
+            typeof candidate.modelId === "string"
+              ? candidate.modelId
+              : undefined,
+          modelName:
+            typeof candidate.modelName === "string"
+              ? candidate.modelName
+              : undefined,
+        });
+      } catch {
+        // Invalid persisted selections do not override the live session target.
+      }
+    }
+  } else if (typeof legacyProviderId === "string") {
+    executionTarget = executionTargetFromGooseServeSession({
+      providerId: legacyProviderId,
+      modelId: typeof legacyModelId === "string" ? legacyModelId : undefined,
+    });
+  }
+
+  return {
+    ...rest,
+    ...(executionTarget ? { executionTarget } : {}),
   };
 }
 

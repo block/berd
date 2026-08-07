@@ -1,3 +1,4 @@
+import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
@@ -6,25 +7,30 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { emitSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { resetManagedModelSelectionRepairCacheForTests } from "@/features/providers/lib/managedModelSelectionRepair";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
+import type { Persona } from "@/shared/types/agents";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
 import {
   type ChatSession,
   useChatSessionStore,
 } from "../../stores/chatSessionStore";
-import { applyLatestSessionConfig } from "../../lib/sessionConfigRequests";
+import { transitionSessionTarget } from "../../lib/sessionTargetCoordinator";
+import { resetSessionTargetCoordinatorsForTests } from "../../lib/sessionTargetCoordinator";
 import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { ChatSendOptions, ModelOption } from "../../types";
 
 const mockAcpPrepareSession = vi.fn();
-const mockAcpSetModel = vi.fn();
 const mockAcpSetSessionConfigOption = vi.fn();
 const mockSetSelectedProvider = vi.fn();
 const mockResolveSessionCwd = vi.fn();
 const mockGooseDefaultsRead = vi.fn();
 const mockGoosePreferencesRead = vi.fn();
 const mockGoosePreferencesSave = vi.fn();
+const mockSupportedModelsList = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseChatSteerMessage = vi.fn();
@@ -101,7 +107,6 @@ function deferred<T = void>() {
 
 vi.mock("@/shared/api/acp", () => ({
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
-  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
   acpSetSessionConfigOption: (...args: unknown[]) =>
     mockAcpSetSessionConfigOption(...args),
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
@@ -120,6 +125,8 @@ vi.mock("@/shared/api/acpConnection", () => ({
         mockGoosePreferencesRead(...args),
       GooseUnstablePreferencesSave: (...args: unknown[]) =>
         mockGoosePreferencesSave(...args),
+      GooseUnstableProvidersSupportedModelsList: (...args: unknown[]) =>
+        mockSupportedModelsList(...args),
       GooseUnstableSessionArchive: (...args: unknown[]) =>
         mockAcpSessionArchive(...args),
     },
@@ -225,6 +232,7 @@ vi.mock("../useAgentModelPickerState", () => ({
     getModelsForAgent: (agentId: string) =>
       mockPickerState.modelsByAgent.get(agentId) ??
       mockPickerState.availableModels,
+    isModelInventoryAuthoritative: () => false,
     modelsLoading: mockPickerState.modelsLoading,
     modelStatusMessage: mockPickerState.modelStatusMessage,
     handleProviderChange: (providerId: string) =>
@@ -258,6 +266,30 @@ function latestMessageQueueArgs() {
   ];
 }
 
+function expectSessionPreparation({
+  sessionId,
+  modelProviderId,
+  workingDir = "/tmp/project",
+  modelId,
+  forceConfigRefresh,
+}: {
+  sessionId: string;
+  modelProviderId: string;
+  workingDir?: string;
+  modelId?: string;
+  forceConfigRefresh?: boolean;
+}) {
+  expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+    sessionId,
+    modelProviderId,
+    workingDir,
+    expect.objectContaining({
+      ...(modelId ? { modelId } : {}),
+      ...(forceConfigRefresh ? { forceConfigRefresh: true } : {}),
+    }),
+  );
+}
+
 function catalogSkill(name: string) {
   return {
     id: `project:/tmp/project/.agents/skills/${name}`,
@@ -274,13 +306,36 @@ function catalogSkill(name: string) {
   };
 }
 
-function singleWorkspaceSession(): ChatSession {
+function sessionFixture(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "session-1",
     title: "Chat",
-    providerId: "openai",
-    modelId: "gpt-4o",
-    modelName: "GPT-4o",
+    createdAt: "2026-04-20T00:00:00.000Z",
+    updatedAt: "2026-04-20T00:00:00.000Z",
+    messageCount: 0,
+    ...overrides,
+  };
+}
+
+function personaFixture(overrides: Partial<Persona> = {}): Persona {
+  return {
+    id: "persona-1",
+    displayName: "Research Scout",
+    systemPrompt: "Gather context.",
+    isBuiltin: false,
+    writable: true,
+    ...overrides,
+  };
+}
+
+function singleWorkspaceSession(): ChatSession {
+  return sessionFixture({
+    executionTarget: {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "gpt-4o",
+      modelName: "GPT-4o",
+    },
     workingDir: "/tmp/project",
     workspaceAttachments: [
       {
@@ -292,10 +347,7 @@ function singleWorkspaceSession(): ChatSession {
         usedByAgent: false,
       },
     ],
-    createdAt: "2026-04-20T00:00:00.000Z",
-    updatedAt: "2026-04-20T00:00:00.000Z",
-    messageCount: 0,
-  };
+  });
 }
 
 function patchReasoningEffort(sessionId: string, currentValue = "off") {
@@ -314,7 +366,19 @@ function patchReasoningEffort(sessionId: string, currentValue = "off") {
 
 describe("useChatSessionController", () => {
   beforeEach(() => {
+    resetSessionTargetCoordinatorsForTests();
     vi.clearAllMocks();
+    delete modelFixtures["legacy-v1-model"];
+    resetManagedModelSelectionRepairCacheForTests();
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      result: {
+        status: "ready",
+        source: "appDefault",
+        config: DEFAULT_RUNTIME_CONFIG,
+      },
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
     window.localStorage.clear();
     setMultiWorkspaceEnabled(true);
     mockUseChatSendMessage.mockImplementation(
@@ -379,7 +443,6 @@ describe("useChatSessionController", () => {
       },
     ]);
     mockAcpPrepareSession.mockResolvedValue(undefined);
-    mockAcpSetModel.mockResolvedValue(undefined);
     mockAcpSetSessionConfigOption.mockResolvedValue(undefined);
     mockAcpCreateSession.mockResolvedValue({
       sessionId: "session-recovered",
@@ -393,6 +456,7 @@ describe("useChatSessionController", () => {
     });
     mockGoosePreferencesRead.mockResolvedValue({ values: [] });
     mockGoosePreferencesSave.mockResolvedValue(undefined);
+    mockSupportedModelsList.mockResolvedValue({ models: [] });
     mockPreSeedDraftAgent.mockResolvedValue({
       path: "/Users/x/.agents/agents/draft-from-chat.md",
       slug: "draft-from-chat",
@@ -440,23 +504,20 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+        }),
       ],
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: true,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
   });
 
@@ -738,17 +799,16 @@ describe("useChatSessionController", () => {
     try {
       useChatSessionStore.setState({
         sessions: [
-          {
+          sessionFixture({
             id: "draft-session",
             clientSessionId: "draft-session",
-            title: "Chat",
-            providerId: "openai",
+            executionTarget: {
+              harnessId: "goose",
+              modelProviderId: "openai",
+            },
             projectId: "project-1",
             creationState: "pending",
-            createdAt: "2026-04-20T00:00:00.000Z",
-            updatedAt: "2026-04-20T00:00:00.000Z",
-            messageCount: 0,
-          },
+          }),
         ],
       });
 
@@ -801,16 +861,15 @@ describe("useChatSessionController", () => {
   it("keeps queued messages from draining while a project draft session is pending", () => {
     useChatSessionStore.setState({
       sessions: [
-        {
+        sessionFixture({
           id: "draft-session",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           projectId: "project-1",
           creationState: "pending",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
@@ -831,12 +890,13 @@ describe("useChatSessionController", () => {
   it("passes all included workspaces to the agent system prompt", () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -858,10 +918,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -902,12 +959,13 @@ describe("useChatSessionController", () => {
     ]);
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -929,10 +987,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1005,12 +1060,13 @@ describe("useChatSessionController", () => {
     ]);
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -1022,10 +1078,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1125,12 +1178,13 @@ describe("useChatSessionController", () => {
     mockListSkills.mockResolvedValue([]);
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "codex",
-          modelId: "gpt-5.4",
-          modelName: "GPT-5.4",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "codex-acp",
+            modelProviderId: "codex-acp",
+            modelId: "gpt-5.4",
+            modelName: "GPT-5.4",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -1142,10 +1196,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1155,6 +1206,7 @@ describe("useChatSessionController", () => {
       expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
         providerId: "codex-acp",
         includeAppSkills: false,
+        fresh: undefined,
       });
     });
   });
@@ -1183,18 +1235,16 @@ describe("useChatSessionController", () => {
     });
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           projectId: "project-1",
           workingDir: "/Users/test/goose artifacts",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1249,12 +1299,13 @@ describe("useChatSessionController", () => {
     });
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           projectId: "project-1",
           workingDir: "/repo/builderbot",
           workspaceAttachments: [
@@ -1267,10 +1318,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1285,16 +1333,15 @@ describe("useChatSessionController", () => {
   it("allows a queued draft message to drain after promotion to the backend session id", () => {
     useChatSessionStore.setState({
       sessions: [
-        {
+        sessionFixture({
           id: "draft-session",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           projectId: "project-1",
           creationState: "pending",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
@@ -1315,15 +1362,14 @@ describe("useChatSessionController", () => {
       useChatStore.getState().promoteSessionId("draft-session", "backend-1");
       useChatSessionStore.setState({
         sessions: [
-          {
+          sessionFixture({
             id: "backend-1",
-            title: "Chat",
-            providerId: "openai",
+            executionTarget: {
+              harnessId: "goose",
+              modelProviderId: "openai",
+            },
             projectId: "project-1",
-            createdAt: "2026-04-20T00:00:00.000Z",
-            updatedAt: "2026-04-20T00:00:00.000Z",
-            messageCount: 0,
-          },
+          }),
         ],
       });
     });
@@ -1343,16 +1389,15 @@ describe("useChatSessionController", () => {
   it("keeps failed project draft sessions from draining queued messages", () => {
     useChatSessionStore.setState({
       sessions: [
-        {
+        sessionFixture({
           id: "draft-session",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           projectId: "project-1",
           creationState: "failed",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
@@ -1475,12 +1520,13 @@ describe("useChatSessionController", () => {
     }));
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -1492,10 +1538,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1537,12 +1580,13 @@ describe("useChatSessionController", () => {
     ]);
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -1554,10 +1598,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -1575,17 +1616,15 @@ describe("useChatSessionController", () => {
     act(() => {
       useChatSessionStore.setState({
         sessions: [
-          {
-            id: "session-1",
-            title: "Chat",
-            providerId: "openai",
-            modelId: "gpt-4o",
-            modelName: "GPT-4o",
+          sessionFixture({
+            executionTarget: {
+              harnessId: "goose",
+              modelProviderId: "openai",
+              modelId: "gpt-4o",
+              modelName: "GPT-4o",
+            },
             workspaceAttachments: [],
-            createdAt: "2026-04-20T00:00:00.000Z",
-            updatedAt: "2026-04-20T00:00:00.000Z",
-            messageCount: 0,
-          },
+          }),
         ],
       });
     });
@@ -1675,8 +1714,9 @@ describe("useChatSessionController", () => {
     mockUseChatRuntime.chatState = "streaming";
     mockPickerState.selectedAgentId = "codex-acp";
     useAgentStore.setState({ selectedProvider: "codex-acp" });
-    useChatSessionStore.getState().patchSession("session-1", {
-      providerId: "codex-acp",
+    useChatSessionStore.getState().replaceSessionExecutionTarget("session-1", {
+      harnessId: "codex-acp",
+      modelProviderId: "codex-acp",
       modelId: "gpt-5.4",
       modelName: "GPT-5.4",
     });
@@ -1778,6 +1818,11 @@ describe("useChatSessionController", () => {
       "session-1",
       "thinking_effort",
       "high",
+      {
+        providerId: "openai",
+        modelId: "gpt-4o",
+        reasoningEffortValue: "high",
+      },
     );
   });
 
@@ -1806,6 +1851,11 @@ describe("useChatSessionController", () => {
         "session-1",
         "thinking_effort",
         "high",
+        {
+          providerId: "openai",
+          modelId: "gpt-4o",
+          reasoningEffortValue: "high",
+        },
       );
     });
     expect(mockGoosePreferencesSave).not.toHaveBeenCalled();
@@ -1828,26 +1878,25 @@ describe("useChatSessionController", () => {
   it("keeps pending reasoning-effort defaults scoped to each chat", async () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
+        sessionFixture({
           title: "Chat A",
-          providerId: "openai",
-          modelId: "gpt-5.4",
-          modelName: "GPT-5.4",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
-        {
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-5.4",
+            modelName: "GPT-5.4",
+          },
+        }),
+        sessionFixture({
           id: "session-2",
           title: "Chat B",
-          providerId: "openai",
-          modelId: "gpt-5.4",
-          modelName: "GPT-5.4",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-5.4",
+            modelName: "GPT-5.4",
+          },
+        }),
       ],
     });
     patchReasoningEffort("session-1");
@@ -1909,19 +1958,17 @@ describe("useChatSessionController", () => {
   it("handleSend in a builder session merges the builder assistant prompt", async () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           intent: "build-agent",
           targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
           targetAgentSlug: "draft-1",
-        },
+        }),
       ],
     });
     const { result } = renderHook(() =>
@@ -1948,17 +1995,15 @@ describe("useChatSessionController", () => {
   it("lets the canonical composer remove the agent-builder skill", () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           intent: "build-agent",
           targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
           targetAgentSlug: "draft-1",
-        },
+        }),
       ],
     });
 
@@ -1980,18 +2025,16 @@ describe("useChatSessionController", () => {
   it("does not reopen a closed builder just because its skill remains selected", async () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           intent: "build-agent",
           agentBuilderOpen: false,
           targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
           targetAgentSlug: "draft-1",
-        },
+        }),
       ],
     });
     useChatStore
@@ -2096,13 +2139,10 @@ describe("useChatSessionController", () => {
   it("activates builder mode for a deferred persona send with the agent-builder chip", async () => {
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
+        personaFixture({
           displayName: "Planner",
           systemPrompt: "Plan clearly.",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     const { result } = renderHook(() =>
@@ -2144,15 +2184,12 @@ describe("useChatSessionController", () => {
     const onMessageAccepted = vi.fn();
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
+        personaFixture({
           displayName: "Planner",
           systemPrompt: "Plan clearly.",
           provider: "goose",
           model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.modelsByAgent.set("goose", [
@@ -2195,18 +2232,16 @@ describe("useChatSessionController", () => {
     });
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           projectId: "project-1",
           workingDir: "/repo/builderbot",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     const { result } = renderHook(() =>
@@ -2242,8 +2277,12 @@ describe("useChatSessionController", () => {
       payload: {
         text: "plan",
         personaId: "persona-1",
-        providerId: "goose",
-        modelId: "goose-claude-opus-4-8",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-claude-opus-4-8",
+          modelName: "Claude Opus 4.8",
+        },
         sendOptions: {
           assistantPrompt: expect.stringContaining("draft-from-chat.md"),
         },
@@ -2304,24 +2343,22 @@ describe("useChatSessionController", () => {
     );
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
+        personaFixture({
           displayName: "Codex Planner",
           systemPrompt: "Plan clearly.",
           provider: "codex-acp",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           workingDir: "/tmp/project",
           workspaceAttachments: [
             {
@@ -2333,10 +2370,7 @@ describe("useChatSessionController", () => {
               usedByAgent: false,
             },
           ],
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
 
@@ -2377,13 +2411,10 @@ describe("useChatSessionController", () => {
   it("blocks deferred persona sends while read-only", async () => {
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
+        personaFixture({
           displayName: "Planner",
           systemPrompt: "Plan clearly.",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     const { result, rerender } = renderHook(
@@ -2553,7 +2584,7 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("prepares the selected model provider before setting a goose model", async () => {
+  it("applies the selected provider-qualified model atomically", async () => {
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
@@ -2565,36 +2596,32 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
 
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-1",
-        "anthropic",
-        "/tmp/project",
-      );
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
 
-    await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-1",
-        "claude-sonnet-4",
-      );
-    });
-
-    expect(mockAcpPrepareSession.mock.invocationCallOrder[0]).toBeLessThan(
-      mockAcpSetModel.mock.invocationCallOrder[0],
-    );
     expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
     await waitFor(() => {
       expect(
@@ -2609,13 +2636,11 @@ describe("useChatSessionController", () => {
         },
       });
     });
-    expect(
-      useChatSessionStore.getState().getModelSelectionIntent("session-1"),
-    ).toBeUndefined();
+    expect(getModelSelectionIntent("session-1")).toBeUndefined();
   });
 
   it("archives the stranded empty session after recovering from a 'Provider not set' switch", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
 
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
@@ -2676,7 +2701,7 @@ describe("useChatSessionController", () => {
   });
 
   it("keeps the recovery navigation when archiving the stranded session fails", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
     mockAcpSessionArchive.mockRejectedValueOnce(new Error("archive failed"));
 
     const { result } = renderHook(() =>
@@ -2702,7 +2727,7 @@ describe("useChatSessionController", () => {
   });
 
   it("skips navigation and archives the fresh session when a newer pick supersedes the recreate mid-flight", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
 
     // Suspend the recovery's createSession so a second pick can land while the
     // fresh session is still being born.
@@ -2763,7 +2788,7 @@ describe("useChatSessionController", () => {
   });
 
   it("recovers a session with a failed prompt and carries the draft into the new composer", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
 
     // Chat-first on a dead provider: the optimistic user message and the
     // error bubble live only in the local store; the backend committed
@@ -2844,7 +2869,7 @@ describe("useChatSessionController", () => {
   });
 
   it("does not recover a session that has assistant history", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
 
     useChatStore.setState({
       messagesBySession: {
@@ -2881,18 +2906,13 @@ describe("useChatSessionController", () => {
   });
 
   it("recovers onto the persona's provider when a persona switch strands on a dead provider", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("Provider not set"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "anthropic",
           model: "claude-sonnet-4",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.availableModels = [
@@ -2937,9 +2957,61 @@ describe("useChatSessionController", () => {
     expect(mockToastError).not.toHaveBeenCalled();
   });
 
+  it("does not activate a persona recovery superseded by a newer pick", async () => {
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("Provider not set"));
+    const create = deferred<{
+      sessionId: string;
+      configOptionsSnapshot: undefined;
+    }>();
+    mockAcpCreateSession.mockReturnValueOnce(create.promise);
+    useAgentStore.setState({
+      personas: [
+        personaFixture({
+          provider: "anthropic",
+          model: "claude-sonnet-4",
+        }),
+      ],
+    });
+    mockPickerState.availableModels = [
+      {
+        id: "claude-sonnet-4",
+        name: "claude-sonnet-4",
+        displayName: "Claude Sonnet 4",
+        providerId: "anthropic",
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      result.current.handleProviderChange("codex-acp");
+    });
+    create.resolve({
+      sessionId: "session-recovered",
+      configOptionsSnapshot: undefined,
+    });
+
+    await waitFor(() => {
+      expect(mockAcpSessionArchive).toHaveBeenCalledWith({
+        sessionId: "session-recovered",
+      });
+    });
+    expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+      "session-recovered",
+    );
+  });
+
   it("preserves reasoning effort rehydrated during a model switch", async () => {
     patchReasoningEffort("session-1", "low");
-    mockAcpSetModel.mockImplementationOnce(async () => {
+    mockAcpPrepareSession.mockImplementationOnce(async () => {
       patchReasoningEffort("session-1", "high");
     });
 
@@ -2952,16 +3024,15 @@ describe("useChatSessionController", () => {
     });
 
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-1",
-        "claude-sonnet-4",
-      );
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
 
     await waitFor(() => {
-      expect(
-        useChatSessionStore.getState().getModelSelectionIntent("session-1"),
-      ).toBeUndefined();
+      expect(getModelSelectionIntent("session-1")).toBeUndefined();
     });
     expect(
       useChatSessionStore.getState().getSession("session-1")?.reasoningEffort,
@@ -2972,7 +3043,7 @@ describe("useChatSessionController", () => {
   });
 
   it("refreshes missing reasoning effort when the model picker opens", async () => {
-    mockAcpSetModel.mockResolvedValueOnce({
+    mockAcpPrepareSession.mockResolvedValueOnce({
       model: null,
       reasoningEffort: {
         configId: "thinking_effort",
@@ -2994,7 +3065,10 @@ describe("useChatSessionController", () => {
     });
 
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-4o", {
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
         forceConfigRefresh: true,
       });
     });
@@ -3006,17 +3080,179 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("refreshes Home reasoning effort when Goose resolves to a concrete model provider", async () => {
+  it("does not refresh a UI-owned provider-only target when the model picker opens", async () => {
+    useChatSessionStore.getState().replaceSessionExecutionTarget("session-1", {
+      harnessId: "goose",
+      modelProviderId: "anthropic",
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    await act(async () => {
+      result.current.handlePickerOpen();
+      await Promise.resolve();
+    });
+
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toEqual({
+      harnessId: "goose",
+      modelProviderId: "anthropic",
+    });
+  });
+
+  it("does not restore a stale model when a reasoning refresh finishes after a provider change", async () => {
+    const refresh = deferred<{
+      model: null;
+      reasoningEffort: {
+        configId: string;
+        currentValue: string;
+        options: Array<{ id: string; name: string }>;
+      };
+    }>();
+    mockAcpPrepareSession.mockReturnValueOnce(refresh.promise);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePickerOpen();
+    });
+    await waitFor(() => {
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+        forceConfigRefresh: true,
+      });
+    });
+
+    act(() => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget("session-1", {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+        });
+      refresh.resolve({
+        model: null,
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [{ id: "high", name: "High" }],
+        },
+      });
+    });
+
+    await act(async () => {
+      await refresh.promise;
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+      },
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget
+        ?.modelId,
+    ).toBeUndefined();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.reasoningEffort,
+    ).toBeUndefined();
+  });
+
+  it("does not enqueue a reasoning refresh after its selection changes while resolving cwd", async () => {
+    const cwd = deferred<string>();
+    mockResolveSessionCwd.mockReturnValueOnce(cwd.promise);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePickerOpen();
+    });
+    await waitFor(() => {
+      expect(mockResolveSessionCwd).toHaveBeenCalledOnce();
+    });
+
+    await act(async () => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget("session-1", {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+          modelId: "claude-sonnet-4",
+          modelName: "Claude Sonnet 4",
+        });
+      cwd.resolve("/tmp/project");
+      await cwd.promise;
+    });
+
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget("session-1", {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.6",
+          modelName: "GPT-5.6",
+        });
+      useChatSessionStore.getState().setActiveWorkspace("session-1", {
+        path: "/tmp/final",
+        branch: null,
+      });
+    });
+
+    await waitFor(() => {
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "openai",
+        modelId: "gpt-5.6",
+      });
+    });
+  });
+
+  it("does not enqueue a reasoning refresh when metadata arrives while resolving cwd", async () => {
+    const cwd = deferred<string>();
+    mockResolveSessionCwd.mockReturnValueOnce(cwd.promise);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePickerOpen();
+    });
+    await waitFor(() => {
+      expect(mockResolveSessionCwd).toHaveBeenCalledOnce();
+    });
+
+    await act(async () => {
+      patchReasoningEffort("session-1", "high");
+      cwd.resolve("/tmp/project");
+      await cwd.promise;
+    });
+
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+  });
+
+  it("does not infer a model to refresh reasoning for an unresolved Home target", async () => {
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "home-session",
           title: "Home",
-          providerId: "goose",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+          executionTarget: { harnessId: "goose" },
+        }),
         ...state.sessions,
       ],
     }));
@@ -3029,19 +3265,6 @@ describe("useChatSessionController", () => {
         recommended: true,
       },
     ];
-    mockAcpSetModel.mockResolvedValueOnce({
-      model: null,
-      reasoningEffort: {
-        configId: "thinking_effort",
-        currentValue: "medium",
-        options: [
-          { id: "off", name: "Off" },
-          { id: "medium", name: "Medium" },
-          { id: "high", name: "High" },
-        ],
-      },
-    });
-
     const { result } = renderHook(() =>
       useChatSessionController({
         sessionId: "home-session",
@@ -3049,26 +3272,16 @@ describe("useChatSessionController", () => {
       }),
     );
 
-    act(() => {
+    await act(async () => {
       result.current.handlePickerOpen();
+      await Promise.resolve();
     });
 
-    await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "home-session",
-        "claude-sonnet-4",
-        { forceConfigRefresh: true },
-      );
-    });
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
     expect(
       useChatSessionStore.getState().getSession("home-session"),
     ).toMatchObject({
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
-      reasoningEffort: {
-        configId: "thinking_effort",
-        currentValue: "medium",
-      },
+      executionTarget: { harnessId: "goose" },
     });
   });
 
@@ -3078,8 +3291,6 @@ describe("useChatSessionController", () => {
     mockAcpPrepareSession
       .mockReturnValueOnce(firstPrepare.promise)
       .mockResolvedValue(undefined);
-    mockAcpSetModel.mockReset();
-    mockAcpSetModel.mockResolvedValue(undefined);
 
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
@@ -3093,11 +3304,11 @@ describe("useChatSessionController", () => {
       expect(result.current.currentModelId).toBe("claude-sonnet-4");
     });
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-1",
-        "anthropic",
-        "/tmp/project",
-      );
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
 
     act(() => {
@@ -3111,35 +3322,29 @@ describe("useChatSessionController", () => {
     firstPrepare.resolve();
 
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledTimes(2);
+      expect(mockAcpPrepareSession).toHaveBeenCalledTimes(1);
     });
-    await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledTimes(2);
-    });
-    expect(mockAcpSetModel).toHaveBeenNthCalledWith(
-      2,
-      "session-1",
-      "claude-sonnet-4",
-    );
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
   });
 
   it("uses the selected provider and model during send-time preparation", async () => {
-    useChatSessionStore.getState().patchSession("session-1", {
-      providerId: "anthropic",
+    useChatSessionStore.getState().replaceSessionExecutionTarget("session-1", {
+      harnessId: "goose",
+      modelProviderId: "anthropic",
       modelId: "claude-sonnet-4",
       modelName: "Claude Sonnet 4",
     });
     mockAcpPrepareSession.mockReset();
-    mockAcpSetModel.mockReset();
     mockAcpPrepareSession.mockResolvedValue(undefined);
-    mockAcpSetModel.mockResolvedValue(undefined);
 
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
@@ -3149,35 +3354,121 @@ describe("useChatSessionController", () => {
       await result.current.handleSend("use the selected model");
     });
 
-    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-      "session-1",
-      "anthropic",
-      "/tmp/project",
+    await waitFor(() => {
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
+    });
+  });
+
+  it("does not prepare or dispatch an unresolved existing session", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Existing chat",
+          workingDir: "/tmp/project",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    const preparationResults: Array<boolean | undefined> = [];
+    const promptTransport = vi.fn();
+    mockUseChatSendMessage.mockImplementation(
+      async (options?: {
+        ensurePrepared?: () => Promise<boolean | undefined>;
+      }) => {
+        const prepared = await options?.ensurePrepared?.();
+        preparationResults.push(prepared);
+        if (prepared !== false) promptTransport();
+      },
     );
-    expect(mockAcpSetModel).toHaveBeenCalledWith(
-      "session-1",
-      "claude-sonnet-4",
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
     );
+
+    act(() => {
+      result.current.handleSend("keep the backend model");
+    });
+
+    await waitFor(() => {
+      expect(preparationResults).toEqual([false]);
+    });
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+    expect(promptTransport).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget("session-1", {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.6",
+          modelName: "GPT-5.6",
+        });
+      result.current.handleSend("now use the explicit model");
+    });
+
+    await waitFor(() => {
+      expect(preparationResults).toEqual([false, true]);
+      expect(promptTransport).toHaveBeenCalledOnce();
+    });
+    expectSessionPreparation({
+      sessionId: "session-1",
+      modelProviderId: "openai",
+      modelId: "gpt-5.6",
+    });
+  });
+
+  it("does not prepare an unresolved session when its workspace changes", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Existing chat",
+          workingDir: "/tmp/project",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await act(async () => {
+      useChatSessionStore.getState().setActiveWorkspace("session-1", {
+        path: "/tmp/other",
+        branch: null,
+      });
+    });
+
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
   it("keeps a manually selected Goose model when sending with the current persona", async () => {
-    useChatSessionStore.getState().patchSession("session-1", {
-      providerId: "databricks_v2",
+    useChatSessionStore.getState().replaceSessionExecutionTarget("session-1", {
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
       modelId: "goose-gpt-5-6-sol",
       modelName: "GPT-5.6 Sol",
+    });
+    useChatSessionStore.getState().patchSession("session-1", {
       personaId: "persona-1",
     });
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
+        personaFixture({
           displayName: "Trace",
           systemPrompt: "Debug carefully.",
           provider: "goose",
           model: "goose-claude-fable-5",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.modelsByAgent.set("goose", [
@@ -3199,9 +3490,7 @@ describe("useChatSessionController", () => {
       },
     ]);
     mockAcpPrepareSession.mockReset();
-    mockAcpSetModel.mockReset();
     mockAcpPrepareSession.mockResolvedValue(undefined);
-    mockAcpSetModel.mockResolvedValue(undefined);
     mockUseChatSendMessage.mockImplementationOnce(
       async (options?: {
         ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
@@ -3218,23 +3507,13 @@ describe("useChatSessionController", () => {
       await result.current.handleSend("use the selected model");
     });
 
-    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-      "session-1",
-      "databricks_v2",
-      "/tmp/project",
-    );
-    expect(mockAcpSetModel).toHaveBeenCalledWith(
-      "session-1",
-      "goose-gpt-5-6-sol",
-    );
-    expect(mockAcpSetModel).not.toHaveBeenCalledWith(
-      "session-1",
-      "goose-gpt-5-5",
-    );
-    expect(mockAcpSetModel).not.toHaveBeenCalledWith(
-      "session-1",
-      "goose-claude-fable-5",
-    );
+    await waitFor(() => {
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+      });
+    });
   });
 
   it("does not let send-time preparation restore a stale model after a newer selection", async () => {
@@ -3261,17 +3540,21 @@ describe("useChatSessionController", () => {
     });
 
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-1",
-        "claude-sonnet-4",
-      );
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
 
     await act(async () => {
@@ -3280,11 +3563,105 @@ describe("useChatSessionController", () => {
       await Promise.resolve();
     });
 
-    expect(mockAcpSetModel).toHaveBeenCalledTimes(1);
+    expect(mockAcpPrepareSession).toHaveBeenCalledTimes(1);
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "anthropic",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
+    });
+  });
+
+  it("rejects a captured send target when the UI changes before cwd resolves", async () => {
+    const capturedTarget = {
+      harnessId: "goose" as const,
+      modelProviderId: "openai",
+      modelId: "gpt-4o",
+      modelName: "GPT-4o",
+    };
+    const capturedCwd = deferred<string>();
+    const preparationResults: Array<boolean | undefined> = [];
+    const promptTransport = vi.fn();
+    mockResolveSessionCwd.mockReset();
+    mockResolveSessionCwd
+      .mockReturnValueOnce(capturedCwd.promise)
+      .mockResolvedValue("/tmp/project");
+    mockUseChatSendMessage.mockImplementationOnce(
+      async (
+        options?: {
+          ensurePrepared?: (
+            personaId?: string,
+            sessionSelection?: ChatSendOptions["sessionSelection"],
+          ) => Promise<boolean | undefined>;
+        },
+        _text?: string,
+        _persona?: unknown,
+        _attachments?: unknown,
+        sendOptions?: ChatSendOptions,
+      ) => {
+        const prepared = await options?.ensurePrepared?.(
+          undefined,
+          sendOptions?.sessionSelection,
+        );
+        preparationResults.push(prepared);
+        if (prepared !== false) promptTransport();
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleSend(
+        "use the captured model",
+        undefined,
+        undefined,
+        {
+          sessionSelection: capturedTarget,
+        },
+      );
+    });
+    await waitFor(() => {
+      expect(mockResolveSessionCwd).toHaveBeenCalledOnce();
+    });
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+    await waitFor(() => {
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
+    });
+
+    await act(async () => {
+      capturedCwd.resolve("/tmp/project");
+      await capturedCwd.promise;
+    });
+
+    await waitFor(() => {
+      expect(preparationResults).toEqual([false]);
+    });
+    expect(promptTransport).not.toHaveBeenCalled();
+    expect(mockAcpPrepareSession).toHaveBeenCalledTimes(1);
+    expect(mockAcpPrepareSession).not.toHaveBeenCalledWith(
+      "session-1",
+      "openai",
+      expect.anything(),
+      expect.objectContaining({ modelId: "gpt-4o" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toEqual({
+      harnessId: "goose",
+      modelProviderId: "anthropic",
       modelId: "claude-sonnet-4",
       modelName: "Claude Sonnet 4",
     });
@@ -3301,7 +3678,7 @@ describe("useChatSessionController", () => {
         },
       }),
     );
-    mockAcpSetModel.mockRejectedValueOnce(new Error("set model failed"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("set model failed"));
 
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
@@ -3315,9 +3692,12 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
-        providerId: "openai",
-        modelId: "gpt-4o",
-        modelName: "GPT-4o",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+        },
       });
     });
 
@@ -3335,16 +3715,13 @@ describe("useChatSessionController", () => {
     expect(mockToastError).toHaveBeenCalledWith(
       "Could not switch to Claude Sonnet 4. This chat is still using GPT-4o.",
     );
-    expect(
-      useChatSessionStore.getState().getModelSelectionIntent("session-1"),
-    ).toBeUndefined();
+    expect(getModelSelectionIntent("session-1")).toBeUndefined();
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-1",
-        "openai",
-        "/tmp/project",
-      );
-      expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-4o");
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "openai",
+        modelId: "gpt-4o",
+      });
     });
   });
 
@@ -3353,10 +3730,6 @@ describe("useChatSessionController", () => {
     mockAcpPrepareSession.mockReset();
     mockAcpPrepareSession
       .mockReturnValueOnce(firstPrepare.promise)
-      .mockResolvedValue(undefined);
-    mockAcpSetModel.mockReset();
-    mockAcpSetModel
-      .mockRejectedValueOnce(new Error("first set model failed"))
       .mockResolvedValue(undefined);
 
     const { result } = renderHook(() =>
@@ -3371,9 +3744,12 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
-        providerId: "anthropic",
-        modelId: "claude-sonnet-4",
-        modelName: "Claude Sonnet 4",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+          modelId: "claude-sonnet-4",
+          modelName: "Claude Sonnet 4",
+        },
       });
     });
 
@@ -3385,16 +3761,23 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
-        providerId: "openai",
-        modelId: "gpt-5.4",
-        modelName: "GPT-5.4",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+        },
       });
     });
 
-    firstPrepare.resolve();
+    firstPrepare.reject(new Error("first prepare failed"));
 
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-5.4");
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "openai",
+        modelId: "gpt-5.4",
+      });
     });
     await waitFor(() => {
       expect(
@@ -3412,11 +3795,90 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "openai",
-      modelId: "gpt-5.4",
-      modelName: "GPT-5.4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-5.4",
+        modelName: "GPT-5.4",
+      },
     });
     expect(mockToastError).not.toHaveBeenCalled();
+  });
+
+  it("adopts a managed model repair after foreground selection", async () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "databricks_v2",
+        displayName: "Databricks",
+        category: "model",
+        description: "Databricks",
+        setupMethod: "single_api_key",
+        group: "default",
+      },
+    ]);
+    const managedRuntimeConfig = {
+      schemaVersion: 1 as const,
+      goose: {
+        defaultModelProviderId: "databricks_v2",
+        defaultModelId: "goose-gpt-5-5",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks",
+            models: [
+              { id: "goose-gpt-5-5", name: "GPT-5.5" },
+              { id: "legacy-v1-model", name: "Legacy" },
+            ],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      result: {
+        status: "ready",
+        source: "fakeEndpoint",
+        config: managedRuntimeConfig,
+      },
+      config: managedRuntimeConfig,
+    });
+    mockSupportedModelsList.mockResolvedValue({ models: ["goose-gpt-5-5"] });
+    mockPickerState.availableModels = [
+      {
+        id: "legacy-v1-model",
+        name: "Legacy",
+        providerId: "databricks_v2",
+      },
+    ];
+    modelFixtures["legacy-v1-model"] = {
+      name: "legacy-v1-model",
+      displayName: "Legacy",
+      providerId: "databricks_v2",
+    };
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("legacy-v1-model");
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+      ).toEqual({
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+        modelName: "goose-gpt-5-5",
+      });
+    });
+    expectSessionPreparation({
+      sessionId: "session-1",
+      modelProviderId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
   });
 
   it("shows the stored explicit model for new chats", async () => {
@@ -3442,28 +3904,26 @@ describe("useChatSessionController", () => {
     expect(result.current.currentModelName).toBe("Claude Sonnet 4");
   });
 
-  it("applies a selected persona's resolved provider and model to an existing chat", async () => {
+  it("applies a persona's provider-qualified model without model inventory", async () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "databricks_v2",
+        displayName: "Databricks",
+        category: "model",
+        description: "Databricks",
+        setupMethod: "single_api_key",
+        group: "default",
+      },
+    ]);
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "goose",
+          modelProviderId: "databricks_v2",
           model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
-    mockPickerState.availableModels = [
-      {
-        id: "goose-claude-opus-4-8",
-        name: "goose-claude-opus-4-8",
-        providerId: "databricks_v2",
-      },
-    ];
-
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
@@ -3480,21 +3940,19 @@ describe("useChatSessionController", () => {
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
       personaId: "persona-1",
-      providerId: "goose",
-      modelId: "goose-claude-opus-4-8",
-      modelName: "goose-claude-opus-4-8",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+        modelName: "goose-claude-opus-4-8",
+      },
     });
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-1",
-        "goose",
-        "/tmp/project",
-        { modelId: "goose-claude-opus-4-8" },
-      );
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-1",
-        "goose-claude-opus-4-8",
-      );
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+      });
     });
   });
 
@@ -3502,15 +3960,10 @@ describe("useChatSessionController", () => {
     useAgentStore.setState({
       selectedProvider: "codex-acp",
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "goose",
           model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.selectedAgentId = "codex-acp";
@@ -3545,45 +3998,38 @@ describe("useChatSessionController", () => {
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
       personaId: "persona-1",
-      providerId: "goose",
-      modelId: "goose-claude-opus-4-8",
-      modelName: "goose-claude-opus-4-8",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+        modelName: "goose-claude-opus-4-8",
+      },
     });
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-1",
-        "goose-claude-opus-4-8",
-      );
+      expectSessionPreparation({
+        sessionId: "session-1",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+      });
     });
-    expect(mockAcpSetModel).not.toHaveBeenCalledWith("session-1", "gpt-5.4");
   });
 
   it("keeps a selected persona when a later persona refresh omits it", async () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           personaId: "persona-1",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     useAgentStore.setState({
-      personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
-          isBuiltin: false,
-          writable: true,
-        },
-      ],
+      personas: [personaFixture()],
     });
 
     const { result } = renderHook(() =>
@@ -3594,13 +4040,11 @@ describe("useChatSessionController", () => {
 
     await act(async () => {
       useAgentStore.getState().setPersonas([
-        {
+        personaFixture({
           id: "persona-2",
           displayName: "Another Agent",
           systemPrompt: "Help elsewhere.",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ]);
       await Promise.resolve();
     });
@@ -3632,17 +4076,15 @@ describe("useChatSessionController", () => {
   it("sends the selected persona id even when the persona snapshot is missing", async () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
           personaId: "persona-1",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     useAgentStore.setState({ personas: [] });
@@ -3666,31 +4108,24 @@ describe("useChatSessionController", () => {
   it("keeps the current configured persona model through send-time preparation", async () => {
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          modelId: "goose-claude-opus-4-8",
-          modelName: "goose-claude-opus-4-8",
+        sessionFixture({
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "goose-claude-opus-4-8",
+            modelName: "goose-claude-opus-4-8",
+          },
           personaId: "persona-1",
           workingDir: "/tmp/stored-session",
-          createdAt: "2026-04-20T00:00:00.000Z",
-          updatedAt: "2026-04-20T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
     });
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "goose",
           model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.modelsByAgent.set("goose", [
@@ -3729,40 +4164,30 @@ describe("useChatSessionController", () => {
         "/tmp/stored-session",
       );
     });
-    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-      "session-1",
-      "goose",
-      "/tmp/stored-session",
-      { modelId: "goose-claude-opus-4-8" },
-    );
-    expect(mockAcpSetModel).toHaveBeenCalledWith(
-      "session-1",
-      "goose-claude-opus-4-8",
-    );
-    expect(mockAcpSetModel).not.toHaveBeenCalledWith(
-      "session-1",
-      "goose-gpt-5-5",
-    );
+    expectSessionPreparation({
+      sessionId: "session-1",
+      modelProviderId: "databricks_v2",
+      modelId: "goose-claude-opus-4-8",
+      workingDir: "/tmp/stored-session",
+    });
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "goose",
-      modelId: "goose-claude-opus-4-8",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+      },
     });
   });
 
-  it("falls back when a selected persona's saved model is no longer available", async () => {
+  it("does not replace an unavailable persona model with a recommended model", async () => {
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "goose",
           model: "goose-claude-fable-5",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.availableModels = [
@@ -3770,7 +4195,7 @@ describe("useChatSessionController", () => {
         id: "goose-claude-opus-4-8",
         name: "goose-claude-opus-4-8",
         displayName: "Claude Opus 4.8",
-        providerId: "goose",
+        providerId: "databricks_v2",
         recommended: true,
       },
     ];
@@ -3783,30 +4208,20 @@ describe("useChatSessionController", () => {
       result.current.handlePersonaChange("persona-1");
     });
 
-    await waitFor(() => {
-      expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
-    });
-    expect(result.current.currentModelName).toBe("Claude Opus 4.8");
-    await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-1",
-        "goose-claude-opus-4-8",
-      );
-    });
+    expect(result.current.currentModelId).toBeNull();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toBeUndefined();
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
   it("replaces a user-selected model highlight when selecting a persona with a configured model", async () => {
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "goose",
           model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
     mockPickerState.availableModels = [
@@ -3818,7 +4233,7 @@ describe("useChatSessionController", () => {
       {
         id: "goose-claude-opus-4-8",
         name: "goose-claude-opus-4-8",
-        providerId: "goose",
+        providerId: "databricks_v2",
       },
     ];
 
@@ -3841,34 +4256,37 @@ describe("useChatSessionController", () => {
     await waitFor(() => {
       expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
     });
-    expect(result.current.currentModelProviderId).toBe("goose");
+    expect(result.current.currentModelProviderId).toBe("databricks_v2");
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
       personaId: "persona-1",
-      providerId: "goose",
-      modelId: "goose-claude-opus-4-8",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+      },
     });
   });
 
   it("removes the active persona without changing the selected model", async () => {
-    useChatSessionStore.getState().patchSession("session-1", {
-      personaId: "persona-1",
-      providerId: "databricks_v2",
+    useChatSessionStore.getState().replaceSessionExecutionTarget("session-1", {
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
       modelId: "goose-gpt-5-6-sol",
       modelName: "GPT-5.6 Sol",
     });
+    useChatSessionStore.getState().patchSession("session-1", {
+      personaId: "persona-1",
+    });
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
+        personaFixture({
           displayName: "Trace",
           systemPrompt: "Debug carefully.",
           provider: "goose",
           model: "goose-claude-fable-5",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
 
@@ -3883,27 +4301,25 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-6-sol",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+      },
     });
     expect(
       useChatSessionStore.getState().getSession("session-1")?.personaId,
     ).toBeUndefined();
-    expect(mockAcpSetModel).not.toHaveBeenCalled();
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
-  it("does not apply a persona model when the persona provider cannot resolve", () => {
+  it("clears the current target when a persona target cannot resolve", () => {
     useAgentStore.setState({
       personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
+        personaFixture({
           provider: "missing-provider",
           model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
+        }),
       ],
     });
 
@@ -3915,16 +4331,65 @@ describe("useChatSessionController", () => {
       result.current.handlePersonaChange("persona-1");
     });
 
-    expect(result.current.currentModelId).toBe("gpt-4o");
+    expect(result.current.currentModelId).toBeNull();
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
       personaId: "persona-1",
-      providerId: "openai",
-      modelId: "gpt-4o",
-      modelName: "GPT-4o",
+      executionTargetSource: "ui",
     });
-    expect(mockAcpSetModel).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toBeUndefined();
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unresolved Home persona target clear when the session is created", async () => {
+    useAgentStore.setState({
+      personas: [
+        personaFixture({
+          provider: "missing-provider",
+          model: "goose-claude-opus-4-8",
+        }),
+      ],
+    });
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useChatSessionController({ sessionId, isHomeSession: true }),
+      { initialProps: { sessionId: null as string | null } },
+    );
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        sessionFixture({
+          id: "home-unresolved-persona",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
+        }),
+        ...state.sessions,
+      ],
+    }));
+
+    rerender({ sessionId: "home-unresolved-persona" });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("home-unresolved-persona"),
+      ).toMatchObject({
+        personaId: "persona-1",
+        executionTargetSource: "ui",
+      });
+    });
+    expect(
+      useChatSessionStore.getState().getSession("home-unresolved-persona")
+        ?.executionTarget,
+    ).toBeUndefined();
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
   it("falls back to the configured goose default model when no explicit model is stored", async () => {
@@ -3966,14 +4431,15 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-2",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -3981,42 +4447,40 @@ describe("useChatSessionController", () => {
     rerender({ sessionId: "session-2" });
 
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-2",
-        "anthropic",
-        "/tmp/project",
-      );
-    });
-
-    await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-2",
-        "claude-sonnet-4",
-      );
+      expectSessionPreparation({
+        sessionId: "session-2",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
 
     expect(
       useChatSessionStore.getState().getSession("session-2"),
     ).toMatchObject({
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
   });
 
   it("refreshes reasoning effort after a Home model change response omits it", async () => {
-    mockAcpSetModel.mockResolvedValueOnce(undefined).mockResolvedValueOnce({
-      model: null,
-      reasoningEffort: {
-        configId: "thinking_effort",
-        currentValue: "high",
-        options: [
-          { id: "off", name: "Off" },
-          { id: "low", name: "Low" },
-          { id: "high", name: "High" },
-        ],
-      },
-    });
+    mockAcpPrepareSession
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        model: null,
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [
+            { id: "off", name: "Off" },
+            { id: "low", name: "Low" },
+            { id: "high", name: "High" },
+          ],
+        },
+      });
 
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
@@ -4032,14 +4496,13 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "home-session-model-change",
           title: "Home",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4047,11 +4510,12 @@ describe("useChatSessionController", () => {
     rerender({ sessionId: "home-session-model-change" });
 
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "home-session-model-change",
-        "claude-sonnet-4",
-        { forceConfigRefresh: true },
-      );
+      expectSessionPreparation({
+        sessionId: "home-session-model-change",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        forceConfigRefresh: true,
+      });
     });
     expect(
       useChatSessionStore.getState().getSession("home-session-model-change")
@@ -4111,14 +4575,15 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-home-attachments",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4155,14 +4620,15 @@ describe("useChatSessionController", () => {
     });
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-restored-home",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4210,14 +4676,15 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-occupied",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4264,14 +4731,15 @@ describe("useChatSessionController", () => {
       act(() => {
         useChatSessionStore.setState((state) => ({
           sessions: [
-            {
+            sessionFixture({
               id: "session-from-home",
-              title: "Chat",
-              providerId: "openai",
+              executionTarget: {
+                harnessId: "goose",
+                modelProviderId: "openai",
+              },
               createdAt: "2026-04-21T00:00:00.000Z",
               updatedAt: "2026-04-21T00:00:00.000Z",
-              messageCount: 0,
-            },
+            }),
             ...state.sessions,
           ],
         }));
@@ -4328,14 +4796,15 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-superseded-home",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4343,30 +4812,30 @@ describe("useChatSessionController", () => {
     rerender({ sessionId: "session-superseded-home" });
 
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-superseded-home",
-        "anthropic",
-        "/tmp/project",
-      );
+      expectSessionPreparation({
+        sessionId: "session-superseded-home",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
 
-    const latestConfig = applyLatestSessionConfig({
+    const latestConfig = transitionSessionTarget({
       sessionId: "session-superseded-home",
-      providerId: "anthropic",
+      target: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
       workingDir: "/tmp/other-project",
-      modelId: "claude-sonnet-4",
     });
 
     firstPrepare.resolve();
 
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-superseded-home",
-        "anthropic",
-        "/tmp/other-project",
-      );
+      expect(mockAcpPrepareSession).toHaveBeenCalledTimes(1);
     });
-    await expect(latestConfig).resolves.toEqual({ applied: true });
+    await expect(latestConfig).resolves.toMatchObject({ applied: false });
 
     await waitFor(() => {
       expect(
@@ -4387,7 +4856,7 @@ describe("useChatSessionController", () => {
   });
 
   it("rolls back and shows an error when ACP rejects a pending Home model", async () => {
-    mockAcpSetModel.mockRejectedValueOnce(new Error("set model failed"));
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("set model failed"));
 
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
@@ -4407,14 +4876,15 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-3",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4422,25 +4892,31 @@ describe("useChatSessionController", () => {
     rerender({ sessionId: "session-3" });
 
     await waitFor(() => {
-      expect(mockAcpSetModel).toHaveBeenCalledWith(
-        "session-3",
-        "claude-sonnet-4",
-      );
+      expectSessionPreparation({
+        sessionId: "session-3",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
     });
 
     await waitFor(() => {
       expect(
         useChatSessionStore.getState().getSession("session-3"),
       ).toMatchObject({
-        providerId: "openai",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+        },
       });
     });
 
     expect(
       useChatSessionStore.getState().getSession("session-3"),
     ).not.toMatchObject({
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+      executionTarget: {
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
     expect(
       window.localStorage.getItem("goose:preferredModelsByAgent"),
@@ -4448,9 +4924,7 @@ describe("useChatSessionController", () => {
     expect(mockToastError).toHaveBeenCalledWith(
       "Could not switch to Claude Sonnet 4.",
     );
-    expect(
-      useChatSessionStore.getState().getModelSelectionIntent("session-3"),
-    ).toBeUndefined();
+    expect(getModelSelectionIntent("session-3")).toBeUndefined();
   });
 
   it("catches provider-only Home sync failures after consuming pending state", async () => {
@@ -4473,14 +4947,15 @@ describe("useChatSessionController", () => {
 
     useChatSessionStore.setState((state) => ({
       sessions: [
-        {
+        sessionFixture({
           id: "session-4",
-          title: "Chat",
-          providerId: "openai",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
           createdAt: "2026-04-21T00:00:00.000Z",
           updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
         ...state.sessions,
       ],
     }));
@@ -4488,11 +4963,10 @@ describe("useChatSessionController", () => {
     rerender({ sessionId: "session-4" });
 
     await waitFor(() => {
-      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-        "session-4",
-        "anthropic",
-        "/tmp/project",
-      );
+      expectSessionPreparation({
+        sessionId: "session-4",
+        modelProviderId: "anthropic",
+      });
     });
     await waitFor(() => {
       expect(consoleError).toHaveBeenCalledWith(
@@ -4503,12 +4977,77 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-4"),
     ).toMatchObject({
-      providerId: "openai",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+      },
     });
-    expect(
-      useChatSessionStore.getState().getModelSelectionIntent("session-4"),
-    ).toBeUndefined();
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Could not switch to anthropic. This chat is still using openai.",
+    );
+    expect(getModelSelectionIntent("session-4")).toBeUndefined();
 
+    consoleError.mockRestore();
+  });
+
+  it("does not let a failed Home provider sync roll back a newer model pick", async () => {
+    const firstPrepare = deferred<void>();
+    mockAcpPrepareSession.mockReturnValueOnce(firstPrepare.promise);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useChatSessionController({ sessionId, isHomeSession: true }),
+      { initialProps: { sessionId: null as string | null } },
+    );
+
+    act(() => {
+      result.current.handleProviderChange("anthropic");
+    });
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        sessionFixture({
+          id: "session-home-provider-race",
+          title: "Home provider race",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+        ...state.sessions,
+      ],
+    }));
+    rerender({ sessionId: "session-home-provider-race" });
+
+    await waitFor(() => {
+      expectSessionPreparation({
+        sessionId: "session-home-provider-race",
+        modelProviderId: "anthropic",
+      });
+    });
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+    firstPrepare.reject(new Error("old Home prepare failed"));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-home-provider-race")
+          ?.executionTarget,
+      ).toMatchObject({
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+      });
+    });
+    expect(consoleError).not.toHaveBeenCalledWith(
+      "Failed to sync pending Home state:",
+      expect.anything(),
+    );
     consoleError.mockRestore();
   });
 });

@@ -2397,12 +2397,48 @@ describe("ChatInput", () => {
     expect(onUpdateQueue).toHaveBeenCalledWith("tail", {
       text: "updated second",
       personaId: undefined,
-      providerId: "goose",
-      modelId: undefined,
+      executionTarget: { harnessId: "goose" },
       attachments: undefined,
       sendOptions: undefined,
     });
     expect(onCancelQueueEdit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a qualified provider-only target when updating a queued message", async () => {
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        selectedProvider="goose"
+        providers={[{ id: "goose", label: "Goose" }]}
+        currentExecutionTarget={{
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+        }}
+        queuedMessages={[{ recordId: "queued", payload: { text: "continue" } }]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalledWith("queued", {
+      text: "continue",
+      personaId: undefined,
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+      attachments: undefined,
+      sendOptions: undefined,
+    });
   });
 
   it("refreshes display text when updating a queued message in place", async () => {

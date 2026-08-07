@@ -354,7 +354,6 @@ describe("ContextPanel", () => {
       hasMoreSessions: false,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
     mockRefetch.mockResolvedValue(undefined);
     mockRefetchFiles.mockResolvedValue(undefined);
@@ -2687,6 +2686,7 @@ describe("ContextPanel", () => {
           createdAt: "2026-04-01T00:00:00.000Z",
           updatedAt: "2026-04-01T00:00:00.000Z",
           messageCount: 0,
+          executionTarget: { harnessId: "goose" },
         },
       ],
     });

@@ -1,20 +1,21 @@
 import { toast } from "sonner";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import {
+  clearSessionTargetSelection,
+  getSessionTargetSelection,
+  recordSessionTargetSelection,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import { i18n } from "@/shared/i18n";
+import type { SessionExecutionTarget } from "@/features/chat/lib/sessionExecutionTarget";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 
 export type PreferredModelSelection = {
   id: string;
   name: string;
-  providerId?: string;
+  modelProviderId: string;
   source: "default" | "explicit";
 };
-
-export interface PreviousModelSelection {
-  providerId?: string;
-  modelId?: string;
-  modelName?: string;
-}
 
 export interface ModelSelectionApplyOptions {
   nextProject?: ProjectInfo | null;
@@ -23,14 +24,14 @@ export interface ModelSelectionApplyOptions {
 }
 
 export type ApplySessionModelSelection = (
-  providerId: string,
+  modelProviderId: string,
   modelSelection: PreferredModelSelection,
   requestId: string,
   options?: ModelSelectionApplyOptions,
 ) => Promise<boolean>;
 
 type PrepareSelectedProvider = (
-  providerId: string,
+  wireProviderId: string,
   options?: ModelSelectionApplyOptions,
 ) => Promise<boolean>;
 
@@ -38,27 +39,52 @@ export function createModelSelectionRequestId(): string {
   return crypto.randomUUID();
 }
 
+export interface ModelSelectionIntent {
+  requestId: string;
+  target: SessionExecutionTarget;
+  previousTarget?: SessionExecutionTarget;
+  preferenceAgentId?: string;
+}
+
+export function beginModelSelectionIntent(
+  sessionId: string,
+  intent: ModelSelectionIntent,
+): void {
+  recordSessionTargetSelection({
+    sessionId,
+    operationId: intent.requestId,
+    target: intent.target,
+    previousTarget: intent.previousTarget,
+    preferenceAgentId: intent.preferenceAgentId,
+  });
+}
+
+export function getModelSelectionIntent(
+  sessionId: string,
+): ModelSelectionIntent | undefined {
+  const selection = getSessionTargetSelection(sessionId);
+  return selection
+    ? {
+        requestId: selection.operationId,
+        target: selection.target,
+        previousTarget: selection.previousTarget,
+        preferenceAgentId: selection.preferenceAgentId,
+      }
+    : undefined;
+}
+
 export function isCurrentModelSelectionIntent(
   sessionId: string,
   requestId: string,
 ): boolean {
-  return (
-    useChatSessionStore.getState().getModelSelectionIntent(sessionId)
-      ?.requestId === requestId
-  );
+  return getSessionTargetSelection(sessionId)?.operationId === requestId;
 }
 
 export function clearCurrentModelSelectionIntent(
   sessionId: string,
-  requestId: string,
+  requestId?: string,
 ): boolean {
-  if (!isCurrentModelSelectionIntent(sessionId, requestId)) {
-    return false;
-  }
-  useChatSessionStore
-    .getState()
-    .clearModelSelectionIntent(sessionId, requestId);
-  return true;
+  return clearSessionTargetSelection(sessionId, requestId);
 }
 
 export function showModelSwitchErrorToast({
@@ -83,7 +109,7 @@ export function showModelSwitchErrorToast({
 export function rollbackToPreviousModel({
   sessionId,
   failedModelName,
-  previous,
+  previousTarget,
   applySessionModelSelection,
   prepareSelectedProvider,
   setGlobalSelectedProvider,
@@ -92,22 +118,25 @@ export function rollbackToPreviousModel({
 }: {
   sessionId: string;
   failedModelName: string;
-  previous: PreviousModelSelection;
+  previousTarget?: SessionExecutionTarget;
   applySessionModelSelection: ApplySessionModelSelection;
   prepareSelectedProvider: PrepareSelectedProvider;
   setGlobalSelectedProvider?: (providerId: string) => void;
   options?: ModelSelectionApplyOptions;
   restoreErrorMessage: string;
 }): void {
-  const { providerId, modelId, modelName } = previous;
-  useChatSessionStore.getState().patchSession(sessionId, {
-    providerId,
+  const sessionStore = useChatSessionStore.getState();
+  const currentTarget = sessionStore.getSession(sessionId)?.executionTarget;
+  const {
+    providerId: wireProviderId,
     modelId,
     modelName,
-  });
+  } = gooseServeSelectionFromExecutionTarget(previousTarget);
 
-  if (providerId) {
-    setGlobalSelectedProvider?.(providerId);
+  if (previousTarget) {
+    setGlobalSelectedProvider?.(previousTarget.harnessId);
+  } else {
+    sessionStore.replaceSessionExecutionTarget(sessionId, undefined);
   }
 
   showModelSwitchErrorToast({
@@ -115,27 +144,30 @@ export function rollbackToPreviousModel({
     fallbackModelName: modelName ?? null,
   });
 
-  if (providerId && modelId) {
+  if (previousTarget && wireProviderId) {
     const rollbackRequestId = createModelSelectionRequestId();
-    const rollbackSelection: PreferredModelSelection = {
-      id: modelId,
-      name: modelName ?? modelId,
-      providerId,
-      source: "explicit",
-    };
-    useChatSessionStore.getState().beginModelSelectionIntent(sessionId, {
+    beginModelSelectionIntent(sessionId, {
       requestId: rollbackRequestId,
-      kind: "model",
-      providerId,
-      modelId,
-      modelName: modelName ?? modelId,
+      target: previousTarget,
+      previousTarget: currentTarget,
     });
-    void applySessionModelSelection(
-      providerId,
-      rollbackSelection,
-      rollbackRequestId,
-      options,
-    )
+    const rollback = modelId
+      ? applySessionModelSelection(
+          wireProviderId,
+          {
+            id: modelId,
+            name: modelName ?? modelId,
+            modelProviderId: wireProviderId,
+            source: "explicit",
+          },
+          rollbackRequestId,
+          options,
+        )
+      : prepareSelectedProvider(wireProviderId, {
+          ...options,
+          requestId: rollbackRequestId,
+        });
+    void rollback
       .catch((rollbackError) => {
         console.error(restoreErrorMessage, rollbackError);
       })
@@ -143,11 +175,5 @@ export function rollbackToPreviousModel({
         clearCurrentModelSelectionIntent(sessionId, rollbackRequestId);
       });
     return;
-  }
-
-  if (providerId) {
-    void prepareSelectedProvider(providerId, options).catch((rollbackError) => {
-      console.error(restoreErrorMessage, rollbackError);
-    });
   }
 }

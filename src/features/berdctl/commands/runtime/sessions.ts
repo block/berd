@@ -11,11 +11,6 @@ import {
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { acpGetSessionInfo, acpListSessionsPage } from "@/shared/api/acp";
-import {
-  GOOSE_PROVIDER_ID,
-  isGooseManagedProvider,
-} from "@/shared/api/acpPersonaHandoff";
-
 import { sessionNotFoundMessage } from "../helpers";
 import { CommandError } from "../types";
 
@@ -123,7 +118,6 @@ export function refuseRunningTarget(sessionId: string, verb: string): void {
 }
 
 export function sessionMetadata(session: ChatSession) {
-  const providerId = session.providerId;
   const runtime = useChatStore.getState().getSessionRuntime(session.id);
   const isOpenInWindow = useSessionWindowStore
     .getState()
@@ -131,11 +125,8 @@ export function sessionMetadata(session: ChatSession) {
   return {
     session_id: session.id,
     title: session.title,
-    harness_id:
-      providerId == null || isGooseManagedProvider(providerId)
-        ? GOOSE_PROVIDER_ID
-        : providerId,
-    model_id: session.modelId ?? null,
+    harness_id: session.executionTarget?.harnessId ?? "goose",
+    model_id: session.executionTarget?.modelId ?? null,
     agent_id: session.personaId ?? null,
     project_id: session.projectId ?? null,
     working_dir: session.workingDir ?? null,

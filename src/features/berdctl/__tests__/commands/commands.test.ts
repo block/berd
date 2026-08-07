@@ -44,7 +44,6 @@ const mocks = vi.hoisted(() => ({
   acpPrepareSession: vi.fn(),
   acpSendMessage: vi.fn(),
   loadSessionMessages: vi.fn(),
-  acpSetModel: vi.fn(),
   acpSteerMessage: vi.fn(),
   discoverAcpProviders: vi.fn(),
   runDoctor: vi.fn(),
@@ -81,7 +80,6 @@ vi.mock("@/shared/api/acp", () => ({
     mocks.acpListSessionsPage(...args),
   acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
   acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
-  acpSetModel: (...args: unknown[]) => mocks.acpSetModel(...args),
   acpSteerMessage: (...args: unknown[]) => mocks.acpSteerMessage(...args),
   discoverAcpProviders: (...args: unknown[]) =>
     mocks.discoverAcpProviders(...args),
@@ -324,7 +322,6 @@ beforeEach(() => {
     hasMoreSessions: false,
     isRightRailOpen: false,
     activeWorkspaceBySession: {},
-    modelSelectionIntentBySession: {},
   });
   useChatStore.setState({
     messagesBySession: {},
@@ -367,7 +364,6 @@ beforeEach(() => {
   mocks.acpPrepareSession.mockResolvedValue(undefined);
   mocks.acpSendMessage.mockResolvedValue(undefined);
   mocks.loadSessionMessages.mockResolvedValue(true);
-  mocks.acpSetModel.mockResolvedValue(undefined);
   mocks.acpSteerMessage.mockResolvedValue({
     runId: "run-steered",
     messageId: "steer-message",
@@ -623,6 +619,7 @@ describe("command safety metadata", () => {
 
 describe("sessions.create", () => {
   it("creates the session and leaves the accepted first prompt in the shared queue", async () => {
+    seedModelCache("databricks_v2", ["model-9"]);
     mocks.listPersonas.mockResolvedValue([
       {
         id: "agent-7",
@@ -664,7 +661,7 @@ describe("sessions.create", () => {
 
     expect(mocks.resolveSessionCwd).toHaveBeenCalledWith(null);
     expect(mocks.acpCreateSession).toHaveBeenCalledWith(
-      "goose",
+      "databricks_v2",
       "/resolved/cwd",
       {
         personaId: "agent-7",
@@ -778,6 +775,23 @@ describe("sessions.create", () => {
       ),
       "model_not_found",
     );
+  });
+
+  it("reports model_not_found when an explicit Goose model has no concrete provider", async () => {
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          harness_id: "goose",
+          model_id: "unresolved-model",
+        },
+        ctx,
+      ),
+      "model_not_found",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
   });
 
   it("rejects a model the harness does not list with model_not_found", async () => {
@@ -977,8 +991,8 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
+      { modelId: "gpt-6" },
     );
-    expect(mocks.acpSetModel).toHaveBeenCalledWith("session-1", "gpt-6");
     expect(controller.openSession).not.toHaveBeenCalled();
 
     const messages = useChatStore.getState().messagesBySession["session-1"];
@@ -1054,6 +1068,7 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
+      {},
     );
     expect(getPendingSessionWorkspaceActivation("session-1")).toBeNull();
   });
@@ -1076,9 +1091,15 @@ describe("sessions.send", () => {
       workingDir: "/old/cwd",
     });
     mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget("session-1", {
+          harnessId: "codex-acp",
+          modelProviderId: "codex-acp",
+          modelId: "gpt-6",
+          modelName: "gpt-6",
+        });
       useChatSessionStore.getState().patchSession("session-1", {
-        providerId: "codex-acp",
-        modelId: "gpt-6",
         personaId: "agent-refreshed",
         projectId: "project-refreshed",
         workingDir: "/refreshed/cwd",
@@ -1104,8 +1125,8 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
+      { modelId: "gpt-6" },
     );
-    expect(mocks.acpSetModel).toHaveBeenCalledWith("session-1", "gpt-6");
     await vi.waitFor(() => {
       expect(mocks.acpSendMessage).toHaveBeenCalledWith(
         "session-1",
@@ -1120,7 +1141,7 @@ describe("sessions.send", () => {
   });
 
   it("commits hydrated history before injecting the background prompt", async () => {
-    mockSessionFound();
+    mockSessionFound({ providerId: "codex-acp" });
     mocks.loadSessionMessages.mockImplementationOnce(async (sessionId) => {
       useChatStore
         .getState()
@@ -3526,7 +3547,7 @@ describe("agents", () => {
         action: "create",
         name: "Reviewer",
         system_prompt: "Review Kotlin code",
-        provider: "goose",
+        provider: "openai",
         model: "gpt-x",
       },
       ctx,
@@ -3535,7 +3556,8 @@ describe("agents", () => {
     expect(mocks.createPersona).toHaveBeenCalledWith({
       displayName: "Reviewer",
       systemPrompt: "Review Kotlin code",
-      provider: "goose",
+      provider: "openai",
+      modelProviderId: "openai",
       model: "gpt-x",
     });
     expect(useAgentStore.getState().personas).toEqual([persona]);

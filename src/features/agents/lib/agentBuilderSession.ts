@@ -10,7 +10,10 @@ import {
   getStoredModelPreference,
   getStoredModelPreferenceForProvider,
 } from "@/features/chat/lib/modelPreferences";
-import { getDefaultGooseModelId } from "@/features/runtime-config/defaults";
+import {
+  getDefaultGooseModelId,
+  getDefaultGooseModelProviderId,
+} from "@/features/runtime-config/defaults";
 import {
   createDraftAgentSource,
   deleteIfFreshPlaceholderDraft,
@@ -19,6 +22,7 @@ import {
   listAgentBuilderSources,
   promoteAgentBuilderDraftSource,
   readFreshAgentSource,
+  type DraftAgentDefaults,
 } from "./agentBuilderSourceLifecycle";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import {
@@ -348,11 +352,27 @@ export async function preSeedDraftAgent(
   sessionId: string,
 ): Promise<{ path: string; slug: string }> {
   const provider = getStoredProvider(useAgentStore.getState().providers);
-  const model =
-    getStoredModelPreferenceForProvider(provider)?.modelId ??
-    getStoredModelPreference("goose")?.modelId ??
-    getDefaultGooseModelId();
-  return createDraftAgentSource(sessionId, { provider, model });
+  const preference =
+    getStoredModelPreferenceForProvider(provider) ??
+    (provider === "goose" ? getStoredModelPreference("goose") : null);
+  const defaultModelProviderId = getDefaultGooseModelProviderId();
+  const defaultModelId = getDefaultGooseModelId();
+  let modelSelection: DraftAgentDefaults["modelSelection"];
+  if (preference?.providerId) {
+    modelSelection = {
+      modelProviderId: preference.providerId,
+      modelId: preference.modelId,
+    };
+  } else if (provider === "goose" && defaultModelProviderId && defaultModelId) {
+    modelSelection = {
+      modelProviderId: defaultModelProviderId,
+      modelId: defaultModelId,
+    };
+  }
+  return createDraftAgentSource(sessionId, {
+    provider,
+    modelSelection,
+  });
 }
 
 export async function recoverDraftAgent(

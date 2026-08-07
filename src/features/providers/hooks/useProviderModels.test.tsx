@@ -74,6 +74,48 @@ describe("useProviderModels", () => {
     );
   });
 
+  it("reacts when a provisional model inventory becomes authoritative", () => {
+    const models = [
+      {
+        id: "goose-gpt-5-5",
+        name: "GPT-5.5",
+        providerId: "databricks_v2",
+      },
+    ];
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          { providerId: "databricks_v2", models, fetchedAt: 0 },
+        ],
+      ]),
+    });
+    const { result } = renderHook(() => useProviderModels());
+
+    expect(result.current.isModelInventoryAuthoritative("databricks_v2")).toBe(
+      false,
+    );
+
+    act(() => {
+      useProviderModelCacheStore.setState({
+        providers: new Map([
+          [
+            "databricks_v2",
+            {
+              providerId: "databricks_v2",
+              models,
+              fetchedAt: Date.now(),
+            },
+          ],
+        ]),
+      });
+    });
+
+    expect(result.current.isModelInventoryAuthoritative("databricks_v2")).toBe(
+      true,
+    );
+  });
+
   it("recomputes configured and refreshable model providers when the catalog changes", () => {
     const { result } = renderHook(() => useProviderModels());
 

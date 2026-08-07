@@ -102,6 +102,64 @@ describe("queuePersistence", () => {
     });
   });
 
+  it("migrates legacy provider/model fields into a qualified target", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        s1: [
+          {
+            kind: "transport-ready",
+            recordId: "legacy-selection",
+            payload: {
+              text: "continue with claude",
+              providerId: "claude",
+              modelId: "claude-fable",
+            },
+          },
+        ],
+      }),
+    );
+
+    const queues = await loadPersistedMessageQueues();
+    expect(queues.s1?.[0]?.payload).toEqual({
+      text: "continue with claude",
+      executionTarget: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "claude-fable",
+        modelName: "claude-fable",
+      },
+    });
+  });
+
+  it("drops an unqualified legacy model instead of pairing it with a provider", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        s1: [
+          {
+            kind: "transport-ready",
+            recordId: "orphan-model",
+            payload: { text: "use the live target", modelId: "stale-model" },
+          },
+          {
+            kind: "transport-ready",
+            recordId: "goose-sentinel-model",
+            payload: {
+              text: "keep the loaded model",
+              providerId: "goose",
+              modelId: "gpt-5.6",
+            },
+          },
+        ],
+      }),
+    );
+
+    const queues = await loadPersistedMessageQueues();
+    expect(queues.s1?.map((record) => record.payload)).toEqual([
+      { text: "use the live target" },
+      { text: "keep the loaded model" },
+    ]);
+  });
+
   it("rejects deferred records without supported workspace-first-send state", async () => {
     mockInvoke.mockResolvedValue(
       JSON.stringify({

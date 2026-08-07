@@ -1,26 +1,63 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  type ChatSession,
+  useChatSessionStore,
+} from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useResolvedAgentModelPicker } from "../useResolvedAgentModelPicker";
 
 const mockUseAgentModelPickerState = vi.fn();
 const mockGetClient = vi.fn();
-const mockAcpSetModel = vi.fn();
 const mockToastError = vi.fn();
 
+function makeSession(
+  executionTarget: ChatSession["executionTarget"],
+  overrides: Partial<Omit<ChatSession, "executionTarget">> = {},
+): ChatSession {
+  return {
+    id: "session-1",
+    title: "Chat",
+    createdAt: "2026-04-21T00:00:00.000Z",
+    updatedAt: "2026-04-21T00:00:00.000Z",
+    messageCount: 0,
+    ...overrides,
+    ...(executionTarget ? { executionTarget } : {}),
+  };
+}
+
+type ModelPickerOptions = Parameters<typeof useResolvedAgentModelPicker>[0];
+
+function renderModelPicker(overrides: Partial<ModelPickerOptions> = {}) {
+  const options: ModelPickerOptions = {
+    providers: [{ id: "goose", label: "Goose" }],
+    selectedProvider: "goose",
+    sessionId: "session-1",
+    sessionHasStarted: false,
+    session: makeSession({ harnessId: "goose" }),
+    pendingModelSelection: undefined,
+    setPendingExecutionTarget: vi.fn(),
+    setPendingModelSelection: vi.fn(),
+    setGlobalSelectedProvider: vi.fn(),
+    prepareSelectedProvider: vi.fn().mockResolvedValue(true),
+    applySessionModelSelection: vi.fn().mockResolvedValue(true),
+    ...overrides,
+  };
+
+  return renderHook(() => useResolvedAgentModelPicker(options));
+}
+
 vi.mock("../useAgentModelPickerState", () => ({
-  useAgentModelPickerState: (args: unknown) =>
-    mockUseAgentModelPickerState(args),
+  useAgentModelPickerState: (args: unknown) => ({
+    getModelsForAgent: () => [],
+    isModelInventoryAuthoritative: () => false,
+    ...mockUseAgentModelPickerState(args),
+  }),
 }));
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: (...args: unknown[]) => mockGetClient(...args),
-}));
-
-vi.mock("@/shared/api/acp", () => ({
-  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -39,7 +76,6 @@ describe("useResolvedAgentModelPicker", () => {
       hasHydratedSessions: true,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
     });
     useChatStore.setState({ messagesBySession: {} });
     useProviderCatalogStore.getState().setEntries([
@@ -79,8 +115,6 @@ describe("useResolvedAgentModelPicker", () => {
         }),
       },
     });
-    mockAcpSetModel.mockResolvedValue(undefined);
-
     mockUseAgentModelPickerState.mockImplementation(
       ({
         onProviderSelected,
@@ -113,39 +147,37 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const setPendingProviderId = vi.fn();
+    const setPendingExecutionTarget = vi.fn();
     const setPendingModelSelection = vi.fn();
     const setGlobalSelectedProvider = vi.fn();
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "goose",
-        sessionId: null,
-        sessionHasStarted: false,
-        session: undefined,
-        pendingModelSelection: undefined,
-        setPendingProviderId,
-        setPendingModelSelection,
-        setGlobalSelectedProvider,
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      sessionId: null,
+      session: undefined,
+      setPendingExecutionTarget,
+      setPendingModelSelection,
+      setGlobalSelectedProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("codex-acp");
     });
 
     expect(setGlobalSelectedProvider).toHaveBeenCalledWith("codex-acp");
-    expect(setPendingProviderId).toHaveBeenCalledWith("codex-acp");
+    expect(setPendingExecutionTarget).toHaveBeenCalledWith({
+      harnessId: "codex-acp",
+      modelProviderId: "codex-acp",
+      modelId: "gpt-5.4-mini",
+      modelName: "GPT-5.4 mini",
+    });
     expect(setPendingModelSelection).toHaveBeenCalledWith({
       id: "gpt-5.4-mini",
       name: "GPT-5.4 mini",
-      providerId: "codex-acp",
+      modelProviderId: "codex-acp",
       source: "explicit",
     });
   });
@@ -154,28 +186,19 @@ describe("useResolvedAgentModelPicker", () => {
     const prepareSelectedProvider = vi.fn();
     useChatSessionStore.getState().createDraftSession({
       workingDir: "/tmp/project",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
     const session = useChatSessionStore.getState().sessions[0];
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "goose",
-        sessionId: session.id,
-        sessionHasStarted: false,
-        session,
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      sessionId: session.id,
+      session,
+      prepareSelectedProvider,
+    });
 
     act(() => result.current.handleProviderChange("codex-acp"));
 
@@ -183,12 +206,12 @@ describe("useResolvedAgentModelPicker", () => {
     expect(useChatSessionStore.getState().getSession(session.id)).toMatchObject(
       {
         creationState: "pending",
-        providerId: "codex-acp",
+        executionTarget: { harnessId: "codex-acp" },
       },
     );
   });
 
-  it("keeps explicit concrete provider requests authoritative", () => {
+  it("routes explicit concrete model providers through the Goose harness", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
       JSON.stringify({
@@ -200,35 +223,32 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const setPendingProviderId = vi.fn();
+    const setPendingExecutionTarget = vi.fn();
     const setPendingModelSelection = vi.fn();
     const setGlobalSelectedProvider = vi.fn();
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "anthropic",
-        sessionId: null,
-        sessionHasStarted: false,
-        session: undefined,
-        pendingModelSelection: undefined,
-        setPendingProviderId,
-        setPendingModelSelection,
-        setGlobalSelectedProvider,
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "anthropic",
+      sessionId: null,
+      session: undefined,
+      setPendingExecutionTarget,
+      setPendingModelSelection,
+      setGlobalSelectedProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("openai");
     });
 
-    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("openai");
-    expect(setPendingProviderId).toHaveBeenCalledWith("openai");
+    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("goose");
+    expect(setPendingExecutionTarget).toHaveBeenCalledWith({
+      harnessId: "goose",
+      modelProviderId: "openai",
+    });
     expect(setPendingModelSelection).toHaveBeenCalledWith(undefined);
   });
 
@@ -274,38 +294,64 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
 
     expect(result.current.effectiveModelSelection).toEqual({
       id: "gpt-5.4",
       name: "GPT-5.4",
-      providerId: "openai",
+      modelProviderId: "openai",
       source: "explicit",
     });
+  });
+
+  it("does not synthesize a model for an existing provider-only session", () => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "stored-model",
+          modelName: "Stored model",
+          providerId: "openai",
+        },
+      }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "recommended-model",
+          name: "Recommended model",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+      }),
+    });
+
+    expect(result.current.effectiveModelSelection).toBeNull();
   });
 
   it("uses the recommended agent harness model when no saved model exists", () => {
@@ -333,38 +379,55 @@ describe("useResolvedAgentModelPicker", () => {
       handleModelChange: vi.fn(),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "codex-acp",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "codex-acp",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      selectedProvider: "codex-acp",
+      sessionId: null,
+      session: undefined,
+    });
 
     expect(result.current.effectiveModelSelection).toEqual({
       id: "gpt-5.5",
       name: "GPT 5.5",
-      providerId: "codex-acp",
+      modelProviderId: "codex-acp",
       source: "default",
     });
+  });
+
+  it("does not show a fallback model for an unresolved existing ACP session", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "gpt-5.5",
+          name: "GPT 5.5",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Existing chat",
+      createdAt: "2026-04-21T00:00:00.000Z",
+      updatedAt: "2026-04-21T00:00:00.000Z",
+      messageCount: 1,
+    };
+    const { result } = renderModelPicker({
+      sessionId: session.id,
+      sessionHasStarted: true,
+      session,
+    });
+
+    expect(result.current.effectiveModelSelection).toBeNull();
   });
 
   it("resolves a Goose session model to its concrete provider row", () => {
@@ -384,40 +447,24 @@ describe("useResolvedAgentModelPicker", () => {
       handleModelChange: vi.fn(),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          modelId: "goose-gpt-5-6-sol",
-          modelName: "GPT-5.6 Sol",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+    const { result } = renderModelPicker({
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+        modelName: "GPT-5.6 Sol",
       }),
-    );
+    });
 
     expect(result.current.effectiveModelSelection).toEqual({
       id: "goose-gpt-5-6-sol",
       name: "GPT-5.6 Sol",
-      providerId: "databricks_v2",
+      modelProviderId: "databricks_v2",
       source: "explicit",
     });
   });
 
-  it("does not use the latest preference to rewrite an ambiguous Goose session", () => {
+  it("does not use the latest preference to rewrite a provider-qualified Goose session", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
       JSON.stringify({
@@ -448,35 +495,53 @@ describe("useResolvedAgentModelPicker", () => {
       handleModelChange: vi.fn(),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          modelId: "llama3.2",
-          modelName: "llama3.2",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+    const { result } = renderModelPicker({
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "ollama",
+        modelId: "llama3.2",
+        modelName: "llama3.2",
       }),
-    );
+    });
 
     expect(result.current.effectiveModelSelection).toEqual({
       id: "llama3.2",
       name: "llama3.2",
-      providerId: "goose",
+      modelProviderId: "ollama",
+      source: "explicit",
+    });
+  });
+
+  it("does not rewrite a session from another provider's model row", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "shared-model",
+          name: "Other provider model",
+          providerId: "anthropic",
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      sessionHasStarted: true,
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "shared-model",
+        modelName: "Selected model",
+      }),
+    });
+
+    expect(result.current.effectiveModelSelection).toEqual({
+      id: "shared-model",
+      name: "Selected model",
+      modelProviderId: "openai",
       source: "explicit",
     });
   });
@@ -503,31 +568,17 @@ describe("useResolvedAgentModelPicker", () => {
       handleModelChange: vi.fn(),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
       }),
-    );
+    });
 
     expect(result.current.effectiveModelSelection).toBeNull();
   });
@@ -574,33 +625,19 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "codex-acp",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "codex-acp",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      selectedProvider: "codex-acp",
+      session: makeSession({
+        harnessId: "codex-acp",
+        modelProviderId: "codex-acp",
+        modelId: "current",
+        modelName: "current",
       }),
-    );
+    });
 
     act(() => {
       result.current.handleModelChange("gpt-5.4");
@@ -657,33 +694,19 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "current",
       }),
-    );
+    });
 
     expect(result.current.selectedAgentId).toBe("goose");
 
@@ -731,30 +754,21 @@ describe("useResolvedAgentModelPicker", () => {
 
     const applySessionModelSelection = vi.fn().mockResolvedValue(true);
     const setGlobalSelectedProvider = vi.fn();
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: true,
-        session: {
-          id: "session-1",
-          title: "Started chat",
-          providerId: "openai",
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionHasStarted: true,
+      session: makeSession(
+        {
+          harnessId: "goose",
+          modelProviderId: "openai",
           modelId: "current",
           modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 1,
         },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider,
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-      }),
-    );
+        { title: "Started chat", messageCount: 1 },
+      ),
+      setGlobalSelectedProvider,
+      applySessionModelSelection,
+    });
 
     act(() => result.current.handleModelChange("gpt-5.4"));
 
@@ -794,30 +808,20 @@ describe("useResolvedAgentModelPicker", () => {
         }),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: true,
-        session: {
-          id: "session-1",
-          title: "Started chat",
-          providerId: "openai",
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionHasStarted: true,
+      session: makeSession(
+        {
+          harnessId: "goose",
+          modelProviderId: "openai",
           modelId: "current",
           modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 1,
         },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-      }),
-    );
+        { title: "Started chat", messageCount: 1 },
+      ),
+      applySessionModelSelection,
+    });
 
     act(() => result.current.handleModelChange("session-model"));
     await waitFor(() => expect(applySessionModelSelection).toHaveBeenCalled());
@@ -867,33 +871,21 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection,
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "current",
       }),
-    );
+      prepareSelectedProvider,
+      applySessionModelSelection,
+    });
 
     act(() => {
       result.current.handleModelChange("gpt-5.4");
@@ -905,7 +897,7 @@ describe("useResolvedAgentModelPicker", () => {
         {
           id: "gpt-5.4",
           name: "GPT-5.4",
-          providerId: "openai",
+          modelProviderId: "openai",
           source: "explicit",
         },
         expect.any(String),
@@ -937,29 +929,151 @@ describe("useResolvedAgentModelPicker", () => {
       handleModelChange: vi.fn(),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [],
-        selectedProvider: "claude-acp",
-        sessionId: null,
-        sessionHasStarted: false,
-        session: undefined,
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [],
+      selectedProvider: "claude-acp",
+      sessionId: null,
+      session: undefined,
+    });
 
     expect(result.current.selectedAgentId).toBe("claude-acp");
     expect(result.current.effectiveModelSelection).toEqual({
       id: "opus",
       name: "Claude Opus",
-      providerId: "claude-acp",
+      modelProviderId: "claude-acp",
       source: "explicit",
     });
+  });
+
+  it("preserves a stored model while the populated inventory is provisional", () => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "goose-claude-fable",
+          modelName: "Claude Fable",
+          providerId: "openai",
+        },
+      }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "goose-gpt-5-5",
+          name: "GPT-5.5",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
+      isModelInventoryAuthoritative: () => false,
+      modelsLoading: true,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection).toEqual({
+      id: "goose-claude-fable",
+      name: "Claude Fable",
+      modelProviderId: "openai",
+      source: "explicit",
+    });
+  });
+
+  it("ignores a stored Goose model with an unknown provider identity", () => {
+    useProviderCatalogStore.getState().mergeEntries([
+      {
+        id: "goose",
+        displayName: "Goose",
+        category: "agent",
+        description: "Goose",
+        setupMethod: "none",
+        group: "default",
+      },
+    ]);
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "stale-model",
+          modelName: "Stale model",
+          providerId: "removed-provider",
+        },
+      }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "gpt-5.6",
+          name: "GPT-5.6",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
+      isModelInventoryAuthoritative: (providerId: string) =>
+        providerId === "openai",
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection).toMatchObject({
+      id: "gpt-5.6",
+      modelProviderId: "openai",
+    });
+  });
+
+  it("ignores a stored model missing from an authoritative populated inventory", () => {
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "retired-model",
+          modelName: "Retired model",
+          providerId: "openai",
+        },
+      }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        {
+          id: "gpt-5.6",
+          name: "GPT-5.6",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
+      isModelInventoryAuthoritative: () => true,
+      modelsLoading: true,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection?.id).not.toBe(
+      "retired-model",
+    );
   });
 
   it("retains selection after the catalog validates the agent", () => {
@@ -989,30 +1103,21 @@ describe("useResolvedAgentModelPicker", () => {
       handleModelChange: vi.fn(),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "claude-acp",
-        sessionId: null,
-        sessionHasStarted: false,
-        session: undefined,
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      selectedProvider: "claude-acp",
+      sessionId: null,
+      session: undefined,
+    });
 
     expect(result.current.selectedAgentId).toBe("claude-acp");
     expect(result.current.effectiveModelSelection).toEqual({
       id: "opus",
       name: "Claude Opus",
-      providerId: "claude-acp",
+      modelProviderId: "claude-acp",
       source: "explicit",
     });
   });
@@ -1023,32 +1128,14 @@ describe("useResolvedAgentModelPicker", () => {
       .fn()
       .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-        recreateSessionForProvider,
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      prepareSelectedProvider,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("claude-acp");
@@ -1107,34 +1194,21 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-        recreateSessionForProvider,
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "current",
       }),
-    );
+      applySessionModelSelection,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleModelChange("gpt-5.4");
@@ -1146,7 +1220,7 @@ describe("useResolvedAgentModelPicker", () => {
         {
           id: "gpt-5.4",
           name: "GPT-5.4",
-          providerId: "openai",
+          modelProviderId: "openai",
           source: "explicit",
         },
         expect.any(Function),
@@ -1198,31 +1272,21 @@ describe("useResolvedAgentModelPicker", () => {
         }),
     }));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: true,
-        session: {
-          id: "session-1",
-          title: "Started chat",
-          providerId: "openai",
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionHasStarted: true,
+      session: makeSession(
+        {
+          harnessId: "goose",
+          modelProviderId: "openai",
           modelId: "current",
           modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 1,
         },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-        recreateSessionForProvider,
-      }),
-    );
+        { title: "Started chat", messageCount: 1 },
+      ),
+      applySessionModelSelection,
+      recreateSessionForProvider,
+    });
 
     act(() => result.current.handleModelChange("gpt-5.4"));
     await waitFor(() => expect(recreateSessionForProvider).toHaveBeenCalled());
@@ -1253,16 +1317,12 @@ describe("useResolvedAgentModelPicker", () => {
     );
     useChatSessionStore.setState({
       sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
+        makeSession({
+          harnessId: "goose",
+          modelProviderId: "openai",
           modelId: "current",
           modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
+        }),
       ],
       activeSessionId: "session-1",
     });
@@ -1300,34 +1360,21 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-        recreateSessionForProvider,
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "current",
       }),
-    );
+      applySessionModelSelection,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleModelChange("gpt-5.4");
@@ -1342,9 +1389,12 @@ describe("useResolvedAgentModelPicker", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      providerId: "openai",
-      modelId: "current",
-      modelName: "current",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "current",
+      },
     });
     expect(
       JSON.parse(localStorage.getItem("goose:preferredModelsByAgent") ?? "{}"),
@@ -1393,34 +1443,21 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "openai", label: "OpenAI" },
-        ],
-        selectedProvider: "openai",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-        recreateSessionForProvider,
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "openai", label: "OpenAI" },
+      ],
+      selectedProvider: "openai",
+      session: makeSession({
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "current",
       }),
-    );
+      applySessionModelSelection,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleModelChange("gpt-5.4");
@@ -1460,33 +1497,15 @@ describe("useResolvedAgentModelPicker", () => {
       .fn()
       .mockRejectedValue(new Error("Failed to get provider: Provider not set"));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-        recreateSessionForProvider,
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      prepareSelectedProvider,
+      recreateSessionForProvider,
+    });
 
     // First pick strands, kicking off a recreate that stays pending.
     act(() => {
@@ -1523,32 +1542,14 @@ describe("useResolvedAgentModelPicker", () => {
       .fn()
       .mockRejectedValue(new Error("network down"));
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-        recreateSessionForProvider,
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      prepareSelectedProvider,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("claude-acp");
@@ -1597,32 +1598,14 @@ describe("useResolvedAgentModelPicker", () => {
       },
     });
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-        recreateSessionForProvider,
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      prepareSelectedProvider,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("claude-acp");
@@ -1665,32 +1648,14 @@ describe("useResolvedAgentModelPicker", () => {
       },
     });
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-        recreateSessionForProvider,
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      prepareSelectedProvider,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("claude-acp");
@@ -1710,45 +1675,19 @@ describe("useResolvedAgentModelPicker", () => {
 
     // The recoverability guard reads the session store, not the hook prop.
     useChatSessionStore.setState({
-      sessions: [
-        {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 4,
-        },
-      ],
+      sessions: [makeSession({ harnessId: "goose" }, { messageCount: 4 })],
       activeSessionId: "session-1",
     });
 
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        sessionHasStarted: false,
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "goose",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 4,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider,
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-        recreateSessionForProvider,
-      }),
-    );
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      session: makeSession({ harnessId: "goose" }, { messageCount: 4 }),
+      prepareSelectedProvider,
+      recreateSessionForProvider,
+    });
 
     act(() => {
       result.current.handleProviderChange("claude-acp");

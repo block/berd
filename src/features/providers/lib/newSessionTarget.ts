@@ -1,6 +1,7 @@
 import type { SessionModelPreference } from "@/features/chat/lib/sessionModelPreference";
 import type { StoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import type { DefaultProviderReadiness } from "../defaultProviderReadiness";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 export interface NewSessionTargetPolicy {
   /** Restricted builds provide Goose defaults outside the BYO-key setup flow. */
@@ -50,6 +51,12 @@ function isAgentReady(
       snapshot.defaultProviderReadiness?.status !== "needs_setup"
     );
   }
+  if (
+    snapshot.defaultProviderReadiness?.status === "ready" &&
+    snapshot.defaultProviderReadiness.providerId === providerId
+  ) {
+    return true;
+  }
   return (
     snapshot.readyAgentIds.has(providerId) ||
     snapshot.configuredAgentIds.has(providerId)
@@ -61,12 +68,13 @@ function readyTarget(
   modelId: string | undefined,
   provenance: NewSessionTargetProvenance,
 ): NewSessionTargetResult {
+  const concreteModelId = normalizeConcreteModelId(modelId);
   return {
     status: "ready",
     provenance,
     providerId,
-    modelId,
-    ...(modelId ? { modelName: modelId } : {}),
+    modelId: concreteModelId,
+    ...(concreteModelId ? { modelName: concreteModelId } : {}),
   };
 }
 
@@ -102,12 +110,15 @@ export function resolveNewSessionTarget(
         !persistedModelPreference.providerId ||
         persistedModelPreference.providerId === persistedProviderId);
     if (persistedModelMatchesTarget) {
+      const modelId = normalizeConcreteModelId(
+        persistedModelPreference.modelId,
+      );
       return {
         status: "ready",
         provenance: "persisted",
         providerId: persistedProviderId,
-        modelId: persistedModelPreference.modelId,
-        modelName: persistedModelPreference.modelName,
+        modelId,
+        modelName: modelId ? persistedModelPreference.modelName : undefined,
       };
     }
 

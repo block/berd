@@ -23,15 +23,18 @@ import {
   type Message,
   type SystemNotificationContent,
 } from "@/shared/types/messages";
+import type { AcpSessionInfo } from "@/shared/api/acp";
 
 const acpGetSessionInfo = vi.hoisted(() => vi.fn());
 const acpLoadSession = vi.hoisted(() => vi.fn());
+const acpPrepareSession = vi.hoisted(() => vi.fn());
 const resolvePath = vi.hoisted(() => vi.fn());
 const checkDirectoriesExist = vi.hoisted(() => vi.fn());
 
 vi.mock("@/shared/api/acp", () => ({
   acpGetSessionInfo: (...args: unknown[]) => acpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => acpLoadSession(...args),
+  acpPrepareSession: (...args: unknown[]) => acpPrepareSession(...args),
 }));
 
 vi.mock("@/shared/api/pathResolver", () => ({
@@ -81,7 +84,7 @@ function seedSession(
     id: "s1",
     title: DEFAULT_CHAT_TITLE,
     projectId: project?.id ?? null,
-    providerId: "goose",
+    executionTarget: { harnessId: "goose" },
     workingDir: null,
     createdAt: "2026-06-09T00:00:00.000Z",
     updatedAt: "2026-06-09T00:00:00.000Z",
@@ -141,6 +144,7 @@ describe("loadSessionMessages", () => {
     window.localStorage.clear();
     acpGetSessionInfo.mockResolvedValue(null);
     acpLoadSession.mockResolvedValue(undefined);
+    acpPrepareSession.mockResolvedValue(undefined);
     resolvePath.mockImplementation(({ parts }: { parts: string[] }) =>
       Promise.resolve({ path: `/resolved${parts[0]}` }),
     );
@@ -403,6 +407,52 @@ describe("loadSessionMessages", () => {
     expect(messagesFor("s0").map((m) => m.role)).toEqual(["user"]);
   });
 
+  it("reasserts a UI selection changed while cwd resolution delayed ACP load", async () => {
+    const cwdCheck = deferred<string[]>();
+    checkDirectoriesExist.mockReturnValueOnce(cwdCheck.promise);
+    seedSession({
+      id: "s-selection-race",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+        modelName: "GPT-5.5",
+      },
+      workingDir: "/existing/session",
+    });
+
+    const load = loadSessionMessages("s-selection-race");
+    await vi.waitFor(() => {
+      expect(checkDirectoriesExist).toHaveBeenCalledTimes(1);
+    });
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget("s-selection-race", {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+        modelName: "GPT-5.6 Sol",
+      });
+    expect(acpLoadSession).not.toHaveBeenCalled();
+
+    cwdCheck.resolve([]);
+    await expect(load).resolves.toBe(true);
+
+    expect(acpLoadSession).toHaveBeenCalledWith(
+      "s-selection-race",
+      "/resolved/existing/session",
+    );
+    expect(acpPrepareSession).toHaveBeenCalledWith(
+      "s-selection-race",
+      "databricks_v2",
+      "/resolved/existing/session",
+      { modelId: "goose-gpt-5-6-sol" },
+    );
+    expect(acpLoadSession.mock.invocationCallOrder[0]).toBeLessThan(
+      acpPrepareSession.mock.invocationCallOrder[0],
+    );
+  });
+
   it("loads a session without a stored session record", async () => {
     await expect(loadSessionMessages("unknown-session")).resolves.toBe(true);
 
@@ -641,6 +691,7 @@ describe("loadSessionMessages", () => {
         id: "s-pinned",
         title: DEFAULT_CHAT_TITLE,
         projectId: undefined,
+        executionTarget: undefined,
         workingDir: "/missing/session",
         pinnedLoadState: "loading",
         updatedAt: "2026-06-25T00:49:00.000Z",
@@ -665,6 +716,50 @@ describe("loadSessionMessages", () => {
         pinnedLoadState: undefined,
       },
     );
+  });
+
+  it("does not let pinned metadata replace a newer UI model selection", async () => {
+    const metadata = deferred<AcpSessionInfo>();
+    const selectedTarget = {
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+      modelName: "GPT-5.6 Sol",
+    } as const;
+    acpGetSessionInfo.mockReturnValue(metadata.promise);
+    seedSession({
+      id: "s-pinned-race",
+      executionTarget: undefined,
+      pinnedLoadState: "loading",
+    });
+
+    const load = loadSessionMessages("s-pinned-race");
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget("s-pinned-race", selectedTarget);
+    metadata.resolve({
+      sessionId: "s-pinned-race",
+      title: "Pinned race",
+      updatedAt: "2026-06-25T00:45:04.000Z",
+      createdAt: "2026-06-25T00:40:00.000Z",
+      lastMessageAt: null,
+      archivedAt: null,
+      userSetName: false,
+      messageCount: 1,
+      subtitle: null,
+      workingDir: "/tmp/project",
+      projectId: null,
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+      personaId: null,
+    });
+
+    await expect(load).resolves.toBe(true);
+
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-race")
+        ?.executionTarget,
+    ).toEqual(selectedTarget);
   });
 
   it("shares one replay load between concurrent callers", async () => {

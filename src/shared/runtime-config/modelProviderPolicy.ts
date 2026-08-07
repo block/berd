@@ -1,4 +1,5 @@
 import type { RuntimeConfig, RuntimeGooseConfig } from "./schema";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 export interface GooseProviderSelection {
   providerId?: string | null;
@@ -64,27 +65,20 @@ export function resolveManagedGooseProviderSelection(
     (provider) => provider.id === selection.providerId,
   )?.id;
   const providerId = configuredProviderId ?? defaultManagedProviderId(goose);
-  let modelId = selection.modelId ?? goose.defaultModelId;
+  let modelId =
+    normalizeConcreteModelId(selection.modelId) ??
+    normalizeConcreteModelId(goose.defaultModelId);
 
   if (
     providerId === DATABRICKS_V2_PROVIDER_ID &&
     modelId &&
-    shouldRepairDatabricksV2Model(modelId, context)
+    context.targetInventoryValidated === true &&
+    !context.targetModelIds?.has(modelId)
   ) {
     modelId = goose.defaultModelId;
   }
 
   return { providerId, modelId: modelId ?? undefined };
-}
-
-function shouldRepairDatabricksV2Model(
-  modelId: string,
-  context: ManagedGooseProviderResolutionContext,
-): boolean {
-  return (
-    context.targetInventoryValidated === true &&
-    !context.targetModelIds?.has(modelId)
-  );
 }
 
 export function managedGooseSelectionChanged(

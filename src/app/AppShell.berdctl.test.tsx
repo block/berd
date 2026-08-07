@@ -7,6 +7,7 @@ import {
   type CommandOutcome,
 } from "@/features/berdctl/navigation";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
@@ -203,7 +204,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "session-1",
     title: "Calling chat",
-    providerId: "goose",
+    executionTarget: { harnessId: "goose" },
     workingDir: "/tmp/session-1",
     createdAt: now,
     updatedAt: now,
@@ -254,22 +255,27 @@ describe("AppShell berdctl integration", () => {
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
     mockAcpListSessionsPage.mockReset();
     mockAcpListSessionsPage.mockImplementation(async () => ({
-      sessions: useChatSessionStore.getState().sessions.map((session) => ({
-        sessionId: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
-        createdAt: session.createdAt,
-        lastMessageAt: session.lastMessageAt ?? null,
-        archivedAt: session.archivedAt ?? null,
-        userSetName: session.userSetName ?? false,
-        messageCount: session.messageCount,
-        subtitle: session.subtitle ?? null,
-        workingDir: session.workingDir ?? null,
-        projectId: session.projectId ?? null,
-        providerId: session.providerId ?? null,
-        modelId: session.modelId ?? null,
-        personaId: session.personaId ?? null,
-      })),
+      sessions: useChatSessionStore.getState().sessions.map((session) => {
+        const selection = gooseServeSelectionFromExecutionTarget(
+          session.executionTarget,
+        );
+        return {
+          sessionId: session.id,
+          title: session.title,
+          updatedAt: session.updatedAt,
+          createdAt: session.createdAt,
+          lastMessageAt: session.lastMessageAt ?? null,
+          archivedAt: session.archivedAt ?? null,
+          userSetName: session.userSetName ?? false,
+          messageCount: session.messageCount,
+          subtitle: session.subtitle ?? null,
+          workingDir: session.workingDir ?? null,
+          projectId: session.projectId ?? null,
+          providerId: selection.providerId ?? null,
+          modelId: selection.modelId ?? null,
+          personaId: session.personaId ?? null,
+        };
+      }),
       nextCursor: null,
     }));
     mockAcpLoadSession.mockReset();
@@ -314,7 +320,6 @@ describe("AppShell berdctl integration", () => {
       hasHydratedSessions: false,
       isRightRailOpen: false,
       activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
       archiveMutationBySessionId: {},
     });
     useAgentStore.setState({

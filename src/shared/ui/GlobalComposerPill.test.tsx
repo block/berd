@@ -25,6 +25,10 @@ const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
 const mockRefreshAllModelProviders = vi.fn();
 const mockRefreshAgentProviderStatus = vi.fn();
+const mockProviderModelsState = {
+  refreshing: false,
+  inventoryAuthoritative: true,
+};
 const mockVoiceDictation = {
   isEnabled: false,
   isRecording: false,
@@ -83,9 +87,11 @@ vi.mock("@/features/providers/hooks/useProviderModels", () => ({
     configuredModelProviderIds: ["openai", "anthropic"],
     modelCacheRefreshProviderIds: ["openai", "anthropic"],
     getModelsForAgent: (agentId: string) => mockGetModelsForAgent(agentId),
+    isModelInventoryAuthoritative: () =>
+      mockProviderModelsState.inventoryAuthoritative,
     refreshAllModelProviders: (...args: unknown[]) =>
       mockRefreshAllModelProviders(...args),
-    isRefreshingProvider: () => false,
+    isRefreshingProvider: () => mockProviderModelsState.refreshing,
     getError: () => null,
   }),
 }));
@@ -183,6 +189,18 @@ function expectSentImageAttachment(
 ) {
   expect(onSend).toHaveBeenCalledWith("", {
     attachments: [expect.objectContaining({ kind: "image", ...expected })],
+    executionTarget: { harnessId: "goose" },
+  });
+}
+
+function expectSent(
+  onSend: ReturnType<typeof vi.fn>,
+  text: string,
+  options: Record<string, unknown> = {},
+) {
+  expect(onSend).toHaveBeenCalledWith(text, {
+    executionTarget: { harnessId: "goose" },
+    ...options,
   });
 }
 
@@ -223,6 +241,8 @@ describe("GlobalComposerPill", () => {
     mockRefreshAllModelProviders.mockResolvedValue(undefined);
     mockRefreshAgentProviderStatus.mockReset();
     mockRefreshAgentProviderStatus.mockResolvedValue(undefined);
+    mockProviderModelsState.refreshing = false;
+    mockProviderModelsState.inventoryAuthoritative = true;
     mockVoiceDictation.isEnabled = false;
     mockVoiceDictation.isRecording = false;
     mockVoiceDictation.isTranscribing = false;
@@ -355,7 +375,7 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
+    expectSent(onSend, "Hello", {
       personaId: "persona-1",
     });
   });
@@ -437,7 +457,7 @@ describe("GlobalComposerPill", () => {
     expect(onStart).toHaveBeenCalledWith({
       text: "keep this draft",
       selectedSkills: [],
-      options: { providerId: "goose" },
+      options: { executionTarget: { harnessId: "goose" } },
     });
     expect(input).toHaveValue("keep this draft");
 
@@ -643,12 +663,40 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
-      providerId: "claude-acp",
-      modelId: "claude-sonnet-4",
-      modelName: "claude-sonnet-4",
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "claude-sonnet-4",
+        modelName: "claude-sonnet-4",
+      },
       personaId: "persona-1",
     });
+  });
+
+  it("blocks a persona whose model has no provider identity", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Legacy agent",
+          systemPrompt: "Help.",
+          model: "unresolved-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("refreshes the suggested persona provider/model when the same persona changes", async () => {
@@ -677,7 +725,7 @@ describe("GlobalComposerPill", () => {
             id: "persona-1",
             displayName: "Research Scout",
             systemPrompt: "Gather context.",
-            provider: "goose",
+            provider: "databricks_v2",
             model: "goose-claude-opus-4-8",
             isBuiltin: false,
             writable: true,
@@ -689,23 +737,28 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
-      providerId: "goose",
-      modelId: "goose-claude-opus-4-8",
-      modelName: "goose-claude-opus-4-8",
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-opus-4-8",
+        modelName: "goose-claude-opus-4-8",
+      },
       personaId: "persona-1",
     });
   });
 
-  it("uses a suggested persona's implicit Goose model instead of the stored default model", async () => {
+  it("does not send a stored model that is absent from the loaded inventory", async () => {
     const user = userEvent.setup();
+    mockProviderModelsState.refreshing = true;
+    useAgentStore.setState({ selectedProvider: "databricks_v2" });
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
       JSON.stringify({
         goose: {
-          modelId: "gpt-5.5",
-          modelName: "GPT 5.5",
-          providerId: "openai",
+          modelId: "retired-model",
+          modelName: "Retired model",
+          providerId: "databricks_v2",
         },
       }),
     );
@@ -713,76 +766,72 @@ describe("GlobalComposerPill", () => {
       agentId === "goose"
         ? [
             {
-              id: "gpt-5.5",
-              name: "GPT 5.5",
-              providerId: "openai",
+              id: "goose-gpt-5-5",
+              name: "GPT-5.5",
+              providerId: "databricks_v2",
               recommended: true,
             },
           ]
         : [],
     );
-    useAgentStore.setState({
-      providers: [
-        { id: "openai", label: "OpenAI" },
-        { id: "anthropic", label: "Anthropic" },
-      ],
-      personas: [
-        {
-          id: "persona-1",
-          displayName: "Everyday Otter",
-          systemPrompt: "Be brief.",
-          provider: "Goose",
-          model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
-        },
-      ],
-    });
-    const onSend = renderGlobalComposer(vi.fn(), {
-      suggestedPersonaId: "persona-1",
-    });
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: /choose agent and model/i }),
-      ).toHaveTextContent("Claude Opus 4.8");
-    });
+    const onSend = renderGlobalComposer();
 
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
-      providerId: "goose",
-      modelId: "goose-claude-opus-4-8",
-      modelName: "goose-claude-opus-4-8",
-      personaId: "persona-1",
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+        modelName: "GPT-5.5",
+      },
     });
+    expect(onSend).not.toHaveBeenCalledWith(
+      "Hello",
+      expect.objectContaining({ modelId: "retired-model" }),
+    );
   });
 
-  it("does not apply a persona model when the persona provider cannot resolve", async () => {
+  it("keeps sending the selected model while loaded inventory is provisional", async () => {
     const user = userEvent.setup();
-    useAgentStore.setState({
-      personas: [
-        {
-          id: "persona-1",
-          displayName: "Research Scout",
-          systemPrompt: "Gather context.",
-          provider: "missing-provider",
-          model: "goose-claude-opus-4-8",
-          isBuiltin: false,
-          writable: true,
+    mockProviderModelsState.refreshing = true;
+    mockProviderModelsState.inventoryAuthoritative = false;
+    useAgentStore.setState({ selectedProvider: "databricks_v2" });
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "goose-claude-fable",
+          modelName: "Claude Fable",
+          providerId: "databricks_v2",
         },
-      ],
-    });
-    const onSend = renderGlobalComposer(vi.fn(), {
-      suggestedPersonaId: "persona-1",
-    });
+      }),
+    );
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "goose-gpt-5-5",
+              name: "GPT-5.5",
+              providerId: "databricks_v2",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+    const onSend = renderGlobalComposer();
 
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
-      personaId: "persona-1",
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-fable",
+        modelName: "Claude Fable",
+      },
     });
   });
 
@@ -917,7 +966,7 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
+    expectSent(onSend, "Hello", {
       personaId: "persona-2",
     });
   });
@@ -940,6 +989,7 @@ describe("GlobalComposerPill", () => {
           displayName: "UX Critic",
           systemPrompt: "Review flows.",
           provider: "goose",
+          modelProviderId: "databricks_v2",
           model: "goose-default",
           isBuiltin: false,
           writable: true,
@@ -962,10 +1012,13 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
-      providerId: "goose",
-      modelId: "goose-default",
-      modelName: "goose-default",
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-default",
+        modelName: "goose-default",
+      },
       personaId: "persona-2",
     });
   });
@@ -995,10 +1048,13 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
-      providerId: "claude-acp",
-      modelId: "claude-sonnet-4",
-      modelName: "claude-sonnet-4",
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "claude-sonnet-4",
+        modelName: "claude-sonnet-4",
+      },
     });
   });
 
@@ -1072,7 +1128,7 @@ describe("GlobalComposerPill", () => {
     fireEvent.keyDown(textbox, { key: "Enter" });
 
     expect(onHandoffStart).toHaveBeenCalled();
-    expect(onSend).toHaveBeenCalledWith("Hi");
+    expectSent(onSend, "Hi");
     expect(textbox).toHaveFocus();
   });
 
@@ -1091,7 +1147,7 @@ describe("GlobalComposerPill", () => {
 
     fireEvent.keyDown(textbox, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith("Hello", {
+    expectSent(onSend, "Hello", {
       projectId: "project-1",
     });
 
@@ -1135,114 +1191,34 @@ describe("GlobalComposerPill", () => {
     expect(sendButton).toBeEnabled();
 
     await user.click(sendButton);
-    expect(onSend).toHaveBeenCalledWith("Hello");
+    expectSent(onSend, "Hello");
   });
 
   it("sends the selected reasoning effort from the mini composer", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer(vi.fn(), {
-      reasoningEffortConfig: {
-        configId: "thinking_effort",
-        currentValue: "high",
-        options: [
-          { id: "low", name: "low" },
-          { id: "medium", name: "medium" },
-          { id: "high", name: "high" },
-        ],
-      },
-    });
-
-    await user.click(screen.getByRole("textbox"));
-    await user.type(screen.getByRole("textbox"), "Think hard");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
-
-    expect(onSend).toHaveBeenCalledWith("Think hard", {
       reasoningEffort: {
-        configId: "thinking_effort",
-        value: "high",
-      },
-    });
-  });
-
-  it("keeps a picked reasoning effort local to the composer until it is sent", async () => {
-    const user = userEvent.setup();
-    const onSend = renderGlobalComposer(vi.fn(), {
-      reasoningEffortConfig: {
-        configId: "thinking_effort",
-        currentValue: "high",
-        options: [
-          { id: "low", name: "low" },
-          { id: "medium", name: "medium" },
-          { id: "high", name: "high" },
-        ],
-      },
-    });
-
-    await user.click(screen.getByRole("textbox"));
-    await user.type(screen.getByRole("textbox"), "Think a little");
-    await user.click(
-      screen.getByRole("button", { name: /choose agent and model/i }),
-    );
-    await user.click(await screen.findByText("Low"));
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
-
-    expect(onSend).toHaveBeenCalledWith("Think a little", {
-      reasoningEffort: {
-        configId: "thinking_effort",
-        value: "low",
-      },
-    });
-  });
-
-  it("drops a picked reasoning effort the refreshed config no longer offers", async () => {
-    const user = userEvent.setup();
-    const onSend = vi.fn();
-    const { rerender } = render(
-      <GlobalComposerPill
-        onSend={onSend}
-        reasoningEffortConfig={{
+        config: {
           configId: "thinking_effort",
-          currentValue: "medium",
+          currentValue: "high",
           options: [
             { id: "low", name: "low" },
             { id: "medium", name: "medium" },
             { id: "high", name: "high" },
           ],
-        }}
-      />,
-    );
+        },
+        onChange: vi.fn(),
+      },
+    });
 
     await user.click(screen.getByRole("textbox"));
     await user.type(screen.getByRole("textbox"), "Think hard");
-    await user.click(
-      screen.getByRole("button", { name: /choose agent and model/i }),
-    );
-    await user.click(await screen.findByText("High"));
-    await user.keyboard("{Escape}");
-
-    // Same configId, narrower option set: the backend refreshed the config for
-    // the same model while the pick was live.
-    rerender(
-      <GlobalComposerPill
-        onSend={onSend}
-        reasoningEffortConfig={{
-          configId: "thinking_effort",
-          currentValue: "medium",
-          options: [
-            { id: "low", name: "low" },
-            { id: "medium", name: "medium" },
-          ],
-        }}
-      />,
-    );
-
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Think hard", {
+    expectSent(onSend, "Think hard", {
       reasoningEffort: {
         configId: "thinking_effort",
-        value: "medium",
+        value: "high",
       },
     });
   });
@@ -1271,18 +1247,23 @@ describe("GlobalComposerPill", () => {
         : [],
     );
     const onSend = renderGlobalComposer(vi.fn(), {
-      reasoningEffortConfig: {
-        configId: "thinking_effort",
-        currentValue: "high",
-        options: [
-          { id: "low", name: "low" },
-          { id: "medium", name: "medium" },
-          { id: "high", name: "high" },
-        ],
+      reasoningEffort: {
+        config: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [
+            { id: "low", name: "low" },
+            { id: "medium", name: "medium" },
+            { id: "high", name: "high" },
+          ],
+        },
+        onChange: vi.fn(),
       },
-      reasoningEffortModelSelection: {
-        providerId: "openai",
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
         modelId: "gpt-5",
+        modelName: "GPT 5",
       },
     });
 
@@ -1294,16 +1275,19 @@ describe("GlobalComposerPill", () => {
     await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Use Sonnet", {
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+    expectSent(onSend, "Use Sonnet", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
   });
 
   it("reports concrete model picks so Home can refresh reasoning effort", async () => {
     const user = userEvent.setup();
-    const onModelSelectionChange = vi.fn();
+    const onExecutionTargetChange = vi.fn();
     mockGetModelsForAgent.mockImplementation((agentId: string) =>
       agentId === "goose"
         ? [
@@ -1327,7 +1311,7 @@ describe("GlobalComposerPill", () => {
         : [],
     );
 
-    renderGlobalComposer(vi.fn(), { onModelSelectionChange });
+    renderGlobalComposer(vi.fn(), { onExecutionTargetChange });
 
     await user.click(screen.getByRole("textbox"));
     await user.click(
@@ -1335,10 +1319,27 @@ describe("GlobalComposerPill", () => {
     );
     await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
 
-    expect(onModelSelectionChange).toHaveBeenCalledWith({
-      providerId: "anthropic",
+    expect(onExecutionTargetChange).toHaveBeenCalledWith({
+      harnessId: "goose",
+      modelProviderId: "anthropic",
       modelId: "claude-sonnet-4",
       modelName: "Claude Sonnet 4",
+    });
+  });
+
+  it("reports harness-only picks to the Home session", async () => {
+    const user = userEvent.setup();
+    const onExecutionTargetChange = vi.fn();
+    renderGlobalComposer(vi.fn(), { onExecutionTargetChange });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claude Code" }));
+
+    expect(onExecutionTargetChange).toHaveBeenCalledWith({
+      harnessId: "claude-acp",
     });
   });
 
@@ -1427,6 +1428,158 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("expands with the controlled Home model", async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn().mockResolvedValue(true);
+    renderGlobalComposer(vi.fn(), {
+      onExpand,
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "goose-claude-fable",
+        modelName: "Claude Fable",
+      },
+    });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: "Expand to full chat" }),
+    );
+
+    expect(onExpand).toHaveBeenCalledWith({
+      text: "",
+      selectedSkills: [],
+      options: {
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "anthropic",
+          modelId: "goose-claude-fable",
+          modelName: "Claude Fable",
+        },
+      },
+    });
+  });
+
+  it("does not replace a controlled provider-only target with a default model", async () => {
+    const user = userEvent.setup();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "goose-gpt-5-5",
+              name: "GPT-5.5",
+              providerId: "databricks_v2",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Keep this provider");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Keep this provider", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+  });
+
+  it("keeps an acknowledged model pick after clearing its local override", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const onExecutionTargetChange = vi.fn();
+    const gpt56Target = {
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
+      modelId: "goose-gpt-5-6",
+      modelName: "GPT-5.6",
+    } as const;
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "goose-gpt-5-5",
+              name: "GPT-5.5",
+              providerId: "databricks_v2",
+              recommended: true,
+            },
+            {
+              id: gpt56Target.modelId,
+              name: gpt56Target.modelName,
+              displayName: gpt56Target.modelName,
+              providerId: gpt56Target.modelProviderId,
+            },
+          ]
+        : [],
+    );
+    const { rerender } = render(
+      <GlobalComposerPill
+        onSend={onSend}
+        onExecutionTargetChange={onExecutionTargetChange}
+        currentExecutionTarget={{
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-gpt-5-5",
+          modelName: "GPT-5.5",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "View more" }));
+    await user.click(screen.getByRole("button", { name: "GPT-5.6" }));
+    await waitFor(() => {
+      expect(onExecutionTargetChange).toHaveBeenCalledWith(gpt56Target);
+    });
+
+    rerender(
+      <GlobalComposerPill
+        onSend={onSend}
+        onExecutionTargetChange={onExecutionTargetChange}
+        currentExecutionTarget={gpt56Target}
+      />,
+    );
+    await user.type(screen.getByRole("textbox"), "Keep GPT-5.6");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Keep GPT-5.6", { executionTarget: gpt56Target });
+  });
+
+  it("uses a controlled external harness when the global provider differs", async () => {
+    const user = userEvent.setup();
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "claude-opus-4-1",
+        modelName: "Claude Opus 4.1",
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Use Claude");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Use Claude", {
+      executionTarget: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "claude-opus-4-1",
+        modelName: "Claude Opus 4.1",
+      },
+    });
+  });
+
   it("keeps the hidden expand tooltip out of the tab order while attachment work is pending", async () => {
     const attachmentWork = deferred<{ base64: string; mimeType: string }>();
     mockResizeImage.mockReturnValueOnce(attachmentWork.promise);
@@ -1482,7 +1635,7 @@ describe("GlobalComposerPill", () => {
     expect(onExpand).toHaveBeenCalledWith({
       text: "",
       selectedSkills: [],
-      options: undefined,
+      options: { executionTarget: { harnessId: "goose" } },
     });
     expect(textbox).toHaveFocus();
   });
@@ -1547,6 +1700,7 @@ describe("GlobalComposerPill", () => {
             previewUrl: "data:image/png;base64,base64:pasted.png",
           }),
         ],
+        executionTarget: { harnessId: "goose" },
       },
     });
   });
@@ -1792,8 +1946,8 @@ describe("GlobalComposerPill", () => {
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Use Claude", {
-      providerId: "claude-acp",
+    expectSent(onSend, "Use Claude", {
+      executionTarget: { harnessId: "claude-acp" },
     });
   });
 
@@ -1856,10 +2010,13 @@ describe("GlobalComposerPill", () => {
     await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expect(onSend).toHaveBeenCalledWith("Use Sonnet", {
-      providerId: "anthropic",
-      modelId: "claude-sonnet-4",
-      modelName: "Claude Sonnet 4",
+    expectSent(onSend, "Use Sonnet", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      },
     });
   });
 });

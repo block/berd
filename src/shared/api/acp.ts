@@ -7,6 +7,7 @@ import type {
   AcpSteerResponse,
 } from "./acpApi";
 import * as sessionRegistry from "./acpSessionRegistry";
+import type { AcpSessionExecutionSelection } from "./acpSessionRegistry";
 import {
   getCatalogEntry,
   resolveAgentProviderCatalogId,
@@ -33,6 +34,7 @@ import { perfLog } from "@/shared/lib/perfLog";
 import {
   applySessionConfigOptionsSnapshot,
   readSessionConfigOptionsSnapshots,
+  type AcpSessionConfigSnapshotContext,
   type AcpSessionConfigSnapshots,
 } from "./acpSessionConfigSnapshots";
 import {
@@ -40,6 +42,7 @@ import {
   reasoningEffortConfigLogFields,
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
+import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 
 export interface AcpProvider {
   id: string;
@@ -67,6 +70,8 @@ export interface AcpSessionConfigApplyOptions {
   forceConfigRefresh?: boolean;
   /** Model the caller will apply as part of the same session preparation. */
   modelId?: string | null;
+  /** UI selection intent that owns any response snapshots. */
+  requestId?: string;
 }
 
 export interface AcpCreateSessionResult {
@@ -75,19 +80,6 @@ export interface AcpCreateSessionResult {
 }
 
 export type AcpDuplicateSessionOptions = AcpForkSessionOptions;
-
-function mergeSessionConfigSnapshots(
-  base: AcpSessionConfigSnapshots,
-  next?: AcpSessionConfigSnapshots,
-): AcpSessionConfigSnapshots {
-  if (!next) {
-    return base;
-  }
-  return {
-    model: next.model ?? base.model,
-    reasoningEffort: next.reasoningEffort ?? base.reasoningEffort,
-  };
-}
 
 /** Discover ACP providers installed on the system. */
 export async function discoverAcpProviders(): Promise<AcpProvider[]> {
@@ -141,10 +133,21 @@ async function appendBerdStyleGuidelinesPrompt(
 }
 
 /** Send a message to an ACP agent. Response streams via Tauri events. */
-export async function acpSendMessage(
+export function acpSendMessage(
   sessionId: string,
   prompt: string,
   options: AcpSendMessageOptions = {},
+): Promise<void> {
+  return sessionRegistry.runPreparedSessionPrompt(sessionId, (providerId) =>
+    acpSendMessageNow(sessionId, prompt, providerId, options),
+  );
+}
+
+async function acpSendMessageNow(
+  sessionId: string,
+  prompt: string,
+  providerId: string,
+  options: AcpSendMessageOptions,
 ): Promise<void> {
   const {
     systemPrompt,
@@ -157,14 +160,6 @@ export async function acpSendMessage(
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
 
-  if (!sessionRegistry.isSessionPrepared(sessionId)) {
-    throw new Error("Session not prepared. Call acpPrepareSession first.");
-  }
-
-  const providerId = sessionRegistry.getPreparedProviderId(sessionId);
-  if (!providerId) {
-    throw new Error("Session not prepared. Call acpPrepareSession first.");
-  }
   const resolvedProvider = resolveGooseSessionSelection(providerId).providerId;
   if (resolvedProvider !== providerId) {
     throw new Error(
@@ -303,6 +298,10 @@ function resolveGooseSessionSelection(
   providerId: string,
   modelId?: string | null,
 ): { providerId: string; modelId?: string } {
+  if (modelId === "goose") {
+    throw new Error(`Invalid model id: ${modelId}`);
+  }
+  const concreteModelId = normalizeConcreteModelId(modelId);
   // Agent harnesses are outside Goose model-provider policy. Everything else
   // is resolved from runtime policy directly; a missing model catalog entry
   // must not turn into an allowlist bypass while catalogs are still loading.
@@ -310,7 +309,10 @@ function resolveGooseSessionSelection(
     providerId !== "goose" &&
     CURATED_PROVIDER_CATALOG_BY_ID.get(providerId)?.category === "agent"
   ) {
-    return { providerId, ...(modelId ? { modelId } : {}) };
+    return {
+      providerId,
+      ...(concreteModelId ? { modelId: concreteModelId } : {}),
+    };
   }
 
   const runtimeConfigState = useRuntimeConfigStore.getState();
@@ -320,12 +322,25 @@ function resolveGooseSessionSelection(
     );
   }
 
-  return (
-    resolveManagedGooseProviderSelection(runtimeConfigState.config, {
-      providerId,
-      modelId,
-    }) ?? { providerId, ...(modelId ? { modelId } : {}) }
+  const requestedSelection = {
+    providerId,
+    ...(concreteModelId ? { modelId: concreteModelId } : {}),
+  };
+  const managedSelection = resolveManagedGooseProviderSelection(
+    runtimeConfigState.config,
+    requestedSelection,
   );
+  if (!managedSelection) return requestedSelection;
+  if (providerId === "goose") return managedSelection;
+  if (managedSelection.providerId !== providerId) {
+    throw new Error(
+      `Provider ${providerId} is outside the managed Goose provider policy.`,
+    );
+  }
+
+  // A concrete provider is renderer-owned. Policy may validate it, but must
+  // not replace its provider or inject a different provider's default model.
+  return requestedSelection;
 }
 
 /** Prepare or warm an ACP session ahead of the first prompt. */
@@ -341,22 +356,23 @@ export async function acpPrepareSession(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
   const selection = resolveGooseSessionSelection(providerId, options.modelId);
-  const snapshots = await sessionRegistry.prepareSession(
-    sessionId,
-    selection.providerId,
-    workingDir,
-    options,
-  );
-  if (selection.providerId !== providerId && selection.modelId) {
-    return mergeSessionConfigSnapshots(
-      snapshots ?? { model: null, reasoningEffort: null },
-      await sessionRegistry.applySessionModel(
-        sessionId,
-        selection.modelId,
-        options,
-      ),
-    );
-  }
+  const applyResolvedModel =
+    Boolean(options.modelId) || selection.providerId !== providerId;
+  const snapshots =
+    applyResolvedModel && selection.modelId
+      ? await sessionRegistry.configureSession(
+          sessionId,
+          selection.providerId,
+          workingDir,
+          selection.modelId,
+          options,
+        )
+      : await sessionRegistry.prepareSession(
+          sessionId,
+          selection.providerId,
+          workingDir,
+          options,
+        );
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
   );
@@ -399,10 +415,11 @@ export async function acpCreateSession(
   });
   try {
     if (!deferProviderSetup) {
-      configOptionsSnapshot = mergeSessionConfigSnapshots(
-        configOptionsSnapshot,
-        await directAcp.setProvider(sessionId, providerId),
+      const providerConfigSnapshot = await directAcp.setProvider(
+        sessionId,
+        providerId,
       );
+      configOptionsSnapshot = providerConfigSnapshot;
       logReasoningEffortInfo("acpCreateSession setProvider complete", {
         sessionId: shortLogId(sessionId),
         providerId,
@@ -419,13 +436,13 @@ export async function acpCreateSession(
         sessionId,
         providerId,
         workingDir,
+        providerConfigSnapshot?.model?.modelId,
       );
     }
     if (options.modelId) {
-      configOptionsSnapshot = mergeSessionConfigSnapshots(
-        configOptionsSnapshot,
-        await sessionRegistry.applySessionModel(sessionId, options.modelId),
-      );
+      configOptionsSnapshot =
+        (await sessionRegistry.applySessionModel(sessionId, options.modelId)) ??
+        configOptionsSnapshot;
     }
     return { sessionId, configOptionsSnapshot };
   } catch (error) {
@@ -442,40 +459,18 @@ export async function acpCreateSession(
   }
 }
 
-export async function acpSetModel(
-  sessionId: string,
-  modelId: string,
-  options: AcpSessionConfigApplyOptions = {},
-): Promise<AcpSessionConfigSnapshots | undefined> {
-  const providerId = sessionRegistry.getPreparedProviderId(sessionId);
-  if (!providerId) {
-    throw new Error("Session not prepared. Call acpPrepareSession first.");
-  }
-
-  const resolved = resolveGooseSessionSelection(providerId, modelId);
-  if (resolved.providerId !== providerId) {
-    throw new Error(
-      `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before setting its model.`,
-    );
-  }
-  // Runtime model inventories annotate recommendations; upstream-discovered
-  // models remain selectable for every allowed provider.
-
-  // Routed through the registry so repeat applies of the unchanged model are
-  // not sent over the wire (the backend rebuilds the provider on every set).
-  return sessionRegistry.applySessionModel(
-    sessionId,
-    resolved.modelId ?? modelId,
-    options,
-  );
-}
-
 export async function acpSetSessionConfigOption(
   sessionId: string,
   configId: string,
   value: string,
+  context: Omit<AcpSessionConfigSnapshotContext, "origin"> = {},
 ): Promise<AcpSessionConfigSnapshots> {
-  return directAcp.setSessionConfigOption(sessionId, configId, value);
+  return sessionRegistry.applySessionConfigOption(
+    sessionId,
+    configId,
+    value,
+    context,
+  );
 }
 
 export type { AcpSessionInfo, AcpSessionsPage };
@@ -520,43 +515,38 @@ export async function acpSearchSessions(
 export async function acpLoadSession(
   sessionId: string,
   workingDir?: string,
-): Promise<void> {
+): Promise<AcpSessionExecutionSelection | undefined> {
   const effectiveWorkingDir = workingDir ?? "~";
   const sid = sessionId.slice(0, 8);
   const t0 = performance.now();
   logReasoningEffortInfo("acpLoadSession start", {
     sessionId: shortLogId(sessionId),
   });
-  const rollbackSessionRegistration = sessionRegistry.registerPreparedSession(
-    sessionId,
-    "goose",
-    effectiveWorkingDir,
-  );
-  try {
-    perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
-    const response = await directAcp.loadSession(
-      sessionId,
-      effectiveWorkingDir,
-    );
-    const snapshots = readSessionConfigOptionsSnapshots(response);
-    logReasoningEffortInfo("acpLoadSession response", {
-      sessionId: shortLogId(sessionId),
-      hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
-      ...reasoningEffortConfigLogFields(
-        "reasoningEffort",
-        snapshots.reasoningEffort,
-      ),
-    });
-    applySessionConfigOptionsSnapshot(sessionId, response, {
-      origin: "response",
-    });
+  perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
+  const { response, isCurrent, executionSelection } =
+    await sessionRegistry.loadSession(sessionId, effectiveWorkingDir);
+  if (!isCurrent) {
     perfLog(
-      `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
+      `[perf:load] ${sid} dropped superseded load snapshot in ${(performance.now() - t0).toFixed(1)}ms`,
     );
-  } catch (error) {
-    rollbackSessionRegistration();
-    throw error;
+    return undefined;
   }
+  const snapshots = readSessionConfigOptionsSnapshots(response);
+  logReasoningEffortInfo("acpLoadSession response", {
+    sessionId: shortLogId(sessionId),
+    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+    ...reasoningEffortConfigLogFields(
+      "reasoningEffort",
+      snapshots.reasoningEffort,
+    ),
+  });
+  applySessionConfigOptionsSnapshot(sessionId, response, {
+    origin: "response",
+  });
+  perfLog(
+    `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
+  return executionSelection;
 }
 
 /** Export a session as JSON via the goose binary. */

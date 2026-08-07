@@ -231,16 +231,22 @@ export function AgentBuilderRail({
   );
 
   const provider = (data?.properties?.provider as string | undefined) ?? "";
+  const modelProviderId =
+    (data?.properties?.modelProviderId as string | undefined) ?? "";
   const model = (data?.properties?.model as string | undefined) ?? "";
 
-  const writeProperty = useCallback(
-    (key: "provider" | "model" | "avatar", value: string | null) => {
-      const patch: PersonaSourcePatch = {
-        properties: { [key]: value },
-      };
-      update(patch);
+  const writeProperties = useCallback(
+    (properties: PersonaSourcePatch["properties"]) => {
+      update({ properties });
     },
     [update],
+  );
+  const writeProperty = useCallback(
+    (
+      key: "provider" | "modelProviderId" | "model" | "avatar",
+      value: string | null,
+    ) => writeProperties({ [key]: value }),
+    [writeProperties],
   );
 
   const onSelectAvatar = useCallback(
@@ -374,13 +380,27 @@ export function AgentBuilderRail({
   const selectedAvatarMediaState = useAvatarMediaState(effectiveAvatar);
 
   const onChangeProvider = useCallback(
-    (next: string) => writeProperty("provider", next.length > 0 ? next : null),
-    [writeProperty],
+    (next: string) =>
+      writeProperties({
+        provider: next.length > 0 ? next : null,
+        modelProviderId: null,
+        model: null,
+      }),
+    [writeProperties],
   );
 
   const onChangeModel = useCallback(
-    (next: string) => writeProperty("model", next.length > 0 ? next : null),
-    [writeProperty],
+    (
+      selection: {
+        modelId: string;
+        modelProviderId: string;
+      } | null,
+    ) =>
+      writeProperties({
+        modelProviderId: selection?.modelProviderId ?? null,
+        model: selection?.modelId ?? null,
+      }),
+    [writeProperties],
   );
 
   const isDraft = data?.properties?.draft === true;
@@ -1048,6 +1068,7 @@ export function AgentBuilderRail({
 
       <ProviderModelFields
         provider={provider}
+        modelProviderId={modelProviderId}
         model={model}
         onProviderChange={onChangeProvider}
         onModelChange={onChangeModel}

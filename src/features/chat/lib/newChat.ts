@@ -1,12 +1,15 @@
 import type { Message } from "@/shared/types/messages";
 import type { ChatSession } from "../stores/chatSessionStore";
 import { isDefaultChatTitle } from "./sessionTitle";
+import {
+  sameSessionExecutionTarget,
+  type SessionExecutionTarget,
+} from "./sessionExecutionTarget";
 
 interface NewChatRequest {
   title: string;
   projectId?: string;
-  providerId?: string;
-  modelId?: string;
+  executionTarget?: SessionExecutionTarget;
   reasoningEffortValue?: string;
 }
 
@@ -26,8 +29,11 @@ function isMatchingContext(
 ): boolean {
   return (
     session.projectId === request.projectId &&
-    (!request.providerId || session.providerId === request.providerId) &&
-    (!request.modelId || session.modelId === request.modelId) &&
+    (!request.executionTarget ||
+      sameSessionExecutionTarget(
+        session.executionTarget,
+        request.executionTarget,
+      )) &&
     (!request.reasoningEffortValue ||
       session.reasoningEffort?.currentValue === request.reasoningEffortValue)
   );

@@ -21,7 +21,7 @@ describe("findExistingDraft", () => {
   it("reuses a matching project draft with content", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -41,7 +41,7 @@ describe("findExistingDraft", () => {
   it("does not reuse a matching project draft when draft reuse is disabled", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -62,7 +62,7 @@ describe("findExistingDraft", () => {
   it("does not reuse a draft from a different project", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -82,8 +82,12 @@ describe("findExistingDraft", () => {
   it("does not reuse a draft with a different requested provider or model", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
-      modelId: "default-model",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "default-model",
+        modelName: "Default model",
+      },
     });
 
     expect(
@@ -95,8 +99,12 @@ describe("findExistingDraft", () => {
         request: {
           title: "New Chat",
           projectId: "alpha",
-          providerId: "goose",
-          modelId: "specific-model",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "specific-model",
+            modelName: "Specific model",
+          },
         },
       }),
     ).toBeUndefined();
@@ -110,7 +118,12 @@ describe("findExistingDraft", () => {
         request: {
           title: "New Chat",
           projectId: "alpha",
-          providerId: "other-provider",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "other-provider",
+            modelId: "default-model",
+            modelName: "Default model",
+          },
         },
       }),
     ).toBeUndefined();
@@ -119,7 +132,7 @@ describe("findExistingDraft", () => {
   it("matches requested reasoning effort before reusing a draft", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       reasoningEffort: {
         configId: "thinking_effort",
         currentValue: "high",
@@ -139,7 +152,7 @@ describe("findExistingDraft", () => {
         request: {
           title: "New Chat",
           projectId: "alpha",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           reasoningEffortValue: "high",
         },
       }),
@@ -154,7 +167,7 @@ describe("findExistingDraft", () => {
         request: {
           title: "New Chat",
           projectId: "alpha",
-          providerId: "goose",
+          executionTarget: { harnessId: "goose" },
           reasoningEffortValue: "low",
         },
       }),
@@ -164,7 +177,7 @@ describe("findExistingDraft", () => {
   it("reuses a matching empty draft with a terminal", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -186,7 +199,7 @@ describe("findExistingDraft", () => {
     const draft = makeSession("backend-session", {
       clientSessionId: "client-session",
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -207,7 +220,7 @@ describe("findExistingDraft", () => {
   it("does not reuse an abandoned empty draft", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -227,7 +240,7 @@ describe("findExistingDraft", () => {
   it("reuses the active empty draft without content", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -247,7 +260,7 @@ describe("findExistingDraft", () => {
   it("does not reuse the active empty draft for a different project", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
     });
 
     expect(
@@ -267,7 +280,7 @@ describe("findExistingDraft", () => {
   it("does not reuse a session with local messages even if messageCount is 0", () => {
     const session = makeSession("alpha-session", {
       projectId: "alpha",
-      providerId: "goose",
+      executionTarget: { harnessId: "goose" },
       messageCount: 0,
     });
 

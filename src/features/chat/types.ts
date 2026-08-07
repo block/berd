@@ -9,6 +9,7 @@ import type {
 } from "@/shared/types/messages";
 import type { ChatSessionReasoningEffortConfig } from "./stores/chatSessionStore";
 import type { QueuedMessagePayload } from "./stores/chatStore";
+import type { SessionExecutionTarget } from "./lib/sessionExecutionTarget";
 
 export interface ModelOption {
   id: string;
@@ -45,10 +46,7 @@ export interface ChatSkillDraft {
 
 export interface ChatSendOptions {
   /** Internal snapshot used by delayed sends; not forwarded to ACP. */
-  sessionSelection?: {
-    providerId?: string;
-    modelId?: string;
-  };
+  sessionSelection?: SessionExecutionTarget;
   systemPrompt?: string;
   displayText?: string;
   assistantPrompt?: string;
@@ -129,6 +127,7 @@ export interface ChatInputAgentModelPicker {
   currentModelId?: string | null;
   currentModelProviderId?: string | null;
   currentModel?: string;
+  currentExecutionTarget?: SessionExecutionTarget;
   availableModels?: ModelOption[];
   modelsLoading?: boolean;
   modelStatusMessage?: string | null;

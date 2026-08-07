@@ -18,6 +18,11 @@ const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
 const mockArchiveSession = vi.fn();
+const noRequestProviderContext = { requestId: undefined };
+const noRequestModelContext = (providerId: string) => ({
+  providerId,
+  requestId: undefined,
+});
 
 const managedRuntimeConfig: RuntimeConfig = {
   schemaVersion: 1,
@@ -69,6 +74,32 @@ function setStyleGuidelinesPreference(prompt: string) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function executionConfigResponse(providerId: string, modelId: string) {
+  return {
+    configOptions: [
+      {
+        id: "provider",
+        kind: { type: "select", currentValue: providerId, options: [] },
+      },
+      {
+        id: "model",
+        category: "model",
+        kind: { type: "select", currentValue: modelId, options: [] },
+      },
+    ],
+  };
+}
+
 vi.mock("../acpApi", () => ({
   listProviders: vi.fn(),
   prompt: (...args: unknown[]) => mockPrompt(...args),
@@ -87,7 +118,9 @@ vi.mock("../acpApi", () => ({
   cancelSession: vi.fn(),
 }));
 
-const mockGetBerdctlPreamble = vi.fn<() => string | null>(() => null);
+const mockGetBerdctlPreamble = vi.fn<
+  () => string | null | Promise<string | null>
+>(() => null);
 
 vi.mock("@/features/berdctl/appPreamble", () => ({
   getBerdctlPreamble: () => mockGetBerdctlPreamble(),
@@ -380,6 +413,41 @@ describe("acpSendMessage", () => {
       "You are Starfriend.",
     );
   });
+
+  it("does not apply model config after prompt admission until the prompt finishes", async () => {
+    const promptSetup = deferred<string | null>();
+    const promptResponse = deferred<void>();
+    mockGetBerdctlPreamble.mockReturnValueOnce(promptSetup.promise);
+    mockPrompt.mockReturnValueOnce(promptResponse.promise);
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    const sessionId = "acp-session-prompt-config-race";
+    sessionRegistry.registerPreparedSession(
+      sessionId,
+      "codex-acp",
+      "/tmp/project",
+      "gpt-5.5",
+    );
+
+    const send = acpSendMessage(sessionId, "hello");
+    await vi.waitFor(() => expect(mockGetBerdctlPreamble).toHaveBeenCalled());
+    const setModel = sessionRegistry.applySessionModel(sessionId, "gpt-5.6");
+    await Promise.resolve();
+
+    expect(mockSetModel).not.toHaveBeenCalled();
+
+    promptSetup.resolve(null);
+    await vi.waitFor(() => expect(mockPrompt).toHaveBeenCalled());
+    expect(mockSetModel).not.toHaveBeenCalled();
+
+    promptResponse.resolve(undefined);
+    await send;
+    await setModel;
+
+    expect(mockPrompt.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetModel.mock.invocationCallOrder[0],
+    );
+  });
 });
 
 describe("acpLoadSession", () => {
@@ -399,6 +467,7 @@ describe("acpLoadSession", () => {
       "acp-session-1",
       "goose",
       "/tmp/original",
+      "gpt-5.6",
     );
 
     await expect(
@@ -406,6 +475,46 @@ describe("acpLoadSession", () => {
     ).rejects.toThrow("load failed");
 
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+    await sessionRegistry.applySessionModel("acp-session-1", "gpt-5.6");
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("registers the provider and model acknowledged by session load", async () => {
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("databricks_v2", "goose-gpt-5-6-sol"),
+    );
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    await acpLoadSession("acp-session-1", "/tmp/replay");
+    await acpPrepareSession("acp-session-1", "databricks_v2", "/tmp/replay", {
+      modelId: "goose-gpt-5-6-sol",
+    });
+
+    expect(mockLoadSession).toHaveBeenCalledTimes(1);
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a loaded session when its execution selection is unknown", async () => {
+    mockLoadSession.mockResolvedValueOnce({ configOptions: [] });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    await acpLoadSession("acp-session-1", "/tmp/replay");
+    await acpPrepareSession("acp-session-1", "openai", "/tmp/replay", {
+      modelId: "gpt-5.6",
+    });
+
+    expect(mockLoadSession).toHaveBeenCalledTimes(1);
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "acp-session-1",
+      "openai",
+      noRequestProviderContext,
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "acp-session-1",
+      "gpt-5.6",
+      noRequestModelContext("openai"),
+    );
   });
 
   it("hydrates reasoning effort from the load response config options", async () => {
@@ -457,12 +566,54 @@ describe("acpLoadSession", () => {
       { origin: "response" },
     );
   });
+
+  it("does not dispatch a load snapshot superseded by a UI configuration", async () => {
+    const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();
+    mockLoadSession.mockReturnValueOnce(loadResponse.promise);
+    mockSetProvider.mockResolvedValueOnce(undefined);
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const sessionRegistry = await import("../acpSessionRegistry");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-race",
+      "openai",
+      "/tmp/replay",
+      "gpt-5.6",
+    );
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    const load = acpLoadSession("acp-session-race", "/tmp/replay");
+    const configure = acpPrepareSession(
+      "acp-session-race",
+      "openai",
+      "/tmp/replay",
+      { modelId: "gpt-5.6" },
+    );
+    loadResponse.resolve(executionConfigResponse("openai", "gpt-5.5"));
+
+    await load;
+    await configure;
+
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "acp-session-race",
+      "gpt-5.6",
+      noRequestModelContext("openai"),
+    );
+  });
 });
 
 describe("acpCreateSession", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    mockSetProvider.mockReset();
+    mockSetProvider.mockResolvedValue({ model: null, reasoningEffort: null });
+    mockSetModel.mockReset();
+    mockSetModel.mockResolvedValue({ model: null, reasoningEffort: null });
     await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
@@ -493,7 +644,11 @@ describe("acpCreateSession", () => {
     });
     expect(mockLoadSession).not.toHaveBeenCalled();
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
-    expect(mockSetModel).toHaveBeenCalledWith("acp-session-1", "gpt-4.1");
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "acp-session-1",
+      "gpt-4.1",
+      noRequestModelContext("openai"),
+    );
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
 
@@ -564,6 +719,7 @@ describe("acpCreateSession", () => {
     expect(mockSetModel).toHaveBeenCalledWith(
       "acp-session-1",
       "claude-sonnet-4",
+      noRequestModelContext("anthropic"),
     );
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
@@ -572,25 +728,29 @@ describe("acpCreateSession", () => {
     mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
 
     const sessionRegistry = await import("../acpSessionRegistry");
-    const { acpCreateSession, acpPrepareSession, acpSetModel } = await import(
-      "../acp"
-    );
+    const { acpCreateSession, acpPrepareSession } = await import("../acp");
 
     const { sessionId } = await acpCreateSession("goose", "/tmp/project", {
       deferProviderSetup: true,
     });
 
-    await acpPrepareSession(sessionId, "anthropic", "/tmp/project");
-    await acpSetModel(sessionId, "claude-sonnet-4");
+    await acpPrepareSession(sessionId, "anthropic", "/tmp/project", {
+      modelId: "claude-sonnet-4",
+    });
 
     expect(mockLoadSession).toHaveBeenCalledWith(
       "acp-session-1",
       "/tmp/project",
     );
-    expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "anthropic");
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "acp-session-1",
+      "anthropic",
+      noRequestProviderContext,
+    );
     expect(mockSetModel).toHaveBeenCalledWith(
       "acp-session-1",
       "claude-sonnet-4",
+      noRequestModelContext("anthropic"),
     );
     expect(mockLoadSession.mock.invocationCallOrder[0]).toBeLessThan(
       mockSetProvider.mock.invocationCallOrder[0],
@@ -660,41 +820,58 @@ describe("acpCreateSession", () => {
       },
     });
   });
-});
 
-describe("acpSetModel", () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
+  it("does not resurrect provider defaults absent from the final model snapshot", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
+    mockSetProvider.mockResolvedValueOnce({
+      model: { modelId: "gpt-5.5", modelName: "GPT-5.5" },
+      reasoningEffort: reasoningEffortSnapshot,
+    });
+    mockSetModel.mockResolvedValueOnce({
+      model: { modelId: "claude-fable", modelName: "Claude Fable" },
+      reasoningEffort: null,
+    });
+
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(
+      acpCreateSession("anthropic", "/tmp/project", {
+        modelId: "claude-fable",
+      }),
+    ).resolves.toEqual({
+      sessionId: "acp-session-1",
+      configOptionsSnapshot: {
+        model: { modelId: "claude-fable", modelName: "Claude Fable" },
+        reasoningEffort: null,
+      },
+    });
   });
 
-  it("skips redundant wire calls when the model is unchanged", async () => {
-    const sessionRegistry = await import("../acpSessionRegistry");
-    const { acpSetModel } = await import("../acp");
+  it("rejects an explicit provider outside managed policy before creating", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const { acpCreateSession } = await import("../acp");
 
-    sessionRegistry.registerPreparedSession(
-      "acp-session-model",
-      "codex-acp",
-      "/tmp/project",
+    await expect(
+      acpCreateSession("missing-provider", "/tmp/project", {
+        modelId: "goose-gpt-5-5",
+      }),
+    ).rejects.toThrow("outside the managed Goose provider policy");
+
+    expect(mockNewSession).not.toHaveBeenCalled();
+  });
+
+  it("does not inject the default model for another explicit provider", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockNewSession.mockResolvedValue({ sessionId: "other-session" });
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("other-managed", "/tmp/project");
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "other-session",
+      "other-managed",
     );
-
-    // The chat send path re-applies the session config before every message;
-    // only the first apply of a given model may reach the wire (the backend
-    // rebuilds the provider on every set, destroying ACP child threads).
-    await acpSetModel("acp-session-model", "gpt-5.5");
-    await acpSetModel("acp-session-model", "gpt-5.5");
-    await acpSetModel("acp-session-model", "gpt-5.5");
-
-    expect(mockSetModel).toHaveBeenCalledTimes(1);
-    expect(mockSetModel).toHaveBeenCalledWith("acp-session-model", "gpt-5.5");
-
-    await acpSetModel("acp-session-model", "gpt-5.4");
-    expect(mockSetModel).toHaveBeenCalledTimes(2);
-    expect(mockSetModel).toHaveBeenLastCalledWith(
-      "acp-session-model",
-      "gpt-5.4",
-    );
+    expect(mockSetModel).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -719,64 +896,7 @@ describe("acpSetModel", () => {
     expect(mockSetModel).toHaveBeenCalledWith(
       `session-${harnessId}`,
       "harness-model",
-    );
-  });
-
-  it("dedupes the model applied during acpCreateSession", async () => {
-    mockNewSession.mockResolvedValue({ sessionId: "acp-session-created" });
-
-    const { acpCreateSession, acpSetModel } = await import("../acp");
-
-    await acpCreateSession("codex-acp", "/tmp/project", {
-      modelId: "gpt-5.5",
-    });
-    expect(mockSetModel).toHaveBeenCalledTimes(1);
-
-    await acpSetModel("acp-session-created", "gpt-5.5");
-    expect(mockSetModel).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects model changes for sessions that have not been prepared", async () => {
-    const { acpSetModel } = await import("../acp");
-
-    await expect(
-      acpSetModel("unknown-session", "legacy-model"),
-    ).rejects.toThrow("Session not prepared");
-    expect(mockSetModel).not.toHaveBeenCalled();
-  });
-
-  it("rejects model changes until a disallowed provider is re-prepared", async () => {
-    await setRuntimeConfig(managedRuntimeConfig);
-    const sessionRegistry = await import("../acpSessionRegistry");
-    const { acpSetModel } = await import("../acp");
-    sessionRegistry.registerPreparedSession(
-      "legacy-session",
-      "databricks",
-      "/tmp/project",
-    );
-
-    await expect(
-      acpSetModel("legacy-session", "goose-gpt-5-5"),
-    ).rejects.toThrow("outside the managed Goose provider policy");
-    expect(mockSetModel).not.toHaveBeenCalled();
-  });
-
-  it("allows upstream models omitted from runtime recommendation metadata", async () => {
-    await setRuntimeConfig(managedRuntimeConfig);
-    const sessionRegistry = await import("../acpSessionRegistry");
-    const { acpSetModel } = await import("../acp");
-    sessionRegistry.registerPreparedSession(
-      "other-session",
-      "other-managed",
-      "/tmp/project",
-    );
-
-    await expect(
-      acpSetModel("other-session", "new-upstream-model"),
-    ).resolves.toBeUndefined();
-    expect(mockSetModel).toHaveBeenCalledWith(
-      "other-session",
-      "new-upstream-model",
+      noRequestModelContext(harnessId),
     );
   });
 });
@@ -883,35 +1003,59 @@ describe("acpPrepareSession", () => {
 
     await expect(
       acpPrepareSession("acp-session-1", "openai", "/tmp/project"),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ model: null, reasoningEffort: null });
 
     expect(mockLoadSession).toHaveBeenCalledWith(
       "acp-session-1",
       "/tmp/project",
     );
     expect(mockNewSession).not.toHaveBeenCalled();
-    expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "acp-session-1",
+      "openai",
+      noRequestProviderContext,
+    );
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
 
-  it("migrates a provider missing from the catalog without depending on catalog load order", async () => {
+  it("rejects a provider outside managed policy before loading the session", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
-    mockLoadSession.mockResolvedValue(undefined);
     const { acpPrepareSession } = await import("../acp");
 
-    await acpPrepareSession(
-      "legacy-session",
-      "missing-provider",
-      "/tmp/project",
+    await expect(
+      acpPrepareSession("legacy-session", "missing-provider", "/tmp/project"),
+    ).rejects.toThrow(
+      "Provider missing-provider is outside the managed Goose provider policy",
     );
+    expect(mockLoadSession).not.toHaveBeenCalled();
+  });
 
-    expect(mockSetProvider).toHaveBeenCalledWith(
-      "legacy-session",
-      "databricks_v2",
-    );
+  it("rejects the Goose model sentinel before loading the session", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const { acpPrepareSession } = await import("../acp");
+
+    await expect(
+      acpPrepareSession("acp-session-1", "databricks_v2", "/tmp/project", {
+        modelId: "goose",
+      }),
+    ).rejects.toThrow("Invalid model id: goose");
+
+    expect(mockLoadSession).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("allows upstream models omitted from recommendation metadata", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const { acpPrepareSession } = await import("../acp");
+
+    await acpPrepareSession("other-session", "other-managed", "/tmp/project", {
+      modelId: "new-upstream-model",
+    });
+
     expect(mockSetModel).toHaveBeenCalledWith(
-      "legacy-session",
-      "goose-gpt-5-5",
+      "other-session",
+      "new-upstream-model",
+      noRequestModelContext("other-managed"),
     );
   });
 

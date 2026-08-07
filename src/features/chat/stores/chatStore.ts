@@ -27,6 +27,7 @@ import {
   loadCachedUnreadSessionIds,
   persistUnreadSessionIds,
 } from "./unreadPersistence";
+import type { SessionExecutionTarget } from "../lib/sessionExecutionTarget";
 
 const MESSAGE_SESSION_CACHE_LIMIT = 10;
 
@@ -345,8 +346,7 @@ function findLatestInterventionMessageId(messages: Message[]): string | null {
 export interface QueuedMessagePayload {
   text: string;
   personaId?: string;
-  providerId?: string;
-  modelId?: string;
+  executionTarget?: SessionExecutionTarget;
   attachments?: ChatAttachmentDraft[];
   sendOptions?: ChatSendOptions;
   /** False for reliable startup handoffs that should not look user-queued. */

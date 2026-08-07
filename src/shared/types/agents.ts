@@ -14,6 +14,7 @@ export interface Persona {
   avatar?: Avatar | null;
   systemPrompt: string;
   provider?: ProviderType;
+  modelProviderId?: string;
   model?: string;
   isBuiltin: boolean;
   writable: boolean;
@@ -28,6 +29,7 @@ export interface CreatePersonaRequest {
   avatar?: Avatar | null;
   systemPrompt: string;
   provider?: ProviderType;
+  modelProviderId?: string;
   model?: string;
 }
 
@@ -36,6 +38,7 @@ export interface UpdatePersonaRequest {
   avatar?: Avatar | null;
   systemPrompt?: string;
   provider?: ProviderType | null;
+  modelProviderId?: string | null;
   model?: string | null;
 }
 

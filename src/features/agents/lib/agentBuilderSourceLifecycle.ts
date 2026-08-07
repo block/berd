@@ -31,7 +31,10 @@ export async function listAgentBuilderSources(): Promise<AgentSourceEntry[]> {
 
 export interface DraftAgentDefaults {
   provider?: string;
-  model?: string;
+  modelSelection?: {
+    modelProviderId: string;
+    modelId: string;
+  };
 }
 
 export async function createDraftAgentSource(
@@ -45,8 +48,9 @@ export async function createDraftAgentSource(
   if (defaults?.provider) {
     properties.provider = defaults.provider;
   }
-  if (defaults?.model) {
-    properties.model = defaults.model;
+  if (defaults?.modelSelection) {
+    properties.modelProviderId = defaults.modelSelection.modelProviderId;
+    properties.model = defaults.modelSelection.modelId;
   }
 
   const request: CreatePersonaSourceRequest = {

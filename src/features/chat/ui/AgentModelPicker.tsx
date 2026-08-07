@@ -15,10 +15,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { cn } from "@/shared/lib/cn";
-import {
-  logReasoningEffortInfo,
-  reasoningEffortConfigLogFields,
-} from "@/shared/lib/reasoningEffortDiagnostics";
 import { Button } from "@/shared/ui/button";
 import { ComposerActionButton } from "@/shared/ui/composer-action-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
@@ -220,7 +216,18 @@ export function AgentModelPicker({
     availableModels,
   });
   const displayedModels = useMemo(() => {
-    if (!currentModelId || !displayModelLabel) {
+    const currentModelBelongsToSelectedAgent =
+      selectedAgentId === "goose"
+        ? Boolean(currentModelProviderId) &&
+          availableModels.some(
+            (model) => model.providerId === currentModelProviderId,
+          )
+        : currentModelProviderId === selectedAgentId;
+    if (
+      !currentModelId ||
+      !displayModelLabel ||
+      !currentModelBelongsToSelectedAgent
+    ) {
       return availableModels;
     }
 
@@ -254,6 +261,7 @@ export function AgentModelPicker({
     currentModelId,
     currentModelProviderId,
     displayModelLabel,
+    selectedAgentId,
   ]);
   const triggerLabel = showSelectedModelInTrigger
     ? resolvePickerTriggerLabel({
@@ -391,28 +399,6 @@ export function AgentModelPicker({
     target?.focus();
   }, [providerRevealed]);
 
-  useEffect(() => {
-    logReasoningEffortInfo("model picker gate", {
-      open,
-      hasConfig: Boolean(reasoningEffortConfig),
-      hasLiveReasoningEffort,
-      isReasoningEffortPending,
-      showReasoningEffort,
-      showReasoningEffortColumn,
-      ...reasoningEffortConfigLogFields(
-        "config",
-        renderedReasoningEffortConfig,
-      ),
-    });
-  }, [
-    hasLiveReasoningEffort,
-    isReasoningEffortPending,
-    open,
-    reasoningEffortConfig,
-    renderedReasoningEffortConfig,
-    showReasoningEffort,
-    showReasoningEffortColumn,
-  ]);
   const resolveContentAlign = useCallback((): PopoverContentAlign => {
     if (contentAlign !== "smart") {
       return contentAlign;

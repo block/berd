@@ -16,6 +16,8 @@ import { setExperimentEnabled } from "@/features/experiments/experimentPreferenc
 import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { AgentsView } from "../AgentsView";
 
+const mockCreatePersona = vi.hoisted(() => vi.fn());
+
 const mockDraftSource = vi.hoisted(() => ({
   type: "agent",
   path: "/Users/x/.agents/agents/draft-session.md",
@@ -67,7 +69,7 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/features/agents/hooks/usePersonas", () => ({
   usePersonas: () => ({
-    createPersona: vi.fn(),
+    createPersona: mockCreatePersona,
     deletePersona: vi.fn(),
     refreshFromDisk: vi.fn(),
   }),
@@ -354,6 +356,38 @@ describe("AgentsView entry points", () => {
     });
   });
 
+  it("preserves the provider-qualified model when duplicating an agent", async () => {
+    const qualifiedPersona = {
+      ...persona,
+      provider: "goose",
+      modelProviderId: "openai",
+      model: "gpt-5.6",
+    };
+    useAgentStore.setState({ personas: [qualifiedPersona] });
+
+    render(
+      <AgentsView
+        activePersonaId={qualifiedPersona.id}
+        onStartAgentBuilderSession={vi.fn()}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "detail.moreActions" }),
+    );
+    await user.click(
+      screen.getByRole("menuitem", { name: "common:actions.duplicate" }),
+    );
+
+    expect(mockCreatePersona).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "goose",
+        modelProviderId: "openai",
+        model: "gpt-5.6",
+      }),
+    );
+  });
   it("exports agents through the native save dialog in Tauri", async () => {
     const createObjectUrl = vi.spyOn(URL, "createObjectURL");
     vi.mocked(exportPersona).mockResolvedValue(exportedPersona);

@@ -7,13 +7,11 @@ import { useChatSessionStore } from "../../stores/chatSessionStore";
 const mockAcpSendMessage = vi.fn();
 const mockAcpCancelSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
-const mockAcpSetModel = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
   acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
-  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
 import { MAX_PROMPT_ATTACHMENT_BYTES } from "../../lib/attachmentPayloadBudget";
@@ -45,7 +43,6 @@ describe("useChat attachments", () => {
     });
     mockAcpCancelSession.mockResolvedValue(true);
     mockAcpPrepareSession.mockResolvedValue(undefined);
-    mockAcpSetModel.mockResolvedValue(undefined);
   });
 
   it("stores non-image attachments in metadata and appends absolute paths to the prompt", async () => {

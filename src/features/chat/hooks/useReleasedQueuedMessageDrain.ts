@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { i18n } from "@/shared/i18n";
 
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { useChatStore } from "@/features/chat/stores/chatStore";
@@ -53,10 +54,22 @@ function drainReleasedQueuedMessage(sessionId: string): void {
       }
     })
     .catch((error) => {
+      const message = i18n.t("chat:queue.releasedSendFailed");
       console.error(
         `[released-queue] failed to send queued prompt for session ${sessionId}`,
         error,
       );
+      const current =
+        useChatStore.getState().queuedMessageBySession[sessionId]?.[0];
+      if (current === queuedMessage) {
+        useChatStore
+          .getState()
+          .deferTransportReadyMessage(sessionId, queuedMessage.recordId, {
+            type: "workspace-first-send",
+            status: "failed",
+            error: message,
+          });
+      }
     })
     .finally(() => {
       drainingSessionIds.delete(sessionId);

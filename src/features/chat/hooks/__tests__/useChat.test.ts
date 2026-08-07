@@ -21,7 +21,6 @@ const mockAcpSteerMessage = vi.fn();
 const mockAcpCancelSession = vi.fn();
 const mockAcpLoadSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
-const mockAcpSetModel = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
   acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
@@ -29,7 +28,6 @@ vi.mock("@/shared/api/acp", () => ({
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
-  acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
 import { handleSessionNotification } from "../../acp/acpNotificationHandler";
@@ -91,7 +89,6 @@ describe("useChat", () => {
     mockAcpCancelSession.mockReset();
     mockAcpLoadSession.mockReset();
     mockAcpPrepareSession.mockReset();
-    mockAcpSetModel.mockReset();
     clearReplayBuffer("session-1");
     clearReplayBuffer("session-2");
     clearStreamingMessageOwners();
@@ -143,7 +140,6 @@ describe("useChat", () => {
     mockAcpCancelSession.mockResolvedValue(true);
     mockAcpLoadSession.mockResolvedValue(undefined);
     mockAcpPrepareSession.mockResolvedValue(undefined);
-    mockAcpSetModel.mockResolvedValue(undefined);
   });
 
   it("marks the streaming message stopped only after cancellation succeeds", async () => {
@@ -1621,9 +1617,12 @@ describe("useChat", () => {
         {
           id: "session-1",
           title: "New Chat",
-          providerId: "openai",
-          modelId: "gpt-4.1",
-          modelName: "GPT-4.1",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4.1",
+            modelName: "GPT-4.1",
+          },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           messageCount: 0,

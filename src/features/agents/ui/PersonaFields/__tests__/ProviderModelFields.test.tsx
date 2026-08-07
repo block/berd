@@ -77,7 +77,7 @@ describe("ProviderModelFields", () => {
     mocks.getError.mockReturnValue(null);
   });
 
-  it("selects ready providers and clears the saved model", async () => {
+  it("selects a ready provider", async () => {
     const user = userEvent.setup();
     const props = renderFields({ model: "old-model" });
 
@@ -85,7 +85,33 @@ describe("ProviderModelFields", () => {
     await user.click(await screen.findByRole("option", { name: "Goose" }));
 
     expect(props.onProviderChange).toHaveBeenCalledWith("goose");
-    expect(props.onModelChange).toHaveBeenCalledWith("");
+  });
+
+  it("keeps the concrete provider when model ids overlap", async () => {
+    mocks.getModelsForAgent.mockReturnValue([
+      {
+        id: "shared-model",
+        name: "Shared OpenAI model",
+        providerId: "openai",
+      },
+      {
+        id: "shared-model",
+        name: "Shared Databricks model",
+        providerId: "databricks_v2",
+      },
+    ]);
+    const user = userEvent.setup();
+    const props = renderFields({ provider: "goose" });
+
+    await user.click(screen.getAllByRole("combobox")[1]);
+    await user.click(
+      await screen.findByRole("option", { name: "Shared Databricks model" }),
+    );
+
+    expect(props.onModelChange).toHaveBeenCalledWith({
+      modelId: "shared-model",
+      modelProviderId: "databricks_v2",
+    });
   });
 
   it("routes unconnected providers to AI Providers settings without selecting them", async () => {

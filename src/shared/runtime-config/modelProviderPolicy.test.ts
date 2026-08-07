@@ -58,7 +58,7 @@ describe("resolveManagedGooseProviderSelection", () => {
     ).toEqual({ providerId: "databricks_v2", modelId: "shared-model" });
   });
 
-  it("preserves a Databricks model when live inventory cannot be validated", () => {
+  it("repairs the legacy Goose model sentinel without live inventory", () => {
     expect(
       resolveManagedGooseProviderSelection(managedConfig, {
         providerId: "databricks",
@@ -66,7 +66,7 @@ describe("resolveManagedGooseProviderSelection", () => {
       }),
     ).toEqual({
       providerId: "databricks_v2",
-      modelId: "goose",
+      modelId: "goose-gpt-5-5",
     });
   });
 
