@@ -582,6 +582,7 @@
       "applyUpdates": "Actualizar",
       "description": "Conecta un proveedor de modelos para usar Goose, o conecta otro harness de agente.",
       "refresh": "Actualizar",
+      "collapseLabel": "Contraer detalles de {{name}}",
       "errors": {
         "genericSetupFailure": "La configuración tuvo un tropiezo.",
         "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal.",
@@ -589,6 +590,7 @@
         "unknownPlatform": "otra plataforma",
         "installStart": "No se pudo iniciar la instalación"
       },
+      "expandLabel": "Expandir detalles de {{name}}",
       "fix": "Reparar",
       "fixLabel": "Reparar {{name}}",
       "install": "Instalar",
@@ -748,7 +750,8 @@
           "local": "Este proveedor se ejecuta localmente y no necesita ajustes guardados.",
           "oauthGuided": "Berd te guiará por el inicio de sesión.",
           "oauthTerminal": "Ejecuta `goose configure` en tu terminal para terminar de iniciar sesión."
-        }
+        },
+        "configLoadFallback": "No se pudieron cargar los ajustes del proveedor. Aún puedes ingresar valores y guardar."
       },
       "checkingStatus": "Comprobando estado del proveedor...",
       "title": "Proveedores de modelos"

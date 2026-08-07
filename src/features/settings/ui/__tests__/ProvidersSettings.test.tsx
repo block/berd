@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -315,8 +322,8 @@ describe("ProvidersSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the loaded provider catalog while credential status is loading", async () => {
-    const user = userEvent.setup();
+  it("falls back to provider rows when credential status loading stalls", async () => {
+    vi.useFakeTimers();
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(),
       loading: true,
@@ -331,12 +338,170 @@ describe("ProvidersSettings", () => {
       credentialRevision: 0,
     });
 
+    try {
+      renderProviders(<ProvidersSettings />);
+
+      expect(
+        screen.getAllByText("Checking provider status...").length,
+      ).toBeGreaterThan(0);
+      expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Connect a model provider"),
+      ).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      expect(
+        screen.getAllByText("Connect a model provider").length,
+      ).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole("button", { name: /model providers/i }));
+      expect(screen.getByText("Anthropic")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /add provider/i }),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to provider rows when stored provider secrets stall", async () => {
+    vi.useFakeTimers();
+    let resolveStalledSecrets: (
+      value: Awaited<ReturnType<typeof mocks.listProviderSecrets>>,
+    ) => void = () => {};
+    mocks.listProviderSecrets.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStalledSecrets = resolve;
+      }),
+    );
+    const credentials = {
+      configuredIds: new Set<string>(),
+      loading: false,
+      saving: false,
+      savingProviderIds: new Set<string>(),
+      syncingProviderIds: new Set<string>(),
+      modelWarnings: new Map<string, string>(),
+      getConfig: vi.fn().mockResolvedValue([]),
+      save: vi.fn(),
+      remove: vi.fn(),
+      completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
+    };
+    mocks.useCredentials.mockReturnValue(credentials);
+
+    try {
+      const rendered = renderProviders(<ProvidersSettings />);
+
+      expect(
+        screen.getAllByText("Checking provider status...").length,
+      ).toBeGreaterThan(0);
+      expect(
+        screen.queryByText("Connect a model provider"),
+      ).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      expect(
+        screen.getAllByText("Connect a model provider").length,
+      ).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole("button", { name: /model providers/i }));
+      expect(screen.getByText("Anthropic")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /add provider/i }),
+      ).toBeInTheDocument();
+
+      mocks.listProviderSecrets.mockResolvedValueOnce([]);
+      mocks.useCredentials.mockReturnValue({
+        ...credentials,
+        credentialRevision: 1,
+      });
+      rendered.rerender(
+        <QueryClientProvider client={new QueryClient()}>
+          <ProvidersSettings />
+        </QueryClientProvider>,
+      );
+      await act(async () => {
+        resolveStalledSecrets([
+          {
+            id: "provider_cache:openai",
+            provider: "openai",
+            providerDisplayName: "OpenAI",
+            name: "API key",
+            storage: "provider_cache",
+            status: "valid",
+            configured: true,
+            hasSecret: true,
+            canDelete: true,
+            canConfigure: true,
+          },
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(mocks.listProviderSecrets).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("Active")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash connect prompt while stored provider secrets load", async () => {
+    let resolveSecrets: (
+      value: Awaited<ReturnType<typeof mocks.listProviderSecrets>>,
+    ) => void = () => {};
+    mocks.listProviderSecrets.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSecrets = resolve;
+      }),
+    );
+    mocks.useCredentials.mockReturnValue({
+      configuredIds: new Set<string>(),
+      loading: false,
+      saving: false,
+      savingProviderIds: new Set<string>(),
+      syncingProviderIds: new Set<string>(),
+      modelWarnings: new Map<string, string>(),
+      getConfig: vi.fn().mockResolvedValue([]),
+      save: vi.fn(),
+      remove: vi.fn(),
+      completeNativeSetup: vi.fn(),
+      credentialRevision: 0,
+    });
+
     renderProviders(<ProvidersSettings />);
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    expect(
+      screen.getAllByText("Checking provider status...").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Connect a model provider"),
+    ).not.toBeInTheDocument();
 
-    expect(screen.getByText("Anthropic")).toBeInTheDocument();
-    expect(screen.getByText("Checking provider status...")).toBeInTheDocument();
+    resolveSecrets([
+      {
+        id: "provider_cache:openai",
+        provider: "openai",
+        providerDisplayName: "OpenAI",
+        name: "API key",
+        storage: "provider_cache",
+        status: "valid",
+        configured: true,
+        hasSecret: true,
+        canDelete: true,
+        canConfigure: true,
+      },
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0);
+    });
+    expect(
+      screen.queryByText("Connect a model provider"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an unconfigured runtime-managed provider with a Connect action", async () => {
@@ -354,13 +519,13 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
     await user.click(screen.getByRole("button", { name: "Databricks" }));
 
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 
-  it("does not summarize default-ready providers as connected", () => {
+  it("does not summarize default-ready providers as connected", async () => {
     useProviderCatalogStore.getState().mergeEntries([
       {
         id: "aws_bedrock",
@@ -438,8 +603,16 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
-    expect(screen.getByText("Connect a model provider")).toBeInTheDocument();
-    expect(screen.queryByText("Databricks")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("Connect a model provider").length,
+      ).toBeGreaterThan(0);
+    });
+    expect(
+      screen
+        .queryAllByText("Databricks")
+        .every((node) => node.closest('[aria-hidden="true"]') !== null),
+    ).toBe(true);
     expect(
       screen.queryByText(/AWS Bedrock, LM Studio, Atomic Chat/),
     ).not.toBeInTheDocument();
@@ -522,7 +695,7 @@ describe("ProvidersSettings", () => {
     });
 
     renderProviders(<ProvidersSettings />);
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
 
     // The user-touched provider earns the Configured tag but stays out of
     // the Active summary; the default-only provider stays out of the main page.
@@ -578,10 +751,17 @@ describe("ProvidersSettings", () => {
     mocks.useCredentials.mockReturnValue(credentials);
 
     const rendered = renderProviders(<ProvidersSettings />);
-    await user.click(screen.getByRole("button", { name: /goose/i }));
-    expect(await screen.findByText("GitHub Copilot")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
+    expect(
+      (await screen.findAllByText("GitHub Copilot")).length,
+    ).toBeGreaterThan(0);
 
-    mocks.listProviderSecrets.mockRejectedValueOnce(new Error("offline"));
+    let rejectCredentialRefresh: (error: Error) => void = () => {};
+    mocks.listProviderSecrets.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectCredentialRefresh = reject;
+      }),
+    );
     mocks.useCredentials.mockReturnValue({
       ...credentials,
       credentialRevision: 1,
@@ -591,6 +771,16 @@ describe("ProvidersSettings", () => {
         <ProvidersSettings />
       </QueryClientProvider>,
     );
+
+    expect(screen.getAllByText("GitHub Copilot").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Checking provider status..."),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      rejectCredentialRefresh(new Error("offline"));
+      await Promise.resolve();
+    });
 
     await waitFor(() => {
       expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
@@ -642,7 +832,7 @@ describe("ProvidersSettings", () => {
     renderProviders(<ProvidersSettings />);
     expect(await screen.findByText("OpenAI, Databricks")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
 
     const openai = screen.getByText("OpenAI");
     const databricks = screen.getByText("Databricks");
@@ -662,7 +852,7 @@ describe("ProvidersSettings", () => {
     const user = userEvent.setup();
     renderProviders(<ProvidersSettings />);
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
     expect(screen.getAllByRole("button", { name: "OpenAI" })).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: /add provider/i }));
@@ -683,7 +873,7 @@ describe("ProvidersSettings", () => {
     ]);
 
     renderProviders(<ProvidersSettings />);
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
 
     expect(await screen.findByText("My Provider")).toBeInTheDocument();
     expect(mocks.listCustomProviders).toHaveBeenCalledTimes(1);
@@ -694,7 +884,7 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
 
     expect(
       screen.getByRole("button", { name: /add provider/i }),
@@ -741,7 +931,7 @@ describe("ProvidersSettings", () => {
     });
     renderProviders(<ProvidersSettings />);
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
 
     expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
@@ -765,7 +955,7 @@ describe("ProvidersSettings", () => {
 
     renderProviders(<ProvidersSettings />);
 
-    await user.click(screen.getByRole("button", { name: /goose/i }));
+    await user.click(screen.getByRole("button", { name: /model providers/i }));
 
     expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();

@@ -132,14 +132,14 @@ export function getFieldSetupDescription(
 export function renderInlineCodeMessage(message: string) {
   const tokens = message.split(/(`[^`]+`|\*\*[^*]+\*\*)/);
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className="text-sm text-muted-foreground">
       {tokens.map((token, index) => {
         if (token.startsWith("`") && token.endsWith("`")) {
           return (
             <code
               // biome-ignore lint/suspicious/noArrayIndexKey: tokens come from a deterministic split of a static message
               key={`code-${index}`}
-              className="rounded bg-muted px-1 py-0.5 text-xxs"
+              className="rounded bg-muted px-1 py-0.5 text-sm"
             >
               {token.slice(1, -1)}
             </code>
@@ -171,5 +171,5 @@ export function renderSetupMessage(message: string | null) {
     return renderInlineCodeMessage(message);
   }
 
-  return <p className="text-xs text-muted-foreground">{message}</p>;
+  return <p className="text-sm text-muted-foreground">{message}</p>;
 }

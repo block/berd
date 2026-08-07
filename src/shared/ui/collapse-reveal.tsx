@@ -1,8 +1,12 @@
 import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
 
-const COLLAPSE_TRANSITION_CLASS =
-  "duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+const COLLAPSE_TRANSITION_CLASS = {
+  default:
+    "duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+  deliberate:
+    "duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+} as const;
 
 /**
  * Shared expand/collapse animation for vertically revealed content
@@ -18,16 +22,23 @@ export function CollapseReveal({
   open,
   children,
   className,
+  pace = "default",
+  id,
 }: {
   open: boolean;
   children: ReactNode;
   className?: string;
+  pace?: keyof typeof COLLAPSE_TRANSITION_CLASS;
+  id?: string;
 }) {
+  const transitionClass = COLLAPSE_TRANSITION_CLASS[pace];
+
   return (
     <div
+      id={id}
       className={cn(
         "grid transition-[grid-template-rows,opacity]",
-        COLLAPSE_TRANSITION_CLASS,
+        transitionClass,
         open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         className,
       )}
@@ -38,7 +49,7 @@ export function CollapseReveal({
         <div
           className={cn(
             "transition-transform",
-            COLLAPSE_TRANSITION_CLASS,
+            transitionClass,
             open ? "translate-y-0" : "-translate-y-1",
           )}
         >

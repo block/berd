@@ -585,6 +585,7 @@
       "applyUpdates": "Update",
       "description": "Connect a model provider to use Goose, or connect another agent harness.",
       "refresh": "Refresh",
+      "collapseLabel": "Collapse {{name}} details",
       "errors": {
         "genericSetupFailure": "Setup hit a snag.",
         "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal.",
@@ -592,6 +593,7 @@
         "unknownPlatform": "another platform",
         "installStart": "Couldn’t start installation"
       },
+      "expandLabel": "Expand {{name}} details",
       "fix": "Fix",
       "fixLabel": "Fix {{name}}",
       "install": "Install",
@@ -751,7 +753,8 @@
           "local": "This provider runs locally and doesn't need saved settings.",
           "oauthGuided": "Berd will guide you through sign-in.",
           "oauthTerminal": "Run `goose configure` in your terminal to finish sign-in."
-        }
+        },
+        "configLoadFallback": "Couldn't load provider settings. You can still enter values and save."
       },
       "checkingStatus": "Checking provider status...",
       "title": "Model providers"

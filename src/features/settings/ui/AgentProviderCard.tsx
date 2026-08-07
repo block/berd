@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type MouseEvent,
@@ -11,6 +13,7 @@ import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { ExpandableCard } from "@/shared/ui/card";
+import { CollapseReveal } from "@/shared/ui/collapse-reveal";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { Spinner } from "@/shared/ui/spinner";
 import {
@@ -70,10 +73,13 @@ interface AgentProviderCardProps {
   ) => void;
   onProviderReady?: (providerId: string) => void;
   onInstallComplete?: (providerId: string) => void;
+  onDisclosureOpenChange?: (open: boolean) => void;
   // Optional collapsible region rendered inside the card below the header
   // row (the goose card hosts its model providers here). Purely
   // presentational: the parent owns the content.
   expandedContent?: ReactNode;
+  expandableLabel?: ReactNode;
+  collapsedSummary?: ReactNode;
   collapsedSupplement?: ReactNode;
   statusIndicator?: ReactNode;
   // Makes a custom status indicator an explicit shortcut into the card's
@@ -81,6 +87,8 @@ interface AgentProviderCardProps {
   statusIndicatorOpensDetails?: boolean;
   /** Goose keeps its expandable harness card; other agents use SettingsRow. */
   presentation?: "card" | "row";
+  /** Adds an inline disclosure card below the settings row when expandable details are present. */
+  showDisclosure?: boolean;
   /** Starts installation on mount once readiness has finished loading. */
   autoStartInstall?: boolean;
   /** Hides the pre-install card action while an automatic install starts. */
@@ -99,11 +107,15 @@ export function AgentProviderCard({
   onStartTroubleshootingChat,
   onProviderReady,
   onInstallComplete,
+  onDisclosureOpenChange,
   expandedContent,
+  expandableLabel,
+  collapsedSummary,
   collapsedSupplement,
   statusIndicator,
   statusIndicatorOpensDetails = false,
-  presentation = "card",
+  presentation = "row",
+  showDisclosure = false,
   autoStartInstall = false,
   autoInstallProgressOnly = false,
   simulateAutoInstall = false,
@@ -139,6 +151,7 @@ export function AgentProviderCard({
   // between the backend reporting success and the doctor report repainting.
   const [finalizing, setFinalizing] = useState(false);
   const [expandedOpen, setExpandedOpen] = useState(false);
+  const inlineDisclosureRegionId = useId();
   const reportedRef = useRef(false);
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
@@ -419,6 +432,14 @@ export function AgentProviderCard({
     }
   });
 
+  const handleExpandedOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setExpandedOpen(nextOpen);
+      onDisclosureOpenChange?.(nextOpen);
+    },
+    [onDisclosureOpenChange],
+  );
+
   // Failure surface, derived from the store's raw `{ error, output }`. The
   // backend reports `installVerificationFailed` as a sentinel the card
   // localizes; any other error is the raw command failure.
@@ -436,9 +457,9 @@ export function AgentProviderCard({
 
   useEffect(() => {
     if (isActive || setupError) {
-      setExpandedOpen(true);
+      handleExpandedOpenChange(true);
     }
-  }, [isActive, setupError]);
+  }, [isActive, setupError, handleExpandedOpenChange]);
 
   function handleRetry() {
     const action = operation?.action;
@@ -670,17 +691,75 @@ export function AgentProviderCard({
   }
 
   const setupFailureMessage = getSetupFailureMessage();
-  const hasProviderDetails =
-    Boolean(versionCheck && !isActive) ||
+  const versionDetails =
+    versionCheck && !isActive ? (
+      <AgentVersionInfo check={versionCheck} />
+    ) : null;
+  const hasSupplementaryProviderDetails =
     (!isActive && missingComponents.length > 0) ||
     isActive ||
     Boolean(setupError && !isActive);
-  const hasExpandableDetails = hasProviderDetails || Boolean(expandedContent);
+  const providerDetails =
+    (!showDisclosure && versionDetails) || hasSupplementaryProviderDetails ? (
+      <div className="space-y-3">
+        {!showDisclosure ? versionDetails : null}
+        {!isActive && missingComponents.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            {missingComponents.map((name) => (
+              <span key={name} className="break-words text-xs text-destructive">
+                {t("providers.agents.missingComponent", { name })}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {renderSetupProgress()}
+
+        {setupError && !isActive && (
+          <div className="space-y-2">
+            <div className="rounded-sm bg-destructive/10 px-3 py-2.5">
+              <div className="flex flex-col gap-2">
+                <p className="min-w-0 text-xs font-medium leading-relaxed text-destructive">
+                  {setupFailureMessage}
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={handleRetry}
+                  >
+                    {t("common:actions.retry")}
+                  </Button>
+                  {setupFailureAnalysis && onStartTroubleshootingChat ? (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="xs"
+                      leftIcon={<IconMessageCircle aria-hidden="true" />}
+                      onClick={handleTroubleshoot}
+                      className="w-fit"
+                    >
+                      {t("providers.agents.troubleshootInChat")}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            {renderSetupOutput()}
+          </div>
+        )}
+      </div>
+    ) : null;
+  const hasExpandableDetails =
+    Boolean(providerDetails) || Boolean(expandedContent);
+  const shouldCollapseDetails =
+    hasExpandableDetails && (showDisclosure || statusIndicatorOpensDetails);
   const actionableStatusIndicator =
-    statusIndicator && statusIndicatorOpensDetails && hasExpandableDetails ? (
+    statusIndicator && statusIndicatorOpensDetails && shouldCollapseDetails ? (
       <button
         type="button"
-        onClick={() => setExpandedOpen(true)}
+        onClick={() => handleExpandedOpenChange(true)}
         aria-expanded={expandedOpen}
         className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
@@ -689,6 +768,135 @@ export function AgentProviderCard({
     ) : (
       statusIndicator
     );
+  const renderedStatusIndicator =
+    actionableStatusIndicator ?? renderStatusIndicator();
+
+  const rowAction = renderedStatusIndicator ? (
+    <div className="flex min-h-6 items-center justify-end gap-1.5">
+      {renderedStatusIndicator}
+    </div>
+  ) : null;
+
+  const description = (
+    <div className="space-y-1">
+      <p>{provider.description}</p>
+      {showDisclosure && versionDetails ? <div>{versionDetails}</div> : null}
+    </div>
+  );
+
+  const directDetails = hasExpandableDetails ? (
+    <div className="space-y-3">
+      {providerDetails}
+      {expandedContent}
+    </div>
+  ) : null;
+
+  const legacyDisclosureDetails =
+    !showDisclosure && shouldCollapseDetails && hasExpandableDetails ? (
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="mb-2 min-w-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="sr-only">
+            {t("providers.agents.expandLabel", { name: provider.displayName })}
+          </span>
+          <span aria-hidden="true">{provider.displayName}</span>
+        </button>
+      </CollapsibleTrigger>
+    ) : null;
+
+  const collapsedDetails = hasExpandableDetails ? (
+    <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+      <div className="space-y-3">
+        {providerDetails}
+        {expandedContent}
+      </div>
+    </CollapsibleContent>
+  ) : null;
+
+  const expandableAccessibleName =
+    typeof expandableLabel === "string"
+      ? expandableLabel
+      : provider.displayName;
+  const expandableActionLabel = t(
+    expandedOpen
+      ? "providers.agents.collapseLabel"
+      : "providers.agents.expandLabel",
+    { name: expandableAccessibleName },
+  );
+
+  const inlineExpandableDetails =
+    showDisclosure && hasExpandableDetails ? (
+      <div className="group/model-provider-disclosure rounded-sm border border-border">
+        <div className="relative">
+          <button
+            type="button"
+            aria-controls={inlineDisclosureRegionId}
+            aria-label={expandableActionLabel}
+            aria-expanded={expandedOpen}
+            onClick={() => handleExpandedOpenChange(!expandedOpen)}
+            className="flex w-full items-center justify-between gap-3 rounded-sm px-5 py-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-sm text-foreground">
+                {expandableLabel ?? provider.displayName}
+              </span>
+              {collapsedSummary ? (
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {collapsedSummary}
+                </span>
+              ) : null}
+            </span>
+          </button>
+          <div
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-x-5 bottom-0 border-t border-border/60 transition-opacity duration-300 motion-reduce:transition-none",
+              expandedOpen
+                ? "opacity-100 group-hover/model-provider-disclosure:opacity-0"
+                : "opacity-0",
+            )}
+          />
+        </div>
+        <CollapseReveal
+          id={inlineDisclosureRegionId}
+          open={expandedOpen}
+          pace="deliberate"
+        >
+          <div className="px-5 pt-3 pb-5">
+            <div className="space-y-3">
+              {providerDetails}
+              {expandedContent}
+            </div>
+          </div>
+        </CollapseReveal>
+      </div>
+    ) : null;
+
+  const details = showDisclosure ? (
+    inlineExpandableDetails
+  ) : shouldCollapseDetails ? (
+    <>
+      {legacyDisclosureDetails}
+      {collapsedDetails}
+    </>
+  ) : (
+    directDetails
+  );
+
+  const row = (
+    <SettingsRow
+      leading={icon}
+      label={provider.displayName}
+      description={description}
+      align="start"
+      action={rowAction}
+      details={details}
+      detailsClassName={icon ? "ml-10" : undefined}
+      className={cn(isActive && "bg-linear-to-b from-primary/10 to-primary/10")}
+    />
+  );
 
   function renderSummaryContent() {
     return (
@@ -727,60 +935,6 @@ export function AgentProviderCard({
     </div>
   );
 
-  const providerDetails = hasProviderDetails ? (
-    <div className="space-y-3">
-      {versionCheck && !isActive ? (
-        <AgentVersionInfo check={versionCheck} />
-      ) : null}
-      {!isActive && missingComponents.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          {missingComponents.map((name) => (
-            <span key={name} className="break-words text-xs text-destructive">
-              {t("providers.agents.missingComponent", { name })}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      {renderSetupProgress()}
-
-      {setupError && !isActive && (
-        <div className="space-y-2">
-          <div className="rounded-sm bg-destructive/10 px-3 py-2.5">
-            <div className="flex flex-col gap-2">
-              <p className="min-w-0 text-xs font-medium leading-relaxed text-destructive">
-                {setupFailureMessage}
-              </p>
-              <div className="flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={handleRetry}
-                >
-                  {t("common:actions.retry")}
-                </Button>
-                {setupFailureAnalysis && onStartTroubleshootingChat ? (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="xs"
-                    leftIcon={<IconMessageCircle aria-hidden="true" />}
-                    onClick={handleTroubleshoot}
-                    className="w-fit"
-                  >
-                    {t("providers.agents.troubleshootInChat")}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-          {renderSetupOutput()}
-        </div>
-      )}
-    </div>
-  ) : null;
-
   const expandedDetails = hasExpandableDetails ? (
     <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
       <div className="mt-3 space-y-3">
@@ -791,7 +945,7 @@ export function AgentProviderCard({
   ) : null;
 
   const cardContent = hasExpandableDetails ? (
-    <Collapsible open={expandedOpen} onOpenChange={setExpandedOpen}>
+    <Collapsible open={expandedOpen} onOpenChange={handleExpandedOpenChange}>
       {summaryRow}
       {expandedDetails}
     </Collapsible>
@@ -803,7 +957,7 @@ export function AgentProviderCard({
   const canOpenCollapsedStack = Boolean(collapsedSupplement && !expandedOpen);
   const openCollapsedCard = () => {
     if (canOpenCollapsedCard) {
-      setExpandedOpen(true);
+      handleExpandedOpenChange(true);
     }
   };
   const handleCardSurfaceClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -818,17 +972,17 @@ export function AgentProviderCard({
     openCollapsedCard();
   };
 
+  const rowContent = shouldCollapseDetails ? (
+    <Collapsible open={expandedOpen} onOpenChange={handleExpandedOpenChange}>
+      {row}
+    </Collapsible>
+  ) : (
+    row
+  );
+
   const card =
-    presentation === "row" ? (
-      <SettingsRow
-        leading={icon}
-        label={provider.displayName}
-        description={provider.description}
-        align="start"
-        action={renderStatusIndicator()}
-        details={providerDetails}
-        detailsClassName={icon ? "ml-10" : undefined}
-      />
+    presentation === "row" || showDisclosure ? (
+      rowContent
     ) : (
       <ExpandableCard
         active={isActive}

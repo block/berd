@@ -1,28 +1,31 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { cn } from "@/shared/lib/cn";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { Button } from "@/shared/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/shared/ui/collapsible";
+import { Collapsible } from "@/shared/ui/collapsible";
+import { CollapseReveal } from "@/shared/ui/collapse-reveal";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Spinner } from "@/shared/ui/spinner";
 import {
   getProviderIcon,
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
-import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+} from "@tabler/icons-react";
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import type {
@@ -47,6 +50,7 @@ import { ProviderSetupOutput } from "@/features/settings/ui/ProviderSetupOutput"
 
 const INTERNAL_DATABRICKS_PROVIDER_ID = "databricks_v2";
 const DATABRICKS_HOST_ENV_KEY = "DATABRICKS_HOST";
+const PROVIDER_CONFIG_LOADING_TIMEOUT_MS = 3000;
 
 // The org-managed Databricks host, when the runtime config injects one into
 // `goose serve` (see apply_runtime_goose_provider_env in
@@ -82,6 +86,7 @@ interface ModelProviderRowProps {
   modelSyncing?: boolean;
   modelWarning?: string | null;
   defaultExpanded?: boolean;
+  collapseSignal?: number;
 }
 
 function InternalDatabricksDetails({
@@ -92,10 +97,10 @@ function InternalDatabricksDetails({
   host: string;
 }) {
   return (
-    <div className="rounded-sm border border-border bg-card px-3 py-2.5">
-      <div className="space-y-1 rounded-xs bg-background px-2.5 py-2">
+    <div className="py-2.5">
+      <div className="space-y-1 py-2">
         <p className="text-sm">{label}</p>
-        <p className="truncate text-xs text-muted-foreground">{host}</p>
+        <p className="truncate text-sm text-muted-foreground">{host}</p>
       </div>
     </div>
   );
@@ -112,18 +117,25 @@ export function ModelProviderRow({
   modelSyncing = false,
   modelWarning = null,
   defaultExpanded = false,
+  collapseSignal,
 }: ModelProviderRowProps) {
   const { t } = useTranslation("settings");
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [configValues, setConfigValues] = useState<ProviderFieldValue[]>([]);
   const [draftValues, setDraftValues] = useState<Record<string, string>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(
+    () => defaultExpanded && (provider.fields?.length ?? 0) > 0,
+  );
   const [error, setError] = useState("");
   const [showSavedState, setShowSavedState] = useState(false);
   const hasLoadedConfig = useRef(false);
+  const configLoadRunId = useRef(0);
+  const dirtyDraftKeys = useRef(new Set<string>());
+  const lastCollapseSignal = useRef(collapseSignal);
   const shouldRestorePanelFocus = useRef(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const contentRegionId = useId();
 
   // Native sign-in progress is backend-owned: read the latest snapshot from the
   // store (kept current by the app-level `model-setup:state` listener) so this
@@ -177,26 +189,57 @@ export function ModelProviderRow({
   const loadConfig = useCallback(
     async ({ showSkeleton = false }: { showSkeleton?: boolean } = {}) => {
       if (!hasFields) return;
+      const runId = configLoadRunId.current + 1;
+      configLoadRunId.current = runId;
+      let timeoutId: number | null = null;
+
       if (showSkeleton) {
         setLoadingConfig(true);
+        timeoutId = window.setTimeout(() => {
+          if (configLoadRunId.current !== runId) return;
+          hasLoadedConfig.current = true;
+          setDraftValues((current) =>
+            Object.keys(current).length > 0
+              ? current
+              : createDraftValues(fields, []),
+          );
+          setError(t("providers.models.setup.configLoadFallback"));
+          setLoadingConfig(false);
+        }, PROVIDER_CONFIG_LOADING_TIMEOUT_MS);
       }
+
       try {
         const nextValues = await onGetConfig(provider.id);
+        if (configLoadRunId.current !== runId) return;
         hasLoadedConfig.current = true;
         setConfigValues(nextValues);
-        setDraftValues(createDraftValues(fields, nextValues));
+        setDraftValues((current) => {
+          const nextDrafts = createDraftValues(fields, nextValues);
+          if (dirtyDraftKeys.current.size === 0) return nextDrafts;
+
+          return fields.reduce<Record<string, string>>((drafts, field) => {
+            drafts[field.key] = dirtyDraftKeys.current.has(field.key)
+              ? (current[field.key] ?? nextDrafts[field.key] ?? "")
+              : (nextDrafts[field.key] ?? "");
+            return drafts;
+          }, {});
+        });
         setError("");
       } catch (nextError) {
+        if (configLoadRunId.current !== runId) return;
         setError(
           formatAcpErrorMessage(nextError, "Couldn't load provider settings"),
         );
       } finally {
-        if (showSkeleton) {
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+        if (showSkeleton && configLoadRunId.current === runId) {
           setLoadingConfig(false);
         }
       }
     },
-    [fields, hasFields, onGetConfig, provider.id],
+    [fields, hasFields, onGetConfig, provider.id, t],
   );
 
   useEffect(() => {
@@ -204,6 +247,15 @@ export function ModelProviderRow({
       void loadConfig({ showSkeleton: !hasLoadedConfig.current });
     }
   }, [expanded, hasFields, loadConfig]);
+
+  useEffect(() => {
+    if (collapseSignal === undefined) return;
+    if (lastCollapseSignal.current === collapseSignal) return;
+
+    lastCollapseSignal.current = collapseSignal;
+    setExpanded(false);
+    setShowSavedState(false);
+  }, [collapseSignal]);
 
   // When the backend reports the sign-in succeeded, run the frontend-only
   // refresh the backend can't (re-read provider status over ACP + refresh
@@ -301,6 +353,9 @@ export function ModelProviderRow({
     if (!nextExpanded) {
       setShowSavedState(false);
     }
+    if (nextExpanded && hasFields && !hasLoadedConfig.current) {
+      setLoadingConfig(true);
+    }
     setExpanded(nextExpanded);
     setEditingKey(null);
     setError("");
@@ -319,11 +374,13 @@ export function ModelProviderRow({
         ? ""
         : (resolveFieldValue(field, fieldValueMap).value ?? ""),
     }));
+    dirtyDraftKeys.current.delete(field.key);
     setEditingKey(null);
     setError("");
   }
 
   function handleDraftChange(key: string, value: string) {
+    dirtyDraftKeys.current.add(key);
     setShowSavedState(false);
     setDraftValues((current) => ({ ...current, [key]: value }));
   }
@@ -340,6 +397,7 @@ export function ModelProviderRow({
       await onSaveFields([
         { key: field.key, value: nextValue, isSecret: field.secret },
       ]);
+      dirtyDraftKeys.current.delete(field.key);
       await loadConfig();
       setEditingKey(null);
       setShowSavedState(true);
@@ -394,7 +452,10 @@ export function ModelProviderRow({
           isSecret: field.secret,
         })),
       );
-      await loadConfig();
+      fieldsToSave.forEach((field) => {
+        dirtyDraftKeys.current.delete(field.key);
+      });
+      void loadConfig();
       onProviderConnected?.(provider.id);
       setShowSavedState(false);
     } catch (nextError) {
@@ -406,6 +467,9 @@ export function ModelProviderRow({
     try {
       shouldRestorePanelFocus.current = true;
       await onRemoveConfig?.();
+      dirtyDraftKeys.current.clear();
+      setConfigValues([]);
+      setDraftValues(createDraftValues(fields, []));
       await loadConfig();
       setEditingKey(null);
       setError("");
@@ -414,6 +478,12 @@ export function ModelProviderRow({
       setError(formatAcpErrorMessage(nextError, "Couldn't remove"));
     }
   }
+
+  const fieldSetupDescription = getFieldSetupDescription(
+    provider.setupMethod,
+    t,
+    provider.fields,
+  );
 
   function renderExpandedContent() {
     const setupMessage = getSetupMessage(
@@ -426,21 +496,17 @@ export function ModelProviderRow({
       provider.setupMethod,
       t,
     );
-    const fieldSetupDescription = getFieldSetupDescription(
-      provider.setupMethod,
-      t,
-      provider.fields,
-    );
-
     if (loadingConfig && hasFields) {
       return (
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+          className="focus-override space-y-3 pt-3 pb-3 outline-none"
         >
-          <Skeleton className="h-12 w-full rounded-sm" />
-          <Skeleton className="h-12 w-full rounded-sm" />
+          <Skeleton className="h-4 w-1/2 rounded-sm" />
+          {fields.map((field) => (
+            <Skeleton key={field.key} className="h-12 w-full rounded-sm" />
+          ))}
         </div>
       );
     }
@@ -450,11 +516,11 @@ export function ModelProviderRow({
         <div
           ref={panelRef}
           tabIndex={-1}
-          className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+          className="focus-override space-y-3 pt-3 pb-3 outline-none"
         >
           {!isConnected && nativeConnectDescription ? (
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {nativeConnectDescription}
               </p>
               <Button
@@ -482,7 +548,7 @@ export function ModelProviderRow({
             </>
           )}
           {authenticating ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner className="size-3.5 text-primary" />
               <span>{t("providers.waitingForSignIn")}</span>
             </div>
@@ -493,7 +559,7 @@ export function ModelProviderRow({
             scrollRef={outputRef}
           />
           {setupError ? (
-            <p className="text-xs text-destructive">{setupError}</p>
+            <p className="text-sm text-destructive">{setupError}</p>
           ) : null}
         </div>
       );
@@ -536,9 +602,6 @@ export function ModelProviderRow({
           error={error}
           setupMethod={provider.setupMethod}
           setupMessage={setupMessage}
-          fieldSetupDescription={fieldSetupDescription}
-          isConnected={isConnected}
-          docsUrl={provider.docsUrl}
           onDraftChange={handleDraftChange}
           onSaveSetup={() => void handleSaveSetup()}
         />
@@ -549,7 +612,7 @@ export function ModelProviderRow({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="focus-override mx-3 mb-3 space-y-2 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+        className="focus-override space-y-2 pt-3 pb-3 outline-none"
       >
         {renderSetupMessage(setupMessage)}
         <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
@@ -557,63 +620,109 @@ export function ModelProviderRow({
     );
   }
 
+  const descriptionContent =
+    !isConnected && fieldSetupDescription ? (
+      <p className="pb-4 text-sm text-muted-foreground">
+        {fieldSetupDescription}
+        {provider.docsUrl ? (
+          <>
+            {" "}
+            <Button
+              type="button"
+              variant="link"
+              onClick={() => void openUrl(provider.docsUrl ?? "")}
+              className="inline align-baseline leading-[inherit]"
+            >
+              {t("providers.getApiKey")}
+            </Button>
+          </>
+        ) : null}
+      </p>
+    ) : null;
+
   return (
     <Collapsible open={expanded} onOpenChange={handleExpandedChange}>
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          disabled={authenticating}
-          className={cn(
-            "flex w-full items-center gap-3 rounded-sm border border-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:hover:bg-transparent",
-            expanded && "border-border hover:bg-transparent",
-          )}
-        >
-          {icon ? (
-            <div className="flex size-6 flex-shrink-0 items-center justify-center">
-              {icon}
+      <div className="rounded-sm transition-colors hover:bg-accent focus-within:bg-accent">
+        <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-3 px-3">
+          <button
+            type="button"
+            aria-controls={contentRegionId}
+            aria-expanded={expanded}
+            disabled={authenticating}
+            onClick={() => handleExpandedChange(!expanded)}
+            className="group/model-provider-row col-span-3 -mx-3 grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-sm px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+          >
+            <span className="col-start-1 flex size-6 items-center justify-center">
+              <span className="flex size-6 items-center justify-center group-hover/model-provider-row:hidden group-focus-visible/model-provider-row:hidden">
+                {icon ?? (
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {formatProviderLabel(provider.id).charAt(0)}
+                  </span>
+                )}
+              </span>
+              {expanded ? (
+                <IconChevronDown className="hidden size-3 text-muted-foreground group-hover/model-provider-row:block group-focus-visible/model-provider-row:block" />
+              ) : (
+                <IconChevronRight className="hidden size-3 text-muted-foreground group-hover/model-provider-row:block group-focus-visible/model-provider-row:block" />
+              )}
+            </span>
+
+            <span className="col-start-2 flex min-w-0 items-baseline gap-2 text-sm">
+              <span className="min-w-0 truncate">{provider.displayName}</span>
+              {isConnected ? (
+                <span className="shrink-0 text-muted-foreground/60">
+                  {t("providers.models.active")}
+                </span>
+              ) : provider.status === "configured" ? (
+                <span className="shrink-0 text-muted-foreground/60">
+                  {t("providers.models.configured")}
+                </span>
+              ) : null}
+            </span>
+
+            <span className="col-start-3 flex items-center justify-end gap-1.5">
+              {!modelSyncing && modelWarning ? (
+                <IconAlertTriangle
+                  aria-label={t("providers.needsAttention")}
+                  className="size-4 flex-shrink-0 text-warning"
+                />
+              ) : isConnected ? (
+                <IconCheck className="size-4 flex-shrink-0 text-success" />
+              ) : null}
+              {modelSyncing ? (
+                <Spinner className="size-3.5 flex-shrink-0 text-primary" />
+              ) : null}
+              {!isConnected && authenticating ? (
+                <Spinner className="size-3.5 flex-shrink-0 text-primary" />
+              ) : null}
+            </span>
+          </button>
+          {descriptionContent ? (
+            <div className="col-start-2 col-span-2 -mt-2 min-w-0">
+              <CollapseReveal
+                open={expanded}
+                className="[&>div]:[mask-image:linear-gradient(to_bottom,black_calc(100%-12px),transparent)] [&>div]:[mask-repeat:no-repeat]"
+              >
+                {descriptionContent}
+              </CollapseReveal>
             </div>
-          ) : (
-            <div className="flex size-6 flex-shrink-0 items-center justify-center">
-              <span className="text-xs font-medium text-muted-foreground">
-                {formatProviderLabel(provider.id).charAt(0)}
-              </span>
-            </div>
-          )}
-
-          <span className="flex min-w-0 flex-1 items-baseline gap-2 text-sm">
-            <span className="min-w-0 truncate">{provider.displayName}</span>
-            {isConnected ? (
-              <span className="shrink-0 text-muted-foreground/60">
-                {t("providers.models.active")}
-              </span>
-            ) : provider.status === "configured" ? (
-              <span className="shrink-0 text-muted-foreground/60">
-                {t("providers.models.configured")}
-              </span>
-            ) : null}
-          </span>
-
-          {!modelSyncing && modelWarning ? (
-            <IconAlertTriangle
-              aria-label={t("providers.needsAttention")}
-              className="size-4 flex-shrink-0 text-warning"
-            />
-          ) : isConnected ? (
-            <IconCheck className="size-4 flex-shrink-0 text-success" />
           ) : null}
-          {modelSyncing ? (
-            <Spinner className="size-3.5 flex-shrink-0 text-primary" />
-          ) : null}
-          {!isConnected && authenticating ? (
-            <Spinner className="size-3.5 flex-shrink-0 text-primary" />
-          ) : null}
-        </button>
-      </CollapsibleTrigger>
+        </div>
+      </div>
 
-      <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-        {renderExpandedContent()}
-      </CollapsibleContent>
+      <div
+        id={contentRegionId}
+        aria-hidden={!expanded}
+        inert={!expanded ? true : undefined}
+      >
+        <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-3 px-3">
+          <div className="col-start-2 col-span-2 min-w-0">
+            <CollapseReveal open={expanded}>
+              {renderExpandedContent()}
+            </CollapseReveal>
+          </div>
+        </div>
+      </div>
     </Collapsible>
   );
 }

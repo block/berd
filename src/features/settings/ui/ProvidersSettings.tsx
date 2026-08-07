@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/shared/ui/button";
+import { RowButton } from "@/shared/ui/row-button";
 import { Spinner } from "@/shared/ui/spinner";
 import { IconCheck } from "@tabler/icons-react";
 import {
@@ -149,6 +150,9 @@ interface PendingCustomProviderDelete {
   displayName: string;
 }
 
+const PROVIDER_STATUS_LOADING_TIMEOUT_MS = 3000;
+const PROVIDER_SECRETS_LOADING_TIMEOUT_MS = 3000;
+
 export function ProvidersSettings({
   onStartTroubleshootingChat,
   onReturnToAgentDraft,
@@ -158,6 +162,8 @@ export function ProvidersSettings({
   const [selectedSetupProviderId, setSelectedSetupProviderId] = useState<
     string | null
   >(null);
+  const [modelProviderCollapseSignal, setModelProviderCollapseSignal] =
+    useState(0);
   const [setupDetourReadyProviderId, setSetupDetourReadyProviderId] = useState<
     string | null
   >(null);
@@ -319,6 +325,23 @@ export function ProvidersSettings({
     completeNativeSetup,
     credentialRevision,
   } = useCredentials();
+  const [credentialStatusLoading, setCredentialStatusLoading] =
+    useState(loading);
+  useEffect(() => {
+    if (!loading) {
+      setCredentialStatusLoading(false);
+      return;
+    }
+
+    setCredentialStatusLoading(true);
+    const timeoutId = window.setTimeout(() => {
+      setCredentialStatusLoading(false);
+    }, PROVIDER_STATUS_LOADING_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loading]);
 
   // Agent install/auth status comes from the shared doctor report (the same
   // `["doctor","report"]` query the Doctor page and chat picker read), so the
@@ -355,10 +378,22 @@ export function ProvidersSettings({
   const [credentialedIds, setCredentialedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [credentialedIdsLoading, setCredentialedIdsLoading] = useState(true);
+  const hasLoadedCredentialedIds = useRef(false);
   useEffect(() => {
     let cancelled = false;
     const revisionAtRequest = credentialRevision;
-    setCredentialedIds(new Set());
+    const isInitialLoad = !hasLoadedCredentialedIds.current;
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled && revisionAtRequest === credentialRevision) {
+        hasLoadedCredentialedIds.current = true;
+        setCredentialedIdsLoading(false);
+      }
+    }, PROVIDER_SECRETS_LOADING_TIMEOUT_MS);
+
+    if (isInitialLoad) {
+      setCredentialedIdsLoading(true);
+    }
     void listProviderSecrets()
       .then((secrets) => {
         if (!cancelled && revisionAtRequest === credentialRevision) {
@@ -366,10 +401,21 @@ export function ProvidersSettings({
         }
       })
       .catch(() => {
-        // Without secret evidence, stay conservative: no Active promotion.
+        if (!cancelled && revisionAtRequest === credentialRevision) {
+          // Without secret evidence, stay conservative: no Active promotion.
+          setCredentialedIds(new Set());
+        }
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        if (!cancelled && revisionAtRequest === credentialRevision) {
+          hasLoadedCredentialedIds.current = true;
+          setCredentialedIdsLoading(false);
+        }
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
   }, [credentialRevision]);
 
@@ -490,6 +536,8 @@ export function ProvidersSettings({
   const connectedModelNames = connectedModels
     .map((model) => model.displayName)
     .join(", ");
+  const modelProviderStatusLoading =
+    credentialStatusLoading || credentialedIdsLoading;
   const showSetupDetourReturn =
     Boolean(onReturnToAgentDraft) && Boolean(setupDetourReadyProviderId);
 
@@ -503,16 +551,25 @@ export function ProvidersSettings({
     }
   }
 
-  const gooseStatusIndicator =
-    connectedModels.length > 0 ? (
-      <div className="flex h-6 shrink-0 items-center">
-        <IconCheck className="size-4 text-success" />
-      </div>
-    ) : (
-      <span className="shrink-0 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
-        {t("providers.models.connectPrompt")}
-      </span>
-    );
+  function handleGooseDisclosureOpenChange(open: boolean) {
+    if (open) return;
+    setSelectedSetupProviderId(null);
+    setModelProviderCollapseSignal((signal) => signal + 1);
+  }
+
+  const gooseStatusIndicator = modelProviderStatusLoading ? (
+    <div className="flex h-6 shrink-0 items-center">
+      <Spinner className="size-3.5 text-primary" />
+    </div>
+  ) : connectedModels.length > 0 ? (
+    <div className="flex h-6 shrink-0 items-center">
+      <IconCheck className="size-4 text-success" />
+    </div>
+  ) : (
+    <span className="shrink-0 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+      {t("providers.models.connectPrompt")}
+    </span>
+  );
 
   function renderModelProvider(model: ProviderDisplayInfo) {
     return (
@@ -528,6 +585,7 @@ export function ProvidersSettings({
         saving={savingProviderIds.has(model.id)}
         modelSyncing={syncingProviderIds.has(model.id)}
         modelWarning={modelWarnings.get(model.id)}
+        collapseSignal={modelProviderCollapseSignal}
       />
     );
   }
@@ -549,70 +607,56 @@ export function ProvidersSettings({
     );
   }
 
-  const gooseCollapsedSupplement = connectedModelNames ? (
-    <div className="rounded-b-md bg-foreground px-3 pt-8 pb-2.5 text-background">
-      <p className="flex min-w-0 items-baseline gap-2 text-sm leading-5">
-        <span className="shrink-0 text-background/70">
-          {t(
-            connectedModels.length > 1
-              ? "providers.models.summaryLabelPlural"
-              : "providers.models.summaryLabel",
-          )}
-        </span>
-        <span className="min-w-0 truncate text-background">
-          {connectedModelNames}
-        </span>
-      </p>
-    </div>
-  ) : null;
+  const gooseModelProviderSummary = modelProviderStatusLoading
+    ? t("providers.models.checkingStatus")
+    : connectedModelNames || t("providers.models.connectPrompt");
 
   // The model-provider list only powers the goose harness, so it renders
   // inside the goose card's expandable region instead of a sibling section.
   const modelProvidersContent = (
-    <div className="border-t pt-3">
-      <div className="flex items-center gap-2">
-        <h5 className="text-sm text-foreground">
-          {t("providers.models.title")}
-        </h5>
-        {loading ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Spinner className="size-3 text-primary" />
-            {t("providers.models.checkingStatus")}
-          </span>
-        ) : null}
-      </div>
-      <p className="mt-0.5 text-xs text-muted-foreground">
-        {t("providers.models.description")}
-      </p>
-
-      {customProviderError ? (
-        <p
-          role="alert"
-          className="mt-3 rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-        >
-          {customProviderError}
+    <div>
+      {modelProviderStatusLoading ? (
+        <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Spinner className="size-3 text-primary" />
+          {t("providers.models.checkingStatus")}
         </p>
-      ) : null}
+      ) : (
+        <>
+          {customProviderError ? (
+            <p
+              role="alert"
+              className="mb-3 rounded-sm border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              {customProviderError}
+            </p>
+          ) : null}
 
-      <div className="mt-3 space-y-2">
-        {activeModels.map(renderModelProvider)}
-        {byoEnabled ? activeCustomProviders.map(renderCustomProvider) : null}
-        {inactiveModels.map(renderModelProvider)}
-        {byoEnabled ? inactiveCustomProviders.map(renderCustomProvider) : null}
-      </div>
+          <div className="space-y-2">
+            {activeModels.map(renderModelProvider)}
+            {byoEnabled
+              ? activeCustomProviders.map(renderCustomProvider)
+              : null}
+            {inactiveModels.map(renderModelProvider)}
+            {byoEnabled
+              ? inactiveCustomProviders.map(renderCustomProvider)
+              : null}
+          </div>
 
-      {byoEnabled ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={openAddCustomProvider}
-          leftIcon={<IconPlus className="size-3" />}
-          className="mt-2 w-full text-muted-foreground"
-        >
-          {t("providers.custom.addButton")}
-        </Button>
-      ) : null}
+          {byoEnabled ? (
+            <RowButton
+              variant="menu"
+              onClick={openAddCustomProvider}
+              className="mt-2 px-3 py-2.5"
+              icon={
+                <span className="flex size-6 shrink-0 items-center justify-center">
+                  <IconPlus className="size-4 text-muted-foreground" />
+                </span>
+              }
+              label={t("providers.custom.addButton")}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 
@@ -670,7 +714,7 @@ export function ProvidersSettings({
               key={agent.id}
               className={
                 agent.id === "goose"
-                  ? "border-b border-border pb-4"
+                  ? "border-b border-border"
                   : index > 0 && agents[index - 1]?.id !== "goose"
                     ? "border-t border-border"
                     : undefined
@@ -686,16 +730,26 @@ export function ProvidersSettings({
                 expandedContent={
                   agent.id === "goose" ? modelProvidersContent : undefined
                 }
-                collapsedSupplement={
-                  agent.id === "goose" ? gooseCollapsedSupplement : undefined
+                expandableLabel={
+                  agent.id === "goose" ? t("providers.models.title") : undefined
+                }
+                collapsedSummary={
+                  agent.id === "goose" ? gooseModelProviderSummary : undefined
                 }
                 statusIndicator={
                   agent.id === "goose" ? gooseStatusIndicator : undefined
                 }
                 statusIndicatorOpensDetails={
-                  agent.id === "goose" && connectedModels.length === 0
+                  agent.id === "goose" &&
+                  !modelProviderStatusLoading &&
+                  connectedModels.length === 0
                 }
-                presentation={agent.id === "goose" ? "card" : "row"}
+                showDisclosure={agent.id === "goose"}
+                onDisclosureOpenChange={
+                  agent.id === "goose"
+                    ? handleGooseDisclosureOpenChange
+                    : undefined
+                }
               />
             </div>
           ))}

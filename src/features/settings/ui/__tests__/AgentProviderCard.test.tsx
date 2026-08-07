@@ -174,7 +174,7 @@ describe("AgentProviderCard", () => {
     expect(screen.getByText("Model provider setup")).toBeVisible();
   });
 
-  it("gives the expandable Goose harness a neutral outline", () => {
+  it("renders the expandable Goose harness as a settings row", () => {
     const { container } = renderCard(
       <AgentProviderCard
         provider={createProvider({
@@ -183,12 +183,79 @@ describe("AgentProviderCard", () => {
           status: "built_in",
         })}
         expandedContent={<div>Model providers</div>}
+        expandableLabel="Model providers"
+        collapsedSummary="Databricks"
+        showDisclosure
       />,
     );
 
     expect(
+      container.querySelector('[data-slot="settings-row"]'),
+    ).toBeInTheDocument();
+    expect(
       container.querySelector('[data-slot="expandable-card"]'),
-    ).toHaveClass("border", "border-border");
+    ).not.toBeInTheDocument();
+    const disclosure = screen.getByRole("button", {
+      name: "Expand Model providers details",
+    });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    const controlledId = disclosure.getAttribute("aria-controls");
+    expect(controlledId).toBeTruthy();
+    const controlledRegion = document.getElementById(controlledId ?? "");
+    expect(controlledRegion).toBeInTheDocument();
+    expect(controlledRegion).toHaveAttribute("aria-hidden", "true");
+    expect(controlledRegion).toHaveAttribute("inert");
+  });
+
+  it("updates the Goose disclosure action label as it expands and collapses", async () => {
+    const user = userEvent.setup();
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "goose",
+          displayName: "Goose",
+          status: "built_in",
+        })}
+        expandedContent={<div>Model provider setup</div>}
+        expandableLabel="Model providers"
+        collapsedSummary="Databricks"
+        showDisclosure
+      />,
+    );
+
+    const expandButton = screen.getByRole("button", {
+      name: "Expand Model providers details",
+    });
+    expect(expandButton).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByText("Model provider setup").closest("[aria-hidden='true']"),
+    ).toBeInTheDocument();
+
+    await user.click(expandButton);
+
+    const collapseButton = screen.getByRole("button", {
+      name: "Collapse Model providers details",
+    });
+    expect(collapseButton).toHaveAttribute("aria-expanded", "true");
+    const controlledRegion = document.getElementById(
+      collapseButton.getAttribute("aria-controls") ?? "",
+    );
+    expect(controlledRegion).toBeInTheDocument();
+    expect(controlledRegion).toHaveAttribute("aria-hidden", "false");
+    expect(controlledRegion).not.toHaveAttribute("inert");
+    expect(
+      screen.getByText("Model provider setup").closest("[aria-hidden='true']"),
+    ).not.toBeInTheDocument();
+
+    await user.click(collapseButton);
+
+    const collapsedButton = screen.getByRole("button", {
+      name: "Expand Model providers details",
+    });
+    expect(collapsedButton).toHaveAttribute("aria-expanded", "false");
+    expect(controlledRegion).toHaveAttribute("aria-hidden", "true");
+    expect(controlledRegion).toHaveAttribute("inert");
   });
 
   it("shows the checking indicator only during the shared report's first load", async () => {
@@ -230,7 +297,6 @@ describe("AgentProviderCard", () => {
         })}
         statusLoading={false}
         readiness={"not_installed" satisfies AgentProviderReadiness}
-        presentation="row"
       />,
     );
 
@@ -251,7 +317,6 @@ describe("AgentProviderCard", () => {
           installSource: "brew",
           installedVersion: "1.2.3",
         })}
-        presentation="row"
       />,
     );
 
@@ -266,7 +331,6 @@ describe("AgentProviderCard", () => {
         provider={createProvider()}
         statusLoading={false}
         readiness={"not_ready" satisfies AgentProviderReadiness}
-        presentation="row"
       />,
     );
 
@@ -561,9 +625,7 @@ describe("AgentProviderCard", () => {
     expect(clearAgentSetupStatus).not.toHaveBeenCalled();
   });
 
-  it("surfaces install source and version from the shared report", async () => {
-    const user = userEvent.setup();
-
+  it("surfaces install source and version from the shared report", () => {
     renderCard(
       <AgentProviderCard
         provider={createProvider({ supportsAuth: false })}
@@ -575,8 +637,6 @@ describe("AgentProviderCard", () => {
         })}
       />,
     );
-
-    await user.click(screen.getByRole("button", { name: /claude provider/i }));
 
     expect(
       screen.getByText("Installed via Homebrew · v1.2.3"),
@@ -613,7 +673,6 @@ describe("AgentProviderCard", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /claude provider/i }));
     expect(screen.getByText("Update available → v1.3.0")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /update claude/i }));
@@ -918,9 +977,7 @@ describe("AgentProviderCard", () => {
     });
   });
 
-  it("shows a bundled bridge as ready with no update affordance", async () => {
-    const user = userEvent.setup();
-
+  it("shows a bundled bridge as ready with no update affordance", () => {
     // The crate stamps bundled readouts (installSource "bundled") and derives
     // no update command for them — the bundled copy updates with Berd itself,
     // so a newer npm release must not surface an Update button that a global
@@ -965,7 +1022,6 @@ describe("AgentProviderCard", () => {
       screen.queryByRole("button", { name: /update claude/i }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /claude provider/i }));
     expect(
       screen.getByText("Installed via app bundle · v2.1.202"),
     ).toBeInTheDocument();
@@ -1012,9 +1068,7 @@ describe("AgentProviderCard", () => {
     });
   });
 
-  it("flags the missing ACP bridge in danger text when only the main CLI is installed", async () => {
-    const user = userEvent.setup();
-
+  it("flags the missing ACP bridge in danger text when only the main CLI is installed", () => {
     // Same partial-install scenario as above: Codex's CLI is on PATH but the
     // codex-acp bridge is absent. The card body must name the missing bridge in
     // danger-colored text so it isn't mistaken for a healthy install, while
@@ -1055,8 +1109,6 @@ describe("AgentProviderCard", () => {
         })}
       />,
     );
-
-    await user.click(screen.getAllByRole("button", { name: /codex/i })[0]);
 
     const missing = screen.getByText(/codex-acp not installed/i);
     expect(missing).toBeInTheDocument();

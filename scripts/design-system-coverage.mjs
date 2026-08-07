@@ -146,12 +146,13 @@ function propagateSharedUiUsage(manifest, usageByName) {
           .get(importer.source)
           .match(namedImportPattern);
         const importsComponent =
-          match !== null &&
-          match[1]
+          match?.[1]
             .split(",")
             .map((name) => name.trim())
             .filter((name) => !name.startsWith("type "))
-            .some((name) => /^[A-Z]/.test(name) && !/^[A-Z0-9_]+$/.test(name));
+            .some(
+              (name) => /^[A-Z]/.test(name) && !/^[A-Z0-9_]+$/.test(name),
+            ) ?? false;
         if (!importsComponent) {
           continue;
         }

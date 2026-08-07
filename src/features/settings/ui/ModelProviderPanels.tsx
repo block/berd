@@ -1,6 +1,5 @@
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
@@ -32,7 +31,7 @@ export function ModelRefreshMessage({
     return (
       <p
         role="status"
-        className="flex items-center gap-2 text-xs text-muted-foreground"
+        className="flex items-center gap-2 text-sm text-muted-foreground"
       >
         <Spinner className="size-3 text-primary" />
         <span>{t("providers.loadingModels")}</span>
@@ -45,7 +44,7 @@ export function ModelRefreshMessage({
     return (
       <p
         role="status"
-        className="rounded-sm border border-warning bg-warning/20 px-2.5 py-2 text-xs text-warning"
+        className="rounded-sm border border-warning bg-warning/20 px-2.5 py-2 text-sm text-warning"
       >
         {hintKey
           ? t(hintKey, { message: warning })
@@ -95,24 +94,46 @@ export function ConnectedFieldsPanel({
   onRemove,
 }: ConnectedFieldsPanelProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const saveLabel = t("common:actions.save");
+  const cancelLabel = t("common:actions.cancel");
+
+  function renderEqualWidthEditActionLabel(label: string) {
+    return (
+      <span className="grid">
+        <span
+          aria-hidden="true"
+          className="invisible col-start-1 row-start-1 whitespace-nowrap"
+        >
+          {saveLabel}
+        </span>
+        <span
+          aria-hidden="true"
+          className="invisible col-start-1 row-start-1 whitespace-nowrap"
+        >
+          {cancelLabel}
+        </span>
+        <span className="col-start-1 row-start-1 justify-self-center whitespace-nowrap">
+          {label}
+        </span>
+      </span>
+    );
+  }
+
   return (
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+      className="focus-override space-y-3 pt-0 pb-3 outline-none"
     >
       {fields.map((field) => {
         const isEditing = editingKey === field.key;
         return (
-          <div
-            key={field.key}
-            className="space-y-2 rounded-sm border border-border px-3 py-2.5"
-          >
+          <div key={field.key} className="space-y-2 py-2.5">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm">{field.label}</p>
                 {!isEditing && (
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate text-sm text-muted-foreground">
                     {getDisplayValue(field, fieldValueMap, t)}
                   </p>
                 )}
@@ -121,11 +142,10 @@ export function ConnectedFieldsPanel({
               {!isEditing && (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="xs"
                   onClick={() => onStartEdit(field.key)}
                   disabled={saving}
-                  className="text-muted-foreground"
                 >
                   {resolveFieldValue(field, fieldValueMap).isSet
                     ? "Edit"
@@ -154,7 +174,7 @@ export function ConnectedFieldsPanel({
                     }
                   }}
                   disabled={saving}
-                  className="h-8 flex-1 text-xs"
+                  className="h-8 flex-1 text-sm"
                 />
                 <Button
                   type="button"
@@ -164,17 +184,17 @@ export function ConnectedFieldsPanel({
                   className="h-8"
                 >
                   {saving ? <Spinner className="size-3" /> : null}
-                  {t("common:actions.save")}
+                  {renderEqualWidthEditActionLabel(saveLabel)}
                 </Button>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={() => onCancelEdit(field)}
                   disabled={saving}
                   className="h-8"
                 >
-                  {t("common:actions.cancel")}
+                  {renderEqualWidthEditActionLabel(cancelLabel)}
                 </Button>
               </div>
             )}
@@ -182,7 +202,7 @@ export function ConnectedFieldsPanel({
         );
       })}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex gap-2">
         {showSavedState ? (
           <Button type="button" variant="subtle" size="sm" disabled>
             {t("providers.saved")}
@@ -195,6 +215,7 @@ export function ConnectedFieldsPanel({
           size="sm"
           onClick={() => onRemove()}
           disabled={saving}
+          className="w-full"
         >
           {saving ? <Spinner className="size-3" /> : null}
           {t("providers.disconnect")}
@@ -202,7 +223,7 @@ export function ConnectedFieldsPanel({
       </div>
       {renderSetupMessage(setupMessage)}
       <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }
@@ -219,9 +240,6 @@ interface SetupFieldsPanelProps {
   error: string;
   setupMethod: ProviderSetupMethod;
   setupMessage: string | null;
-  fieldSetupDescription: string | null;
-  isConnected: boolean;
-  docsUrl?: string;
   onDraftChange: (key: string, value: string) => void;
   onSaveSetup: () => void;
 }
@@ -238,86 +256,73 @@ export function SetupFieldsPanel({
   error,
   setupMethod,
   setupMessage,
-  fieldSetupDescription,
-  isConnected,
-  docsUrl,
   onDraftChange,
   onSaveSetup,
 }: SetupFieldsPanelProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const showInlineSave = fields.length === 1;
+  const saveButton = (
+    <Button
+      type="button"
+      feedbackState={saving ? "loading" : showSavedState ? "success" : "idle"}
+      loadingLabel={t("providers.saving")}
+      successLabel={t("providers.saved")}
+      loadingVisual="text"
+      loadingDelayMs={250}
+      preserveWidth
+      size="sm"
+      onClick={() => onSaveSetup()}
+      disabled={saving || showSavedState}
+      className="h-8"
+    >
+      {t("common:actions.save")}
+    </Button>
+  );
+
   return (
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="focus-override mx-3 mb-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
+      className="focus-override space-y-3 pt-3 pb-3 outline-none"
     >
-      {!isConnected && fieldSetupDescription ? (
-        <p className="text-xs text-muted-foreground">
-          {fieldSetupDescription}
-          {docsUrl ? (
-            <>
-              {" "}
-              <Button
-                type="button"
-                variant="link"
-                size="xs"
-                onClick={() => void openUrl(docsUrl)}
-              >
-                {t("providers.getApiKey")}
-              </Button>
-            </>
-          ) : null}
-        </p>
-      ) : null}
       {fields.map((field) => {
         const fieldValue = resolveFieldValue(field, fieldValueMap);
         return (
           <div key={field.key} className="space-y-1">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-foreground">
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-medium text-foreground">
                 {field.label}
               </span>
               {field.required && (
-                <span className="text-xxs text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("common:labels.required")}
                 </span>
               )}
             </div>
-            <Input
-              type={field.secret ? "password" : "text"}
-              value={draftValues[field.key] ?? ""}
-              placeholder={
-                field.secret && fieldValue.isSet
-                  ? getDisplayValue(field, fieldValueMap, t)
-                  : (field.placeholder ?? undefined)
-              }
-              onChange={(event) => onDraftChange(field.key, event.target.value)}
-              disabled={saving}
-              className="h-8 text-xs"
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                type={field.secret ? "password" : "text"}
+                value={draftValues[field.key] ?? ""}
+                placeholder={
+                  field.secret && fieldValue.isSet
+                    ? getDisplayValue(field, fieldValueMap, t)
+                    : (field.placeholder ?? undefined)
+                }
+                onChange={(event) =>
+                  onDraftChange(field.key, event.target.value)
+                }
+                disabled={saving}
+                className="h-8 flex-1 text-sm"
+              />
+              {showInlineSave ? saveButton : null}
+            </div>
           </div>
         );
       })}
 
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          feedbackState={
-            saving ? "loading" : showSavedState ? "success" : "idle"
-          }
-          loadingLabel={t("providers.saving")}
-          successLabel={t("providers.saved")}
-          loadingVisual="text"
-          loadingDelayMs={250}
-          preserveWidth
-          size="sm"
-          onClick={() => onSaveSetup()}
-          disabled={saving || showSavedState}
-          className="h-8"
-        >
-          {t("common:actions.save")}
-        </Button>
-      </div>
+      {!showInlineSave ? (
+        <div className="flex justify-end">{saveButton}</div>
+      ) : null}
       {setupMethod === "host_with_oauth_fallback"
         ? renderInlineCodeMessage(
             t("providers.models.setup.hostWithOauthFallbackTerminal"),
@@ -327,7 +332,7 @@ export function SetupFieldsPanel({
         ? renderSetupMessage(setupMessage)
         : null}
       <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

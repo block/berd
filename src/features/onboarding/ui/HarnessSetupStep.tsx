@@ -114,6 +114,7 @@ export function HarnessSetupStep({
             previewMissing ? undefined : agentChecks.get(provider.id)
           }
           statusLoading={loading}
+          presentation="card"
           onProviderReady={markSetupComplete}
           onInstallComplete={
             previewMissing ? markDemoInstallComplete : undefined

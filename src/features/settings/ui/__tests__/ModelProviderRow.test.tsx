@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentType } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -133,6 +139,220 @@ describe("ModelProviderRow", () => {
     onSaveFields.mockResolvedValue(undefined);
     onRemoveConfig.mockResolvedValue(undefined);
     onCompleteNativeSetup.mockResolvedValue(undefined);
+  });
+
+  it("shows setup placeholders while provider config loads", async () => {
+    const user = userEvent.setup();
+    let resolveConfig: (values: []) => void = () => {};
+    onGetConfig.mockReturnValueOnce(
+      new Promise<[]>((resolve) => {
+        resolveConfig = resolve;
+      }),
+    );
+
+    const { container } = render(
+      <ModelProviderRow
+        provider={modelProvider("databricks", "not_configured")}
+        onGetConfig={onGetConfig}
+        onSaveFields={onSaveFields}
+        onRemoveConfig={onRemoveConfig}
+        onCompleteNativeSetup={onCompleteNativeSetup}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /databricks/i }));
+
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+      3,
+    );
+    expect(
+      screen.queryByPlaceholderText(/cloud\.databricks\.com/i),
+    ).not.toBeInTheDocument();
+
+    resolveConfig([]);
+
+    expect(
+      await screen.findByPlaceholderText(/cloud\.databricks\.com/i),
+    ).toBeInTheDocument();
+  });
+
+  it("accepts a late config response after falling back to editable fields", async () => {
+    vi.useFakeTimers();
+    let resolveConfig: (
+      values: Awaited<ReturnType<typeof onGetConfig>>,
+    ) => void = () => {};
+    onGetConfig.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveConfig = resolve;
+      }),
+    );
+
+    try {
+      const { container } = render(
+        <ModelProviderRow
+          provider={modelProvider("databricks", "not_configured")}
+          onGetConfig={onGetConfig}
+          onSaveFields={onSaveFields}
+          onRemoveConfig={onRemoveConfig}
+          onCompleteNativeSetup={onCompleteNativeSetup}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /databricks/i }));
+      expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+        3,
+      );
+      expect(
+        screen.queryByPlaceholderText(/cloud\.databricks\.com/i),
+      ).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+        0,
+      );
+      const hostInput = screen.getByPlaceholderText(/cloud\.databricks\.com/i);
+      expect(hostInput).toBeInTheDocument();
+      expect(
+        screen.getByText(/you can still enter values and save/i),
+      ).toBeInTheDocument();
+
+      fireEvent.change(hostInput, {
+        target: { value: "https://manual.cloud.databricks.com" },
+      });
+
+      await act(async () => {
+        resolveConfig([
+          {
+            key: "DATABRICKS_HOST",
+            value: "https://stale.cloud.databricks.com",
+            isSet: true,
+            isSecret: false,
+            required: true,
+          },
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByDisplayValue("https://manual.cloud.databricks.com"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByDisplayValue("https://stale.cloud.databricks.com"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/you can still enter values and save/i),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves dirty drafts when a retry after config loading fallback resolves", async () => {
+    vi.useFakeTimers();
+    let resolveFirstConfig: (
+      values: Awaited<ReturnType<typeof onGetConfig>>,
+    ) => void = () => {};
+    let resolveRetryConfig: (
+      values: Awaited<ReturnType<typeof onGetConfig>>,
+    ) => void = () => {};
+    onGetConfig
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstConfig = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRetryConfig = resolve;
+        }),
+      );
+
+    try {
+      render(
+        <ModelProviderRow
+          provider={modelProvider("databricks", "not_configured")}
+          onGetConfig={onGetConfig}
+          onSaveFields={onSaveFields}
+          onRemoveConfig={onRemoveConfig}
+          onCompleteNativeSetup={onCompleteNativeSetup}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /databricks/i }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      const trigger = screen.getByRole("button", { name: /databricks/i });
+      fireEvent.click(trigger);
+      fireEvent.click(trigger);
+
+      const hostInput = screen.getByPlaceholderText(/cloud\.databricks\.com/i);
+      fireEvent.change(hostInput, {
+        target: { value: "https://manual-after-retry.cloud.databricks.com" },
+      });
+
+      await act(async () => {
+        resolveRetryConfig([
+          {
+            key: "DATABRICKS_HOST",
+            value: "https://retry.cloud.databricks.com",
+            isSet: true,
+            isSecret: false,
+            required: true,
+          },
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByDisplayValue(
+          "https://manual-after-retry.cloud.databricks.com",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByDisplayValue("https://retry.cloud.databricks.com"),
+      ).not.toBeInTheDocument();
+
+      await act(async () => {
+        resolveFirstConfig([]);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps aria-controls pointed at the mounted provider detail region", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ModelProviderRow
+        provider={modelProvider("databricks", "not_configured")}
+        onGetConfig={onGetConfig}
+        onSaveFields={onSaveFields}
+        onRemoveConfig={onRemoveConfig}
+        onCompleteNativeSetup={onCompleteNativeSetup}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: /databricks/i });
+    const controlledId = trigger.getAttribute("aria-controls");
+    expect(controlledId).toBeTruthy();
+
+    const controlledRegion = document.getElementById(controlledId ?? "");
+    expect(controlledRegion).toBeInTheDocument();
+    expect(controlledRegion).toHaveAttribute("aria-hidden", "true");
+    expect(controlledRegion).toHaveAttribute("inert");
+
+    await user.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(controlledRegion).toHaveAttribute("aria-hidden", "false");
+    expect(controlledRegion).not.toHaveAttribute("inert");
   });
 
   it("saves all changed setup fields from one setup submit", async () => {
