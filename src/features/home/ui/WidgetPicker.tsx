@@ -11,10 +11,12 @@ import {
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
 import {
-  getAutomationTiles,
-  type AutomationTile,
-} from "@/features/automations/api/kgooseAutomations";
+  AUTOMATION_TILES_QUERY_KEY,
+  AUTOMATION_TILES_STALE_TIME_MS,
+  fetchAutomationTilesList,
+} from "@/features/automations/api/automationTilesQuery";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
@@ -376,14 +378,6 @@ export function WidgetPicker({
   const searchInputId = useId();
   const [activePanel, setActivePanel] = useState<WidgetCategory | null>(null);
   const [query, setQuery] = useState("");
-  const [automations, setAutomations] = useState<AutomationTile[]>([]);
-  const [automationStatus, setAutomationStatus] = useState<"idle" | "error">(
-    "idle",
-  );
-  const automationCacheLoadedRef = useRef(false);
-  const automationTilesPromiseRef = useRef<Promise<AutomationTile[]> | null>(
-    null,
-  );
   const lastChatLoadQueryRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -405,9 +399,23 @@ export function WidgetPicker({
     enabled: open && activePanel === "skill",
   });
 
+  // Automation list is gated the same way, and shares the AutomationsView /
+  // pin-widget / search cache entry via AUTOMATION_TILES_QUERY_KEY so tile
+  // mutations invalidate the picker too.
+  const {
+    data: automations,
+    isPending: automationsPending,
+    isError: automationLoadFailed,
+  } = useQuery({
+    queryKey: AUTOMATION_TILES_QUERY_KEY,
+    queryFn: fetchAutomationTilesList,
+    staleTime: AUTOMATION_TILES_STALE_TIME_MS,
+    enabled: open && activePanel === "automation" && automationsEnabled,
+  });
+
   const options = useWidgetPickerOptions({
     activePanel,
-    automations,
+    automations: automations ?? [],
     instances,
     query,
     skills: skills ?? [],
@@ -426,47 +434,6 @@ export function WidgetPicker({
       setQuery("");
     }
   }
-
-  useEffect(() => {
-    if (!automationsEnabled || !open || activePanel !== "automation") {
-      return;
-    }
-    if (automationCacheLoadedRef.current) {
-      return;
-    }
-
-    automationTilesPromiseRef.current ??= getAutomationTiles().then(
-      (response) => response.tiles,
-    );
-
-    let cancelled = false;
-    void automationTilesPromiseRef.current
-      .then((tiles) => {
-        if (cancelled) {
-          return;
-        }
-
-        setAutomations(tiles);
-        automationCacheLoadedRef.current = true;
-        setAutomationStatus("idle");
-      })
-      .catch((error: unknown) => {
-        // Clear the cached promise on any rejection — including after the panel
-        // closed — so the next open refetches instead of `??=` replaying this
-        // rejected promise (which would surface a stale error with no retry).
-        automationTilesPromiseRef.current = null;
-        if (cancelled) {
-          return;
-        }
-
-        console.error("Failed to load automations", error);
-        setAutomationStatus("error");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activePanel, automationsEnabled, open]);
 
   useEffect(() => {
     const normalizedQuery = query.trim();
@@ -515,9 +482,6 @@ export function WidgetPicker({
   const selectCategory = (category: WidgetCategory) => {
     setActivePanel(category);
     setQuery("");
-    if (category === "automation" && !automationCacheLoadedRef.current) {
-      setAutomationStatus("idle");
-    }
   };
 
   const selectOption = (option: PickerOption) => {
@@ -534,11 +498,8 @@ export function WidgetPicker({
 
   const isAutomationPanel = activePanel === "automation";
   const isSkillPanel = activePanel === "skill";
-  const isAutomationLoading =
-    isAutomationPanel &&
-    automationStatus !== "error" &&
-    !automationCacheLoadedRef.current;
-  const isAutomationError = isAutomationPanel && automationStatus === "error";
+  const isAutomationLoading = isAutomationPanel && automationsPending;
+  const isAutomationError = isAutomationPanel && automationLoadFailed;
   const isSkillLoading = isSkillPanel && skillsPending;
   const showEmpty =
     activePanel !== null &&

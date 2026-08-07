@@ -1,58 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
 import {
-  getAutomationTiles,
-  type AutomationTile,
-} from "@/features/automations/api/kgooseAutomations";
+  AUTOMATION_TILES_QUERY_KEY,
+  AUTOMATION_TILES_STALE_TIME_MS,
+  fetchAutomationTilesList,
+} from "@/features/automations/api/automationTilesQuery";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { automationResultMeta } from "../lib/automationResultText";
 import { filterByQuery } from "../lib/filterByQuery";
 
-let automationCache: AutomationTile[] | null = null;
-let automationRequest: Promise<AutomationTile[]> | null = null;
-
-function loadAutomations(): Promise<AutomationTile[]> {
-  automationRequest ??= getAutomationTiles()
-    .then((response) => {
-      automationCache = response.tiles;
-      return response.tiles;
-    })
-    .finally(() => {
-      automationRequest = null;
-    });
-
-  return automationRequest;
-}
-
 export function useAutomationSearch(query: string): AutomationTile[] {
   const automationsEnabled = useProfileCapability("automations");
-  const [automations, setAutomations] = useState<AutomationTile[]>(() =>
-    automationsEnabled ? (automationCache ?? []) : [],
-  );
 
-  useEffect(() => {
-    if (!automationsEnabled) {
-      setAutomations([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    void loadAutomations()
-      .then((loadedAutomations) => {
-        if (!cancelled) {
-          setAutomations(loadedAutomations);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAutomations([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [automationsEnabled]);
+  // Shares the AUTOMATION_TILES_QUERY_KEY cache entry with AutomationsView and
+  // the home widgets, so tile mutations invalidate search results too — a
+  // module-level snapshot here would be stale for the process lifetime.
+  const { data } = useQuery({
+    queryKey: AUTOMATION_TILES_QUERY_KEY,
+    queryFn: fetchAutomationTilesList,
+    enabled: automationsEnabled,
+    staleTime: AUTOMATION_TILES_STALE_TIME_MS,
+  });
 
   return useMemo(() => {
     if (!automationsEnabled) {
@@ -60,9 +29,9 @@ export function useAutomationSearch(query: string): AutomationTile[] {
     }
 
     return filterByQuery(
-      automations.filter((automation) => Boolean(automation.id)),
+      (data ?? []).filter((automation) => Boolean(automation.id)),
       query,
       (automation) => [automation.title, automationResultMeta(automation)],
     );
-  }, [automations, automationsEnabled, query]);
+  }, [automationsEnabled, data, query]);
 }

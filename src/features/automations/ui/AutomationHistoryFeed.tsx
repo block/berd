@@ -6,6 +6,10 @@ import { IconArrowRight } from "@tabler/icons-react";
 import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
 import { getAutomationTileResults } from "@/features/automations/api/kgooseAutomations";
 import {
+  AUTOMATIONS_REFETCH_INTERVAL_MS,
+  automationTileResultsQueryKey,
+} from "@/features/automations/api/automationTilesQuery";
+import {
   getOutputBody,
   keyAutomationResults,
   runTimestamp,
@@ -16,8 +20,6 @@ import { Button } from "@/shared/ui/button";
 import { ExpandableHistoryRow } from "@/features/automations/ui/ExpandableHistoryRow";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
-
-const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
 
 export function AutomationHistoryFeed({
   automations,
@@ -34,7 +36,7 @@ export function AutomationHistoryFeed({
   const automationTiles = automations.filter((tile) => tile.id);
   const historyQueries = useQueries({
     queries: automationTiles.map((tile) => ({
-      queryKey: ["automationTileResults", tile.id, "global"],
+      queryKey: automationTileResultsQueryKey(tile.id),
       queryFn: () => getAutomationTileResults(tile.id ?? ""),
       refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
       enabled: Boolean(tile.id),

@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
 import {
-  type GetAutomationTileResponse,
-  getAutomationTile,
-  getAutomationTiles,
-} from "@/features/automations/api/kgooseAutomations";
+  AUTOMATION_TILES_QUERY_KEY,
+  AUTOMATION_TILES_STALE_TIME_MS,
+  automationTileQueryKey,
+  fetchAutomationTileDetail,
+  fetchAutomationTilesList,
+} from "@/features/automations/api/automationTilesQuery";
 import {
   getOutputSummary,
   latestRunTimestampFromTile,
@@ -33,9 +36,7 @@ function getAutomationId(
  */
 type CardState = "success" | "failed" | "running" | "never-run" | "paused";
 
-function resolveCardState(
-  tile: import("@/features/automations/api/kgooseAutomations").AutomationTile,
-): CardState {
+function resolveCardState(tile: AutomationTile): CardState {
   if (tile.schedulePaused) return "paused";
   const normalized = String(tile.latestRunStatus ?? "").toLowerCase();
   if (!normalized && !tile.lastSuccessAt) return "never-run";
@@ -93,28 +94,62 @@ export function AutomationOutputWidget({
   const automationsEnabled = useProfileCapability("automations");
   const automationId = getAutomationId(instance.state);
 
-  const { data: tileData } = useQuery<GetAutomationTileResponse>({
-    queryKey: ["automation-tile", automationId],
-    queryFn: () =>
-      automationId
-        ? getAutomationTile(automationId)
-        : Promise.resolve<GetAutomationTileResponse>({}),
-    enabled: automationsEnabled && Boolean(automationId),
-    staleTime: 15_000,
-  });
-
+  // One shared list query per home screen instead of a `get_automation_tile`
+  // per pin: the list response carries everything the widget renders, and the
+  // shared key is what lets AutomationsView mutations invalidate pins.
   const { data: listData } = useQuery({
-    queryKey: ["automation-tiles"],
-    queryFn: () => getAutomationTiles().then((r) => r.tiles),
-    enabled: automationsEnabled && !automationId,
-    staleTime: 15_000,
+    queryKey: AUTOMATION_TILES_QUERY_KEY,
+    queryFn: fetchAutomationTilesList,
+    enabled: automationsEnabled,
+    staleTime: AUTOMATION_TILES_STALE_TIME_MS,
   });
 
-  const tile =
-    tileData?.tileInfo ??
-    (automationId
-      ? listData?.find((t) => t.id === automationId)
-      : listData?.[0]);
+  const listTile = automationId
+    ? listData?.find((t) => t.id === automationId)
+    : listData?.[0];
+
+  // The list can lag a just-created/duplicated automation — the same
+  // propagation gap AutomationsView bridges with `pendingCreatedAutomationId`
+  // and its delayed refetch — and a pin created from the detail page in that
+  // window carries an id the list has not published yet. So a resolved list
+  // that misses the pinned id is not proof the automation is gone.
+  const listMissesPinnedTile =
+    Boolean(automationId) && listData !== undefined && !listTile;
+
+  // List/detail parity guard: every run-outcome field rendered below is
+  // optional on AutomationTile, so a backend that stopped populating the list
+  // response would render as "never ran"/"no output" instead of failing
+  // loudly. A list entry without `latestRenderedData` is indistinguishable
+  // from that, so double-check it against `get_automation_tile` (sharing
+  // AutomationsView's detail cache entry) and prefer the detail fields; for a
+  // genuinely never-run tile the confirm fetch returns the same bare fields.
+  // The same confirm covers the propagation window above, so a missing entry
+  // fails loudly only once the detail endpoint agrees the tile is gone. Tiles
+  // with a rendered payload skip this, keeping the common-case home screen at
+  // one IPC call.
+  const detailTileId =
+    listTile?.id ?? (listMissesPinnedTile ? automationId : null);
+  const shouldConfirmWithDetail =
+    Boolean(detailTileId) && !listTile?.latestRenderedData;
+  const { data: detailData, isError: detailConfirmErrored } = useQuery({
+    queryKey: automationTileQueryKey(detailTileId),
+    queryFn: () => fetchAutomationTileDetail(detailTileId ?? ""),
+    enabled: automationsEnabled && shouldConfirmWithDetail,
+    staleTime: AUTOMATION_TILES_STALE_TIME_MS,
+  });
+
+  // react-query keeps the last snapshot across background refetch errors, so
+  // "unresolved" means the confirm fetch has never succeeded for this tile —
+  // the only window where the slim entry's fields are unverified.
+  const detailConfirmUnresolved = shouldConfirmWithDetail && !detailData;
+
+  // Once a confirm is required the detail envelope is the sole source of
+  // truth: a settled-but-empty envelope (tile deleted or no longer generic
+  // between the list and detail calls) must not fall back to the unverified
+  // slim entry it exists to check.
+  const tile = shouldConfirmWithDetail
+    ? detailData?.tileInfo && { ...listTile, ...detailData.tileInfo }
+    : listTile;
 
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (tile?.id) onOpenAutomation?.(tile.id);
@@ -127,7 +162,23 @@ export function AutomationOutputWidget({
     },
   );
 
-  if (!tile) {
+  // While the confirm fetch is in flight neither unverified state may render:
+  // the slim entry would show exactly the "Never run"/"No output" a slimmed
+  // payload fakes, and a missing entry would claim the automation is gone
+  // while it may just be lagging the list. Show a neutral shell instead,
+  // mirroring SkillPinWidget's pending state.
+  if (detailConfirmUnresolved && !detailConfirmErrored) {
+    return (
+      <div aria-hidden="true" className="h-full w-full rounded-md bg-card" />
+    );
+  }
+
+  // Nothing left to render once the confirm settled: an errored fetch leaves
+  // us unable to tell a slimmed payload apart from a never-run tile, and an
+  // empty envelope (or an empty list with no pinned id) means the automation
+  // really is gone. Fail loudly rather than render unverified fields;
+  // invalidation or a later refetch recovers the pin.
+  if (!tile || detailConfirmUnresolved) {
     return (
       <button
         type="button"

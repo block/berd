@@ -9,11 +9,17 @@ import {
   type AutomationTile,
   createAutomationTile,
   deleteAutomationTile,
-  getAutomationTile,
-  getAutomationTiles,
   refreshAutomationTile,
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
+import {
+  AUTOMATION_TILES_QUERY_KEY,
+  AUTOMATIONS_REFETCH_INTERVAL_MS,
+  automationTileQueryKey,
+  fetchAutomationTileDetail,
+  fetchAutomationTilesList,
+  invalidateAutomationTileQueries,
+} from "@/features/automations/api/automationTilesQuery";
 import {
   automationTitle,
   buildDuplicateAutomationRequest,
@@ -35,8 +41,6 @@ import type {
   AppNavigationUpdateOptions,
   AutomationNavigationRoute,
 } from "@/app/types/appNavigation";
-
-const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
 
 // Backend occasionally returns a transient 409-ish message during the optimistic
 // mutation → refetch window. It's not user-actionable, so we suppress it from
@@ -128,15 +132,12 @@ export function AutomationsWorkbench({
     isLoading: isAutomationsLoading,
     refetch: refetchAutomations,
   } = useQuery({
-    queryKey: ["automationTiles"],
-    queryFn: getAutomationTiles,
+    queryKey: AUTOMATION_TILES_QUERY_KEY,
+    queryFn: fetchAutomationTilesList,
     refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
   });
 
-  const automations = useMemo(
-    () => automationsData?.tiles ?? [],
-    [automationsData?.tiles],
-  );
+  const automations = useMemo(() => automationsData ?? [], [automationsData]);
 
   useEffect(() => {
     if (!automations.length) {
@@ -195,8 +196,8 @@ export function AutomationsWorkbench({
     isLoading: isDetailLoading,
     refetch: refetchDetail,
   } = useQuery({
-    queryKey: ["automationTile", detailAutomationId],
-    queryFn: () => getAutomationTile(detailAutomationId ?? ""),
+    queryKey: automationTileQueryKey(detailAutomationId),
+    queryFn: () => fetchAutomationTileDetail(detailAutomationId ?? ""),
     enabled: Boolean(detailAutomationId),
     refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
   });
@@ -239,11 +240,7 @@ export function AutomationsWorkbench({
   }, [onBreadcrumbLabelChange]);
 
   const invalidateAutomationQueries = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["automationTiles"] }),
-      queryClient.invalidateQueries({ queryKey: ["automationTile"] }),
-      queryClient.invalidateQueries({ queryKey: ["automationTileResults"] }),
-    ]);
+    await invalidateAutomationTileQueries(queryClient);
   };
 
   const selectCreatedAutomation = (automationId: string) => {

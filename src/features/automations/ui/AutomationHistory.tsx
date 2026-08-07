@@ -4,12 +4,14 @@ import * as Accordion from "@radix-ui/react-accordion";
 import { useTranslation } from "react-i18next";
 import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
 import { getAutomationTileResults } from "@/features/automations/api/kgooseAutomations";
+import {
+  AUTOMATIONS_REFETCH_INTERVAL_MS,
+  automationTileResultsQueryKey,
+} from "@/features/automations/api/automationTilesQuery";
 import { keyAutomationResults } from "@/features/automations/lib/automationFormatting";
 import { Spinner } from "@/shared/ui/spinner";
 import { ExpandableHistoryRow } from "@/features/automations/ui/ExpandableHistoryRow";
 import { EmptyState, RunOutput } from "@/features/automations/ui/RunOutput";
-
-const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
 
 export function AutomationHistory({
   tile,
@@ -28,7 +30,7 @@ export function AutomationHistory({
     error: historyError,
     isLoading: isHistoryLoading,
   } = useQuery({
-    queryKey: ["automationTileResults", tileId],
+    queryKey: automationTileResultsQueryKey(tileId),
     queryFn: () => getAutomationTileResults(tileId),
     refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
   });

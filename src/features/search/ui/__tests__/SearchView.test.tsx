@@ -1,11 +1,13 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
-  render,
+  render as renderWithoutQueryClient,
   screen,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -29,13 +31,33 @@ vi.mock("@/shared/api/acp", async (importOriginal) => ({
   acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 
+// With a QueryClient in the tree (see `render` below), useSkillSearch fetches
+// through skillsQuery's per-leg queries instead of the provider-less
+// `listSkills` fallback, so both discovery legs need stubs too.
 vi.mock("@/features/skills/api/skills", () => ({
   listSkills: (...args: unknown[]) => mockListSkills(...args),
+  listGooseSourceSkills: (...args: unknown[]) => mockListSkills(...args),
+  listBerdAppSkills: () => Promise.resolve([]),
 }));
 
 vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: (...args: unknown[]) => mockGetAutomationTiles(...args),
 }));
+
+// useAutomationSearch reads the shared automation tile list through
+// react-query, so every render needs a QueryClient — a fresh one per render
+// keeps the tile cache from bleeding between tests.
+function render(ui: ReactElement) {
+  return renderWithoutQueryClient(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      {ui}
+    </QueryClientProvider>,
+  );
+}
 
 describe("SearchView", () => {
   beforeEach(() => {
