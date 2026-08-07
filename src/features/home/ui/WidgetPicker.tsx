@@ -631,10 +631,7 @@ function PanelStageOne({
             "disabled:opacity-50",
           )}
         >
-          {/* Optically nudge the label up 2px within the pill. */}
-          <span className="-translate-y-[2px]">
-            {getSectionLabel(category)}
-          </span>
+          {getSectionLabel(category)}
         </button>
       ))}
     </div>
