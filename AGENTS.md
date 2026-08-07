@@ -22,6 +22,14 @@ UI can handle operations that are not yet in ACP or are client specific.
 - `src-tauri/crates/berdctl/` — bundled berdctl CLI
 - `distro/skills/berdctl/` — seeded skill agents use to discover berdctl
 
+## Architectural laws
+
+`LAWS/` defines required product and user experience behavior. Before planning,
+implementing, or reviewing behavior changes, read `LAWS/README.md` and every
+law file relevant to the affected behavior. Laws take correctness precedence
+over the current code and tests; when they disagree, change the implementation
+and tests or explicitly propose a product-approved law change.
+
 ## Startup assets
 
 Startup artifact media is resolved by the Tauri backend and returned as local
