@@ -135,3 +135,7 @@ admin-runtime-config = []
 
 [dev-dependencies]
 tempfile = "3"
+# Mirrors goose's bare-name command resolver (crates/goose Cargo.toml): the
+# native Windows gate resolves the bridge launcher through the exact
+# `which_in_global` path goosed uses, so PATHEXT resolution is under test.
+which = { version = "8", default-features = false, features = ["real-sys"] }

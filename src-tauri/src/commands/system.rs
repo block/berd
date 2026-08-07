@@ -226,10 +226,10 @@ fn try_launch_chrome(url: &str) -> bool {
 fn try_launch_chrome(url: &str) -> bool {
     // `start` is a shell builtin; the empty "" is the window title argument
     // that `start` requires when the first argument is quoted.
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", "chrome", url])
-        .spawn()
-        .is_ok()
+    let mut command = std::process::Command::new("cmd");
+    command.args(["/C", "start", "", "chrome", url]);
+    crate::services::process::apply_no_window(&mut command);
+    command.spawn().is_ok()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -822,20 +822,18 @@ fn insert_parent_file_mention_directories(
 }
 
 fn load_git_file_mention_paths(root_path: &Path) -> Option<Vec<String>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root_path)
-        .args([
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-            "--",
-            ".",
-        ])
-        .output()
-        .ok()?;
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root_path).args([
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        ".",
+    ]);
+    crate::services::process::apply_no_window(&mut command);
+    let output = command.output().ok()?;
 
     if !output.status.success() {
         return None;

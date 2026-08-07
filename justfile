@@ -34,6 +34,17 @@ dev-windows:
 tauri-check-windows:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Tauri-Check-Windows.ps1
 
+# Build an unsigned native Windows installer with pinned managed sidecars.
+# `bundle` is transported as an argv element to this generated script. Never
+# interpolate recipe arguments into PowerShell source.
+[windows]
+[positional-arguments]
+[script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
+bundle-windows bundle="nsis":
+    & (Join-Path (Get-Location) "scripts/windows/Bundle-Windows.ps1") -Bundle $args[0]
+    if (-not $?) { exit 1 }
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Run focused tests for Windows script path/stamp helpers.
 test-windows-dev:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Test-WindowsDev.ps1
@@ -218,6 +229,13 @@ _tauri-test-windows:
 
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
+
+# Native x64 MSVC CI gate for the managed Node runtime + ACP bridge.
+# Runs the managed_node / managed_acp_tools module tests (including the
+# BERD_WS2_NATIVE_GATE real-ZIP + bridge-launch gates), tauri check, and
+# Windows-only native CI-equivalent gate. Kept for local and release validation.
+ci-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/CI-Windows.ps1
 
 # Run release/updater script tests.
 release-scripts-test:

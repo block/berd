@@ -113,6 +113,7 @@ async fn sq_command() -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    crate::services::process::apply_no_window_async(&mut command);
     command
 }
 

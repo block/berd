@@ -65,6 +65,7 @@ impl GlobalShortcutHandlerState {
             &shortcut,
             initially_hidden,
         );
+        crate::services::process::apply_no_window(&mut command);
 
         let spawned = command
             .spawn()

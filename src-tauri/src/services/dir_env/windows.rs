@@ -68,6 +68,7 @@ pub(crate) fn find_project_hermit_bin(dir: &Path) -> Option<PathBuf> {
         .current_dir(start)
         .env_clear()
         .envs(&env);
+    crate::services::process::apply_no_window(&mut command);
     let output = command.output().ok()?;
     if !output.status.success() {
         return None;

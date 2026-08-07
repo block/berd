@@ -1,4 +1,27 @@
-//! Generic process-liveness helpers.
+//! Generic process helpers.
+
+/// Suppress the console window a GUI-subsystem parent would otherwise allocate
+/// when spawning a console-subsystem child. Redirecting or piping stdio does
+/// not prevent that flash on Windows; `CREATE_NO_WINDOW` does.
+pub(crate) fn apply_no_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
+/// Tokio equivalent of [`apply_no_window`]. Keep both entry points here so
+/// synchronous and asynchronous subprocesses follow the same policy.
+pub(crate) fn apply_no_window_async(command: &mut tokio::process::Command) {
+    apply_no_window(command.as_std_mut());
+}
 
 #[cfg(unix)]
 pub(crate) type ProcessId = libc::pid_t;
@@ -77,6 +100,54 @@ pub(crate) fn kill_process(pid: ProcessId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    const CONSOLE_WINDOW_PROBE: &str = r#"
+        Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }';
+        if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 7 }
+    "#;
+
+    #[cfg(windows)]
+    #[test]
+    fn std_background_command_has_no_console_window() {
+        let mut command = std::process::Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            CONSOLE_WINDOW_PROBE,
+        ]);
+        apply_no_window(&mut command);
+
+        let output = command.output().expect("run console-window probe");
+        assert!(
+            output.status.success(),
+            "background child had a console window: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn async_background_command_has_no_console_window() {
+        let mut command = tokio::process::Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            CONSOLE_WINDOW_PROBE,
+        ]);
+        apply_no_window_async(&mut command);
+
+        let output = command.output().await.expect("run console-window probe");
+        assert!(
+            output.status.success(),
+            "background child had a console window: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[cfg(unix)]
     #[test]

@@ -568,6 +568,7 @@ async fn run_git_once_async(
     )
     .await;
 
+    crate::services::process::apply_no_window_async(&mut command);
     timeout(command_timeout, command.output())
         .await
         .map_err(|_| GitRunError::TimedOut)?

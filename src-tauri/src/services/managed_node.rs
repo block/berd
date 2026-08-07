@@ -27,6 +27,13 @@ const UPSTREAM_NODE_DIST_BASE_URL: &str = "https://nodejs.org/dist";
 /// Hard cap on the compressed tarball; the largest pinned artifact today is
 /// ~49 MB, so anything near this is a wrong or corrupted download.
 const MAX_ARCHIVE_BYTES: u64 = 90 * 1024 * 1024;
+/// Hard cap on the total uncompressed bytes an archive may expand to, a
+/// zip/tar-bomb guard independent of the compressed download cap. The largest
+/// pinned Node release unpacks to well under 300 MB.
+const MAX_EXTRACTED_BYTES: u64 = 600 * 1024 * 1024;
+/// Hard cap on the number of entries an archive may contain, guarding against
+/// entry-count exhaustion. A Node release holds a few thousand files.
+const MAX_EXTRACTED_ENTRIES: u64 = 100_000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
@@ -46,12 +53,165 @@ pub struct NodeRuntimeArtifact {
 }
 
 impl NodeRuntimeArtifact {
-    /// Node's platform string (`darwin-arm64`, …), derived from the tarball
-    /// name so the lock stays the single source of truth.
+    /// Node's platform string (`darwin-arm64`, `win-x64`, …), derived from the
+    /// tarball/zip name so the lock stays the single source of truth.
     fn platform<'a>(&'a self, version: &str) -> Option<&'a str> {
-        self.filename
-            .strip_prefix(format!("node-{version}-").as_str())?
-            .strip_suffix(".tar.gz")
+        let stem = self
+            .filename
+            .strip_prefix(format!("node-{version}-").as_str())?;
+        stem.strip_suffix(".tar.gz")
+            .or_else(|| stem.strip_suffix(".zip"))
+    }
+}
+
+/// The two release archive shapes Node ships: `.tar.gz` for macOS/Linux,
+/// `.zip` for Windows. Derived from the pinned filename so the lock remains
+/// the single source of truth for format as well as platform.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArchiveFormat {
+    TarGz,
+    Zip,
+}
+
+fn archive_format(filename: &str) -> ArchiveFormat {
+    if filename.ends_with(".zip") {
+        ArchiveFormat::Zip
+    } else {
+        ArchiveFormat::TarGz
+    }
+}
+
+/// Whether a platform lays runtime executables out Windows-style — flat in the
+/// runtime root with `.exe`/`.cmd` suffixes — rather than Unix-style under
+/// `bin/` with no extension.
+fn is_windows_platform(platform: &str) -> bool {
+    platform.starts_with("win-")
+}
+
+/// Directory holding a runtime's `node`/`npm` executables: the runtime root on
+/// Windows, `<runtime>/bin` everywhere else.
+fn node_bin_dir(runtime_dir: &Path, platform: &str) -> PathBuf {
+    if is_windows_platform(platform) {
+        runtime_dir.to_path_buf()
+    } else {
+        runtime_dir.join("bin")
+    }
+}
+
+fn node_exe_name(platform: &str) -> &'static str {
+    if is_windows_platform(platform) {
+        "node.exe"
+    } else {
+        "node"
+    }
+}
+
+/// The npm entrypoint that verifies a runtime tree is complete. On Windows
+/// that is the `npm.cmd` batch shim (the extensionless `npm` shipped alongside
+/// it is a POSIX shell script); elsewhere it is the extensionless `npm`.
+fn npm_exe_name(platform: &str) -> &'static str {
+    if is_windows_platform(platform) {
+        "npm.cmd"
+    } else {
+        "npm"
+    }
+}
+
+/// The npm CLI entrypoint the managed npm command drives directly, when the
+/// platform has one that must exist independently of the executables in the
+/// runtime's bin dir. On Windows npm is spawned as `node.exe <npm-cli.js>`, so
+/// `<runtime>/node_modules/npm/bin/npm-cli.js` is load-bearing and can go
+/// missing (AV quarantine, disk cleanup) while `node.exe` stays healthy. On
+/// Unix the `bin/npm` shim is spawned directly and is already covered by
+/// [`npm_exe_name`], so there is no separate entrypoint to check.
+fn npm_cli_entrypoint(runtime_dir: &Path, platform: &str) -> Option<PathBuf> {
+    is_windows_platform(platform).then(|| {
+        runtime_dir
+            .join("node_modules")
+            .join("npm")
+            .join("bin")
+            .join("npm-cli.js")
+    })
+}
+
+/// How to spawn npm for an installed runtime: the program to execute plus any
+/// leading arguments that must precede npm's own arguments. On Windows npm is
+/// driven through `node.exe <npm-cli.js>` so no `cmd.exe` batch semantics or
+/// `PATHEXT` resolution are involved; on Unix the `bin/npm` shim is spawned
+/// directly, exactly as before.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NpmCommand {
+    pub program: PathBuf,
+    pub leading_args: Vec<PathBuf>,
+}
+
+/// Platform-aware layout of an installed managed Node runtime: where its
+/// `node`/`npm` executables live, how npm must be invoked, and where npm
+/// writes global-prefix executables. Resolved once from the embedded lock's
+/// pinned artifact for the current target so every consumer (installer,
+/// bridge provisioner, doctor) agrees on one contract.
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeLayout {
+    platform: &'static str,
+}
+
+impl RuntimeLayout {
+    /// The layout for the current target's pinned artifact, or `None` when the
+    /// embedded lock has no artifact for this target.
+    pub fn current() -> Option<Self> {
+        Some(Self {
+            platform: pinned_platform()?,
+        })
+    }
+
+    /// A layout for an explicit Node platform string, so tests can exercise
+    /// both the Unix and Windows shapes on any host.
+    #[cfg(test)]
+    pub(crate) fn for_platform(platform: &'static str) -> Self {
+        Self { platform }
+    }
+
+    /// Whether executables lay out Windows-style (flat in the runtime root,
+    /// `.exe`/`.cmd` suffixed) rather than Unix-style under `bin/`.
+    pub fn is_windows(&self) -> bool {
+        is_windows_platform(self.platform)
+    }
+
+    /// The directory holding the runtime's executables under `install_dir`.
+    pub fn bin_dir(&self, install_dir: &Path) -> PathBuf {
+        node_bin_dir(install_dir, self.platform)
+    }
+
+    /// The `node` executable path under `install_dir`.
+    pub fn node_exe(&self, install_dir: &Path) -> PathBuf {
+        self.bin_dir(install_dir).join(node_exe_name(self.platform))
+    }
+
+    /// How to spawn npm for a runtime installed at `install_dir`.
+    pub fn npm_command(&self, install_dir: &Path) -> NpmCommand {
+        match npm_cli_entrypoint(install_dir, self.platform) {
+            // The Windows release ships npm's CLI at
+            // `<runtime>/node_modules/npm/bin/npm-cli.js`; driving it through
+            // `node.exe` avoids the `npm.cmd` shell wrapper entirely.
+            Some(npm_cli) => NpmCommand {
+                program: self.node_exe(install_dir),
+                leading_args: vec![npm_cli],
+            },
+            None => NpmCommand {
+                program: self.bin_dir(install_dir).join(npm_exe_name(self.platform)),
+                leading_args: Vec::new(),
+            },
+        }
+    }
+
+    /// The directory npm writes global-prefix executables into under `prefix`:
+    /// the prefix root on Windows, `<prefix>/bin` everywhere else.
+    pub fn npm_prefix_bin_dir(&self, prefix: &Path) -> PathBuf {
+        if self.is_windows() {
+            prefix.to_path_buf()
+        } else {
+            prefix.join("bin")
+        }
     }
 }
 
@@ -72,6 +232,8 @@ pub(crate) fn current_target_triple() -> Option<&'static str> {
         Some("aarch64-unknown-linux-gnu")
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         Some("x86_64-unknown-linux-gnu")
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        Some("x86_64-pc-windows-msvc")
     } else {
         None
     }
@@ -87,7 +249,7 @@ fn node_dist_base_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
         .unwrap_or_else(fallback_node_dist_base_url)
 }
 
-fn fallback_node_dist_base_url() -> String {
+pub(crate) fn fallback_node_dist_base_url() -> String {
     if cfg!(feature = "no-block-npm-registry") {
         UPSTREAM_NODE_DIST_BASE_URL.to_string()
     } else {
@@ -114,6 +276,12 @@ pub enum ManagedNodeError {
         actual: String,
     },
     UnsafeArchiveEntry(String),
+    ArchiveExpandedTooLarge {
+        limit_bytes: u64,
+    },
+    ArchiveTooManyEntries {
+        limit: u64,
+    },
     IncompleteRuntime(String),
     Io(String),
 }
@@ -146,6 +314,14 @@ impl std::fmt::Display for ManagedNodeError {
             Self::UnsafeArchiveEntry(path) => {
                 write!(f, "Node.js runtime archive contains an unsafe entry path: {path}")
             }
+            Self::ArchiveExpandedTooLarge { limit_bytes } => write!(
+                f,
+                "Node.js runtime archive expands beyond the {limit_bytes}-byte limit"
+            ),
+            Self::ArchiveTooManyEntries { limit } => write!(
+                f,
+                "Node.js runtime archive exceeds the {limit}-entry limit"
+            ),
             Self::IncompleteRuntime(message) => {
                 write!(f, "managed Node.js runtime install is incomplete: {message}")
             }
@@ -209,7 +385,17 @@ pub fn managed_node_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option
 }
 
 pub fn managed_node_bin_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
-    Some(pinned_install_dir(&managed_node_root(app)?)?.join("bin"))
+    pinned_node_bin_dir(&managed_node_root(app)?)
+}
+
+/// The directory holding the pinned runtime's `node`/`npm` executables under
+/// `root` — the runtime root on Windows, `<runtime>/bin` elsewhere. `None`
+/// when the embedded lock has no artifact for this target.
+pub fn pinned_node_bin_dir(root: &Path) -> Option<PathBuf> {
+    let lock = node_runtime_lock();
+    let artifact = lock.artifacts.get(current_target_triple()?)?;
+    let platform = artifact.platform(&lock.version)?;
+    Some(node_bin_dir(&pinned_install_dir(root)?, platform))
 }
 
 /// Where the pinned runtime for the current target lives (or belongs) under
@@ -225,10 +411,22 @@ pub fn pinned_install_dir(root: &Path) -> Option<PathBuf> {
 /// Whether the pinned runtime under `root` is installed and healthy for the
 /// current target. `false` on unsupported targets.
 pub async fn pinned_runtime_ready(root: &Path) -> bool {
-    match pinned_install_dir(root) {
-        Some(final_dir) => runtime_ready(&final_dir, &node_runtime_lock().version).await,
-        None => false,
+    let lock = node_runtime_lock();
+    match (pinned_install_dir(root), pinned_platform()) {
+        (Some(final_dir), Some(platform)) => {
+            runtime_ready(&final_dir, &lock.version, platform).await
+        }
+        _ => false,
     }
+}
+
+/// The pinned artifact's Node platform string for the current target, or
+/// `None` when the embedded lock has no artifact for it.
+fn pinned_platform() -> Option<&'static str> {
+    let lock = node_runtime_lock();
+    lock.artifacts
+        .get(current_target_triple()?)?
+        .platform(&lock.version)
 }
 
 fn install_dir(root: &Path, version: &str, platform: &str) -> PathBuf {
@@ -256,7 +454,7 @@ pub async fn ensure_managed_node_runtime<R: tauri::Runtime>(
     .await
 }
 
-async fn ensure_managed_node_runtime_at(
+pub(crate) async fn ensure_managed_node_runtime_at(
     root: &Path,
     base_url: &str,
     lock: &NodeRuntimeLock,
@@ -276,12 +474,12 @@ async fn ensure_managed_node_runtime_at(
         .ok_or_else(|| ManagedNodeError::InvalidLockFilename(artifact.filename.clone()))?;
 
     let final_dir = install_dir(root, &lock.version, platform);
-    if runtime_ready(&final_dir, &lock.version).await {
+    if runtime_ready(&final_dir, &lock.version, platform).await {
         return Ok(());
     }
 
     let _guard = install_serialization_lock().lock().await;
-    if runtime_ready(&final_dir, &lock.version).await {
+    if runtime_ready(&final_dir, &lock.version, platform).await {
         return Ok(());
     }
 
@@ -296,7 +494,7 @@ async fn ensure_managed_node_runtime_at(
     };
     install_runtime(&plan, progress).await?;
 
-    if runtime_ready(&final_dir, &lock.version).await {
+    if runtime_ready(&final_dir, &lock.version, platform).await {
         Ok(())
     } else {
         Err(ManagedNodeError::IncompleteRuntime(
@@ -310,20 +508,35 @@ fn install_serialization_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// Fast-path readiness probe: the installed `bin/node` runs and reports
-/// exactly the pinned version.
-async fn runtime_ready(final_dir: &Path, version: &str) -> bool {
-    let node = final_dir.join("bin").join("node");
+/// Fast-path readiness probe: the installed `node` executable runs and reports
+/// exactly the pinned version, and the platform's required npm entrypoints are
+/// present. The executable name and layout are target-aware (`node.exe` in the
+/// runtime root on Windows, `bin/node` elsewhere). On Windows the managed npm
+/// command executes `node.exe <node_modules/npm/bin/npm-cli.js>`, while other
+/// setup and doctor paths may resolve the runtime's `npm.cmd` from PATH. Both
+/// files are load-bearing: if either is deleted or quarantined while `node.exe`
+/// stays healthy, the runtime is not usable and must be repaired rather than
+/// reported ready.
+async fn runtime_ready(final_dir: &Path, version: &str, platform: &str) -> bool {
+    let bin_dir = node_bin_dir(final_dir, platform);
+    let node = bin_dir.join(node_exe_name(platform));
     if !node.is_file() {
         return false;
     }
-    let output = tokio::process::Command::new(&node)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .await;
+    if npm_cli_entrypoint(final_dir, platform).is_some_and(|npm_cli| {
+        !bin_dir.join(npm_exe_name(platform)).is_file() || !npm_cli.is_file()
+    }) {
+        return false;
+    }
+    let output = {
+        let mut cmd = tokio::process::Command::new(&node);
+        cmd.arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        crate::services::process::apply_no_window_async(&mut cmd);
+        cmd.output().await
+    };
     output
         .ok()
         .filter(|output| output.status.success())
@@ -379,50 +592,71 @@ async fn install_runtime(
     progress(ManagedNodeProgress::Extracting);
     std::fs::create_dir_all(&temp_dir)
         .map_err(|error| ManagedNodeError::Io(format!("create temp dir: {error}")))?;
+    let format = archive_format(plan.filename);
+    let max_extracted_bytes = MAX_EXTRACTED_BYTES;
     let extract_result = {
         let archive_path = archive_path.clone();
         let temp_dir = temp_dir.clone();
-        tokio::task::spawn_blocking(move || extract_archive(&archive_path, &temp_dir))
-            .await
-            .map_err(|error| ManagedNodeError::Io(format!("extract task failed: {error}")))?
+        tokio::task::spawn_blocking(move || {
+            extract_archive(&archive_path, &temp_dir, format, max_extracted_bytes)
+        })
+        .await
+        .map_err(|error| ManagedNodeError::Io(format!("extract task failed: {error}")))?
     };
     let _ = std::fs::remove_file(&archive_path);
     extract_result?;
 
-    // Node tarballs unpack into a single `node-<version>-<platform>` dir.
+    // Node archives unpack into a single `node-<version>-<platform>` dir.
     let extracted_dir = temp_dir.join(format!("node-{}-{}", plan.version, plan.platform));
     let source_dir = if extracted_dir.is_dir() {
         extracted_dir
     } else {
         temp_dir.clone()
     };
-    verify_runtime_tree(&source_dir)?;
+    verify_runtime_tree(&source_dir, plan.platform)?;
 
     progress(ManagedNodeProgress::Installing);
-    let old_dir = final_dir.with_extension("old");
-    if old_dir.exists() {
-        std::fs::remove_dir_all(&old_dir)
-            .map_err(|error| ManagedNodeError::Io(format!("remove stale old dir: {error}")))?;
-    }
-    if final_dir.exists() {
-        std::fs::rename(&final_dir, &old_dir)
-            .map_err(|error| ManagedNodeError::Io(format!("stage previous runtime: {error}")))?;
-    }
-    if let Err(error) = std::fs::rename(&source_dir, &final_dir) {
-        if old_dir.exists() {
-            let _ = std::fs::rename(&old_dir, &final_dir);
-        }
-        return Err(ManagedNodeError::Io(format!(
-            "install Node.js runtime: {error}"
-        )));
-    }
-    let _ = std::fs::remove_dir_all(&old_dir);
+    swap_runtime_into_place(&source_dir, &final_dir)?;
     let _ = std::fs::remove_dir_all(&temp_dir);
     // Superseded version dirs are deliberately NOT pruned here: bridge shims
     // exec the absolute path of the Node version they were installed against,
     // so the old runtime must survive until every shim has been rewritten
     // onto this one. The reconcile epilogue prunes via
     // `prune_superseded_node_runtimes` once every bridge install succeeded.
+    Ok(())
+}
+
+/// Atomically replace the runtime at `final_dir` with the freshly validated
+/// tree at `source_dir`: stage any existing runtime aside to `<final>.old`,
+/// rename the new tree into place, then drop the staged copy. On a failed
+/// swap the previous runtime is rolled back so an install failure never leaves
+/// the pinned runtime missing. A rollback that itself fails is surfaced with
+/// the staged path so the broken state is diagnosable rather than silent.
+fn swap_runtime_into_place(source_dir: &Path, final_dir: &Path) -> Result<(), ManagedNodeError> {
+    let old_dir = final_dir.with_extension("old");
+    if old_dir.exists() {
+        std::fs::remove_dir_all(&old_dir)
+            .map_err(|error| ManagedNodeError::Io(format!("remove stale old dir: {error}")))?;
+    }
+    if final_dir.exists() {
+        std::fs::rename(final_dir, &old_dir)
+            .map_err(|error| ManagedNodeError::Io(format!("stage previous runtime: {error}")))?;
+    }
+    if let Err(error) = std::fs::rename(source_dir, final_dir) {
+        if old_dir.exists() {
+            if let Err(rollback) = std::fs::rename(&old_dir, final_dir) {
+                return Err(ManagedNodeError::Io(format!(
+                    "install Node.js runtime: {error}; rolling the previous runtime back \
+                     also failed: {rollback} (previous runtime is staged at {})",
+                    old_dir.display()
+                )));
+            }
+        }
+        return Err(ManagedNodeError::Io(format!(
+            "install Node.js runtime: {error}"
+        )));
+    }
+    let _ = std::fs::remove_dir_all(&old_dir);
     Ok(())
 }
 
@@ -447,6 +681,11 @@ fn prune_superseded(root: &Path, version: &str) {
     };
     for entry in entries.flatten() {
         if entry.file_name().to_string_lossy() == version {
+            // The kept version dir survives, but a `<platform>.old` staged
+            // inside it by a swap whose cleanup was interrupted (or blocked by
+            // a locked file on Windows) would otherwise leak forever, since
+            // this loop never descends into the kept dir. Sweep those here.
+            prune_stale_old_dirs(&entry.path());
             continue;
         }
         let path = entry.path();
@@ -459,6 +698,25 @@ fn prune_superseded(root: &Path, version: &str) {
             log::warn!(
                 "failed to prune superseded managed Node.js entry {}: {error}",
                 path.display()
+            );
+        }
+    }
+}
+
+/// Remove `<platform>.old` staging dirs left inside the kept version dir when
+/// a swap's best-effort cleanup did not complete.
+fn prune_stale_old_dirs(version_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(version_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("old") {
+            continue;
+        }
+        if let Err(error) = std::fs::remove_dir_all(entry.path()) {
+            log::warn!(
+                "failed to prune stale managed Node.js staging dir {}: {error}",
+                entry.path().display()
             );
         }
     }
@@ -546,13 +804,32 @@ async fn stream_archive(
     Ok(())
 }
 
-fn extract_archive(archive_path: &Path, dest_dir: &Path) -> Result<(), ManagedNodeError> {
-    // Two passes over the (seekable) file: validate every entry path before a
-    // single byte is written, then unpack.
+fn extract_archive(
+    archive_path: &Path,
+    dest_dir: &Path,
+    format: ArchiveFormat,
+    max_extracted_bytes: u64,
+) -> Result<(), ManagedNodeError> {
+    match format {
+        ArchiveFormat::TarGz => extract_tar_gz(archive_path, dest_dir, max_extracted_bytes),
+        ArchiveFormat::Zip => extract_zip(archive_path, dest_dir, max_extracted_bytes),
+    }
+}
+
+fn extract_tar_gz(
+    archive_path: &Path,
+    dest_dir: &Path,
+    max_extracted_bytes: u64,
+) -> Result<(), ManagedNodeError> {
+    // Two passes over the (seekable) file: validate every entry path and the
+    // size/entry budgets before a single byte is written, then unpack. The
+    // second pass uses `tar::Archive::unpack` so symlink entries (npm's
+    // `bin/npm` → `lib/node_modules/...`) are recreated exactly as on macOS
+    // and Linux today.
     let file = std::fs::File::open(archive_path)
         .map_err(|error| ManagedNodeError::Io(format!("open archive: {error}")))?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    validate_archive_entries(&mut archive)?;
+    validate_tar_entries(&mut archive, max_extracted_bytes)?;
 
     let file = std::fs::File::open(archive_path)
         .map_err(|error| ManagedNodeError::Io(format!("open archive for extraction: {error}")))?;
@@ -562,37 +839,143 @@ fn extract_archive(archive_path: &Path, dest_dir: &Path) -> Result<(), ManagedNo
         .map_err(|error| ManagedNodeError::Io(format!("extract archive: {error}")))
 }
 
-fn validate_archive_entries<R: std::io::Read>(
+fn validate_tar_entries<R: std::io::Read>(
     archive: &mut tar::Archive<R>,
+    max_extracted_bytes: u64,
 ) -> Result<(), ManagedNodeError> {
     let entries = archive
         .entries()
         .map_err(|error| ManagedNodeError::Io(format!("read archive entries: {error}")))?;
+    let mut total_bytes = 0_u64;
+    let mut entry_count = 0_u64;
     for entry in entries {
         let entry =
             entry.map_err(|error| ManagedNodeError::Io(format!("read archive entry: {error}")))?;
         let path = entry
             .path()
             .map_err(|error| ManagedNodeError::Io(format!("read archive entry path: {error}")))?;
-        if path.is_absolute()
-            || path
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
+        if !is_safe_relative_path(&path) {
             return Err(ManagedNodeError::UnsafeArchiveEntry(
                 path.to_string_lossy().into_owned(),
             ));
+        }
+        entry_count += 1;
+        if entry_count > MAX_EXTRACTED_ENTRIES {
+            return Err(ManagedNodeError::ArchiveTooManyEntries {
+                limit: MAX_EXTRACTED_ENTRIES,
+            });
+        }
+        total_bytes = total_bytes.saturating_add(entry.size());
+        if total_bytes > max_extracted_bytes {
+            return Err(ManagedNodeError::ArchiveExpandedTooLarge {
+                limit_bytes: max_extracted_bytes,
+            });
         }
     }
     Ok(())
 }
 
-fn verify_runtime_tree(dir: &Path) -> Result<(), ManagedNodeError> {
-    for binary in ["node", "npm"] {
-        if !dir.join("bin").join(binary).is_file() {
+/// Extract a `.zip` (Windows Node release) without shelling out to any host
+/// tool. Rejects unsafe entry paths, then copies every file while enforcing a
+/// running uncompressed-byte budget against the declared entry size — so a
+/// lying header cannot expand past the cap.
+fn extract_zip(
+    archive_path: &Path,
+    dest_dir: &Path,
+    max_extracted_bytes: u64,
+) -> Result<(), ManagedNodeError> {
+    let file = std::fs::File::open(archive_path)
+        .map_err(|error| ManagedNodeError::Io(format!("open archive: {error}")))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|error| ManagedNodeError::Io(format!("read zip archive: {error}")))?;
+    if archive.len() as u64 > MAX_EXTRACTED_ENTRIES {
+        return Err(ManagedNodeError::ArchiveTooManyEntries {
+            limit: MAX_EXTRACTED_ENTRIES,
+        });
+    }
+
+    let mut written_bytes = 0_u64;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| ManagedNodeError::Io(format!("read zip entry: {error}")))?;
+        let relative = zip_entry_relative_path(entry.name())
+            .ok_or_else(|| ManagedNodeError::UnsafeArchiveEntry(entry.name().to_string()))?;
+        let out_path = dest_dir.join(&relative);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out_path)
+                .map_err(|error| ManagedNodeError::Io(format!("create zip dir: {error}")))?;
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                ManagedNodeError::Io(format!("create zip entry parent: {error}"))
+            })?;
+        }
+        let remaining = max_extracted_bytes.saturating_sub(written_bytes);
+        let mut out_file = std::fs::File::create(&out_path)
+            .map_err(|error| ManagedNodeError::Io(format!("create zip entry file: {error}")))?;
+        // `+ 1` so an entry that exactly fills the budget still copies while a
+        // stream that runs one byte over is detected.
+        let mut limited = std::io::Read::take(&mut entry, remaining + 1);
+        let copied = std::io::copy(&mut limited, &mut out_file)
+            .map_err(|error| ManagedNodeError::Io(format!("write zip entry: {error}")))?;
+        if copied > remaining {
+            return Err(ManagedNodeError::ArchiveExpandedTooLarge {
+                limit_bytes: max_extracted_bytes,
+            });
+        }
+        written_bytes += copied;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(mode) = entry.unix_mode() {
+                let _ = std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(mode));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A tar/zip entry path is safe to extract when it is relative and made of
+/// only normal path components — no absolute root, drive prefix, or `..`
+/// traversal.
+fn is_safe_relative_path(path: &Path) -> bool {
+    use std::path::Component;
+    path.components().next().is_some()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+/// The safe relative path for a raw zip entry name, or `None` when it would
+/// escape the destination. Zip names are `/`-separated per spec; a backslash
+/// is rejected outright so a `..\` payload cannot slip past the `/`-only
+/// component check on non-Windows hosts.
+fn zip_entry_relative_path(name: &str) -> Option<PathBuf> {
+    if name.contains('\\') {
+        return None;
+    }
+    let path = Path::new(name);
+    is_safe_relative_path(path).then(|| path.to_path_buf())
+}
+
+fn verify_runtime_tree(dir: &Path, platform: &str) -> Result<(), ManagedNodeError> {
+    let bin_dir = node_bin_dir(dir, platform);
+    for binary in [node_exe_name(platform), npm_exe_name(platform)] {
+        if !bin_dir.join(binary).is_file() {
             return Err(ManagedNodeError::IncompleteRuntime(format!(
-                "archive is missing bin/{binary}"
+                "archive is missing {binary}"
             )));
+        }
+    }
+    // The Windows npm command execs `node.exe <node_modules/npm/bin/npm-cli.js>`,
+    // so a tree without that CLI would install "ready" yet fail every npm run.
+    if let Some(npm_cli) = npm_cli_entrypoint(dir, platform) {
+        if !npm_cli.is_file() {
+            return Err(ManagedNodeError::IncompleteRuntime(
+                "archive is missing node_modules/npm/bin/npm-cli.js".to_string(),
+            ));
         }
     }
     Ok(())
@@ -607,6 +990,7 @@ mod tests {
 
     const TEST_VERSION: &str = "v9.9.9";
     const TEST_PLATFORM: &str = "testos-testarch";
+    const WIN_PLATFORM: &str = "win-x64";
 
     fn target() -> &'static str {
         current_target_triple().expect("tests only run on supported targets")
@@ -720,6 +1104,11 @@ mod tests {
         format!("http://{addr}")
     }
 
+    /// A ready Unix runtime whose `bin/node` is an executable `#!/bin/sh`
+    /// stub. Unix-only: the stub relies on the shebang, so the readiness probe
+    /// that runs it cannot execute on native Windows. Windows execution is
+    /// covered by the real-ZIP native gate.
+    #[cfg(unix)]
     fn write_ready_runtime(root: &Path, version: &str) {
         let bin = install_dir(root, version, TEST_PLATFORM).join("bin");
         std::fs::create_dir_all(&bin).unwrap();
@@ -747,6 +1136,7 @@ mod tests {
             "x86_64-apple-darwin",
             "aarch64-unknown-linux-gnu",
             "x86_64-unknown-linux-gnu",
+            "x86_64-pc-windows-msvc",
         ] {
             let artifact = lock
                 .artifacts
@@ -784,7 +1174,7 @@ mod tests {
     fn archive_validation_rejects_traversal_and_absolute_paths() {
         for name in ["../evil.sh", "/abs/evil.sh"] {
             let mut archive = tar::Archive::new(std::io::Cursor::new(raw_entry_tar(name)));
-            let error = validate_archive_entries(&mut archive).unwrap_err();
+            let error = validate_tar_entries(&mut archive, MAX_EXTRACTED_BYTES).unwrap_err();
             assert!(
                 matches!(error, ManagedNodeError::UnsafeArchiveEntry(_)),
                 "{name}: {error}"
@@ -792,6 +1182,11 @@ mod tests {
         }
     }
 
+    // These tests drive the full install/readiness path against a `#!/bin/sh`
+    // fake `node`, so the readiness probe actually executes it. That stub
+    // cannot run on native Windows; the real-ZIP native gate covers Windows
+    // execution.
+    #[cfg(unix)]
     #[tokio::test]
     async fn install_keeps_superseded_versions_until_reconcile_prunes() {
         let root_dir = tempfile::tempdir().unwrap();
@@ -837,6 +1232,7 @@ mod tests {
         assert!(recorded.contains(&ManagedNodeProgress::Installing));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn fast_path_skips_download_when_runtime_matches_pin() {
         let root_dir = tempfile::tempdir().unwrap();
@@ -990,6 +1386,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn pinned_runtime_ready_probes_the_embedded_pin() {
         let root_dir = tempfile::tempdir().unwrap();
@@ -1047,15 +1444,618 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn readiness_probe_requires_exact_pinned_version() {
         let root_dir = tempfile::tempdir().unwrap();
         let root = root_dir.path();
         let final_dir = install_dir(root, TEST_VERSION, TEST_PLATFORM);
-        assert!(!runtime_ready(&final_dir, TEST_VERSION).await);
+        assert!(!runtime_ready(&final_dir, TEST_VERSION, TEST_PLATFORM).await);
 
         write_ready_runtime(root, TEST_VERSION);
-        assert!(runtime_ready(&final_dir, TEST_VERSION).await);
-        assert!(!runtime_ready(&final_dir, "v9.9.8").await);
+        assert!(runtime_ready(&final_dir, TEST_VERSION, TEST_PLATFORM).await);
+        assert!(!runtime_ready(&final_dir, "v9.9.8", TEST_PLATFORM).await);
+    }
+
+    // ── Windows target ──────────────────────────────────────────────────
+
+    #[test]
+    fn windows_target_maps_to_zip_and_win_platform() {
+        let lock = node_runtime_lock();
+        let artifact = lock
+            .artifacts
+            .get("x86_64-pc-windows-msvc")
+            .expect("lock is missing the Windows target");
+        assert_eq!(artifact.platform(&lock.version), Some("win-x64"));
+        assert_eq!(archive_format(&artifact.filename), ArchiveFormat::Zip);
+        assert!(artifact.filename.ends_with(".zip"));
+    }
+
+    #[test]
+    fn artifact_platform_parses_zip_filenames() {
+        let artifact = NodeRuntimeArtifact {
+            filename: "node-v24.11.0-win-x64.zip".to_string(),
+            sha256: String::new(),
+        };
+        assert_eq!(artifact.platform("v24.11.0"), Some("win-x64"));
+        assert_eq!(artifact.platform("v24.12.0"), None);
+    }
+
+    #[test]
+    fn archive_format_and_layout_are_target_aware() {
+        assert_eq!(
+            archive_format("node-v1-linux-x64.tar.gz"),
+            ArchiveFormat::TarGz
+        );
+        assert_eq!(archive_format("node-v1-win-x64.zip"), ArchiveFormat::Zip);
+
+        assert!(is_windows_platform("win-x64"));
+        assert!(!is_windows_platform("linux-x64"));
+
+        let root = Path::new("/data/v1/win-x64");
+        assert_eq!(node_bin_dir(root, "win-x64"), root.to_path_buf());
+        assert_eq!(node_bin_dir(root, "linux-x64"), root.join("bin"));
+        assert_eq!(node_exe_name("win-x64"), "node.exe");
+        assert_eq!(node_exe_name("linux-x64"), "node");
+        assert_eq!(npm_exe_name("win-x64"), "npm.cmd");
+        assert_eq!(npm_exe_name("linux-x64"), "npm");
+    }
+
+    /// A minimal but shape-faithful Windows Node release zip: `node.exe`,
+    /// `npm`, and `npm.cmd` flat in the runtime root (no `bin/`), plus the
+    /// `node_modules/npm/bin/npm-cli.js` the Windows npm command execs.
+    fn node_win_zip(version: &str, extra: &[(&str, &[u8])]) -> Vec<u8> {
+        use zip::write::SimpleFileOptions;
+        let prefix = format!("node-{version}-{WIN_PLATFORM}");
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let files: &[(&str, &[u8])] = &[
+            ("node.exe", b"MZ node"),
+            ("npm", b"#!/bin/sh\n"),
+            ("npm.cmd", b"@echo off\n"),
+            ("node_modules/npm/bin/npm-cli.js", b"// npm-cli\n"),
+        ];
+        writer.add_directory(format!("{prefix}/"), options).unwrap();
+        for (name, contents) in files {
+            writer
+                .start_file(format!("{prefix}/{name}"), options)
+                .unwrap();
+            writer.write_all(contents).unwrap();
+        }
+        for (name, contents) in extra {
+            writer
+                .start_file(format!("{prefix}/{name}"), options)
+                .unwrap();
+            writer.write_all(contents).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn win_test_lock(sha256: &str) -> NodeRuntimeLock {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "x86_64-pc-windows-msvc".to_string(),
+            NodeRuntimeArtifact {
+                filename: format!("node-{TEST_VERSION}-{WIN_PLATFORM}.zip"),
+                sha256: sha256.to_string(),
+            },
+        );
+        NodeRuntimeLock {
+            version: TEST_VERSION.to_string(),
+            artifacts,
+        }
+    }
+
+    #[test]
+    fn zip_extraction_lays_out_windows_runtime_flat() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let dest = root_dir.path().join("out");
+        std::fs::create_dir_all(&dest).unwrap();
+        let zip = node_win_zip(TEST_VERSION, &[("subdir/extra.txt", b"data")]);
+        let archive = root_dir.path().join("node.zip");
+        std::fs::write(&archive, &zip).unwrap();
+
+        extract_zip(&archive, &dest, MAX_EXTRACTED_BYTES).unwrap();
+
+        let runtime = dest.join(format!("node-{TEST_VERSION}-{WIN_PLATFORM}"));
+        assert!(runtime.join("node.exe").is_file());
+        assert!(runtime.join("npm.cmd").is_file());
+        assert!(runtime.join("subdir").join("extra.txt").is_file());
+        // Windows layout: executables sit in the runtime root, not under bin/.
+        verify_runtime_tree(&runtime, WIN_PLATFORM).unwrap();
+    }
+
+    #[test]
+    fn verify_runtime_tree_requires_windows_npm_cli() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let runtime = root_dir.path();
+        // A Windows tree with node.exe + npm.cmd but no npm-cli.js: the npm
+        // command would exec a missing `node.exe <npm-cli.js>` and fail every
+        // run, so the tree must be rejected as incomplete rather than accepted.
+        std::fs::write(runtime.join("node.exe"), b"MZ node").unwrap();
+        std::fs::write(runtime.join("npm.cmd"), b"@echo off\n").unwrap();
+        let error = verify_runtime_tree(runtime, WIN_PLATFORM).unwrap_err();
+        assert!(
+            matches!(error, ManagedNodeError::IncompleteRuntime(ref message)
+                if message.contains("npm-cli.js")),
+            "{error:?}"
+        );
+
+        // Adding the CLI entrypoint completes the tree.
+        let npm_cli = npm_cli_entrypoint(runtime, WIN_PLATFORM).unwrap();
+        std::fs::create_dir_all(npm_cli.parent().unwrap()).unwrap();
+        std::fs::write(&npm_cli, b"// npm-cli\n").unwrap();
+        verify_runtime_tree(runtime, WIN_PLATFORM).unwrap();
+    }
+
+    #[tokio::test]
+    async fn readiness_probe_requires_windows_npm_entrypoints() {
+        // On Windows both npm.cmd (for PATH-resolved setup/doctor paths) and
+        // npm-cli.js (for the managed Node-driven npm command) are required.
+        // Losing either one must mark the runtime not ready so ensure repairs
+        // the installation. These file gates run before node.exe is executed,
+        // so this detection test remains host-independent.
+        let root_dir = tempfile::tempdir().unwrap();
+        let runtime = install_dir(root_dir.path(), TEST_VERSION, WIN_PLATFORM);
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("node.exe"), b"MZ node").unwrap();
+        std::fs::write(runtime.join("npm.cmd"), b"@echo off\n").unwrap();
+
+        // node.exe + npm.cmd present but npm-cli.js missing: not ready.
+        assert!(
+            !runtime_ready(&runtime, TEST_VERSION, WIN_PLATFORM).await,
+            "runtime with a missing npm-cli.js must not be reported ready"
+        );
+
+        let npm_cli = npm_cli_entrypoint(&runtime, WIN_PLATFORM).unwrap();
+        std::fs::create_dir_all(npm_cli.parent().unwrap()).unwrap();
+        std::fs::write(&npm_cli, b"// npm-cli\n").unwrap();
+
+        // node.exe + npm-cli.js present but npm.cmd missing: also not ready.
+        std::fs::remove_file(runtime.join("npm.cmd")).unwrap();
+        assert!(
+            !runtime_ready(&runtime, TEST_VERSION, WIN_PLATFORM).await,
+            "runtime with a missing npm.cmd must not be reported ready"
+        );
+
+        // Restoring npm.cmd clears both file-existence gates. The probe then
+        // proceeds to execute node.exe, which is covered by the Windows gate.
+        std::fs::write(runtime.join("npm.cmd"), b"@echo off\n").unwrap();
+        assert!(npm_cli.is_file() && runtime.join("npm.cmd").is_file());
+    }
+
+    #[test]
+    fn zip_extraction_rejects_traversal_entries() {
+        for name in [
+            "../evil.txt",
+            "..\\evil.txt",
+            "/abs/evil.txt",
+            "sub/../../evil",
+        ] {
+            use zip::write::SimpleFileOptions;
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let options = SimpleFileOptions::default();
+            writer.start_file(name, options).unwrap();
+            writer.write_all(b"evil").unwrap();
+            let bytes = writer.finish().unwrap().into_inner();
+
+            let root_dir = tempfile::tempdir().unwrap();
+            let dest = root_dir.path().join("out");
+            std::fs::create_dir_all(&dest).unwrap();
+            let archive = root_dir.path().join("node.zip");
+            std::fs::write(&archive, &bytes).unwrap();
+
+            let error = extract_zip(&archive, &dest, MAX_EXTRACTED_BYTES).unwrap_err();
+            assert!(
+                matches!(error, ManagedNodeError::UnsafeArchiveEntry(_)),
+                "{name}: {error:?}"
+            );
+            // Nothing escaped the destination dir.
+            assert!(!root_dir.path().join("evil.txt").exists());
+        }
+    }
+
+    #[test]
+    fn zip_extraction_enforces_uncompressed_byte_cap() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let dest = root_dir.path().join("out");
+        std::fs::create_dir_all(&dest).unwrap();
+        // A single 4 KiB entry against a 1 KiB budget.
+        let zip = node_win_zip(TEST_VERSION, &[("big.bin", &vec![0_u8; 4096])]);
+        let archive = root_dir.path().join("node.zip");
+        std::fs::write(&archive, &zip).unwrap();
+
+        let error = extract_zip(&archive, &dest, 1024).unwrap_err();
+        assert!(
+            matches!(error, ManagedNodeError::ArchiveExpandedTooLarge { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn windows_zip_installs_flat_layout() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        let zip = node_win_zip(TEST_VERSION, &[]);
+        let lock = win_test_lock(&sha256_hex(&zip));
+        let base_url = serve_once(zip, true).await;
+
+        install_windows_runtime(root, &base_url, &lock)
+            .await
+            .unwrap();
+
+        let runtime = install_dir(root, TEST_VERSION, WIN_PLATFORM);
+        // node.exe / npm.cmd sit flat in the runtime root.
+        assert!(runtime.join("node.exe").is_file());
+        assert!(runtime.join("npm.cmd").is_file());
+        // The bin-dir resolver points at the runtime root on Windows.
+        assert_eq!(node_bin_dir(&runtime, WIN_PLATFORM), runtime);
+    }
+
+    #[tokio::test]
+    async fn windows_install_recovers_from_partial_temp_dir() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        // A crashed prior install left a half-written temp dir behind.
+        let stale_temp = root.join(format!("{TEST_VERSION}.{WIN_PLATFORM}.tmp"));
+        std::fs::create_dir_all(stale_temp.join("garbage")).unwrap();
+        std::fs::write(stale_temp.join("garbage").join("f"), b"junk").unwrap();
+
+        let zip = node_win_zip(TEST_VERSION, &[]);
+        let lock = win_test_lock(&sha256_hex(&zip));
+        let base_url = serve_once(zip, true).await;
+
+        install_windows_runtime(root, &base_url, &lock)
+            .await
+            .unwrap();
+
+        let runtime = install_dir(root, TEST_VERSION, WIN_PLATFORM);
+        assert!(runtime.join("node.exe").is_file());
+        assert!(runtime.join("npm.cmd").is_file());
+        assert!(!stale_temp.exists());
+    }
+
+    #[tokio::test]
+    async fn windows_install_handles_paths_with_spaces() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path().join("App Data").join("packages node");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let zip = node_win_zip(TEST_VERSION, &[]);
+        let lock = win_test_lock(&sha256_hex(&zip));
+        let base_url = serve_once(zip, true).await;
+
+        install_windows_runtime(&root, &base_url, &lock)
+            .await
+            .unwrap();
+
+        let runtime = install_dir(&root, TEST_VERSION, WIN_PLATFORM);
+        assert!(runtime.join("node.exe").is_file());
+        assert!(runtime.join("npm.cmd").is_file());
+    }
+
+    #[tokio::test]
+    async fn windows_zip_missing_node_exe_fails_install() {
+        use zip::write::SimpleFileOptions;
+        let prefix = format!("node-{TEST_VERSION}-{WIN_PLATFORM}");
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default();
+        writer
+            .start_file(format!("{prefix}/npm.cmd"), options)
+            .unwrap();
+        writer.write_all(b"@echo off\n").unwrap();
+        let zip = writer.finish().unwrap().into_inner();
+
+        let root_dir = tempfile::tempdir().unwrap();
+        let lock = win_test_lock(&sha256_hex(&zip));
+        let base_url = serve_once(zip, true).await;
+
+        let error = install_windows_runtime(root_dir.path(), &base_url, &lock)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ManagedNodeError::IncompleteRuntime(_)),
+            "{error:?}"
+        );
+        assert!(!install_dir(root_dir.path(), TEST_VERSION, WIN_PLATFORM).exists());
+    }
+
+    #[tokio::test]
+    async fn windows_zip_sha_mismatch_fails_install() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let zip = node_win_zip(TEST_VERSION, &[]);
+        let lock = win_test_lock(&sha256_hex(b"not the archive"));
+        let base_url = serve_once(zip, true).await;
+
+        let error = install_windows_runtime(root_dir.path(), &base_url, &lock)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ManagedNodeError::Sha256Mismatch { .. }),
+            "{error:?}"
+        );
+        assert!(!install_dir(root_dir.path(), TEST_VERSION, WIN_PLATFORM).exists());
+    }
+
+    // ── Atomic swap + repair durability ─────────────────────────────────
+
+    #[test]
+    fn swap_installs_when_no_previous_runtime_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let final_dir = dir.path().join("final");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("node"), b"new").unwrap();
+
+        swap_runtime_into_place(&source, &final_dir).unwrap();
+
+        assert!(final_dir.join("node").is_file());
+        assert!(!source.exists());
+        assert!(!final_dir.with_extension("old").exists());
+    }
+
+    #[test]
+    fn swap_replaces_previous_runtime_and_drops_staged_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let final_dir = dir.path().join("final");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("node"), b"new").unwrap();
+        std::fs::create_dir_all(&final_dir).unwrap();
+        std::fs::write(final_dir.join("node"), b"old").unwrap();
+
+        swap_runtime_into_place(&source, &final_dir).unwrap();
+
+        assert_eq!(std::fs::read(final_dir.join("node")).unwrap(), b"new");
+        assert!(!final_dir.with_extension("old").exists());
+    }
+
+    #[test]
+    fn swap_rolls_the_previous_runtime_back_when_the_second_rename_fails() {
+        // Force the `source -> final` rename to fail by removing the source
+        // after staging the previous runtime aside: a non-existent source is
+        // a rename error, exercising the rollback branch. We drive the swap in
+        // two steps to inject the failure between stage and rename, so this
+        // stays a host test with no Windows file-locking needed.
+        let dir = tempfile::tempdir().unwrap();
+        let final_dir = dir.path().join("final");
+        std::fs::create_dir_all(&final_dir).unwrap();
+        std::fs::write(final_dir.join("node"), b"old").unwrap();
+        // A source path that does not exist: `rename(source, final)` fails.
+        let missing_source = dir.path().join("missing-source");
+
+        let error = swap_runtime_into_place(&missing_source, &final_dir).unwrap_err();
+
+        assert!(matches!(error, ManagedNodeError::Io(_)), "{error:?}");
+        // Rollback restored the previous runtime rather than leaving it staged.
+        assert_eq!(std::fs::read(final_dir.join("node")).unwrap(), b"old");
+        assert!(!final_dir.with_extension("old").exists());
+    }
+
+    #[test]
+    fn prune_sweeps_stale_old_dirs_inside_the_kept_version() {
+        let root_dir = tempfile::tempdir().unwrap();
+        let root = root_dir.path();
+        // The kept version dir with a leaked `<platform>.old` staging dir that
+        // a prior swap's best-effort cleanup never removed.
+        let kept_version = root.join(TEST_VERSION);
+        let platform_dir = kept_version.join(TEST_PLATFORM);
+        let stale_old = kept_version.join(format!("{TEST_PLATFORM}.old"));
+        std::fs::create_dir_all(&platform_dir).unwrap();
+        std::fs::create_dir_all(stale_old.join("junk")).unwrap();
+        std::fs::write(stale_old.join("junk").join("f"), b"leak").unwrap();
+        // A superseded version dir that must be removed wholesale.
+        std::fs::create_dir_all(install_dir(root, "v0.0.1", TEST_PLATFORM)).unwrap();
+
+        prune_superseded(root, TEST_VERSION);
+
+        // Kept version and its real platform dir survive.
+        assert!(platform_dir.exists());
+        // The leaked `.old` inside the kept version is swept.
+        assert!(!stale_old.exists());
+        // Superseded version is gone.
+        assert!(!root.join("v0.0.1").exists());
+    }
+
+    /// Drive the platform-parameterized install path directly for the Windows
+    /// artifact, bypassing the host's `current_target_triple()` so the
+    /// zip/`node.exe` layout is exercised on any CI host. `node.exe` is not
+    /// executed here (it is not a real binary on non-Windows CI); the
+    /// native-Windows readiness probe is covered by the CI test matrix.
+    async fn install_windows_runtime(
+        root: &Path,
+        base_url: &str,
+        lock: &NodeRuntimeLock,
+    ) -> Result<(), ManagedNodeError> {
+        let artifact = lock
+            .artifacts
+            .get("x86_64-pc-windows-msvc")
+            .expect("windows lock must have the windows artifact");
+        let platform = artifact
+            .platform(&lock.version)
+            .expect("windows filename must parse");
+        let plan = InstallPlan {
+            root,
+            version: &lock.version,
+            platform,
+            filename: &artifact.filename,
+            sha256: &artifact.sha256,
+            base_url,
+            max_archive_bytes: MAX_ARCHIVE_BYTES,
+        };
+        install_runtime(&plan, &ignore_progress).await
+    }
+
+    // ── Native Windows gate (real pinned ZIP) ───────────────────────────
+    //
+    // These tests download and execute the real pinned Node runtime. They
+    // compile on every host (so the mac/Linux CI lanes type-check them) but
+    // only execute on native Windows when opted in via `BERD_WS2_NATIVE_GATE=1`
+    // — the Buildkite `windows-native` lane sets that variable. Off Windows, or
+    // without the variable, they skip immediately. They cover the audit's
+    // minimum native matrix items 2-3: exact `node.exe --version`, npm
+    // execution through the layout's npm command, the fast path, and repair
+    // after the installed tree is corrupted — all under a path with a space.
+
+    /// Whether the opt-in native gate should execute on this run: native
+    /// Windows plus the explicit opt-in variable.
+    fn native_gate_enabled() -> bool {
+        cfg!(windows) && std::env::var_os("BERD_WS2_NATIVE_GATE").is_some_and(|value| value == "1")
+    }
+
+    #[tokio::test]
+    async fn native_gate_installs_and_probes_the_real_pinned_runtime() {
+        if !native_gate_enabled() {
+            eprintln!(
+                "skipping: native Windows gate runs only on Windows with BERD_WS2_NATIVE_GATE=1"
+            );
+            return;
+        }
+        // A root under a directory whose name contains a space, matching a real
+        // `%LOCALAPPDATA%\Berd\App Data` install path.
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("App Data").join("packages node");
+        std::fs::create_dir_all(&root).unwrap();
+        let lock = node_runtime_lock();
+
+        // Fresh install from the pinned mirror; SHA and readiness are enforced
+        // inside `ensure_managed_node_runtime_at`.
+        ensure_managed_node_runtime_at(
+            &root,
+            &fallback_node_dist_base_url(),
+            lock,
+            MAX_ARCHIVE_BYTES,
+            &ignore_progress,
+        )
+        .await
+        .expect("real pinned Node runtime installs on native Windows");
+
+        let platform = pinned_platform().expect("windows target is pinned");
+        let install = install_dir(&root, &lock.version, platform);
+
+        // node.exe runs and reports exactly the pinned version.
+        let layout = RuntimeLayout::current().expect("windows layout resolves");
+        let node = layout.node_exe(&install);
+        let output = tokio::process::Command::new(&node)
+            .arg("--version")
+            .output()
+            .await
+            .expect("node.exe --version runs");
+        assert!(output.status.success(), "node.exe --version failed");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            lock.version,
+            "node.exe reports the pinned version"
+        );
+
+        // npm runs through the layout's Windows-safe command (node.exe +
+        // npm-cli.js) and reports a version.
+        let npm = layout.npm_command(&install);
+        let npm_output = tokio::process::Command::new(&npm.program)
+            .args(&npm.leading_args)
+            .arg("--version")
+            .output()
+            .await
+            .expect("npm runs through the managed runtime");
+        assert!(npm_output.status.success(), "npm --version failed");
+        assert!(
+            !String::from_utf8_lossy(&npm_output.stdout)
+                .trim()
+                .is_empty(),
+            "npm --version prints a version"
+        );
+
+        // Fast path: a second ensure with an unroutable base URL must not
+        // download — the ready runtime satisfies the probe.
+        ensure_managed_node_runtime_at(
+            &root,
+            "http://127.0.0.1:1",
+            lock,
+            MAX_ARCHIVE_BYTES,
+            &ignore_progress,
+        )
+        .await
+        .expect("fast path skips download when the runtime is already ready");
+
+        // Repair: corrupt node.exe so the probe fails, then re-install and
+        // confirm the runtime is healthy again.
+        let overwrite_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match std::fs::write(&node, b"corrupt") {
+                Ok(()) => break,
+                Err(error)
+                    if error.raw_os_error() == Some(32)
+                        && std::time::Instant::now() < overwrite_deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(error) => panic!("failed to corrupt node.exe for repair test: {error}"),
+            }
+        }
+        assert!(
+            !runtime_ready(&install, &lock.version, platform).await,
+            "corrupted node.exe fails the readiness probe"
+        );
+        ensure_managed_node_runtime_at(
+            &root,
+            &fallback_node_dist_base_url(),
+            lock,
+            MAX_ARCHIVE_BYTES,
+            &ignore_progress,
+        )
+        .await
+        .expect("repair re-installs a healthy runtime");
+        assert!(
+            runtime_ready(&install, &lock.version, platform).await,
+            "runtime is healthy after repair"
+        );
+
+        // Repair after npm.cmd loss: PATH-resolved npm users require the
+        // shipped batch launcher even though the managed npm command bypasses
+        // it. Deletion must make readiness fail and trigger reinstall.
+        let npm_cmd = install.join("npm.cmd");
+        std::fs::remove_file(&npm_cmd).unwrap();
+        assert!(
+            !runtime_ready(&install, &lock.version, platform).await,
+            "a missing npm.cmd fails the readiness probe even though node.exe is healthy"
+        );
+        ensure_managed_node_runtime_at(
+            &root,
+            &fallback_node_dist_base_url(),
+            lock,
+            MAX_ARCHIVE_BYTES,
+            &ignore_progress,
+        )
+        .await
+        .expect("repair restores npm.cmd");
+        assert!(
+            npm_cmd.is_file() && runtime_ready(&install, &lock.version, platform).await,
+            "npm.cmd is restored and the runtime is healthy after repair"
+        );
+
+        // Repair after npm-cli.js loss: deleting the CLI leaves node.exe
+        // healthy but makes every npm run fail. The readiness probe must
+        // detect this and re-install repairs the CLI (audit P2).
+        let npm_cli = npm_cli_entrypoint(&install, platform)
+            .expect("windows layout has an npm CLI entrypoint");
+        std::fs::remove_file(&npm_cli).unwrap();
+        assert!(
+            !runtime_ready(&install, &lock.version, platform).await,
+            "a missing npm-cli.js fails the readiness probe even though node.exe is healthy"
+        );
+        ensure_managed_node_runtime_at(
+            &root,
+            &fallback_node_dist_base_url(),
+            lock,
+            MAX_ARCHIVE_BYTES,
+            &ignore_progress,
+        )
+        .await
+        .expect("repair restores npm-cli.js");
+        assert!(
+            npm_cli.is_file() && runtime_ready(&install, &lock.version, platform).await,
+            "npm-cli.js is restored and the runtime is healthy after repair"
+        );
     }
 }

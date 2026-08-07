@@ -18,8 +18,15 @@ const TARGET_PLATFORMS = {
   "aarch64-apple-darwin": "darwin-arm64",
   "aarch64-unknown-linux-gnu": "linux-arm64",
   "x86_64-apple-darwin": "darwin-x64",
+  "x86_64-pc-windows-msvc": "win-x64",
   "x86_64-unknown-linux-gnu": "linux-x64",
 };
+
+// Node publishes Windows releases as `.zip` and every other platform as
+// `.tar.gz`; the archive extension is keyed off the platform component.
+function archiveExtension(platform) {
+  return platform.startsWith("win-") ? "zip" : "tar.gz";
+}
 
 function usage() {
   console.log(`Usage: scripts/update-node-runtime-lock.mjs [version] [--lock-file <path>] [--base-url <url>]
@@ -122,7 +129,7 @@ async function main() {
   const shasums = await fetchShasums(args.baseUrl, version);
   const artifacts = {};
   for (const [target, platform] of Object.entries(TARGET_PLATFORMS)) {
-    const filename = `node-${version}-${platform}.tar.gz`;
+    const filename = `node-${version}-${platform}.${archiveExtension(platform)}`;
     const sha256 = shasums.get(filename);
     if (!sha256) {
       throw new Error(

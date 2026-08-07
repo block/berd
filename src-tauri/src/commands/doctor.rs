@@ -11,6 +11,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+#[cfg(windows)]
+use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::services::{
@@ -463,6 +465,7 @@ async fn run_timed_command(
 ) -> Result<Output, String> {
     command.kill_on_drop(true);
     command.stdin(Stdio::null());
+    crate::services::process::apply_no_window_async(&mut command);
     timeout(command_timeout, command.output())
         .await
         .map_err(|_| {
@@ -1108,8 +1111,13 @@ fn build_managed_node_runtime_check(
         detail.extend(npm_tools.iter().map(|name| format!("- {name}")));
     }
 
-    let node_path = (state == ManagedNodeRuntimeState::Ready)
-        .then(|| install_dir.join("bin").join("node").display().to_string());
+    let node_path =
+        (state == ManagedNodeRuntimeState::Ready).then(
+            || match managed_node::RuntimeLayout::current() {
+                Some(layout) => layout.node_exe(install_dir).display().to_string(),
+                None => install_dir.join("bin").join("node").display().to_string(),
+            },
+        );
     let offers_fix = status != CheckStatus::Pass;
     let mut check = build_local_result(
         &NODE_RUNTIME_CHECK,
@@ -1159,10 +1167,10 @@ async fn execute_local_fix(
         ("sh", "-c")
     };
 
-    let output = tokio::process::Command::new(shell)
-        .arg(flag)
-        .arg(command)
-        .env("PATH", extended_path)
+    let mut process = tokio::process::Command::new(shell);
+    process.arg(flag).arg(command).env("PATH", extended_path);
+    crate::services::process::apply_no_window_async(&mut process);
+    let output = process
         .output()
         .await
         .map_err(|error| format!("Failed to run command: {error}"))?;
@@ -1200,7 +1208,111 @@ impl ManagedRuntimePaths {
     }
 
     fn npm_prefix_bin_dir(&self) -> Option<PathBuf> {
-        self.npm_prefix_dir.as_ref().map(|dir| dir.join("bin"))
+        self.npm_prefix_dir
+            .as_ref()
+            .map(|dir| managed_acp_tools::npm_global_bin_dir(dir))
+    }
+}
+
+#[cfg(windows)]
+fn managed_bridge_probe(
+    tool: managed_acp_tools::ManagedTool,
+) -> (&'static [&'static str], &'static str) {
+    match tool.id {
+        "claude-acp" => (&["--cli", "auth", "status"], "auth status"),
+        "codex-acp" => (&["cli", "login", "status"], "login status"),
+        _ => (&[], "probe"),
+    }
+}
+
+/// The upstream doctor resolver joins bare executable names onto PATH entries.
+/// Windows does not apply PATHEXT to that manual join, so Berd's intentional
+/// `<binary>.cmd` managed shims are invisible there. Re-probe only managed
+/// Windows bridges from the exact managed directory and repair those results;
+/// other checks and platforms remain upstream-owned.
+pub(crate) async fn repair_windows_managed_bridge_checks(
+    checks: &mut [doctor::DoctorCheck],
+    bundled_tools_dir: &Path,
+    env_vars: &[(String, String)],
+) {
+    #[cfg(not(windows))]
+    let _ = (checks, bundled_tools_dir, env_vars);
+
+    #[cfg(windows)]
+    for tool in managed_acp_tools::managed_tools() {
+        let check_id = crate::commands::agent_setup::crate_check_id(tool.id);
+        let Some(check) = checks.iter_mut().find(|check| check.id == check_id) else {
+            continue;
+        };
+        let shim_path = bundled_tools_dir.join(format!("{}.cmd", tool.binary));
+        if !shim_path.is_file() {
+            continue;
+        }
+
+        let (args, probe_label) = managed_bridge_probe(tool);
+        let mut command = Command::new(&shim_path);
+        command
+            .args(args)
+            .envs(env_vars.iter().map(|(key, value)| (key, value)))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let command_label = format!("{} {}", shim_path.display(), args.join(" "));
+        let (status, message, auth_status, fix_type, fix_command, probe_output) =
+            match run_timed_command(command, &command_label, LOCAL_DOCTOR_COMMAND_TIMEOUT).await {
+                Ok(output) if output.status.success() => (
+                    CheckStatus::Pass,
+                    "Installed".to_string(),
+                    Some(AuthStatus::Authenticated),
+                    None,
+                    None,
+                    format_command_output(&output),
+                ),
+                Ok(output) => (
+                    CheckStatus::Warn,
+                    "Installed, not authenticated".to_string(),
+                    Some(AuthStatus::NotAuthenticated),
+                    Some(FixType::Auth),
+                    Some(
+                        match tool.id {
+                            "claude-acp" => "claude-agent-acp --cli auth login",
+                            "codex-acp" => "codex-acp cli login",
+                            _ => tool.binary,
+                        }
+                        .to_string(),
+                    ),
+                    format_command_output(&output),
+                ),
+                Err(error) => (
+                    CheckStatus::Warn,
+                    "Installed, auth status unknown".to_string(),
+                    Some(AuthStatus::Unknown),
+                    None,
+                    None,
+                    format!("failed to run command: {error}"),
+                ),
+            };
+
+        check.status = status;
+        check.message = message;
+        check.fix_url = None;
+        check.fix_type = fix_type;
+        check.fix_command = fix_command;
+        check.path = Some(shim_path.to_string_lossy().into_owned());
+        check.bridge_path = None;
+        check.auth_status = auth_status;
+        check.install_source = Some(InstallSource::Bundled);
+        check.main = Some(doctor::types::AgentVersionInfo {
+            install_source: Some(InstallSource::Bundled),
+            bundled: Some(true),
+            ..Default::default()
+        });
+        check.bridge = None;
+        check.raw_output = Some(format!(
+            "# Berd Windows managed bridge repair\npath: {}\nprobe: {}\n{}",
+            shim_path.display(),
+            probe_label,
+            probe_output
+        ));
     }
 }
 
@@ -1229,7 +1341,7 @@ async fn run_doctor_impl(
             &managed_acp_tools::managed_npm_env_at(prefix),
         );
     }
-    let upstream = doctor::run_checks_with_options(
+    let mut checks = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
             npm_registry: crate::commands::agent_setup::npm_registry_for_distro(distro_state),
             check_freshness,
@@ -1242,12 +1354,15 @@ async fn run_doctor_impl(
             // (install source + readout flag) and suppresses registry
             // install/update fixes for them — Berd installs and upgrades these
             // bridges itself, so no manual update nag is shown.
-            bundled_tools_dir,
+            bundled_tools_dir: bundled_tools_dir.clone(),
         }
-        .with_env_snapshot(doctor_env_vars),
+        .with_env_snapshot(doctor_env_vars.clone()),
     )
     .await;
-    let mut checks: Vec<DoctorCheck> = upstream.checks.into_iter().map(DoctorCheck::from).collect();
+    if let Some(dir) = bundled_tools_dir.as_deref() {
+        repair_windows_managed_bridge_checks(&mut checks.checks, dir, &doctor_env_vars).await;
+    }
+    let mut checks: Vec<DoctorCheck> = checks.checks.into_iter().map(DoctorCheck::from).collect();
     let distro_config_path = distro_state
         .bundle()
         .and_then(|bundle| bundle.config_path.as_deref());
@@ -1566,6 +1681,72 @@ mod tests {
             main: None,
             bridge: None,
         }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn repairs_windows_managed_cmd_bridge_checks_and_auth_outcomes() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("claude-agent-acp.cmd"),
+            "@echo off\r\nif \"%1 %2 %3\"==\"--cli auth status\" exit /b 0\r\nexit /b 9\r\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("codex-acp.cmd"),
+            "@echo off\r\nif \"%1 %2 %3\"==\"cli login status\" exit /b 1\r\nexit /b 9\r\n",
+        )
+        .unwrap();
+        let mut checks = vec![
+            upstream_check("ai-agent-claude"),
+            upstream_check("ai-agent-codex"),
+        ];
+        for check in &mut checks {
+            check.status = CheckStatus::Warn;
+            check.message = "Not installed".to_string();
+        }
+
+        repair_windows_managed_bridge_checks(&mut checks, dir.path(), &[]).await;
+
+        let claude = checks
+            .iter()
+            .find(|check| check.id == "ai-agent-claude")
+            .unwrap();
+        assert_eq!(claude.status, CheckStatus::Pass);
+        assert_eq!(claude.auth_status, Some(AuthStatus::Authenticated));
+        assert_eq!(claude.install_source, Some(InstallSource::Bundled));
+        assert!(claude
+            .path
+            .as_deref()
+            .is_some_and(|path| path.ends_with("claude-agent-acp.cmd")));
+        assert!(claude.fix_type.is_none());
+
+        let codex = checks
+            .iter()
+            .find(|check| check.id == "ai-agent-codex")
+            .unwrap();
+        assert_eq!(codex.status, CheckStatus::Warn);
+        assert_eq!(codex.auth_status, Some(AuthStatus::NotAuthenticated));
+        assert_eq!(codex.fix_type, Some(FixType::Auth));
+        assert_eq!(codex.fix_command.as_deref(), Some("codex-acp cli login"));
+        assert!(codex.raw_output.as_deref().is_some_and(
+            |output| output.contains("exit code: 1") || output.contains("exit status: 1")
+        ));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_bridge_repair_does_not_fabricate_a_missing_cmd_shim() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut checks = vec![upstream_check("ai-agent-claude")];
+        checks[0].status = CheckStatus::Warn;
+        checks[0].message = "Not installed".to_string();
+
+        repair_windows_managed_bridge_checks(&mut checks, dir.path(), &[]).await;
+
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+        assert_eq!(checks[0].message, "Not installed");
+        assert!(checks[0].path.is_none());
     }
 
     fn fixture_meta() -> LocalCheckMeta {

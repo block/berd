@@ -212,7 +212,10 @@ fn bb_version(path: &Path) -> Option<String> {
 }
 
 fn command_output<P: AsRef<std::ffi::OsStr>>(program: P, args: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(args).output().ok()?;
+    let mut command = Command::new(program);
+    command.args(args);
+    crate::services::process::apply_no_window(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }

@@ -573,10 +573,10 @@
           "markdownDescription": "Denies the driver_result command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-set-timeouts`\n- `allow-submit-result`",
+          "description": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-status`\n- `allow-set-timeouts`\n- `allow-submit-result`",
           "type": "string",
           "const": "berdctl:default",
-          "markdownDescription": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-set-timeouts`\n- `allow-submit-result`"
+          "markdownDescription": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe berdctl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-status`\n- `allow-set-timeouts`\n- `allow-submit-result`"
         },
         {
           "description": "Enables the set_timeouts command without any pre-configured scope.",
@@ -589,6 +589,12 @@
           "type": "string",
           "const": "berdctl:allow-start",
           "markdownDescription": "Enables the start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the status command without any pre-configured scope.",
+          "type": "string",
+          "const": "berdctl:allow-status",
+          "markdownDescription": "Enables the status command without any pre-configured scope."
         },
         {
           "description": "Enables the stop command without any pre-configured scope.",
@@ -615,6 +621,12 @@
           "markdownDescription": "Denies the start command without any pre-configured scope."
         },
         {
+          "description": "Denies the status command without any pre-configured scope.",
+          "type": "string",
+          "const": "berdctl:deny-status",
+          "markdownDescription": "Denies the status command without any pre-configured scope."
+        },
+        {
           "description": "Denies the stop command without any pre-configured scope.",
           "type": "string",
           "const": "berdctl:deny-stop",
@@ -625,6 +637,84 @@
           "type": "string",
           "const": "berdctl:deny-submit-result",
           "markdownDescription": "Denies the submit_result command without any pre-configured scope."
+        },
+        {
+          "description": "No features are enabled by default, as we believe\nthe clipboard can be inherently dangerous and it is \napplication specific if read and/or write access is needed.\n\nClipboard interaction needs to be explicitly enabled.\n",
+          "type": "string",
+          "const": "clipboard-manager:default",
+          "markdownDescription": "No features are enabled by default, as we believe\nthe clipboard can be inherently dangerous and it is \napplication specific if read and/or write access is needed.\n\nClipboard interaction needs to be explicitly enabled.\n"
+        },
+        {
+          "description": "Enables the clear command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-clear",
+          "markdownDescription": "Enables the clear command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-read-image",
+          "markdownDescription": "Enables the read_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-read-text",
+          "markdownDescription": "Enables the read_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-write-html",
+          "markdownDescription": "Enables the write_html command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-write-image",
+          "markdownDescription": "Enables the write_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-write-text",
+          "markdownDescription": "Enables the write_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-clear",
+          "markdownDescription": "Denies the clear command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-read-image",
+          "markdownDescription": "Denies the read_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-read-text",
+          "markdownDescription": "Denies the read_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-write-html",
+          "markdownDescription": "Denies the write_html command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-write-image",
+          "markdownDescription": "Denies the write_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-write-text",
+          "markdownDescription": "Denies the write_text command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

@@ -444,11 +444,14 @@ async fn run_shell_command(
         "Starting Berd sign-in...",
     );
 
-    let mut child = tokio::process::Command::new(shell)
+    let mut process = tokio::process::Command::new(shell);
+    process
         .arg(flag)
         .arg(command)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    crate::services::process::apply_no_window_async(&mut process);
+    let mut child = process
         .spawn()
         .map_err(|e| format!("Failed to start sign-in flow: {e}"))?;
 

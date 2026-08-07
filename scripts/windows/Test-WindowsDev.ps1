@@ -58,7 +58,7 @@ try {
     Assert-Equal "process args: embedded quote escaped" (Join-WindowsProcessArguments -Arguments @('say "hi"')) '"say \"hi\""'
 
     $justfile = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "justfile")
-    Assert-Equal "justfile selects PowerShell for ordinary Windows recipes" ($justfile -match '(?m)^set windows-shell := \["powershell\.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"\]$') $true
+    Assert-Equal "justfile selects PowerShell for ordinary Windows recipes" ($justfile -match '(?m)^set windows-shell := \["powershell\.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"\]\r?$') $true
     foreach ($recipe in @("_tauri-cargo-windows", "_clean-windows")) {
         $escapedRecipe = [regex]::Escape($recipe)
         Assert-Equal "$recipe selects PowerShell locally" ($justfile -match "(?m)^${escapedRecipe}[^:]*:\r?\n\s+#!powershell\.exe") $true
@@ -88,6 +88,19 @@ try {
         $scriptPattern = [regex]::Escape($windowsRecipeCommands[$recipe])
         Assert-Equal "$recipe dispatches through its native PowerShell script" ($justfile -match "(?m)^${recipePattern}[^:]*:\r?\n\s+powershell\.exe .* -File ${scriptPattern}") $true
     }
+    Assert-Equal "bundle-windows is declared in the justfile" ($justfile -match '(?m)^bundle-windows[^:]*:') $true
+    Assert-Equal "bundle-windows uses positional argv transport" ($justfile -match '(?m)^\[positional-arguments\]\r?\n\[script\("powershell\.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"\)\]\r?\nbundle-windows[^:]*:\r?\n\s+& .*Bundle-Windows\.ps1.*\$args\[0\]') $true
+    Assert-Equal "bundle-windows does not interpolate bundle into source" ($justfile -notmatch '(?m)^\s+.*Bundle-Windows\.ps1.*\{\{\s*bundle\s*\}\}') $true
+
+    $injectionMarker = Join-Path $temp "just-injection-proof"
+    $maliciousBundle = 'bogus"; New-Item -ItemType File -Force -Path "' + $injectionMarker + '" | Out-Null; #'
+    $justCommand = (Get-Command just -ErrorAction SilentlyContinue).Source
+    if ([string]::IsNullOrWhiteSpace($justCommand)) {
+        $justCommand = Join-Path $env:USERPROFILE ".local\bin\just.exe"
+    }
+    Assert-Equal "just is available for injection regression" (Test-Path -LiteralPath $justCommand) $true
+    & $justCommand --justfile (Join-Path (Get-BerdRepoRoot) "justfile") bundle-windows $maliciousBundle *> $null
+    Assert-Equal "bundle-windows malicious argv is not executed" (Test-Path $injectionMarker) $false
 
     Assert-Equal "required pnpm version accepted" (Test-PnpmVersion (Get-RequiredPnpmVersion)) $true
     Assert-Equal "wrong pnpm version rejected" (Test-PnpmVersion "9.0.0") $false

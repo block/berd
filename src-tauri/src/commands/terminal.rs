@@ -51,6 +51,7 @@ struct TerminalSession {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    #[cfg(unix)]
     process_id: Option<u32>,
     stopping: Arc<AtomicBool>,
 }
@@ -208,6 +209,7 @@ pub async fn start_terminal(
         .slave
         .spawn_command(process)
         .map_err(|error| format!("Failed to start terminal shell: {error}"))?;
+    #[cfg(unix)]
     let process_id = child.process_id();
     let killer = Arc::new(Mutex::new(child.clone_killer()));
     let mut reader = pair
@@ -224,6 +226,7 @@ pub async fn start_terminal(
         master,
         writer,
         killer,
+        #[cfg(unix)]
         process_id,
         stopping: Arc::new(AtomicBool::new(false)),
     };

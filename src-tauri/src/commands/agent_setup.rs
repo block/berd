@@ -45,7 +45,7 @@ pub(crate) fn npm_registry_for_distro(distro_state: &DistroBundleState) -> Optio
         .or_else(fallback_npm_registry)
 }
 
-fn fallback_npm_registry() -> Option<String> {
+pub(crate) fn fallback_npm_registry() -> Option<String> {
     (!cfg!(feature = "no-block-npm-registry")).then(|| BLOCK_NPM_REGISTRY_URL.to_string())
 }
 
@@ -354,7 +354,9 @@ async fn setup_env_vars(app: &AppHandle) -> Vec<(String, String)> {
 
 async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::DoctorCheck, String> {
     let target = crate_check_id(provider_id);
-    let report = doctor::run_checks_with_options(
+    let env_vars = setup_env_vars(app).await;
+    let bundled_tools_dir = managed_acp_tools::bundled_tools_dir_for_checks(app);
+    let mut report = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
             npm_registry: npm_registry(app),
             check_freshness: false,
@@ -365,11 +367,19 @@ async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::Doctor
             // and upgrades these bridges itself (the startup reconciler floats
             // them to the latest version), so the crate must not nag the user
             // to update them manually.
-            bundled_tools_dir: managed_acp_tools::bundled_tools_dir_for_checks(app),
+            bundled_tools_dir: bundled_tools_dir.clone(),
         }
-        .with_env_snapshot(setup_env_vars(app).await),
+        .with_env_snapshot(env_vars.clone()),
     )
     .await;
+    if let Some(dir) = bundled_tools_dir.as_deref() {
+        crate::commands::doctor::repair_windows_managed_bridge_checks(
+            &mut report.checks,
+            dir,
+            &env_vars,
+        )
+        .await;
+    }
     report
         .checks
         .into_iter()

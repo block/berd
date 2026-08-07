@@ -33,6 +33,9 @@ const GOOSE_SERVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 const GOOSE_SEARCH_PATHS_ENV: &str = "GOOSE_SEARCH_PATHS";
 const LOCALHOST: &str = "127.0.0.1";
+#[cfg(target_os = "windows")]
+const TAURI_WEBVIEW_ORIGIN: &str = "http://tauri.localhost";
+#[cfg(not(target_os = "windows"))]
 const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
 const DATABRICKS_HOST_ENV: &str = "DATABRICKS_HOST";
 const GOOSE_FAST_MODEL_ENV: &str = "GOOSE_FAST_MODEL";
@@ -229,6 +232,7 @@ impl GooseServeProcess {
             ]),
         );
 
+        crate::services::process::apply_no_window_async(&mut command);
         let mut child = command.spawn().map_err(|error| {
             diagnostic_log::record_event(
                 DiagnosticLevel::Error,
@@ -1033,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn release_build_allows_tauri_webview_origin_for_acp_websocket() {
+    fn release_build_allows_platform_tauri_webview_origin_for_acp_websocket() {
         let mut command = Command::new("goose");
 
         add_release_webview_origin_arg(&mut command);
