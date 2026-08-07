@@ -2,6 +2,8 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { PersonaCard } from "../PersonaCard";
 import type { Persona } from "@/shared/types/agents";
 
@@ -134,6 +136,37 @@ describe("PersonaCard", () => {
     expect(
       screen.getByRole("menuitem", { name: /delete/i }),
     ).toBeInTheDocument();
+  });
+
+  it("calls onShare from the options menu when share cards are enabled", async () => {
+    setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, true);
+    const onShare = vi.fn();
+    const user = userEvent.setup();
+    const persona = makePersona();
+    render(<PersonaCard persona={persona} onShare={onShare} />);
+
+    await user.click(screen.getByRole("button", { name: /agent options/i }));
+    await user.click(screen.getByRole("menuitem", { name: /share agent/i }));
+
+    expect(onShare).toHaveBeenCalledWith(persona);
+  });
+
+  it("restores Export when share cards are disabled", async () => {
+    setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, false);
+    const onExport = vi.fn();
+    const user = userEvent.setup();
+    const persona = makePersona();
+    render(
+      <PersonaCard persona={persona} onExport={onExport} onShare={vi.fn()} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /agent options/i }));
+    expect(
+      screen.queryByRole("menuitem", { name: /share agent/i }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: /export/i }));
+
+    expect(onExport).toHaveBeenCalledWith(persona);
   });
 
   it("delete is disabled for built-in personas", async () => {

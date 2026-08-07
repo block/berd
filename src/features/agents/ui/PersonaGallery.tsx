@@ -36,7 +36,8 @@ interface PersonaGalleryProps {
   onEditPersona: (persona: Persona) => void;
   onDuplicatePersona: (persona: Persona) => void;
   onDeletePersona: (persona: Persona) => void;
-  onExportPersona?: (persona: Persona) => void;
+  onExportPersona?: (persona: Persona) => void | Promise<void>;
+  onSharePersona?: (persona: Persona) => void;
   onCreatePersona: () => void;
   onContinueDraft?: (sessionId: string) => void;
   onDeleteDraft?: (sessionId: string) => void;
@@ -197,6 +198,7 @@ export function PersonaGallery({
   onDuplicatePersona,
   onDeletePersona,
   onExportPersona,
+  onSharePersona,
   onCreatePersona,
   onContinueDraft,
   onDeleteDraft,
@@ -355,6 +357,7 @@ export function PersonaGallery({
             onDuplicate={onDuplicatePersona}
             onDelete={onDeletePersona}
             onExport={onExportPersona}
+            onShare={onSharePersona}
           />
         </div>
       ))}

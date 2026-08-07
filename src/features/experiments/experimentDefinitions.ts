@@ -65,6 +65,8 @@ export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
 export const FIRST_RUN_ONBOARDING_EXPERIMENT_ID = "first-run-onboarding";
 
+export const AGENT_SHARE_CARD_EXPERIMENT_ID = "agent-share-card";
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -84,6 +86,11 @@ export const EXPERIMENT_DEFINITIONS = [
     // Skill discovery is an opt-in surface because it requires the optional
     // sq-agents CLI and can make remote catalog requests.
     defaultEnabled: false,
+  },
+  {
+    id: AGENT_SHARE_CARD_EXPERIMENT_ID,
+    titleKey: "experiments.agentShareCard.title",
+    descriptionKey: "experiments.agentShareCard.description",
   },
   {
     id: STARTER_TASKS_EXPERIMENT_ID,

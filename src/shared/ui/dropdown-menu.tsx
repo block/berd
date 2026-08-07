@@ -283,6 +283,7 @@ function DropdownMenuSeparator({
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
+  const menuVariant = React.useContext(DropdownMenuVariantContext);
   return (
     <DropdownMenuPrimitive.Separator
       {...getDesignSystemMetadata({
@@ -292,7 +293,13 @@ function DropdownMenuSeparator({
         customClassName: typeof className === "string" ? className : undefined,
       })}
       data-slot="dropdown-menu-separator"
-      className={cn("bg-border -mx-1 my-1 h-px", className)}
+      className={cn(
+        "-mx-1 my-1 h-px",
+        menuVariant === "inverse"
+          ? "bg-popover-inverse-muted-foreground/35"
+          : "bg-border",
+        className,
+      )}
       {...props}
     />
   );

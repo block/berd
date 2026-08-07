@@ -26,6 +26,7 @@ import {
 } from "@/features/agents/stores/agentSelectors";
 import { AgentDetailPage } from "@/features/agents/ui/AgentDetailPage";
 import { PersonaGallery } from "@/features/agents/ui/PersonaGallery";
+import { AgentShareDialog } from "@/features/agents/ui/share-card";
 import {
   exportPersona,
   importPersonas,
@@ -46,6 +47,8 @@ import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 
 function decodeImportFileBytes(fileBytes: number[]): string {
   try {
@@ -99,14 +102,21 @@ export function AgentsView({
   onDeleteDraftSession,
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
+  const shareCardEnabled =
+    useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const isActivePersonaControlled = activePersonaId !== undefined;
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
+  const [sharingPersonaId, setSharingPersonaId] = useState<string | null>(null);
   const [internalActivePersonaId, setInternalActivePersonaId] = useState<
     string | null
   >(null);
 
   const storedPersonas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
+  const sharingPersona = sharingPersonaId
+    ? (storedPersonas.find((persona) => persona.id === sharingPersonaId) ??
+      null)
+    : null;
   // Dev-only simulation of the empty gallery onboarding state. See
   // emptyGallerySimulation.ts for how to toggle it from the console.
   const personas = useMemo(
@@ -289,6 +299,10 @@ export function AgentsView({
   const handleDeletePersona = useCallback((persona: Persona) => {
     if (!canDeletePersona(persona)) return;
     setDeletingPersona(persona);
+  }, []);
+
+  const handleSharePersona = useCallback((persona: Persona) => {
+    setSharingPersonaId(persona.id);
   }, []);
 
   const handleConfirmDeletePersona = useCallback(async () => {
@@ -489,6 +503,14 @@ export function AgentsView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {shareCardEnabled && sharingPersona ? (
+        <AgentShareDialog
+          open
+          persona={sharingPersona}
+          onOpenChange={(open) => !open && setSharingPersonaId(null)}
+          onDownloadAgent={handleExportPersona}
+        />
+      ) : null}
     </>
   );
 
@@ -497,11 +519,13 @@ export function AgentsView({
       <>
         <AgentDetailPage
           persona={activePersona}
+          onBack={() => setActivePersona(null)}
           onStartChat={handleStartChat}
           onEdit={handleEditPersona}
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}
           onExport={handleExportPersona}
+          onShare={shareCardEnabled ? handleSharePersona : undefined}
           onAvatarUpdate={handleUpdateAvatar}
         />
         {dialogs}
@@ -533,6 +557,7 @@ export function AgentsView({
           onDuplicatePersona={handleDuplicatePersona}
           onDeletePersona={handleDeletePersona}
           onExportPersona={handleExportPersona}
+          onSharePersona={shareCardEnabled ? handleSharePersona : undefined}
           onCreatePersona={handleCreatePersona}
           onContinueDraft={handleContinueDraft}
           onDeleteDraft={handleDeleteDraft}

@@ -2584,6 +2584,22 @@ button.avatar-scatter-item:active:not(:disabled) .avatar-scatter-media,
   mix-blend-mode: normal;
 }
 
+.agent-instructions-scrollbar {
+  scrollbar-width: thin;
+}
+
+.agent-instructions-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.agent-instructions-scrollbar::-webkit-scrollbar-thumb {
+  border-block: 20px solid transparent;
+}
+
+.agent-builder-instructions-scrollbar::-webkit-scrollbar-thumb {
+  border-block: 12px solid transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

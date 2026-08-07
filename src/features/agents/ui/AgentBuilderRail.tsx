@@ -64,8 +64,10 @@ import {
 import { ProviderModelFields } from "@/features/agents/ui/PersonaFields/ProviderModelFields";
 import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 
-const FIELD_CLASS = FORM_FIELD_CLASS;
+const FIELD_CLASS = cn(FORM_FIELD_CLASS, "bg-muted/40");
 const FIELD_LABEL_CLASS = "mb-2 block text-xs text-muted-foreground";
+const STICKY_HEADER_CLASS =
+  "relative z-10 bg-card px-8 py-4 text-sm text-foreground after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-gradient-to-b after:from-card after:to-transparent";
 
 /**
  * Design width of the builder rail. Containers that host the rail should size
@@ -98,7 +100,6 @@ export interface AgentBuilderRailProps {
   onDraftPromoted?: (source: AgentSourceEntry) => void;
   onDraftTargetChanged?: (target: { path: string; slug: string }) => void;
   onRecoverMissingDraft?: () => void | Promise<void>;
-  onBack?: (source: AgentSourceEntry) => void;
   onClose?: () => void;
   onLocalEditStateChange?: (hasLocalEdits: boolean) => void;
   onSaveDraftHandlerChange?: (
@@ -116,7 +117,6 @@ export function AgentBuilderRail({
   onDraftPromoted,
   onDraftTargetChanged,
   onRecoverMissingDraft,
-  onBack,
   onClose,
   onLocalEditStateChange,
   onSaveDraftHandlerChange,
@@ -384,7 +384,6 @@ export function AgentBuilderRail({
   );
 
   const isDraft = data?.properties?.draft === true;
-  const showBackButton = Boolean(data && !isDraft && onBack);
   const hasLocalEdits =
     Boolean(data) && (saveStatus === "unsaved" || saveStatus === "error");
 
@@ -461,7 +460,9 @@ export function AgentBuilderRail({
   );
 
   const headerNode = (
-    <div className="flex items-center justify-between py-1 text-sm text-foreground">
+    <div
+      className={cn(STICKY_HEADER_CLASS, "flex items-center justify-between")}
+    >
       <span className="flex min-w-0 items-center gap-2">
         {onExpandChat ? (
           <Button
@@ -477,17 +478,6 @@ export function AgentBuilderRail({
               className="size-4"
               aria-hidden="true"
             />
-          </Button>
-        ) : showBackButton && data ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="-ml-1 shrink-0"
-            aria-label={t("builderRail.backToAgent")}
-            onClick={() => onBack?.(data)}
-          >
-            <IconArrowLeft className="size-4" aria-hidden="true" />
           </Button>
         ) : null}
         <IconSparkles className="size-4 shrink-0 text-foreground" />
@@ -608,18 +598,18 @@ export function AgentBuilderRail({
   ) => (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-md bg-card px-5 pb-5 pt-3",
+        "flex min-h-0 w-full flex-col overflow-hidden rounded-md bg-card pb-5",
         className,
       )}
       aria-label={t("builderRail.ariaLabel")}
       data-testid="agent-builder-rail"
       data-full-page={fullPage ? "true" : undefined}
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col">
-        {header}
-        <div className="mt-4 flex min-h-0 flex-1 flex-col">{body}</div>
-        {footer}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="sticky top-0 z-10">{header}</div>
+        <div className="mt-4 flex min-h-0 flex-1 flex-col px-5">{body}</div>
       </div>
+      {footer ? <div className="px-5">{footer}</div> : null}
     </aside>
   );
 
@@ -839,7 +829,7 @@ export function AgentBuilderRail({
     ) : null;
 
   const pickerHeaderNode = (
-    <div className="flex items-center gap-2 py-3 text-sm text-foreground">
+    <div className={cn(STICKY_HEADER_CLASS, "flex items-center gap-2")}>
       <Button
         type="button"
         variant="ghost"
@@ -1033,10 +1023,7 @@ export function AgentBuilderRail({
               aria-hidden="true"
             />
           )}
-          {/* Centered on the avatar: the media is `object-contain`, so a
-              corner-anchored label sits over transparent padding and reads as
-              detached for tall or wide avatars alike. */}
-          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-foreground px-3 py-1.5 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          <span className="pointer-events-none absolute left-1/2 top-1/2 inline-flex h-8 -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded-sm bg-accent px-3 text-sm font-normal text-accent-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
             {normalizedAvatar
               ? t("builderRail.changeAvatar")
               : t("builderRail.selectAvatar")}
@@ -1090,8 +1077,10 @@ export function AgentBuilderRail({
           rows={fullPage ? undefined : 8}
           className={cn(
             FIELD_CLASS,
-            "min-h-32",
-            fullPage ? "flex-1 resize-none" : "resize-y",
+            "agent-builder-instructions-scrollbar min-h-32 overflow-y-scroll scrollbar-visible [scrollbar-gutter:stable]",
+            fullPage
+              ? "flex-1 resize-none"
+              : "max-h-[min(20rem,calc(100vh-24rem))] resize-y",
           )}
         />
       </label>
@@ -1198,7 +1187,7 @@ export function AgentBuilderRail({
     <>
       {shell(
         headerNode,
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+        <div className="flex flex-col gap-4">
           {avatarNode}
           {fieldsNode}
         </div>,

@@ -2,8 +2,9 @@ import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconCopy,
-  IconDownload,
   IconDots,
+  IconDownload,
+  IconShare,
   IconPencil,
   IconTrash,
 } from "@tabler/icons-react";
@@ -26,6 +27,8 @@ import {
 } from "@/features/agents/lib/personaPresentation";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { getAgentAvatarTransitionName } from "@/features/agents/lib/agentViewTransitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 
 interface PersonaCardProps {
   persona: Persona;
@@ -34,7 +37,8 @@ interface PersonaCardProps {
   onEdit?: (persona: Persona) => void;
   onDuplicate?: (persona: Persona) => void;
   onDelete?: (persona: Persona) => void;
-  onExport?: (persona: Persona) => void;
+  onExport?: (persona: Persona) => void | Promise<void>;
+  onShare?: (persona: Persona) => void;
   isActive?: boolean;
 }
 
@@ -55,9 +59,12 @@ export const PersonaCard = memo(function PersonaCard({
   onDuplicate,
   onDelete,
   onExport,
+  onShare,
   isActive = false,
 }: PersonaCardProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const shareCardEnabled =
+    useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const [menuOpen, setMenuOpen] = useState(false);
 
   const avatarMedia = useAvatarMedia(persona.avatar);
@@ -123,10 +130,17 @@ export const PersonaCard = memo(function PersonaCard({
           <IconCopy className="size-3.5" />
           {t("common:actions.duplicate")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onExport?.(persona)}>
-          <IconDownload className="size-3.5" />
-          {t("common:actions.export")}
-        </DropdownMenuItem>
+        {shareCardEnabled && onShare ? (
+          <DropdownMenuItem onSelect={() => onShare(persona)}>
+            <IconShare className="size-3.5" />
+            {t("share.action")}
+          </DropdownMenuItem>
+        ) : onExport ? (
+          <DropdownMenuItem onSelect={() => void onExport(persona)}>
+            <IconDownload className="size-3.5" />
+            {t("common:actions.export")}
+          </DropdownMenuItem>
+        ) : null}
         {isDeletable && (
           <DropdownMenuItem
             variant="destructive"

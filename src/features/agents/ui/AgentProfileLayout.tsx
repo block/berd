@@ -8,6 +8,7 @@ interface AgentProfileLayoutProps {
   className?: string;
   fieldsTransitionName?: string;
   formId?: string;
+  header?: ReactNode;
   identityRail: ReactNode;
   onSubmit?: FormEventHandler<HTMLFormElement>;
   sectionEnterClassName?: string;
@@ -21,6 +22,7 @@ function AgentProfileContent({
   animateSections = true,
   children,
   fieldsTransitionName,
+  header,
   identityRail,
   sectionEnterClassName,
 }: Omit<AgentProfileLayoutProps, "className" | "formId" | "onSubmit">) {
@@ -29,6 +31,11 @@ function AgentProfileContent({
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-var(--spacing-app-top-bar)-3rem)] w-full max-w-[1180px] flex-col justify-start gap-8 pb-20 pt-4">
+      {header ? (
+        <div data-agent-layout-slot="header" className="-mt-8">
+          {header}
+        </div>
+      ) : null}
       <div className="grid items-start gap-8 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,760px)]">
         <section
           data-agent-layout-slot="identity-rail"
@@ -70,6 +77,7 @@ export function AgentProfileLayout({
   className,
   fieldsTransitionName,
   formId,
+  header,
   identityRail,
   onSubmit,
   sectionEnterClassName,
@@ -78,6 +86,7 @@ export function AgentProfileLayout({
     <AgentProfileContent
       animateSections={animateSections}
       fieldsTransitionName={fieldsTransitionName}
+      header={header}
       identityRail={identityRail}
       sectionEnterClassName={sectionEnterClassName}
     >

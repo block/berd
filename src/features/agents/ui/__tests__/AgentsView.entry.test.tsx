@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exportPersona } from "@/shared/api/agents";
@@ -6,6 +12,8 @@ import { saveExportedAgentFile } from "@/shared/api/system";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { toast } from "sonner";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { AgentsView } from "../AgentsView";
 
 const mockDraftSource = vi.hoisted(() => ({
@@ -102,11 +110,18 @@ function setTauriInternals(value: unknown = {}): void {
   });
 }
 
-async function clickDetailExport(): Promise<void> {
+async function openDetailShareDialog(): Promise<void> {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "detail.moreActions" }));
   await user.click(
-    await screen.findByRole("menuitem", { name: "common:actions.export" }),
+    await screen.findByRole("menuitem", { name: "share.action" }),
+  );
+}
+
+async function clickDetailAgentDownload(): Promise<void> {
+  await openDetailShareDialog();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "share.downloadAgent" }),
   );
 }
 
@@ -138,6 +153,7 @@ describe("AgentsView entry points", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, true);
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
@@ -149,6 +165,34 @@ describe("AgentsView entry points", () => {
       isLoading: false,
       hasHydratedSessions: false,
     });
+  });
+
+  it("hides share-card actions when the experiment is toggled off", async () => {
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView activePersonaId={persona.id} />);
+    await user.click(
+      screen.getByRole("button", { name: "detail.moreActions" }),
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "share.action" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    act(() => {
+      setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, false);
+    });
+    await user.click(
+      screen.getByRole("button", { name: "detail.moreActions" }),
+    );
+
+    expect(
+      screen.queryByRole("menuitem", { name: "share.action" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "common:actions.export" }),
+    ).toBeInTheDocument();
   });
 
   it("clicking Create calls onStartAgentBuilderSession", () => {
@@ -210,6 +254,39 @@ describe("AgentsView entry points", () => {
     expect(onDeleteDraftSession).toHaveBeenCalledWith("draft-session");
   });
 
+  it("returns from the detail page to the agents gallery", () => {
+    const onActivePersonaIdChange = vi.fn();
+    useAgentStore.setState({ personas: [persona] });
+
+    render(
+      <AgentsView
+        activePersonaId={persona.id}
+        onActivePersonaIdChange={onActivePersonaIdChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "view.backToAgents" }));
+
+    expect(onActivePersonaIdChange).toHaveBeenCalledWith(null, undefined);
+  });
+
+  it("shows and activates the avatar customization affordance", async () => {
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    const customizeAvatar = screen.getByRole("button", {
+      name: "editor.customizeAvatar",
+    });
+    expect(screen.getByText("editor.changeAvatar")).toBeInTheDocument();
+    customizeAvatar.focus();
+    expect(customizeAvatar).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText("editor.avatarUrl")).toBeInTheDocument();
+  });
+
   it("clicking detail Start chat calls onStartChatWithAgent with the persona id", () => {
     const onStartChatWithAgent = vi.fn();
     useAgentStore.setState({ personas: [persona] });
@@ -252,6 +329,31 @@ describe("AgentsView entry points", () => {
     });
   });
 
+  it("keeps an open share dialog synced to the live persona", async () => {
+    useAgentStore.setState({ personas: [persona] });
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await openDetailShareDialog();
+    expect(screen.getByText("share.title")).toBeInTheDocument();
+
+    act(() => {
+      useAgentStore.getState().updatePersona(persona.id, {
+        displayName: "Updated reviewer",
+        systemPrompt: "Updated instructions.",
+      });
+    });
+
+    expect(screen.getAllByText("Updated reviewer")).toHaveLength(2);
+    expect(screen.getAllByText("Updated instructions.")).toHaveLength(2);
+
+    act(() => {
+      useAgentStore.getState().removePersona(persona.id);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Updated reviewer")).not.toBeInTheDocument();
+    });
+  });
+
   it("exports agents through the native save dialog in Tauri", async () => {
     const createObjectUrl = vi.spyOn(URL, "createObjectURL");
     vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
@@ -263,7 +365,7 @@ describe("AgentsView entry points", () => {
 
     render(<AgentsView activePersonaId={persona.id} />);
 
-    await clickDetailExport();
+    await clickDetailAgentDownload();
 
     await waitFor(() => {
       expect(exportPersona).toHaveBeenCalledWith(persona.id);
@@ -286,7 +388,7 @@ describe("AgentsView entry points", () => {
 
     render(<AgentsView activePersonaId={persona.id} />);
 
-    await clickDetailExport();
+    await clickDetailAgentDownload();
 
     await waitFor(() => {
       expect(saveExportedAgentFile).toHaveBeenCalledWith(
@@ -313,7 +415,7 @@ describe("AgentsView entry points", () => {
 
     render(<AgentsView activePersonaId={persona.id} />);
 
-    await clickDetailExport();
+    await clickDetailAgentDownload();
 
     await waitFor(() => {
       expect(createObjectUrl).toHaveBeenCalledTimes(1);

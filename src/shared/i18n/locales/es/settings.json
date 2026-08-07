@@ -194,6 +194,10 @@
       "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
       "label": "Activar nuevos experimentos automáticamente"
     },
+    "agentShareCard": {
+      "description": "Comparte agentes como tarjetas coleccionables descargables desde la galería y la página de detalles del agente.",
+      "title": "Tarjetas para compartir agentes"
+    },
     "avatarCollectionPage": {
       "description": "Elige avatares de agentes en un lienzo de colección de pantalla completa y desplazable en lugar del selector integrado en el generador de agentes.",
       "title": "Lienzo de colección de avatares"

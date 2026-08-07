@@ -193,6 +193,18 @@
     "loading": "Loading agents",
     "new": "New Agent"
   },
+  "share": {
+    "action": "Share agent",
+    "title": "Share {{name}}",
+    "description": "Download a collectible card or the agent file to share.",
+    "cardAlt": "Share card for {{name}}",
+    "downloadCard": "Download card",
+    "downloadingCard": "Downloading card…",
+    "downloadAgent": "Download {{name}}.md",
+    "downloadingAgent": "Downloading agent…",
+    "cardDownloaded": "Downloaded {{filename}}",
+    "cardDownloadFailed": "Couldn't create the card. Try again."
+  },
   "statuses": {
     "error": "Error",
     "offline": "Offline",

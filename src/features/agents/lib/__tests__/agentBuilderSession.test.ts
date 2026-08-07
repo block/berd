@@ -441,7 +441,7 @@ describe("agentBuilderSession", () => {
       expect.objectContaining({
         targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
         targetAgentSlug: "code-reviewer",
-        agentBuilderChatStartCollapsed: true,
+        agentBuilderChatStartCollapsed: false,
       }),
     );
   });
@@ -468,7 +468,7 @@ describe("agentBuilderSession", () => {
       expect.objectContaining({
         targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
         targetAgentSlug: "code-reviewer",
-        agentBuilderChatStartCollapsed: true,
+        agentBuilderChatStartCollapsed: false,
       }),
     );
   });
@@ -507,6 +507,7 @@ describe("agentBuilderSession", () => {
     expect(id).toBe("sess-old");
     expect(mocks.patchSession).toHaveBeenCalledWith("sess-old", {
       agentBuilderOpen: true,
+      agentBuilderChatStartCollapsed: false,
     });
     expect(navigateChat).toHaveBeenCalledWith("sess-old");
   });

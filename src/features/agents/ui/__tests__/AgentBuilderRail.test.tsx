@@ -1043,36 +1043,20 @@ describe("AgentBuilderRail", () => {
     });
   });
 
-  it("shows a back button for existing agent edits", () => {
-    const existingSource = {
-      ...baseSource,
-      name: "Code Reviewer",
-      properties: {},
-    };
-    mockHook({ data: existingSource });
-    const onBack = vi.fn();
+  it("does not show a back button in the agent editor", () => {
+    mockHook({
+      data: {
+        ...baseSource,
+        name: "Code Reviewer",
+        properties: {},
+      },
+    });
 
     renderWithProviders(
       <AgentBuilderRail
         sessionId="s1"
         targetAgentPath={baseSource.path}
         targetAgentSlug="code-reviewer"
-        onBack={onBack}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /back to agent/i }));
-    expect(onBack).toHaveBeenCalledWith(existingSource);
-  });
-
-  it("does not show the back button for new draft agents", () => {
-    mockHook();
-    renderWithProviders(
-      <AgentBuilderRail
-        sessionId="s1"
-        targetAgentPath={baseSource.path}
-        targetAgentSlug="draft-1"
-        onBack={vi.fn()}
       />,
     );
 

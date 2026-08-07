@@ -193,6 +193,18 @@
     "loading": "Cargando agentes",
     "new": "Nuevo agente"
   },
+  "share": {
+    "action": "Compartir agente",
+    "title": "Compartir {{name}}",
+    "description": "Descarga una tarjeta coleccionable o el archivo del agente para compartir.",
+    "cardAlt": "Tarjeta para compartir de {{name}}",
+    "downloadCard": "Descargar tarjeta",
+    "downloadingCard": "Descargando tarjeta…",
+    "downloadAgent": "Descargar {{name}}.md",
+    "downloadingAgent": "Descargando agente…",
+    "cardDownloaded": "Se descargó {{filename}}",
+    "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo."
+  },
   "statuses": {
     "error": "Error",
     "offline": "Desconectado",

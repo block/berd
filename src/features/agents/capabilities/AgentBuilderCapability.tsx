@@ -72,13 +72,6 @@ export function AgentBuilderCapability({
     [completeBuilder],
   );
 
-  const handleBuilderBack = useCallback(
-    (source: AgentSourceEntry) => {
-      completeBuilder(source, "Failed to refresh agents after leaving edit:");
-    },
-    [completeBuilder],
-  );
-
   const handleDraftTargetChanged = useCallback(
     (target: { path: string; slug: string }) => {
       patchSession(session.id, {
@@ -171,7 +164,6 @@ export function AgentBuilderCapability({
       onDraftPromoted={handleDraftPromoted}
       onDraftTargetChanged={handleDraftTargetChanged}
       onRecoverMissingDraft={handleRecoverMissingDraft}
-      onBack={handleBuilderBack}
       onClose={handleClose}
       onLocalEditStateChange={handleLocalEditStateChange}
       onSaveDraftHandlerChange={handleSaveDraftHandlerChange}

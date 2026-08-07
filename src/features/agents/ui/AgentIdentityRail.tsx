@@ -15,7 +15,7 @@ interface AgentIdentityRailProps {
   leadingControl?: ReactNode;
   metadata?: AgentIdentityMetadataItem[];
   modeControl?: ReactNode;
-  title: ReactNode;
+  title?: ReactNode;
 }
 
 export function AgentIdentityRail({
@@ -35,24 +35,28 @@ export function AgentIdentityRail({
       {avatar ? <div data-agent-layout-slot="avatar">{avatar}</div> : null}
 
       <div className="space-y-4">
-        <div className="space-y-2">
-          <h1 className="break-words text-base font-normal leading-5 text-surface-agent-profile-fg">
-            {title}
-          </h1>
-          {description ? (
-            <div className="text-sm font-normal leading-relaxed text-surface-agent-profile-fg-muted">
-              {description}
-            </div>
-          ) : null}
-        </div>
+        {title || description ? (
+          <div className="space-y-2">
+            {title ? (
+              <h1 className="break-words text-base font-normal leading-5 text-surface-agent-profile-fg">
+                {title}
+              </h1>
+            ) : null}
+            {description ? (
+              <div className="text-sm font-normal leading-relaxed text-surface-agent-profile-fg-muted">
+                {description}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {modeControl ? <div>{modeControl}</div> : null}
 
         {metadata.length > 0 ? (
-          <dl className="grid gap-3 border-y border-surface-agent-profile-border py-4">
+          <dl className="grid gap-3 border-t border-surface-agent-profile-border pt-4">
             {metadata.map((item) => (
               <div key={item.label} className="min-w-0 space-y-1">
-                <dt className="text-xs leading-4 font-medium text-surface-agent-profile-fg-muted">
+                <dt className="text-sm leading-5 font-normal text-surface-agent-profile-fg-muted">
                   {item.label}
                 </dt>
                 <dd

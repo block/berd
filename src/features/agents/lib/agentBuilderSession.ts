@@ -139,6 +139,7 @@ export async function startAgentBuilderSession(
     if (existing) {
       useChatSessionStore.getState().patchSession(existing.id, {
         agentBuilderOpen: true,
+        agentBuilderChatStartCollapsed: false,
       });
       await deps.navigateChat(existing.id);
       return existing.id;
@@ -157,7 +158,7 @@ export async function startAgentBuilderSession(
         targetAgentSlug: target.slug,
         targetAgentDraftState: null,
         targetAgentDraftSaved: false,
-        agentBuilderChatStartCollapsed: true,
+        agentBuilderChatStartCollapsed: false,
       });
 
       await deps.navigateChat(sessionId);

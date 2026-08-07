@@ -1441,6 +1441,7 @@ export const designSystemComponentManifest = [
       "bg-border",
       "bg-popover",
       "bg-popover-inverse",
+      "bg-popover-inverse-muted-foreground/35",
       "dark:data-[variant=destructive]:focus:bg-destructive/10",
       "data-[state=open]:bg-accent",
       "data-[state=open]:text-foreground",

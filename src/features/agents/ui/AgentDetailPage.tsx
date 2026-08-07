@@ -3,21 +3,26 @@ import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
+  ChevronLeft,
   Copy,
   Download,
   MessageCircle,
   MoreHorizontal,
-  MousePointer2,
   Pencil,
   PinIcon,
+  Share2,
   Trash2,
 } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { avatarRef, isBundledAvatarRef } from "@/shared/avatars/catalog";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
+import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
+import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,24 +50,25 @@ import { AgentIdentityRail } from "@/features/agents/ui/AgentIdentityRail";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
 import { AgentAvatarSection } from "@/features/agents/ui/AgentAvatarSection";
 import {
-  AVATAR_CUSTOMIZE_AFFORDANCE_CLASS,
+  AVATAR_CUSTOMIZE_LABEL_CLASS,
   AVATAR_CUSTOMIZE_SURFACE_CLASS,
   AVATAR_CUSTOMIZE_TRIGGER_CLASS,
-  updateAvatarCustomizePosition,
 } from "@/features/agents/ui/avatarCustomizeMotion";
 
 interface AgentDetailPageProps {
   persona: Persona;
+  onBack: () => void;
   onStartChat?: (persona: Persona) => void;
   onEdit: (persona: Persona) => void;
   onDuplicate: (persona: Persona) => void;
   onDelete: (persona: Persona) => void;
-  onExport: (persona: Persona) => void;
+  onExport: (persona: Persona) => void | Promise<void>;
+  onShare?: (persona: Persona) => void;
   onAvatarUpdate: (persona: Persona, avatar: string | null) => Promise<void>;
 }
 
 const CONTEXT_LABEL_CLASS =
-  "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
+  "text-sm leading-5 font-normal text-surface-agent-profile-fg-muted";
 const SECONDARY_ACTION_CLASS =
   "bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover hover:text-surface-agent-profile-fg";
 const OVERFLOW_TRIGGER_CLASS =
@@ -73,7 +79,9 @@ const AVATAR_FIELD_INPUT_CLASS =
 const AVATAR_FIELD_LABEL_CLASS =
   "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
-  "min-h-[24rem] w-full overflow-y-auto rounded-md bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
+  "relative h-[min(32rem,calc(100vh-var(--spacing-app-top-bar)-7rem))] min-h-0 w-full overflow-hidden rounded-md bg-card text-sm leading-relaxed text-surface-agent-profile-fg";
+const INSTRUCTIONS_SCROLL_CLASS =
+  "agent-instructions-scrollbar h-full overflow-y-scroll overscroll-contain rounded-[inherit] p-4 outline-none scrollbar-visible [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -90,14 +98,18 @@ function formatDate(value: string): string {
 
 export function AgentDetailPage({
   persona,
+  onBack,
   onStartChat,
   onEdit,
   onDuplicate,
   onDelete,
   onExport,
+  onShare,
   onAvatarUpdate,
 }: AgentDetailPageProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const shareCardEnabled =
+    useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const acpProviders = useAgentStore((s) => s.providers);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
@@ -229,11 +241,7 @@ export function AgentDetailPage({
   );
 
   const avatarPreview = (
-    <div
-      className={AVATAR_CUSTOMIZE_SURFACE_CLASS}
-      onPointerEnter={updateAvatarCustomizePosition}
-      onPointerMove={updateAvatarCustomizePosition}
-    >
+    <div className={AVATAR_CUSTOMIZE_SURFACE_CLASS}>
       <div
         className="h-full w-full"
         style={{ viewTransitionName: avatarTransitionName }}
@@ -262,14 +270,16 @@ export function AgentDetailPage({
             variant="ghost"
             size="icon"
             aria-label={t("editor.customizeAvatar")}
-            tooltip={t("editor.customizeAvatar")}
             className={AVATAR_CUSTOMIZE_TRIGGER_CLASS}
             onClick={handleOpenAvatarSection}
           />
-          <div className={AVATAR_CUSTOMIZE_AFFORDANCE_CLASS} aria-hidden="true">
-            <MousePointer2 className="size-3.5" />
-            {t("editor.customizeAvatar")}
-          </div>
+          <Badge
+            variant="secondary"
+            className={AVATAR_CUSTOMIZE_LABEL_CLASS}
+            aria-hidden="true"
+          >
+            {t("editor.changeAvatar")}
+          </Badge>
         </>
       ) : null}
     </div>
@@ -285,7 +295,7 @@ export function AgentDetailPage({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="default"
           onClick={() => onStartChat(persona)}
           leftIcon={<MessageCircle />}
           className={SECONDARY_ACTION_CLASS}
@@ -297,7 +307,7 @@ export function AgentDetailPage({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="default"
           onClick={() => onEdit(persona)}
           leftIcon={<Pencil />}
           className={SECONDARY_ACTION_CLASS}
@@ -308,7 +318,7 @@ export function AgentDetailPage({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="default"
         onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
         disabled={isPinningToHome}
         leftIcon={<PinIcon fill={isPinnedToHome ? "currentColor" : "none"} />}
@@ -322,7 +332,7 @@ export function AgentDetailPage({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="icon-sm"
+                size="icon"
                 variant="ghost"
                 aria-label={t("detail.moreActions")}
                 className={OVERFLOW_TRIGGER_CLASS}
@@ -336,17 +346,25 @@ export function AgentDetailPage({
         <DropdownMenuContent
           variant="inverse"
           align="end"
-          alignOffset={-2}
+          alignOffset={-4}
           sideOffset={4}
+          className={SIDEBAR_INVERSE_MENU_CONTENT_CLASS}
         >
           <DropdownMenuItem onSelect={() => onDuplicate(persona)}>
             <Copy className="size-3.5" />
             {t("common:actions.duplicate")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onExport(persona)}>
-            <Download className="size-3.5" />
-            {t("common:actions.export")}
-          </DropdownMenuItem>
+          {shareCardEnabled && onShare ? (
+            <DropdownMenuItem onSelect={() => onShare(persona)}>
+              <Share2 className="size-3.5" />
+              {t("share.action")}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onSelect={() => void onExport(persona)}>
+              <Download className="size-3.5" />
+              {t("common:actions.export")}
+            </DropdownMenuItem>
+          )}
           {isDeletable ? (
             <>
               <DropdownMenuSeparator />
@@ -362,6 +380,31 @@ export function AgentDetailPage({
         </DropdownMenuContent>
       </DropdownMenu>
     </>
+  );
+
+  const profileHeader = (
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-1 md:-ml-4">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("view.backToAgents")}
+          tooltip={t("view.backToAgents")}
+          onClick={onBack}
+        >
+          <ChevronLeft />
+        </Button>
+        <h1 className="truncate text-[20px] font-normal leading-6 text-surface-agent-profile-fg">
+          {persona.displayName}
+        </h1>
+      </div>
+      {!showAvatarSection ? (
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {profileActions}
+        </div>
+      ) : null}
+    </div>
   );
 
   const backToProfileControl = (
@@ -381,13 +424,12 @@ export function AgentDetailPage({
     <AgentProfileLayout
       animateSections={false}
       fieldsTransitionName={AGENT_PROFILE_FIELDS_TRANSITION_NAME}
+      header={profileHeader}
       identityRail={
         <AgentIdentityRail
           avatar={avatarPreview}
-          title={persona.displayName}
           leadingControl={null}
           metadata={showAvatarSection ? [] : metadata}
-          actions={showAvatarSection ? null : profileActions}
           modeControl={showAvatarSection ? backToProfileControl : null}
         />
       }
@@ -421,20 +463,20 @@ export function AgentDetailPage({
             style={{ animationDelay: "80ms" }}
             aria-labelledby="agent-instructions"
           >
-            <div className="flex items-end justify-between gap-3">
-              <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
-                {t("view.instructions")}
-              </h2>
-              <span className="shrink-0 text-xs leading-4 text-surface-agent-profile-fg-faint">
-                {t("common:labels.characterCount", {
-                  count: persona.systemPrompt.length,
-                })}
-              </span>
-            </div>
+            <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
+              {t("view.instructions")}
+            </h2>
             <div className={INSTRUCTIONS_PANEL_CLASS}>
-              <MessageResponse className="min-w-0 text-sm leading-relaxed">
-                {persona.systemPrompt || " "}
-              </MessageResponse>
+              <section
+                className={INSTRUCTIONS_SCROLL_CLASS}
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus this nested scroll region.
+                tabIndex={0}
+                aria-labelledby="agent-instructions"
+              >
+                <MessageResponse className="min-w-0 pb-4 text-sm leading-relaxed">
+                  {persona.systemPrompt || " "}
+                </MessageResponse>
+              </section>
             </div>
           </section>
         </div>
