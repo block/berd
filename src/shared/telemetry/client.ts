@@ -64,7 +64,7 @@ export const TELEMETRY_DESKTOP_PAGE_CONTEXT: Record<string, string> = {
 
 const client = new CDP({
   application: {
-    name: "berd",
+    name: "goose-internal",
     version: appVersion,
   },
   environment: getEnvironment(),
