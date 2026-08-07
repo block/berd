@@ -55,6 +55,21 @@ impl<'a> KgooseContext<'a> {
             .map_err(|error| error.user_message())
     }
 
+    /// Sends JSON through the kgoose transport without attaching a stored
+    /// BuilderBot session credential. This is reserved for network-edge
+    /// identity requests, where Cloudflare Access is the identity authority.
+    pub(crate) async fn post_json_without_session_credential(
+        &self,
+        endpoint: &str,
+        body: Value,
+    ) -> Result<Value, String> {
+        let url = self.build_url(endpoint)?;
+        let request = session_credential_free_json_post_request(url.clone());
+        send_json_request_detailed(request, url, &body)
+            .await
+            .map_err(|error| error.user_message())
+    }
+
     pub(crate) async fn post_json_detailed(
         &self,
         endpoint: &str,
@@ -144,6 +159,10 @@ fn json_post_request(url: reqwest::Url) -> reqwest::RequestBuilder {
         .post(url)
         .header(ACCEPT, "application/json")
         .header(CONTENT_TYPE, "application/json")
+}
+
+fn session_credential_free_json_post_request(url: reqwest::Url) -> reqwest::RequestBuilder {
+    add_playpen_baggage(json_post_request(url))
 }
 
 async fn send_json_request_detailed(
@@ -775,12 +794,24 @@ mod tests {
     use super::{
         build_sse_url, build_url, is_access_request_error_kind, is_configured,
         is_multipart_access_request_error_kind, kgoose_base_url_from_request_url, playpen_baggage,
-        probe_url, truncate_error_body, KgooseDistroConfig, KgooseJsonError,
+        probe_url, truncate_error_body, KgooseContext, KgooseDistroConfig, KgooseJsonError,
         KgooseRequestErrorKind, KGOOSE_BASE_URL_ENV, KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
     };
-    use crate::commands::runtime_config::RuntimeKgooseConfig;
+    use crate::commands::{
+        runtime_config::{default_runtime_config, RuntimeKgooseConfig},
+        whoami::request_whoami,
+    };
+    use crate::services::distro_bundle::DistroBundleState;
     use crate::test_support::env_lock;
-    use builderbot_auth::config::BB_HOME_ENV_VAR;
+    use builderbot_auth::auth_storage::{
+        FileSessionCredentialStorage, SessionCredentialStorage, SessionStorageKey,
+        StoredSessionCredential, BB_AUTH_STORAGE_ENV_VAR, BB_AUTH_STORAGE_FILE_ENV_VAR,
+    };
+    use builderbot_auth::config::{
+        default_preferences_path, write_preferences_file, BB_HOME_ENV_VAR,
+        DEFAULT_KGOOSE_SERVICE_PATH,
+    };
+    use builderbot_auth::preferences::BuilderBotPreferences;
     use reqwest::StatusCode;
     use std::env;
     use tempfile::{tempdir, TempDir};
@@ -1017,6 +1048,106 @@ mod tests {
 
         assert!(error.contains("kgoose is not configured"));
         assert!(!error.contains("kgoose.stage.sqprod.co"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn whoami_request_omits_session_and_authorization_headers() {
+        let _guard = env_lock().lock().expect("env lock");
+        let bb_home = clear_kgoose_env_and_isolate_bb_home();
+        let storage_path = bb_home.path().join("sessions.json");
+        env::set_var(BB_AUTH_STORAGE_ENV_VAR, "file");
+        env::set_var(BB_AUTH_STORAGE_FILE_ENV_VAR, &storage_path);
+        write_preferences_file(
+            &default_preferences_path(bb_home.path()),
+            &BuilderBotPreferences {
+                org: Some("test".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("write preferences");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+        let origin = format!("http://{}", listener.local_addr().expect("server address"));
+        FileSessionCredentialStorage::new(storage_path)
+            .set(
+                &SessionStorageKey::from_profile_and_kgoose_base_url(
+                    "default",
+                    &origin,
+                    DEFAULT_KGOOSE_SERVICE_PATH,
+                ),
+                &StoredSessionCredential {
+                    session_credential: "matching-session".to_string(),
+                    expires_at: None,
+                },
+            )
+            .expect("write matching session");
+
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.expect("accept request");
+                requests.push(read_http_request(&mut socket).await);
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await
+                    .expect("write response");
+            }
+            requests
+        });
+
+        let mut runtime_config = default_runtime_config();
+        runtime_config.kgoose = Some(RuntimeKgooseConfig {
+            base_url: Some(origin),
+            path: None,
+        });
+        let distro_state = DistroBundleState::empty_for_tests();
+        let kgoose = KgooseContext::new(&distro_state, &runtime_config);
+
+        kgoose
+            .post_json("v3/whoami", serde_json::json!({}))
+            .await
+            .expect("shared request succeeds");
+        request_whoami(&distro_state, &runtime_config)
+            .await
+            .expect("whoami request succeeds");
+
+        let requests = server.await.expect("capture server");
+        let shared = String::from_utf8_lossy(&requests[0]).to_ascii_lowercase();
+        assert!(shared.contains("x-bb-session-credential: matching-session\r\n"));
+
+        let whoami = String::from_utf8_lossy(&requests[1]).to_ascii_lowercase();
+        assert!(!whoami.contains("x-bb-session-credential:"));
+        assert!(!whoami.contains("authorization:"));
+        assert!(whoami.ends_with("\r\n\r\n{}"), "request was {whoami:?}");
+    }
+
+    async fn read_http_request(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            let read = socket.read(&mut buffer).await.expect("read request");
+            assert!(read > 0, "connection closed before complete request");
+            request.extend_from_slice(&buffer[..read]);
+            let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n") else {
+                continue;
+            };
+            let header_end = header_end + 4;
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().expect("content length"))
+                })
+                .unwrap_or(0);
+            if request.len() >= header_end + content_length {
+                request.truncate(header_end + content_length);
+                return request;
+            }
+        }
     }
 
     #[test]
