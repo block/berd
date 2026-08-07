@@ -30,6 +30,9 @@ For local testing, a manifest can supply generic `http`/`https` values:
   "kgoose": {
     "baseUrl": "https://kgoose.example.test/",
     "path": "example/goose"
+  },
+  "marketplace": {
+    "skillUrlTemplate": "https://marketplace.example.test/skills/{skillId}"
   }
 }
 ```
@@ -38,6 +41,11 @@ For local testing, a manifest can supply generic `http`/`https` values:
 
 - `appVersion?: string`
   - optional app version tag supplied by bundled defaults
+- `marketplace?: { skillUrlTemplate: string }`
+  - optional URL template used to open a skill in the distribution's marketplace
+  - must use HTTPS, include a host, and contain exactly one `{skillId}` placeholder
+  - `{skillId}` may appear in the path or query, but not in the URL authority (userinfo, host, or port)
+  - must not include credentials or a fragment
 - `kgoose?: { baseUrl?: string, path?: string }`
   - generic default KGoose endpoint used by KGoose-backed features until runtime config owns this source
   - `baseUrl` must use `http` or `https`

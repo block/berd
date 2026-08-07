@@ -1,10 +1,19 @@
-const SKILLS_MARKETPLACE_BASE = "https://dev-guides.sqprod.co/skills";
+const SKILL_ID_TEMPLATE_PLACEHOLDER = "{skillId}";
 
 /**
- * Canonical web URL for a skill in the Block skills marketplace. Mirrors where
- * `sq agents skills marketplace` and go/skills point, so "View on web" lands on
- * the same catalog page users already know.
+ * Builds a distribution-provided marketplace URL for a skill. An absent
+ * template intentionally returns undefined so callers can omit the web action
+ * without affecting discovery, preview, or installation.
  */
-export function remoteSkillWebUrl(name: string): string {
-  return `${SKILLS_MARKETPLACE_BASE}/skill?id=${encodeURIComponent(name)}`;
+export function remoteSkillWebUrl(
+  template: string | undefined,
+  name: string,
+): string | undefined {
+  if (!template) {
+    return undefined;
+  }
+  return template.replace(
+    SKILL_ID_TEMPLATE_PLACEHOLDER,
+    encodeURIComponent(name),
+  );
 }

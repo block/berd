@@ -9,6 +9,8 @@ const DISTRO_DIR_NAME: &str = "distro";
 const DISTRO_JSON_NAME: &str = "distro.json";
 const DISTRO_CONFIG_NAME: &str = "config.yaml";
 const DISTRO_BIN_DIR_NAME: &str = "bin";
+const SKILL_ID_TEMPLATE_PLACEHOLDER: &str = "{skillId}";
+const MAX_MARKETPLACE_TEMPLATE_LENGTH: usize = 2_048;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +18,13 @@ pub struct DistroManifest {
     pub app_version: Option<String>,
     pub kgoose: Option<KgooseDistroConfig>,
     pub distribution: Option<DistributionDistroConfig>,
+    pub marketplace: Option<MarketplaceDistroConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceDistroConfig {
+    pub skill_url_template: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -92,6 +101,7 @@ impl DistroBundleState {
                     app_version: None,
                     kgoose: Some(kgoose),
                     distribution: None,
+                    marketplace: None,
                 },
             }),
         }
@@ -201,8 +211,65 @@ fn read_manifest(path: &Path) -> Result<DistroManifest, String> {
     if let Some(distribution) = manifest.distribution.as_mut() {
         validate_distribution_config(distribution)?;
     }
+    if let Some(marketplace) = manifest.marketplace.as_ref() {
+        validate_marketplace_config(marketplace)?;
+    }
 
     Ok(manifest)
+}
+
+fn validate_marketplace_config(config: &MarketplaceDistroConfig) -> Result<(), String> {
+    let template = &config.skill_url_template;
+    if template.len() > MAX_MARKETPLACE_TEMPLATE_LENGTH {
+        return Err(format!(
+            "marketplace.skillUrlTemplate must not exceed {MAX_MARKETPLACE_TEMPLATE_LENGTH} bytes"
+        ));
+    }
+    if template.matches(SKILL_ID_TEMPLATE_PLACEHOLDER).count() != 1 {
+        return Err(format!(
+            "marketplace.skillUrlTemplate must contain exactly one {SKILL_ID_TEMPLATE_PLACEHOLDER} placeholder"
+        ));
+    }
+
+    let placeholder_index = template
+        .find(SKILL_ID_TEMPLATE_PLACEHOLDER)
+        .expect("exactly one placeholder was validated");
+    let authority_start = template
+        .find("://")
+        .map(|index| index + 3)
+        .unwrap_or_default();
+    let authority_end = template[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|index| authority_start + index)
+        .unwrap_or(template.len());
+    if placeholder_index < authority_end {
+        return Err(
+            "marketplace.skillUrlTemplate placeholder must appear in the path or query".to_string(),
+        );
+    }
+
+    let without_placeholder = template.replace(SKILL_ID_TEMPLATE_PLACEHOLDER, "skill-id");
+    if without_placeholder.contains('{') || without_placeholder.contains('}') {
+        return Err(
+            "marketplace.skillUrlTemplate must not contain unknown placeholders".to_string(),
+        );
+    }
+    let url = Url::parse(&without_placeholder).map_err(|error| {
+        format!("marketplace.skillUrlTemplate must be a valid URL template: {error}")
+    })?;
+    if url.scheme() != "https" {
+        return Err("marketplace.skillUrlTemplate must use HTTPS".to_string());
+    }
+    if url.host_str().is_none() {
+        return Err("marketplace.skillUrlTemplate must include a host".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("marketplace.skillUrlTemplate must not include credentials".to_string());
+    }
+    if url.fragment().is_some() {
+        return Err("marketplace.skillUrlTemplate must not include a fragment".to_string());
+    }
+    Ok(())
 }
 
 fn validate_distribution_config(config: &mut DistributionDistroConfig) -> Result<(), String> {
@@ -267,6 +334,7 @@ mod tests {
                         path: None,
                     }),
                     distribution: None,
+                    marketplace: None,
                 },
             }),
         };
@@ -314,6 +382,7 @@ mod tests {
         );
         assert_eq!(kgoose.path.as_deref(), Some("example/goose"));
         assert!(manifest.distribution.is_none());
+        assert!(manifest.marketplace.is_none());
     }
 
     #[test]
@@ -352,6 +421,39 @@ mod tests {
                 error.contains("must use HTTPS") || error.contains("must not include credentials"),
                 "{error}"
             );
+        }
+    }
+
+    #[test]
+    fn parses_marketplace_skill_url_template() {
+        let manifest = parse_manifest(
+            r#"{"marketplace":{"skillUrlTemplate":"https://marketplace.example.test/skills/skill?id={skillId}"}}"#,
+        )
+        .expect("marketplace template should parse");
+
+        assert_eq!(
+            manifest
+                .marketplace
+                .expect("marketplace should be present")
+                .skill_url_template,
+            "https://marketplace.example.test/skills/skill?id={skillId}"
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_or_malformed_marketplace_templates() {
+        for template in [
+            "http://marketplace.example.test/skill?id={skillId}",
+            "https://user:password@marketplace.example.test/skill?id={skillId}",
+            "https://marketplace.example.test/skill?id={skillId}#fragment",
+            "https://marketplace.example.test/skill",
+            "https://marketplace.example.test/{skillId}/{skillId}",
+            "https://{skillId}.marketplace.example.test/skills/skill",
+            "https://marketplace.example.test:{skillId}/skills/skill",
+            "https://marketplace.example.test/skill?id={unknown}",
+        ] {
+            let contents = format!(r#"{{"marketplace":{{"skillUrlTemplate":"{template}"}}}}"#);
+            parse_manifest(&contents).expect_err("template should be rejected");
         }
     }
 

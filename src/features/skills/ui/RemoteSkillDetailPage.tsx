@@ -8,6 +8,7 @@ import { AgentIdentityRail } from "@/features/agents/ui/AgentIdentityRail";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { Button } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { useDistroStore } from "@/features/settings/stores/distroStore";
 import { showRemoteSkill, type RemoteSkill } from "../api/skillMarketplace";
 import { remoteSkillWebUrl } from "../lib/remoteSkillWebUrl";
 
@@ -38,6 +39,10 @@ export function RemoteSkillDetailPage({
   const { t } = useTranslation(["skills", "common"]);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const marketplaceTemplate = useDistroStore(
+    (state) => state.manifest.marketplace?.skillUrlTemplate,
+  );
+  const webUrl = remoteSkillWebUrl(marketplaceTemplate, skill.name);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,8 +70,11 @@ export function RemoteSkillDetailPage({
   }, [skill.name, t]);
 
   const handleViewOnWeb = () => {
+    if (!webUrl) {
+      return;
+    }
     void import("@tauri-apps/plugin-opener")
-      .then(({ openUrl }) => openUrl(remoteSkillWebUrl(skill.name)))
+      .then(({ openUrl }) => openUrl(webUrl))
       .catch((error) => {
         console.error("[remoteSkillDetail] openUrl failed:", error);
       });
@@ -104,17 +112,19 @@ export function RemoteSkillDetailPage({
           {t("discover.install")}
         </Button>
       )}
-      <Button
-        type="button"
-        variant="ghost"
-        flush
-        size="sm"
-        className="ml-2"
-        onClick={handleViewOnWeb}
-        rightIcon={<IconExternalLink />}
-      >
-        {t("discover.viewOnWeb")}
-      </Button>
+      {webUrl ? (
+        <Button
+          type="button"
+          variant="ghost"
+          flush
+          size="sm"
+          className="ml-2"
+          onClick={handleViewOnWeb}
+          rightIcon={<IconExternalLink />}
+        >
+          {t("discover.viewOnWeb")}
+        </Button>
+      ) : null}
     </>
   );
 
