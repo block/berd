@@ -129,6 +129,15 @@ function serializeSessionMutation<T>(
   return result;
 }
 
+export function supersedeSessionMutation(sessionId: string): void {
+  const queue = mutationQueues.get(sessionId);
+  if (!queue) return;
+  // Resolution may need authoritative I/O before it can enqueue its ACP
+  // mutation. Make that user-initiated configuration current immediately so a
+  // concurrent load cannot publish an obsolete response snapshot meanwhile.
+  queue.latestSequence = nextMutationSequence++;
+}
+
 export async function prepareSession(
   sessionId: string,
   providerId: string,

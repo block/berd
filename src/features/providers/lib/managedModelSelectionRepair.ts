@@ -5,6 +5,7 @@ import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/provid
 import { subscribeToProviderModelInventoryInvalidation } from "./providerModelInventoryEvents";
 import {
   resolveManagedGooseProviderSelection,
+  resolveValidatedManagedGooseProviderSelection,
   type GooseProviderSelection,
   type ManagedGooseProviderSelection,
 } from "@/shared/runtime-config/modelProviderPolicy";
@@ -102,6 +103,9 @@ export async function repairManagedGooseModelSelection(
   const config = useRuntimeConfigStore.getState().config;
   const initial = resolveManagedGooseProviderSelection(config, selection);
   if (!initial) return null;
+  if (initial.providerId !== selection.providerId) {
+    return resolveValidatedManagedGooseProviderSelection(config, selection);
+  }
 
   const targetModelIds =
     initial.providerId === DATABRICKS_V2_PROVIDER_ID && selection.modelId

@@ -28,7 +28,7 @@ import {
   type PersonaHandoffClaim,
 } from "./acpPersonaHandoff";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
+import { resolveValidatedManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
@@ -169,7 +169,8 @@ async function acpSendMessageNow(
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
 
-  const resolvedProvider = resolveGooseSessionSelection(providerId).providerId;
+  const resolvedProvider = (await resolveGooseSessionSelection(providerId))
+    .providerId;
   if (resolvedProvider !== providerId) {
     throw new Error(
       `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before prompting.`,
@@ -324,10 +325,10 @@ export async function acpSteerMessage(
   );
 }
 
-function resolveGooseSessionSelection(
+async function resolveGooseSessionSelection(
   providerId: string,
   modelId?: string | null,
-): { providerId: string; modelId?: string } {
+): Promise<{ providerId: string; modelId?: string }> {
   if (modelId === "goose") {
     throw new Error(`Invalid model id: ${modelId}`);
   }
@@ -356,7 +357,7 @@ function resolveGooseSessionSelection(
     providerId,
     ...(concreteModelId ? { modelId: concreteModelId } : {}),
   };
-  const managedSelection = resolveManagedGooseProviderSelection(
+  const managedSelection = await resolveValidatedManagedGooseProviderSelection(
     runtimeConfigState.config,
     requestedSelection,
   );
@@ -385,7 +386,11 @@ export async function acpPrepareSession(
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  const selection = resolveGooseSessionSelection(providerId, options.modelId);
+  sessionRegistry.supersedeSessionMutation(sessionId);
+  const selection = await resolveGooseSessionSelection(
+    providerId,
+    options.modelId,
+  );
   const applyResolvedModel =
     Boolean(options.modelId) || selection.providerId !== providerId;
   const snapshots =
@@ -414,7 +419,10 @@ export async function acpCreateSession(
   workingDir: string,
   options: AcpCreateSessionOptions = {},
 ): Promise<AcpCreateSessionResult> {
-  const selection = resolveGooseSessionSelection(providerId, options.modelId);
+  const selection = await resolveGooseSessionSelection(
+    providerId,
+    options.modelId,
+  );
   providerId = selection.providerId;
   options = { ...options, modelId: selection.modelId };
   // Only the "goose" sentinel should rely on backend defaults. Concrete

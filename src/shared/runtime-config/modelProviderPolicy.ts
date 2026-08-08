@@ -1,5 +1,6 @@
 import type { RuntimeConfig, RuntimeGooseConfig } from "./schema";
 import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
+import { getClient } from "@/shared/api/acpConnection";
 
 export interface GooseProviderSelection {
   providerId?: string | null;
@@ -79,6 +80,47 @@ export function resolveManagedGooseProviderSelection(
   }
 
   return { providerId, modelId: modelId ?? undefined };
+}
+
+/**
+ * Resolve a managed provider migration only after the target provider proves
+ * support for the selected (or fallback) model. Runtime config metadata is
+ * advisory, so it is never evidence for this decision.
+ */
+export async function resolveValidatedManagedGooseProviderSelection(
+  config: Pick<RuntimeConfig, "goose">,
+  selection: GooseProviderSelection,
+): Promise<ManagedGooseProviderSelection | null> {
+  const resolved = resolveManagedGooseProviderSelection(config, selection);
+  if (!resolved || resolved.providerId === selection.providerId) {
+    return resolved;
+  }
+
+  let supportedModelIds: ReadonlySet<string>;
+  try {
+    const client = await getClient();
+    const response =
+      await client.goose.GooseUnstableProvidersSupportedModelsList({
+        providerId: resolved.providerId,
+      });
+    supportedModelIds = new Set(response.models as string[]);
+  } catch (error) {
+    throw new Error(
+      `Cannot verify models for migrated provider ${resolved.providerId}; provider selection was not changed.`,
+      { cause: error },
+    );
+  }
+
+  if (resolved.modelId && supportedModelIds.has(resolved.modelId)) {
+    return resolved;
+  }
+  const fallbackModelId = normalizeConcreteModelId(config.goose.defaultModelId);
+  if (fallbackModelId && supportedModelIds.has(fallbackModelId)) {
+    return { providerId: resolved.providerId, modelId: fallbackModelId };
+  }
+  throw new Error(
+    `No supported model is available for migrated provider ${resolved.providerId}; provider selection was not changed.`,
+  );
 }
 
 export function managedGooseSelectionChanged(

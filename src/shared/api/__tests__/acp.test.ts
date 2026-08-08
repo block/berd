@@ -140,6 +140,16 @@ vi.mock("@/features/berdctl/appPreamble", () => ({
   getBerdctlPreamble: () => mockGetBerdctlPreamble(),
 }));
 
+const mockSupportedModelsList = vi.hoisted(() => vi.fn());
+vi.mock("../acpConnection", () => ({
+  getClient: () =>
+    Promise.resolve({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
+      },
+    }),
+}));
+
 vi.mock("../acpActiveMessageTracking", () => ({
   setActiveMessageId: vi.fn(),
   clearActiveMessageId: vi.fn(),
@@ -799,6 +809,8 @@ describe("acpCreateSession", () => {
     mockSetProvider.mockResolvedValue({ model: null, reasoningEffort: null });
     mockSetModel.mockReset();
     mockSetModel.mockResolvedValue({ model: null, reasoningEffort: null });
+    mockSupportedModelsList.mockReset();
+    mockSupportedModelsList.mockResolvedValue({ models: ["goose-gpt-5-5"] });
     await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
@@ -1032,6 +1044,43 @@ describe("acpCreateSession", () => {
     });
   });
 
+  it("does not mutate ACP when managed provider migration cannot prove support", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(
+      acpCreateSession("goose", "/tmp/project", { modelId: "other-model" }),
+    ).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+
+    expect(mockNewSession).not.toHaveBeenCalled();
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("uses a proven default instead of an unsupported migrated model", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockResolvedValueOnce({
+      models: ["goose-gpt-5-5"],
+    });
+    mockNewSession.mockResolvedValue({ sessionId: "migrated-session" });
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("goose", "/tmp/project", { modelId: "other-model" });
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "migrated-session",
+      "databricks_v2",
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "migrated-session",
+      "goose-gpt-5-5",
+      noRequestModelContext("databricks_v2"),
+    );
+  });
+
   it("rejects an explicit provider outside managed policy before creating", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     const { acpCreateSession } = await import("../acp");
@@ -1177,6 +1226,8 @@ describe("acpPrepareSession", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    mockSupportedModelsList.mockReset();
+    mockSupportedModelsList.mockResolvedValue({ models: ["goose-gpt-5-5"] });
     await setRuntimeConfig(DEFAULT_RUNTIME_CONFIG);
   });
 
@@ -1201,6 +1252,24 @@ describe("acpPrepareSession", () => {
       noRequestProviderContext,
     );
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+
+  it("does not load or mutate a session when managed migration cannot prove support", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));
+    const { acpPrepareSession } = await import("../acp");
+
+    await expect(
+      acpPrepareSession("legacy-session", "goose", "/tmp/project", {
+        modelId: "other-model",
+      }),
+    ).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+
+    expect(mockLoadSession).not.toHaveBeenCalled();
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
   });
 
   it("rejects a provider outside managed policy before loading the session", async () => {
