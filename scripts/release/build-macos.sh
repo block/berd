@@ -407,7 +407,7 @@ if [[ "$BUILD_KIND" == "custom" && "$VITE_SECURITY_ML_VALUE" == "0" ]]; then
 fi
 
 # Stage the selected bundled agents into distro/agents/ for the Tauri resource
-# bundle. Official builds use the default block,builderbot selection.
+# bundle. Official and custom builds use the default builderbot selection.
 stage_custom_bundled_agents
 
 # Generate the channel-specific release overlay. The generator validates the

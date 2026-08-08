@@ -19,7 +19,7 @@ function runDefaultBundledAgents(buildKind: string) {
 
 describe("release bundled-agent defaults", () => {
   it.each([
-    ["official", "block,builderbot"],
+    ["official", "builderbot"],
     ["custom", "builderbot"],
   ])("uses the %s build default", (buildKind, expected) => {
     expect(runDefaultBundledAgents(buildKind)).toBe(expected);

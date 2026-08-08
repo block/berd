@@ -165,7 +165,7 @@ default_bundled_agents() {
 
   case "$build_kind" in
     official)
-      printf '%s' "block,builderbot"
+      printf '%s' "builderbot"
       ;;
     custom)
       printf '%s' "builderbot"
