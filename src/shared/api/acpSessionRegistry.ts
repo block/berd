@@ -51,9 +51,11 @@ function scheduleQueueCleanup(
   sessionId: string,
   queue: SessionMutationQueue,
 ): void {
-  void queue.tail.then(() => {
+  const tail = queue.tail;
+  void tail.then(() => {
     if (
       mutationQueues.get(sessionId) === queue &&
+      queue.tail === tail &&
       queue.pendingSupersession === undefined
     ) {
       mutationQueues.delete(sessionId);

@@ -382,6 +382,43 @@ describe("applySessionModel", () => {
     );
   });
 
+  it("keeps a mutation behind an owned preflight configuration after its old tail settles", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    const firstProviderResponse = deferred<AcpSessionConfigSnapshots>();
+    mockSetProvider.mockReturnValueOnce(firstProviderResponse.promise);
+
+    const supersession = registry.supersedeSessionMutation("session-1");
+    const first = registry.prepareSession(
+      "session-1",
+      "anthropic",
+      "/project",
+      {},
+      supersession,
+    );
+
+    await vi.waitFor(() => expect(mockSetProvider).toHaveBeenCalledTimes(1));
+
+    // The owned intent was consumed before the real mutation was appended. A
+    // cleanup registered against the formerly resolved tail must not reclaim
+    // the queue while this provider call is still in flight.
+    const second = registry.prepareSession("session-1", "gemini", "/project");
+    await Promise.resolve();
+    expect(mockSetProvider).toHaveBeenCalledTimes(1);
+
+    firstProviderResponse.resolve(
+      modelConfigResponse("claude-default", "Claude Default"),
+    );
+    await first;
+    await second;
+
+    expect(mockSetProvider).toHaveBeenCalledTimes(2);
+    expect(mockSetProvider).toHaveBeenLastCalledWith(
+      "session-1",
+      "gemini",
+      noRequestProviderContext,
+    );
+  });
+
   it("does not run a load between one provider and model configuration", async () => {
     const registry = await importPreparedRegistry("openai", "gpt-4.1");
     const providerResponse = deferred<AcpSessionConfigSnapshots>();
