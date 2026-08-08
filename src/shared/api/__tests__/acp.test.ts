@@ -814,6 +814,144 @@ describe("acpLoadSession", () => {
     );
   });
 
+  it("does not let a stale preflight consume a newer preflight intent or publish a load", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const firstInventory = deferred<{ models: string[] }>();
+    const secondInventory = deferred<{ models: string[] }>();
+    mockSupportedModelsList
+      .mockReturnValueOnce(firstInventory.promise)
+      .mockReturnValueOnce(secondInventory.promise);
+    mockSetProvider.mockResolvedValue({ model: null, reasoningEffort: null });
+    mockSetModel.mockResolvedValue({ model: null, reasoningEffort: null });
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    const first = acpPrepareSession(
+      "acp-session-two-preflights",
+      "goose",
+      "/tmp/replay",
+      {
+        modelId: "other-model",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(1),
+    );
+    const second = acpPrepareSession(
+      "acp-session-two-preflights",
+      "goose",
+      "/tmp/replay",
+      {
+        modelId: "other-model",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(2),
+    );
+
+    firstInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await first;
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+
+    await acpLoadSession("acp-session-two-preflights", "/tmp/replay");
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+
+    secondInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await second;
+    expect(mockSetProvider).toHaveBeenCalledTimes(1);
+    expect(mockSetModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases only a rejected latest preflight intent", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const firstInventory = deferred<{ models: string[] }>();
+    mockSupportedModelsList
+      .mockReturnValueOnce(firstInventory.promise)
+      .mockRejectedValueOnce(new Error("offline"));
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("other-managed", "other-model"),
+    );
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    const first = acpPrepareSession(
+      "acp-session-rejected-latest",
+      "goose",
+      "/tmp/replay",
+      {
+        modelId: "other-model",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(1),
+    );
+    await expect(
+      acpPrepareSession("acp-session-rejected-latest", "goose", "/tmp/replay", {
+        modelId: "other-model",
+      }),
+    ).rejects.toThrow("Cannot verify models for migrated provider");
+
+    firstInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await first;
+    await acpLoadSession("acp-session-rejected-latest", "/tmp/replay");
+
+    expect(applyModelConfigSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+  });
+
+  it("keeps the latest preflight when it resolves before an older one", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const firstInventory = deferred<{ models: string[] }>();
+    const secondInventory = deferred<{ models: string[] }>();
+    mockSupportedModelsList
+      .mockReturnValueOnce(firstInventory.promise)
+      .mockReturnValueOnce(secondInventory.promise);
+    mockSetProvider.mockResolvedValue({ model: null, reasoningEffort: null });
+    mockSetModel.mockResolvedValue({ model: null, reasoningEffort: null });
+    const { acpPrepareSession } = await import("../acp");
+
+    const first = acpPrepareSession(
+      "acp-session-reverse-preflights",
+      "goose",
+      "/tmp/replay",
+      {
+        modelId: "other-model",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(1),
+    );
+    const second = acpPrepareSession(
+      "acp-session-reverse-preflights",
+      "goose",
+      "/tmp/replay",
+      {
+        modelId: "other-model",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(2),
+    );
+
+    secondInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await second;
+    firstInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await first;
+
+    expect(mockSetProvider).toHaveBeenCalledTimes(1);
+    expect(mockSetModel).toHaveBeenCalledTimes(1);
+  });
+
   it("does not dispatch a load snapshot superseded by a UI configuration", async () => {
     const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();
     mockLoadSession.mockReturnValueOnce(loadResponse.promise);

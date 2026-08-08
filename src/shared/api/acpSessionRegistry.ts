@@ -37,6 +37,12 @@ interface SessionMutationQueue {
   pendingSupersession?: number;
 }
 
+/** Opaque ownership of a configuration intent that is awaiting preflight. */
+export interface SessionMutationSupersession {
+  readonly sequence: number;
+  clear(): void;
+}
+
 const prepared = new Map<string, PreparedSession>();
 const mutationQueues = new Map<string, SessionMutationQueue>();
 let nextMutationSequence = 1;
@@ -121,7 +127,6 @@ function serializeSessionMutation<T>(
   sessionId: string,
   mutation: (isLatest: () => boolean) => Promise<T>,
   bounded = true,
-  consumesPendingSupersession = true,
 ): Promise<T> {
   let queue = mutationQueues.get(sessionId);
   if (!queue) {
@@ -145,16 +150,27 @@ function serializeSessionMutation<T>(
     () => undefined,
   );
   queue.tail = tail;
-  if (consumesPendingSupersession) {
-    // The first configuration mutation queued after async preflight consumes
-    // the intent; loads remain obsolete until then.
-    queue.pendingSupersession = undefined;
-  }
   scheduleQueueCleanup(sessionId, queue);
   return result;
 }
 
-export function supersedeSessionMutation(sessionId: string): () => void {
+function consumeSessionSupersession(
+  sessionId: string,
+  supersession: SessionMutationSupersession | undefined,
+): boolean {
+  if (!supersession) return true;
+  const queue = mutationQueues.get(sessionId);
+  if (!queue || queue.pendingSupersession !== supersession.sequence) {
+    return false;
+  }
+  queue.pendingSupersession = undefined;
+  scheduleQueueCleanup(sessionId, queue);
+  return true;
+}
+
+export function supersedeSessionMutation(
+  sessionId: string,
+): SessionMutationSupersession {
   let queue = mutationQueues.get(sessionId);
   if (!queue) {
     queue = { latestSequence: 0, tail: Promise.resolve() };
@@ -168,10 +184,13 @@ export function supersedeSessionMutation(sessionId: string): () => void {
   queue.pendingSupersession = sequence;
   scheduleQueueCleanup(sessionId, queue);
 
-  return () => {
-    if (queue?.pendingSupersession !== sequence) return;
-    queue.pendingSupersession = undefined;
-    scheduleQueueCleanup(sessionId, queue);
+  return {
+    sequence,
+    clear() {
+      if (queue?.pendingSupersession !== sequence) return;
+      queue.pendingSupersession = undefined;
+      scheduleQueueCleanup(sessionId, queue);
+    },
   };
 }
 
@@ -180,7 +199,9 @@ export async function prepareSession(
   providerId: string,
   workingDir: string,
   options: SessionConfigMutationOptions = {},
+  supersession?: SessionMutationSupersession,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
+  if (!consumeSessionSupersession(sessionId, supersession)) return;
   return serializeSessionMutation(sessionId, () =>
     prepareSessionNow(sessionId, providerId, workingDir, options),
   );
@@ -360,11 +381,13 @@ export async function configureSession(
   workingDir: string,
   modelId?: string,
   options: SessionConfigMutationOptions = {},
+  supersession?: SessionMutationSupersession,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const concreteModelId = normalizeConcreteModelId(modelId);
   if (modelId && !concreteModelId) {
     throw new Error(`Invalid model id: ${modelId}`);
   }
+  if (!consumeSessionSupersession(sessionId, supersession)) return;
   return serializeSessionMutation(sessionId, async () => {
     let snapshots = await prepareSessionNow(
       sessionId,
@@ -450,7 +473,6 @@ export async function loadSession(
         executionSelection: executionSnapshot ?? undefined,
       };
     },
-    false,
     false,
   );
 }

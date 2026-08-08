@@ -386,7 +386,7 @@ export async function acpPrepareSession(
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  const clearSupersession = sessionRegistry.supersedeSessionMutation(sessionId);
+  const supersession = sessionRegistry.supersedeSessionMutation(sessionId);
   try {
     const selection = await resolveGooseSessionSelection(
       providerId,
@@ -402,19 +402,21 @@ export async function acpPrepareSession(
             workingDir,
             selection.modelId,
             options,
+            supersession,
           )
         : await sessionRegistry.prepareSession(
             sessionId,
             selection.providerId,
             workingDir,
             options,
+            supersession,
           );
     perfLog(
       `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
     );
     return snapshots;
   } finally {
-    clearSupersession();
+    supersession.clear();
   }
 }
 
