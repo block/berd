@@ -577,9 +577,20 @@ export async function acpLoadSession(
     sessionId: shortLogId(sessionId),
   });
   perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
-  const { response, isCurrent, executionSelection } =
-    await sessionRegistry.loadSession(sessionId, effectiveWorkingDir);
+  const {
+    response,
+    isCurrent,
+    preflightSettlement,
+    canPublish,
+    executionSelection,
+  } = await sessionRegistry.loadSession(sessionId, effectiveWorkingDir);
   if (!isCurrent) {
+    void preflightSettlement?.then((publishDeferredLoad) => {
+      if (!publishDeferredLoad || !canPublish()) return;
+      applySessionConfigOptionsSnapshot(sessionId, response, {
+        origin: "response",
+      });
+    });
     perfLog(
       `[perf:load] ${sid} dropped superseded load snapshot in ${(performance.now() - t0).toFixed(1)}ms`,
     );

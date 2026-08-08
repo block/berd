@@ -814,6 +814,58 @@ describe("acpLoadSession", () => {
     );
   });
 
+  it("publishes a deferred load snapshot when its owning preflight rejects", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const supportedModels = deferred<{ models: string[] }>();
+    mockSupportedModelsList.mockReturnValueOnce(supportedModels.promise);
+    mockLoadSession.mockResolvedValueOnce({
+      ...executionConfigResponse("other-managed", "other-model"),
+      configOptions: [
+        ...executionConfigResponse("other-managed", "other-model")
+          .configOptions,
+        {
+          id: "thinking_effort",
+          kind: {
+            type: "select",
+            currentValue: "high",
+            options: [{ value: "high", name: "High" }],
+          },
+        },
+      ],
+    });
+    const applyModelConfigSnapshot = vi.fn();
+    const applyReasoningEffortConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({
+      applyModelConfigSnapshot,
+      applyReasoningEffortConfigSnapshot,
+    });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    const configure = acpPrepareSession(
+      "acp-session-rejected-preflight-load",
+      "goose",
+      "/tmp/replay",
+      { modelId: "other-model" },
+    );
+    await vi.waitFor(() => expect(mockSupportedModelsList).toHaveBeenCalled());
+
+    await acpLoadSession("acp-session-rejected-preflight-load", "/tmp/replay");
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+    expect(applyReasoningEffortConfigSnapshot).not.toHaveBeenCalled();
+
+    supportedModels.reject(new Error("offline"));
+    await expect(configure).rejects.toThrow(
+      "Cannot verify models for migrated provider",
+    );
+    await vi.waitFor(() => {
+      expect(applyModelConfigSnapshot).toHaveBeenCalledTimes(1);
+      expect(applyReasoningEffortConfigSnapshot).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("does not let a stale preflight consume a newer preflight intent or publish a load", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     const firstInventory = deferred<{ models: string[] }>();

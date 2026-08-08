@@ -34,7 +34,13 @@ interface SessionMutationQueue {
   latestSequence: number;
   tail: Promise<void>;
   /** Configuration intent awaiting async preflight before it can enqueue. */
-  pendingSupersession?: number;
+  pendingSupersession?: PendingSessionSupersession;
+}
+
+interface PendingSessionSupersession {
+  sequence: number;
+  settled: Promise<boolean>;
+  resolve(publishDeferredLoad: boolean): void;
 }
 
 /** Opaque ownership of a configuration intent that is awaiting preflight. */
@@ -127,7 +133,11 @@ async function runBoundedSessionMutation<T>(
 
 function serializeSessionMutation<T>(
   sessionId: string,
-  mutation: (isLatest: () => boolean) => Promise<T>,
+  mutation: (
+    isLatest: () => boolean,
+    sequence: number,
+    queue: SessionMutationQueue,
+  ) => Promise<T>,
   bounded = true,
 ): Promise<T> {
   let queue = mutationQueues.get(sessionId);
@@ -143,6 +153,8 @@ function serializeSessionMutation<T>(
       () =>
         queue?.pendingSupersession === undefined &&
         queue?.latestSequence === sequence,
+      sequence,
+      queue,
     );
   const result = queue.tail.then(() =>
     bounded ? runBoundedSessionMutation(sessionId, execute()) : execute(),
@@ -162,9 +174,10 @@ function consumeSessionSupersession(
 ): boolean {
   if (!supersession) return true;
   const queue = mutationQueues.get(sessionId);
-  if (!queue || queue.pendingSupersession !== supersession.sequence) {
+  if (!queue || queue.pendingSupersession?.sequence !== supersession.sequence) {
     return false;
   }
+  queue.pendingSupersession.resolve(false);
   queue.pendingSupersession = undefined;
   scheduleQueueCleanup(sessionId, queue);
   return true;
@@ -182,14 +195,19 @@ export function supersedeSessionMutation(
   // mutation. Retain that intent even when the session was idle, so a later
   // load cannot publish a snapshot that predates it.
   const sequence = nextMutationSequence++;
+  let resolve!: (publishDeferredLoad: boolean) => void;
+  const settled = new Promise<boolean>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
   queue.latestSequence = sequence;
-  queue.pendingSupersession = sequence;
+  queue.pendingSupersession = { sequence, settled, resolve };
   scheduleQueueCleanup(sessionId, queue);
 
   return {
     sequence,
     clear() {
-      if (queue?.pendingSupersession !== sequence) return;
+      if (queue?.pendingSupersession?.sequence !== sequence) return;
+      queue.pendingSupersession.resolve(true);
       queue.pendingSupersession = undefined;
       scheduleQueueCleanup(sessionId, queue);
     },
@@ -457,13 +475,21 @@ export async function loadSession(
 ): Promise<{
   response: Awaited<ReturnType<typeof acpApi.loadSession>>;
   isCurrent: boolean;
+  /** Resolves when the preflight that suppressed this load settles. */
+  preflightSettlement?: Promise<boolean>;
+  /** Re-checks the load's ordering after asynchronous preflight settlement. */
+  canPublish(): boolean;
   executionSelection?: AcpSessionExecutionSelection;
 }> {
   return serializeSessionMutation(
     sessionId,
-    async (isLatest) => {
+    async (isLatest, sequence, queue) => {
       const response = await acpApi.loadSession(sessionId, workingDir);
       const isCurrentResult = isLatest();
+      const pendingSupersession = isCurrentResult
+        ? undefined
+        : mutationQueues.get(sessionId)?.pendingSupersession;
+      const preflightSettlement = pendingSupersession?.settled;
       const executionSnapshot = readSessionExecutionConfigSnapshot(response);
       prepared.set(sessionId, {
         workingDir,
@@ -472,6 +498,12 @@ export async function loadSession(
       return {
         response,
         isCurrent: isCurrentResult,
+        preflightSettlement,
+        canPublish: () =>
+          pendingSupersession !== undefined &&
+          pendingSupersession.sequence < sequence &&
+          queue.latestSequence === sequence &&
+          queue.pendingSupersession === undefined,
         executionSelection: executionSnapshot ?? undefined,
       };
     },
