@@ -227,9 +227,7 @@ export function supersedeSessionMutation(
   );
   const previousSupersession = queue.pendingSupersession;
   if (previousSupersession) {
-    previousSupersession.resolve(
-      settled.then((settlement) => ({ ...settlement, sequence })),
-    );
+    previousSupersession.resolve(settled);
   }
   queue.latestSequence = sequence;
   queue.pendingSupersession = { sequence, settled, resolve };

@@ -1009,6 +1009,86 @@ describe("acpLoadSession", () => {
   });
 
   it.each([
+    { name: "rejects", outcome: "reject" },
+    { name: "mutates", outcome: "succeed" },
+    { name: "fails mutation", outcome: "fail" },
+  ])("settles an A→B→C deferred load when C $name", async ({ outcome }) => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const inventories = [
+      deferred<{ models: string[] }>(),
+      deferred<{ models: string[] }>(),
+      deferred<{ models: string[] }>(),
+    ];
+    mockSupportedModelsList
+      .mockReturnValueOnce(inventories[0].promise)
+      .mockReturnValueOnce(inventories[1].promise)
+      .mockReturnValueOnce(inventories[2].promise);
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("other-managed", "other-model"),
+    );
+    if (outcome === "fail") {
+      mockSetProvider.mockRejectedValueOnce(new Error("offline"));
+    } else if (outcome === "succeed") {
+      mockSetProvider.mockResolvedValueOnce({
+        model: null,
+        reasoningEffort: null,
+      });
+      mockSetModel.mockResolvedValueOnce({
+        model: null,
+        reasoningEffort: null,
+      });
+    }
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+    const sessionId = `acp-session-three-preflights-${outcome}`;
+    const prepare = () =>
+      acpPrepareSession(sessionId, "goose", "/tmp/replay", {
+        modelId: "other-model",
+      });
+
+    const first = prepare();
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(1),
+    );
+    await acpLoadSession(sessionId, "/tmp/replay");
+    const second = prepare();
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(2),
+    );
+    const third = prepare();
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(3),
+    );
+
+    if (outcome === "reject") {
+      inventories[2].reject(new Error("offline"));
+      await expect(third).rejects.toThrow(
+        "Cannot verify models for migrated provider",
+      );
+      await vi.waitFor(() =>
+        expect(applyModelConfigSnapshot).toHaveBeenCalledTimes(1),
+      );
+    } else {
+      inventories[2].resolve({ models: ["goose-gpt-5-5"] });
+      if (outcome === "fail") {
+        await expect(third).rejects.toThrow("offline");
+      } else {
+        await third;
+      }
+      expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+    }
+
+    inventories[0].resolve({ models: ["goose-gpt-5-5"] });
+    inventories[1].resolve({ models: ["goose-gpt-5-5"] });
+    await first;
+    await second;
+  });
+
+  it.each([
     {
       name: "setProvider",
       load: executionConfigResponse("other-managed", "other-model"),
