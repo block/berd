@@ -1,6 +1,7 @@
 import type { RuntimeConfig, RuntimeGooseConfig } from "./schema";
 import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 import { getClient } from "@/shared/api/acpConnection";
+import { providerModelInventoryGeneration } from "./providerModelInventoryInvalidation";
 
 export interface GooseProviderSelection {
   providerId?: string | null;
@@ -20,6 +21,7 @@ export interface ManagedGooseProviderResolutionContext {
 }
 
 const DATABRICKS_V2_PROVIDER_ID = "databricks_v2";
+const INVENTORY_PROOF_TIMEOUT_MS = 60_000;
 
 /**
  * Runtime model providers define provider policy and curated model metadata.
@@ -87,6 +89,35 @@ export function resolveManagedGooseProviderSelection(
  * support for the selected (or fallback) model. Runtime config metadata is
  * advisory, so it is never evidence for this decision.
  */
+
+async function readProvenTargetInventory(
+  providerId: string,
+): Promise<ReadonlySet<string>> {
+  const generationAtStart = providerModelInventoryGeneration(providerId);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const client = await getClient();
+    const response = await Promise.race([
+      client.goose.GooseUnstableProvidersSupportedModelsList({ providerId }),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(
+            new Error(`Timed out proving models for provider ${providerId}.`),
+          );
+        }, INVENTORY_PROOF_TIMEOUT_MS);
+      }),
+    ]);
+    if (generationAtStart !== providerModelInventoryGeneration(providerId)) {
+      throw new Error(
+        `Model inventory changed while proving provider ${providerId}.`,
+      );
+    }
+    return new Set(response.models as string[]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 export async function resolveValidatedManagedGooseProviderSelection(
   config: Pick<RuntimeConfig, "goose">,
   selection: GooseProviderSelection,
@@ -98,12 +129,7 @@ export async function resolveValidatedManagedGooseProviderSelection(
 
   let supportedModelIds: ReadonlySet<string>;
   try {
-    const client = await getClient();
-    const response =
-      await client.goose.GooseUnstableProvidersSupportedModelsList({
-        providerId: resolved.providerId,
-      });
-    supportedModelIds = new Set(response.models as string[]);
+    supportedModelIds = await readProvenTargetInventory(resolved.providerId);
   } catch (error) {
     throw new Error(
       `Cannot verify models for migrated provider ${resolved.providerId}; provider selection was not changed.`,

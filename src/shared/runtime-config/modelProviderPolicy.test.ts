@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeConfig } from "./schema";
+import { notifyProviderModelInventoryInvalidated } from "./providerModelInventoryInvalidation";
 import {
   managedGooseSelectionChanged,
   resolveManagedGooseProviderSelection,
@@ -41,6 +42,7 @@ const managedConfig: RuntimeConfig = {
 
 describe("resolveManagedGooseProviderSelection", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     mockSupportedModelsList.mockReset();
   });
   it("returns unrestricted for an empty provider list", () => {
@@ -236,6 +238,53 @@ describe("resolveManagedGooseProviderSelection", () => {
       }),
     ).rejects.toThrow(
       "No supported model is available for migrated provider databricks_v2",
+    );
+  });
+
+  it("times out a never-settling inventory proof without accepting its late result", async () => {
+    vi.useFakeTimers();
+    let resolveInventory!: (value: { models: string[] }) => void;
+    mockSupportedModelsList.mockReturnValue(
+      new Promise<{ models: string[] }>((resolve) => {
+        resolveInventory = resolve;
+      }),
+    );
+
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      {
+        providerId: "disallowed",
+      },
+    );
+    const rejectedMigration = expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedMigration;
+    resolveInventory({ models: ["goose-gpt-5-5"] });
+    await Promise.resolve();
+  });
+
+  it("rejects an inventory proof invalidated while it is in flight", async () => {
+    let resolveInventory!: (value: { models: string[] }) => void;
+    mockSupportedModelsList.mockReturnValue(
+      new Promise<{ models: string[] }>((resolve) => {
+        resolveInventory = resolve;
+      }),
+    );
+
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      {
+        providerId: "disallowed",
+      },
+    );
+    await vi.waitFor(() => expect(mockSupportedModelsList).toHaveBeenCalled());
+    notifyProviderModelInventoryInvalidated("databricks_v2");
+    resolveInventory({ models: ["goose-gpt-5-5"] });
+
+    await expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
     );
   });
 

@@ -1579,6 +1579,103 @@ describe("acpPrepareSession", () => {
     expect(applyModelConfigSnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it("releases timed-out inventory intent so fresh load and retry can reconcile", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    vi.useFakeTimers();
+    const timedOutInventory = deferred<{ models: string[] }>();
+    mockSupportedModelsList
+      .mockReturnValueOnce(timedOutInventory.promise)
+      .mockResolvedValueOnce({ models: ["goose-gpt-5-5"] });
+    mockLoadSession.mockResolvedValue(
+      executionConfigResponse("openai", "gpt-5.5"),
+    );
+    mockSetProvider.mockResolvedValue({ model: null, reasoningEffort: null });
+    mockSetModel.mockResolvedValue({ model: null, reasoningEffort: null });
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+    const sessionId = "acp-session-timeout-retry";
+
+    const timedOutPrepare = acpPrepareSession(
+      sessionId,
+      "goose",
+      "/tmp/project",
+      {
+        modelId: "other-model",
+      },
+    );
+    const rejectedPrepare = expect(timedOutPrepare).rejects.toThrow(
+      "Cannot verify models for migrated provider",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedPrepare;
+
+    expect(mockLoadSession).not.toHaveBeenCalled();
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+    timedOutInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await Promise.resolve();
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+
+    await acpLoadSession(sessionId, "/tmp/project");
+    expect(applyModelConfigSnapshot).toHaveBeenCalledTimes(1);
+    await acpPrepareSession(sessionId, "goose", "/tmp/project", {
+      modelId: "other-model",
+    });
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      sessionId,
+      "databricks_v2",
+      noRequestProviderContext,
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      sessionId,
+      "goose-gpt-5-5",
+      noRequestModelContext("databricks_v2"),
+    );
+    vi.useRealTimers();
+  });
+
+  it("rejects invalidated inventory proof and requires a fresh proof before mutation", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const staleInventory = deferred<{ models: string[] }>();
+    mockSupportedModelsList
+      .mockReturnValueOnce(staleInventory.promise)
+      .mockResolvedValueOnce({ models: ["goose-gpt-5-5"] });
+    mockSetProvider.mockResolvedValue({ model: null, reasoningEffort: null });
+    mockSetModel.mockResolvedValue({ model: null, reasoningEffort: null });
+    const { acpPrepareSession } = await import("../acp");
+    const { notifyProviderModelInventoryInvalidated } = await import(
+      "@/shared/runtime-config/providerModelInventoryInvalidation"
+    );
+    const sessionId = "acp-session-invalidated-proof";
+
+    const stalePrepare = acpPrepareSession(sessionId, "goose", "/tmp/project", {
+      modelId: "other-model",
+    });
+    await vi.waitFor(() =>
+      expect(mockSupportedModelsList).toHaveBeenCalledTimes(1),
+    );
+    notifyProviderModelInventoryInvalidated("databricks_v2");
+    staleInventory.resolve({ models: ["goose-gpt-5-5"] });
+    await expect(stalePrepare).rejects.toThrow(
+      "Cannot verify models for migrated provider",
+    );
+
+    expect(mockLoadSession).not.toHaveBeenCalled();
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+    await acpPrepareSession(sessionId, "goose", "/tmp/project", {
+      modelId: "other-model",
+    });
+    expect(mockSupportedModelsList).toHaveBeenCalledTimes(2);
+    expect(mockSetProvider).toHaveBeenCalledTimes(1);
+    expect(mockSetModel).toHaveBeenCalledTimes(1);
+  });
+
   it("does not load or mutate a session when managed migration cannot prove support", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));

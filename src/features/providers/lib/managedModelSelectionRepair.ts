@@ -2,7 +2,10 @@ import packageJson from "../../../../package.json";
 import { getClient } from "@/shared/api/acpConnection";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
-import { subscribeToProviderModelInventoryInvalidation } from "./providerModelInventoryEvents";
+import {
+  providerModelInventoryGeneration,
+  subscribeToProviderModelInventoryInvalidation,
+} from "@/shared/runtime-config/providerModelInventoryInvalidation";
 import {
   resolveManagedGooseProviderSelection,
   resolveValidatedManagedGooseProviderSelection,
@@ -20,16 +23,9 @@ const inventoryRequests = new Map<
   string,
   Promise<ReadonlySet<string> | null>
 >();
-const inventoryGenerations = new Map<string, number>();
-
-function inventoryGeneration(providerId: string): number {
-  return inventoryGenerations.get(providerId) ?? 0;
-}
-
 subscribeToProviderModelInventoryInvalidation((providerId) => {
   validatedInventories.delete(providerId);
   inventoryRequests.delete(providerId);
-  inventoryGenerations.set(providerId, inventoryGeneration(providerId) + 1);
 });
 
 export type ManagedModelRepairSource =
@@ -51,7 +47,7 @@ async function validatedModelIds(
   const existing = inventoryRequests.get(providerId);
   if (existing) return existing;
 
-  const generationAtStart = inventoryGeneration(providerId);
+  const generationAtStart = providerModelInventoryGeneration(providerId);
   let request!: Promise<ReadonlySet<string> | null>;
   request = (async () => {
     try {
@@ -61,7 +57,7 @@ async function validatedModelIds(
           providerId,
         });
       const modelIds = new Set<string>(response.models as string[]);
-      if (generationAtStart !== inventoryGeneration(providerId)) {
+      if (generationAtStart !== providerModelInventoryGeneration(providerId)) {
         return validatedModelIds(providerId);
       }
       validatedInventories.set(providerId, {
@@ -136,5 +132,4 @@ export async function repairManagedGooseModelSelection(
 export function resetManagedModelSelectionRepairCacheForTests(): void {
   validatedInventories.clear();
   inventoryRequests.clear();
-  inventoryGenerations.clear();
 }
