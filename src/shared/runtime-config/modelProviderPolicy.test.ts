@@ -204,6 +204,41 @@ describe("resolveManagedGooseProviderSelection", () => {
     });
   });
 
+  it("uses a deterministic proven inventory model when a migration has no default model", async () => {
+    mockSupportedModelsList.mockResolvedValue({
+      models: ["z-model", "a-model"],
+    });
+    const configWithoutDefault: RuntimeConfig = {
+      ...managedConfig,
+      goose: { ...managedConfig.goose, defaultModelId: undefined },
+    };
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(configWithoutDefault, {
+        providerId: "disallowed",
+      }),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "a-model",
+    });
+  });
+
+  it("rejects a migration with no selected default when target inventory is empty", async () => {
+    mockSupportedModelsList.mockResolvedValue({ models: [] });
+    const configWithoutDefault: RuntimeConfig = {
+      ...managedConfig,
+      goose: { ...managedConfig.goose, defaultModelId: undefined },
+    };
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(configWithoutDefault, {
+        providerId: "disallowed",
+      }),
+    ).rejects.toThrow(
+      "No supported model is available for migrated provider databricks_v2",
+    );
+  });
+
   it("rejects a provider migration when support cannot be proved", async () => {
     mockSupportedModelsList.mockRejectedValue(new Error("offline"));
 

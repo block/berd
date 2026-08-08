@@ -118,6 +118,13 @@ export async function resolveValidatedManagedGooseProviderSelection(
   if (fallbackModelId && supportedModelIds.has(fallbackModelId)) {
     return { providerId: resolved.providerId, modelId: fallbackModelId };
   }
+  const provenInventoryFallback = [...supportedModelIds].sort()[0];
+  if (provenInventoryFallback) {
+    return {
+      providerId: resolved.providerId,
+      modelId: provenInventoryFallback,
+    };
+  }
   throw new Error(
     `No supported model is available for migrated provider ${resolved.providerId}; provider selection was not changed.`,
   );
