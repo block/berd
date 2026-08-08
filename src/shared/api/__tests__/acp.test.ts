@@ -1538,6 +1538,47 @@ describe("acpPrepareSession", () => {
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
 
+  it("keeps a caller-owned configuration intent after prepare rejects", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const {
+      acpLoadSession,
+      acpPrepareSession,
+      reserveAcpSessionConfiguration,
+    } = await import("../acp");
+    const sessionId = "acp-session-caller-owned-intent";
+    const intent = reserveAcpSessionConfiguration(sessionId);
+
+    await expect(
+      acpPrepareSession(
+        sessionId,
+        "goose",
+        "/tmp/project",
+        {
+          modelId: "other-model",
+        },
+        intent,
+      ),
+    ).rejects.toThrow("Cannot verify models for migrated provider");
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("openai", "gpt-5.5"),
+    );
+    await acpLoadSession(sessionId, "/tmp/project");
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+
+    intent.clear();
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("openai", "gpt-5.5"),
+    );
+    await acpLoadSession(sessionId, "/tmp/project");
+    expect(applyModelConfigSnapshot).toHaveBeenCalledTimes(1);
+  });
+
   it("does not load or mutate a session when managed migration cannot prove support", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));

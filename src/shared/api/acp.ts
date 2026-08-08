@@ -80,6 +80,19 @@ export interface AcpSessionConfigApplyOptions {
   requestId?: string;
 }
 
+export type AcpSessionConfigurationIntent =
+  sessionRegistry.SessionMutationSupersession;
+
+/**
+ * Reserve a session's configuration ordering before asynchronous resolution.
+ * The owner must pass it to acpPrepareSession and clear it when finished.
+ */
+export function reserveAcpSessionConfiguration(
+  sessionId: string,
+): AcpSessionConfigurationIntent {
+  return sessionRegistry.supersedeSessionMutation(sessionId);
+}
+
 export interface AcpCreateSessionResult {
   sessionId: string;
   configOptionsSnapshot: AcpSessionConfigSnapshots;
@@ -380,13 +393,15 @@ export async function acpPrepareSession(
   providerId: string,
   workingDir: string,
   options: AcpSessionConfigApplyOptions = {},
+  intent?: AcpSessionConfigurationIntent,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const t0 = performance.now();
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  const supersession = sessionRegistry.supersedeSessionMutation(sessionId);
+  const supersession = intent ?? reserveAcpSessionConfiguration(sessionId);
+  const ownsSupersession = intent === undefined;
   try {
     const selection = await resolveGooseSessionSelection(
       providerId,
@@ -416,7 +431,7 @@ export async function acpPrepareSession(
     );
     return snapshots;
   } finally {
-    supersession.clear();
+    if (ownsSupersession) supersession.clear();
   }
 }
 

@@ -1,4 +1,7 @@
-import { acpPrepareSession } from "@/shared/api/acp";
+import {
+  acpPrepareSession,
+  reserveAcpSessionConfiguration,
+} from "@/shared/api/acp";
 import type {
   AcpModelConfigSnapshot,
   AcpReasoningEffortConfigSnapshot,
@@ -269,6 +272,7 @@ async function execute(
   operation: PendingOperation,
 ): Promise<void> {
   const { request, operationId } = operation;
+  const intent = reserveAcpSessionConfiguration(request.sessionId);
   try {
     const effective = await resolveEffectiveTarget(request.target);
     const liveTarget = useChatSessionStore
@@ -339,6 +343,7 @@ async function execute(
           ? { requestId: operationId }
           : {}),
       },
+      intent,
     );
     if (!currentOperation(actor, operation)) {
       resolveSuperseded(actor, operation);
@@ -441,6 +446,8 @@ async function execute(
       error,
       fallback,
     });
+  } finally {
+    intent.clear();
   }
 }
 

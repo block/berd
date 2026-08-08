@@ -6,6 +6,32 @@ const mockSetProvider = vi.fn();
 const mockSetModel = vi.fn();
 const mockGetClient = vi.fn();
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function executionConfigResponse(providerId: string, modelId: string) {
+  return {
+    configOptions: [
+      {
+        id: "provider",
+        kind: { type: "select", currentValue: providerId, options: [] },
+      },
+      {
+        id: "model",
+        category: "model",
+        kind: { type: "select", currentValue: modelId, options: [] },
+      },
+    ],
+  };
+}
+
 vi.mock("@/shared/api/acpApi", () => ({
   loadSession: (...args: unknown[]) => mockLoadSession(...args),
   setProvider: (...args: unknown[]) => mockSetProvider(...args),
@@ -273,6 +299,60 @@ describe("transitionSessionTarget with managed Goose models", () => {
         modelProviderId: "databricks_v2",
       },
     });
+  });
+
+  it("suppresses a concurrent load while migration proof is pending", async () => {
+    const supportedModels = deferred<{ models: string[] }>();
+    const supportedModelsList = vi
+      .fn()
+      .mockReturnValue(supportedModels.promise);
+    mockGetClient.mockResolvedValue({
+      goose: { GooseUnstableProvidersSupportedModelsList: supportedModelsList },
+    });
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("legacy-provider", "legacy-model"),
+    );
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "@/shared/api/acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { resetManagedModelSelectionRepairCacheForTests } = await import(
+      "@/features/providers/lib/managedModelSelectionRepair"
+    );
+    resetManagedModelSelectionRepairCacheForTests();
+    const { acpLoadSession } = await import("@/shared/api/acp");
+    const { transitionSessionTarget } = await import(
+      "./sessionTargetCoordinator"
+    );
+
+    const transition = transitionSessionTarget({
+      sessionId: "migration-proof-session",
+      target: {
+        harnessId: "goose",
+        modelProviderId: "legacy-provider",
+        modelId: "legacy-model",
+        modelName: "Legacy model",
+      },
+      workingDir: "/tmp/project",
+    });
+    await vi.waitFor(() =>
+      expect(supportedModelsList).toHaveBeenCalledTimes(1),
+    );
+
+    await acpLoadSession("migration-proof-session", "/tmp/project");
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+
+    supportedModels.resolve({ models: ["goose-gpt-5-5"] });
+    await expect(transition).resolves.toMatchObject({
+      applied: true,
+      resolvedTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
   });
 
   it("finishes on the explicitly selected model instead of the managed default", async () => {
