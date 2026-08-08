@@ -585,8 +585,8 @@ export async function acpLoadSession(
     executionSelection,
   } = await sessionRegistry.loadSession(sessionId, effectiveWorkingDir);
   if (!isCurrent) {
-    void preflightSettlement?.then((publishDeferredLoad) => {
-      if (!publishDeferredLoad || !canPublish()) return;
+    void preflightSettlement?.then((settlement) => {
+      if (!canPublish(settlement)) return;
       applySessionConfigOptionsSnapshot(sessionId, response, {
         origin: "response",
       });
