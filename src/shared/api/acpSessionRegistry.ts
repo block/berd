@@ -30,12 +30,30 @@ interface SessionConfigMutationOptions {
 
 const SESSION_MUTATION_TIMEOUT_MS = 60_000;
 
+interface SessionMutationQueue {
+  latestSequence: number;
+  tail: Promise<void>;
+  /** Configuration intent awaiting async preflight before it can enqueue. */
+  pendingSupersession?: number;
+}
+
 const prepared = new Map<string, PreparedSession>();
-const mutationQueues = new Map<
-  string,
-  { latestSequence: number; tail: Promise<void> }
->();
+const mutationQueues = new Map<string, SessionMutationQueue>();
 let nextMutationSequence = 1;
+
+function scheduleQueueCleanup(
+  sessionId: string,
+  queue: SessionMutationQueue,
+): void {
+  void queue.tail.then(() => {
+    if (
+      mutationQueues.get(sessionId) === queue &&
+      queue.pendingSupersession === undefined
+    ) {
+      mutationQueues.delete(sessionId);
+    }
+  });
+}
 
 function clonePreparedSession(
   entry: PreparedSession | undefined,
@@ -103,6 +121,7 @@ function serializeSessionMutation<T>(
   sessionId: string,
   mutation: (isLatest: () => boolean) => Promise<T>,
   bounded = true,
+  consumesPendingSupersession = true,
 ): Promise<T> {
   let queue = mutationQueues.get(sessionId);
   if (!queue) {
@@ -112,7 +131,12 @@ function serializeSessionMutation<T>(
 
   const sequence = nextMutationSequence++;
   queue.latestSequence = sequence;
-  const execute = () => mutation(() => queue?.latestSequence === sequence);
+  const execute = () =>
+    mutation(
+      () =>
+        queue?.pendingSupersession === undefined &&
+        queue?.latestSequence === sequence,
+    );
   const result = queue.tail.then(() =>
     bounded ? runBoundedSessionMutation(sessionId, execute()) : execute(),
   );
@@ -121,21 +145,34 @@ function serializeSessionMutation<T>(
     () => undefined,
   );
   queue.tail = tail;
-  void tail.then(() => {
-    if (mutationQueues.get(sessionId)?.tail === tail) {
-      mutationQueues.delete(sessionId);
-    }
-  });
+  if (consumesPendingSupersession) {
+    // The first configuration mutation queued after async preflight consumes
+    // the intent; loads remain obsolete until then.
+    queue.pendingSupersession = undefined;
+  }
+  scheduleQueueCleanup(sessionId, queue);
   return result;
 }
 
-export function supersedeSessionMutation(sessionId: string): void {
-  const queue = mutationQueues.get(sessionId);
-  if (!queue) return;
+export function supersedeSessionMutation(sessionId: string): () => void {
+  let queue = mutationQueues.get(sessionId);
+  if (!queue) {
+    queue = { latestSequence: 0, tail: Promise.resolve() };
+    mutationQueues.set(sessionId, queue);
+  }
   // Resolution may need authoritative I/O before it can enqueue its ACP
-  // mutation. Make that user-initiated configuration current immediately so a
-  // concurrent load cannot publish an obsolete response snapshot meanwhile.
-  queue.latestSequence = nextMutationSequence++;
+  // mutation. Retain that intent even when the session was idle, so a later
+  // load cannot publish a snapshot that predates it.
+  const sequence = nextMutationSequence++;
+  queue.latestSequence = sequence;
+  queue.pendingSupersession = sequence;
+  scheduleQueueCleanup(sessionId, queue);
+
+  return () => {
+    if (queue?.pendingSupersession !== sequence) return;
+    queue.pendingSupersession = undefined;
+    scheduleQueueCleanup(sessionId, queue);
+  };
 }
 
 export async function prepareSession(
@@ -413,6 +450,7 @@ export async function loadSession(
         executionSelection: executionSnapshot ?? undefined,
       };
     },
+    false,
     false,
   );
 }

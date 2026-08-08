@@ -762,6 +762,58 @@ describe("acpLoadSession", () => {
     );
   });
 
+  it("does not dispatch a load snapshot when provider-changing prepare is awaiting inventory proof", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const supportedModels = deferred<{ models: string[] }>();
+    const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();
+    mockSupportedModelsList.mockReturnValueOnce(supportedModels.promise);
+    mockLoadSession.mockReturnValueOnce(loadResponse.promise);
+    mockSetProvider.mockResolvedValueOnce({
+      model: null,
+      reasoningEffort: null,
+    });
+    mockSetModel.mockResolvedValueOnce({ model: null, reasoningEffort: null });
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { acpLoadSession, acpPrepareSession } = await import("../acp");
+
+    const configure = acpPrepareSession(
+      "acp-session-preflight-race",
+      "goose",
+      "/tmp/replay",
+      { modelId: "other-model" },
+    );
+    await vi.waitFor(() => expect(mockSupportedModelsList).toHaveBeenCalled());
+
+    const load = acpLoadSession("acp-session-preflight-race", "/tmp/replay");
+    await vi.waitFor(() => expect(mockLoadSession).toHaveBeenCalledTimes(1));
+    loadResponse.resolve(
+      executionConfigResponse("other-managed", "other-model"),
+    );
+    await load;
+
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+
+    supportedModels.resolve({ models: ["goose-gpt-5-5"] });
+    await configure;
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "acp-session-preflight-race",
+      "databricks_v2",
+      noRequestProviderContext,
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "acp-session-preflight-race",
+      "goose-gpt-5-5",
+      noRequestModelContext("databricks_v2"),
+    );
+  });
+
   it("does not dispatch a load snapshot superseded by a UI configuration", async () => {
     const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();
     mockLoadSession.mockReturnValueOnce(loadResponse.promise);

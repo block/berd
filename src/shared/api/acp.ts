@@ -386,32 +386,36 @@ export async function acpPrepareSession(
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  sessionRegistry.supersedeSessionMutation(sessionId);
-  const selection = await resolveGooseSessionSelection(
-    providerId,
-    options.modelId,
-  );
-  const applyResolvedModel =
-    Boolean(options.modelId) || selection.providerId !== providerId;
-  const snapshots =
-    applyResolvedModel && selection.modelId
-      ? await sessionRegistry.configureSession(
-          sessionId,
-          selection.providerId,
-          workingDir,
-          selection.modelId,
-          options,
-        )
-      : await sessionRegistry.prepareSession(
-          sessionId,
-          selection.providerId,
-          workingDir,
-          options,
-        );
-  perfLog(
-    `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
-  );
-  return snapshots;
+  const clearSupersession = sessionRegistry.supersedeSessionMutation(sessionId);
+  try {
+    const selection = await resolveGooseSessionSelection(
+      providerId,
+      options.modelId,
+    );
+    const applyResolvedModel =
+      Boolean(options.modelId) || selection.providerId !== providerId;
+    const snapshots =
+      applyResolvedModel && selection.modelId
+        ? await sessionRegistry.configureSession(
+            sessionId,
+            selection.providerId,
+            workingDir,
+            selection.modelId,
+            options,
+          )
+        : await sessionRegistry.prepareSession(
+            sessionId,
+            selection.providerId,
+            workingDir,
+            options,
+          );
+    perfLog(
+      `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
+    return snapshots;
+  } finally {
+    clearSupersession();
+  }
 }
 
 export async function acpCreateSession(
