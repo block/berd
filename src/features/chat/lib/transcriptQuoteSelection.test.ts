@@ -61,19 +61,51 @@ describe("stagedQuoteFromSelection", () => {
     });
   });
 
-  it("refuses transformed markdown until the canonical mapper supports it", () => {
-    const message = makeMessage("message-1", "**bold** text");
-    const { root, block } = renderPlainTextMessage("message-1", "bold text");
+  it("maps a selected numbered-list sentence back into the canonical Markdown source", () => {
+    const selected =
+      "Ask reviewers to separate product concerns from visual polish.";
+    const canonical = [
+      "1. Set a clear critique goal upfront.",
+      `2. ${selected}`,
+      "3. End with explicit decisions and owners.",
+    ].join("\n");
+    const message = makeMessage("message-1", canonical);
+    const { root, block } = renderPlainTextMessage(
+      "message-1",
+      [
+        "Set a clear critique goal upfront.",
+        selected,
+        "End with explicit decisions and owners.",
+      ].join(""),
+    );
     const node = block.firstChild as Text;
+    const renderedStart = block.textContent?.indexOf(selected) ?? -1;
+    const canonicalStart = canonical.indexOf(selected);
 
     expect(
       stagedQuoteFromSelection({
         id: "quote-1",
         messages: [message],
         root,
-        selection: selectionFor(node, 0, 4),
+        selection: selectionFor(
+          node,
+          renderedStart,
+          renderedStart + selected.length,
+        ),
       }),
-    ).toBeNull();
+    ).toEqual({
+      id: "quote-1",
+      kind: "quote",
+      excerpt: selected,
+      sources: [
+        {
+          messageId: "message-1",
+          contentBlockIndex: 0,
+          start: canonicalStart,
+          end: canonicalStart + selected.length,
+        },
+      ],
+    });
   });
 
   it("refuses a selection that crosses message boundaries", () => {

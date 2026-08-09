@@ -95,35 +95,49 @@ export function stagedQuoteFromSelection({
   if (!block || block.type !== "text") return null;
 
   const canonicalText = (block as TextContent).text;
+  const renderedText = startBlock.textContent ?? "";
   const renderedSourceText = canonicalText.slice(
     sourceTextStart,
-    sourceTextStart + (startBlock.textContent?.length ?? 0),
+    sourceTextStart + renderedText.length,
   );
-  // This first production slice intentionally handles only text whose rendered
-  // DOM exactly matches its canonical source slice. Markdown decoration,
-  // tables, and other transformed text need the next mapper layer; accepting
-  // them here would produce plausible-looking but incorrect source offsets.
-  if (startBlock.textContent !== renderedSourceText) return null;
 
   let start: number;
   let end: number;
-  try {
-    start = getBoundaryOffsetWithin(
-      startBlock,
-      range.startContainer,
-      range.startOffset,
-    );
-    end = getBoundaryOffsetWithin(
-      startBlock,
-      range.endContainer,
-      range.endOffset,
-    );
-  } catch {
-    return null;
+  if (renderedText === renderedSourceText) {
+    // Plain text maps directly because DOM and canonical UTF-16 offsets agree.
+    try {
+      start =
+        sourceTextStart +
+        getBoundaryOffsetWithin(
+          startBlock,
+          range.startContainer,
+          range.startOffset,
+        );
+      end =
+        sourceTextStart +
+        getBoundaryOffsetWithin(
+          startBlock,
+          range.endContainer,
+          range.endOffset,
+        );
+    } catch {
+      return null;
+    }
+  } else {
+    // Markdown syntax can change the rendered block without changing the text
+    // the person selected (list markers, emphasis, links, etc.). A unique
+    // verbatim occurrence is a lossless mapping back to canonical source. If
+    // the same selection occurs more than once, decline rather than guess;
+    // later mapper layers can disambiguate with richer syntax coordinates.
+    const selectedText = range.toString();
+    if (!selectedText.trim()) return null;
+    const canonicalSlice = canonicalText.slice(sourceTextStart);
+    const firstMatch = canonicalSlice.indexOf(selectedText);
+    if (firstMatch < 0) return null;
+    if (canonicalSlice.indexOf(selectedText, firstMatch + 1) >= 0) return null;
+    start = sourceTextStart + firstMatch;
+    end = start + selectedText.length;
   }
-
-  start += sourceTextStart;
-  end += sourceTextStart;
   if (start < 0 || end <= start || end > canonicalText.length) return null;
   const excerpt = canonicalText.slice(start, end);
   if (!excerpt.trim()) return null;
