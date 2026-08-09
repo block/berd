@@ -41,18 +41,20 @@ export function TranscriptQuoteAffordance({
     setPendingQuote(item && position ? { item, ...position } : null);
   }, [messages, rootRef, sessionId]);
 
-  useEffect(() => {
-    setPendingQuote(null);
-  }, [sessionId]);
-
+  // The key on the affordance remounts it when the rendered session changes,
+  // so pending selection state can never cross sessions.
   useEffect(() => {
     const root = rootRef.current;
     document.addEventListener("selectionchange", updateFromSelection);
     window.addEventListener("resize", updateFromSelection);
+    root?.addEventListener("pointerup", updateFromSelection);
+    root?.addEventListener("keyup", updateFromSelection);
     root?.addEventListener("scroll", updateFromSelection);
     return () => {
       document.removeEventListener("selectionchange", updateFromSelection);
       window.removeEventListener("resize", updateFromSelection);
+      root?.removeEventListener("pointerup", updateFromSelection);
+      root?.removeEventListener("keyup", updateFromSelection);
       root?.removeEventListener("scroll", updateFromSelection);
     };
   }, [rootRef, updateFromSelection]);

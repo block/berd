@@ -3916,6 +3916,7 @@ function VirtualMessageTimelineSession({
       >
         {quoteEnabled ? (
           <TranscriptQuoteAffordance
+            key={sessionId}
             messages={messages}
             rootRef={containerRef}
             sessionId={sessionId}

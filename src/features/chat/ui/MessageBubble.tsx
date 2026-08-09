@@ -825,9 +825,7 @@ export const MessageBubble = memo(function MessageBubble({
   const sourceContentBlockIndex = useCallback(
     (block: MessageContent, renderedIndex: number) => {
       if (quoteSource) return quoteSource.contentBlockIndex;
-      const canonicalIndex = rawContent.findIndex(
-        (candidate) => candidate === block,
-      );
+      const canonicalIndex = rawContent.indexOf(block);
       return canonicalIndex >= 0 ? canonicalIndex : renderedIndex;
     },
     [quoteSource, rawContent],

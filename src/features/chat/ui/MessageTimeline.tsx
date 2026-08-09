@@ -1447,6 +1447,7 @@ export function MessageTimeline({
     >
       {quoteEnabled ? (
         <TranscriptQuoteAffordance
+          key={sessionId}
           messages={messages}
           rootRef={containerRef}
           sessionId={sessionId}
