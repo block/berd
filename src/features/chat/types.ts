@@ -6,6 +6,7 @@ import type {
   ChatAttachmentDraft,
   MessageChip,
   MessageMetadata,
+  StagedItem,
 } from "@/shared/types/messages";
 import type { ChatSessionReasoningEffortConfig } from "./stores/chatSessionStore";
 import type { QueuedMessagePayload } from "./stores/chatStore";
@@ -191,6 +192,8 @@ export interface ChatInputProps {
   composerActions: ChatInputComposerActions;
   initialValue?: string;
   initialAttachments?: ChatAttachmentDraft[];
+  stagedItems?: StagedItem[];
+  onRemoveStagedItem?: (itemId: string) => void;
   placeholder?: string;
   onDraftChange?: (text: string) => void;
   /** Mirrors the live composer attachments so a remounted chat can restore them. */

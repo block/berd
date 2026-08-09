@@ -91,6 +91,28 @@ export type ChatAttachmentDraft =
   | ChatFileAttachmentDraft
   | ChatDirectoryAttachmentDraft;
 
+// ── Composer staged items ──────────────────────────────────────────────
+
+/** A canonical text range in a transcript message. Offsets use UTF-16 code
+ * units, matching DOM Range and JavaScript string offsets. */
+export interface StagedQuoteSourceRange {
+  messageId: string;
+  contentBlockIndex: number;
+  start: number;
+  end: number;
+}
+
+export interface StagedQuoteItem {
+  id: string;
+  kind: "quote";
+  excerpt: string;
+  sources: StagedQuoteSourceRange[];
+}
+
+/** Structured composer content staged alongside, rather than pasted into,
+ * the typed draft. More kinds can join this union without becoming files. */
+export type StagedItem = StagedQuoteItem;
+
 // ── Renderer-only content block types ─────────────────────────────────
 //
 // These types have no ACP equivalent. They are synthesized by the

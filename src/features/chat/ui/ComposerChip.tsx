@@ -3,10 +3,11 @@ import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
-type ComposerChipTone = "file" | "agent" | "skill" | "automation";
+type ComposerChipTone = "file" | "quote" | "agent" | "skill" | "automation";
 
 const toneClasses: Record<ComposerChipTone, string> = {
   file: "bg-chip-file-bg text-chip-file-fg hover:bg-chip-file-bg",
+  quote: "bg-chip-chat-bg text-chip-chat-fg hover:bg-chip-chat-bg",
   agent: "bg-chip-agent-bg text-chip-agent-fg hover:bg-chip-agent-bg",
   skill: "bg-chip-skill-bg text-chip-skill-fg hover:bg-chip-skill-bg",
   automation:

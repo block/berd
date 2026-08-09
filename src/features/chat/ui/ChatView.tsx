@@ -844,6 +844,8 @@ export function ChatView({
           onAttachmentDragOverChange={setConversationAttachmentDragOver}
           initialValue={controller.draftValue}
           initialAttachments={controller.draftAttachments}
+          stagedItems={controller.stagedItems}
+          onRemoveStagedItem={controller.handleRemoveStagedItem}
           onDraftChange={controller.handleDraftChange}
           onDraftAttachmentsChange={controller.handleDraftAttachmentsChange}
           selectedSkills={controller.selectedSkills}
@@ -934,6 +936,7 @@ export function ChatView({
     <VirtualMessageTimelineGate
       sessionId={timelineSessionId}
       messages={timelineMessages}
+      quoteEnabled={!isReadOnly}
       streamingMessageId={controller.streamingMessageId}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}

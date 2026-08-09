@@ -300,6 +300,10 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           message={message}
           animateEntry={false}
           contentOverride={row.fragment.content}
+          quoteSource={{
+            contentBlockIndex: row.fragment.sourceContentBlockIndex,
+            textStart: row.fragment.sourceTextStart,
+          }}
           fragmentRole={row.fragment.role}
           isStreaming={row.fragment.isStreamingTail && isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}

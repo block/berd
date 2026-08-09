@@ -14,6 +14,10 @@
     "view": "View attachment {{index}}",
     "viewFullSize": "View full-size attachment {{name}}"
   },
+  "quotes": {
+    "addToComposer": "Add to composer",
+    "remove": "Remove quote"
+  },
   "agentToolsTip": {
     "connect": "Connect",
     "connected": "{{tool}} is connected",

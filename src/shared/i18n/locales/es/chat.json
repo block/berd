@@ -13,6 +13,10 @@
     "view": "Ver adjunto {{index}}",
     "viewFullSize": "Ver adjunto {{name}} en tamaño completo"
   },
+  "quotes": {
+    "addToComposer": "Añadir al compositor",
+    "remove": "Quitar cita"
+  },
   "agentToolsTip": {
     "connect": "Conectar",
     "connected": "{{tool}} está conectado",

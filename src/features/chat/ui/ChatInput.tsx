@@ -59,6 +59,7 @@ import { useChatInputAttachments } from "../hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "../hooks/useChatInputFilePicker";
 import { ChatInputAttachments } from "./ChatInputAttachments";
 import { ChatInputSelectionChips } from "./ChatInputSelectionChips";
+import { ChatInputStagedItems } from "./ChatInputStagedItems";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
@@ -200,6 +201,8 @@ export function ChatInput({
   composerActions,
   initialValue = "",
   initialAttachments,
+  stagedItems = [],
+  onRemoveStagedItem,
   placeholder,
   onDraftChange,
   onDraftAttachmentsChange,
@@ -1673,6 +1676,11 @@ export function ChatInput({
               <ChatInputAttachments
                 attachments={scopedControls.attachments ? attachments : []}
                 onRemove={removeAttachment}
+              />
+
+              <ChatInputStagedItems
+                items={stagedItems}
+                onRemove={(itemId) => onRemoveStagedItem?.(itemId)}
               />
 
               <ChatInputSelectionChips

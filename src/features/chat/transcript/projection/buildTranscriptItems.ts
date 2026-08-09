@@ -517,8 +517,12 @@ function buildAssistantTextFragmentItems({
     isStreaming,
   });
 
+  let sourceTextStart = 0;
   return textChunks.map((chunk, fragmentIndex) => {
     const { text, isCodeContinuationChunk, startsWithHeading } = chunk;
+    const chunkStart = sourceText.indexOf(text, sourceTextStart);
+    const chunkEnd = chunkStart + text.length;
+    sourceTextStart = chunkEnd;
     const isStreamingTail = isStreaming && fragmentIndex === lastIndex;
     const fragmentId = useStreamingFragmentIds
       ? fragmentIndex === lastIndex
@@ -569,6 +573,9 @@ function buildAssistantTextFragmentItems({
         fragmentCount: textChunks.length,
         role: getAssistantFragmentRole(fragmentIndex, textChunks.length),
         content: fragmentContent,
+        sourceContentBlockIndex: message.content.indexOf(visibleContent[0]),
+        sourceTextStart: chunkStart,
+        sourceTextEnd: chunkEnd,
         isStreamingTail,
         messageScrollTarget: isStreaming
           ? isStreamingTail

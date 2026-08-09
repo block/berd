@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
-import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import type { ChatAttachmentDraft, StagedItem } from "@/shared/types/messages";
 import type { ChatSendOptions, ChatSkillDraft, ModelOption } from "../types";
 import { INITIAL_TOKEN_STATE } from "@/shared/types/chat";
 import { useChat } from "./useChat";
@@ -130,6 +130,7 @@ const DRAFT_STORE_UPDATE_DEBOUNCE_MS = 300;
 const PENDING_HOME_SESSION_ID = "__home_pending__";
 const EMPTY_SKILL_DRAFTS: ChatSkillDraft[] = [];
 const EMPTY_ATTACHMENT_DRAFTS: ChatAttachmentDraft[] = [];
+const EMPTY_STAGED_ITEMS: StagedItem[] = [];
 const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
 const STEERING_SUPPORTED_AGENT_ID = "goose";
 const EMPTY_PROMPT_STATE: { key: string; prompt: string | undefined } = {
@@ -2562,6 +2563,11 @@ export function useChatSessionController({
   const draftAttachments = sessionId
     ? sessionDraftAttachments
     : pendingDraftAttachments;
+  const stagedItems = useChatStore((s) =>
+    sessionId
+      ? (s.stagedItemsBySession[sessionId] ?? EMPTY_STAGED_ITEMS)
+      : EMPTY_STAGED_ITEMS,
+  );
   const draftValue = sessionId ? sessionDraftValue : pendingDraftValue;
   const storedSelectedSkills = sessionId
     ? sessionSkillDrafts
@@ -2631,6 +2637,12 @@ export function useChatSessionController({
   const handleDraftAttachmentsChange = useCallback(
     (attachments: ChatAttachmentDraft[]) => {
       useChatStore.getState().setDraftAttachments(stateSessionId, attachments);
+    },
+    [stateSessionId],
+  );
+  const handleRemoveStagedItem = useCallback(
+    (itemId: string) => {
+      useChatStore.getState().removeStagedItem(stateSessionId, itemId);
     },
     [stateSessionId],
   );
@@ -3087,6 +3099,8 @@ export function useChatSessionController({
     handleDraftChange,
     draftAttachments,
     handleDraftAttachmentsChange,
+    stagedItems,
+    handleRemoveStagedItem,
     selectedSkills,
     handleSkillsChange,
     skillProjectDirs,

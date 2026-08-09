@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -45,6 +45,10 @@ import { resolveImageContentSrc } from "./resolveImageContentSrc";
 import { McpAppView } from "./McpAppView";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
 import { detectProviderErrorNotice } from "@/features/chat/lib/providerErrorNotice";
+import {
+  quoteMessageAttributes,
+  quoteTextBlockAttributes,
+} from "@/features/chat/lib/transcriptQuoteSelection";
 import type { CustomRenderer } from "streamdown";
 import { RUNNABLE_SHELL_LANGUAGES } from "@/shared/lib/runnableShellCommand";
 import type {
@@ -342,6 +346,8 @@ interface MessageBubbleProps {
   actionsAlwaysVisible?: boolean;
   animateEntry?: boolean;
   contentOverride?: readonly MessageContent[];
+  /** Canonical coordinates for a projected text fragment. */
+  quoteSource?: { contentBlockIndex: number; textStart: number };
   contentContext?: readonly MessageContent[];
   actionMessageId?: string;
   fragmentRole?: "single" | "start" | "middle" | "end";
@@ -365,6 +371,7 @@ interface ContentSection {
   key: string;
   type: "single" | "toolChain";
   items: MessageContent[] | ToolChainItem[];
+  contentBlockIndex?: number;
 }
 
 function filterUserVisibleContent(content: MessageContent[]): MessageContent[] {
@@ -453,6 +460,7 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
       key: `${block.type}-${"id" in block ? String(block.id) : index}`,
       type: "single",
       items: [block],
+      contentBlockIndex: index,
     });
   }
 
@@ -695,6 +703,7 @@ export const MessageBubble = memo(function MessageBubble({
   actionsAlwaysVisible = false,
   animateEntry = true,
   contentOverride,
+  quoteSource,
   contentContext,
   actionMessageId = message.id,
   fragmentRole,
@@ -813,6 +822,16 @@ export const MessageBubble = memo(function MessageBubble({
           ),
     [attachedImageContentIndexes, content],
   );
+  const sourceContentBlockIndex = useCallback(
+    (block: MessageContent, renderedIndex: number) => {
+      if (quoteSource) return quoteSource.contentBlockIndex;
+      const canonicalIndex = rawContent.findIndex(
+        (candidate) => candidate === block,
+      );
+      return canonicalIndex >= 0 ? canonicalIndex : renderedIndex;
+    },
+    [quoteSource, rawContent],
+  );
   const messageChips = message.metadata?.chips ?? [];
 
   // Skip empty user bubbles (all blocks filtered as assistant-only).
@@ -831,7 +850,11 @@ export const MessageBubble = memo(function MessageBubble({
     : textContent;
   if (role === "system") {
     return (
-      <div className="flex justify-center px-4 py-2" {...rowRootAttributes}>
+      <div
+        className="flex justify-center px-4 py-2"
+        {...quoteMessageAttributes(message.id)}
+        {...rowRootAttributes}
+      >
         <div className="w-full max-w-md text-center text-xs text-muted-foreground">
           {content.map((c, i) =>
             renderContentBlock(c, i, {
@@ -929,6 +952,7 @@ export const MessageBubble = memo(function MessageBubble({
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
       data-message-fragment-role={fragmentRole}
+      {...quoteMessageAttributes(message.id)}
       {...rowRootAttributes}
     >
       {showPersonaGutterAvatar && showLeadingAssistantChrome ? (
@@ -1055,21 +1079,41 @@ export const MessageBubble = memo(function MessageBubble({
             const block = section.items[0] as MessageContent;
             if (isUser && block.type === "text") {
               if (!block.text.trim()) return null;
-              return couldOverflowUserMessagePreview(block.text) ? (
-                <UserMessageClamp
+              return (
+                <div
                   key={`${message.id}-${section.key}`}
-                  text={block.text}
-                  stateKey={section.key}
-                />
-              ) : (
-                <LinkifiedText
-                  key={`${message.id}-${section.key}`}
-                  text={block.text}
-                />
+                  {...quoteTextBlockAttributes(
+                    sourceContentBlockIndex(
+                      block,
+                      section.contentBlockIndex ?? 0,
+                    ),
+                    quoteSource?.textStart ?? 0,
+                  )}
+                >
+                  {couldOverflowUserMessagePreview(block.text) ? (
+                    <UserMessageClamp
+                      text={block.text}
+                      stateKey={section.key}
+                    />
+                  ) : (
+                    <LinkifiedText text={block.text} />
+                  )}
+                </div>
               );
             }
             return (
-              <div key={`${message.id}-${section.key}`}>
+              <div
+                key={`${message.id}-${section.key}`}
+                {...(block.type === "text"
+                  ? quoteTextBlockAttributes(
+                      sourceContentBlockIndex(
+                        block,
+                        section.contentBlockIndex ?? 0,
+                      ),
+                      quoteSource?.textStart ?? 0,
+                    )
+                  : {})}
+              >
                 {renderContentBlock(
                   block,
                   sectionIdx,
