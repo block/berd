@@ -174,6 +174,46 @@ export function hasConversationMessages(
 
 const sessionLoadPromises = new Map<string, Promise<boolean>>();
 
+export async function loadSessionMessagesAndPrepare(
+  sessionId: string,
+  options: LoadSessionMessagesOptions = {},
+): Promise<boolean> {
+  const loaded = await loadSessionMessages(sessionId, options);
+  if (!loaded) return false;
+
+  const session = useChatSessionStore.getState().getSession(sessionId);
+  const liveTarget = session?.executionTarget;
+  if (liveTarget) {
+    const project = session?.projectId
+      ? (useProjectStore
+          .getState()
+          .projects.find((candidate) => candidate.id === session.projectId) ??
+        null)
+      : null;
+    const { workingDir, missingCwdWarning } =
+      await resolveWorkingDirForSessionLoad(session, project);
+    try {
+      await transitionSessionTarget({
+        sessionId,
+        target: liveTarget,
+        workingDir: missingCwdWarning
+          ? workingDir
+          : (session?.workingDir ?? workingDir),
+        prepareWorkingDir: workingDir,
+      });
+    } catch (error) {
+      console.warn("Failed to prepare loaded session selection:", error);
+    }
+  }
+  return true;
+}
+
+/**
+ * Deduplicates only replay/session hydration. Caller-specific target
+ * preparation deliberately happens after this shared promise settles, so load
+ * join order cannot erase either an ordinary caller's preparation contract or
+ * a sender's load-before-dispatch ordering contract.
+ */
 export async function loadSessionMessages(
   sessionId: string,
   options: LoadSessionMessagesOptions = {},
@@ -306,23 +346,6 @@ async function performSessionMessagesLoad(
       : undefined;
     if (loadedTarget) {
       hydrateSessionTarget(sessionId, loadedTarget);
-    }
-    const liveTarget = useChatSessionStore
-      .getState()
-      .getSession(sessionId)?.executionTarget;
-    if (liveTarget) {
-      try {
-        await transitionSessionTarget({
-          sessionId,
-          target: liveTarget,
-          workingDir: missingCwdWarning
-            ? workingDir
-            : (session?.workingDir ?? workingDir),
-          prepareWorkingDir: workingDir,
-        });
-      } catch (error) {
-        console.warn("Failed to prepare loaded session selection:", error);
-      }
     }
     const tFlush = performance.now();
     const buffer = getAndDeleteReplayBuffer(sessionId);

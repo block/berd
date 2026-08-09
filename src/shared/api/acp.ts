@@ -23,8 +23,9 @@ import {
   type SessionSearchTarget,
 } from "./sessionSearch";
 import {
-  claimPersonaHandoff,
   isGooseManagedProvider,
+  preparePersonaHandoff,
+  type PersonaHandoffClaim,
 } from "./acpPersonaHandoff";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
@@ -57,6 +58,10 @@ export interface AcpSendMessageOptions {
   goose?: Record<string, unknown>;
   /** Image attachments as [base64Data, mimeType] pairs. */
   images?: [string, string][];
+  /** Fires after ACP setup/client acquisition, immediately before transport. */
+  onPromptDispatching?: () => void;
+  /** Fires after ACP setup completes and the external prompt invocation starts. */
+  onPromptDispatched?: () => void;
 }
 
 export interface AcpCreateSessionOptions {
@@ -156,6 +161,8 @@ async function acpSendMessageNow(
     personaName,
     goose,
     images,
+    onPromptDispatching,
+    onPromptDispatched,
   } = options;
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
@@ -173,7 +180,7 @@ async function acpSendMessageNow(
   // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
   const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
   const berdctlPreamble = await getBerdctlPreamble();
-  let personaHandoff: string | null = null;
+  let personaHandoffClaim: PersonaHandoffClaim | null = null;
   if (isGooseManaged) {
     await appendBerdStyleGuidelinesPrompt(
       sessionId,
@@ -192,7 +199,7 @@ async function acpSendMessageNow(
       systemPrompt?.trim() ? systemPrompt : "",
     );
   } else {
-    personaHandoff = claimPersonaHandoff(
+    personaHandoffClaim = preparePersonaHandoff(
       sessionId,
       providerId,
       systemPrompt,
@@ -202,9 +209,10 @@ async function acpSendMessageNow(
 
   // Merge the persona handoff (when present) with any skill/builder assistant
   // prompt into a single assistant-audience block, persona first.
-  const assistantPromptParts = [personaHandoff, assistantPrompt?.trim()].filter(
-    (part): part is string => Boolean(part?.trim()),
-  );
+  const assistantPromptParts = [
+    personaHandoffClaim?.preamble,
+    assistantPrompt?.trim(),
+  ].filter((part): part is string => Boolean(part?.trim()));
   const mergedAssistantPrompt =
     assistantPromptParts.length > 0
       ? assistantPromptParts.join("\n\n")
@@ -245,11 +253,19 @@ async function acpSendMessageNow(
   if (personaId) meta.personaId = personaId;
   if (goose && Object.keys(goose).length > 0) meta.goose = goose;
   try {
-    await directAcp.prompt(
+    const promptPromise = directAcp.prompt(
       sessionId,
       content,
       Object.keys(meta).length > 0 ? meta : undefined,
+      {
+        onPromptDispatching: () => {
+          onPromptDispatching?.();
+          personaHandoffClaim?.markDelivered();
+        },
+        onPromptDispatched,
+      },
     );
+    await promptPromise;
     const tDone = performance.now();
     perfLog(
       `[perf:send] ${sid} prompt() resolved in ${(tDone - tPrompt).toFixed(1)}ms (total acpSendMessage ${(tDone - tStart).toFixed(1)}ms)`,

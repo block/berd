@@ -154,7 +154,7 @@ describe("useVoiceDictation", () => {
     // Transcript now ends with "submit"
     opts.onTranscriptText("hello world submit");
     expect(stopRecording).toHaveBeenCalled();
-    expect(onSend).toHaveBeenCalledWith("hello world", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("hello world", null, undefined);
   });
 
   it("strips trigger phrase but does not send when isSendLocked", () => {

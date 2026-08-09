@@ -1,7 +1,19 @@
 import { useEffect } from "react";
 
-import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  assertQueuedSessionReady,
+  isQueuedSessionReady,
+} from "@/features/chat/lib/queuedMessageReadiness";
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
+import {
+  assertQueuedMessageAttemptOwned,
+  becameQueuedMessageTargetAttemptable,
+  isQueuedMessageTargetAttemptable,
+} from "@/features/chat/lib/queuedMessageAttemptOwnership";
+import {
+  type QueuedMessageRecord,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { loadPersistedMessageQueues } from "@/features/chat/stores/queuePersistence";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
@@ -9,9 +21,47 @@ import {
   isBerdctlCrossSessionQueuedMessage,
   sendPromptToExistingSessionInBackground,
 } from "@/features/berdctl/commands/runtime/sessionSend";
+import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
 
 const drainingSessionIds = new Set<string>();
+const activeOwners = new Set<string>();
+type ContentionWaiter = {
+  ownerId: string;
+  record: QueuedMessageRecord;
+  cancel: () => void;
+  releaseObserved: boolean;
+  attemptSettled: boolean;
+  resumeScheduled: boolean;
+};
+
+const contentionWaiters = new Map<string, ContentionWaiter>();
 let ownershipRefreshSequence = 0;
+
+function ownerIdFor(scopedSessionId?: string): string {
+  return scopedSessionId ? `session:${scopedSessionId}` : "global";
+}
+
+function cancelContentionWaiter(sessionId: string): void {
+  contentionWaiters.get(sessionId)?.cancel();
+  contentionWaiters.delete(sessionId);
+}
+
+function scheduleContentionResume(
+  sessionId: string,
+  waiter: ContentionWaiter,
+): void {
+  if (
+    !waiter.releaseObserved ||
+    !waiter.attemptSettled ||
+    waiter.resumeScheduled ||
+    contentionWaiters.get(sessionId) !== waiter
+  ) {
+    return;
+  }
+  waiter.resumeScheduled = true;
+  contentionWaiters.delete(sessionId);
+  queueMicrotask(() => drainQueuedMessage(sessionId, waiter.ownerId));
+}
 
 async function refreshReclaimedQueues(
   previousOpenSessions: Record<string, string>,
@@ -33,7 +83,18 @@ async function refreshReclaimedQueues(
   drainReadyQueuedMessages();
 }
 
-function drainQueuedMessage(queuedSessionId: string): void {
+function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
+  if (!activeOwners.has(ownerId)) return;
+  const sessionExists = Boolean(
+    useChatSessionStore.getState().getSession(queuedSessionId),
+  );
+  const currentRecord =
+    useChatStore.getState().queuedMessageBySession[queuedSessionId]?.[0];
+  const pendingWaiter = contentionWaiters.get(queuedSessionId);
+  if (pendingWaiter) {
+    if (sessionExists && pendingWaiter.record === currentRecord) return;
+    cancelContentionWaiter(queuedSessionId);
+  }
   if (drainingSessionIds.has(queuedSessionId)) {
     return;
   }
@@ -42,12 +103,13 @@ function drainQueuedMessage(queuedSessionId: string): void {
   const queuedMessage = chatStore.queuedMessageBySession[queuedSessionId]?.[0];
   const runtime = chatStore.getSessionRuntime(queuedSessionId);
   if (
-    queuedMessage?.kind !== "transport-ready" ||
-    queuedMessage.editing ||
+    !isQueuedMessageTargetAttemptable(
+      queuedMessage,
+      useChatSessionStore.getState().getSession(queuedSessionId),
+    ) ||
     !isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
     queuedMessage.releasedFromDeferred ||
-    isSessionRunning(runtime.chatState) ||
-    runtime.isRunCancellationPending
+    !isQueuedSessionReady(runtime)
   ) {
     return;
   }
@@ -57,18 +119,18 @@ function drainQueuedMessage(queuedSessionId: string): void {
     queuedSessionId,
     queuedMessage.payload.text,
     () => {
-      const latestQueuedMessage =
-        useChatStore.getState().queuedMessageBySession[queuedSessionId]?.[0];
-      if (
-        latestQueuedMessage?.recordId !== queuedMessage.recordId ||
-        latestQueuedMessage.payload !== queuedMessage.payload ||
-        latestQueuedMessage.editing
-      ) {
-        throw new DOMException("The queued prompt was canceled.", "AbortError");
-      }
+      const state = useChatStore.getState();
+      assertQueuedMessageAttemptOwned(
+        state.queuedMessageBySession[queuedSessionId]?.[0],
+        queuedMessage,
+      );
+      assertQueuedSessionReady(state.getSessionRuntime(queuedSessionId));
     },
+    { returnOnDispatch: true },
   );
   let sendSucceeded = false;
+  let shouldResumeDrain = false;
+  let waitingForContention = false;
   void send
     .then(() => {
       sendSucceeded = true;
@@ -85,6 +147,28 @@ function drainQueuedMessage(queuedSessionId: string): void {
       }
     })
     .catch((error) => {
+      if (error instanceof SessionDispatchContentionError) {
+        waitingForContention = true;
+        const waiter: ContentionWaiter = {
+          ownerId,
+          record: queuedMessage,
+          cancel: () => undefined,
+          releaseObserved: false,
+          attemptSettled: false,
+          resumeScheduled: false,
+        };
+        contentionWaiters.set(queuedSessionId, waiter);
+        waiter.cancel = error.waiter.wait(() => {
+          if (contentionWaiters.get(queuedSessionId) !== waiter) return;
+          waiter.releaseObserved = true;
+          scheduleContentionResume(queuedSessionId, waiter);
+        });
+        return;
+      }
+      if (error instanceof PreCommitSendRejectedError) {
+        shouldResumeDrain = true;
+        return;
+      }
       console.error(
         `[berdctl-queue] failed to send queued prompt for session ${queuedSessionId}`,
         error,
@@ -92,7 +176,17 @@ function drainQueuedMessage(queuedSessionId: string): void {
     })
     .finally(() => {
       drainingSessionIds.delete(queuedSessionId);
-      if (sendSucceeded) drainQueuedMessage(queuedSessionId);
+      if (waitingForContention) {
+        const waiter = contentionWaiters.get(queuedSessionId);
+        if (waiter?.record === queuedMessage) {
+          waiter.attemptSettled = true;
+          scheduleContentionResume(queuedSessionId, waiter);
+        } else {
+          queueMicrotask(() => drainQueuedMessage(queuedSessionId, ownerId));
+        }
+      } else if (sendSucceeded || shouldResumeDrain) {
+        drainQueuedMessage(queuedSessionId, ownerId);
+      }
     });
 }
 
@@ -111,13 +205,32 @@ function getQueuedSessionIds(
   );
 }
 
+function reconcileContentionWaiters(scopedSessionId?: string): void {
+  const sessionStore = useChatSessionStore.getState();
+  const queue = useChatStore.getState().queuedMessageBySession;
+  const owned = new Set(getQueuedSessionIds(queue, scopedSessionId));
+  for (const [sessionId, waiter] of contentionWaiters) {
+    if (
+      (!scopedSessionId || sessionId === scopedSessionId) &&
+      (!owned.has(sessionId) ||
+        !sessionStore.getSession(sessionId) ||
+        queue[sessionId]?.[0] !== waiter.record)
+    ) {
+      cancelContentionWaiter(sessionId);
+    }
+  }
+}
+
 function drainReadyQueuedMessages(scopedSessionId?: string): void {
+  const ownerId = ownerIdFor(scopedSessionId);
+  if (!activeOwners.has(ownerId)) return;
+  reconcileContentionWaiters(scopedSessionId);
   const { queuedMessageBySession } = useChatStore.getState();
   for (const queuedSessionId of getQueuedSessionIds(
     queuedMessageBySession,
     scopedSessionId,
   )) {
-    drainQueuedMessage(queuedSessionId);
+    drainQueuedMessage(queuedSessionId, ownerId);
   }
 }
 
@@ -127,6 +240,8 @@ export function useBerdctlQueuedMessageDrain(
 ): void {
   useEffect(() => {
     if (!ownerReady) return;
+    const ownerId = ownerIdFor(queuedSessionId);
+    activeOwners.add(ownerId);
     drainReadyQueuedMessages(queuedSessionId);
     const unsubscribeWindowStore = queuedSessionId
       ? undefined
@@ -148,6 +263,26 @@ export function useBerdctlQueuedMessageDrain(
         });
     const unsubscribeSessionStore = useChatSessionStore.subscribe(
       (state, previousState) => {
+        reconcileContentionWaiters(queuedSessionId);
+        for (const sessionId of getQueuedSessionIds(
+          useChatStore.getState().queuedMessageBySession,
+          queuedSessionId,
+        )) {
+          const currentHead =
+            useChatStore.getState().queuedMessageBySession[sessionId]?.[0];
+          if (
+            becameQueuedMessageTargetAttemptable(
+              currentHead,
+              currentHead,
+              state.getSession(sessionId),
+              previousState.sessions.find(
+                (session) => session.id === sessionId,
+              ),
+            )
+          ) {
+            drainQueuedMessage(sessionId, ownerId);
+          }
+        }
         if (state.hasHydratedSessions && !previousState.hasHydratedSessions) {
           drainReadyQueuedMessages(queuedSessionId);
         }
@@ -155,6 +290,7 @@ export function useBerdctlQueuedMessageDrain(
     );
     const unsubscribeChatStore = useChatStore.subscribe(
       (state, previousState) => {
+        reconcileContentionWaiters(queuedSessionId);
         if (
           state.hasHydratedMessageQueues &&
           !previousState.hasHydratedMessageQueues
@@ -170,9 +306,10 @@ export function useBerdctlQueuedMessageDrain(
           const queuedMessage =
             state.queuedMessageBySession[queuedSessionId]?.[0];
           if (
-            !queuedMessage ||
-            queuedMessage.kind !== "transport-ready" ||
-            queuedMessage.editing ||
+            !isQueuedMessageTargetAttemptable(
+              queuedMessage,
+              useChatSessionStore.getState().getSession(queuedSessionId),
+            ) ||
             !isBerdctlCrossSessionQueuedMessage(queuedMessage) ||
             queuedMessage.releasedFromDeferred
           ) {
@@ -182,13 +319,8 @@ export function useBerdctlQueuedMessageDrain(
           const currentRuntime = state.sessionStateById[queuedSessionId];
           const previousRuntime =
             previousState.sessionStateById[queuedSessionId];
-          const currentChatState = currentRuntime?.chatState ?? "idle";
-          const currentBlocked =
-            isSessionRunning(currentChatState) ||
-            (currentRuntime?.isRunCancellationPending ?? false);
-          const previousBlocked =
-            isSessionRunning(previousRuntime?.chatState ?? "idle") ||
-            (previousRuntime?.isRunCancellationPending ?? false);
+          const currentBlocked = !isQueuedSessionReady(currentRuntime);
+          const previousBlocked = !isQueuedSessionReady(previousRuntime);
           // Match the composer queue: failed/cancelling runs leave the prompt
           // parked until every blocking runtime signal clears.
           const previousQueuedMessage =
@@ -201,11 +333,10 @@ export function useBerdctlQueuedMessageDrain(
             previousQueuedMessage.editing === true &&
             !queuedMessage.editing;
           if (
-            currentChatState === "idle" &&
             !currentBlocked &&
             (previousBlocked || becameTransportReady || becameReadyAfterEditing)
           ) {
-            drainQueuedMessage(queuedSessionId);
+            drainQueuedMessage(queuedSessionId, ownerId);
           }
         }
       },
@@ -214,6 +345,10 @@ export function useBerdctlQueuedMessageDrain(
       unsubscribeWindowStore?.();
       unsubscribeSessionStore();
       unsubscribeChatStore();
+      activeOwners.delete(ownerId);
+      for (const [sessionId, waiter] of contentionWaiters) {
+        if (waiter.ownerId === ownerId) cancelContentionWaiter(sessionId);
+      }
     };
   }, [ownerReady, queuedSessionId]);
 }

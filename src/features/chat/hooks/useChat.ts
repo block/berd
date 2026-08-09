@@ -42,6 +42,7 @@ type CompactConversationResult = "completed" | "failed" | "skipped";
 type EnsurePrepared = (
   personaId?: string,
   sessionSelection?: ChatSendOptions["sessionSelection"],
+  sessionSelectionToken?: ChatSendOptions["sessionSelectionToken"],
 ) => Promise<boolean | undefined>;
 
 function createCompactionConfirmationMessage() {
@@ -55,9 +56,10 @@ async function ensurePreparedForPrompt(
   ensurePrepared: EnsurePrepared | undefined,
   personaId?: string,
   sessionSelection?: ChatSendOptions["sessionSelection"],
+  sessionSelectionToken?: ChatSendOptions["sessionSelectionToken"],
 ) {
   const prepared = sessionSelection
-    ? await ensurePrepared?.(personaId, sessionSelection)
+    ? await ensurePrepared?.(personaId, sessionSelection, sessionSelectionToken)
     : await ensurePrepared?.(personaId);
   if (prepared === false) {
     throw new Error(i18n.t("chat:errors.sessionPreparationSuperseded"));
@@ -132,7 +134,10 @@ export function useChat(
   const isStreaming = chatState === "streaming" || streamingMessageId !== null;
 
   const resolvePersonaInfo = useCallback(
-    (overridePersonaId?: string, overridePersonaName?: string) => {
+    (overridePersonaId?: string | null, overridePersonaName?: string) => {
+      if (overridePersonaId === null) {
+        return undefined;
+      }
       if (overridePersonaId) {
         // Read the latest persona snapshot at call time so override lookups
         // still work even if the agent store changed after this hook rendered.
@@ -152,7 +157,7 @@ export function useChat(
   const sendMessage = useCallback(
     async (
       text: string,
-      overridePersona?: { id: string; name?: string },
+      overridePersona?: { id: string | null; name?: string },
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
     ) => {
@@ -172,7 +177,7 @@ export function useChat(
         currentChatState === "thinking" ||
         currentChatState === "compacting"
       )
-        return;
+        return false;
       perfLog(
         `[perf:send] ${sid} useChat.sendMessage start (textLen=${text.length}, attachments=${attachments?.length ?? 0})`,
       );
@@ -183,7 +188,10 @@ export function useChat(
       );
       const agent = useAgentStore.getState().getActiveAgent();
       const providerId = providerOverride ?? agent?.provider ?? "goose";
-      const systemPrompt = systemPromptOverride ?? agent?.systemPrompt;
+      const systemPrompt =
+        sendOptions?.executionSystemPrompt ??
+        systemPromptOverride ??
+        agent?.systemPrompt;
 
       // Ensure active session
       setActiveSession(sessionId);
@@ -191,8 +199,10 @@ export function useChat(
       const abort = new AbortController();
       abortRef.current = abort;
 
-      try {
-        await dispatchPrompt(sessionId, text, {
+      let accepted = false;
+      let userMessageCommitted = false;
+      const acceptedPromise = new Promise<boolean>((resolve) => {
+        void dispatchPrompt(sessionId, text, {
           persona: effectivePersonaInfo,
           attachments,
           assistantPrompt: sendOptions?.assistantPrompt,
@@ -202,30 +212,47 @@ export function useChat(
           acpGooseMetadata: sendOptions?.acpGooseMetadata,
           providerId,
           systemPrompt,
+          beforeUserMessageCommitted: sendOptions?.beforeUserMessageCommitted,
           signal: abort.signal,
           prepare: () =>
             ensurePreparedForPrompt(
               options?.ensurePrepared,
               effectivePersonaInfo?.id,
               sendOptions?.sessionSelection,
+              sendOptions?.sessionSelectionToken,
             ),
           onUserMessageCommitted: () => {
+            userMessageCommitted = true;
+            sendOptions?.onUserMessageCommitted?.();
             const shouldClearDraft =
               options?.onMessageAccepted?.(sessionId, text) !== false;
             if (shouldClearDraft) {
               clearDraft(sessionId);
             }
           },
-        });
-      } catch {
-        // dispatchPrompt already recorded the failure in the chat stores; for
-        // an AbortError it only returns the session to idle. sendMessage's
-        // contract is to never reject.
-      } finally {
-        if (abortRef.current === abort) {
-          abortRef.current = null;
-        }
-      }
+          onPromptDispatched: () => {
+            accepted = true;
+            // Queue ownership ends once preparation succeeds and the ACP
+            // prompt invocation starts. Later run failure cannot retry a turn
+            // that has already crossed the transport boundary.
+            resolve(true);
+          },
+        })
+          .catch(() => {
+            // dispatchPrompt records the failure in the chat stores. A failure
+            // before commitment is a rejection; a later run failure does not
+            // make the already-committed user turn retryable.
+            if (!accepted) {
+              resolve(userMessageCommitted);
+            }
+          })
+          .finally(() => {
+            if (abortRef.current === abort) {
+              abortRef.current = null;
+            }
+          });
+      });
+      return acceptedPromise;
     },
     [
       sessionId,
@@ -358,7 +385,13 @@ export function useChat(
   }, [sessionId, workspaceRepository]);
 
   const compactConversation = useCallback(
-    async (overridePersona?: { id: string; name?: string }) => {
+    async (
+      overridePersona?: { id: string | null; name?: string },
+      dispatch?: Pick<
+        ChatSendOptions,
+        "sessionSelection" | "sessionSelectionToken"
+      >,
+    ) => {
       const currentRuntime = useChatStore
         .getState()
         .getSessionRuntime(sessionId);
@@ -387,6 +420,8 @@ export function useChat(
         await ensurePreparedForPrompt(
           options?.ensurePrepared,
           effectivePersonaInfo?.id,
+          dispatch?.sessionSelection,
+          dispatch?.sessionSelectionToken,
         );
       } catch (err) {
         const errorMessage = formatAcpErrorMessage(err);

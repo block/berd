@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import {
+  acquireSessionDispatchTarget,
+  clearSessionTargetSelection,
+  getSessionTargetSelection,
   getSessionTargetState,
   hydrateSessionTarget,
+  onSessionDispatchReleased,
   observeSessionTargetMetadata,
   observeSessionTargetModelSnapshot,
   recordSessionTargetSelection,
+  replaceSessionTargetAfterDispatch,
   resetSessionTargetCoordinatorsForTests,
   transitionSessionTarget,
 } from "./sessionTargetCoordinator";
@@ -404,6 +409,286 @@ describe("session target coordinator", () => {
       modelId: "a",
       forceConfigRefresh: true,
     });
+  });
+
+  it("defers external hydration until the dispatch lease releases", () => {
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        executionTargetSource: "acp" as const,
+      })),
+    }));
+    const lease = acquireSessionDispatchTarget("s");
+
+    expect(hydrateSessionTarget("s", target("b"))).toBe(false);
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+  });
+
+  it("defers a divergent model snapshot until the dispatch lease releases", () => {
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        executionTargetSource: "acp" as const,
+      })),
+    }));
+    const lease = acquireSessionDispatchTarget("s");
+
+    expect(
+      observeSessionTargetModelSnapshot({
+        sessionId: "s",
+        snapshot: { modelId: "b", modelName: "b" },
+        context: {
+          origin: "response",
+          providerId: "openai",
+          modelId: "b",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+  });
+
+  it.each([
+    ["ACP page merge", "acp"],
+    ["UI rollback", "ui"],
+  ] as const)("fences a divergent direct %s store writer until dispatch releases", (_boundary, source) => {
+    const lease = acquireSessionDispatchTarget("s");
+
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        executionTarget: target("b"),
+        executionTargetSource: source,
+      })),
+    }));
+
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTargetSource,
+    ).toBe(source);
+  });
+
+  it("materializes a matching provider-only lease without deferring it", () => {
+    const providerTarget = {
+      harnessId: "goose",
+      modelProviderId: "openai",
+    } as const;
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        executionTarget: providerTarget,
+        executionTargetSource: "acp" as const,
+      })),
+    }));
+    const lease = acquireSessionDispatchTarget("s");
+
+    expect(hydrateSessionTarget("s", target("a"))).toBe(true);
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+  });
+
+  it("defers direct target replacement until the dispatch lease releases", () => {
+    const lease = acquireSessionDispatchTarget("s");
+    expect(lease?.target).toEqual(target("a"));
+
+    replaceSessionTargetAfterDispatch("s", target("b"));
+
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+  });
+
+  it("keeps the latest user selection ahead of a later external target mutation", () => {
+    const lease = acquireSessionDispatchTarget("s");
+    recordSessionTargetSelection({
+      sessionId: "s",
+      operationId: "pick-b",
+      target: target("b"),
+    });
+    replaceSessionTargetAfterDispatch("s", undefined);
+
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    expect(getSessionTargetSelection("s")).toMatchObject({
+      operationId: "pick-b",
+      target: target("b"),
+    });
+  });
+
+  it("keeps a deferred picker intent visible while publishing only after backend apply", async () => {
+    const wire = deferred();
+    mockPrepare.mockReturnValueOnce(wire.promise);
+    const lease = acquireSessionDispatchTarget("s");
+    recordSessionTargetSelection({
+      sessionId: "s",
+      operationId: "pick-b",
+      target: target("b"),
+      previousTarget: target("a"),
+    });
+
+    expect(getSessionTargetSelection("s")).toMatchObject({
+      operationId: "pick-b",
+      target: target("b"),
+    });
+
+    const apply = transitionSessionTarget({
+      sessionId: "s",
+      target: target("b"),
+      workingDir: "/w",
+      requestId: "pick-b",
+    });
+    await Promise.resolve();
+    expect(mockPrepare).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+
+    lease.release?.();
+    await vi.waitFor(() => expect(mockPrepare).toHaveBeenCalledOnce());
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    wire.resolve();
+    await expect(apply).resolves.toMatchObject({ status: "committed" });
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+    expect(clearSessionTargetSelection("s", "pick-b")).toBe(true);
+  });
+
+  it("provides a cancellable one-shot contention waiter across release races", async () => {
+    const lease = acquireSessionDispatchTarget("s");
+    const contention = acquireSessionDispatchTarget("s");
+    expect(contention.status).toBe("contended");
+    if (contention.status !== "contended") return;
+
+    lease.release?.();
+    const released = vi.fn();
+    const cancel = contention.waiter.wait(released);
+    cancel();
+    await Promise.resolve();
+    expect(released).not.toHaveBeenCalled();
+
+    const nextLease = acquireSessionDispatchTarget("s");
+    const nextContention = acquireSessionDispatchTarget("s");
+    expect(nextContention.status).toBe("contended");
+    if (nextContention.status !== "contended") return;
+    const nextReleased = vi.fn();
+    nextContention.waiter.wait(nextReleased);
+    nextContention.waiter.wait(nextReleased);
+    nextLease.release?.();
+    await vi.waitFor(() => expect(nextReleased).toHaveBeenCalledOnce());
+  });
+
+  it("notifies release waiters only after a deferred picker transition settles", async () => {
+    const wire = deferred();
+    mockPrepare.mockReturnValueOnce(wire.promise);
+    const lease = acquireSessionDispatchTarget("s");
+    recordSessionTargetSelection({
+      sessionId: "s",
+      operationId: "pick-b",
+      target: target("b"),
+      previousTarget: target("a"),
+    });
+    const apply = transitionSessionTarget({
+      sessionId: "s",
+      target: target("b"),
+      workingDir: "/w",
+      requestId: "pick-b",
+    });
+    const released = vi.fn();
+    expect(onSessionDispatchReleased("s", released)).not.toBeNull();
+
+    lease.release?.();
+    await vi.waitFor(() => expect(mockPrepare).toHaveBeenCalledOnce());
+    expect(released).not.toHaveBeenCalled();
+
+    wire.resolve();
+    await expect(apply).resolves.toMatchObject({ status: "committed" });
+    await vi.waitFor(() => expect(released).toHaveBeenCalledOnce());
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+  });
+
+  it("keeps local A when deferred picker backend apply fails", async () => {
+    const failure = new Error("prepare failed");
+    mockPrepare.mockRejectedValueOnce(failure);
+    const lease = acquireSessionDispatchTarget("s");
+    recordSessionTargetSelection({
+      sessionId: "s",
+      operationId: "pick-b",
+      target: target("b"),
+      previousTarget: target("a"),
+    });
+    const apply = transitionSessionTarget({
+      sessionId: "s",
+      target: target("b"),
+      workingDir: "/w",
+      requestId: "pick-b",
+    });
+
+    lease.release?.();
+    await expect(apply).rejects.toBe(failure);
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+  });
+
+  it("gives deferred user intent precedence over external observations", async () => {
+    mockPrepare.mockResolvedValue(undefined);
+    const lease = acquireSessionDispatchTarget("s");
+    recordSessionTargetSelection({
+      sessionId: "s",
+      operationId: "pick-b",
+      target: target("b"),
+    });
+    expect(hydrateSessionTarget("s", target("c"))).toBe(false);
+
+    const apply = transitionSessionTarget({
+      sessionId: "s",
+      target: target("b"),
+      workingDir: "/w",
+      requestId: "pick-b",
+    });
+    lease.release?.();
+    await expect(apply).resolves.toMatchObject({ status: "committed" });
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
   });
 
   it("starts tracking bootstrap actors once their session becomes live", async () => {

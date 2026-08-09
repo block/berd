@@ -41,7 +41,7 @@ interface UseVoiceDictationOptions {
   selectedPersonaId: string | null;
   onSend: (
     text: string,
-    personaId?: string,
+    personaId?: string | null,
     attachments?: ChatAttachmentDraft[],
   ) => boolean | Promise<boolean>;
   onAutoSubmit?: (text: string) => boolean | Promise<boolean>;
@@ -86,7 +86,7 @@ export function useVoiceDictation({
         ? onAutoSubmit(merged.trim())
         : onSend(
             merged.trim(),
-            selectedPersonaId ?? undefined,
+            selectedPersonaId,
             attachments.length > 0 ? attachments : undefined,
           );
 

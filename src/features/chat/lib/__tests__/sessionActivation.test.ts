@@ -8,6 +8,7 @@ import { handleSessionInfoUpdate } from "@/features/chat/acp/acpSessionInfoUpdat
 import {
   clearIdleStreamingMessageAfterReplay,
   loadSessionMessages,
+  loadSessionMessagesAndPrepare,
 } from "@/features/chat/lib/sessionActivation";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
@@ -24,6 +25,10 @@ import {
   type SystemNotificationContent,
 } from "@/shared/types/messages";
 import type { AcpSessionInfo } from "@/shared/api/acp";
+import {
+  acquireSessionDispatchTarget,
+  resetSessionTargetCoordinatorsForTests,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 
 const acpGetSessionInfo = vi.hoisted(() => vi.fn());
 const acpLoadSession = vi.hoisted(() => vi.fn());
@@ -140,6 +145,7 @@ function notificationFromLastMessage(
 describe("loadSessionMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetSessionTargetCoordinatorsForTests();
     clearReplayAssistantTracking();
     window.localStorage.clear();
     acpGetSessionInfo.mockResolvedValue(null);
@@ -159,6 +165,77 @@ describe("loadSessionMessages", () => {
       activeWorkspaceBySession: {},
     });
     useProjectStore.setState({ projects: [] });
+  });
+
+  it("uses the leased target when ACP load returns a divergent target", async () => {
+    const targetA = {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "a",
+      modelName: "a",
+    } as const;
+    const targetB = {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "b",
+      modelName: "b",
+    } as const;
+    seedSession({
+      id: "leased-load",
+      executionTarget: targetA,
+      executionTargetSource: "acp",
+    });
+    acpLoadSession.mockResolvedValue({ providerId: "openai", modelId: "b" });
+    const lease = acquireSessionDispatchTarget("leased-load");
+
+    await expect(loadSessionMessages("leased-load")).resolves.toBe(true);
+
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("leased-load")?.executionTarget,
+    ).toEqual(targetA);
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("leased-load")?.executionTarget,
+    ).toEqual(targetB);
+  });
+
+  it("uses the leased target when pinned session info returns a divergent target", async () => {
+    const targetA = {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "a",
+      modelName: "a",
+    } as const;
+    const targetB = {
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "b",
+      modelName: "b",
+    } as const;
+    seedSession({
+      id: "leased-info",
+      executionTarget: targetA,
+      executionTargetSource: "acp",
+      pinnedLoadState: "loading",
+    });
+    acpGetSessionInfo.mockResolvedValue({
+      providerId: "openai",
+      modelId: "b",
+      messageCount: 1,
+    });
+    const lease = acquireSessionDispatchTarget("leased-info");
+
+    await expect(loadSessionMessages("leased-info")).resolves.toBe(true);
+
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("leased-info")?.executionTarget,
+    ).toEqual(targetA);
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("leased-info")?.executionTarget,
+    ).toEqual(targetB);
   });
 
   it.each([
@@ -421,7 +498,7 @@ describe("loadSessionMessages", () => {
       workingDir: "/existing/session",
     });
 
-    const load = loadSessionMessages("s-selection-race");
+    const load = loadSessionMessagesAndPrepare("s-selection-race");
     await vi.waitFor(() => {
       expect(checkDirectoriesExist).toHaveBeenCalledTimes(1);
     });

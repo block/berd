@@ -4,21 +4,11 @@ import {
   setSessionConfigSnapshotHandlers,
   type AcpSessionConfigSnapshotHandlers,
 } from "@/shared/api/acpSessionConfigSnapshots";
-import {
-  observeSessionTargetModelSnapshot,
-  observeSessionTargetReasoningSnapshot,
-} from "@/features/chat/lib/sessionTargetCoordinator";
+import { observeSessionTargetConfigSnapshots } from "@/features/chat/lib/sessionTargetCoordinator";
 
 const chatHandlers: AcpSessionConfigSnapshotHandlers = {
-  applyModelConfigSnapshot: (sessionId, snapshot, context) => {
-    observeSessionTargetModelSnapshot({ sessionId, snapshot, context });
-  },
-  applyReasoningEffortConfigSnapshot: (sessionId, reasoningEffort, context) => {
-    observeSessionTargetReasoningSnapshot({
-      sessionId,
-      reasoningEffort,
-      context,
-    });
+  applyConfigSnapshots: (sessionId, snapshots, context) => {
+    observeSessionTargetConfigSnapshots({ sessionId, snapshots, context });
   },
 };
 

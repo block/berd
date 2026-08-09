@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import { createDeferredQueuedMessagePayload } from "@/features/chat/lib/admittedSend";
 
 import { CommandError, defineCommand } from "../types";
 
@@ -205,10 +206,13 @@ Result:
     }
     const accepted = acceptFirstSend(
       session.id,
-      {
+      createDeferredQueuedMessagePayload({
         text: args.prompt,
+        persona: persona
+          ? { kind: "persona", id: persona.id, name: persona.displayName }
+          : { kind: "inherit" },
         sendOptions: berdctlCrossSessionSendOptions(),
-      },
+      }),
       { project, queueReady: true },
     );
     if (!accepted.accepted) {

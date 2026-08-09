@@ -1,6 +1,9 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
+import type { SessionDispatchReleaseWaiter } from "@/features/chat/lib/sessionTargetCoordinator";
+import { QueuedMessageOwnershipLostError } from "@/features/chat/lib/preCommitSendRejection";
 import {
   type QueuedMessageRecord,
   useChatStore,
@@ -43,6 +46,21 @@ function DrainHarness({
   return null;
 }
 
+function contentionHarness() {
+  let listener: (() => void) | undefined;
+  const cancel = vi.fn(() => {
+    listener = undefined;
+  });
+  const waiter: SessionDispatchReleaseWaiter = {
+    wait: vi.fn((next) => {
+      listener = next;
+      return cancel;
+    }),
+    cancel,
+  };
+  return { waiter, release: () => listener?.(), cancel };
+}
+
 function resetChatStore(): void {
   useChatStore.setState({
     messagesBySession: {},
@@ -67,7 +85,23 @@ describe("useBerdctlQueuedMessageDrain", () => {
       undefined,
     );
     resetChatStore();
-    useChatSessionStore.setState({ hasHydratedSessions: true });
+    useChatSessionStore.setState({
+      sessions: [
+        "session-1",
+        "other-session",
+        "main-session",
+        "detached-session",
+        "owned-session",
+      ].map((id) => ({
+        id,
+        title: "Session",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        messageCount: 0,
+        executionTarget: { harnessId: "goose" },
+      })),
+      hasHydratedSessions: true,
+    });
     useSessionWindowStore.setState({
       openSessions: {},
       handoffs: {},
@@ -79,9 +113,344 @@ describe("useBerdctlQueuedMessageDrain", () => {
     vi.restoreAllMocks();
   });
 
+  it("drains a Berdctl exact head once when its session gains a target", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTargetSource: "ui" as const,
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "targetless",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+
+    render(<DrainHarness />);
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() =>
+      useChatSessionStore
+        .getState()
+        .replaceSessionExecutionTarget("session-1", { harnessId: "goose" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it("drains a Berdctl exact head once after a source-less targetless state gains an ACP target", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "source-less targetless",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+
+    render(<DrainHarness />);
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() =>
+      useChatSessionStore.setState((state) => ({
+        sessions: state.sessions.map((session) =>
+          session.id === "session-1"
+            ? {
+                ...session,
+                executionTarget: { harnessId: "goose" },
+                executionTargetSource: "acp" as const,
+              }
+            : session,
+        ),
+      })),
+    );
+
+    await waitFor(() =>
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it("ignores unrelated session updates while a Berdctl head stays targetless", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTargetSource: "ui" as const,
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "targetless",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+
+    render(<DrainHarness />);
+    act(() =>
+      useChatSessionStore
+        .getState()
+        .patchSession("session-1", { title: "Renamed" }),
+    );
+
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("serializes a synchronous contention release after attempt settlement", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTarget: { harnessId: "goose" },
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    const cancel = vi.fn();
+    const waiter: SessionDispatchReleaseWaiter = {
+      wait: vi.fn((resume) => {
+        resume();
+        return cancel;
+      }),
+      cancel,
+    };
+    mocks.sendPromptToExistingSessionInBackground.mockRejectedValueOnce(
+      new SessionDispatchContentionError(waiter),
+    );
+
+    render(<DrainHarness />);
+
+    await waitFor(() =>
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(2),
+    );
+    expect(waiter.wait).toHaveBeenCalledOnce();
+  });
+
+  it("resumes exactly once when contention releases after registration", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTarget: { harnessId: "goose" },
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    const contention = contentionHarness();
+    mocks.sendPromptToExistingSessionInBackground.mockRejectedValueOnce(
+      new SessionDispatchContentionError(contention.waiter),
+    );
+
+    render(<DrainHarness />);
+    await waitFor(() => expect(contention.waiter.wait).toHaveBeenCalledOnce());
+    act(() => {
+      contention.release();
+      contention.release();
+    });
+
+    await waitFor(() =>
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  it("retains one contention waiter and cancels it for same-id replacement", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTarget: { harnessId: "goose" },
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    const chatStore = useChatStore.getState();
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    const original =
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0];
+    const contention = contentionHarness();
+    mocks.sendPromptToExistingSessionInBackground.mockRejectedValueOnce(
+      new SessionDispatchContentionError(contention.waiter),
+    );
+
+    const owner = render(<DrainHarness />);
+    await waitFor(() => expect(contention.waiter.wait).toHaveBeenCalledOnce());
+    act(() => {
+      useChatStore.setState((state) => ({
+        queuedMessageBySession: {
+          ...state.queuedMessageBySession,
+          "session-1": original
+            ? [
+                {
+                  ...original,
+                  payload: { ...original.payload, text: "replacement" },
+                },
+              ]
+            : [],
+        },
+      }));
+    });
+    expect(contention.cancel).toHaveBeenCalledOnce();
+    act(() => contention.release());
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).toHaveBeenCalledOnce();
+    owner.unmount();
+  });
+
+  it("cancels contention without retry when the exact head is removed", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTarget: { harnessId: "goose" },
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    const contention = contentionHarness();
+    mocks.sendPromptToExistingSessionInBackground.mockRejectedValueOnce(
+      new SessionDispatchContentionError(contention.waiter),
+    );
+
+    render(<DrainHarness />);
+    await waitFor(() => expect(contention.waiter.wait).toHaveBeenCalledOnce());
+    act(() => {
+      useChatStore.setState({ queuedMessageBySession: {} });
+      contention.release();
+    });
+
+    expect(contention.cancel).toHaveBeenCalledOnce();
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a contention waiter on owner unmount", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Session",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTarget: { harnessId: "goose" },
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    const contention = contentionHarness();
+    mocks.sendPromptToExistingSessionInBackground.mockRejectedValueOnce(
+      new SessionDispatchContentionError(contention.waiter),
+    );
+
+    const owner = render(<DrainHarness />);
+    await waitFor(() => expect(contention.waiter.wait).toHaveBeenCalledOnce());
+    owner.unmount();
+
+    expect(contention.cancel).toHaveBeenCalledOnce();
+    act(() => contention.release());
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).toHaveBeenCalledOnce();
+  });
+
   it("waits for session-list hydration before draining restored berdctl queues", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "restored prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -103,6 +472,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "session-1",
         "restored prompt",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
   });
@@ -110,6 +480,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
   it("drains a Berdctl record after editing finishes while idle", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "original prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -127,6 +498,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
 
     act(() => {
       useChatStore.getState().updateQueuedMessage("session-1", recordId, {
+        persona: { kind: "inherit" },
         text: "edited prompt",
         sendOptions: {
           userMessageMetadata: {
@@ -143,6 +515,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "session-1",
         "edited prompt",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
   });
@@ -151,6 +524,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "queued prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -174,6 +548,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "session-1",
         "queued prompt",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
     expect(
@@ -184,12 +559,14 @@ describe("useBerdctlQueuedMessageDrain", () => {
   it("drains consecutive berdctl records in FIFO order while idle", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "first prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
       },
     });
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "second prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -200,8 +577,18 @@ describe("useBerdctlQueuedMessageDrain", () => {
 
     await waitFor(() => {
       expect(mocks.sendPromptToExistingSessionInBackground.mock.calls).toEqual([
-        ["session-1", "first prompt", expect.any(Function)],
-        ["session-1", "second prompt", expect.any(Function)],
+        [
+          "session-1",
+          "first prompt",
+          expect.any(Function),
+          { returnOnDispatch: true },
+        ],
+        [
+          "session-1",
+          "second prompt",
+          expect.any(Function),
+          { returnOnDispatch: true },
+        ],
       ]);
     });
     expect(
@@ -209,11 +596,44 @@ describe("useBerdctlQueuedMessageDrain", () => {
     ).toBeUndefined();
   });
 
+  it("waits for the active run to clear before draining an idle session", async () => {
+    const chatStore = useChatStore.getState();
+    chatStore.setActiveRunId("session-1", "run-1");
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "queued prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    render(<DrainHarness />);
+
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", null);
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued prompt",
+        expect.any(Function),
+        { returnOnDispatch: true },
+      );
+    });
+  });
+
   it("waits for pending cancellation to clear before draining an idle session", async () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
     chatStore.setRunCancellationPending("session-1", true);
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "queued prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -240,6 +660,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "session-1",
         "queued prompt",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
   });
@@ -248,6 +669,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "queued prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -279,6 +701,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "queued prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -298,6 +721,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "session-1",
         "queued prompt",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
     await waitFor(() => {
@@ -309,6 +733,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload,
     ).toEqual({
+      persona: { kind: "inherit" },
       text: "queued prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -325,6 +750,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
             kind: "deferred",
             recordId: "deferred-1",
             payload: {
+              persona: { kind: "inherit" },
               text: "held prompt",
               sendOptions: {
                 userMessageMetadata: {
@@ -360,6 +786,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
       kind: "deferred" as const,
       recordId: "record-1",
       payload: {
+        persona: { kind: "inherit" },
         text: "held prompt",
         sendOptions: {
           userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -379,7 +806,9 @@ describe("useBerdctlQueuedMessageDrain", () => {
             {
               kind: "transport-ready",
               recordId: deferred.recordId,
-              payload: deferred.payload,
+              payload: {
+                ...deferred.payload,
+              },
             },
           ],
         },
@@ -389,7 +818,9 @@ describe("useBerdctlQueuedMessageDrain", () => {
     await waitFor(() => {
       expect(
         mocks.sendPromptToExistingSessionInBackground,
-      ).toHaveBeenCalledWith("session-1", "held prompt", expect.any(Function));
+      ).toHaveBeenCalledWith("session-1", "held prompt", expect.any(Function), {
+        returnOnDispatch: true,
+      });
     });
   });
 
@@ -399,6 +830,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
       recordId: "record-1",
       releasedFromDeferred: true,
       payload: {
+        persona: { kind: "inherit" },
         text: "held prompt",
         sendOptions: {
           userMessageMetadata: { origin: "berdctl_cross_session" },
@@ -427,6 +859,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
       kind: "transport-ready",
       recordId: "cached-record",
       payload: {
+        persona: { kind: "inherit" },
         text: "cached prompt",
         sendOptions: {
           userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -458,12 +891,14 @@ describe("useBerdctlQueuedMessageDrain", () => {
       "session-1",
       "cached prompt",
       expect.any(Function),
+      { returnOnDispatch: true },
     );
   });
 
   it("waits for the initial detached-window snapshot before global draining", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("detached-session", {
+      persona: { kind: "inherit" },
       text: "owned elsewhere",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -505,6 +940,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
   it("starts global draining after an empty initial window snapshot", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("main-session", {
+      persona: { kind: "inherit" },
       text: "owned by main",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -532,6 +968,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "main-session",
         "owned by main",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
   });
@@ -539,6 +976,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
   it("leaves detached-window sessions for their scoped owner drain", () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("detached-session", {
+      persona: { kind: "inherit" },
       text: "owned elsewhere",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -564,6 +1002,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
       kind: "transport-ready",
       recordId: "already-sent",
       payload: {
+        persona: { kind: "inherit" },
         text: "stale prompt",
         sendOptions: {
           userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -602,6 +1041,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("owned-session", "streaming");
     chatStore.enqueueTransportReadyMessage("owned-session", {
+      persona: { kind: "inherit" },
       text: "queued while source runs",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -630,6 +1070,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "owned-session",
         "queued while source runs",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
   });
@@ -637,9 +1078,11 @@ describe("useBerdctlQueuedMessageDrain", () => {
   it("leaves released detached-window records to the dedicated owner drain", () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("owned-session", {
+      persona: { kind: "inherit" },
       text: "owned released prompt",
     });
     chatStore.enqueueTransportReadyMessage("other-session", {
+      persona: { kind: "inherit" },
       text: "other released prompt",
     });
     const owned =
@@ -677,6 +1120,131 @@ describe("useBerdctlQueuedMessageDrain", () => {
     ).toBe(other.recordId);
   });
 
+  it("retains and retries when a run starts during background preparation", async () => {
+    mocks.sendPromptToExistingSessionInBackground
+      .mockImplementationOnce(
+        async (
+          _sessionId: string,
+          _prompt: string,
+          beforeUserMessageCommitted: () => void,
+        ) => {
+          useChatStore.getState().setActiveRunId("session-1", "racing-run");
+          beforeUserMessageCommitted();
+        },
+      )
+      .mockResolvedValueOnce(undefined);
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "race-safe prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+
+    render(<DrainHarness />);
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .text,
+    ).toBe("race-safe prompt");
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", null);
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(2);
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"],
+      ).toBeUndefined();
+    });
+  });
+
+  it("dismisses at acknowledged dispatch while the held turn fences a replacement", async () => {
+    let settleTurn!: () => void;
+    const heldSettlement = new Promise<void>((resolve) => {
+      settleTurn = resolve;
+    });
+    mocks.sendPromptToExistingSessionInBackground.mockImplementation(
+      async (
+        _sessionId: string,
+        _prompt: string,
+        beforeUserMessageCommitted: () => void,
+        options?: { returnOnDispatch?: boolean },
+      ) => {
+        expect(options).toEqual({ returnOnDispatch: true });
+        beforeUserMessageCommitted();
+        useChatStore.getState().setActiveRunId("session-1", "held-turn");
+        // Match the real helper's split contract: queue ownership completes
+        // now while the detached turn keeps the runtime blocked until settlement.
+        void heldSettlement.then(() => {
+          useChatStore.getState().setActiveRunId("session-1", null);
+        });
+      },
+    );
+    const chatStore = useChatStore.getState();
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+
+    render(<DrainHarness />);
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"],
+      ).toBeUndefined();
+    });
+    expect(mocks.sendPromptToExistingSessionInBackground).toHaveBeenCalledTimes(
+      1,
+    );
+
+    act(() => {
+      useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+        persona: { kind: "inherit" },
+        text: "replacement prompt",
+        sendOptions: {
+          userMessageMetadata: { origin: "berdctl_cross_session" as const },
+        },
+      });
+    });
+    expect(mocks.sendPromptToExistingSessionInBackground).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .text,
+    ).toBe("replacement prompt");
+
+    act(() => {
+      settleTurn();
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(2);
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenLastCalledWith(
+        "session-1",
+        "replacement prompt",
+        expect.any(Function),
+        { returnOnDispatch: true },
+      );
+    });
+  });
+
   it("retains an edited replacement when an older background send resolves", async () => {
     let resolveSend!: () => void;
     mocks.sendPromptToExistingSessionInBackground.mockReturnValueOnce(
@@ -686,6 +1254,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
     );
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "original prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" as const },
@@ -704,6 +1273,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
         "session-1",
         "original prompt",
         expect.any(Function),
+        { returnOnDispatch: true },
       );
     });
 
@@ -715,6 +1285,7 @@ describe("useBerdctlQueuedMessageDrain", () => {
       ).toBe(true);
       expect(
         useChatStore.getState().updateQueuedMessage("session-1", recordId, {
+          persona: { kind: "inherit" },
           text: "replacement prompt",
           sendOptions: {
             userMessageMetadata: {
@@ -734,10 +1305,66 @@ describe("useBerdctlQueuedMessageDrain", () => {
     });
   });
 
+  it("retries a replacement after the stale Berdctl attempt loses ownership", async () => {
+    let rejectStale!: (error: Error) => void;
+    mocks.sendPromptToExistingSessionInBackground
+      .mockReturnValueOnce(
+        new Promise<void>((_resolve, reject) => {
+          rejectStale = reject;
+        }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const chatStore = useChatStore.getState();
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "original prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+    const recordId =
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]
+        ?.recordId;
+    if (!recordId) throw new Error("expected queued record fixture");
+
+    render(<DrainHarness />);
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      useChatStore.getState().updateQueuedMessage("session-1", recordId, {
+        persona: { kind: "inherit" },
+        text: "replacement prompt",
+        sendOptions: {
+          userMessageMetadata: { origin: "berdctl_cross_session" as const },
+        },
+      });
+      rejectStale(new QueuedMessageOwnershipLostError());
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledTimes(2);
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenLastCalledWith(
+        "session-1",
+        "replacement prompt",
+        expect.any(Function),
+        { returnOnDispatch: true },
+      );
+    });
+  });
+
   it("leaves ordinary queued messages for ChatView-owned queue handling", async () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");
     chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "user queued prompt",
     });
     render(<DrainHarness />);
@@ -751,6 +1378,9 @@ describe("useBerdctlQueuedMessageDrain", () => {
     ).not.toHaveBeenCalled();
     expect(
       useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload,
-    ).toEqual({ text: "user queued prompt" });
+    ).toEqual({
+      persona: { kind: "inherit" },
+      text: "user queued prompt",
+    });
   });
 });

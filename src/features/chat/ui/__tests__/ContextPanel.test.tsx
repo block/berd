@@ -2696,7 +2696,7 @@ describe("ContextPanel", () => {
     });
     useChatStore.getState().enqueueDeferredMessage(
       "test-session-8",
-      { text: "repair the workspace" },
+      { persona: { kind: "inherit" }, text: "repair the workspace" },
       {
         type: "workspace-first-send",
         status: "held",

@@ -21,9 +21,23 @@ const mockAcpSteerMessage = vi.fn();
 const mockAcpCancelSession = vi.fn();
 const mockAcpLoadSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
+let mockAcpDispatches = true;
 
 vi.mock("@/shared/api/acp", () => ({
-  acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
+  acpSendMessage: (...args: unknown[]) => {
+    const result = mockAcpSendMessage(...args);
+    const options = args[2] as
+      | {
+          onPromptDispatching?: () => void;
+          onPromptDispatched?: () => void;
+        }
+      | undefined;
+    if (mockAcpDispatches) {
+      options?.onPromptDispatching?.();
+      options?.onPromptDispatched?.();
+    }
+    return result;
+  },
   acpSteerMessage: (...args: unknown[]) => mockAcpSteerMessage(...args),
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
@@ -89,6 +103,7 @@ describe("useChat", () => {
     mockAcpCancelSession.mockReset();
     mockAcpLoadSession.mockReset();
     mockAcpPrepareSession.mockReset();
+    mockAcpDispatches = true;
     clearReplayBuffer("session-1");
     clearReplayBuffer("session-2");
     clearStreamingMessageOwners();
@@ -336,7 +351,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("stop this");
       await Promise.resolve();
@@ -381,7 +396,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let firstSendPromise!: Promise<void>;
+    let firstSendPromise!: Promise<boolean>;
     await act(async () => {
       firstSendPromise = result.current.sendMessage("too late to stop");
       await Promise.resolve();
@@ -410,7 +425,7 @@ describe("useChat", () => {
       useChatStore.getState().setRunCancellationPending("session-1", false);
       claimSessionPrompt("session-1");
     });
-    let secondSendPromise!: Promise<void>;
+    let secondSendPromise!: Promise<boolean>;
     await act(async () => {
       secondSendPromise = result.current.sendMessage("follow up");
       await Promise.resolve();
@@ -451,7 +466,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("too late to stop");
       await Promise.resolve();
@@ -493,7 +508,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("too late to stop");
       await Promise.resolve();
@@ -538,7 +553,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("finish this");
       await Promise.resolve();
@@ -569,7 +584,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("first prompt");
       await Promise.resolve();
@@ -625,7 +640,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("keep working");
       await Promise.resolve();
@@ -660,7 +675,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let firstSendPromise!: Promise<void>;
+    let firstSendPromise!: Promise<boolean>;
     await act(async () => {
       firstSendPromise = result.current.sendMessage("first prompt");
       await Promise.resolve();
@@ -673,7 +688,7 @@ describe("useChat", () => {
       useChatStore.getState().setRunCancellationPending("session-1", false);
     });
 
-    let secondSendPromise!: Promise<void>;
+    let secondSendPromise!: Promise<boolean>;
     await act(async () => {
       secondSendPromise = result.current.sendMessage("second prompt");
       await Promise.resolve();
@@ -724,7 +739,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let firstSendPromise!: Promise<void>;
+    let firstSendPromise!: Promise<boolean>;
     await act(async () => {
       firstSendPromise = result.current.sendMessage("first prompt");
       await Promise.resolve();
@@ -747,7 +762,7 @@ describe("useChat", () => {
       useChatStore.getState().setRunCancellationPending("session-1", false);
     });
 
-    let secondSendPromise!: Promise<void>;
+    let secondSendPromise!: Promise<boolean>;
     await act(async () => {
       secondSendPromise = result.current.sendMessage("second prompt");
       await Promise.resolve();
@@ -799,7 +814,7 @@ describe("useChat", () => {
 
     const firstHook = renderHook(() => useChat("session-1"));
 
-    let firstSendPromise!: Promise<void>;
+    let firstSendPromise!: Promise<boolean>;
     await act(async () => {
       firstSendPromise = firstHook.result.current.sendMessage("first prompt");
       await Promise.resolve();
@@ -814,7 +829,7 @@ describe("useChat", () => {
     firstHook.unmount();
 
     const secondHook = renderHook(() => useChat("session-1"));
-    let secondSendPromise!: Promise<void>;
+    let secondSendPromise!: Promise<boolean>;
     await act(async () => {
       secondSendPromise =
         secondHook.result.current.sendMessage("second prompt");
@@ -856,7 +871,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let firstSendPromise!: Promise<void>;
+    let firstSendPromise!: Promise<boolean>;
     await act(async () => {
       firstSendPromise = result.current.sendMessage("first prompt");
       await Promise.resolve();
@@ -869,7 +884,7 @@ describe("useChat", () => {
       useChatStore.getState().setRunCancellationPending("session-1", false);
     });
 
-    let secondSendPromise!: Promise<void>;
+    let secondSendPromise!: Promise<boolean>;
     await act(async () => {
       secondSendPromise = result.current.sendMessage("second prompt");
       await Promise.resolve();
@@ -949,7 +964,7 @@ describe("useChat", () => {
       }),
     );
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("wait for it");
       await Promise.resolve();
@@ -957,7 +972,7 @@ describe("useChat", () => {
 
     expect(
       useChatStore.getState().getSessionRuntime("session-1").chatState,
-    ).toBe("thinking");
+    ).toBe("idle");
 
     let cancellation!: Promise<boolean>;
     act(() => {
@@ -977,12 +992,17 @@ describe("useChat", () => {
     expect(
       useChatStore.getState().getSessionRuntime("session-1")
         .isRunCancellationPending,
-    ).toBe(false);
+    ).toBe(true);
 
     await act(async () => {
       prepareDeferred.resolve(undefined);
       await sendPromise;
     });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(false);
 
     expect(mockAcpSendMessage).not.toHaveBeenCalled();
     expect(
@@ -1239,7 +1259,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let sendPromise!: Promise<void>;
+    let sendPromise!: Promise<boolean>;
     await act(async () => {
       sendPromise = result.current.sendMessage("first prompt");
       await Promise.resolve();
@@ -1270,7 +1290,7 @@ describe("useChat", () => {
 
     const { result } = renderHook(() => useChat("session-1"));
 
-    let firstSendPromise!: Promise<void>;
+    let firstSendPromise!: Promise<boolean>;
     let steerPromise!: Promise<boolean>;
     await act(async () => {
       firstSendPromise = result.current.sendMessage("first prompt");
@@ -1284,7 +1304,7 @@ describe("useChat", () => {
       useChatStore.getState().setRunCancellationPending("session-1", false);
     });
 
-    let secondSendPromise!: Promise<void>;
+    let secondSendPromise!: Promise<boolean>;
     await act(async () => {
       secondSendPromise = result.current.sendMessage("second prompt");
       await Promise.resolve();
@@ -1572,7 +1592,7 @@ describe("useChat", () => {
     const firstSession = renderHook(() => useChat("session-1"));
     const secondSession = renderHook(() => useChat("session-2"));
 
-    let firstPromise!: Promise<void>;
+    let firstPromise!: Promise<boolean>;
     await act(async () => {
       firstPromise = firstSession.result.current.sendMessage("First");
       await Promise.resolve();
@@ -1586,23 +1606,23 @@ describe("useChat", () => {
       1,
       "session-1",
       "First",
-      {
+      expect.objectContaining({
         systemPrompt: undefined,
         personaId: undefined,
         personaName: undefined,
         images: undefined,
-      },
+      }),
     );
     expect(mockAcpSendMessage).toHaveBeenNthCalledWith(
       2,
       "session-2",
       "Second",
-      {
+      expect.objectContaining({
         systemPrompt: undefined,
         personaId: undefined,
         personaName: undefined,
         images: undefined,
-      },
+      }),
     );
 
     deferred.resolve();
@@ -1636,12 +1656,16 @@ describe("useChat", () => {
       await result.current.sendMessage("Hello");
     });
 
-    expect(mockAcpSendMessage).toHaveBeenCalledWith("session-1", "Hello", {
-      systemPrompt: undefined,
-      personaId: undefined,
-      personaName: undefined,
-      images: undefined,
-    });
+    expect(mockAcpSendMessage).toHaveBeenCalledWith(
+      "session-1",
+      "Hello",
+      expect.objectContaining({
+        systemPrompt: undefined,
+        personaId: undefined,
+        personaName: undefined,
+        images: undefined,
+      }),
+    );
   });
 
   it("fires onMessageAccepted only after the message enters the session", async () => {
@@ -1657,9 +1681,9 @@ describe("useChat", () => {
 
     await act(async () => {
       const sendPromise = result.current.sendMessage("Hello");
-      await Promise.resolve();
-
-      expect(onMessageAccepted).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => {
+        expect(onMessageAccepted).toHaveBeenCalledTimes(1);
+      });
       expect(
         useChatStore.getState().messagesBySession["session-1"],
       ).toHaveLength(1);
@@ -1667,6 +1691,169 @@ describe("useChat", () => {
       deferred.resolve();
       await sendPromise;
     });
+  });
+
+  it("reports acceptance at user-turn commitment before the agent run settles", async () => {
+    const deferred = createDeferredPromise();
+    mockAcpSendMessage.mockReturnValue(deferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.sendMessage("queued turn");
+    });
+
+    expect(accepted).toBe(true);
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      1,
+    );
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("streaming");
+
+    await act(async () => {
+      deferred.resolve();
+      await deferred.promise;
+    });
+  });
+
+  it("reports acceptance only after preparation and ACP dispatch start", async () => {
+    const preparation = createDeferredPromise<boolean | undefined>();
+    const run = createDeferredPromise();
+    mockAcpSendMessage.mockReturnValue(run.promise);
+
+    const { result } = renderHook(() =>
+      useChat("session-1", undefined, undefined, undefined, {
+        ensurePrepared: () => preparation.promise,
+      }),
+    );
+
+    let acceptance!: Promise<boolean>;
+    let settled = false;
+    await act(async () => {
+      acceptance = result.current.sendMessage("queued turn");
+      void acceptance.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+    });
+
+    expect(settled).toBe(false);
+    expect(mockAcpSendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      preparation.resolve(undefined);
+      await preparation.promise;
+      await acceptance;
+    });
+
+    expect(mockAcpSendMessage).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(true);
+
+    await act(async () => {
+      run.resolve();
+      await run.promise;
+    });
+  });
+
+  it("rejects queue acceptance when preparation fails before dispatch", async () => {
+    const { result } = renderHook(() =>
+      useChat("session-1", undefined, undefined, undefined, {
+        ensurePrepared: vi.fn().mockResolvedValue(false),
+      }),
+    );
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.sendMessage("queued turn");
+    });
+
+    expect(accepted).toBe(false);
+    expect(mockAcpSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not commit a user turn when ACP setup fails before transport", async () => {
+    mockAcpDispatches = false;
+    mockAcpSendMessage.mockRejectedValueOnce(
+      new Error("ACP client unavailable"),
+    );
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.sendMessage("queued turn");
+    });
+
+    expect(accepted).toBe(false);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"] ?? [],
+    ).toEqual([]);
+  });
+
+  it("keeps a committed user turn accepted when ACP throws before dispatch acknowledgement", async () => {
+    mockAcpDispatches = false;
+    mockAcpSendMessage.mockImplementationOnce(
+      (
+        _sessionId: string,
+        _prompt: string,
+        options?: {
+          onPromptDispatching?: () => void;
+        },
+      ) => {
+        options?.onPromptDispatching?.();
+        return Promise.reject(new Error("transport failed after commit"));
+      },
+    );
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.sendMessage("queued turn");
+    });
+
+    expect(accepted).toBe(true);
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-1"]?.filter(
+          (message) => message.role === "user",
+        ),
+    ).toHaveLength(1);
+  });
+
+  it("does not revoke acceptance when the dispatched agent run fails", async () => {
+    mockAcpSendMessage.mockRejectedValue(new Error("run failed"));
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.sendMessage("queued turn");
+      await Promise.resolve();
+    });
+
+    expect(accepted).toBe(true);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0],
+    ).toMatchObject({ role: "user" });
+  });
+
+  it("uses a queued execution prompt instead of current render state", async () => {
+    const { result } = renderHook(() =>
+      useChat("session-1", undefined, "current persona prompt"),
+    );
+
+    await act(async () => {
+      await result.current.sendMessage("queued turn", undefined, undefined, {
+        executionSystemPrompt: "queued persona prompt",
+      });
+    });
+
+    expect(mockAcpSendMessage).toHaveBeenCalledWith(
+      "session-1",
+      "queued turn",
+      expect.objectContaining({ systemPrompt: "queued persona prompt" }),
+    );
   });
 
   it("awaits ensurePrepared before prompting", async () => {
@@ -1733,12 +1920,16 @@ describe("useChat", () => {
       }),
     ]);
     expect(session?.activeWorkspaceId).toBe(activeWorkspaceId);
-    expect(mockAcpSendMessage).toHaveBeenCalledWith("session-1", "Hello", {
-      systemPrompt: undefined,
-      personaId: undefined,
-      personaName: undefined,
-      images: undefined,
-    });
+    expect(mockAcpSendMessage).toHaveBeenCalledWith(
+      "session-1",
+      "Hello",
+      expect.objectContaining({
+        systemPrompt: undefined,
+        personaId: undefined,
+        personaName: undefined,
+        images: undefined,
+      }),
+    );
   });
 
   it("does not prompt when preparation is superseded", async () => {
@@ -1761,15 +1952,7 @@ describe("useChat", () => {
     const messages = useChatStore.getState().messagesBySession["session-1"];
     const runtime = useChatStore.getState().getSessionRuntime("session-1");
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0].role).toBe("user");
-    expect(messages[1].content).toEqual([
-      {
-        type: "systemNotification",
-        notificationType: "error",
-        text: "Session configuration changed while preparing. Try sending again.",
-      },
-    ]);
+    expect(messages).toBeUndefined();
     expect(runtime.error).toBe(
       "Session configuration changed while preparing. Try sending again.",
     );
@@ -1778,12 +1961,7 @@ describe("useChat", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1")
         ?.workspaceAttachments,
-    ).toEqual([
-      expect.objectContaining({
-        path: "/tmp/project",
-        usedByAgent: false,
-      }),
-    ]);
+    ).toBeUndefined();
   });
 
   it("appends an error message and removes the empty assistant placeholder when send fails", async () => {

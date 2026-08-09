@@ -757,7 +757,13 @@ export function ChatView({
           skillProviderId={controller.selectedProvider}
           composerActions={{
             onSend: controller.handleSend,
-            onSteerMessage: controller.steerDraftMessage,
+            onSteerMessage: (text, personaId, attachments, options) =>
+              controller.steerDraftMessage(
+                text,
+                personaId ?? undefined,
+                attachments,
+                options,
+              ),
             canSteerMessage: controller.canSteerMessage,
             onSteerQueuedMessage: controller.steerQueuedMessage,
             canSteerQueuedMessage: controller.canSteerQueuedMessage,

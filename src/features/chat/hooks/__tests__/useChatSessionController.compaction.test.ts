@@ -32,8 +32,9 @@ let mockTokenState = { ...INITIAL_TOKEN_STATE };
 let capturedQueuedSend:
   | ((
       text: string,
-      overridePersona?: { id: string; name?: string },
+      overridePersona?: { id: string | null; name?: string },
       attachments?: unknown[],
+      sendOptions?: unknown,
     ) => boolean | Promise<boolean>)
   | null = null;
 
@@ -58,7 +59,18 @@ vi.mock("../useMessageQueue", () => ({
     capturedQueuedSend = args[2] as typeof capturedQueuedSend;
     return {
       queuedMessage: null,
-      enqueue: vi.fn(),
+      enqueue: (
+        text: string,
+        personaId?: string,
+        attachments?: unknown[],
+        sendOptions?: unknown,
+      ) =>
+        capturedQueuedSend?.(
+          text,
+          personaId ? { id: personaId } : undefined,
+          attachments,
+          sendOptions,
+        ) ?? false,
       dismiss: vi.fn(),
     };
   },
@@ -392,10 +404,44 @@ describe("useChatSessionController compaction behavior", () => {
       await capturedQueuedSend?.("hello", { id: "persona-a" });
     });
 
-    expect(mockCompactConversation).toHaveBeenCalledWith({ id: "persona-a" });
+    expect(mockCompactConversation).toHaveBeenCalledWith(
+      { id: "persona-a" },
+      undefined,
+    );
     expect(mockSendMessage).toHaveBeenCalledWith(
       "hello",
       { id: "persona-a" },
+      undefined,
+    );
+  });
+
+  it("preserves explicit no-persona intent through queued auto-compaction", async () => {
+    mockSelectedAgentId = "claude-acp";
+    mockTokenState = {
+      ...INITIAL_TOKEN_STATE,
+      accumulatedTotal: 8_500,
+      contextLimit: 10_000,
+    };
+    useChatStore
+      .getState()
+      .replaceTokenState("session-1", mockTokenState, true);
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget("session-1", { harnessId: "goose" });
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await act(async () => {
+      await capturedQueuedSend?.("hello", { id: null });
+    });
+
+    expect(mockCompactConversation).toHaveBeenCalledWith(
+      { id: null },
+      undefined,
+    );
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      "hello",
+      { id: null },
       undefined,
     );
   });
@@ -433,7 +479,10 @@ describe("useChatSessionController compaction behavior", () => {
       await capturedQueuedSend?.("hello", { id: "persona-a" });
     });
 
-    expect(mockCompactConversation).toHaveBeenCalledWith({ id: "persona-a" });
+    expect(mockCompactConversation).toHaveBeenCalledWith(
+      { id: "persona-a" },
+      undefined,
+    );
     expect(mockSendMessage).toHaveBeenCalledWith(
       "hello",
       { id: "persona-a" },

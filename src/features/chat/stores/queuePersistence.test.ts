@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { admitSystemInheritedQueuedMessage } from "../lib/admittedSend";
 
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }));
 
@@ -24,6 +25,7 @@ describe("queuePersistence", () => {
           recordId: "queued-image",
           payload: {
             text: "inspect this",
+            executionTarget: { harnessId: "goose" },
             attachments: [
               {
                 id: "image-1",
@@ -64,7 +66,10 @@ describe("queuePersistence", () => {
           {
             kind: "transport-ready",
             recordId: "editing-record",
-            payload: { text: "original" },
+            payload: {
+              text: "original",
+              executionTarget: { harnessId: "goose" },
+            },
             editing: true,
           },
         ],
@@ -86,7 +91,11 @@ describe("queuePersistence", () => {
           {
             kind: "transport-ready",
             recordId: "hidden-startup-handoff",
-            payload: { text: "first message", showInComposer: false },
+            payload: {
+              text: "first message",
+              executionTarget: { harnessId: "goose" },
+              showInComposer: false,
+            },
           },
         ],
       }),
@@ -102,7 +111,7 @@ describe("queuePersistence", () => {
     });
   });
 
-  it("migrates legacy provider/model fields into a qualified target", async () => {
+  it("strips legacy provider/model fields without losing the prompt", async () => {
     mockInvoke.mockResolvedValue(
       JSON.stringify({
         s1: [
@@ -122,16 +131,11 @@ describe("queuePersistence", () => {
     const queues = await loadPersistedMessageQueues();
     expect(queues.s1?.[0]?.payload).toEqual({
       text: "continue with claude",
-      executionTarget: {
-        harnessId: "claude-acp",
-        modelProviderId: "claude-acp",
-        modelId: "claude-fable",
-        modelName: "claude-fable",
-      },
+      persona: { kind: "inherit" },
     });
   });
 
-  it("drops an unqualified legacy model instead of pairing it with a provider", async () => {
+  it("strips all obsolete legacy model fields while retaining records", async () => {
     mockInvoke.mockResolvedValue(
       JSON.stringify({
         s1: [
@@ -154,10 +158,55 @@ describe("queuePersistence", () => {
     );
 
     const queues = await loadPersistedMessageQueues();
+    expect(queues.s1).toHaveLength(2);
     expect(queues.s1?.map((record) => record.payload)).toEqual([
-      { text: "use the live target" },
-      { text: "keep the loaded model" },
+      { text: "use the live target", persona: { kind: "inherit" } },
+      { text: "keep the loaded model", persona: { kind: "inherit" } },
     ]);
+  });
+
+  it("rejects malformed persona intent instead of guessing", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        s1: [
+          {
+            kind: "transport-ready",
+            recordId: "bad-persona",
+            payload: {
+              text: "do not guess",
+              persona: { kind: "persona" },
+              executionTarget: { harnessId: "goose" },
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(loadPersistedMessageQueues()).resolves.toEqual({});
+  });
+
+  it("restores targetless transport records with explicit persona intent", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        s1: [
+          {
+            kind: "transport-ready",
+            recordId: "missing-target",
+            payload: { text: "do not infer", personaId: null },
+          },
+        ],
+      }),
+    );
+
+    await expect(loadPersistedMessageQueues()).resolves.toMatchObject({
+      s1: [
+        {
+          recordId: "missing-target",
+          restored: true,
+          payload: { text: "do not infer", persona: { kind: "none" } },
+        },
+      ],
+    });
   });
 
   it("rejects deferred records without supported workspace-first-send state", async () => {
@@ -185,7 +234,7 @@ describe("queuePersistence", () => {
           {
             kind: "transport-ready",
             recordId: "main-record",
-            payload: { text: "main" },
+            payload: { text: "main", executionTarget: { harnessId: "goose" } },
           },
         ],
       }),
@@ -197,7 +246,9 @@ describe("queuePersistence", () => {
           {
             kind: "transport-ready",
             recordId: "detached-record",
-            payload: { text: "detached" },
+            payload: admitSystemInheritedQueuedMessage({
+              text: "detached",
+            }),
           },
         ],
       },
@@ -222,7 +273,9 @@ describe("queuePersistence", () => {
           {
             kind: "transport-ready",
             recordId: "queued-image",
-            payload: { text: "inspect this" },
+            payload: admitSystemInheritedQueuedMessage({
+              text: "inspect this",
+            }),
           },
         ],
       },
@@ -235,7 +288,9 @@ describe("queuePersistence", () => {
             {
               kind: "transport-ready",
               recordId: "queued-image",
-              payload: { text: "inspect this" },
+              payload: admitSystemInheritedQueuedMessage({
+                text: "inspect this",
+              }),
             },
           ],
         }),

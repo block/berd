@@ -1,8 +1,16 @@
 import { z } from "zod/v4";
 
-import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
+import {
+  assertQueuedSessionReady,
+  isQueuedSessionReady,
+} from "@/features/chat/lib/queuedMessageReadiness";
 import { steerPromptInSession } from "@/features/chat/lib/steerCore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  admitSystemInheritedQueuedMessage,
+  createDeferredQueuedMessagePayload,
+} from "@/features/chat/lib/admittedSend";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 
@@ -71,6 +79,8 @@ Result:
       {
         berdctlCrossSessionSendOptions,
         sendPromptToExistingSessionInBackground,
+        SessionDispatchContentionError,
+        SessionDispatchUnresolvedError,
       },
     ] = await Promise.all([
       import("@/features/chat/lib/firstWorkspaceSend"),
@@ -101,10 +111,7 @@ Result:
         "startup_name is only valid for the first send when workspace setup is available.",
       );
     }
-    if (
-      isSessionRunning(runtime.chatState) ||
-      runtime.isRunCancellationPending
-    ) {
+    if (!isQueuedSessionReady(runtime)) {
       switch (args.if_running) {
         case "refuse":
           throw new CommandError(
@@ -129,10 +136,13 @@ Result:
           return { session_id: session.id, send_status: "steered" };
 
         case "queue":
-          chatStore.enqueueTransportReadyMessage(args.session_id, {
-            text: args.prompt,
-            sendOptions: berdctlCrossSessionSendOptions(),
-          });
+          chatStore.enqueueTransportReadyMessage(
+            args.session_id,
+            admitSystemInheritedQueuedMessage({
+              text: args.prompt,
+              sendOptions: berdctlCrossSessionSendOptions(),
+            }),
+          );
           return { session_id: session.id, send_status: "queued" };
 
         default:
@@ -147,10 +157,11 @@ Result:
       : null;
     const firstSend = acceptFirstSend(
       args.session_id,
-      {
+      createDeferredQueuedMessagePayload({
         text: args.prompt,
+        persona: { kind: "inherit" },
         sendOptions: berdctlCrossSessionSendOptions(),
-      },
+      }),
       { startupName: args.startup_name, project },
     );
     if (firstSend.needsName) {
@@ -163,10 +174,13 @@ Result:
       return { session_id: session.id, send_status: "queued" };
     }
     if ((chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0) {
-      chatStore.enqueueTransportReadyMessage(args.session_id, {
-        text: args.prompt,
-        sendOptions: berdctlCrossSessionSendOptions(),
-      });
+      chatStore.enqueueTransportReadyMessage(
+        args.session_id,
+        admitSystemInheritedQueuedMessage({
+          text: args.prompt,
+          sendOptions: berdctlCrossSessionSendOptions(),
+        }),
+      );
       return { session_id: session.id, send_status: "queued" };
     }
 
@@ -174,8 +188,52 @@ Result:
       await sendPromptToExistingSessionInBackground(
         args.session_id,
         args.prompt,
+        () => {
+          const liveChatStore = useChatStore.getState();
+          assertQueuedSessionReady(
+            liveChatStore.getSessionRuntime(args.session_id),
+            (liveChatStore.queuedMessageBySession[args.session_id]?.length ??
+              0) === 0,
+          );
+        },
+        { returnOnDispatch: true },
       );
     } catch (error) {
+      if (error instanceof SessionDispatchContentionError) {
+        if (args.if_running === "queue") {
+          useChatStore.getState().enqueueTransportReadyMessage(
+            args.session_id,
+            admitSystemInheritedQueuedMessage({
+              text: args.prompt,
+              sendOptions: berdctlCrossSessionSendOptions(),
+            }),
+          );
+          return { session_id: session.id, send_status: "queued" };
+        }
+        throw new CommandError(
+          "target_session_running",
+          runningTargetMessage(args.session_id),
+        );
+      }
+      if (error instanceof SessionDispatchUnresolvedError) {
+        throw new CommandError("invalid_args", error.message);
+      }
+      if (error instanceof PreCommitSendRejectedError) {
+        if (args.if_running === "queue") {
+          useChatStore.getState().enqueueTransportReadyMessage(
+            args.session_id,
+            admitSystemInheritedQueuedMessage({
+              text: args.prompt,
+              sendOptions: berdctlCrossSessionSendOptions(),
+            }),
+          );
+          return { session_id: session.id, send_status: "queued" };
+        }
+        throw new CommandError(
+          "target_session_running",
+          runningTargetMessage(args.session_id),
+        );
+      }
       if (error instanceof CommandError) {
         throw error;
       }

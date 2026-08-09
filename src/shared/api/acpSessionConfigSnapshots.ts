@@ -43,6 +43,11 @@ export interface AcpSessionConfigSnapshotContext {
 }
 
 export interface AcpSessionConfigSnapshotHandlers {
+  applyConfigSnapshots?: (
+    sessionId: string,
+    snapshots: AcpSessionConfigSnapshots,
+    context: AcpSessionConfigSnapshotContext,
+  ) => void;
   applyModelConfigSnapshot?: (
     sessionId: string,
     snapshot: AcpModelConfigSnapshot,
@@ -96,6 +101,10 @@ export function dispatchSessionConfigSnapshots(
     ),
     ...getConfigOptionsLogFields(source),
   });
+  if (handlers.applyConfigSnapshots) {
+    handlers.applyConfigSnapshots(sessionId, snapshots, context);
+    return;
+  }
   if (snapshots.model) {
     if (handlers.applyModelConfigSnapshot) {
       handlers.applyModelConfigSnapshot(sessionId, snapshots.model, context);

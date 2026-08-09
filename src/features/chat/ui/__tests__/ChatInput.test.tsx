@@ -30,10 +30,17 @@ const mockVoiceDictation = {
   stopRecording: vi.fn(),
   toggleRecording: vi.fn(),
 };
+let lastVoiceAutoSubmit: ((text: string) => boolean | Promise<boolean>) | null =
+  null;
 
 vi.mock("../../hooks/useVoiceDictation", () => ({
   useAnyVoiceDictationActive: () => false,
-  useVoiceDictation: () => mockVoiceDictation,
+  useVoiceDictation: (options: {
+    onAutoSubmit?: (text: string) => boolean | Promise<boolean>;
+  }) => {
+    lastVoiceAutoSubmit = options.onAutoSubmit ?? null;
+    return mockVoiceDictation;
+  },
 }));
 
 // Deterministic shortcut modifiers across dev machines and CI: "mod"
@@ -115,7 +122,10 @@ const TEST_PERSONAS: Persona[] = [
 function StatefulChatInput({
   onSend = vi.fn(),
 }: {
-  onSend?: (text: string, personaId?: string) => boolean | Promise<boolean>;
+  onSend?: (
+    text: string,
+    personaId?: string | null,
+  ) => boolean | Promise<boolean>;
 }) {
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(
     "builtin-solo",
@@ -242,7 +252,7 @@ function renderQueuedRecallInput(
   render(
     <ChatInput
       onSend={vi.fn()}
-      queuedMessage={{ text: "queued follow up" }}
+      queuedMessage={{ persona: { kind: "none" }, text: "queued follow up" }}
       onDismissQueue={onDismissQueue}
       onRecallLastUserMessage={onRecallLastUserMessage}
       {...props}
@@ -281,7 +291,7 @@ describe("ChatInput", () => {
     render(
       <ChatInput
         onSend={vi.fn()}
-        queuedMessage={{ text: "queued follow up" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued follow up" }}
       />,
     );
 
@@ -300,7 +310,7 @@ describe("ChatInput", () => {
         surface="bare"
         innerBareSurface
         onSend={vi.fn()}
-        queuedMessage={{ text: "queued follow up" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued follow up" }}
         onDismissQueue={vi.fn()}
         queuedMessageAccessory={<div>Configure a new worktree?</div>}
       />,
@@ -374,6 +384,7 @@ describe("ChatInput", () => {
     mockVoiceDictation.isStarting.mockReturnValue(false);
     mockVoiceDictation.stopRecording.mockReset();
     mockVoiceDictation.toggleRecording.mockReset();
+    lastVoiceAutoSubmit = null;
   });
 
   it("renders with default placeholder", () => {
@@ -394,7 +405,7 @@ describe("ChatInput", () => {
     await user.type(input, "hello");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("hello", null, undefined);
   });
 
   it("does not call onSend on Shift+Enter (newline)", async () => {
@@ -1410,7 +1421,7 @@ describe("ChatInput", () => {
 
     expect(onSend).toHaveBeenCalledWith(
       "",
-      undefined,
+      null,
       expect.arrayContaining([
         expect.objectContaining({
           kind: "file",
@@ -1455,7 +1466,7 @@ describe("ChatInput", () => {
 
     expect(onSend).toHaveBeenCalledWith(
       "check",
-      undefined,
+      null,
       expect.arrayContaining([
         expect.objectContaining({
           kind: "file",
@@ -2250,7 +2261,7 @@ describe("ChatInput", () => {
     await user.type(screen.getByRole("textbox"), "follow up");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("follow up", null, undefined);
   });
 
   it("queues on plain enter during streaming", async () => {
@@ -2269,7 +2280,7 @@ describe("ChatInput", () => {
     await user.type(screen.getByRole("textbox"), "follow up");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("follow up", null, undefined);
     expect(onSteerMessage).not.toHaveBeenCalled();
   });
 
@@ -2307,7 +2318,7 @@ describe("ChatInput", () => {
         canSteerQueuedMessage
         onStop={vi.fn()}
         isStreaming
-        queuedMessage={{ text: "queued msg" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
       />,
     );
 
@@ -2323,7 +2334,10 @@ describe("ChatInput", () => {
 
   it("hides queue edit and dismiss actions when dismissal is disabled", () => {
     render(
-      <ChatInput onSend={vi.fn()} queuedMessage={{ text: "queued msg" }} />,
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
     );
 
     expect(
@@ -2343,7 +2357,12 @@ describe("ChatInput", () => {
         onSteerQueuedMessage={onSteerQueuedMessage}
         canSteerQueuedMessage
         isStreaming
-        queuedMessages={[{ recordId: "head", payload: { text: "queued msg" } }]}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "queued msg" },
+          },
+        ]}
         onEditQueue={vi.fn(() => true)}
         onCancelQueueEdit={vi.fn(() => true)}
         onDismissQueue={vi.fn()}
@@ -2369,8 +2388,14 @@ describe("ChatInput", () => {
       <ChatInput
         onSend={vi.fn()}
         queuedMessages={[
-          { recordId: "head", payload: { text: "first" } },
-          { recordId: "tail", payload: { text: "second" } },
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" }, text: "first" },
+          },
+          {
+            recordId: "tail",
+            payload: { persona: { kind: "none" }, text: "second" },
+          },
         ]}
         onEditQueue={onEditQueue}
         onCancelQueueEdit={onCancelQueueEdit}
@@ -2396,15 +2421,161 @@ describe("ChatInput", () => {
 
     expect(onUpdateQueue).toHaveBeenCalledWith("tail", {
       text: "updated second",
-      personaId: undefined,
-      executionTarget: { harnessId: "goose" },
+      persona: { kind: "none" },
       attachments: undefined,
       sendOptions: undefined,
     });
     expect(onCancelQueueEdit).not.toHaveBeenCalled();
   });
 
-  it("keeps a qualified provider-only target when updating a queued message", async () => {
+  it("routes queued-edit voice auto-submit through the editor-local persona", async () => {
+    const onSend = vi.fn();
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        personas={TEST_PERSONAS}
+        selectedPersonaId="builtin-solo"
+        onPersonaChange={vi.fn()}
+        queuedMessages={[
+          {
+            recordId: "queued-review",
+            payload: {
+              persona: { kind: "persona", id: "reviewer" },
+              text: "original",
+            },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await act(async () => {
+      expect(await lastVoiceAutoSubmit?.("dictated revision")).toBe(true);
+    });
+
+    expect(onUpdateQueue).toHaveBeenCalledWith("queued-review", {
+      text: "dictated revision",
+      persona: { kind: "persona", id: "reviewer" },
+      attachments: undefined,
+      sendOptions: undefined,
+    });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps non-edit voice auto-submit on the normal send path", async () => {
+    const onSend = vi.fn(() => true);
+    render(
+      <ChatInput
+        onSend={onSend}
+        personas={TEST_PERSONAS}
+        selectedPersonaId="builtin-solo"
+      />,
+    );
+
+    await act(async () => {
+      expect(await lastVoiceAutoSubmit?.("dictated message")).toBe(true);
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      "dictated message",
+      "builtin-solo",
+      undefined,
+      expect.any(Object),
+    );
+  });
+
+  it("keeps inherited queue persona editor-local across open and save", async () => {
+    const onPersonaChange = vi.fn();
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        personas={TEST_PERSONAS}
+        selectedPersonaId="builtin-solo"
+        onPersonaChange={onPersonaChange}
+        queuedMessages={[
+          {
+            recordId: "inherited",
+            payload: { persona: { kind: "inherit" }, text: "keep intent" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    expect(onPersonaChange).not.toHaveBeenCalled();
+    expect(screen.queryByText("Solo")).not.toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalledWith("inherited", {
+      text: "keep intent",
+      persona: { kind: "inherit" },
+      attachments: undefined,
+      sendOptions: undefined,
+    });
+    expect(onPersonaChange).not.toHaveBeenCalled();
+  });
+
+  it("changes only the queued persona draft during edit", async () => {
+    const onPersonaChange = vi.fn();
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        personas={TEST_PERSONAS}
+        selectedPersonaId="builtin-solo"
+        onPersonaChange={onPersonaChange}
+        queuedMessages={[
+          {
+            recordId: "inherited",
+            payload: { persona: { kind: "inherit" }, text: "choose reviewer" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    const input = screen.getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "@Rev");
+    await user.click(screen.getByRole("option", { name: /reviewer/i }));
+    await user.type(input, "choose reviewer");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalledWith(
+      "inherited",
+      expect.objectContaining({
+        persona: { kind: "persona", id: "reviewer" },
+      }),
+    );
+    expect(onPersonaChange).not.toHaveBeenCalled();
+  });
+
+  it("does not stamp the live session target onto an edited queued message", async () => {
     const onUpdateQueue = vi.fn(() => true);
     const user = userEvent.setup();
     render(
@@ -2416,7 +2587,12 @@ describe("ChatInput", () => {
           harnessId: "goose",
           modelProviderId: "databricks_v2",
         }}
-        queuedMessages={[{ recordId: "queued", payload: { text: "continue" } }]}
+        queuedMessages={[
+          {
+            recordId: "queued",
+            payload: { persona: { kind: "none" }, text: "continue" },
+          },
+        ]}
         onEditQueue={vi.fn(() => true)}
         onCancelQueueEdit={vi.fn(() => true)}
         onDismissQueue={vi.fn()}
@@ -2431,11 +2607,7 @@ describe("ChatInput", () => {
 
     expect(onUpdateQueue).toHaveBeenCalledWith("queued", {
       text: "continue",
-      personaId: undefined,
-      executionTarget: {
-        harnessId: "goose",
-        modelProviderId: "databricks_v2",
-      },
+      persona: { kind: "none" },
       attachments: undefined,
       sendOptions: undefined,
     });
@@ -2451,6 +2623,7 @@ describe("ChatInput", () => {
           {
             recordId: "head",
             payload: {
+              persona: { kind: "none" },
               text: "check this diff",
               sendOptions: {
                 assistantPrompt: "Use code-review.",
@@ -2492,7 +2665,12 @@ describe("ChatInput", () => {
     const { unmount } = render(
       <ChatInput
         onSend={vi.fn()}
-        queuedMessages={[{ recordId: "head", payload: { text: "queued msg" } }]}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "queued msg" },
+          },
+        ]}
         onEditQueue={onEditQueue}
         onCancelQueueEdit={onCancelQueueEdit}
         onDismissQueue={vi.fn()}
@@ -2516,7 +2694,10 @@ describe("ChatInput", () => {
 
     function DismissEditedQueueInput() {
       const [queuedMessages, setQueuedMessages] = useState([
-        { recordId: "head", payload: { text: "queued msg" } },
+        {
+          recordId: "head",
+          payload: { persona: { kind: "none" as const }, text: "queued msg" },
+        },
       ]);
       return (
         <ChatInput
@@ -2542,7 +2723,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onUpdateQueue).not.toHaveBeenCalled();
-    expect(onSend).toHaveBeenCalledWith("new prompt", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("new prompt", null, undefined);
   });
 
   it("hides reliable startup handoffs from the queue bar", () => {
@@ -2550,6 +2731,7 @@ describe("ChatInput", () => {
       <ChatInput
         onSend={vi.fn()}
         queuedMessage={{
+          persona: { kind: "none" },
           text: "first message",
           showInComposer: false,
         }}
@@ -2569,8 +2751,8 @@ describe("ChatInput", () => {
         onDismissQueue={onDismissQueue}
         onPersonaChange={onPersonaChange}
         queuedMessage={{
+          persona: { kind: "persona", id: "reviewer" },
           text: "queued msg",
-          personaId: "reviewer",
           attachments: [
             {
               id: "file-1",
@@ -2588,7 +2770,7 @@ describe("ChatInput", () => {
     );
 
     expect(onDismissQueue).toHaveBeenCalledOnce();
-    expect(onPersonaChange).toHaveBeenCalledWith("reviewer");
+    expect(onPersonaChange).not.toHaveBeenCalled();
     expect(screen.getByRole("textbox")).toHaveValue("queued msg");
     expect(screen.getByRole("textbox")).toHaveFocus();
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
@@ -2605,8 +2787,8 @@ describe("ChatInput", () => {
       const [queuedMessage, setQueuedMessage] = useState<
         ChatInputComposerActions["queuedMessage"]
       >({
+        persona: { kind: "persona", id: "reviewer" },
         text: "@Reviewer check this diff",
-        personaId: "reviewer",
         attachments: [
           {
             id: "file-1",
@@ -2683,7 +2865,7 @@ describe("ChatInput", () => {
     );
   });
 
-  it("preserves queued send options when resending an edited message", async () => {
+  it("drops derived execution context when resending an edited message", async () => {
     const onSend = vi.fn(() => true);
     const onDismissQueue = vi.fn();
     const user = userEvent.setup();
@@ -2692,11 +2874,13 @@ describe("ChatInput", () => {
       const [queuedMessage, setQueuedMessage] = useState<
         ChatInputComposerActions["queuedMessage"]
       >({
+        persona: { kind: "none" },
         text: "check this diff",
         sendOptions: {
           assistantPrompt: "Use these skills for this request: code-review.",
           chips: [{ label: "code-review", type: "skill" as const }],
           displayText: "check this diff",
+          executionSystemPrompt: "stale queued context",
         },
       });
 
@@ -2725,7 +2909,7 @@ describe("ChatInput", () => {
     expect(onDismissQueue).toHaveBeenCalledOnce();
     expect(onSend).toHaveBeenCalledWith(
       "check this diff carefully",
-      undefined,
+      null,
       undefined,
       {
         assistantPrompt: "Use these skills for this request: code-review.",
@@ -2746,8 +2930,8 @@ describe("ChatInput", () => {
       const [queuedMessage, setQueuedMessage] = useState<
         ChatInputComposerActions["queuedMessage"]
       >({
+        persona: { kind: "persona", id: "builtin-solo" },
         text: "queued msg",
-        personaId: "builtin-solo",
         sendOptions: {
           assistantPrompt: "Use these skills for this request: code-review.",
           chips: [
@@ -2816,6 +3000,7 @@ describe("ChatInput", () => {
       const [queuedMessage, setQueuedMessage] = useState<
         ChatInputComposerActions["queuedMessage"]
       >({
+        persona: { kind: "none" },
         text: "queued from another session",
         sendOptions: {
           acpGooseMetadata: {
@@ -2847,7 +3032,7 @@ describe("ChatInput", () => {
     await user.type(input, "now from me");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("now from me", undefined, undefined, {
+    expect(onSend).toHaveBeenCalledWith("now from me", null, undefined, {
       acpGooseMetadata: {
         threadId: "thread-1",
       },
@@ -2864,7 +3049,7 @@ describe("ChatInput", () => {
         onSteerQueuedMessage={onSteerQueuedMessage}
         canSteerQueuedMessage
         isStreaming
-        queuedMessage={{ text: "queued msg" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
       />,
     );
 
@@ -2884,7 +3069,7 @@ describe("ChatInput", () => {
         onSteerQueuedMessage={onSteerQueuedMessage}
         canSteerQueuedMessage
         isStreaming
-        queuedMessage={{ text: "queued msg" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
       />,
     );
 
@@ -2892,11 +3077,11 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
-    expect(onSend).toHaveBeenCalledWith("another draft", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("another draft", null, undefined);
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
-  it("steers the current draft when a queued message already exists", async () => {
+  it("queues the current draft behind an existing head instead of steering it", async () => {
     const onSend = vi.fn();
     const onSteerMessage = vi.fn();
     const onSteerQueuedMessage = vi.fn();
@@ -2910,41 +3095,42 @@ describe("ChatInput", () => {
         canSteerMessage
         canSteerQueuedMessage
         isStreaming
-        queuedMessage={{ text: "queued msg" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
       />,
     );
 
-    await user.type(screen.getByRole("textbox"), "new steering draft");
+    await user.type(screen.getByRole("textbox"), "new queued draft");
     await user.keyboard("{Enter}");
 
-    expect(onSteerMessage).toHaveBeenCalledWith(
-      "new steering draft",
-      undefined,
-      undefined,
-    );
+    expect(onSteerMessage).not.toHaveBeenCalled();
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("new queued draft", null, undefined);
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
-  it("unlocks an edited queued record before steering its composer text", async () => {
+  it("updates an edited queued record instead of steering ahead of it", async () => {
+    const onSend = vi.fn();
     const onSteerMessage = vi.fn();
     const onCancelQueueEdit = vi.fn(() => true);
+    const onUpdateQueue = vi.fn(() => true);
     const user = userEvent.setup();
     localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
     render(
       <ChatInput
-        onSend={vi.fn()}
+        onSend={onSend}
         onSteerMessage={onSteerMessage}
         canSteerMessage
         isStreaming
         queuedMessages={[
-          { recordId: "head", payload: { text: "queued draft" } },
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" }, text: "queued draft" },
+          },
         ]}
         onEditQueue={vi.fn(() => true)}
         onCancelQueueEdit={onCancelQueueEdit}
         onDismissQueue={vi.fn()}
-        onUpdateQueue={vi.fn(() => true)}
+        onUpdateQueue={onUpdateQueue}
       />,
     );
 
@@ -2952,15 +3138,18 @@ describe("ChatInput", () => {
       screen.getByRole("button", { name: "Edit queued message" }),
     );
     await user.clear(screen.getByRole("textbox"));
-    await user.type(screen.getByRole("textbox"), "steer this instead");
+    await user.type(screen.getByRole("textbox"), "keep this queued");
     await user.keyboard("{Enter}");
 
-    expect(onSteerMessage).toHaveBeenCalledWith(
-      "steer this instead",
-      undefined,
-      undefined,
-    );
-    expect(onCancelQueueEdit).toHaveBeenCalledWith("head");
+    expect(onSteerMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onUpdateQueue).toHaveBeenCalledWith("head", {
+      text: "keep this queued",
+      persona: { kind: "none" },
+      attachments: undefined,
+      sendOptions: undefined,
+    });
+    expect(onCancelQueueEdit).not.toHaveBeenCalled();
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
@@ -2981,7 +3170,7 @@ describe("ChatInput", () => {
     await user.type(screen.getByRole("textbox"), "follow up");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
 
-    expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("follow up", null, undefined);
     expect(onSteerMessage).not.toHaveBeenCalled();
   });
 
@@ -3047,6 +3236,7 @@ describe("ChatInput", () => {
       const [queuedMessage, setQueuedMessage] = useState<
         ChatInputComposerActions["queuedMessage"]
       >({
+        persona: { kind: "none" },
         text: "check this diff",
         sendOptions: {
           assistantPrompt: "Use these skills for this request: code-review.",
@@ -3172,18 +3362,14 @@ describe("ChatInput", () => {
       <ChatInput
         onSend={onSend}
         isStreaming
-        queuedMessage={{ text: "queued msg" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
       />,
     );
 
     await user.type(screen.getByRole("textbox"), "another message");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "another message",
-      undefined,
-      undefined,
-    );
+    expect(onSend).toHaveBeenCalledWith("another message", null, undefined);
     expect(screen.getByRole("textbox")).toHaveValue("");
   });
 
@@ -3196,18 +3382,14 @@ describe("ChatInput", () => {
       <ChatInput
         onSend={onSend}
         isStreaming
-        queuedMessage={{ text: "queued msg" }}
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
       />,
     );
 
     await user.type(screen.getByRole("textbox"), "another message");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "another message",
-      undefined,
-      undefined,
-    );
+    expect(onSend).toHaveBeenCalledWith("another message", null, undefined);
     expect(mockVoiceDictation.stopRecording).toHaveBeenCalled();
   });
 
@@ -3765,8 +3947,8 @@ describe("ChatInput", () => {
       onDismissQueue,
       onPersonaChange,
       queuedMessage: {
+        persona: { kind: "persona", id: "persona-1" },
         text: "queued follow up",
-        personaId: "persona-1",
         attachments: [
           {
             id: "file-1",
@@ -3782,7 +3964,7 @@ describe("ChatInput", () => {
 
     expect(onDismissQueue).toHaveBeenCalledTimes(1);
     expect(onRecallLastUserMessage).not.toHaveBeenCalled();
-    expect(onPersonaChange).toHaveBeenCalledWith("persona-1");
+    expect(onPersonaChange).not.toHaveBeenCalled();
     expect(recallTextbox()).toHaveValue("queued follow up");
     expect(recallTextbox().selectionStart).toBe("queued follow up".length);
     expect(screen.getByText("notes.txt")).toBeInTheDocument();
@@ -3866,7 +4048,7 @@ describe("ChatInput", () => {
     expect(onSend).not.toHaveBeenCalled();
 
     await user.keyboard("{Alt>}{Enter}{/Alt}");
-    expect(onSend).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("hello", null, undefined);
   });
 
   it("ignores a stored override that conflicts with another command default", async () => {
@@ -3880,6 +4062,6 @@ describe("ChatInput", () => {
     await user.type(screen.getByRole("textbox"), "hello");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("hello", null, undefined);
   });
 });

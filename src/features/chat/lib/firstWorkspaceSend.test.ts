@@ -112,9 +112,10 @@ describe("first workspace send", () => {
   it("converts an existing transport-ready first send into the choice flow", () => {
     const onNeedsName = vi.fn();
     const onChoice = vi.fn();
-    useChatStore
-      .getState()
-      .enqueueTransportReadyMessage("s1", { text: "from Home" });
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "from Home",
+    });
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (!record) throw new Error("missing queued record");
 
@@ -136,9 +137,47 @@ describe("first workspace send", () => {
     expect(onChoice).toHaveBeenCalledOnce();
   });
 
+  it("normalizes mixed context when converting an existing queued first send", () => {
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "persona", id: "reviewer", name: "Reviewer" },
+      text: "from Home",
+      sendOptions: {
+        capturedPersonaSystemPrompt: "Review carefully.",
+        executionSystemPrompt: "stale workspace context",
+        assistantPrompt: "Use the selected skill.",
+      },
+    });
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    if (!record) throw new Error("missing queued record");
+
+    expect(
+      prepareExistingFirstSend("s1", record.recordId, {
+        onNeedsName: vi.fn(),
+        onChoice: vi.fn(),
+      }),
+    ).toBe(true);
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toEqual({
+      text: "from Home",
+      persona: { kind: "persona", id: "reviewer", name: "Reviewer" },
+      sendOptions: {
+        capturedPersonaSystemPrompt: "Review carefully.",
+        executionSystemPrompt: undefined,
+        assistantPrompt: "Use the selected skill.",
+      },
+    });
+  });
+
   it("queues before the choice and preserves the exact payload", () => {
     const onNeedsName = vi.fn();
-    expect(acceptFirstSend("s1", { text: "hello" }, { onNeedsName })).toEqual({
+    expect(
+      acceptFirstSend(
+        "s1",
+        { persona: { kind: "inherit" }, text: "hello" },
+        { onNeedsName },
+      ),
+    ).toEqual({
       accepted: true,
       deferred: true,
       needsName: false,
@@ -152,6 +191,36 @@ describe("first workspace send", () => {
     expect(onNeedsName).not.toHaveBeenCalled();
   });
 
+  it("keeps immutable intent but drops mixed execution context when deferring", () => {
+    expect(
+      acceptFirstSend(
+        "s1",
+        {
+          text: "hello",
+          persona: { kind: "persona", id: "reviewer", name: "Reviewer" },
+          sendOptions: {
+            capturedPersonaSystemPrompt: "Review carefully.",
+            executionSystemPrompt: "stale workspace context",
+            assistantPrompt: "Use the selected skill.",
+          },
+        },
+        { onNeedsName: vi.fn() },
+      ),
+    ).toMatchObject({ accepted: true, deferred: true });
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toEqual({
+      text: "hello",
+      persona: { kind: "persona", id: "reviewer", name: "Reviewer" },
+      sendOptions: {
+        capturedPersonaSystemPrompt: "Review carefully.",
+        executionSystemPrompt: undefined,
+        assistantPrompt: "Use the selected skill.",
+      },
+    });
+  });
+
   it("keeps the prior naming flow for non-worktree startup modes", () => {
     const onNeedsName = vi.fn();
     useProjectStore.setState({
@@ -163,7 +232,13 @@ describe("first workspace send", () => {
       ],
     });
 
-    expect(acceptFirstSend("s1", { text: "hello" }, { onNeedsName })).toEqual({
+    expect(
+      acceptFirstSend(
+        "s1",
+        { persona: { kind: "inherit" }, text: "hello" },
+        { onNeedsName },
+      ),
+    ).toEqual({
       accepted: true,
       deferred: true,
       needsName: false,
@@ -179,7 +254,11 @@ describe("first workspace send", () => {
 
   it("opens naming only after Yes and keeps the queue record authoritative", () => {
     const onNeedsName = vi.fn();
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName },
+    );
     const before = useChatStore.getState().queuedMessageBySession.s1?.[0];
 
     expect(chooseDeferredWorkspaceSetup("s1", true)).toBe(true);
@@ -195,7 +274,11 @@ describe("first workspace send", () => {
   });
 
   it("returns from naming to the choice without replacing the queued record", () => {
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     expect(chooseDeferredWorkspaceSetup("s1", true)).toBe(true);
     const before = useChatStore.getState().queuedMessageBySession.s1;
 
@@ -217,7 +300,11 @@ describe("first workspace send", () => {
       applied: true,
       target: { harnessId: "goose" },
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const before = useChatStore.getState().queuedMessageBySession.s1?.[0];
 
     expect(chooseDeferredWorkspaceSetup("s1", false)).toBe(true);
@@ -235,7 +322,9 @@ describe("first workspace send", () => {
   });
 
   it("requires a name for non-UI callers without accepting", () => {
-    expect(acceptFirstSend("s1", { text: "hello" })).toEqual({
+    expect(
+      acceptFirstSend("s1", { persona: { kind: "inherit" }, text: "hello" }),
+    ).toEqual({
       accepted: false,
       deferred: false,
       needsName: true,
@@ -244,9 +333,15 @@ describe("first workspace send", () => {
   });
 
   it("rejects a second send while the deferred first-send slot is occupied", () => {
-    acceptFirstSend("s1", { text: "first" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "first" },
+      { onNeedsName: vi.fn() },
+    );
 
-    expect(acceptFirstSend("s1", { text: "second" })).toEqual({
+    expect(
+      acceptFirstSend("s1", { persona: { kind: "inherit" }, text: "second" }),
+    ).toEqual({
       accepted: false,
       deferred: false,
       needsName: false,
@@ -259,7 +354,11 @@ describe("first workspace send", () => {
 
   it("fails safely when the project workspace configuration changes during naming", async () => {
     const onNeedsName = vi.fn();
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
     useProjectStore.setState({
@@ -282,7 +381,11 @@ describe("first workspace send", () => {
   });
 
   it("stops stale planning before config apply without calling it", async () => {
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
     vi.mocked(planProjectChatWorkspaces).mockImplementationOnce(async () => {
@@ -331,7 +434,11 @@ describe("first workspace send", () => {
         },
       ],
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -374,7 +481,11 @@ describe("first workspace send", () => {
         },
       ],
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -417,7 +528,11 @@ describe("first workspace send", () => {
         },
       ],
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -446,7 +561,11 @@ describe("first workspace send", () => {
         finishApply = resolve;
       }),
     );
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -474,9 +593,10 @@ describe("first workspace send", () => {
     });
 
     expect(
-      useChatStore
-        .getState()
-        .updateQueuedMessage("s1", record.recordId, { text: "edited" }),
+      useChatStore.getState().updateQueuedMessage("s1", record.recordId, {
+        persona: { kind: "inherit" },
+        text: "edited",
+      }),
     ).toBe(true);
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.[0],
@@ -496,7 +616,11 @@ describe("first workspace send", () => {
       applied: true,
       target: { harnessId: "goose" },
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -514,7 +638,11 @@ describe("first workspace send", () => {
     useChatSessionStore.setState({
       sessions: [{ ...session(), executionTarget: undefined }],
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -586,7 +714,11 @@ describe("first workspace send", () => {
         },
       ],
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
     useChatStore.getState().promoteSessionId("s1", "backend-s1");
@@ -609,7 +741,11 @@ describe("first workspace send", () => {
     useChatSessionStore.setState({
       sessions: [{ ...session(), executionTarget: undefined }],
     });
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
 
@@ -620,7 +756,11 @@ describe("first workspace send", () => {
   });
 
   it("releases failure only by Send anyway or an explicit matching user edit", () => {
-    acceptFirstSend("s1", { text: "hello" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (record?.kind !== "deferred") throw new Error("missing deferred record");
     useChatStore.getState().updateDeferredMessage("s1", record.recordId, {
@@ -640,7 +780,11 @@ describe("first workspace send", () => {
     useChatSessionStore
       .getState()
       .patchSession("s1", { workspaceAttachments: [] });
-    acceptFirstSend("s1", { text: "again" }, { onNeedsName: vi.fn() });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "again" },
+      { onNeedsName: vi.fn() },
+    );
     const again = useChatStore.getState().queuedMessageBySession.s1?.[0];
     if (again?.kind !== "deferred") throw new Error("missing second record");
     expect(releaseDeferredWorkspaceSend("s1", again.recordId, true)).toBe(true);

@@ -10,7 +10,18 @@ const mockAcpCancelSession = vi.fn();
 const mockAcpLoadSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
-  acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
+  acpSendMessage: (...args: unknown[]) => {
+    const result = mockAcpSendMessage(...args);
+    const options = args[2] as
+      | {
+          onPromptDispatching?: () => void;
+          onPromptDispatched?: () => void;
+        }
+      | undefined;
+    options?.onPromptDispatching?.();
+    options?.onPromptDispatched?.();
+    return result;
+  },
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
 }));
@@ -97,12 +108,16 @@ describe("useChat persona preparation", () => {
       );
     });
 
-    expect(ensurePrepared).toHaveBeenCalledWith("persona-a", {
-      harnessId: "goose",
-      modelProviderId: "databricks_v2",
-      modelId: "goose-gpt-5-6-sol",
-      modelName: "goose-gpt-5-6-sol",
-    });
+    expect(ensurePrepared).toHaveBeenCalledWith(
+      "persona-a",
+      {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-6-sol",
+        modelName: "goose-gpt-5-6-sol",
+      },
+      undefined,
+    );
   });
 
   it("prepares the override persona before prompting", async () => {
@@ -125,6 +140,9 @@ describe("useChat persona preparation", () => {
     expect(ensurePrepared).toHaveBeenCalledWith("persona-b");
     expect(mockAcpSendMessage).toHaveBeenCalledWith("session-1", "Hello", {
       systemPrompt: undefined,
+      goose: undefined,
+      onPromptDispatching: expect.any(Function),
+      onPromptDispatched: expect.any(Function),
       personaId: "persona-b",
       personaName: "Persona B",
       images: undefined,

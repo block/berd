@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
+import { loadSessionMessagesAndPrepare } from "@/features/chat/lib/sessionActivation";
 import type { SessionHandoffSnapshotAvailable } from "@/features/chat/lib/sessionHandoffEvents";
 import {
   joinSessionHandoff,
@@ -52,6 +52,7 @@ vi.mock("@/shared/profile/buildProfile", () => ({
 vi.mock("@/features/chat/lib/sessionActivation", () => ({
   activateSession: vi.fn(),
   loadSessionMessages: vi.fn().mockResolvedValue(undefined),
+  loadSessionMessagesAndPrepare: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/features/chat/lib/sessionHandoffEvents", () => ({
@@ -210,7 +211,7 @@ describe("SessionWindowApp", () => {
       hasHydratedSessions: true,
       isRightRailOpen: false,
     });
-    vi.mocked(loadSessionMessages).mockClear();
+    vi.mocked(loadSessionMessagesAndPrepare).mockClear();
     vi.mocked(listSessionWindows).mockReset();
     vi.mocked(listSessionWindows).mockResolvedValue([]);
     vi.mocked(joinSessionHandoff).mockReset();
@@ -255,7 +256,7 @@ describe("SessionWindowApp", () => {
       "data-read-only-status",
       "Finishing current response...",
     );
-    expect(loadSessionMessages).not.toHaveBeenCalled();
+    expect(loadSessionMessagesAndPrepare).not.toHaveBeenCalled();
   });
 
   it("shows ordinary Context state in a read-only builder mirror", async () => {
@@ -290,7 +291,9 @@ describe("SessionWindowApp", () => {
   it("mounts owned chat windows while persisted history is still loading", async () => {
     seedSession();
     const historyLoad = deferred<boolean>();
-    vi.mocked(loadSessionMessages).mockReturnValueOnce(historyLoad.promise);
+    vi.mocked(loadSessionMessagesAndPrepare).mockReturnValueOnce(
+      historyLoad.promise,
+    );
 
     renderSessionWindow();
 
@@ -298,7 +301,7 @@ describe("SessionWindowApp", () => {
       "data-read-only-status",
       "",
     );
-    expect(loadSessionMessages).toHaveBeenCalledWith("session-1", {
+    expect(loadSessionMessagesAndPrepare).toHaveBeenCalledWith("session-1", {
       force: undefined,
     });
 
@@ -343,6 +346,7 @@ describe("SessionWindowApp", () => {
           kind: "transport-ready",
           recordId: "queued-during-detach",
           payload: {
+            persona: { kind: "inherit" },
             text: "follow up",
             sendOptions: {
               userMessageMetadata: { origin: "berdctl_cross_session" },
@@ -371,7 +375,7 @@ describe("SessionWindowApp", () => {
   it("applies final snapshot and becomes writable without persisted reload", async () => {
     seedSession();
     await renderMirrorSessionWindow();
-    vi.mocked(loadSessionMessages).mockClear();
+    vi.mocked(loadSessionMessagesAndPrepare).mockClear();
     const message = textMessage("m1", "done");
     vi.mocked(readSessionHandoffSnapshot).mockResolvedValueOnce(
       handoffSnapshot(message, true),
@@ -392,7 +396,7 @@ describe("SessionWindowApp", () => {
         "",
       );
     });
-    expect(loadSessionMessages).not.toHaveBeenCalled();
+    expect(loadSessionMessagesAndPrepare).not.toHaveBeenCalled();
   });
 
   it("can open the context panel from the session window top bar", async () => {
@@ -440,7 +444,7 @@ describe("SessionWindowApp", () => {
   it("does not reload persisted history when ownership changes before the final snapshot is pulled", async () => {
     seedSession();
     await renderMirrorSessionWindow();
-    vi.mocked(loadSessionMessages).mockClear();
+    vi.mocked(loadSessionMessagesAndPrepare).mockClear();
 
     act(() => {
       useSessionWindowStore.getState().setSnapshot([
@@ -458,7 +462,7 @@ describe("SessionWindowApp", () => {
       "data-read-only-status",
       "Finishing current response...",
     );
-    expect(loadSessionMessages).not.toHaveBeenCalled();
+    expect(loadSessionMessagesAndPrepare).not.toHaveBeenCalled();
   });
 
   it("shows a reload action when no handoff snapshot arrives", async () => {
@@ -473,7 +477,7 @@ describe("SessionWindowApp", () => {
 
     await waitFor(() => {
       expect(recoverSessionHandoff).toHaveBeenCalledWith("session-1");
-      expect(loadSessionMessages).toHaveBeenCalledWith("session-1", {
+      expect(loadSessionMessagesAndPrepare).toHaveBeenCalledWith("session-1", {
         force: true,
       });
     });

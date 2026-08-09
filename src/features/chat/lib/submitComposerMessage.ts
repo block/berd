@@ -78,15 +78,11 @@ export async function submitComposerMessage({
   const sendResult = mergedSendOptions
     ? onSend(
         submittedText,
-        selectedPersonaId ?? undefined,
+        selectedPersonaId,
         submittedAttachments,
         mergedSendOptions,
       )
-    : onSend(
-        submittedText,
-        selectedPersonaId ?? undefined,
-        submittedAttachments,
-      );
+    : onSend(submittedText, selectedPersonaId, submittedAttachments);
   const accepted = isPromiseLike<boolean>(sendResult)
     ? await sendResult
     : sendResult;

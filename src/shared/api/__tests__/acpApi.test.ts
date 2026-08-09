@@ -148,6 +148,46 @@ describe("promptForText", () => {
     expect(stopIntercepting).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
+  it("acknowledges transport only around the real client prompt invocation", async () => {
+    const order: string[] = [];
+    const clientPrompt = vi.fn(() => {
+      order.push("client.prompt");
+      return Promise.resolve({ stopReason: "end_turn" });
+    });
+    mocks.getClient.mockImplementation(async () => {
+      order.push("getClient");
+      return { prompt: clientPrompt };
+    });
+    const { prompt } = await import("../acpApi");
+
+    await prompt("session-1", [{ type: "text", text: "hello" }], undefined, {
+      onPromptDispatching: () => order.push("dispatching"),
+      onPromptDispatched: () => order.push("dispatched"),
+    });
+
+    expect(order).toEqual([
+      "getClient",
+      "dispatching",
+      "client.prompt",
+      "dispatched",
+    ]);
+  });
+
+  it("does not acknowledge transport when client acquisition fails", async () => {
+    const onPromptDispatching = vi.fn();
+    const onPromptDispatched = vi.fn();
+    mocks.getClient.mockRejectedValueOnce(new Error("client unavailable"));
+    const { prompt } = await import("../acpApi");
+
+    await expect(
+      prompt("session-1", [{ type: "text", text: "hello" }], undefined, {
+        onPromptDispatching,
+        onPromptDispatched,
+      }),
+    ).rejects.toThrow("client unavailable");
+    expect(onPromptDispatching).not.toHaveBeenCalled();
+    expect(onPromptDispatched).not.toHaveBeenCalled();
+  });
 });
 
 describe("listSessionsPage", () => {

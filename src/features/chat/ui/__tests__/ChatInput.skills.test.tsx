@@ -769,16 +769,11 @@ describe("ChatInput skill mentions", () => {
     await user.type(screen.getByRole("textbox"), "check this diff");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "check this diff",
-      undefined,
-      undefined,
-      {
-        assistantPrompt: "Use these skills for this request: code-review.",
-        chips: [{ label: "code-review", type: "skill" }],
-        displayText: "check this diff",
-      },
-    );
+    expect(onSend).toHaveBeenCalledWith("check this diff", null, undefined, {
+      assistantPrompt: "Use these skills for this request: code-review.",
+      chips: [{ label: "code-review", type: "skill" }],
+      displayText: "check this diff",
+    });
   });
 
   it("clears selected skill chips when the session controller clears the draft during send", async () => {
@@ -814,16 +809,11 @@ describe("ChatInput skill mentions", () => {
     await user.type(input, "check this diff");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "check this diff",
-      undefined,
-      undefined,
-      {
-        assistantPrompt: "Use these skills for this request: code-review.",
-        chips: [{ label: "code-review", type: "skill" }],
-        displayText: "check this diff",
-      },
-    );
+    expect(onSend).toHaveBeenCalledWith("check this diff", null, undefined, {
+      assistantPrompt: "Use these skills for this request: code-review.",
+      chips: [{ label: "code-review", type: "skill" }],
+      displayText: "check this diff",
+    });
 
     await waitFor(() => {
       expect(screen.queryByText("code-review")).not.toBeInTheDocument();
@@ -853,16 +843,11 @@ describe("ChatInput skill mentions", () => {
     await user.type(input, "/code-review check this diff");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "check this diff",
-      undefined,
-      undefined,
-      {
-        assistantPrompt: "Use these skills for this request: code-review.",
-        chips: [{ label: "code-review", type: "skill" }],
-        displayText: "check this diff",
-      },
-    );
+    expect(onSend).toHaveBeenCalledWith("check this diff", null, undefined, {
+      assistantPrompt: "Use these skills for this request: code-review.",
+      chips: [{ label: "code-review", type: "skill" }],
+      displayText: "check this diff",
+    });
   });
 
   it("expands colon-qualified slash skill commands before sending", async () => {
@@ -887,16 +872,11 @@ describe("ChatInput skill mentions", () => {
     await user.type(input, "/github:github triage this PR");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "triage this PR",
-      undefined,
-      undefined,
-      {
-        assistantPrompt: "Use these skills for this request: github:github.",
-        chips: [{ label: "github:github", type: "skill" }],
-        displayText: "triage this PR",
-      },
-    );
+    expect(onSend).toHaveBeenCalledWith("triage this PR", null, undefined, {
+      assistantPrompt: "Use these skills for this request: github:github.",
+      chips: [{ label: "github:github", type: "skill" }],
+      displayText: "triage this PR",
+    });
   });
 
   it("expands selected skill chips for voice auto-submit", async () => {
@@ -924,16 +904,11 @@ describe("ChatInput skill mentions", () => {
       expect(accepted).toBe(true);
     });
 
-    expect(onSend).toHaveBeenCalledWith(
-      "check this diff",
-      undefined,
-      undefined,
-      {
-        assistantPrompt: "Use these skills for this request: code-review.",
-        chips: [{ label: "code-review", type: "skill" }],
-        displayText: "check this diff",
-      },
-    );
+    expect(onSend).toHaveBeenCalledWith("check this diff", null, undefined, {
+      assistantPrompt: "Use these skills for this request: code-review.",
+      chips: [{ label: "code-review", type: "skill" }],
+      displayText: "check this diff",
+    });
     expect(onSkillsChange).toHaveBeenCalledWith([]);
   });
 
@@ -959,6 +934,6 @@ describe("ChatInput skill mentions", () => {
     await user.type(input, "/compact");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("/compact", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith("/compact", null, undefined);
   });
 });

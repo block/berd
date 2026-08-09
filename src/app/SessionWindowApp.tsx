@@ -14,7 +14,7 @@ import {
 } from "@/features/chat/lib/chatCapabilityVisibility";
 import {
   activateSession,
-  loadSessionMessages,
+  loadSessionMessagesAndPrepare,
 } from "@/features/chat/lib/sessionActivation";
 import {
   joinSessionHandoff,
@@ -162,7 +162,7 @@ export function SessionWindowApp({
   const loadOwnedSession = useCallback(
     async (options: { force?: boolean } = {}) => {
       activateSession(sessionId);
-      await loadSessionMessages(sessionId, { force: options.force });
+      await loadSessionMessagesAndPrepare(sessionId, { force: options.force });
     },
     [sessionId],
   );

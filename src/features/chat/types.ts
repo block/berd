@@ -45,9 +45,19 @@ export interface ChatSkillDraft {
 }
 
 export interface ChatSendOptions {
-  /** Internal snapshot used by delayed sends; not forwarded to ACP. */
+  /** Internal target snapshot owned by the active queued dispatch attempt. */
   sessionSelection?: SessionExecutionTarget;
+  /** Coordinator token proving ownership of sessionSelection. */
+  sessionSelectionToken?: symbol;
   systemPrompt?: string;
+  /** Internal queue ownership check at the transcript commit boundary. */
+  beforeUserMessageCommitted?: () => void;
+  /** Internal notification that this attempt has committed its user turn. */
+  onUserMessageCommitted?: () => void;
+  /** Fully composed execution prompt captured for a queued send. */
+  executionSystemPrompt?: string;
+  /** Persona-only prompt captured while workspace context is still loading. */
+  capturedPersonaSystemPrompt?: string;
   displayText?: string;
   assistantPrompt?: string;
   chips?: MessageChip[];
@@ -57,7 +67,7 @@ export interface ChatSendOptions {
 
 export type ChatInputSendHandler = (
   text: string,
-  personaId?: string,
+  personaId?: string | null,
   attachments?: ChatAttachmentDraft[],
   options?: ChatSendOptions,
 ) => boolean | Promise<boolean>;

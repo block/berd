@@ -125,7 +125,7 @@ describe("ChatInput attachments", () => {
 
     expect(onSend).toHaveBeenCalledWith(
       "",
-      undefined,
+      null,
       expect.arrayContaining([
         expect.objectContaining({
           kind: "file",

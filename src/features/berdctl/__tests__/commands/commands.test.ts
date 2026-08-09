@@ -14,6 +14,7 @@ import {
 } from "@/features/berdctl/commands/types";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import { resetSessionTargetCoordinatorsForTests } from "@/features/chat/lib/sessionTargetCoordinator";
 import {
   applyPendingSessionWorkspaceActivation,
   getPendingSessionWorkspaceActivation,
@@ -79,7 +80,18 @@ vi.mock("@/shared/api/acp", () => ({
   acpListSessionsPage: (...args: unknown[]) =>
     mocks.acpListSessionsPage(...args),
   acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
-  acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
+  acpSendMessage: (...args: unknown[]) => {
+    const result = mocks.acpSendMessage(...args);
+    const options = args[2] as
+      | {
+          onPromptDispatching?: () => void;
+          onPromptDispatched?: () => void;
+        }
+      | undefined;
+    options?.onPromptDispatching?.();
+    options?.onPromptDispatched?.();
+    return result;
+  },
   acpSteerMessage: (...args: unknown[]) => mocks.acpSteerMessage(...args),
   discoverAcpProviders: (...args: unknown[]) =>
     mocks.discoverAcpProviders(...args),
@@ -311,6 +323,7 @@ async function expectCommandError(
 }
 
 beforeEach(() => {
+  resetSessionTargetCoordinatorsForTests();
   localStorage.removeItem("goose:chat-workspace-metadata");
   useChatSessionStore.setState({
     sessions: [],
@@ -1073,7 +1086,7 @@ describe("sessions.send", () => {
     expect(getPendingSessionWorkspaceActivation("session-1")).toBeNull();
   });
 
-  it("prepares from session metadata refreshed during hydration", async () => {
+  it("refreshes non-target session metadata during hydration without changing the attempt target", async () => {
     const refreshedProject = makeProject({ id: "project-refreshed" });
     mocks.listProjects.mockResolvedValue([refreshedProject]);
     mocks.listPersonas.mockResolvedValue([
@@ -1091,14 +1104,6 @@ describe("sessions.send", () => {
       workingDir: "/old/cwd",
     });
     mocks.loadSessionMessages.mockImplementationOnce(async () => {
-      useChatSessionStore
-        .getState()
-        .replaceSessionExecutionTarget("session-1", {
-          harnessId: "codex-acp",
-          modelProviderId: "codex-acp",
-          modelId: "gpt-6",
-          modelName: "gpt-6",
-        });
       useChatSessionStore.getState().patchSession("session-1", {
         personaId: "agent-refreshed",
         projectId: "project-refreshed",
@@ -1123,9 +1128,9 @@ describe("sessions.send", () => {
     );
     expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
       "session-1",
-      "codex-acp",
+      "old-provider",
       "/resolved/cwd",
-      { modelId: "gpt-6" },
+      { modelId: "old-model" },
     );
     await vi.waitFor(() => {
       expect(mocks.acpSendMessage).toHaveBeenCalledWith(
@@ -1167,7 +1172,7 @@ describe("sessions.send", () => {
   });
 
   it("does not inject a prompt when history hydration fails", async () => {
-    mockSessionFound();
+    mockSessionFound({ providerId: "codex-acp" });
     mocks.loadSessionMessages.mockResolvedValueOnce(false);
 
     await expect(
@@ -1213,6 +1218,7 @@ describe("sessions.send", () => {
   it("rejects startup_name when an occupied first-send queue prevents workspace setup", async () => {
     mockSessionFound();
     useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
       text: "already queued",
     });
 
@@ -1332,6 +1338,195 @@ describe("sessions.send", () => {
     ).toBe("queue despite missing project");
   });
 
+  it("queues exactly once if the target acquires a run before commit", async () => {
+    let newerOwnerRuntime: unknown;
+    mockSessionFound({ providerId: "codex-acp" });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      return true;
+    });
+    mocks.acpSendMessage.mockImplementationOnce(() => {
+      useChatStore.getState().setError("session-1", "newer owner error");
+      useChatStore.getState().setChatState("session-1", "streaming");
+      useChatStore
+        .getState()
+        .setPendingAssistantProvider("session-1", "newer-provider");
+      useChatStore.getState().setActiveRunId("session-1", "racing-run");
+      useChatStore.getState().setRunCancellationPending("session-1", true);
+      newerOwnerRuntime = structuredClone(
+        useChatStore.getState().getSessionRuntime("session-1"),
+      );
+      return Promise.resolve();
+    });
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "preserve this prompt",
+        if_running: "queue",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["preserve this prompt"]);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toBeUndefined();
+    expect(useChatStore.getState().getSessionRuntime("session-1")).toEqual(
+      newerOwnerRuntime,
+    );
+  });
+
+  it("queues behind a composer message that arrives before commit", async () => {
+    mockSessionFound({ providerId: "codex-acp" });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      return true;
+    });
+    mocks.acpSendMessage.mockImplementationOnce(() => {
+      useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+        persona: { kind: "inherit" },
+        text: "composer head",
+      });
+      return Promise.resolve();
+    });
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "berdctl tail",
+        if_running: "queue",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["composer head", "berdctl tail"]);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toBeUndefined();
+  });
+
+  it("truthfully refuses if a composer message takes queue ownership before commit", async () => {
+    mockSessionFound({ providerId: "codex-acp" });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      return true;
+    });
+    mocks.acpSendMessage.mockImplementationOnce(() => {
+      useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+        persona: { kind: "inherit" },
+        text: "composer head",
+      });
+      return Promise.resolve();
+    });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "do not jump the head",
+        },
+        ctx,
+      ),
+      "target_session_running",
+    );
+
+    expect(
+      useChatStore
+        .getState()
+        .queuedMessageBySession["session-1"]?.map(
+          (record) => record.payload.text,
+        ),
+    ).toEqual(["composer head"]);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toBeUndefined();
+  });
+
+  it("truthfully refuses if the target acquires a run before commit", async () => {
+    let newerOwnerRuntime: unknown;
+    mockSessionFound({ providerId: "codex-acp" });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      return true;
+    });
+    mocks.acpSendMessage.mockImplementationOnce(() => {
+      useChatStore.getState().setError("session-1", "newer owner error");
+      useChatStore.getState().setChatState("session-1", "streaming");
+      useChatStore
+        .getState()
+        .setPendingAssistantProvider("session-1", "newer-provider");
+      useChatStore.getState().setActiveRunId("session-1", "racing-run");
+      useChatStore.getState().setRunCancellationPending("session-1", true);
+      newerOwnerRuntime = structuredClone(
+        useChatStore.getState().getSessionRuntime("session-1"),
+      );
+      return Promise.resolve();
+    });
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "do not overlap",
+        },
+        ctx,
+      ),
+      "target_session_running",
+    );
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toBeUndefined();
+    expect(useChatStore.getState().getSessionRuntime("session-1")).toEqual(
+      newerOwnerRuntime,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+  });
+
+  it("queues a prompt while an idle session still owns an active run", async () => {
+    mockSessionFound();
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "after active run",
+        if_running: "queue",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .text,
+    ).toBe("after active run");
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
+
   it("queues a prompt while cancellation is pending", async () => {
     mockSessionFound();
     useChatStore.getState().setRunCancellationPending("session-1", true);
@@ -1417,6 +1612,7 @@ describe("sessions.send", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload,
     ).toEqual({
+      persona: { kind: "inherit" },
       text: "next prompt",
       sendOptions: {
         userMessageMetadata: { origin: "berdctl_cross_session" },

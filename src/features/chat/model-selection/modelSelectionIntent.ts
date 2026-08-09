@@ -4,6 +4,7 @@ import {
   clearSessionTargetSelection,
   getSessionTargetSelection,
   recordSessionTargetSelection,
+  replaceSessionTargetAfterDispatch,
 } from "@/features/chat/lib/sessionTargetCoordinator";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import { i18n } from "@/shared/i18n";
@@ -136,7 +137,7 @@ export function rollbackToPreviousModel({
   if (previousTarget) {
     setGlobalSelectedProvider?.(previousTarget.harnessId);
   } else {
-    sessionStore.replaceSessionExecutionTarget(sessionId, undefined);
+    replaceSessionTargetAfterDispatch(sessionId, undefined);
   }
 
   showModelSwitchErrorToast({

@@ -1,3 +1,4 @@
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   appendAttachmentPaths,
@@ -84,6 +85,8 @@ export interface SendCoreOptions {
    * to the stores, before any awaits.
    */
   onUserMessageCommitted?: () => void;
+  /** Fires once preparation succeeds and the ACP prompt invocation starts. */
+  onPromptDispatched?: () => void;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -199,6 +202,7 @@ export async function dispatchPrompt(
     beforeUserMessageCommitted,
     chips,
     displayText,
+    onPromptDispatched,
     onUserMessageCommitted,
     persona,
     prepare,
@@ -222,6 +226,8 @@ export async function dispatchPrompt(
 
   const promptOwner = claimSessionPrompt(sessionId);
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
+  let userMessageCommitted = false;
+  let preCommitRejected = false;
 
   const { addMessage, setChatState, setError, setPendingAssistantProvider } =
     useChatStore.getState();
@@ -232,70 +238,68 @@ export async function dispatchPrompt(
   setPendingAssistantProvider(sessionId, pendingAssistantProvider);
   clearLiveSubtitleUpdate(sessionId);
 
-  // Create and add user message.
-  beforeUserMessageCommitted?.();
-  const userMessage = createUserMessage(
-    displayText ?? text,
-    buildMessageAttachments(attachments),
-    chips,
-  );
-  if (persona) {
-    userMessage.metadata = {
-      ...userMessage.metadata,
-      targetPersonaId: persona.id,
-      targetPersonaName: persona.name,
-    };
-  }
-  if (userMessageMetadata) {
-    userMessage.metadata = {
-      ...userMessage.metadata,
-      ...userMessageMetadata,
-    };
-  }
-  // Embed image content blocks into the user message for local display.
-  if (images && images.length > 0) {
-    for (const img of images) {
-      userMessage.content.push({
-        type: "image",
-        data: img.base64,
-        mimeType: img.mimeType,
-      });
-    }
-  }
-  addMessage(sessionId, userMessage);
-  setChatState(sessionId, "thinking");
-  setError(sessionId, null);
-
-  const sessionStore = useChatSessionStore.getState();
-  const session = sessionStore.getSession(sessionId);
-
-  // Immediately set the session/sidebar title from the user's message when
-  // the session still has the default placeholder. This gives instant feedback
-  // instead of waiting for acp:done or acp:session_info. A better
-  // backend-generated title will overwrite this if it arrives via the
-  // acp:session_info event.
-  if (session && isDefaultChatTitle(session.title)) {
-    sessionStore.patchSession(sessionId, {
-      title: getSessionTitleFromDraft(text, attachments),
-      updatedAt: new Date().toISOString(),
-    });
-  } else {
-    sessionStore.patchSession(sessionId, {
-      updatedAt: new Date().toISOString(),
-    });
-  }
-  sessionStore.updateSessionSubtitleFromText(sessionId, text);
-
-  onUserMessageCommitted?.();
-
   try {
+    // Preparation can be superseded or aborted. Complete it before committing
+    // local transcript state so a retained queued record can retry without
+    // duplicating the user turn.
     throwIfAborted(signal);
     await prepare?.();
     throwIfAborted(signal);
 
-    useChatSessionStore.getState().markWorkspaceUsedByAgent(sessionId);
-    setChatState(sessionId, "streaming");
-    throwIfAborted(signal);
+    const commitUserMessage = () => {
+      throwIfAborted(signal);
+      beforeUserMessageCommitted?.();
+      const userMessage = createUserMessage(
+        displayText ?? text,
+        buildMessageAttachments(attachments),
+        chips,
+      );
+      if (persona) {
+        userMessage.metadata = {
+          ...userMessage.metadata,
+          targetPersonaId: persona.id,
+          targetPersonaName: persona.name,
+        };
+      }
+      if (userMessageMetadata) {
+        userMessage.metadata = {
+          ...userMessage.metadata,
+          ...userMessageMetadata,
+        };
+      }
+      // Embed image content blocks into the user message for local display.
+      if (images && images.length > 0) {
+        for (const img of images) {
+          userMessage.content.push({
+            type: "image",
+            data: img.base64,
+            mimeType: img.mimeType,
+          });
+        }
+      }
+      addMessage(sessionId, userMessage);
+      userMessageCommitted = true;
+      setChatState(sessionId, "thinking");
+      setError(sessionId, null);
+
+      const sessionStore = useChatSessionStore.getState();
+      const session = sessionStore.getSession(sessionId);
+      if (session && isDefaultChatTitle(session.title)) {
+        sessionStore.patchSession(sessionId, {
+          title: getSessionTitleFromDraft(text, attachments),
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        sessionStore.patchSession(sessionId, {
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      sessionStore.updateSessionSubtitleFromText(sessionId, text);
+      onUserMessageCommitted?.();
+      sessionStore.markWorkspaceUsedByAgent(sessionId);
+      setChatState(sessionId, "streaming");
+    };
+
     const promptWithPaths = appendAttachmentPaths(
       background ? text : text.trim(),
       attachments,
@@ -308,7 +312,7 @@ export async function dispatchPrompt(
         `[perf:send] ${sid} → acpSendMessage (setup took ${(tAcp - tSendStart).toFixed(1)}ms)`,
       );
     }
-    await acpSendMessage(sessionId, acpPrompt, {
+    const promptPromise = acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
       ...(assistantPrompt ? { assistantPrompt } : {}),
       personaId: persona?.id,
@@ -317,7 +321,10 @@ export async function dispatchPrompt(
       images: images?.map(
         (img) => [img.base64, img.mimeType] as [string, string],
       ),
+      onPromptDispatching: commitUserMessage,
+      onPromptDispatched,
     });
+    await promptPromise;
     if (!background) {
       perfLog(
         `[perf:send] ${sid} acpSendMessage returned after ${(performance.now() - tAcp).toFixed(1)}ms (total dispatchPrompt ${(performance.now() - tSendStart).toFixed(1)}ms)`,
@@ -345,11 +352,17 @@ export async function dispatchPrompt(
       }
     }
   } catch (err) {
-    const cancellationRace = assistantCancellationRaces.get(promptOwner);
-    if (cancellationRace) {
-      recordAssistantPromptOutcome(promptOwner, "error");
+    preCommitRejected = err instanceof PreCommitSendRejectedError;
+    if (!preCommitRejected) {
+      const cancellationRace = assistantCancellationRaces.get(promptOwner);
+      if (cancellationRace) {
+        recordAssistantPromptOutcome(promptOwner, "error");
+      }
     }
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if (preCommitRejected) {
+      // Ownership/readiness changed at the last reversible boundary. This
+      // prompt committed nothing, so leave the newer owner's runtime intact.
+    } else if (err instanceof DOMException && err.name === "AbortError") {
       if (isCurrent()) {
         flushBufferedStreamingUpdatesForSession(sessionId, {
           flushSubtitle: true,
@@ -377,16 +390,18 @@ export async function dispatchPrompt(
         }));
       }
 
-      liveStore.addMessage(
-        sessionId,
-        createSystemNotificationMessage(errorMessage, "error"),
-      );
+      if (userMessageCommitted) {
+        liveStore.addMessage(
+          sessionId,
+          createSystemNotificationMessage(errorMessage, "error"),
+        );
+      }
       setError(sessionId, errorMessage);
       if (isCurrent()) {
         setChatState(sessionId, "idle");
       }
     }
-    if (isCurrent()) {
+    if (!preCommitRejected && isCurrent()) {
       setPendingAssistantProvider(sessionId, null);
     }
     throw err;
@@ -396,7 +411,7 @@ export async function dispatchPrompt(
         owner: promptOwner,
       });
     }
-    if (releaseSessionPrompt(sessionId, promptOwner)) {
+    if (releaseSessionPrompt(sessionId, promptOwner) && !preCommitRejected) {
       const liveStore = useChatStore.getState();
       const liveRuntime = liveStore.getSessionRuntime(sessionId);
       if (liveRuntime.isRunCancellationPending) {

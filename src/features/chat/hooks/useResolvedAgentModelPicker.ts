@@ -8,10 +8,7 @@ import { useProviderCatalogStore } from "@/features/providers/stores/providerCat
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { resolveModelProviderId } from "@/features/providers/lib/modelProviderResolution";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
-import {
-  useChatSessionStore,
-  type ChatSession,
-} from "../stores/chatSessionStore";
+import type { ChatSession } from "../stores/chatSessionStore";
 import { recoverStrandedProviderSession } from "../model-selection/strandedProviderRecovery";
 import { useAgentModelPickerState } from "./useAgentModelPickerState";
 import {
@@ -37,6 +34,7 @@ import {
   type SessionExecutionTarget,
 } from "../lib/sessionExecutionTarget";
 import { gooseServeSelectionFromExecutionTarget } from "../lib/gooseServeExecutionTarget";
+import { replaceSessionTargetAfterDispatch } from "../lib/sessionTargetCoordinator";
 import type { ModelOption } from "../types";
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
@@ -388,7 +386,6 @@ export function useResolvedAgentModelPicker({
         return;
       }
 
-      const sessionStore = useChatSessionStore.getState();
       clearCurrentModelSelectionIntent(sessionId);
       if (!sessionHasStarted) {
         setGlobalSelectedProvider(resolvedRequestedAgentId);
@@ -406,7 +403,7 @@ export function useResolvedAgentModelPicker({
             preferenceAgentId: resolvedRequestedAgentId,
           });
         } else {
-          sessionStore.replaceSessionExecutionTarget(sessionId, nextTarget);
+          replaceSessionTargetAfterDispatch(sessionId, nextTarget);
         }
         return;
       }

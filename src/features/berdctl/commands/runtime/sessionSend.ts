@@ -1,7 +1,18 @@
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
-import { prepareExistingSessionForBackgroundSend } from "@/features/chat/lib/queuedSessionSend";
+import {
+  acquireExistingSessionForBackgroundSend,
+  prepareExistingSessionForBackgroundSend,
+  SessionDispatchContentionError,
+  SessionDispatchMissingError,
+  SessionDispatchUnresolvedError,
+} from "@/features/chat/lib/queuedSessionSend";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-export { sendQueuedPromptToExistingSessionInBackground } from "@/features/chat/lib/queuedSessionSend";
+export {
+  sendQueuedPromptToExistingSessionInBackground,
+  SessionDispatchContentionError,
+  SessionDispatchMissingError,
+  SessionDispatchUnresolvedError,
+} from "@/features/chat/lib/queuedSessionSend";
 import { formatIncludedWorkspacesPrompt } from "@/features/chat/lib/workspaceAttachments";
 import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
 import type { MessageMetadata } from "@/shared/types/messages";
@@ -35,25 +46,67 @@ export async function sendPromptToExistingSessionInBackground(
   sessionId: string,
   prompt: string,
   beforeUserMessageCommitted?: () => void,
+  options: { returnOnDispatch?: boolean } = {},
 ): Promise<void> {
-  const { providerId, persona } =
-    await prepareExistingSessionForBackgroundSend(sessionId);
-  const session = useChatSessionStore.getState().getSession(sessionId);
-  void sendPromptInBackground(
-    sessionId,
-    prompt,
-    providerId,
-    persona,
-    {
-      ...berdctlCrossSessionSendOptions(),
-      systemPrompt: session
-        ? formatIncludedWorkspacesPrompt(session)
-        : undefined,
-    },
-    undefined,
-    beforeUserMessageCommitted,
-  ).catch(() => {
-    // Background transport records and logs the failure. The direct Berdctl
-    // command intentionally returns once dispatch begins, not after the turn.
+  const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
+  if (acquisition.status === "contended") {
+    throw new SessionDispatchContentionError(acquisition.waiter);
+  }
+  if (acquisition.status === "unresolved") {
+    throw new SessionDispatchUnresolvedError();
+  }
+  if (acquisition.status === "session-missing") {
+    throw new SessionDispatchMissingError(sessionId);
+  }
+  const targetLease = acquisition;
+  let dispatched = false;
+  let resolveDispatch: (() => void) | undefined;
+  let rejectDispatch: ((error: unknown) => void) | undefined;
+  const dispatch = options.returnOnDispatch
+    ? new Promise<void>((resolve, reject) => {
+        resolveDispatch = resolve;
+        rejectDispatch = reject;
+      })
+    : null;
+  const settlement = (async () => {
+    try {
+      const { providerId, persona } =
+        await prepareExistingSessionForBackgroundSend(sessionId, {
+          executionTarget: targetLease.target,
+          dispatchToken: targetLease.token,
+        });
+      const session = useChatSessionStore.getState().getSession(sessionId);
+      await sendPromptInBackground(
+        sessionId,
+        prompt,
+        providerId,
+        persona,
+        {
+          ...berdctlCrossSessionSendOptions(),
+          systemPrompt: session
+            ? formatIncludedWorkspacesPrompt(session)
+            : undefined,
+        },
+        undefined,
+        beforeUserMessageCommitted,
+        undefined,
+        undefined,
+        () => {
+          dispatched = true;
+          resolveDispatch?.();
+        },
+      );
+    } catch (error) {
+      if (!dispatched) rejectDispatch?.(error);
+      throw error;
+    } finally {
+      targetLease.release();
+    }
+  })();
+  if (!dispatch) return settlement;
+  void settlement.catch(() => {
+    // Pre-dispatch failures are returned through `dispatch`; post-dispatch
+    // failures are already recorded and logged by the background send path.
   });
+  return dispatch;
 }

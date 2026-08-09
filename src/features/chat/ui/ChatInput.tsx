@@ -61,7 +61,10 @@ import { ChatInputSelectionChips } from "./ChatInputSelectionChips";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
-import { normalizeSessionExecutionTarget } from "../lib/sessionExecutionTarget";
+import {
+  personaIntentFromComposer,
+  type PersonaIntent,
+} from "../lib/admittedSend";
 import { resolveAgentToolsCapabilityTips } from "../lib/agentToolsCapabilities";
 import { useAgentToolsTipsPreference } from "../lib/agentToolsTipPreferences";
 import { getImageFilesFromClipboardItems } from "../lib/clipboardAttachments";
@@ -114,7 +117,13 @@ function getManualEditQueuedSendOptions(
     return null;
   }
 
-  const { userMessageMetadata, acpGooseMetadata, ...rest } = sendOptions;
+  const {
+    userMessageMetadata,
+    acpGooseMetadata,
+    executionSystemPrompt: _executionSystemPrompt,
+    capturedPersonaSystemPrompt: _capturedPersonaSystemPrompt,
+    ...rest
+  } = sendOptions;
   const nextUserMessageMetadata = stripCrossSessionOrigin(userMessageMetadata);
   const nextAcpGooseMetadata = stripCrossSessionOrigin(acpGooseMetadata);
 
@@ -254,7 +263,6 @@ export function ChatInput({
     currentModelId = null,
     currentModelProviderId = null,
     currentModel,
-    currentExecutionTarget,
     availableModels = [],
     modelsLoading = false,
     modelStatusMessage = null,
@@ -293,6 +301,8 @@ export function ChatInput({
   const [editingQueuedRecordId, setEditingQueuedRecordId] = useState<
     string | null
   >(null);
+  const [editingQueuedPersona, setEditingQueuedPersona] =
+    useState<PersonaIntent | null>(null);
   const editingQueuedRecordIdRef = useRef<string | null>(null);
   const onCancelQueueEditRef = useRef(onCancelQueueEdit);
   onCancelQueueEditRef.current = onCancelQueueEdit;
@@ -486,11 +496,29 @@ export function ChatInput({
     !attachmentWorkPending &&
     isStreaming &&
     canSteerMessage &&
+    visibleQueuedMessages.length === 0 &&
     Boolean(onSteerMessage);
 
+  const effectivePersonaId = editingQueuedPersona
+    ? editingQueuedPersona.kind === "persona"
+      ? editingQueuedPersona.id
+      : editingQueuedPersona.kind === "none"
+        ? null
+        : undefined
+    : selectedPersonaId;
+  const handleEffectivePersonaChange = useCallback(
+    (personaId: string | null) => {
+      if (editingQueuedPersona) {
+        setEditingQueuedPersona(personaIntentFromComposer(personaId));
+        return;
+      }
+      onPersonaChange?.(personaId);
+    },
+    [editingQueuedPersona, onPersonaChange],
+  );
   const activePersona = useMemo(
-    () => personas.find((persona) => persona.id === selectedPersonaId) ?? null,
-    [personas, selectedPersonaId],
+    () => personas.find((persona) => persona.id === effectivePersonaId) ?? null,
+    [effectivePersonaId, personas],
   );
   const selectedProject = useMemo(
     () =>
@@ -565,8 +593,8 @@ export function ChatInput({
     text,
     setText,
     textareaRef,
-    activePersonaId: selectedPersonaId,
-    onPersonaChange,
+    activePersonaId: effectivePersonaId ?? null,
+    onPersonaChange: handleEffectivePersonaChange,
     onSkillMentionSelect: handleSkillMentionAdded,
     onFileMentionSelect: scopedControls.attachments
       ? handleFileMentionAttachmentSelect
@@ -629,27 +657,8 @@ export function ChatInput({
     (value: string) => setText(value, "aggregate"),
     [setText],
   );
-
-  const dictation = useVoiceDictation({
-    text,
-    setText: setTextFromDictation,
-    attachments,
-    clearAttachments,
-    selectedPersonaId,
-    onSend,
-    onAutoSubmit: handleVoiceAutoSubmit,
-    resetTextarea,
-    isSendLocked: disabled || sendDisabled || attachmentWorkPending,
-  });
-
-  const handleVoiceDictationShortcut = useVoiceDictationShortcutTarget(
-    textareaRef,
-    {
-      surface: "selected-chat",
-      canStart: scopedControls.voice && dictation.isEnabled && !disabled,
-      isRecording: scopedControls.voice && dictation.isRecording,
-      toggle: dictation.toggleRecording,
-    },
+  const dictationRef = useRef<ReturnType<typeof useVoiceDictation> | null>(
+    null,
   );
 
   const submitRestoredQueuedMessage = useCallback(
@@ -672,34 +681,38 @@ export function ChatInput({
             );
       const sendResult = submitHandler(
         displayText || " ",
-        selectedPersonaId ?? undefined,
+        effectivePersonaId,
         submittedAttachments.length > 0 ? submittedAttachments : undefined,
         restoredSendOptions,
       );
       const accepted = await Promise.resolve(sendResult);
       return accepted !== false;
     },
-    [selectedPersonaId],
+    [effectivePersonaId],
   );
 
   const submitCurrentMessage = useCallback(
-    async (submitHandler: typeof onSend, canSubmitCurrentMessage: boolean) => {
+    async (
+      submitHandler: typeof onSend,
+      canSubmitCurrentMessage: boolean,
+      submittedTextOverride?: string,
+    ) => {
       if (!canSubmitCurrentMessage) {
-        return;
+        return false;
       }
 
       // Stop without flushing so Send uses the text already in the composer.
       // This also cancels an in-flight microphone startup.
       if (
         scopedControls.voice &&
-        (dictation.isRecording ||
-          dictation.isTranscribing ||
-          dictation.isStarting())
+        (dictationRef.current?.isRecording ||
+          dictationRef.current?.isTranscribing ||
+          dictationRef.current?.isStarting())
       ) {
-        dictation.stopRecording();
+        dictationRef.current?.stopRecording();
       }
 
-      const submittedText = text;
+      const submittedText = submittedTextOverride ?? text;
       const submittedSkills = visibleSelectedSkills;
       const submittedAttachments = scopedControls.attachments
         ? attachmentsRef.current
@@ -708,24 +721,13 @@ export function ChatInput({
         restoredQueuedSendOptions && submittedSkills.length === 0
           ? restoredQueuedSendOptions
           : null;
-      const executionTarget =
-        currentExecutionTarget ??
-        normalizeSessionExecutionTarget({
-          harnessId: selectedProvider,
-          modelProviderId:
-            currentModelId == null
-              ? undefined
-              : (currentModelProviderId ??
-                (selectedProvider === "goose" ? undefined : selectedProvider)),
-          modelId: currentModelId,
-          modelName: currentModel,
-        });
       const accepted =
         editingQueuedRecordId && onUpdateQueue
           ? onUpdateQueue(editingQueuedRecordId, {
               text: submittedText.trim() || " ",
-              personaId: selectedPersonaId ?? undefined,
-              executionTarget,
+              persona:
+                editingQueuedPersona ??
+                personaIntentFromComposer(selectedPersonaId),
               attachments:
                 submittedAttachments.length > 0
                   ? submittedAttachments
@@ -753,10 +755,11 @@ export function ChatInput({
                 submitHandler,
               );
       if (!accepted) {
-        return;
+        return false;
       }
       setRestoredQueuedSendOptions(null);
       setEditingQueuedRecord(null);
+      setEditingQueuedPersona(null);
       const textStillMatchesSubmission = textRef.current === submittedText;
       const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
         selectedSkillsRef.current,
@@ -778,14 +781,10 @@ export function ChatInput({
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
+      return true;
     },
     [
       clearAttachments,
-      currentExecutionTarget,
-      currentModel,
-      currentModelId,
-      currentModelProviderId,
-      dictation,
       editingQueuedRecordId,
       onUpdateQueue,
       scopedControls.attachments,
@@ -794,13 +793,60 @@ export function ChatInput({
       setSelectedSkills,
       setText,
       restoredQueuedSendOptions,
+      editingQueuedPersona,
       selectedPersonaId,
-      selectedProvider,
       submitRestoredQueuedMessage,
       submitChatInputMessage,
       text,
       visibleSelectedSkills,
     ],
+  );
+
+  const handleVoiceAutoSubmitCurrentMessage = useCallback(
+    async (submittedText: string) => {
+      if (!editingQueuedRecordId) {
+        return handleVoiceAutoSubmit(submittedText);
+      }
+      const canSubmitDictatedEdit =
+        (submittedText.trim().length > 0 || hasDraftContext) &&
+        !disabled &&
+        !sendDisabled &&
+        !attachmentWorkPending;
+      return submitCurrentMessage(onSend, canSubmitDictatedEdit, submittedText);
+    },
+    [
+      attachmentWorkPending,
+      disabled,
+      editingQueuedRecordId,
+      handleVoiceAutoSubmit,
+      hasDraftContext,
+      onSend,
+      sendDisabled,
+      submitCurrentMessage,
+    ],
+  );
+
+  const dictation = useVoiceDictation({
+    text,
+    setText: setTextFromDictation,
+    attachments,
+    clearAttachments,
+    selectedPersonaId,
+    onSend,
+    onAutoSubmit: handleVoiceAutoSubmitCurrentMessage,
+    resetTextarea,
+    isSendLocked: disabled || sendDisabled || attachmentWorkPending,
+  });
+  dictationRef.current = dictation;
+
+  const handleVoiceDictationShortcut = useVoiceDictationShortcutTarget(
+    textareaRef,
+    {
+      surface: "selected-chat",
+      canStart: scopedControls.voice && dictation.isEnabled && !disabled,
+      isRecording: scopedControls.voice && dictation.isRecording,
+      toggle: dictation.toggleRecording,
+    },
   );
 
   const handleSend = useCallback(async () => {
@@ -840,25 +886,45 @@ export function ChatInput({
       dictation.stopRecording();
     }
 
+    const steerMessage: typeof onSteerMessage = (
+      submittedText,
+      personaId,
+      submittedAttachments,
+      sendOptions,
+    ) =>
+      sendOptions === undefined
+        ? onSteerMessage(
+            submittedText,
+            personaId ?? undefined,
+            submittedAttachments,
+          )
+        : onSteerMessage(
+            submittedText,
+            personaId ?? undefined,
+            submittedAttachments,
+            sendOptions,
+          );
+
     if (restoredSendOptions) {
       void submitRestoredQueuedMessage(
         submittedText,
         submittedAttachments,
         restoredSendOptions,
-        onSteerMessage,
+        steerMessage,
       );
     } else {
       void submitChatInputMessage(
         submittedText,
         submittedAttachments,
         submittedSkills,
-        onSteerMessage,
+        steerMessage,
       );
     }
 
     if (editingQueuedRecordId) {
       onCancelQueueEdit?.(editingQueuedRecordId);
       setEditingQueuedRecord(null);
+      setEditingQueuedPersona(null);
     }
     setRestoredQueuedSendOptions(null);
     setText("");
@@ -918,7 +984,7 @@ export function ChatInput({
         getManualEditQueuedSendOptions(message.sendOptions),
       );
       setEditingQueuedRecord(isLegacyMessage ? null : recordId);
-      onPersonaChange?.(message.personaId ?? null);
+      setEditingQueuedPersona(message.persona);
       replaceAttachments(
         scopedControls.attachments ? (message.attachments ?? []) : [],
       );
@@ -930,7 +996,6 @@ export function ChatInput({
       onDismissQueue,
       onEditQueue,
       onCancelQueueEdit,
-      onPersonaChange,
       onUpdateQueue,
       replaceAttachments,
       scopedControls.attachments,
@@ -1396,9 +1461,9 @@ export function ChatInput({
 
   const handleRemovePersona = useCallback(
     (_personaId: string) => {
-      onPersonaChange?.(null);
+      handleEffectivePersonaChange(null);
     },
-    [onPersonaChange],
+    [handleEffectivePersonaChange],
   );
 
   const handleRemoveSkill = useCallback(
@@ -1591,6 +1656,7 @@ export function ChatInput({
                           onClick={() => {
                             if (editingQueuedRecordIdRef.current === recordId) {
                               setEditingQueuedRecord(null);
+                              setEditingQueuedPersona(null);
                             }
                             onDismissQueue?.(
                               recordId === "legacy" ? undefined : recordId,

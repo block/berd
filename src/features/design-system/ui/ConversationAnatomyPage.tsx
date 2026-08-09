@@ -893,6 +893,7 @@ export function ConversationAnatomyPage() {
                 onSteerQueuedMessage: () => true,
                 queuedMessage: {
                   text: "Also compare it against the previous design.",
+                  persona: { kind: "inherit" },
                 },
                 onDismissQueue: () => {},
               }}

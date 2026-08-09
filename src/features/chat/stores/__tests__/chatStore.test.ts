@@ -499,8 +499,8 @@ describe("chatStore", () => {
       },
     ]);
     store.enqueueTransportReadyMessage("local-session", {
+      persona: { kind: "persona", id: "reviewer" },
       text: "@Reviewer queued text",
-      personaId: "reviewer",
       attachments: [queuedAttachment],
       sendOptions: queuedSendOptions,
     });
@@ -530,8 +530,8 @@ describe("chatStore", () => {
     ]);
     expect(state.draftAttachmentsBySession["local-session"]).toBeUndefined();
     expect(state.queuedMessageBySession["acp-session"]?.[0]?.payload).toEqual({
+      persona: { kind: "persona", id: "reviewer" },
       text: "@Reviewer queued text",
-      personaId: "reviewer",
       attachments: [queuedAttachment],
       sendOptions: queuedSendOptions,
     });
@@ -720,13 +720,25 @@ describe("chatStore", () => {
 
   it("updates and removes queue records by stable ID without reordering", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("s1", { text: "first" });
-    store.enqueueTransportReadyMessage("s1", { text: "second" });
-    store.enqueueTransportReadyMessage("s1", { text: "third" });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "first",
+    });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "second",
+    });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "third",
+    });
     const queue = useChatStore.getState().queuedMessageBySession.s1 ?? [];
 
     expect(
-      store.updateQueuedMessage("s1", queue[1].recordId, { text: "edited" }),
+      store.updateQueuedMessage("s1", queue[1].recordId, {
+        persona: { kind: "inherit" },
+        text: "edited",
+      }),
     ).toBe(true);
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.map((record) => ({
@@ -749,8 +761,14 @@ describe("chatStore", () => {
 
   it("pauses records while they are edited and resumes them on update", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("s1", { text: "first" });
-    store.enqueueTransportReadyMessage("s1", { text: "second" });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "first",
+    });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "second",
+    });
     const queue = useChatStore.getState().queuedMessageBySession.s1 ?? [];
 
     expect(store.setQueuedMessageEditing("s1", queue[0].recordId, true)).toBe(
@@ -760,12 +778,18 @@ describe("chatStore", () => {
       useChatStore.getState().queuedMessageBySession.s1?.[0],
     ).toMatchObject({ recordId: queue[0].recordId, editing: true });
     expect(
-      store.updateQueuedMessage("s1", queue[0].recordId, { text: "edited" }),
+      store.updateQueuedMessage("s1", queue[0].recordId, {
+        persona: { kind: "inherit" },
+        text: "edited",
+      }),
     ).toBe(true);
     expect(useChatStore.getState().queuedMessageBySession.s1?.[0]).toEqual(
       expect.objectContaining({
         recordId: queue[0].recordId,
-        payload: { text: "edited" },
+        payload: {
+          persona: { kind: "inherit" },
+          text: "edited",
+        },
       }),
     );
     expect(
@@ -780,7 +804,10 @@ describe("chatStore", () => {
 
   it("preserves an edit lock through defer and release", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("s1", { text: "original" });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "original",
+    });
     const recordId =
       useChatStore.getState().queuedMessageBySession.s1?.[0]?.recordId ?? "";
 
@@ -806,7 +833,7 @@ describe("chatStore", () => {
     const store = useChatStore.getState();
     store.enqueueDeferredMessage(
       "s1",
-      { text: "original" },
+      { persona: { kind: "inherit" }, text: "original" },
       { type: "workspace-first-send", status: "creating" },
     );
     const recordId =
@@ -824,13 +851,19 @@ describe("chatStore", () => {
       editing: true,
     });
 
-    expect(store.updateQueuedMessage("s1", recordId, { text: "updated" })).toBe(
-      true,
-    );
+    expect(
+      store.updateQueuedMessage("s1", recordId, {
+        persona: { kind: "inherit" },
+        text: "updated",
+      }),
+    ).toBe(true);
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.[0],
     ).toMatchObject({
-      payload: { text: "updated" },
+      payload: {
+        persona: { kind: "inherit" },
+        text: "updated",
+      },
       releasedFromDeferred: true,
     });
     expect(
@@ -845,21 +878,27 @@ describe("chatStore", () => {
     const store = useChatStore.getState();
     store.enqueueDeferredMessage(
       "s1",
-      { text: "original" },
+      { persona: { kind: "inherit" }, text: "original" },
       { type: "workspace-first-send", status },
     );
     const recordId =
       useChatStore.getState().queuedMessageBySession.s1?.[0]?.recordId ?? "";
 
     expect(store.setQueuedMessageEditing("s1", recordId, true)).toBe(true);
-    expect(store.updateQueuedMessage("s1", recordId, { text: "updated" })).toBe(
-      true,
-    );
+    expect(
+      store.updateQueuedMessage("s1", recordId, {
+        persona: { kind: "inherit" },
+        text: "updated",
+      }),
+    ).toBe(true);
     expect(useChatStore.getState().queuedMessageBySession.s1?.[0]).toEqual(
       expect.objectContaining({
         kind: "transport-ready",
         recordId,
-        payload: { text: "updated" },
+        payload: {
+          persona: { kind: "inherit" },
+          text: "updated",
+        },
         releasedFromDeferred: true,
       }),
     );
@@ -868,7 +907,7 @@ describe("chatStore", () => {
     ).not.toHaveProperty("editing");
   });
 
-  it("parks interrupted workspace creation and clears ephemeral edit locks on hydration", async () => {
+  it("parks interrupted workspace creation, clears edit locks, and restores targetless transport records", async () => {
     window.localStorage.setItem(
       "goose:chat-message-queues:v1",
       JSON.stringify({
@@ -909,12 +948,23 @@ describe("chatStore", () => {
         status: "held",
       },
     });
-    expect(queue[1].recordId).toBe("tail");
+    expect(queue[1]).toMatchObject({
+      kind: "transport-ready",
+      recordId: "tail",
+      restored: true,
+      payload: {
+        text: "after setup",
+        persona: { kind: "inherit" },
+      },
+    });
   });
 
   it("persists queue changes for restart recovery", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("s1", { text: "durable" });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "durable",
+    });
     const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
     expect(
       JSON.parse(
@@ -933,10 +983,14 @@ describe("chatStore", () => {
   it("enqueues and dismisses messages per session", () => {
     const store = useChatStore.getState();
 
-    store.enqueueTransportReadyMessage("s1", { text: "follow up" });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "follow up",
+    });
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
     ).toEqual({
+      persona: { kind: "inherit" },
       text: "follow up",
     });
     expect(useChatStore.getState().queuedMessageBySession.s2).toBeUndefined();
@@ -948,14 +1002,20 @@ describe("chatStore", () => {
   it("appends messages and ignores stale dismissal", () => {
     const store = useChatStore.getState();
 
-    expect(store.enqueueTransportReadyMessage("s1", { text: "first" })).toBe(
-      true,
-    );
+    expect(
+      store.enqueueTransportReadyMessage("s1", {
+        persona: { kind: "inherit" },
+        text: "first",
+      }),
+    ).toBe(true);
     const first = useChatStore.getState().queuedMessageBySession.s1;
     const firstRecordId = first?.[0]?.recordId;
-    expect(store.enqueueTransportReadyMessage("s1", { text: "second" })).toBe(
-      true,
-    );
+    expect(
+      store.enqueueTransportReadyMessage("s1", {
+        persona: { kind: "inherit" },
+        text: "second",
+      }),
+    ).toBe(true);
     expect(useChatStore.getState().queuedMessageBySession.s1).toHaveLength(2);
     store.dismissQueuedMessage("s1", "stale-record");
     expect(
@@ -973,9 +1033,18 @@ describe("chatStore", () => {
 
   it("appends promoted records after an occupied destination queue", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("acp-session", { text: "existing" });
-    store.enqueueTransportReadyMessage("local-session", { text: "promoted-1" });
-    store.enqueueTransportReadyMessage("local-session", { text: "promoted-2" });
+    store.enqueueTransportReadyMessage("acp-session", {
+      persona: { kind: "inherit" },
+      text: "existing",
+    });
+    store.enqueueTransportReadyMessage("local-session", {
+      persona: { kind: "inherit" },
+      text: "promoted-1",
+    });
+    store.enqueueTransportReadyMessage("local-session", {
+      persona: { kind: "inherit" },
+      text: "promoted-2",
+    });
 
     store.promoteSessionId("local-session", "acp-session");
 
@@ -993,7 +1062,10 @@ describe("chatStore", () => {
 
   it("moves whole queues and appends them to the destination", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("pending", { text: "first" });
+    store.enqueueTransportReadyMessage("pending", {
+      persona: { kind: "inherit" },
+      text: "first",
+    });
     const pending = useChatStore.getState().queuedMessageBySession.pending;
 
     expect(store.moveQueuedMessage("pending", "session-1")).toBe(true);
@@ -1004,7 +1076,10 @@ describe("chatStore", () => {
       useChatStore.getState().queuedMessageBySession.pending,
     ).toBeUndefined();
 
-    store.enqueueTransportReadyMessage("pending", { text: "second" });
+    store.enqueueTransportReadyMessage("pending", {
+      persona: { kind: "inherit" },
+      text: "second",
+    });
     expect(store.moveQueuedMessage("pending", "session-1")).toBe(true);
     expect(
       useChatStore.getState().queuedMessageBySession.pending,
@@ -1020,11 +1095,17 @@ describe("chatStore", () => {
 
   it("moves one record without disturbing either queue", () => {
     const store = useChatStore.getState();
-    store.enqueueTransportReadyMessage("pending", { text: "first" });
-    store.enqueueTransportReadyMessage("pending", { text: "second" });
+    store.enqueueTransportReadyMessage("pending", {
+      persona: { kind: "inherit" },
+      text: "first",
+    });
+    store.enqueueTransportReadyMessage("pending", {
+      persona: { kind: "inherit" },
+      text: "second",
+    });
     store.enqueueDeferredMessage(
       "session-1",
-      { text: "existing deferred" },
+      { persona: { kind: "inherit" }, text: "existing deferred" },
       { type: "workspace-first-send", status: "held" },
     );
     const movedId =
@@ -1112,7 +1193,10 @@ describe("chatStore", () => {
 
     store.addMessage("s1", makeMessage());
     store.setChatState("s1", "streaming");
-    store.enqueueTransportReadyMessage("s1", { text: "queued" });
+    store.enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "queued",
+    });
     store.setDraft("s1", "draft text");
     store.setSkillDrafts("s1", [{ id: "skill-1", name: "code-review" }]);
     store.setDraftAttachments("s1", [

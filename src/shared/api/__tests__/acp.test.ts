@@ -102,7 +102,18 @@ function executionConfigResponse(providerId: string, modelId: string) {
 
 vi.mock("../acpApi", () => ({
   listProviders: vi.fn(),
-  prompt: (...args: unknown[]) => mockPrompt(...args),
+  prompt: (...args: unknown[]) => {
+    const result = mockPrompt(...args);
+    const callbacks = args[3] as
+      | {
+          onPromptDispatching?: () => void;
+          onPromptDispatched?: () => void;
+        }
+      | undefined;
+    callbacks?.onPromptDispatching?.();
+    callbacks?.onPromptDispatched?.();
+    return result;
+  },
   appendSessionSystemPrompt: (...args: unknown[]) =>
     mockAppendSessionSystemPrompt(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
@@ -143,6 +154,55 @@ describe("acpSendMessage", () => {
     // preamble to unavailable so tests opt in explicitly.
     mockGetBerdctlPreamble.mockReturnValue(null);
     localStorage.removeItem(STYLE_GUIDELINES_STORAGE_KEY);
+  });
+
+  it("reports dispatch only after ACP setup reaches the transport boundary", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    const onPromptDispatched = vi.fn();
+    sessionRegistry.registerPreparedSession(
+      "acp-session-dispatch-boundary",
+      "goose",
+      "/tmp/project",
+    );
+    mockAppendSessionSystemPrompt.mockRejectedValueOnce(
+      new Error("ACP setup failed"),
+    );
+
+    await expect(
+      acpSendMessage("acp-session-dispatch-boundary", "hello", {
+        onPromptDispatched,
+      }),
+    ).rejects.toThrow("ACP setup failed");
+
+    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(onPromptDispatched).not.toHaveBeenCalled();
+  });
+
+  it("reports dispatch immediately after invoking the external prompt", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    const onPromptDispatched = vi.fn();
+    let resolvePrompt!: () => void;
+    mockPrompt.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolvePrompt = resolve;
+      }),
+    );
+    sessionRegistry.registerPreparedSession(
+      "acp-session-dispatched",
+      "goose",
+      "/tmp/project",
+    );
+
+    const send = acpSendMessage("acp-session-dispatched", "hello", {
+      onPromptDispatched,
+    });
+    await vi.waitFor(() => expect(onPromptDispatched).toHaveBeenCalledOnce());
+    expect(mockPrompt).toHaveBeenCalledOnce();
+
+    resolvePrompt();
+    await send;
   });
 
   it.each(
@@ -342,6 +402,44 @@ describe("acpSendMessage", () => {
       type: "text",
       text: "hello",
     });
+  });
+
+  it("does not consume an external persona handoff when ownership fails", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
+    const { acpSendMessage } = await import("../acp");
+    __resetAllPersonaHandoffs();
+    sessionRegistry.registerPreparedSession(
+      "acp-session-canceled-handoff",
+      "claude-acp",
+      "/tmp/project",
+    );
+    mockPrompt.mockImplementationOnce(
+      (
+        _sessionId: string,
+        _content: unknown,
+        _meta: unknown,
+        callbacks?: { onPromptDispatching?: () => void },
+      ) => {
+        callbacks?.onPromptDispatching?.();
+        return Promise.resolve();
+      },
+    );
+
+    await expect(
+      acpSendMessage("acp-session-canceled-handoff", "canceled", {
+        systemPrompt: "You are Starfriend.",
+        onPromptDispatching: () => {
+          throw new DOMException("canceled", "AbortError");
+        },
+      }),
+    ).rejects.toThrow("canceled");
+    await acpSendMessage("acp-session-canceled-handoff", "retry", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    const [, retryBlocks] = mockPrompt.mock.calls[1];
+    expect(retryBlocks[0].text).toContain("You are Starfriend.");
   });
 
   it("merges the persona handoff with a skill assistant prompt, persona first", async () => {

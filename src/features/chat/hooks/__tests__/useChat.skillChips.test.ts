@@ -10,7 +10,18 @@ const mockAcpLoadSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
-  acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
+  acpSendMessage: (...args: unknown[]) => {
+    const result = mockAcpSendMessage(...args);
+    const options = args[2] as
+      | {
+          onPromptDispatching?: () => void;
+          onPromptDispatched?: () => void;
+        }
+      | undefined;
+    options?.onPromptDispatching?.();
+    options?.onPromptDispatched?.();
+    return result;
+  },
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
@@ -77,6 +88,9 @@ describe("useChat skill chips", () => {
       {
         assistantPrompt: "Use these skills for this request: capture-task.",
         systemPrompt: undefined,
+        goose: undefined,
+        onPromptDispatching: expect.any(Function),
+        onPromptDispatched: expect.any(Function),
         personaId: undefined,
         personaName: undefined,
         images: undefined,

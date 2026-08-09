@@ -2738,7 +2738,7 @@ describe("AppShell global navigation", () => {
           {
             payload: {
               text: "ask the tagged agent",
-              personaId: "persona-1",
+              persona: { kind: "persona", id: "persona-1" },
             },
           },
         ],
@@ -2748,6 +2748,86 @@ describe("AppShell global navigation", () => {
       ).toMatchObject({
         personaId: "persona-1",
       });
+    });
+  });
+
+  it.each([
+    {
+      label: "explicit no persona",
+      selectPersona: false,
+      expectedPersonaId: null,
+    },
+    {
+      label: "a captured persona",
+      selectPersona: true,
+      expectedPersonaId: "persona-1",
+    },
+  ])("preserves $label through global admission, Home handoff, and release", async ({
+    selectPersona,
+    expectedPersonaId,
+  }) => {
+    renderAppShell();
+
+    if (selectPersona) {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open agent detail" }),
+      );
+      await act(async () => {
+        flushAfterNextPaintCallbacks();
+      });
+    }
+
+    const textbox = screen.getByPlaceholderText("Start a conversation");
+    fireEvent.change(textbox, { target: { value: "preserve my intent" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["created-session"]?.[0]
+          ?.payload.persona,
+      ).toEqual(
+        expectedPersonaId === null
+          ? { kind: "none" }
+          : { kind: "persona", id: expectedPersonaId },
+      );
+    });
+
+    const chat = useChatStore.getState();
+    const record = chat.queuedMessageBySession["created-session"]?.[0];
+    expect(record?.kind).toBe("transport-ready");
+    expect(record?.recordId).toEqual(expect.any(String));
+
+    useChatSessionStore
+      .getState()
+      .patchSession("created-session", { personaId: "later-session-persona" });
+    expect(
+      chat.deferTransportReadyMessage(
+        "created-session",
+        record?.recordId ?? "missing",
+        { type: "compaction", status: "pending" },
+      ),
+    ).toBe(true);
+    expect(
+      useChatStore
+        .getState()
+        .releaseDeferredMessage(
+          "created-session",
+          record?.recordId ?? "missing",
+        ),
+    ).toBe(true);
+
+    expect(
+      useChatStore.getState().queuedMessageBySession["created-session"]?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      releasedFromDeferred: true,
+      payload: {
+        text: "preserve my intent",
+        persona:
+          expectedPersonaId === null
+            ? { kind: "none" }
+            : { kind: "persona", id: expectedPersonaId },
+      },
     });
   });
 
@@ -2778,7 +2858,7 @@ describe("AppShell global navigation", () => {
           {
             payload: {
               text: "How do projects work?",
-              personaId,
+              persona: { kind: "persona", id: personaId },
               showInComposer: false,
             },
           },

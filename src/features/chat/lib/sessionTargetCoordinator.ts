@@ -32,6 +32,7 @@ export interface SessionTargetTransition {
   origin?: TargetTransitionOrigin;
   operationId?: string;
   requestId?: string;
+  dispatchToken?: symbol;
   /** Ensure target-qualified reasoning metadata as part of this operation. */
   requireReasoningEffort?: boolean;
 }
@@ -72,12 +73,77 @@ interface SessionActor {
   latest?: PendingOperation;
   current?: PendingOperation;
   selection?: SessionTargetSelection;
+  /**
+   * A user selection made while dispatch owns the live target. It remains
+   * visible to the picker request that must apply it, but cannot affect the
+   * leased target until dispatch releases.
+   */
+  deferredSelection?: SessionTargetSelection;
+  deferredTargetMutation?: {
+    kind: "target";
+    target?: SessionExecutionTarget;
+    source: "ui" | "acp";
+    reasoningEffort?: AcpReasoningEffortConfigSnapshot;
+  };
+  dispatch?: {
+    token: symbol;
+    target: SessionExecutionTarget;
+    source?: "ui" | "acp";
+    reasoningEffort?: AcpReasoningEffortConfigSnapshot;
+    release: () => void;
+  };
+  dispatchReleased?: Promise<void>;
+  dispatchReleaseListeners: Set<() => void>;
 }
 
 const actors = new Map<string, SessionActor>();
 let nextOperationId = 0;
+let restoringLeasedTarget = false;
 
 useChatSessionStore.subscribe?.((state) => {
+  if (!restoringLeasedTarget) {
+    for (const [sessionId, actor] of actors) {
+      const dispatch = actor.dispatch;
+      if (!dispatch) continue;
+      const session = state.sessions.find(
+        (candidate) => candidate.id === sessionId,
+      );
+      const observed = session?.executionTarget;
+      const matchesLease =
+        sameSessionExecutionTarget(observed, dispatch.target) ||
+        (dispatch.target.modelId === undefined &&
+          observed?.harnessId === dispatch.target.harnessId &&
+          observed.modelProviderId === dispatch.target.modelProviderId);
+      if (matchesLease) continue;
+
+      actor.deferredTargetMutation = {
+        kind: "target",
+        target: observed,
+        source: session?.executionTargetSource ?? "acp",
+        ...(session?.reasoningEffort
+          ? { reasoningEffort: session.reasoningEffort }
+          : {}),
+      };
+      restoringLeasedTarget = true;
+      try {
+        useChatSessionStore.setState((current) => ({
+          sessions: current.sessions.map((candidate) =>
+            candidate.id === sessionId
+              ? {
+                  ...candidate,
+                  executionTarget: dispatch.target,
+                  executionTargetSource: dispatch.source,
+                  reasoningEffort: dispatch.reasoningEffort,
+                }
+              : candidate,
+          ),
+        }));
+      } finally {
+        restoringLeasedTarget = false;
+      }
+    }
+  }
+
   const liveSessionIds = new Set(state.sessions.map((session) => session.id));
   for (const [sessionId, actor] of actors) {
     if (actor.tracksLiveSession && !liveSessionIds.has(sessionId)) {
@@ -120,6 +186,7 @@ function actorFor(sessionId: string): SessionActor {
       running: false,
       cancelled: false,
       tracksLiveSession,
+      dispatchReleaseListeners: new Set(),
     };
     actors.set(sessionId, actor);
   }
@@ -377,6 +444,13 @@ async function execute(
   }
 }
 
+function notifyDispatchReleaseListeners(actor: SessionActor): void {
+  if (actor.dispatch || actor.running || actor.latest) return;
+  const releaseListeners = [...actor.dispatchReleaseListeners];
+  actor.dispatchReleaseListeners.clear();
+  for (const listener of releaseListeners) listener();
+}
+
 async function drain(sessionId: string, actor: SessionActor) {
   if (actor.running) return;
   actor.running = true;
@@ -392,7 +466,11 @@ async function drain(sessionId: string, actor: SessionActor) {
     }
   } finally {
     actor.running = false;
-    if (actor.latest) void drain(sessionId, actor);
+    if (actor.latest) {
+      void drain(sessionId, actor);
+    } else {
+      notifyDispatchReleaseListeners(actor);
+    }
   }
 }
 
@@ -431,9 +509,234 @@ function requestSessionTargetTransition(
   return outcome;
 }
 
+export interface SessionDispatchTargetLease {
+  target: SessionExecutionTarget;
+  token: symbol;
+  release: () => void;
+}
+
+type SessionDispatchTargetNonAcquired = {
+  target?: undefined;
+  token?: undefined;
+  release?: undefined;
+};
+
+export interface SessionDispatchReleaseWaiter {
+  wait: (listener: () => void) => () => void;
+  cancel: () => void;
+}
+
+function createDispatchReleaseWaiter(
+  actor: SessionActor,
+): SessionDispatchReleaseWaiter {
+  let listener: (() => void) | undefined;
+  let cancelled = false;
+  let released = false;
+  let scheduled = false;
+
+  const schedule = () => {
+    if (scheduled || cancelled || !released || !listener) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      if (cancelled || !released || !listener) return;
+      const pending = listener;
+      listener = undefined;
+      cancelled = true;
+      pending();
+    });
+  };
+  const releasedListener = () => {
+    if (cancelled) return;
+    released = true;
+    schedule();
+  };
+  actor.dispatchReleaseListeners.add(releasedListener);
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    listener = undefined;
+    actor.dispatchReleaseListeners.delete(releasedListener);
+  };
+  return {
+    wait: (nextListener) => {
+      if (cancelled) return () => {};
+      listener = nextListener;
+      schedule();
+      return cancel;
+    },
+    cancel,
+  };
+}
+
+export type SessionDispatchTargetAcquisition =
+  | ({ status: "acquired" } & SessionDispatchTargetLease)
+  | ({
+      status: "contended";
+      waiter: SessionDispatchReleaseWaiter;
+    } & SessionDispatchTargetNonAcquired)
+  | ({ status: "unresolved" } & SessionDispatchTargetNonAcquired)
+  | ({ status: "session-missing" } & SessionDispatchTargetNonAcquired);
+
+export function acquireSessionDispatchTarget(
+  sessionId: string,
+  targetOverride?: SessionExecutionTarget,
+): SessionDispatchTargetAcquisition {
+  const actor = actorFor(sessionId);
+  if (actor.dispatch) {
+    return {
+      status: "contended",
+      waiter: createDispatchReleaseWaiter(actor),
+    };
+  }
+  const session = useChatSessionStore.getState().getSession(sessionId);
+  if (!session) return { status: "session-missing" };
+  const target = targetOverride ?? session.executionTarget;
+  if (!target) return { status: "unresolved" };
+  if (
+    targetOverride &&
+    !sameSessionExecutionTarget(session.executionTarget, targetOverride)
+  ) {
+    actor.deferredTargetMutation = {
+      kind: "target",
+      target: session.executionTarget,
+      source: session.executionTargetSource ?? "acp",
+      ...(session.reasoningEffort
+        ? { reasoningEffort: session.reasoningEffort }
+        : {}),
+    };
+  }
+  const token = Symbol(`dispatch:${sessionId}`);
+  let releaseGate!: () => void;
+  actor.dispatchReleased = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  const release = () => {
+    if (actor.dispatch?.token !== token) return;
+    actor.dispatch = undefined;
+    actor.dispatchReleased = undefined;
+    const deferredSelection = actor.deferredSelection;
+    actor.deferredSelection = undefined;
+    const deferredMutation = actor.deferredTargetMutation;
+    actor.deferredTargetMutation = undefined;
+    if (deferredSelection) {
+      // User intent wins over uncorrelated external observations. Keep the
+      // store on the successfully prepared lease target until the picker
+      // transition waiting behind this release prepares and publishes B.
+      actor.selection = deferredSelection;
+    } else if (deferredMutation) {
+      const store = useChatSessionStore.getState();
+      const target = deferredMutation.target;
+      if (target) {
+        transition(actor, {
+          type: "HYDRATE",
+          target,
+          metadata: metadataFor(target, deferredMutation.reasoningEffort),
+        });
+      } else {
+        transition(actor, { type: "SESSION_REMOVED" });
+      }
+      if (deferredMutation.source === "ui") {
+        store.replaceSessionExecutionTarget(sessionId, target);
+      } else {
+        const normalizedTarget = target
+          ? normalizeSessionExecutionTarget(target)
+          : undefined;
+        useChatSessionStore.setState((state) => ({
+          sessions: state.sessions.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  executionTarget: normalizedTarget,
+                  executionTargetSource: "acp" as const,
+                  reasoningEffort: deferredMutation.reasoningEffort,
+                }
+              : session,
+          ),
+        }));
+      }
+      if (
+        deferredMutation.source === "ui" &&
+        deferredMutation.reasoningEffort
+      ) {
+        store.patchSession(sessionId, {
+          reasoningEffort: deferredMutation.reasoningEffort,
+        });
+      }
+    }
+    releaseGate();
+    if (actor.latest) {
+      void drain(sessionId, actor);
+    } else {
+      queueMicrotask(() => notifyDispatchReleaseListeners(actor));
+    }
+  };
+  actor.dispatch = {
+    token,
+    target,
+    source: session.executionTargetSource,
+    reasoningEffort: session.reasoningEffort,
+    release,
+  };
+  if (
+    targetOverride &&
+    !sameSessionExecutionTarget(session.executionTarget, targetOverride)
+  ) {
+    restoringLeasedTarget = true;
+    try {
+      useChatSessionStore.setState((state) => ({
+        sessions: state.sessions.map((candidate) =>
+          candidate.id === sessionId
+            ? {
+                ...candidate,
+                executionTarget: targetOverride,
+                executionTargetSource: actor.dispatch?.source,
+                reasoningEffort: actor.dispatch?.reasoningEffort,
+              }
+            : candidate,
+        ),
+      }));
+    } finally {
+      restoringLeasedTarget = false;
+    }
+  }
+  return {
+    status: "acquired",
+    target,
+    token,
+    release,
+  };
+}
+
+export function onSessionDispatchReleased(
+  sessionId: string,
+  listener: () => void,
+): (() => void) | null {
+  const actor = actors.get(sessionId);
+  if (!actor?.dispatch) return null;
+  actor.dispatchReleaseListeners.add(listener);
+  return () => actor.dispatchReleaseListeners.delete(listener);
+}
+
+export function getSessionDispatchTarget(
+  sessionId: string,
+  dispatchToken?: symbol,
+): SessionExecutionTarget | undefined {
+  const dispatch = actors.get(sessionId)?.dispatch;
+  if (!dispatch || (dispatchToken && dispatch.token !== dispatchToken)) {
+    return undefined;
+  }
+  return dispatch.target;
+}
+
 export async function transitionSessionTarget(
   request: SessionTargetTransition,
 ): Promise<SessionTargetOutcome> {
+  const actor = actorFor(request.sessionId);
+  const activeDispatch = actor.dispatch;
+  if (activeDispatch && request.dispatchToken !== activeDispatch.token) {
+    await actor.dispatchReleased;
+  }
   const outcome = await requestSessionTargetTransition(request);
   if (outcome.status === "failed") throw outcome.error;
   return outcome;
@@ -449,6 +752,34 @@ export function hydrateSessionTarget(
   // enrich settled state, but it cannot cancel explicit work already owned by
   // the coordinator.
   if (actor.current || actor.latest || actor.selection) return false;
+  if (actor.dispatch) {
+    const dispatchTarget = actor.dispatch.target;
+    const normalizedTarget = normalizeSessionExecutionTarget(target);
+    const matchesDispatch =
+      sameSessionExecutionTarget(normalizedTarget, dispatchTarget) ||
+      (dispatchTarget.modelId === undefined &&
+        normalizedTarget.harnessId === dispatchTarget.harnessId &&
+        normalizedTarget.modelProviderId === dispatchTarget.modelProviderId);
+    if (matchesDispatch) {
+      const store = useChatSessionStore.getState();
+      if (!sameSessionExecutionTarget(normalizedTarget, dispatchTarget)) {
+        store.hydrateSessionExecutionTarget(sessionId, normalizedTarget);
+      }
+      if (reasoningEffort) {
+        store.patchSession(sessionId, {
+          reasoningEffort,
+        });
+      }
+      return true;
+    }
+    actor.deferredTargetMutation = {
+      kind: "target",
+      target: normalizedTarget,
+      source: "acp",
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    };
+    return false;
+  }
   const metadata = metadataFor(target, reasoningEffort);
   transition(actor, { type: "HYDRATE", target, metadata });
   const store = useChatSessionStore.getState();
@@ -515,9 +846,38 @@ function rejectModelSnapshot(
   return false;
 }
 
+function publishObservedTarget(
+  sessionId: string,
+  target: SessionExecutionTarget,
+  source: "ui" | "acp",
+  reasoningEffort?: AcpReasoningEffortConfigSnapshot,
+): void {
+  const normalizedTarget = normalizeSessionExecutionTarget(target);
+  useChatSessionStore.setState((state) => ({
+    sessions: state.sessions.map((session) => {
+      if (session.id !== sessionId) return session;
+      const identityChanged = !sameSessionExecutionTarget(
+        session.executionTarget,
+        normalizedTarget,
+      );
+      return {
+        ...session,
+        executionTarget: normalizedTarget,
+        executionTargetSource: source,
+        ...(reasoningEffort
+          ? { reasoningEffort }
+          : identityChanged
+            ? { reasoningEffort: undefined }
+            : {}),
+      };
+    }),
+  }));
+}
+
 export function observeSessionTargetModelSnapshot(input: {
   sessionId: string;
   snapshot: AcpModelConfigSnapshot;
+  reasoningEffort?: AcpReasoningEffortConfigSnapshot;
   context: AcpSessionConfigSnapshotContext;
 }): boolean {
   const actor = actorFor(input.sessionId);
@@ -525,6 +885,63 @@ export function observeSessionTargetModelSnapshot(input: {
   const session = store.getSession(input.sessionId);
   const localTarget = session?.executionTarget;
   const selection = actor.selection;
+  const requestId = input.context.requestId;
+  const ownsTransition =
+    requestId !== undefined &&
+    actor.state.status === "transitioning" &&
+    actor.state.operationId === requestId;
+  if (actor.dispatch) {
+    const dispatchTarget = actor.dispatch.target;
+    const observedBase = input.context.providerId
+      ? executionTargetFromGooseServeSession({
+          providerId: input.context.providerId,
+          modelId: input.snapshot.modelId,
+          modelName: input.snapshot.modelName,
+        })
+      : dispatchTarget;
+    const observedTarget = materializeSessionExecutionModel(
+      observedBase,
+      input.snapshot,
+    );
+    if (!observedTarget) {
+      return rejectModelSnapshot(input, session, selection);
+    }
+    const matchesDispatch =
+      sameSessionExecutionTarget(observedTarget, dispatchTarget) ||
+      (dispatchTarget.modelId === undefined &&
+        observedTarget.harnessId === dispatchTarget.harnessId &&
+        observedTarget.modelProviderId === dispatchTarget.modelProviderId);
+    if (!matchesDispatch) {
+      actor.deferredTargetMutation = {
+        kind: "target",
+        target: observedTarget,
+        source: "acp",
+        ...(input.reasoningEffort
+          ? { reasoningEffort: input.reasoningEffort }
+          : {}),
+      };
+      return false;
+    }
+    if (!ownsTransition) {
+      const pairedReasoningIsCurrent =
+        input.reasoningEffort !== undefined &&
+        session !== undefined &&
+        (input.context.reasoningEffortValue === undefined ||
+          session.reasoningEffort?.currentValue ===
+            input.context.reasoningEffortValue) &&
+        (session.executionTargetSource !== "ui" ||
+          snapshotContextMatchesTarget(session.executionTarget, input.context));
+      if (session) {
+        publishObservedTarget(
+          input.sessionId,
+          observedTarget,
+          session.executionTargetSource === "ui" ? "ui" : "acp",
+          pairedReasoningIsCurrent ? input.reasoningEffort : undefined,
+        );
+      }
+      return true;
+    }
+  }
 
   let base: SessionExecutionTarget | undefined;
   if (selection) {
@@ -556,34 +973,78 @@ export function observeSessionTargetModelSnapshot(input: {
 
   const target = materializeSessionExecutionModel(base, input.snapshot);
   if (!target) return rejectModelSnapshot(input, session, selection);
+  const pairedReasoningIsCurrent =
+    input.reasoningEffort !== undefined &&
+    (input.context.reasoningEffortValue === undefined ||
+      session?.reasoningEffort?.currentValue ===
+        input.context.reasoningEffortValue) &&
+    (selection
+      ? snapshotContextMatchesSelection(selection, input.context)
+      : session?.executionTargetSource !== "ui" ||
+        snapshotContextMatchesTarget(session.executionTarget, input.context));
+  const pairedReasoning = pairedReasoningIsCurrent
+    ? input.reasoningEffort
+    : undefined;
 
-  const requestId = input.context.requestId;
-  const ownsTransition =
-    requestId !== undefined &&
-    actor.state.status === "transitioning" &&
-    actor.state.operationId === requestId;
   if (ownsTransition) {
     transition(actor, {
       type: "ACKNOWLEDGED",
       operationId: requestId,
       target,
+      ...(pairedReasoning
+        ? { metadata: metadataFor(target, pairedReasoning) }
+        : {}),
     });
   } else if (!selection) {
     transition(actor, {
       type: "HYDRATE",
       target,
-      metadata: metadataFor(target),
+      metadata: metadataFor(target, pairedReasoning),
     });
   }
 
   if (session) {
-    if (session.executionTargetSource === "ui" || selection) {
-      store.replaceSessionExecutionTarget(input.sessionId, target);
-    } else {
-      store.hydrateSessionExecutionTarget(input.sessionId, target);
+    if (input.reasoningEffort && !pairedReasoningIsCurrent) {
+      console.warn("Dropped stale ACP reasoningEffort config snapshot", {
+        sessionId: input.sessionId.slice(0, 8),
+        origin: input.context.origin,
+        providerId: input.context.providerId,
+        modelId: input.context.modelId,
+        reasoningEffortValue: input.context.reasoningEffortValue,
+      });
     }
+    publishObservedTarget(
+      input.sessionId,
+      target,
+      session.executionTargetSource === "ui" || selection ? "ui" : "acp",
+      pairedReasoning,
+    );
   }
   return true;
+}
+
+export function observeSessionTargetConfigSnapshots(input: {
+  sessionId: string;
+  snapshots: AcpSessionConfigSnapshots;
+  context: AcpSessionConfigSnapshotContext;
+}): void {
+  const { model, reasoningEffort } = input.snapshots;
+  if (model) {
+    observeSessionTargetModelSnapshot({
+      sessionId: input.sessionId,
+      snapshot: model,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      context: input.context,
+    });
+    return;
+  }
+  if (reasoningEffort) {
+    observeSessionTargetReasoningSnapshot({
+      sessionId: input.sessionId,
+      reasoningEffort,
+      context: input.context,
+    });
+  }
 }
 
 export function observeSessionTargetReasoningSnapshot(input: {
@@ -679,21 +1140,45 @@ export function recordSessionTargetSelection(input: {
   preferenceAgentId?: string;
 }): void {
   const actor = actorFor(input.sessionId);
-  actor.selection = {
+  const selection = {
     operationId: input.operationId,
     target: normalizeSessionExecutionTarget(input.target),
     previousTarget: input.previousTarget,
     preferenceAgentId: input.preferenceAgentId,
   };
+  if (actor.dispatch) {
+    actor.deferredSelection = selection;
+    return;
+  }
+  actor.selection = selection;
   useChatSessionStore
     .getState()
-    .replaceSessionExecutionTarget(input.sessionId, actor.selection.target);
+    .replaceSessionExecutionTarget(input.sessionId, selection.target);
+}
+
+export function replaceSessionTargetAfterDispatch(
+  sessionId: string,
+  target: SessionExecutionTarget | undefined,
+): void {
+  const actor = actorFor(sessionId);
+  if (actor.dispatch) {
+    actor.deferredTargetMutation = {
+      kind: "target",
+      target,
+      source: "ui",
+    };
+    return;
+  }
+  useChatSessionStore
+    .getState()
+    .replaceSessionExecutionTarget(sessionId, target);
 }
 
 export function getSessionTargetSelection(
   sessionId: string,
 ): SessionTargetSelection | undefined {
-  return actorFor(sessionId).selection;
+  const actor = actorFor(sessionId);
+  return actor.deferredSelection ?? actor.selection;
 }
 
 export function clearSessionTargetSelection(
@@ -701,7 +1186,15 @@ export function clearSessionTargetSelection(
   operationId?: string,
 ): boolean {
   const actor = actors.get(sessionId);
-  if (!actor?.selection) return false;
+  if (!actor) return false;
+  if (actor.deferredSelection) {
+    if (operationId && actor.deferredSelection.operationId !== operationId) {
+      return false;
+    }
+    actor.deferredSelection = undefined;
+    return true;
+  }
+  if (!actor.selection) return false;
   if (operationId && actor.selection.operationId !== operationId) return false;
   actor.selection = undefined;
   return true;
@@ -739,6 +1232,9 @@ export function cancelSessionTarget(sessionId: string): void {
   }
   actor.latest = undefined;
   actor.selection = undefined;
+  actor.deferredSelection = undefined;
+  actor.deferredTargetMutation = undefined;
+  actor.dispatch?.release();
   actors.delete(sessionId);
 }
 

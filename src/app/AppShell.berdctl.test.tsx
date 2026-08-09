@@ -102,6 +102,8 @@ vi.mock("@/features/chat/lib/sessionActivation", async (importOriginal) => {
     ...actual,
     loadSessionMessages: (...args: unknown[]) =>
       mockLoadSessionMessages(...args),
+    loadSessionMessagesAndPrepare: (...args: unknown[]) =>
+      mockLoadSessionMessages(...args),
   };
 });
 

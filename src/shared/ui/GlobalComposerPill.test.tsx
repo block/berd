@@ -190,6 +190,7 @@ function expectSentImageAttachment(
   expect(onSend).toHaveBeenCalledWith("", {
     attachments: [expect.objectContaining({ kind: "image", ...expected })],
     executionTarget: { harnessId: "goose" },
+    personaId: null,
   });
 }
 
@@ -200,6 +201,7 @@ function expectSent(
 ) {
   expect(onSend).toHaveBeenCalledWith(text, {
     executionTarget: { harnessId: "goose" },
+    personaId: null,
     ...options,
   });
 }
@@ -457,7 +459,10 @@ describe("GlobalComposerPill", () => {
     expect(onStart).toHaveBeenCalledWith({
       text: "keep this draft",
       selectedSkills: [],
-      options: { executionTarget: { harnessId: "goose" } },
+      options: {
+        executionTarget: { harnessId: "goose" },
+        personaId: null,
+      },
     });
     expect(input).toHaveValue("keep this draft");
 
@@ -1456,6 +1461,7 @@ describe("GlobalComposerPill", () => {
           modelId: "goose-claude-fable",
           modelName: "Claude Fable",
         },
+        personaId: null,
       },
     });
   });
@@ -1635,7 +1641,10 @@ describe("GlobalComposerPill", () => {
     expect(onExpand).toHaveBeenCalledWith({
       text: "",
       selectedSkills: [],
-      options: { executionTarget: { harnessId: "goose" } },
+      options: {
+        executionTarget: { harnessId: "goose" },
+        personaId: null,
+      },
     });
     expect(textbox).toHaveFocus();
   });
@@ -1701,6 +1710,7 @@ describe("GlobalComposerPill", () => {
           }),
         ],
         executionTarget: { harnessId: "goose" },
+        personaId: null,
       },
     });
   });

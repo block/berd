@@ -1,4 +1,5 @@
 import { dispatchPrompt } from "@/features/chat/lib/sendCore";
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import {
   composeSystemPrompt,
   formatPersonaSystemPrompt,
@@ -29,11 +30,14 @@ export function sendPromptInBackground(
   beforeUserMessageCommitted?: () => void,
   onUserMessageCommitted?: () => void,
   validateExecutionTarget?: () => void,
+  onPromptDispatched?: () => void,
 ): Promise<void> {
-  const systemPrompt = composeSystemPrompt(
-    formatPersonaSystemPrompt(persona),
-    sendOptions.systemPrompt,
-  );
+  const systemPrompt =
+    sendOptions.executionSystemPrompt ??
+    composeSystemPrompt(
+      formatPersonaSystemPrompt(persona),
+      sendOptions.systemPrompt,
+    );
   return dispatchPrompt(sessionId, prompt, {
     persona: persona
       ? { id: persona.id, name: persona.displayName }
@@ -52,9 +56,13 @@ export function sendPromptInBackground(
     providerId,
     beforeUserMessageCommitted,
     onUserMessageCommitted,
+    onPromptDispatched,
     prepare: validateExecutionTarget,
     background: true,
   }).catch((error) => {
+    // Readiness changed at the final reversible boundary. The intent owner
+    // classifies this expected race (retain, queue, or refuse) deterministically.
+    if (error instanceof PreCommitSendRejectedError) throw error;
     // dispatchPrompt has already recorded the failure in the session
     // transcript and the chat-state stores; this log is diagnostics only.
     console.error(

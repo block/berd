@@ -838,9 +838,7 @@ export function GlobalComposerPill({
       if (selectedProjectId) {
         options.projectId = selectedProjectId;
       }
-      if (selectedPersonaId) {
-        options.personaId = selectedPersonaId;
-      }
+      options.personaId = selectedPersonaId;
       if (activeReasoningEffort?.config) {
         options.reasoningEffort = {
           configId: activeReasoningEffort.config.configId,
@@ -926,9 +924,7 @@ export function GlobalComposerPill({
     if (selectedProjectId) {
       options.projectId = selectedProjectId;
     }
-    if (selectedPersonaId) {
-      options.personaId = selectedPersonaId;
-    }
+    options.personaId = selectedPersonaId;
     if (activeReasoningEffort?.config) {
       options.reasoningEffort = {
         configId: activeReasoningEffort.config.configId,
@@ -1121,7 +1117,7 @@ export function GlobalComposerPill({
     }
     options.executionTarget = effectiveExecutionTarget;
     if (selectedProjectId) options.projectId = selectedProjectId;
-    if (selectedPersonaId) options.personaId = selectedPersonaId;
+    options.personaId = selectedPersonaId;
     if (activeReasoningEffort?.config) {
       options.reasoningEffort = {
         configId: activeReasoningEffort.config.configId,

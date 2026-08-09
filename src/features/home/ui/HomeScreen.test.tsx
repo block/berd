@@ -348,7 +348,7 @@ describe("HomeScreen", () => {
 
     expect(mockController.handleSend).toHaveBeenCalledWith(
       "",
-      undefined,
+      null,
       expect.arrayContaining([
         expect.objectContaining({
           kind: "image",

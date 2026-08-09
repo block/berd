@@ -6,12 +6,23 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { listSkills } from "@/features/skills/api/skills";
 import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillChatPrompt";
-import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
+import {
+  composeSystemPrompt,
+  formatPersonaSystemPrompt,
+} from "@/features/projects/lib/chatProjectContext";
 
 import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
-import { transitionSessionTarget } from "@/features/chat/lib/sessionTargetCoordinator";
+import {
+  SessionDispatchContentionError,
+  SessionDispatchMissingError,
+  SessionDispatchUnresolvedError,
+} from "@/features/chat/lib/sessionDispatchAcquisition";
+import {
+  acquireSessionDispatchTarget,
+  transitionSessionTarget,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 import { applyPendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import {
   formatIncludedWorkspacesPrompt,
@@ -23,6 +34,7 @@ import {
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
+
 import {
   sameSessionExecutionTarget,
   type SessionExecutionTarget,
@@ -75,23 +87,46 @@ function hasUiOwnedUnresolvedTarget(session?: ChatSession): boolean {
   return session?.executionTargetSource === "ui" && !session.executionTarget;
 }
 
+export {
+  SessionDispatchContentionError,
+  SessionDispatchMissingError,
+  SessionDispatchUnresolvedError,
+} from "@/features/chat/lib/sessionDispatchAcquisition";
+
+export async function acquireExistingSessionForBackgroundSend(
+  sessionId: string,
+) {
+  const sessionBeforeHydration = useChatSessionStore
+    .getState()
+    .getSession(sessionId);
+  if (!sessionBeforeHydration) {
+    return { status: "session-missing" } as const;
+  }
+  const snapshottedTarget = sessionBeforeHydration.executionTarget;
+  const loaded = await loadSessionMessages(sessionId);
+  if (!loaded) {
+    throw new Error("Failed to load the target session before sending.");
+  }
+  await applyPendingSessionWorkspaceActivation(sessionId);
+  if (!useChatSessionStore.getState().getSession(sessionId)) {
+    return { status: "session-missing" } as const;
+  }
+  return acquireSessionDispatchTarget(sessionId, snapshottedTarget);
+}
+
 export async function prepareExistingSessionForBackgroundSend(
   sessionId: string,
   options: {
     preserveWorkingDir?: boolean;
     executionTarget?: SessionExecutionTarget;
+    dispatchToken?: symbol;
+    skipPersonaLookup?: boolean;
   } = {},
 ): Promise<{
   providerId: string;
   executionTarget: SessionExecutionTarget;
   persona?: Pick<Persona, "id" | "displayName" | "systemPrompt">;
 }> {
-  const loaded = await loadSessionMessages(sessionId);
-  if (!loaded) {
-    throw new Error("Failed to load the target session before sending.");
-  }
-
-  await applyPendingSessionWorkspaceActivation(sessionId);
   const session = useChatSessionStore.getState().getSession(sessionId);
   if (!session) {
     throw new Error(`No session "${sessionId}".`);
@@ -109,7 +144,9 @@ export async function prepareExistingSessionForBackgroundSend(
           return match;
         })
       : null,
-    session.personaId ? findPersona(session.personaId) : null,
+    !options.skipPersonaLookup && session.personaId
+      ? findPersona(session.personaId)
+      : null,
   ]);
   const activeWorkspacePath = options.preserveWorkingDir
     ? session.workingDir
@@ -147,6 +184,7 @@ export async function prepareExistingSessionForBackgroundSend(
     sessionId,
     target: executionTarget,
     workingDir,
+    dispatchToken: options.dispatchToken,
   });
   if (!result.applied) {
     throw new Error("Session preparation was superseded by a newer selection.");
@@ -168,63 +206,110 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   sessionId: string,
   queuedMessage: QueuedMessageRecord & { kind: "transport-ready" },
   beforeUserMessageCommitted?: () => void,
-  onUserMessageCommitted?: () => void,
+  onPromptDispatched?: () => void,
 ): Promise<void> {
-  const { payload } = queuedMessage;
-  const payloadPersona = payload.personaId
-    ? await findPersona(payload.personaId)
-    : undefined;
-  const {
-    providerId,
-    executionTarget: preparedExecutionTarget,
-    persona: sessionPersona,
-  } = await prepareExistingSessionForBackgroundSend(sessionId, {
-    preserveWorkingDir: queuedMessage.releasedFromDeferred,
-    ...(payload.executionTarget
-      ? { executionTarget: payload.executionTarget }
-      : {}),
-  });
-  const persona = payloadPersona ?? sessionPersona;
-  const session = useChatSessionStore.getState().getSession(sessionId);
-  const sendOptions = payload.sendOptions ?? {};
-  const workspacePaths = session
-    ? getWorkspaceAttachments(session)
-        .filter((attachment) => attachment.source !== "excluded")
-        .map((attachment) => attachment.path)
-    : [];
-  const [instructionFiles, skills] = await Promise.all([
-    loadWorkspaceInstructionFiles(workspacePaths).catch((error) => {
-      console.warn(
-        "Failed to load workspace instructions for queued send:",
-        error,
+  const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
+  if (acquisition.status === "contended") {
+    throw new SessionDispatchContentionError(acquisition.waiter);
+  }
+  if (acquisition.status === "unresolved") {
+    throw new SessionDispatchUnresolvedError();
+  }
+  if (acquisition.status === "session-missing") {
+    throw new SessionDispatchMissingError(sessionId);
+  }
+  const targetLease = acquisition;
+  try {
+    const { payload } = queuedMessage;
+    const sendOptions = payload.sendOptions ?? {};
+    const payloadPersonaIntent = payload.persona;
+    const payloadPersona =
+      payloadPersonaIntent.kind === "persona"
+        ? await findPersona(payloadPersonaIntent.id).catch((error) => {
+            if (!payloadPersonaIntent.name) throw error;
+            return {
+              id: payloadPersonaIntent.id,
+              displayName: payloadPersonaIntent.name,
+              systemPrompt: "",
+              isBuiltin: false,
+              writable: false,
+            } satisfies Persona;
+          })
+        : undefined;
+    const {
+      providerId,
+      executionTarget: preparedExecutionTarget,
+      persona: sessionPersona,
+    } = await prepareExistingSessionForBackgroundSend(sessionId, {
+      preserveWorkingDir: queuedMessage.releasedFromDeferred,
+      skipPersonaLookup: payload.persona.kind !== "inherit",
+      executionTarget: targetLease.target,
+      dispatchToken: targetLease.token,
+    });
+    const persona =
+      payloadPersonaIntent.kind === "none"
+        ? undefined
+        : payloadPersona
+          ? {
+              ...payloadPersona,
+              displayName:
+                payloadPersonaIntent.kind === "persona"
+                  ? (payloadPersonaIntent.name ?? payloadPersona.displayName)
+                  : payloadPersona.displayName,
+            }
+          : sessionPersona;
+    const session = useChatSessionStore.getState().getSession(sessionId);
+    const workspacePaths = session
+      ? getWorkspaceAttachments(session)
+          .filter((attachment) => attachment.source !== "excluded")
+          .map((attachment) => attachment.path)
+      : [];
+    const [instructionFiles, skills] = await Promise.all([
+      loadWorkspaceInstructionFiles(workspacePaths).catch((error) => {
+        console.warn(
+          "Failed to load workspace instructions for queued send:",
+          error,
+        );
+        return [];
+      }),
+      listSkills(workspacePaths, { providerId }).catch((error) => {
+        console.warn("Failed to list skills for queued send:", error);
+        return [];
+      }),
+    ]);
+    const workspaceContextPrompt = session
+      ? composeSystemPrompt(
+          formatIncludedWorkspacesPrompt(session),
+          formatWorkspaceInstructionsPrompt(instructionFiles),
+          formatAvailableSkillsCatalogPrompt(skills),
+        )
+      : undefined;
+    const personaSystemPrompt =
+      sendOptions.capturedPersonaSystemPrompt ??
+      formatPersonaSystemPrompt(persona);
+    const executionSystemPrompt =
+      sendOptions.executionSystemPrompt ??
+      composeSystemPrompt(
+        personaSystemPrompt,
+        sendOptions.systemPrompt ?? workspaceContextPrompt,
       );
-      return [];
-    }),
-    listSkills(workspacePaths, { providerId }).catch((error) => {
-      console.warn("Failed to list skills for queued send:", error);
-      return [];
-    }),
-  ]);
-  const workspaceContextPrompt = session
-    ? composeSystemPrompt(
-        formatIncludedWorkspacesPrompt(session),
-        formatWorkspaceInstructionsPrompt(instructionFiles),
-        formatAvailableSkillsCatalogPrompt(skills),
-      )
-    : undefined;
-  assertSessionExecutionTarget(sessionId, preparedExecutionTarget);
-  await sendPromptInBackground(
-    sessionId,
-    payload.text,
-    providerId,
-    persona ?? undefined,
-    {
-      ...sendOptions,
-      systemPrompt: sendOptions.systemPrompt ?? workspaceContextPrompt,
-    },
-    payload.attachments,
-    beforeUserMessageCommitted,
-    onUserMessageCommitted,
-    () => assertSessionExecutionTarget(sessionId, preparedExecutionTarget),
-  );
+    assertSessionExecutionTarget(sessionId, preparedExecutionTarget);
+    await sendPromptInBackground(
+      sessionId,
+      payload.text,
+      providerId,
+      persona ?? undefined,
+      {
+        ...sendOptions,
+        executionSystemPrompt,
+      },
+      payload.attachments,
+      beforeUserMessageCommitted,
+      undefined,
+      () => assertSessionExecutionTarget(sessionId, preparedExecutionTarget),
+      onPromptDispatched,
+    );
+  } finally {
+    targetLease.release();
+  }
 }

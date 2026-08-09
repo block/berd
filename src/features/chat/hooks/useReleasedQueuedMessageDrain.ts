@@ -1,41 +1,129 @@
 import { useEffect } from "react";
 import { i18n } from "@/shared/i18n";
 
-import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  assertQueuedSessionReady,
+  isQueuedSessionReady,
+} from "@/features/chat/lib/queuedMessageReadiness";
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
+import {
+  assertQueuedMessageAttemptOwned,
+  becameQueuedMessageTargetAttemptable,
+  isQueuedMessageTargetAttemptable,
+} from "@/features/chat/lib/queuedMessageAttemptOwnership";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  type QueuedMessageRecord,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
 import { sendQueuedPromptToExistingSessionInBackground } from "@/features/chat/lib/queuedSessionSend";
 
 const drainingSessionIds = new Set<string>();
+const activeOwners = new Set<string>();
+type ContentionWaiter = {
+  ownerId: string;
+  record: QueuedMessageRecord;
+  cancel: () => void;
+  releaseObserved: boolean;
+  attemptSettled: boolean;
+  resumeScheduled: boolean;
+};
 
-function drainReleasedQueuedMessage(sessionId: string): void {
+const contentionWaiters = new Map<string, ContentionWaiter>();
+
+function ownerIdFor(scopedSessionId?: string): string {
+  return scopedSessionId ? `session:${scopedSessionId}` : "global";
+}
+
+function reconcileContentionWaiters(scopedSessionId?: string): void {
+  const sessionStore = useChatSessionStore.getState();
+  const queue = useChatStore.getState().queuedMessageBySession;
+  const owned = new Set(getOwnedSessionIds(queue, scopedSessionId));
+  for (const [sessionId, waiter] of contentionWaiters) {
+    if (
+      (!scopedSessionId || sessionId === scopedSessionId) &&
+      (!owned.has(sessionId) ||
+        !sessionStore.getSession(sessionId) ||
+        queue[sessionId]?.[0] !== waiter.record)
+    ) {
+      cancelContentionWaiter(sessionId);
+    }
+  }
+}
+
+function cancelContentionWaiter(sessionId: string): void {
+  contentionWaiters.get(sessionId)?.cancel();
+  contentionWaiters.delete(sessionId);
+}
+
+function scheduleContentionResume(
+  sessionId: string,
+  waiter: ContentionWaiter,
+): void {
+  if (
+    !waiter.releaseObserved ||
+    !waiter.attemptSettled ||
+    waiter.resumeScheduled ||
+    contentionWaiters.get(sessionId) !== waiter
+  ) {
+    return;
+  }
+  waiter.resumeScheduled = true;
+  contentionWaiters.delete(sessionId);
+  queueMicrotask(() => drainReleasedQueuedMessage(sessionId, waiter.ownerId));
+}
+
+function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
+  if (!activeOwners.has(ownerId)) return;
+  const sessionExists = Boolean(
+    useChatSessionStore.getState().getSession(sessionId),
+  );
+  const currentRecord =
+    useChatStore.getState().queuedMessageBySession[sessionId]?.[0];
+  const pendingWaiter = contentionWaiters.get(sessionId);
+  if (pendingWaiter) {
+    if (sessionExists && pendingWaiter.record === currentRecord) return;
+    cancelContentionWaiter(sessionId);
+  }
   if (drainingSessionIds.has(sessionId)) {
     return;
   }
 
   const chatStore = useChatStore.getState();
+  const sessionStore = useChatSessionStore.getState();
+  if (
+    !sessionStore.hasHydratedSessions ||
+    !sessionStore.getSession(sessionId)
+  ) {
+    return;
+  }
   const queuedMessage = chatStore.queuedMessageBySession[sessionId]?.[0];
   const runtime = chatStore.getSessionRuntime(sessionId);
   if (
-    queuedMessage?.kind !== "transport-ready" ||
+    !isQueuedMessageTargetAttemptable(
+      queuedMessage,
+      sessionStore.getSession(sessionId),
+    ) ||
     !queuedMessage.releasedFromDeferred ||
-    isSessionRunning(runtime.chatState) ||
-    runtime.isRunCancellationPending
+    !isQueuedSessionReady(runtime)
   ) {
     return;
   }
 
   drainingSessionIds.add(sessionId);
+  let waitingForContention = false;
   void sendQueuedPromptToExistingSessionInBackground(
     sessionId,
     queuedMessage,
     () => {
-      if (
-        useChatStore.getState().queuedMessageBySession[sessionId]?.[0] !==
-        queuedMessage
-      ) {
-        throw new DOMException("The queued prompt was canceled.", "AbortError");
-      }
+      const state = useChatStore.getState();
+      assertQueuedMessageAttemptOwned(
+        state.queuedMessageBySession[sessionId]?.[0],
+        queuedMessage,
+      );
+      assertQueuedSessionReady(state.getSessionRuntime(sessionId));
     },
     () => {
       useChatStore
@@ -54,6 +142,25 @@ function drainReleasedQueuedMessage(sessionId: string): void {
       }
     })
     .catch((error) => {
+      if (error instanceof SessionDispatchContentionError) {
+        waitingForContention = true;
+        const waiter: ContentionWaiter = {
+          ownerId,
+          record: queuedMessage,
+          cancel: () => undefined,
+          releaseObserved: false,
+          attemptSettled: false,
+          resumeScheduled: false,
+        };
+        contentionWaiters.set(sessionId, waiter);
+        waiter.cancel = error.waiter.wait(() => {
+          if (contentionWaiters.get(sessionId) !== waiter) return;
+          waiter.releaseObserved = true;
+          scheduleContentionResume(sessionId, waiter);
+        });
+        return;
+      }
+      if (error instanceof PreCommitSendRejectedError) return;
       const message = i18n.t("chat:queue.releasedSendFailed");
       console.error(
         `[released-queue] failed to send queued prompt for session ${sessionId}`,
@@ -73,6 +180,17 @@ function drainReleasedQueuedMessage(sessionId: string): void {
     })
     .finally(() => {
       drainingSessionIds.delete(sessionId);
+      if (waitingForContention) {
+        const waiter = contentionWaiters.get(sessionId);
+        if (waiter?.record === queuedMessage) {
+          waiter.attemptSettled = true;
+          scheduleContentionResume(sessionId, waiter);
+        } else {
+          queueMicrotask(() => drainReleasedQueuedMessage(sessionId, ownerId));
+        }
+      } else {
+        drainReleasedQueuedMessage(sessionId, ownerId);
+      }
     });
 }
 
@@ -89,12 +207,15 @@ function getOwnedSessionIds(
 }
 
 function drainReadyReleasedMessages(scopedSessionId?: string): void {
+  const ownerId = ownerIdFor(scopedSessionId);
+  if (!activeOwners.has(ownerId)) return;
+  reconcileContentionWaiters(scopedSessionId);
   const { queuedMessageBySession } = useChatStore.getState();
   for (const sessionId of getOwnedSessionIds(
     queuedMessageBySession,
     scopedSessionId,
   )) {
-    drainReleasedQueuedMessage(sessionId);
+    drainReleasedQueuedMessage(sessionId, ownerId);
   }
 }
 
@@ -104,6 +225,8 @@ export function useReleasedQueuedMessageDrain(
 ): void {
   useEffect(() => {
     if (!ownerReady) return;
+    const ownerId = ownerIdFor(scopedSessionId);
+    activeOwners.add(ownerId);
     drainReadyReleasedMessages(scopedSessionId);
     const unsubscribeWindowStore = scopedSessionId
       ? undefined
@@ -116,8 +239,36 @@ export function useReleasedQueuedMessageDrain(
             drainReadyReleasedMessages();
           }
         });
+    const unsubscribeSessionStore = useChatSessionStore.subscribe(
+      (state, previousState) => {
+        reconcileContentionWaiters(scopedSessionId);
+        for (const sessionId of getOwnedSessionIds(
+          useChatStore.getState().queuedMessageBySession,
+          scopedSessionId,
+        )) {
+          const currentHead =
+            useChatStore.getState().queuedMessageBySession[sessionId]?.[0];
+          if (
+            becameQueuedMessageTargetAttemptable(
+              currentHead,
+              currentHead,
+              state.getSession(sessionId),
+              previousState.sessions.find(
+                (session) => session.id === sessionId,
+              ),
+            )
+          ) {
+            drainReleasedQueuedMessage(sessionId, ownerId);
+          }
+        }
+        if (state.hasHydratedSessions && !previousState.hasHydratedSessions) {
+          drainReadyReleasedMessages(scopedSessionId);
+        }
+      },
+    );
     const unsubscribeChatStore = useChatStore.subscribe(
       (state, previousState) => {
+        reconcileContentionWaiters(scopedSessionId);
         for (const sessionId of getOwnedSessionIds(
           state.queuedMessageBySession,
           scopedSessionId,
@@ -133,12 +284,8 @@ export function useReleasedQueuedMessageDrain(
           const currentRuntime = state.sessionStateById[sessionId];
           const previousRuntime = previousState.sessionStateById[sessionId];
           const currentChatState = currentRuntime?.chatState ?? "idle";
-          const currentBlocked =
-            isSessionRunning(currentChatState) ||
-            (currentRuntime?.isRunCancellationPending ?? false);
-          const previousBlocked =
-            isSessionRunning(previousRuntime?.chatState ?? "idle") ||
-            (previousRuntime?.isRunCancellationPending ?? false);
+          const currentBlocked = !isQueuedSessionReady(currentRuntime);
+          const previousBlocked = !isQueuedSessionReady(previousRuntime);
           const becameTransportReady =
             previousState.queuedMessageBySession[sessionId]?.[0] !==
             queuedMessage;
@@ -147,14 +294,19 @@ export function useReleasedQueuedMessageDrain(
             !currentBlocked &&
             (previousBlocked || becameTransportReady)
           ) {
-            drainReleasedQueuedMessage(sessionId);
+            drainReleasedQueuedMessage(sessionId, ownerId);
           }
         }
       },
     );
     return () => {
       unsubscribeWindowStore?.();
+      unsubscribeSessionStore();
       unsubscribeChatStore();
+      activeOwners.delete(ownerId);
+      for (const [sessionId, waiter] of contentionWaiters) {
+        if (waiter.ownerId === ownerId) cancelContentionWaiter(sessionId);
+      }
     };
   }, [ownerReady, scopedSessionId]);
 }

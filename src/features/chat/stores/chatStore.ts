@@ -17,7 +17,7 @@ import {
   INITIAL_SESSION_CHAT_RUNTIME,
   INITIAL_TOKEN_STATE,
 } from "@/shared/types/chat";
-import type { ChatSendOptions, ChatSkillDraft } from "../types";
+import type { ChatSkillDraft } from "../types";
 import { loadCachedDrafts, persistDrafts } from "./draftPersistence";
 import {
   loadCachedMessageQueues,
@@ -27,7 +27,11 @@ import {
   loadCachedUnreadSessionIds,
   persistUnreadSessionIds,
 } from "./unreadPersistence";
-import type { SessionExecutionTarget } from "../lib/sessionExecutionTarget";
+import {
+  isAdmittedQueuedMessagePayload,
+  type AdmittedQueuedMessagePayload,
+  type QueuedMessagePayload,
+} from "../lib/admittedSend";
 
 const MESSAGE_SESSION_CACHE_LIMIT = 10;
 
@@ -343,21 +347,13 @@ function findLatestInterventionMessageId(messages: Message[]): string | null {
   return null;
 }
 
-export interface QueuedMessagePayload {
-  text: string;
-  personaId?: string;
-  executionTarget?: SessionExecutionTarget;
-  attachments?: ChatAttachmentDraft[];
-  sendOptions?: ChatSendOptions;
-  /** False for reliable startup handoffs that should not look user-queued. */
-  showInComposer?: boolean;
-}
+export type { QueuedMessagePayload, AdmittedQueuedMessagePayload };
 
 export type QueuedMessageRecord =
   | {
       kind: "transport-ready";
       recordId: string;
-      payload: QueuedMessagePayload;
+      payload: AdmittedQueuedMessagePayload;
       releasedFromDeferred?: boolean;
       restored?: boolean;
       editing?: boolean;
@@ -483,11 +479,12 @@ interface ChatStoreActions {
     sessionId: string,
     recordId: string,
     state: unknown,
+    payload?: QueuedMessagePayload,
   ) => boolean;
   releaseDeferredMessage: (sessionId: string, recordId: string) => boolean;
   enqueueTransportReadyMessage: (
     sessionId: string,
-    payload: QueuedMessagePayload,
+    payload: AdmittedQueuedMessagePayload,
   ) => boolean;
   updateQueuedMessage: (
     sessionId: string,
@@ -1452,7 +1449,7 @@ const createChatStore: StateCreator<
     return true;
   },
 
-  deferTransportReadyMessage: (sessionId, recordId, deferredState) => {
+  deferTransportReadyMessage: (sessionId, recordId, deferredState, payload) => {
     const queue = get().queuedMessageBySession[sessionId] ?? [];
     const index = queue.findIndex(
       (record) =>
@@ -1464,7 +1461,7 @@ const createChatStore: StateCreator<
     next[index] = {
       kind: "deferred",
       recordId,
-      payload: record.payload,
+      payload: payload ?? record.payload,
       state: deferredState,
       ...(record.editing ? { editing: true } : {}),
     };
@@ -1532,16 +1529,23 @@ const createChatStore: StateCreator<
       record.kind === "deferred"
         ? (record.state as { status?: unknown })
         : undefined;
-    next[index] =
+    if (
       record.kind === "deferred" &&
       (deferredState?.status === "held" || deferredState?.status === "failed")
-        ? {
-            kind: "transport-ready",
-            recordId,
-            payload,
-            releasedFromDeferred: true,
-          }
-        : ({ ...record, payload } as QueuedMessageRecord);
+    ) {
+      if (!isAdmittedQueuedMessagePayload(payload)) return false;
+      next[index] = {
+        kind: "transport-ready",
+        recordId,
+        payload,
+        releasedFromDeferred: true,
+      };
+    } else if (record.kind === "transport-ready") {
+      if (!isAdmittedQueuedMessagePayload(payload)) return false;
+      next[index] = { ...record, payload };
+    } else {
+      next[index] = { ...record, payload };
+    }
     set((state) => ({
       queuedMessageBySession: {
         ...state.queuedMessageBySession,

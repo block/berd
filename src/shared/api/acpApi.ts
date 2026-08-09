@@ -469,9 +469,20 @@ export async function prompt(
   sessionId: string,
   content: ContentBlock[],
   meta?: Record<string, unknown>,
+  callbacks: {
+    onPromptDispatching?: () => void;
+    onPromptDispatched?: () => void;
+  } = {},
 ): Promise<PromptResponse> {
   const client = await getClient();
-  return client.prompt({ sessionId, prompt: content, _meta: meta });
+  callbacks.onPromptDispatching?.();
+  const promptPromise = client.prompt({
+    sessionId,
+    prompt: content,
+    _meta: meta,
+  });
+  callbacks.onPromptDispatched?.();
+  return promptPromise;
 }
 
 /**

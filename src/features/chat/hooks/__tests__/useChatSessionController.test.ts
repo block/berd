@@ -18,8 +18,10 @@ import {
   type ChatSession,
   useChatSessionStore,
 } from "../../stores/chatSessionStore";
-import { transitionSessionTarget } from "../../lib/sessionTargetCoordinator";
-import { resetSessionTargetCoordinatorsForTests } from "../../lib/sessionTargetCoordinator";
+import {
+  resetSessionTargetCoordinatorsForTests,
+  transitionSessionTarget,
+} from "../../lib/sessionTargetCoordinator";
 import { workspaceAttachmentIdForPath } from "../../lib/workspaceAttachments";
 import type { ChatSendOptions, ModelOption } from "../../types";
 
@@ -391,13 +393,51 @@ describe("useChatSessionController", () => {
         __sessionId?: string;
       }) => {
         await options?.ensurePrepared?.();
+        return true;
       },
     );
-    mockUseMessageQueue.mockImplementation(() => ({
-      queuedMessage: null,
-      enqueue: vi.fn(),
-      dismiss: vi.fn(),
-    }));
+    mockUseMessageQueue.mockImplementation(
+      (
+        _sessionId: string,
+        _chatState: string,
+        sendMessage: (
+          text: string,
+          persona?: { id: string },
+          attachments?: unknown[],
+          sendOptions?: unknown,
+        ) => boolean | Promise<boolean>,
+      ) => ({
+        queuedMessage: null,
+        enqueue: (
+          text: string,
+          personaId?: string,
+          attachments?: unknown[],
+          sendOptions?: unknown,
+          personaName?: string,
+        ) => {
+          const persona = personaId
+            ? useAgentStore
+                .getState()
+                .personas.find((candidate) => candidate.id === personaId)
+            : undefined;
+          void sendMessage(
+            text,
+            personaId
+              ? {
+                  id: personaId,
+                  ...((personaName ?? persona?.displayName) && {
+                    name: personaName ?? persona?.displayName,
+                  }),
+                }
+              : undefined,
+            attachments,
+            sendOptions,
+          );
+          return true;
+        },
+        dismiss: vi.fn(),
+      }),
+    );
     mockDeletePersonaSource.mockResolvedValue(undefined);
     mockListSkills.mockReset().mockResolvedValue([]);
     mockListBerdAppSkills
@@ -602,7 +642,35 @@ describe("useChatSessionController", () => {
             "hello",
           );
           await options?.ensurePrepared?.();
+          return true;
         },
+      );
+      mockUseMessageQueue.mockImplementationOnce(
+        (
+          _sessionId: string,
+          _chatState: string,
+          sendMessage: (
+            text: string,
+            persona?: { id: string; name?: string },
+            attachments?: unknown[],
+            sendOptions?: unknown,
+          ) => boolean | Promise<boolean>,
+        ) => ({
+          queuedMessage: null,
+          enqueue: (
+            text: string,
+            personaId?: string,
+            attachments?: unknown[],
+            sendOptions?: unknown,
+          ) =>
+            sendMessage(
+              text,
+              personaId ? { id: personaId } : undefined,
+              attachments,
+              sendOptions,
+            ),
+          dismiss: vi.fn(),
+        }),
       );
       const { result } = renderHook(() =>
         useChatSessionController({ sessionId: "session-1" }),
@@ -873,6 +941,7 @@ describe("useChatSessionController", () => {
       ],
     });
     useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
+      persona: { kind: "inherit" },
       text: "queued from pill",
     });
 
@@ -884,7 +953,10 @@ describe("useChatSessionController", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["draft-session"]?.[0]
         ?.payload,
-    ).toEqual({ text: "queued from pill" });
+    ).toEqual({
+      persona: { kind: "inherit" },
+      text: "queued from pill",
+    });
   });
 
   it("passes all included workspaces to the agent system prompt", () => {
@@ -1345,6 +1417,7 @@ describe("useChatSessionController", () => {
       ],
     });
     useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
+      persona: { kind: "inherit" },
       text: "queued from pill",
     });
 
@@ -1364,10 +1437,6 @@ describe("useChatSessionController", () => {
         sessions: [
           sessionFixture({
             id: "backend-1",
-            executionTarget: {
-              harnessId: "goose",
-              modelProviderId: "openai",
-            },
             projectId: "project-1",
           }),
         ],
@@ -1380,7 +1449,10 @@ describe("useChatSessionController", () => {
     expect(queueChatState).toBe("idle");
     expect(
       useChatStore.getState().queuedMessageBySession["backend-1"]?.[0]?.payload,
-    ).toEqual({ text: "queued from pill" });
+    ).toEqual({
+      persona: { kind: "inherit" },
+      text: "queued from pill",
+    });
     expect(
       useChatStore.getState().queuedMessageBySession["draft-session"],
     ).toBeUndefined();
@@ -1401,6 +1473,7 @@ describe("useChatSessionController", () => {
       ],
     });
     useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
+      persona: { kind: "inherit" },
       text: "queued from pill",
     });
 
@@ -1415,7 +1488,10 @@ describe("useChatSessionController", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["draft-session"]?.[0]
         ?.payload,
-    ).toEqual({ text: "queued from pill" });
+    ).toEqual({
+      persona: { kind: "inherit" },
+      text: "queued from pill",
+    });
   });
 
   it("keeps existing non-draft sessions idle so no-project queued sends still drain", () => {
@@ -1471,6 +1547,7 @@ describe("useChatSessionController", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
   });
@@ -1498,6 +1575,7 @@ describe("useChatSessionController", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
 
@@ -1509,10 +1587,17 @@ describe("useChatSessionController", () => {
     await waitFor(() => expect(latestMessageQueueArgs()[1]).toBe("idle"));
   });
 
-  it("waits for workspace context discovery before accepting workspace sends", async () => {
-    const skillsDeferred = deferred<[]>();
+  it("waits for complete workspace context before freezing queued execution", async () => {
+    const skillsDeferred = deferred<ReturnType<typeof catalogSkill>[]>();
     const enqueue = vi.fn();
     mockListSkills.mockReturnValue(skillsDeferred.promise);
+    mockLoadWorkspaceInstructionFiles.mockResolvedValue([
+      {
+        path: "/tmp/project/AGENTS.md",
+        workspacePaths: ["/tmp/project"],
+        content: "workspace instructions are ready",
+      },
+    ]);
     mockUseMessageQueue.mockImplementation(() => ({
       queuedMessage: null,
       enqueue,
@@ -1552,22 +1637,108 @@ describe("useChatSessionController", () => {
       expect(result.current.handleSend("hello")).toBe(true);
     });
 
-    expect(enqueue).toHaveBeenCalledWith(
-      "hello",
-      undefined,
-      undefined,
-      undefined,
-    );
+    const queuedSendOptions = enqueue.mock.calls[0]?.[3];
+    const queuedExecutionTarget = enqueue.mock.calls[0]?.[5];
+    expect(queuedSendOptions).toBeUndefined();
+    expect(queuedExecutionTarget).toBeUndefined();
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
 
     await act(async () => {
-      skillsDeferred.resolve([]);
+      skillsDeferred.resolve([catalogSkill("code-review")]);
       await skillsDeferred.promise;
     });
 
     await waitFor(() => {
       expect(latestMessageQueueArgs()[1]).toBe("idle");
     });
+
+    const drainSend = latestMessageQueueArgs()[2] as (
+      text: string,
+      persona?: { id: string; name?: string },
+      attachments?: unknown[],
+      sendOptions?: ChatSendOptions,
+    ) => boolean | Promise<boolean>;
+    await act(async () => {
+      await drainSend("hello", undefined, undefined, undefined);
+    });
+
+    const executionSystemPrompt =
+      mockUseChatSendMessage.mock.calls.at(-1)?.[4]?.executionSystemPrompt;
+    expect(executionSystemPrompt).toContain("<included-workspaces>");
+    expect(executionSystemPrompt).toContain("workspace instructions are ready");
+    expect(executionSystemPrompt).toContain("code-review");
+  });
+
+  it("snapshots persona identity before workspace context becomes ready", async () => {
+    const skillsDeferred = deferred<ReturnType<typeof catalogSkill>[]>();
+    const enqueue = vi.fn();
+    mockListSkills.mockReturnValue(skillsDeferred.promise);
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      enqueue,
+      dismiss: vi.fn(),
+    }));
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Planner",
+          systemPrompt: "Preserve this instruction.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+          workingDir: "/tmp/project",
+          workspaceAttachments: [
+            {
+              id: workspaceAttachmentIdForPath("/tmp/project"),
+              path: "/tmp/project",
+              kind: "git-main-worktree",
+              source: "inferred",
+              branch: "main",
+              usedByAgent: false,
+            },
+          ],
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+    act(() => {
+      result.current.handleSend("plan", "persona-1");
+    });
+
+    expect(enqueue).toHaveBeenCalledWith(
+      "plan",
+      "persona-1",
+      undefined,
+      expect.objectContaining({
+        capturedPersonaSystemPrompt: expect.stringContaining(
+          "Preserve this instruction.",
+        ),
+      }),
+      "Planner",
+    );
+    expect(enqueue.mock.calls[0]?.[3]).not.toHaveProperty(
+      "executionSystemPrompt",
+    );
   });
 
   it("does not reuse stale workspace instructions after included workspaces are removed", async () => {
@@ -2107,9 +2278,36 @@ describe("useChatSessionController", () => {
   });
 
   it("activates builder mode before appending an agent-builder send", async () => {
-    useChatStore
-      .getState()
-      .enqueueTransportReadyMessage("session-1", { text: "existing" });
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "existing",
+    });
+    mockUseMessageQueue.mockImplementation((sessionId: string) => ({
+      queuedMessage: null,
+      queuedRecords:
+        useChatStore.getState().queuedMessageBySession[sessionId] ?? [],
+      enqueue: (
+        text: string,
+        personaId?: string,
+        attachments?: unknown[],
+        sendOptions?: unknown,
+        personaName?: string,
+      ) =>
+        useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
+          persona:
+            personaId === undefined
+              ? { kind: "inherit" }
+              : {
+                  kind: "persona",
+                  id: personaId,
+                  ...(personaName ? { name: personaName } : {}),
+                },
+          text,
+          attachments: attachments as ChatAttachmentDraft[] | undefined,
+          sendOptions: sendOptions as ChatSendOptions | undefined,
+        }),
+      dismiss: vi.fn(),
+    }));
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
@@ -2276,13 +2474,7 @@ describe("useChatSessionController", () => {
       kind: "deferred",
       payload: {
         text: "plan",
-        personaId: "persona-1",
-        executionTarget: {
-          harnessId: "goose",
-          modelProviderId: "databricks_v2",
-          modelId: "goose-claude-opus-4-8",
-          modelName: "Claude Opus 4.8",
-        },
+        persona: { kind: "persona", id: "persona-1" },
         sendOptions: {
           assistantPrompt: expect.stringContaining("draft-from-chat.md"),
         },
@@ -2305,7 +2497,7 @@ describe("useChatSessionController", () => {
     });
     useChatStore.getState().enqueueDeferredMessage(
       "session-1",
-      { text: "build it" },
+      { persona: { kind: "inherit" }, text: "build it" },
       {
         type: "workspace-first-send",
         status: "choice",
@@ -2335,18 +2527,20 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("waits for refreshed workspace context before sending after a persona provider switch", async () => {
-    const codexSkills = deferred<[]>();
-    mockListSkills.mockImplementation(
-      async (_paths: string[], options?: { providerId?: string }) =>
-        options?.providerId === "codex-acp" ? codexSkills.promise : [],
-    );
+  it("queues persona-switch sends immediately with immutable FIFO selections", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
           displayName: "Codex Planner",
           systemPrompt: "Plan clearly.",
           provider: "codex-acp",
+        }),
+        personaFixture({
+          id: "persona-2",
+          displayName: "Goose Reviewer",
+          systemPrompt: "Review carefully.",
+          provider: "goose",
+          model: "goose-claude-opus-4-8",
         }),
       ],
     });
@@ -2373,42 +2567,137 @@ describe("useChatSessionController", () => {
         }),
       ],
     });
+    mockPickerState.modelsByAgent.set("goose", [
+      {
+        id: "goose-claude-opus-4-8",
+        name: "Claude Opus 4.8",
+        providerId: "databricks_v2",
+      },
+    ]);
+    const queued: Array<{
+      text: string;
+      personaId?: string | null;
+      personaName?: string;
+      sendOptions?: ChatSendOptions;
+    }> = [];
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      queuedRecords: queued.map((payload, index) => ({
+        id: `queued-${index}`,
+        kind: "transport-ready" as const,
+        payload,
+        createdAt: index,
+      })),
+      enqueue: (
+        text: string,
+        personaId?: string | null,
+        _attachments?: ChatAttachmentDraft[],
+        sendOptions?: ChatSendOptions,
+        personaName?: string,
+      ) => {
+        queued.push({
+          text,
+          personaId,
+          personaName,
+          sendOptions,
+        });
+        return true;
+      },
+      dismiss: vi.fn(),
+    }));
 
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
 
-    await waitFor(() => {
-      expect(latestMessageQueueArgs()[1]).toBe("idle");
-    });
-    mockUseChatSendMessage.mockClear();
-
-    let sendResult!: boolean | Promise<boolean>;
     act(() => {
-      sendResult = result.current.handleSend("plan", "persona-1");
+      expect(result.current.handleSend("no persona", null)).toBe(true);
+      expect(result.current.handleSend("plan", "persona-1")).toBe(true);
+      expect(result.current.handleSend("review", "persona-2")).toBe(true);
     });
 
-    await waitFor(() => {
-      expect(mockListSkills).toHaveBeenCalledWith(["/tmp/project"], {
-        providerId: "codex-acp",
-        includeAppSkills: false,
-      });
-    });
+    expect(queued).toEqual([
+      {
+        text: "no persona",
+        personaId: null,
+        personaName: undefined,
+        sendOptions: undefined,
+      },
+      {
+        text: "plan",
+        personaId: "persona-1",
+        personaName: "Codex Planner",
+        sendOptions: {
+          capturedPersonaSystemPrompt: expect.stringContaining("Plan clearly."),
+        },
+      },
+      {
+        text: "review",
+        personaId: "persona-2",
+        personaName: "Goose Reviewer",
+        sendOptions: {
+          capturedPersonaSystemPrompt:
+            expect.stringContaining("Review carefully."),
+        },
+      },
+    ]);
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
-
-    await act(async () => {
-      codexSkills.resolve([]);
-      await codexSkills.promise;
-    });
-
-    await waitFor(() => {
-      expect(latestMessageQueueArgs()[1]).toBe("idle");
-      expect(mockUseChatSendMessage).toHaveBeenCalledOnce();
-    });
-    await expect(sendResult).resolves.toBe(true);
   });
 
-  it("blocks deferred persona sends while read-only", async () => {
+  it("preserves a newer draft when a persona-switch queue commits later", () => {
+    vi.useFakeTimers();
+    let acceptCommittedMessage!: (text: string) => void;
+    mockUseChatSendMessage.mockImplementationOnce(
+      (options?: {
+        onMessageAccepted?: (
+          sessionId: string,
+          text: string,
+        ) => boolean | undefined;
+        __sessionId?: string;
+      }) => {
+        acceptCommittedMessage = (text: string) => {
+          const targetSessionId = options?.__sessionId ?? "session-1";
+          if (options?.onMessageAccepted?.(targetSessionId, text) !== false) {
+            useChatStore.getState().clearDraft(targetSessionId);
+          }
+        };
+      },
+    );
+    mockUseChatRuntime.chatState = "streaming";
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Planner",
+          systemPrompt: "Plan clearly.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleDraftChange("plan this");
+      expect(result.current.handleSend("plan this", "persona-1")).toBe(true);
+      result.current.handleDraftChange("newer draft");
+    });
+    const [, , drainQueuedMessage] = latestMessageQueueArgs();
+    act(() => {
+      (drainQueuedMessage as (text: string) => void)("plan this");
+      acceptCommittedMessage("plan this");
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+      "newer draft",
+    );
+    vi.useRealTimers();
+  });
+
+  it("keeps an accepted persona-switch record when the view becomes read-only", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -2417,28 +2706,26 @@ describe("useChatSessionController", () => {
         }),
       ],
     });
+    const enqueue = vi.fn().mockReturnValue(true);
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      queuedRecords: [],
+      enqueue,
+      dismiss: vi.fn(),
+    }));
     const { result, rerender } = renderHook(
       ({ readOnly }: { readOnly: boolean }) =>
         useChatSessionController({ sessionId: "session-1", readOnly }),
-      {
-        initialProps: { readOnly: false },
-      },
+      { initialProps: { readOnly: false } },
     );
 
-    let accepted: boolean | undefined;
-    let sendResult!: boolean | Promise<boolean>;
     act(() => {
-      sendResult = result.current.handleSend("plan", "persona-1");
+      expect(result.current.handleSend("plan", "persona-1")).toBe(true);
       rerender({ readOnly: true });
     });
 
-    await act(async () => {
-      accepted = sendResult instanceof Promise ? await sendResult : sendResult;
-    });
-
-    expect(accepted).toBe(false);
+    expect(enqueue).toHaveBeenCalledOnce();
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
-    expect(useChatStore.getState().draftsBySession["session-1"]).toBe("plan");
   });
 
   it("opens builder mode as soon as the agent-builder skill is selected", async () => {
@@ -3504,7 +3791,7 @@ describe("useChatSessionController", () => {
     );
 
     await act(async () => {
-      await result.current.handleSend("use the selected model");
+      await result.current.handleSend("use the selected model", "persona-1");
     });
 
     await waitFor(() => {
@@ -4537,6 +4824,7 @@ describe("useChatSessionController", () => {
         sendOptions?: ChatSendOptions,
       ) =>
         useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
+          persona: { kind: "inherit" },
           text,
           ...(personaId ? { personaId } : {}),
           ...(attachments ? { attachments } : {}),
@@ -4569,6 +4857,7 @@ describe("useChatSessionController", () => {
       useChatStore.getState().queuedMessageBySession.__home_pending__?.[0]
         ?.payload,
     ).toEqual({
+      persona: { kind: "inherit" },
       text: "",
       attachments: [imageDraft],
     });
@@ -4596,6 +4885,7 @@ describe("useChatSessionController", () => {
           "session-home-attachments"
         ]?.[0]?.payload,
       ).toEqual({
+        persona: { kind: "inherit" },
         text: "",
         attachments: [imageDraft],
       });
@@ -4612,7 +4902,10 @@ describe("useChatSessionController", () => {
           {
             kind: "transport-ready",
             recordId: "restored-home",
-            payload: { text: "restored from Home" },
+            payload: {
+              persona: { kind: "inherit" },
+              text: "restored from Home",
+            },
             restored: true,
           },
         ],
@@ -4647,7 +4940,10 @@ describe("useChatSessionController", () => {
         ]?.[0],
       ).toMatchObject({
         recordId: "restored-home",
-        payload: { text: "restored from Home" },
+        payload: {
+          persona: { kind: "inherit" },
+          text: "restored from Home",
+        },
       });
     });
     expect(
@@ -4660,12 +4956,15 @@ describe("useChatSessionController", () => {
   it("appends pending Home messages to an occupied destination", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("__home_pending__", {
+      persona: { kind: "inherit" },
       text: "queued from Home",
     });
     chatStore.enqueueTransportReadyMessage("__home_pending__", {
+      persona: { kind: "inherit" },
       text: "Home follow-up",
     });
     chatStore.enqueueTransportReadyMessage("session-occupied", {
+      persona: { kind: "inherit" },
       text: "already queued",
     });
     chatStore.setDraft("__home_pending__", "pending draft");
@@ -4789,6 +5088,7 @@ describe("useChatSessionController", () => {
     act(() => {
       result.current.handleModelChange("claude-sonnet-4");
       useChatStore.getState().enqueueTransportReadyMessage("__home_pending__", {
+        persona: { kind: "inherit" },
         text: "queued from Home",
         attachments: [queuedImageAttachment],
       });
@@ -4843,6 +5143,7 @@ describe("useChatSessionController", () => {
           "session-superseded-home"
         ]?.[0]?.payload,
       ).toEqual({
+        persona: { kind: "inherit" },
         text: "queued from Home",
         attachments: [queuedImageAttachment],
       });

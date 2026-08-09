@@ -4,9 +4,20 @@ import type {
   ModelExecutionTarget,
   SessionExecutionTarget,
 } from "@/features/chat/lib/sessionExecutionTarget";
+import {
+  acquireSessionDispatchTarget,
+  getSessionTargetSelection,
+  resetSessionTargetCoordinatorsForTests,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import type { AcpSessionConfigSnapshotContext } from "@/shared/api/acpSessionConfigSnapshots";
-import { applyChatSessionConfigOptionsSnapshot } from "../sessionConfigSnapshotAdapter";
+import {
+  applySessionConfigOptionsSnapshot,
+  type AcpSessionConfigSnapshotContext,
+} from "@/shared/api/acpSessionConfigSnapshots";
+import {
+  applyChatSessionConfigOptionsSnapshot,
+  registerChatSessionConfigSnapshotHandlers,
+} from "../sessionConfigSnapshotAdapter";
 
 const sessionId = "acp-session";
 const gooseProviderTarget = {
@@ -112,6 +123,8 @@ function getSession() {
 
 describe("sessionConfigSnapshotAdapter", () => {
   beforeEach(() => {
+    resetSessionTargetCoordinatorsForTests();
+    registerChatSessionConfigSnapshotHandlers();
     useChatSessionStore.setState({
       sessions: [],
     });
@@ -337,6 +350,53 @@ describe("sessionConfigSnapshotAdapter", () => {
     warnSpy.mockRestore();
   });
 
+  it("keeps anonymous paired reasoning off a UI-owned matching target", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    addSession("ui");
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(sessionId, gpt56Target);
+
+    applySnapshot("gpt-5.6-sol", { origin: "notification" }, "medium");
+
+    expect(getSession()?.executionTarget).toEqual({
+      ...gpt56Target,
+      modelName: "gpt-5.6-sol",
+    });
+    expect(getSession()?.reasoningEffort).toBeUndefined();
+    warnSpy.mockRestore();
+  });
+
+  it("materializes a matching provider-only lease atomically with paired reasoning", () => {
+    addSession("acp");
+    const lease = acquireSessionDispatchTarget(sessionId);
+    const observations: Array<{
+      modelId?: string;
+      reasoningEffort?: string;
+      source?: string;
+    }> = [];
+    const unsubscribe = useChatSessionStore.subscribe((state) => {
+      const session = state.getSession(sessionId);
+      observations.push({
+        modelId: session?.executionTarget?.modelId,
+        reasoningEffort: session?.reasoningEffort?.currentValue,
+        source: session?.executionTargetSource,
+      });
+    });
+
+    applySnapshot("gpt-5.5", { origin: "notification" }, "medium");
+    unsubscribe();
+
+    expect(observations).toEqual([
+      {
+        modelId: "gpt-5.5",
+        reasoningEffort: "medium",
+        source: "acp",
+      },
+    ]);
+    lease.release?.();
+  });
+
   it("hydrates snapshots when ACP owns the target and no request is pending", () => {
     addSession("acp");
 
@@ -350,5 +410,163 @@ describe("sessionConfigSnapshotAdapter", () => {
         currentValue: "medium",
       },
     });
+  });
+
+  it.each([
+    "response",
+    "notification",
+  ] as const)("defers a divergent target and its reasoning as one %s observation", (origin) => {
+    addSession("acp");
+    useChatSessionStore
+      .getState()
+      .hydrateSessionExecutionTarget(sessionId, gpt55Target);
+    useChatSessionStore.getState().patchSession(sessionId, {
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "low",
+        options: [{ id: "low", name: "low" }],
+      },
+    });
+    const lease = acquireSessionDispatchTarget(sessionId);
+    expect(lease.status).toBe("acquired");
+
+    applySnapshot(
+      "gpt-5.6-sol",
+      {
+        origin,
+        ...(origin === "response"
+          ? { providerId: "databricks_v2", modelId: "gpt-5.6-sol" }
+          : {}),
+      },
+      "high",
+    );
+
+    expect(getSession()).toMatchObject({
+      executionTarget: gpt55Target,
+      reasoningEffort: { currentValue: "low" },
+    });
+    lease.release?.();
+    expect(getSession()).toMatchObject({
+      executionTarget: { ...gpt56Target, modelName: "gpt-5.6-sol" },
+      reasoningEffort: { currentValue: "high" },
+    });
+  });
+
+  it("routes registry-backed responses through the composite observation", () => {
+    addSession("acp");
+    useChatSessionStore
+      .getState()
+      .hydrateSessionExecutionTarget(sessionId, gpt55Target);
+    const lease = acquireSessionDispatchTarget(sessionId);
+
+    applySessionConfigOptionsSnapshot(
+      sessionId,
+      createConfigResponse({
+        modelId: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+      }),
+      {
+        origin: "response",
+        providerId: "databricks_v2",
+        modelId: "gpt-5.6-sol",
+      },
+    );
+
+    expect(getSession()?.executionTarget).toEqual(gpt55Target);
+    expect(getSession()?.reasoningEffort).toBeUndefined();
+    lease.release?.();
+    expect(getSession()).toMatchObject({
+      executionTarget: { ...gpt56Target, modelName: "gpt-5.6-sol" },
+      reasoningEffort: { currentValue: "medium" },
+    });
+  });
+
+  it("keeps deferred user intent ahead of an external target and reasoning pair", () => {
+    addSession("acp");
+    useChatSessionStore
+      .getState()
+      .hydrateSessionExecutionTarget(sessionId, gpt55Target);
+    const lease = acquireSessionDispatchTarget(sessionId);
+    beginModelSelectionIntent(sessionId, {
+      requestId: "pick-user",
+      target: gpt55Target,
+      previousTarget: gpt55Target,
+    });
+
+    applySnapshot(
+      "gpt-5.6-sol",
+      {
+        origin: "notification",
+      },
+      "high",
+    );
+    lease.release?.();
+
+    expect(getSession()?.executionTarget).toEqual(gpt55Target);
+    expect(getSession()?.reasoningEffort).toBeUndefined();
+    expect(getSessionTargetSelection(sessionId)).toMatchObject({
+      operationId: "pick-user",
+      target: gpt55Target,
+    });
+  });
+
+  it("keeps only the latest external target and reasoning pair during dispatch", () => {
+    addSession("acp");
+    useChatSessionStore
+      .getState()
+      .hydrateSessionExecutionTarget(sessionId, gpt55Target);
+    const lease = acquireSessionDispatchTarget(sessionId);
+
+    applySnapshot("gpt-5.6-sol", { origin: "notification" }, "medium");
+    applySnapshot("gpt-5.7", { origin: "notification" }, "high");
+    lease.release?.();
+
+    expect(getSession()).toMatchObject({
+      executionTarget: {
+        modelProviderId: "databricks_v2",
+        modelId: "gpt-5.7",
+      },
+      reasoningEffort: { currentValue: "high" },
+    });
+  });
+
+  it("materializes a matching provider-only lease with paired reasoning", () => {
+    addSession("acp");
+    const lease = acquireSessionDispatchTarget(sessionId);
+
+    applySnapshot("gpt-5.5", { origin: "notification" }, "medium");
+
+    expect(getSession()).toMatchObject({
+      executionTarget: { ...gpt55Target, modelName: "gpt-5.5" },
+      reasoningEffort: { currentValue: "medium" },
+    });
+    lease.release?.();
+  });
+
+  it("clears stale reasoning when a divergent observation has none", () => {
+    addSession("acp");
+    useChatSessionStore
+      .getState()
+      .hydrateSessionExecutionTarget(sessionId, gpt55Target);
+    useChatSessionStore.getState().patchSession(sessionId, {
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "low",
+        options: [{ id: "low", name: "low" }],
+      },
+    });
+    const lease = acquireSessionDispatchTarget(sessionId);
+
+    applyChatSessionConfigOptionsSnapshot(
+      sessionId,
+      createConfigResponse({ modelId: "gpt-5.6-sol" }),
+      { origin: "notification" },
+    );
+    lease.release?.();
+
+    expect(getSession()?.executionTarget).toMatchObject({
+      modelId: "gpt-5.6-sol",
+    });
+    expect(getSession()?.reasoningEffort).toBeUndefined();
   });
 });

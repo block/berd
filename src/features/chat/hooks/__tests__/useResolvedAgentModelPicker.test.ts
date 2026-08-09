@@ -6,11 +6,18 @@ import {
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  acquireSessionDispatchTarget,
+  getSessionTargetSelection,
+  resetSessionTargetCoordinatorsForTests,
+  transitionSessionTarget,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 import { useResolvedAgentModelPicker } from "../useResolvedAgentModelPicker";
 
 const mockUseAgentModelPickerState = vi.fn();
 const mockGetClient = vi.fn();
 const mockToastError = vi.fn();
+const mockPrepareSession = vi.fn();
 
 function makeSession(
   executionTarget: ChatSession["executionTarget"],
@@ -60,6 +67,10 @@ vi.mock("@/shared/api/acpConnection", () => ({
   getClient: (...args: unknown[]) => mockGetClient(...args),
 }));
 
+vi.mock("@/shared/api/acp", () => ({
+  acpPrepareSession: (...args: unknown[]) => mockPrepareSession(...args),
+}));
+
 vi.mock("sonner", () => ({
   toast: { error: (...args: unknown[]) => mockToastError(...args) },
 }));
@@ -67,6 +78,8 @@ vi.mock("sonner", () => ({
 describe("useResolvedAgentModelPicker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrepareSession.mockResolvedValue(undefined);
+    resetSessionTargetCoordinatorsForTests();
     window.localStorage.clear();
     useProviderCatalogStore.getState().reset();
     useChatSessionStore.setState({
@@ -132,6 +145,176 @@ describe("useResolvedAgentModelPicker", () => {
           onProviderSelected(providerId),
         handleModelChange: vi.fn(),
       }),
+    );
+  });
+
+  it("runs the real model picker apply behind dispatch and publishes B after preparation", async () => {
+    const executionTarget = {
+      harnessId: "goose" as const,
+      modelProviderId: "openai",
+      modelId: "current",
+      modelName: "Current",
+    };
+    const nextTarget = {
+      harnessId: "goose" as const,
+      modelProviderId: "openai",
+      modelId: "next",
+      modelName: "Next",
+    };
+    const session = makeSession(executionTarget);
+    useChatSessionStore.setState({ sessions: [session] });
+    const lease = acquireSessionDispatchTarget("session-1");
+    const applySessionModelSelection = vi.fn(
+      async (_providerId: string, _selection: unknown, requestId: string) =>
+        (
+          await transitionSessionTarget({
+            sessionId: "session-1",
+            target: nextTarget,
+            workingDir: "/w",
+            requestId,
+          })
+        ).applied,
+    );
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [{ id: "next", name: "Next", providerId: "openai" }],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: () =>
+        onModelSelected?.({ id: "next", name: "Next", providerId: "openai" }),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      session,
+      applySessionModelSelection,
+    });
+    act(() => result.current.handleModelChange("next"));
+    await waitFor(() =>
+      expect(applySessionModelSelection).toHaveBeenCalledOnce(),
+    );
+    expect(mockPrepareSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toEqual(executionTarget);
+
+    lease.release?.();
+    await waitFor(() =>
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+      ).toEqual(nextTarget),
+    );
+    expect(mockPrepareSession).toHaveBeenCalledOnce();
+    expect(mockPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "openai",
+      "/w",
+      expect.objectContaining({ modelId: "next" }),
+    );
+  });
+
+  it("keeps a model picker request current while dispatch delays its backend apply", async () => {
+    const executionTarget = {
+      harnessId: "goose" as const,
+      modelProviderId: "openai",
+      modelId: "current",
+      modelName: "Current",
+    };
+    const session = makeSession(executionTarget);
+    useChatSessionStore.setState({ sessions: [session] });
+    const lease = acquireSessionDispatchTarget("session-1");
+    let finishApply!: (value: boolean) => void;
+    const applySessionModelSelection = vi.fn(
+      (
+        _providerId: string,
+        _selection: unknown,
+        _requestId: string,
+      ): Promise<boolean> =>
+        new Promise<boolean>((resolve) => {
+          finishApply = resolve;
+        }),
+    );
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [{ id: "next", name: "Next", providerId: "openai" }],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: () =>
+        onModelSelected?.({ id: "next", name: "Next", providerId: "openai" }),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      session,
+      applySessionModelSelection,
+    });
+    act(() => result.current.handleModelChange("next"));
+
+    await waitFor(() =>
+      expect(applySessionModelSelection).toHaveBeenCalledOnce(),
+    );
+    const requestId = applySessionModelSelection.mock.calls[0]?.[2];
+    expect(requestId).toBeTruthy();
+    expect(getSessionTargetSelection("session-1")?.operationId).toBe(requestId);
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toEqual(executionTarget);
+
+    lease.release?.();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toEqual(executionTarget);
+    finishApply(true);
+    await waitFor(() =>
+      expect(getSessionTargetSelection("session-1")).toBeUndefined(),
+    );
+  });
+
+  it("keeps a provider picker request current while dispatch delays its backend apply", async () => {
+    const executionTarget = {
+      harnessId: "goose" as const,
+      modelProviderId: "openai",
+      modelId: "current",
+      modelName: "Current",
+    };
+    const session = makeSession(executionTarget);
+    useChatSessionStore.setState({ sessions: [session] });
+    const lease = acquireSessionDispatchTarget("session-1");
+    let finishPrepare!: (value: boolean) => void;
+    const prepareSelectedProvider = vi.fn(
+      (
+        _providerId: string,
+        _options?: { requestId?: string },
+      ): Promise<boolean> =>
+        new Promise<boolean>((resolve) => {
+          finishPrepare = resolve;
+        }),
+    );
+
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      session,
+      prepareSelectedProvider,
+    });
+    act(() => result.current.handleProviderChange("claude-acp"));
+
+    await waitFor(() => expect(prepareSelectedProvider).toHaveBeenCalledOnce());
+    const requestId = prepareSelectedProvider.mock.calls[0]?.[1]?.requestId;
+    expect(requestId).toBeTruthy();
+    expect(getSessionTargetSelection("session-1")?.operationId).toBe(requestId);
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+    ).toEqual(executionTarget);
+
+    lease.release?.();
+    finishPrepare(true);
+    await waitFor(() =>
+      expect(getSessionTargetSelection("session-1")).toBeUndefined(),
     );
   });
 

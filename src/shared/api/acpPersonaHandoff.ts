@@ -117,19 +117,21 @@ export function buildPersonaHandoffPreamble(systemPrompt: string): string {
  * Marks the handoff as delivered as a side effect, so callers must only invoke
  * this once per send when they intend to inject.
  */
-export function claimPersonaHandoff(
+export interface PersonaHandoffClaim {
+  preamble: string;
+  markDelivered: () => void;
+}
+
+export function preparePersonaHandoff(
   sessionId: string,
   providerId: string | undefined,
   systemPrompt: string | undefined,
   appPreamble?: string | null,
-): string | null {
+): PersonaHandoffClaim | null {
   if (!isExternalAgentProvider(providerId)) {
     return null;
   }
 
-  // App context first, persona after — mirroring the goose path where the
-  // app-owned keyed sections precede the client system prompt. Either part
-  // may be absent; the handoff only fires when at least one is present.
   const combined = [appPreamble?.trim(), systemPrompt?.trim()]
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
@@ -141,8 +143,26 @@ export function claimPersonaHandoff(
   if (deliveredHandoffs.has(key)) {
     return null;
   }
-  deliveredHandoffs.add(key);
-  return buildPersonaHandoffPreamble(combined);
+  return {
+    preamble: buildPersonaHandoffPreamble(combined),
+    markDelivered: () => deliveredHandoffs.add(key),
+  };
+}
+
+export function claimPersonaHandoff(
+  sessionId: string,
+  providerId: string | undefined,
+  systemPrompt: string | undefined,
+  appPreamble?: string | null,
+): string | null {
+  const claim = preparePersonaHandoff(
+    sessionId,
+    providerId,
+    systemPrompt,
+    appPreamble,
+  );
+  claim?.markDelivered();
+  return claim?.preamble ?? null;
 }
 
 /**

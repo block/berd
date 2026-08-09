@@ -31,6 +31,10 @@ import {
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { acceptFirstSend } from "@/features/chat/lib/firstWorkspaceSend";
+import {
+  admitSystemInheritedQueuedMessage,
+  personaIntentFromComposer,
+} from "@/features/chat/lib/admittedSend";
 import { planProjectChatWorkspacesAsIs } from "@/features/projects/lib/projectChatWorkspaces";
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
@@ -114,6 +118,7 @@ import { AppShellLayout } from "./ui/AppShellLayout";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { AppShellContent } from "./ui/AppShellContent";
 import {
+  replaceSessionTargetAfterDispatch,
   transferSessionTargetOwnership,
   transitionSessionTarget,
 } from "@/features/chat/lib/sessionTargetCoordinator";
@@ -134,7 +139,7 @@ import {
 import {
   activateSession as activateChatSession,
   hasConversationMessages,
-  loadSessionMessages,
+  loadSessionMessagesAndPrepare,
 } from "@/features/chat/lib/sessionActivation";
 import {
   focusSessionWindow,
@@ -1217,7 +1222,7 @@ export function AppShell({
         while (nextIndex < pendingSessionIds.length) {
           const sessionId = pendingSessionIds[nextIndex];
           nextIndex += 1;
-          const ok = await loadSessionMessages(sessionId);
+          const ok = await loadSessionMessagesAndPrepare(sessionId);
           if (!ok) {
             useChatSessionStore.getState().patchSession(sessionId, {
               pinnedLoadState: "failed",
@@ -1612,9 +1617,7 @@ export function AppShell({
           return readLiveHomeSession();
         } catch (error) {
           if (clearCurrentModelSelectionIntent(homeSession.id, requestId)) {
-            useChatSessionStore
-              .getState()
-              .replaceSessionExecutionTarget(homeSession.id, bootstrapTarget);
+            replaceSessionTargetAfterDispatch(homeSession.id, bootstrapTarget);
           }
           throw error;
         }
@@ -1846,12 +1849,10 @@ export function AppShell({
                       latestTarget,
                     )
                   ) {
-                    useChatSessionStore
-                      .getState()
-                      .replaceSessionExecutionTarget(
-                        session.id,
-                        result.resolvedTarget,
-                      );
+                    replaceSessionTargetAfterDispatch(
+                      session.id,
+                      result.resolvedTarget,
+                    );
                   }
                 }
                 appliedTarget = effectiveTarget;
@@ -2789,9 +2790,7 @@ export function AppShell({
         } catch (error) {
           if (clearCurrentModelSelectionIntent(sessionId, requestId)) {
             const previousTarget = liveHomeSession.executionTarget;
-            useChatSessionStore
-              .getState()
-              .replaceSessionExecutionTarget(sessionId, previousTarget);
+            replaceSessionTargetAfterDispatch(sessionId, previousTarget);
             setGlobalComposerExecutionTarget(previousTarget ?? null);
             showModelSwitchErrorToast({
               modelName: target.modelName ?? target.modelId ?? target.harnessId,
@@ -2880,8 +2879,10 @@ export function AppShell({
       const acceptGlobalFirstSend = async (session: ChatSession) => {
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
 
-        if (options?.personaId) {
-          patchSession(sessionId, { personaId: options.personaId });
+        if (options?.personaId !== undefined) {
+          patchSession(sessionId, {
+            personaId: options.personaId ?? undefined,
+          });
         }
         if (options?.reasoningEffort) {
           try {
@@ -2903,7 +2904,7 @@ export function AppShell({
             ...(internalOptions?.showQueuedHandoff === false
               ? { showInComposer: false }
               : {}),
-            ...(options?.personaId ? { personaId: options.personaId } : {}),
+            persona: personaIntentFromComposer(options?.personaId),
             attachments: options?.attachments,
             ...(options?.sendOptions
               ? { sendOptions: options.sendOptions }
@@ -3085,8 +3086,10 @@ export function AppShell({
         }
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
 
-        if (options?.personaId) {
-          patchSession(sessionId, { personaId: options.personaId });
+        if (options?.personaId !== undefined) {
+          patchSession(sessionId, {
+            personaId: options.personaId ?? undefined,
+          });
         }
 
         if (options?.reasoningEffort) {
@@ -3189,8 +3192,10 @@ export function AppShell({
         }
 
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
-        if (options?.personaId) {
-          patchSession(sessionId, { personaId: options.personaId });
+        if (options?.personaId !== undefined) {
+          patchSession(sessionId, {
+            personaId: options.personaId ?? undefined,
+          });
         }
         if (options?.reasoningEffort) {
           try {
@@ -3272,9 +3277,12 @@ export function AppShell({
         })
           .then((session) => {
             if (!session) return;
-            useChatStore.getState().enqueueTransportReadyMessage(session.id, {
-              text: request.prompt,
-            });
+            useChatStore.getState().enqueueTransportReadyMessage(
+              session.id,
+              admitSystemInheritedQueuedMessage({
+                text: request.prompt,
+              }),
+            );
           })
           .catch((error) => {
             console.error(
@@ -3369,7 +3377,7 @@ export function AppShell({
     setActiveView("chat");
     setChatActiveSession(target.sessionId);
     useChatStore.getState().markSessionRead(target.sessionId);
-    void loadSessionMessages(target.sessionId);
+    void loadSessionMessagesAndPrepare(target.sessionId);
     return true;
   }, [
     agentBuilderSettingsReturnTarget,
@@ -3750,7 +3758,7 @@ export function AppShell({
     activateChatSession(id);
     clearSettingsSectionUrl();
     setActiveView("chat");
-    void loadSessionMessages(id);
+    void loadSessionMessagesAndPrepare(id);
   }, []);
   navigateAgentBuilderChatRef.current = selectSessionDirect;
 
@@ -4084,7 +4092,7 @@ export function AppShell({
           setActiveView("chat");
           setChatActiveSession(location.sessionId);
           useChatStore.getState().markSessionRead(location.sessionId);
-          void loadSessionMessages(location.sessionId);
+          void loadSessionMessagesAndPrepare(location.sessionId);
           return;
         }
       }

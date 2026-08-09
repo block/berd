@@ -9,7 +9,18 @@ const mockAcpCancelSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
-  acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
+  acpSendMessage: (...args: unknown[]) => {
+    const result = mockAcpSendMessage(...args);
+    const options = args[2] as
+      | {
+          onPromptDispatching?: () => void;
+          onPromptDispatched?: () => void;
+        }
+      | undefined;
+    options?.onPromptDispatching?.();
+    options?.onPromptDispatched?.();
+    return result;
+  },
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
 }));
@@ -91,6 +102,9 @@ describe("useChat attachments", () => {
       "Please review these /tmp/report.pdf /tmp/screenshots",
       {
         systemPrompt: undefined,
+        goose: undefined,
+        onPromptDispatching: expect.any(Function),
+        onPromptDispatched: expect.any(Function),
         personaId: undefined,
         personaName: undefined,
         images: undefined,
@@ -145,6 +159,9 @@ describe("useChat attachments", () => {
       "/tmp/diagram.png",
       {
         systemPrompt: undefined,
+        goose: undefined,
+        onPromptDispatching: expect.any(Function),
+        onPromptDispatched: expect.any(Function),
         personaId: undefined,
         personaName: undefined,
         images: [["abc123", "image/png"]],
@@ -171,6 +188,9 @@ describe("useChat attachments", () => {
 
     expect(mockAcpSendMessage).toHaveBeenCalledWith("session-1", " ", {
       systemPrompt: undefined,
+      goose: undefined,
+      onPromptDispatching: expect.any(Function),
+      onPromptDispatched: expect.any(Function),
       personaId: undefined,
       personaName: undefined,
       images: [["abc123", "image/png"]],
@@ -217,6 +237,9 @@ describe("useChat attachments", () => {
       "can you see the attachments i attached? /tmp/mobile-confirmation.html /tmp/neighborhood block /tmp/Screenshot.png",
       {
         systemPrompt: undefined,
+        goose: undefined,
+        onPromptDispatching: expect.any(Function),
+        onPromptDispatched: expect.any(Function),
         personaId: undefined,
         personaName: undefined,
         images: [["abc123", "image/png"]],
@@ -257,6 +280,9 @@ describe("useChat attachments", () => {
       "Please review this",
       {
         systemPrompt: undefined,
+        goose: undefined,
+        onPromptDispatching: expect.any(Function),
+        onPromptDispatched: expect.any(Function),
         personaId: undefined,
         personaName: undefined,
         images: undefined,

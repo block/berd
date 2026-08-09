@@ -14,6 +14,7 @@ import { useChat } from "./useChat";
 import { useAutoCompactPreferences } from "./useAutoCompactPreferences";
 import { useMessageQueue } from "./useMessageQueue";
 import { useChatStore, type QueuedMessagePayload } from "../stores/chatStore";
+import { personaIntentFromComposer } from "../lib/admittedSend";
 import {
   hasSessionStarted,
   useChatSessionStore,
@@ -46,7 +47,10 @@ import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { formatAvailableSkillsCatalogPrompt } from "@/features/skills/lib/skillChatPrompt";
 import { setStoredModelPreference } from "../lib/modelPreferences";
 import { saveDefaultReasoningEffort } from "../lib/reasoningEffortPreferences";
-import { transitionSessionTarget } from "../lib/sessionTargetCoordinator";
+import {
+  replaceSessionTargetAfterDispatch,
+  transitionSessionTarget,
+} from "../lib/sessionTargetCoordinator";
 import { applyPendingSessionWorkspaceActivation } from "../lib/sessionWorkspaceActivation";
 import {
   shouldAutoCompactContext,
@@ -287,9 +291,7 @@ async function syncPendingHomeModelSelection({
     clearCurrentModelSelectionIntent(sessionId, selectionRequestId);
     console.error("Failed to sync pending Home state:", error);
     if (!homePendingModel?.id) {
-      useChatSessionStore
-        .getState()
-        .replaceSessionExecutionTarget(sessionId, previousTarget);
+      replaceSessionTargetAfterDispatch(sessionId, previousTarget);
       if (previousTarget) {
         setGlobalSelectedProvider(previousTarget.harnessId);
       }
@@ -1203,6 +1205,7 @@ export function useChatSessionController({
     async (
       _personaId?: string,
       sessionSelection?: ChatSendOptions["sessionSelection"],
+      sessionSelectionToken?: ChatSendOptions["sessionSelectionToken"],
     ) => {
       const activatedWorkspacePath =
         await applyPendingSessionWorkspaceActivation(stateSessionId, {
@@ -1220,12 +1223,14 @@ export function useChatSessionController({
       }
       if (
         sessionSelection &&
+        !sessionSelectionToken &&
         !sameSessionExecutionTarget(liveSession?.executionTarget, target)
       ) {
         return false;
       }
       if (sessionSelection) {
         const selectionIsCurrent = () =>
+          sessionSelectionToken !== undefined ||
           sameSessionExecutionTarget(
             useChatSessionStore.getState().getSession(stateSessionId)
               ?.executionTarget,
@@ -1242,6 +1247,7 @@ export function useChatSessionController({
           sessionId: stateSessionId,
           target: sessionSelection,
           workingDir,
+          dispatchToken: sessionSelectionToken,
         });
         if (!result.applied || !selectionIsCurrent()) {
           return false;
@@ -1435,9 +1441,8 @@ export function useChatSessionController({
 
       if (hasUnresolvedPersonaTarget) {
         if (sessionId) {
-          const sessionStore = useChatSessionStore.getState();
           clearCurrentModelSelectionIntent(sessionId);
-          sessionStore.replaceSessionExecutionTarget(sessionId, undefined);
+          replaceSessionTargetAfterDispatch(sessionId, undefined);
         } else {
           setPendingExecutionTarget(null);
           setPendingModelSelection(null);
@@ -1821,7 +1826,14 @@ export function useChatSessionController({
   const isCompactingContext = chatState === "compacting";
   const isQueuedSendBlocked = activeRunId !== null || isRunCancellationPending;
   const resolveAutoCompactAgentId = useCallback(
-    (overridePersona?: { id: string; name?: string }): string | null => {
+    (
+      overridePersona?: { id: string | null; name?: string },
+      sessionSelection?: SessionExecutionTarget,
+    ): string | null => {
+      if (sessionSelection) return sessionSelection.harnessId;
+      if (overridePersona?.id === null) {
+        return session?.executionTarget?.harnessId ?? selectedAgentId;
+      }
       if (!overridePersona?.id) {
         return selectedAgentId;
       }
@@ -1835,11 +1847,17 @@ export function useChatSessionController({
 
       return resolvePersonaProvider(targetPersona, providers)?.id ?? null;
     },
-    [personas, providers, selectedAgentId],
+    [personas, providers, selectedAgentId, session?.executionTarget?.harnessId],
   );
   const canAutoCompactBeforeSend = useCallback(
-    (overridePersona?: { id: string; name?: string }) => {
-      const targetAgentId = resolveAutoCompactAgentId(overridePersona);
+    (
+      overridePersona?: { id: string | null; name?: string },
+      sessionSelection?: SessionExecutionTarget,
+    ) => {
+      const targetAgentId = resolveAutoCompactAgentId(
+        overridePersona,
+        sessionSelection,
+      );
       if (
         !sessionId ||
         !supportsContextAutoCompaction(targetAgentId) ||
@@ -1876,7 +1894,7 @@ export function useChatSessionController({
   const sendWithAutoCompact = useCallback(
     (
       text: string,
-      overridePersona?: { id: string; name?: string },
+      overridePersona?: { id: string | null; name?: string },
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
       sessionOverride?: Pick<
@@ -1889,15 +1907,23 @@ export function useChatSessionController({
         sessionOverride ?? session,
         sendOptions,
       );
-      const nextSendOptions = artifactFolderInstructions
-        ? {
-            ...builderSendOptions,
-            assistantPrompt: composeSystemPrompt(
-              artifactFolderInstructions,
-              builderSendOptions.assistantPrompt,
-            ),
-          }
-        : builderSendOptions;
+      const nextSendOptions = {
+        ...(artifactFolderInstructions
+          ? {
+              ...builderSendOptions,
+              assistantPrompt: composeSystemPrompt(
+                artifactFolderInstructions,
+                builderSendOptions.assistantPrompt,
+              ),
+            }
+          : builderSendOptions),
+        ...(sendOptions?.sessionSelection
+          ? {
+              sessionSelection: sendOptions.sessionSelection,
+              sessionSelectionToken: sendOptions.sessionSelectionToken,
+            }
+          : {}),
+      };
       const shouldPassSendOptions =
         Boolean(sendOptions) || nextSendOptions.assistantPrompt != null;
 
@@ -1910,30 +1936,37 @@ export function useChatSessionController({
           recordSubmittedDraft(sessionId, text);
         }
       };
+      const dispatchSend = () =>
+        shouldPassSendOptions
+          ? sendMessage(text, overridePersona, attachments, nextSendOptions)
+          : sendMessage(text, overridePersona, attachments);
 
-      if (!canAutoCompactBeforeSend(overridePersona)) {
+      if (
+        !canAutoCompactBeforeSend(
+          overridePersona,
+          sendOptions?.sessionSelection,
+        )
+      ) {
         recordDraftSubmission();
-        if (shouldPassSendOptions) {
-          void sendMessage(text, overridePersona, attachments, nextSendOptions);
-        } else {
-          void sendMessage(text, overridePersona, attachments);
-        }
-        return true;
+        return dispatchSend();
       }
 
       return (async () => {
-        const compactionResult = await compactConversation(overridePersona);
+        const compactionResult = await compactConversation(
+          overridePersona,
+          sendOptions?.sessionSelection
+            ? {
+                sessionSelection: sendOptions.sessionSelection,
+                sessionSelectionToken: sendOptions.sessionSelectionToken,
+              }
+            : undefined,
+        );
         if (compactionResult !== "completed") {
           return false;
         }
 
         recordDraftSubmission();
-        if (shouldPassSendOptions) {
-          void sendMessage(text, overridePersona, attachments, nextSendOptions);
-        } else {
-          void sendMessage(text, overridePersona, attachments);
-        }
-        return true;
+        return dispatchSend();
       })();
     },
     [
@@ -1953,12 +1986,6 @@ export function useChatSessionController({
         (s.messagesBySession[sessionId]?.length ?? 0) === 0
       : false,
   );
-  const deferredSend = useRef<{
-    text: string;
-    attachments?: ChatAttachmentDraft[];
-    sendOptions?: ChatSendOptions;
-    resolve?: (accepted: boolean) => void;
-  } | null>(null);
   const deferredWorkspaceRecord = useChatStore((state) => {
     const record = state.queuedMessageBySession[stateSessionId]?.[0];
     return record?.kind === "deferred" &&
@@ -1983,29 +2010,59 @@ export function useChatSessionController({
       null,
     );
   }, [deferredWorkspaceRecord, session?.executionTarget, stateSessionId]);
-  const queueChatState =
+  const isQueuePreparationReady = Boolean(
     sessionId &&
-    session?.creationState == null &&
-    workspaceContextReady &&
-    !deferredWorkspaceRecord
-      ? chatState
-      : "thinking";
+      session?.creationState == null &&
+      workspaceContextReady &&
+      !deferredWorkspaceRecord,
+  );
+  const queueChatState = isQueuePreparationReady ? chatState : "thinking";
   const sendQueuedMessageWithAutoCompact = useCallback(
     (
       text: string,
-      overridePersona?: { id: string; name?: string },
+      overridePersona?: { id: string | null; name?: string },
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
-    ) =>
-      sendWithAutoCompact(
+    ) => {
+      const queuedPersona =
+        overridePersona?.id === null
+          ? undefined
+          : overridePersona?.id
+            ? useAgentStore.getState().getPersonaById(overridePersona.id)
+            : selectedPersona;
+      const derivedExecutionSystemPrompt = composeSystemPrompt(
+        sendOptions?.capturedPersonaSystemPrompt ??
+          formatPersonaSystemPrompt(queuedPersona),
+        includedWorkspacesPrompt,
+        workspaceInstructionsPrompt,
+        appSkillsCatalogPrompt,
+        availableSkillsCatalogPrompt,
+      );
+      const executionOptions = sendOptions?.executionSystemPrompt
+        ? sendOptions
+        : derivedExecutionSystemPrompt !== undefined
+          ? {
+              ...sendOptions,
+              executionSystemPrompt: derivedExecutionSystemPrompt,
+            }
+          : sendOptions;
+      return sendWithAutoCompact(
         text,
         overridePersona,
         attachments,
-        sendOptions,
+        executionOptions,
         undefined,
         { recordDraftSubmission: false },
-      ),
-    [sendWithAutoCompact],
+      );
+    },
+    [
+      appSkillsCatalogPrompt,
+      availableSkillsCatalogPrompt,
+      includedWorkspacesPrompt,
+      selectedPersona,
+      sendWithAutoCompact,
+      workspaceInstructionsPrompt,
+    ],
   );
   const queue = useMessageQueue(
     stateSessionId,
@@ -2013,6 +2070,7 @@ export function useChatSessionController({
     sendQueuedMessageWithAutoCompact,
     readOnly,
     isQueuedSendBlocked,
+    isQueuePreparationReady,
   );
   const pendingBuilderActivationRef = useRef<
     Record<string, Promise<ChatSession | null>>
@@ -2108,63 +2166,123 @@ export function useChatSessionController({
     [sessionId, stateSessionId],
   );
 
+  const captureSessionSelection = useCallback(
+    (payload: QueuedMessagePayload): QueuedMessagePayload => {
+      const requestedPersona =
+        payload.persona.kind === "persona"
+          ? useAgentStore.getState().getPersonaById(payload.persona.id)
+          : undefined;
+      const queuedPersona =
+        payload.persona.kind === "inherit" ? selectedPersona : requestedPersona;
+      const capturedPersonaSystemPrompt =
+        formatPersonaSystemPrompt(queuedPersona);
+      const executionSystemPrompt = workspaceContextReady
+        ? composeSystemPrompt(
+            capturedPersonaSystemPrompt,
+            includedWorkspacesPrompt,
+            workspaceInstructionsPrompt,
+            appSkillsCatalogPrompt,
+            availableSkillsCatalogPrompt,
+          )
+        : undefined;
+      const sendOptions =
+        capturedPersonaSystemPrompt !== undefined ||
+        executionSystemPrompt !== undefined
+          ? {
+              ...payload.sendOptions,
+              ...(capturedPersonaSystemPrompt !== undefined
+                ? { capturedPersonaSystemPrompt }
+                : {}),
+              ...(executionSystemPrompt !== undefined
+                ? { executionSystemPrompt }
+                : {}),
+            }
+          : payload.sendOptions;
+      return {
+        ...payload,
+        persona:
+          payload.persona.kind === "persona"
+            ? {
+                ...payload.persona,
+                name: queuedPersona?.displayName ?? payload.persona.name,
+              }
+            : payload.persona,
+        sendOptions,
+      };
+    },
+    [
+      appSkillsCatalogPrompt,
+      availableSkillsCatalogPrompt,
+      includedWorkspacesPrompt,
+      selectedPersona,
+      workspaceContextReady,
+      workspaceInstructionsPrompt,
+    ],
+  );
+
+  const updateCapturedQueuedMessage = useCallback(
+    (recordId: string, payload: QueuedMessagePayload) => {
+      const updated = queue.update(recordId, captureSessionSelection(payload));
+      if (updated && sessionId) {
+        recordDraftPreservingSubmission(sessionId, payload.text);
+      }
+      return updated;
+    },
+    [
+      captureSessionSelection,
+      queue,
+      recordDraftPreservingSubmission,
+      sessionId,
+    ],
+  );
+
+  const enqueueCapturedMessage = useCallback(
+    (payload: QueuedMessagePayload) =>
+      queue.enqueue(
+        payload.text,
+        payload.persona.kind === "persona"
+          ? payload.persona.id
+          : payload.persona.kind === "none"
+            ? null
+            : undefined,
+        payload.attachments,
+        payload.sendOptions,
+        payload.persona.kind === "persona" ? payload.persona.name : undefined,
+      ),
+    [queue],
+  );
+
   const handleSend = useCallback(
     (
       text: string,
-      personaId?: string,
+      personaId?: string | null,
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
     ) => {
-      const captureSessionSelection = (
-        payload: QueuedMessagePayload,
-      ): QueuedMessagePayload => {
-        const liveSession = useChatSessionStore
-          .getState()
-          .getSession(stateSessionId);
-        const requestedPersona =
-          payload.personaId && payload.personaId !== selectedPersonaId
-            ? useAgentStore.getState().getPersonaById(payload.personaId)
-            : undefined;
-        const personaProvider = resolvePersonaProvider(
-          requestedPersona,
-          providers,
+      const personaName = personaId
+        ? selectedPersona?.id === personaId
+          ? selectedPersona.displayName
+          : useAgentStore.getState().getPersonaById(personaId)?.displayName
+        : undefined;
+      const enqueueMessage = (options = sendOptions) => {
+        const accepted = enqueueCapturedMessage(
+          captureSessionSelection({
+            text,
+            persona: personaIntentFromComposer(personaId, personaName),
+            attachments,
+            sendOptions: options,
+          }),
         );
-        const personaModelSelection =
-          requestedPersona && personaProvider
-            ? resolvePersonaModelSelection(requestedPersona, personaProvider.id)
-            : undefined;
-        const hasUnresolvedPersonaModel = Boolean(
-          requestedPersona?.model && !personaModelSelection,
-        );
-        const personaHarnessId = personaProvider?.id;
-        let personaExecutionTarget: SessionExecutionTarget | undefined;
-        if (personaModelSelection) {
-          personaExecutionTarget = targetFromAgentModelSelection(
-            personaHarnessId ?? "goose",
-            {
-              modelProviderId: personaModelSelection.modelProviderId,
-              modelId: personaModelSelection.id,
-              modelName: personaModelSelection.name,
-            },
-          );
-        } else if (personaHarnessId && !hasUnresolvedPersonaModel) {
-          personaExecutionTarget = normalizeSessionExecutionTarget({
-            harnessId: personaHarnessId,
-          });
+        if (accepted && sessionId) {
+          recordDraftPreservingSubmission(sessionId, text);
         }
-        return {
-          ...payload,
-          executionTarget:
-            payload.executionTarget ??
-            personaExecutionTarget ??
-            liveSession?.executionTarget,
-        };
+        return accepted;
       };
       if (!sessionId) {
         if (readOnly) {
           return false;
         }
-        return queue.enqueue(text, personaId, attachments, sendOptions);
+        return enqueueMessage();
       }
 
       if (readOnly) {
@@ -2220,23 +2338,14 @@ export function useChatSessionController({
             (useChatStore.getState().queuedMessageBySession[stateSessionId]
               ?.length ?? 0) > 0
           ) {
-            recordDraftPreservingSubmission(sessionId, text);
-            useChatStore.getState().enqueueTransportReadyMessage(
-              stateSessionId,
-              captureSessionSelection({
-                text,
-                personaId,
-                attachments,
-                sendOptions: deferredSendOptions,
-              }),
-            );
+            enqueueMessage(deferredSendOptions);
             return true;
           }
           const firstSend = acceptFirstSend(
             sessionId,
             captureSessionSelection({
               text,
-              personaId,
+              persona: personaIntentFromComposer(personaId, personaName),
               attachments,
               sendOptions: deferredSendOptions,
             }),
@@ -2256,33 +2365,22 @@ export function useChatSessionController({
           }
           if (firstSend.needsName || firstSend.occupied) return false;
           if (personaId && personaId !== selectedPersonaId) {
-            handlePersonaChange(personaId);
-            return new Promise<boolean>((resolve) => {
-              deferredSend.current = {
-                text,
-                attachments,
-                sendOptions,
-                resolve,
-              };
-            });
+            const accepted = enqueueMessage(deferredSendOptions);
+            if (accepted) {
+              handlePersonaChange(personaId);
+            }
+            return accepted;
           }
           if (!workspaceContextReady) {
-            queue.enqueue(text, personaId, attachments, deferredSendOptions);
+            enqueueMessage(deferredSendOptions);
             return true;
           }
-          return sendWithAutoCompact(
-            text,
-            undefined,
-            attachments,
-            sendOptions,
-            builderSession,
-          );
+          return enqueueMessage(deferredSendOptions);
         })();
       }
 
       if ((queue.queuedRecords?.length ?? 0) > 0) {
-        recordDraftPreservingSubmission(sessionId, text);
-        queue.enqueue(text, personaId, attachments, sendOptions);
+        enqueueMessage();
         return true;
       }
 
@@ -2291,7 +2389,7 @@ export function useChatSessionController({
           sessionId,
           captureSessionSelection({
             text,
-            personaId,
+            persona: personaIntentFromComposer(personaId, personaName),
             attachments,
             sendOptions,
           }),
@@ -2305,10 +2403,11 @@ export function useChatSessionController({
         }
         if (firstSend.needsName || firstSend.occupied) return false;
 
-        handlePersonaChange(personaId);
-        return new Promise<boolean>((resolve) => {
-          deferredSend.current = { text, attachments, sendOptions, resolve };
-        });
+        const accepted = enqueueMessage();
+        if (accepted) {
+          handlePersonaChange(personaId);
+        }
+        return accepted;
       }
 
       const currentSession = useChatSessionStore
@@ -2322,7 +2421,7 @@ export function useChatSessionController({
         sessionId,
         captureSessionSelection({
           text,
-          personaId,
+          persona: personaIntentFromComposer(personaId, personaName),
           attachments,
           sendOptions: preparedSendOptions,
         }),
@@ -2336,45 +2435,27 @@ export function useChatSessionController({
       if (firstSend.needsName || firstSend.occupied) return false;
 
       if (!workspaceContextReady) {
-        queue.enqueue(text, personaId, attachments, preparedSendOptions);
+        enqueueMessage(preparedSendOptions);
         return true;
       }
 
-      if (chatState !== "idle" || isQueuedSendBlocked) {
-        recordDraftPreservingSubmission(sessionId, text);
-        queue.enqueue(text, personaId, attachments, preparedSendOptions);
-        return true;
-      }
-
-      return sendWithAutoCompact(
-        text,
-        personaId
-          ? selectedPersona?.id === personaId
-            ? { id: selectedPersona.id, name: selectedPersona.displayName }
-            : { id: personaId }
-          : undefined,
-        attachments,
-        preparedSendOptions,
-      );
+      return enqueueMessage(preparedSendOptions);
     },
     [
-      chatState,
+      captureSessionSelection,
+      enqueueCapturedMessage,
       ensureCurrentSessionIsAgentBuilder,
       handlePersonaChange,
-      isQueuedSendBlocked,
       onMessageAccepted,
       onWorkspaceNameRequest,
-      providers,
       queue,
       readOnly,
       recordDraftPreservingSubmission,
-      resolvePersonaModelSelection,
       session?.agentBuilderOpen,
       session?.intent,
       sessionId,
       selectedPersona,
       selectedPersonaId,
-      sendWithAutoCompact,
       stateSessionId,
       workspaceContextReady,
     ],
@@ -2417,59 +2498,6 @@ export function useChatSessionController({
     },
     [chatState, readOnly, sessionId, steerMessage, supportsSteering],
   );
-
-  useEffect(() => {
-    if (deferredSend.current && selectedPersona) {
-      if (!workspaceContextReady) {
-        return;
-      }
-      const { text, attachments, sendOptions, resolve } = deferredSend.current;
-      deferredSend.current = null;
-      if (readOnly) {
-        useChatStore.getState().setDraft(stateSessionId, text);
-        resolve?.(false);
-        return;
-      }
-
-      void (async () => {
-        const needsBuilderActivation =
-          (session?.intent !== "build-agent" ||
-            session.agentBuilderOpen === false) &&
-          isAgentBuilderSkillSendOptions(sendOptions);
-        const builderSession = needsBuilderActivation
-          ? await ensureCurrentSessionIsAgentBuilder()
-          : undefined;
-        if (needsBuilderActivation && !builderSession) {
-          useChatStore.getState().setDraft(stateSessionId, text);
-          resolve?.(false);
-          return;
-        }
-
-        const sendResult = sendWithAutoCompact(
-          text,
-          undefined,
-          attachments,
-          sendOptions,
-          builderSession ?? undefined,
-        );
-        const accepted =
-          sendResult instanceof Promise ? await sendResult : sendResult;
-        if (accepted === false) {
-          useChatStore.getState().setDraft(stateSessionId, text);
-        }
-        resolve?.(accepted !== false);
-      })();
-    }
-  }, [
-    ensureCurrentSessionIsAgentBuilder,
-    readOnly,
-    selectedPersona,
-    sendWithAutoCompact,
-    session?.agentBuilderOpen,
-    session?.intent,
-    stateSessionId,
-    workspaceContextReady,
-  ]);
 
   const handleCreatePersona = useCallback(() => {
     if (onCreatePersonaRequested) {
@@ -2738,7 +2766,7 @@ export function useChatSessionController({
       if (hasPendingExecutionTarget || hasPendingModel) {
         if (!nextTarget) {
           clearCurrentModelSelectionIntent(sessionId);
-          sessionStore.replaceSessionExecutionTarget(sessionId, undefined);
+          replaceSessionTargetAfterDispatch(sessionId, undefined);
         } else {
           const homePendingModel = isModelExecutionTarget(nextTarget)
             ? {
@@ -2897,7 +2925,11 @@ export function useChatSessionController({
     isContextUsageReady:
       hasContextUsageSnapshot && resolvedTokenState.contextLimit > 0,
     isLoadingHistory,
-    queue: { ...queue, dismiss: dismissQueuedMessage },
+    queue: {
+      ...queue,
+      update: updateCapturedQueuedMessage,
+      dismiss: dismissQueuedMessage,
+    },
     deferredWorkspaceRecord,
     deferredWorkspaceError: deferredWorkspaceRecord?.state.error,
     unresolvedDeferredSend,

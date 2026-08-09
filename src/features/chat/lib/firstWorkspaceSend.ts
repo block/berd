@@ -17,6 +17,7 @@ import {
   isSameWorkspacePath,
 } from "./workspaceAttachments";
 import { transitionSessionTarget } from "./sessionTargetCoordinator";
+import { isAdmittedQueuedMessagePayload } from "./admittedSend";
 import {
   useChatStore,
   type QueuedMessagePayload,
@@ -515,6 +516,22 @@ export function chooseDeferredWorkspaceSetup(
   return true;
 }
 
+function payloadForDeferredWorkspaceSetup(
+  payload: QueuedMessagePayload,
+): QueuedMessagePayload {
+  if (!payload.sendOptions?.executionSystemPrompt) return payload;
+  return {
+    ...payload,
+    sendOptions: {
+      ...payload.sendOptions,
+      // Workspace creation may replace cwd and attachments. Preserve the
+      // separately captured persona instructions, but derive all mixed
+      // execution context from the prepared workspace at send time.
+      executionSystemPrompt: undefined,
+    },
+  };
+}
+
 export function prepareExistingFirstSend(
   sessionId: string,
   recordId: string,
@@ -555,12 +572,21 @@ export function prepareExistingFirstSend(
   );
   if (needsName && !options.onNeedsName) return false;
   if (
-    !chat.deferTransportReadyMessage(sessionId, recordId, {
-      type: "workspace-first-send",
-      status: usesWorktreeChoice ? "choice" : needsName ? "naming" : "creating",
-      projectId: project.id,
-      desired: project.projectWorkspaces,
-    })
+    !chat.deferTransportReadyMessage(
+      sessionId,
+      recordId,
+      {
+        type: "workspace-first-send",
+        status: usesWorktreeChoice
+          ? "choice"
+          : needsName
+            ? "naming"
+            : "creating",
+        projectId: project.id,
+        desired: project.projectWorkspaces,
+      },
+      payloadForDeferredWorkspaceSetup(record.payload),
+    )
   ) {
     return false;
   }
@@ -634,9 +660,10 @@ export function acceptFirstSend(
     )
   ) {
     return {
-      accepted: options.queueReady
-        ? chat.enqueueTransportReadyMessage(sessionId, payload)
-        : false,
+      accepted:
+        options.queueReady && isAdmittedQueuedMessagePayload(payload)
+          ? chat.enqueueTransportReadyMessage(sessionId, payload)
+          : false,
       deferred: false,
       needsName: false,
     };
@@ -653,18 +680,22 @@ export function acceptFirstSend(
       needsName: true,
     };
   }
-  const record = chat.enqueueDeferredMessage(sessionId, payload, {
-    type: "workspace-first-send",
-    status:
-      needsName && options.startupName === undefined
-        ? usesWorktreeChoice
-          ? "choice"
-          : "naming"
-        : "creating",
-    projectId: project.id,
-    desired: project.projectWorkspaces,
-    cancelBuilderDraftPath: options.cancelBuilderDraftPath,
-  });
+  const record = chat.enqueueDeferredMessage(
+    sessionId,
+    payloadForDeferredWorkspaceSetup(payload),
+    {
+      type: "workspace-first-send",
+      status:
+        needsName && options.startupName === undefined
+          ? usesWorktreeChoice
+            ? "choice"
+            : "naming"
+          : "creating",
+      projectId: project.id,
+      desired: project.projectWorkspaces,
+      cancelBuilderDraftPath: options.cancelBuilderDraftPath,
+    },
+  );
   if (!record) {
     return {
       accepted: false,

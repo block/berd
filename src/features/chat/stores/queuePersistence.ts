@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { QueuedMessagePayload, QueuedMessageRecord } from "./chatStore";
-import type { DeferredWorkspaceSend } from "../lib/firstWorkspaceSend";
 import {
-  normalizeSessionExecutionTarget,
-  type SessionExecutionTarget,
-} from "../lib/sessionExecutionTarget";
-import { executionTargetFromGooseServeSession } from "../lib/gooseServeExecutionTarget";
+  isAdmittedQueuedMessagePayload,
+  personaIntentFromComposer,
+  type PersonaIntent,
+} from "../lib/admittedSend";
+import type { DeferredWorkspaceSend } from "../lib/firstWorkspaceSend";
 
 const QUEUES_STORAGE_KEY = "goose:chat-message-queues:v1";
 let nativeWriteChain = Promise.resolve();
@@ -42,7 +42,7 @@ function isQueuedRecord(value: unknown): value is QueuedMessageRecord {
 
 function normalizeQueuedRecord(
   record: QueuedMessageRecord,
-): QueuedMessageRecord {
+): QueuedMessageRecord | null {
   const { editing: _editing, restored: _restored, ...persisted } = record;
   const normalizedPayload = normalizeQueuedPayload(persisted.payload);
   const restoredPayload =
@@ -50,6 +50,7 @@ function normalizeQueuedRecord(
       ? { ...normalizedPayload, showInComposer: true }
       : normalizedPayload;
   if (persisted.kind !== "deferred") {
+    if (!isAdmittedQueuedMessagePayload(restoredPayload)) return null;
     return { ...persisted, payload: restoredPayload, restored: true };
   }
   const state = persisted.state as Partial<DeferredWorkspaceSend> | undefined;
@@ -82,48 +83,58 @@ function normalizeQueuedPayload(
     providerId?: unknown;
     modelId?: unknown;
     executionTarget?: unknown;
+    persona?: unknown;
+    personaId?: unknown;
+    personaName?: unknown;
   };
   const {
     providerId: legacyProviderId,
     modelId: legacyModelId,
     executionTarget: rawTarget,
+    persona: rawPersona,
+    personaId: legacyPersonaId,
+    personaName: legacyPersonaName,
     ...rest
   } = legacy;
 
-  let executionTarget: SessionExecutionTarget | undefined;
-  if (rawTarget && typeof rawTarget === "object") {
-    const candidate = rawTarget as unknown as Record<string, unknown>;
-    if (typeof candidate.harnessId === "string") {
-      try {
-        executionTarget = normalizeSessionExecutionTarget({
-          harnessId: candidate.harnessId,
-          modelProviderId:
-            typeof candidate.modelProviderId === "string"
-              ? candidate.modelProviderId
-              : undefined,
-          modelId:
-            typeof candidate.modelId === "string"
-              ? candidate.modelId
-              : undefined,
-          modelName:
-            typeof candidate.modelName === "string"
-              ? candidate.modelName
-              : undefined,
-        });
-      } catch {
-        // Invalid persisted selections do not override the live session target.
-      }
+  let persona: PersonaIntent;
+  if (rawPersona !== undefined) {
+    if (!rawPersona || typeof rawPersona !== "object") {
+      throw new Error("Invalid persisted queue persona intent.");
     }
-  } else if (typeof legacyProviderId === "string") {
-    executionTarget = executionTargetFromGooseServeSession({
-      providerId: legacyProviderId,
-      modelId: typeof legacyModelId === "string" ? legacyModelId : undefined,
-    });
+    const candidate = rawPersona as Record<string, unknown>;
+    if (candidate.kind === "inherit" || candidate.kind === "none") {
+      persona = { kind: candidate.kind };
+    } else if (
+      candidate.kind === "persona" &&
+      typeof candidate.id === "string" &&
+      candidate.id.length > 0 &&
+      (candidate.name === undefined || typeof candidate.name === "string")
+    ) {
+      persona = {
+        kind: "persona",
+        id: candidate.id,
+        ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+      };
+    } else {
+      throw new Error("Invalid persisted queue persona intent.");
+    }
+  } else if (
+    legacyPersonaId === undefined ||
+    legacyPersonaId === null ||
+    typeof legacyPersonaId === "string"
+  ) {
+    persona = personaIntentFromComposer(
+      legacyPersonaId,
+      typeof legacyPersonaName === "string" ? legacyPersonaName : undefined,
+    );
+  } else {
+    throw new Error("Invalid legacy queue persona intent.");
   }
 
   return {
     ...rest,
-    ...(executionTarget ? { executionTarget } : {}),
+    persona,
   };
 }
 
@@ -152,7 +163,14 @@ function parseMessageQueues(stored: string): PersistedQueues {
   return Object.fromEntries(
     Object.entries(parsed).flatMap(([sessionId, value]) => {
       if (!Array.isArray(value)) return [];
-      const records = value.filter(isQueuedRecord).map(normalizeQueuedRecord);
+      const records = value.filter(isQueuedRecord).flatMap((record) => {
+        try {
+          const normalized = normalizeQueuedRecord(record);
+          return normalized ? [normalized] : [];
+        } catch {
+          return [];
+        }
+      });
       return records.length > 0 ? [[sessionId, records]] : [];
     }),
   );

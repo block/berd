@@ -2,13 +2,41 @@ import { useEffect, useCallback, useMemo, useRef } from "react";
 import type { ChatState } from "@/shared/types/chat";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import {
+  assertQueuedMessageAttemptOwned,
+  becameQueuedMessageTargetAttemptable,
+  isQueuedMessageTargetAttemptable,
+} from "../lib/queuedMessageAttemptOwnership";
+import {
+  assertQueuedSessionReady,
+  isQueuedSessionReady,
+} from "../lib/queuedMessageReadiness";
 import { useChatStore } from "../stores/chatStore";
 import { useChatSessionStore } from "../stores/chatSessionStore";
+import {
+  acquireSessionDispatchTarget,
+  type SessionDispatchTargetLease,
+} from "../lib/sessionTargetCoordinator";
 import type { QueuedMessageRecord } from "../stores/chatStore";
 import type { ChatSendOptions } from "../types";
+import type { SessionExecutionTarget } from "../lib/sessionExecutionTarget";
+import {
+  admitComposerQueuedMessage,
+  personaIntentToOverride,
+} from "../lib/admittedSend";
 
-const MAX_CONSECUTIVE_SEND_FAILURES = 2;
 const EMPTY_QUEUED_RECORDS: QueuedMessageRecord[] = [];
+
+interface QueueAttemptLease {
+  recordId: string;
+  payload: QueuedMessageRecord["payload"];
+  targetLease: SessionDispatchTargetLease;
+}
+
+// Queue ownership must outlive any one React owner. Detached/reattached views can
+// remount while a transport promise is unresolved; a module-scoped lease keeps
+// the replacement owner from overlapping the still-live attempt.
+const queueAttemptLeaseBySession = new Map<string, QueueAttemptLease>();
 
 function getQueuedMessageKey(
   queuedMessage: QueuedMessageRecord | null,
@@ -25,20 +53,6 @@ function isBerdctlCrossSessionQueuedMessage(
     queuedMessage?.kind === "transport-ready" &&
     queuedMessage.payload.sendOptions?.userMessageMetadata?.origin ===
       "berdctl_cross_session"
-  );
-}
-
-function isRuntimeSendBlocked(
-  runtime:
-    | {
-        activeRunId: string | null;
-        isRunCancellationPending: boolean;
-      }
-    | undefined,
-) {
-  return (
-    (runtime?.activeRunId ?? null) !== null ||
-    (runtime?.isRunCancellationPending ?? false)
   );
 }
 
@@ -61,12 +75,13 @@ export function useMessageQueue(
   chatState: ChatState,
   sendMessage: (
     text: string,
-    overridePersona?: { id: string; name?: string },
+    overridePersona?: { id: string | null; name?: string },
     attachments?: ChatAttachmentDraft[],
     sendOptions?: ChatSendOptions,
   ) => boolean | Promise<boolean>,
   readOnly = false,
   isSendBlocked = false,
+  isPreparationReady = true,
 ) {
   const queuedRecords = useChatStore(
     (s) => s.queuedMessageBySession[sessionId] ?? EMPTY_QUEUED_RECORDS,
@@ -78,13 +93,18 @@ export function useMessageQueue(
   const idleCycleRef = useRef(0);
   const lastAttemptRef = useRef<{
     key: string;
+    payload: QueuedMessageRecord["payload"];
     idleCycle: number;
   } | null>(null);
-  const failureStateRef = useRef<{
-    key: string;
-    count: number;
-  } | null>(null);
   const inFlightAttemptKeyRef = useRef<string | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dispatchReleaseUnsubscribeRef = useRef<(() => void) | null>(null);
+  const dispatchReleasePayloadRef = useRef<
+    QueuedMessageRecord["payload"] | null
+  >(null);
+  const automaticallyRetriedPayloadRef = useRef<
+    QueuedMessageRecord["payload"] | null
+  >(null);
   const suppressNextRenderIdleCycleRef = useRef(false);
   const queuedMessageKey = useMemo(
     () => getQueuedMessageKey(queuedRecord),
@@ -101,19 +121,28 @@ export function useMessageQueue(
   sendMessageRef.current = sendMessage;
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
+  const isPreparationReadyRef = useRef(isPreparationReady);
+  isPreparationReadyRef.current = isPreparationReady;
 
   const tryDrainQueuedMessage = useCallback(
     (queuedMsg: QueuedMessageRecord | null | undefined) => {
       if (
         readOnlyRef.current ||
-        queuedMsg?.kind !== "transport-ready" ||
+        !isQueuedMessageTargetAttemptable(
+          queuedMsg,
+          useChatSessionStore.getState().getSession(sessionId),
+        ) ||
         queuedMsg.restored ||
-        queuedMsg.editing ||
         queuedMsg.releasedFromDeferred ||
         isBerdctlCrossSessionQueuedMessage(queuedMsg)
       ) {
         return false;
       }
+      const liveRuntime = useChatStore.getState().getSessionRuntime(sessionId);
+      if (!isQueuedSessionReady(liveRuntime, isPreparationReadyRef.current)) {
+        return false;
+      }
+
       const { payload } = queuedMsg;
 
       const key = getQueuedMessageKey(queuedMsg);
@@ -121,47 +150,92 @@ export function useMessageQueue(
         return false;
       }
 
-      const hasReachedRetryLimit =
-        failureStateRef.current?.key === key &&
-        failureStateRef.current.count >= MAX_CONSECUTIVE_SEND_FAILURES;
       const alreadyAttemptedThisIdleCycle =
         lastAttemptRef.current?.key === key &&
+        lastAttemptRef.current.payload === payload &&
         lastAttemptRef.current.idleCycle === idleCycleRef.current;
-      const alreadySending = inFlightAttemptKeyRef.current === key;
-      if (
-        hasReachedRetryLimit ||
-        alreadyAttemptedThisIdleCycle ||
-        alreadySending
-      ) {
+      const activeLease = queueAttemptLeaseBySession.get(sessionId);
+      const alreadySending =
+        (activeLease?.recordId === key && activeLease.payload === payload) ||
+        inFlightAttemptKeyRef.current === key;
+      if (alreadyAttemptedThisIdleCycle || alreadySending) {
         return false;
       }
 
+      if (dispatchReleaseUnsubscribeRef.current) {
+        return false;
+      }
+      const acquisition = acquireSessionDispatchTarget(sessionId);
+      if (acquisition.status === "contended") {
+        dispatchReleasePayloadRef.current = payload;
+        dispatchReleaseUnsubscribeRef.current = acquisition.waiter.wait(() => {
+          dispatchReleaseUnsubscribeRef.current = null;
+          dispatchReleasePayloadRef.current = null;
+          const state = useChatStore.getState();
+          const currentHead = state.queuedMessageBySession[sessionId]?.[0];
+          if (
+            currentHead &&
+            isQueuedSessionReady(
+              state.getSessionRuntime(sessionId),
+              isPreparationReadyRef.current,
+            )
+          ) {
+            tryDrainQueuedMessage(currentHead);
+          }
+        });
+        return false;
+      }
+      if (acquisition.status !== "acquired") {
+        return false;
+      }
+      const targetLease = acquisition;
       lastAttemptRef.current = {
         key,
+        payload,
         idleCycle: idleCycleRef.current,
       };
       inFlightAttemptKeyRef.current = key;
+      queueAttemptLeaseBySession.set(sessionId, {
+        recordId: key,
+        payload,
+        targetLease,
+      });
 
-      const { text, personaId, attachments, sendOptions } = payload;
-      const queuedSendOptions = payload.executionTarget
-        ? {
-            ...sendOptions,
-            sessionSelection: payload.executionTarget,
-          }
-        : sendOptions;
+      const { text, persona, attachments, sendOptions } = payload;
+      const queuedPersona = personaIntentToOverride(persona);
+      let userMessageCommitted = false;
+      const queuedSendOptions = {
+        ...sendOptions,
+        beforeUserMessageCommitted: () => {
+          const state = useChatStore.getState();
+          const latestQueuedMessage =
+            state.queuedMessageBySession[sessionId]?.[0];
+          assertQueuedMessageAttemptOwned(latestQueuedMessage, queuedMsg);
+          assertQueuedSessionReady(
+            state.getSessionRuntime(sessionId),
+            isPreparationReadyRef.current,
+          );
+        },
+        onUserMessageCommitted: () => {
+          userMessageCommitted = true;
+          sendOptions?.onUserMessageCommitted?.();
+        },
+        sessionSelection: targetLease.target,
+        sessionSelectionToken: targetLease.token,
+      };
       const sendFn = sendMessageRef.current;
-      const sendResult = queuedSendOptions
-        ? sendFn(
-            text,
-            personaId ? { id: personaId } : undefined,
-            attachments,
-            queuedSendOptions,
-          )
-        : sendFn(text, personaId ? { id: personaId } : undefined, attachments);
 
       const finalize = (accepted: boolean | undefined) => {
+        if (userMessageCommitted) {
+          accepted = true;
+        }
         if (inFlightAttemptKeyRef.current === key) {
           inFlightAttemptKeyRef.current = null;
+        }
+        const activeLease = queueAttemptLeaseBySession.get(sessionId);
+        if (activeLease?.recordId === key && activeLease.payload === payload) {
+          queueAttemptLeaseBySession.delete(sessionId);
+          activeLease.targetLease.release();
         }
 
         const latestQueuedMessage =
@@ -172,35 +246,78 @@ export function useMessageQueue(
           latestQueuedMessage?.payload !== payload ||
           latestQueuedMessage.editing
         ) {
+          if (
+            latestQueuedMessage?.kind === "transport-ready" &&
+            !latestQueuedMessage.editing
+          ) {
+            queueMicrotask(() => tryDrainQueuedMessage(latestQueuedMessage));
+          }
           return;
         }
 
         if (accepted === false) {
-          if (latestQueuedMessage.payload.showInComposer === false) {
+          let retryPayload = latestQueuedMessage.payload;
+          if (retryPayload.showInComposer === false) {
+            retryPayload = {
+              ...retryPayload,
+              showInComposer: true,
+            };
+            lastAttemptRef.current = {
+              key,
+              payload: retryPayload,
+              idleCycle: idleCycleRef.current,
+            };
             useChatStore
               .getState()
-              .updateQueuedMessage(sessionId, latestQueuedMessage.recordId, {
-                ...latestQueuedMessage.payload,
-                showInComposer: true,
-              });
+              .updateQueuedMessage(
+                sessionId,
+                latestQueuedMessage.recordId,
+                retryPayload,
+              );
           }
-          const previousFailureCount =
-            failureStateRef.current?.key === key
-              ? failureStateRef.current.count
-              : 0;
-          failureStateRef.current = {
-            key,
-            count: previousFailureCount + 1,
-          };
+          if (
+            retryTimerRef.current === null &&
+            automaticallyRetriedPayloadRef.current !== retryPayload
+          ) {
+            retryTimerRef.current = setTimeout(() => {
+              retryTimerRef.current = null;
+              const state = useChatStore.getState();
+              const runtime = state.getSessionRuntime(sessionId);
+              const retryHead = state.queuedMessageBySession[sessionId]?.[0];
+              if (
+                !isQueuedSessionReady(runtime, isPreparationReadyRef.current) ||
+                getQueuedMessageKey(retryHead) !== key ||
+                retryHead?.payload !== retryPayload
+              ) {
+                return;
+              }
+              automaticallyRetriedPayloadRef.current = retryPayload;
+              idleCycleRef.current += 1;
+              tryDrainQueuedMessage(retryHead);
+            }, 1_000);
+          }
           return;
         }
 
-        failureStateRef.current = null;
+        automaticallyRetriedPayloadRef.current = null;
         lastAttemptRef.current = null;
         useChatStore
           .getState()
           .dismissQueuedMessage(sessionId, queuedMsg.recordId);
       };
+
+      let sendResult: boolean | Promise<boolean>;
+      try {
+        sendResult = sendFn(
+          text,
+          queuedPersona,
+          attachments,
+          queuedSendOptions,
+        );
+      } catch {
+        finalize(false);
+        return true;
+      }
 
       if (isPromiseLike<boolean>(sendResult)) {
         void sendResult
@@ -221,8 +338,8 @@ export function useMessageQueue(
       const previousRuntime = previousState.sessionStateById[sessionId];
       const currentChatState = runtime?.chatState ?? "idle";
       const prevChatState = previousRuntime?.chatState ?? "idle";
-      const isLiveSendBlocked = isRuntimeSendBlocked(runtime);
-      const wasSendBlocked = isRuntimeSendBlocked(previousRuntime);
+      const isLiveSendBlocked = !isQueuedSessionReady(runtime);
+      const wasSendBlocked = !isQueuedSessionReady(previousRuntime);
       const becameIdle =
         currentChatState === "idle" && prevChatState !== "idle";
       const becameReadyWhileIdle =
@@ -239,11 +356,30 @@ export function useMessageQueue(
         !queuedMessage.restored &&
         previousQueuedMessage?.recordId === queuedMessage.recordId &&
         previousQueuedMessage.restored === true;
+      const editedCurrentRecord =
+        queuedMessage?.kind === "transport-ready" &&
+        previousQueuedMessage?.recordId === queuedMessage.recordId &&
+        previousQueuedMessage.payload !== queuedMessage.payload &&
+        previousQueuedMessage.editing === true &&
+        !queuedMessage.editing;
       const advancedToNextRecord =
         queuedMessage?.recordId !== previousQueuedMessage?.recordId &&
         previousQueuedMessage !== undefined;
 
-      if (becameIdle) {
+      if (editedCurrentRecord || advancedToNextRecord) {
+        automaticallyRetriedPayloadRef.current = null;
+        if (retryTimerRef.current !== null) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+      }
+
+      if (becameIdle || becameReadyWhileIdle) {
+        automaticallyRetriedPayloadRef.current = null;
+        if (retryTimerRef.current !== null) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
         idleCycleRef.current += 1;
         suppressNextRenderIdleCycleRef.current = true;
       }
@@ -253,6 +389,7 @@ export function useMessageQueue(
         !becameReadyWhileIdle &&
         !becameTransportReady &&
         !becameReadyAfterRestore &&
+        !editedCurrentRecord &&
         !advancedToNextRecord
       ) {
         return;
@@ -267,13 +404,55 @@ export function useMessageQueue(
   }, [sessionId, tryDrainQueuedMessage]);
 
   useEffect(() => {
+    return () => {
+      dispatchReleaseUnsubscribeRef.current?.();
+      dispatchReleaseUnsubscribeRef.current = null;
+      dispatchReleasePayloadRef.current = null;
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (dispatchReleasePayloadRef.current !== queuedRecord?.payload) {
+      dispatchReleaseUnsubscribeRef.current?.();
+      dispatchReleaseUnsubscribeRef.current = null;
+      dispatchReleasePayloadRef.current = null;
+    }
     if (queuedMessageKey !== lastAttemptRef.current?.key) {
       lastAttemptRef.current = null;
+      automaticallyRetriedPayloadRef.current = null;
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     }
-    if (queuedMessageKey !== failureStateRef.current?.key) {
-      failureStateRef.current = null;
-    }
-  }, [queuedMessageKey]);
+  }, [queuedMessageKey, queuedRecord]);
+
+  useEffect(() => {
+    return useChatSessionStore.subscribe((state, previousState) => {
+      const currentSession = state.getSession(sessionId);
+      if (!currentSession) {
+        dispatchReleaseUnsubscribeRef.current?.();
+        dispatchReleaseUnsubscribeRef.current = null;
+        dispatchReleasePayloadRef.current = null;
+        return;
+      }
+      const currentHead =
+        useChatStore.getState().queuedMessageBySession[sessionId]?.[0];
+      if (
+        becameQueuedMessageTargetAttemptable(
+          currentHead,
+          currentHead,
+          currentSession,
+          previousState.sessions.find((session) => session.id === sessionId),
+        )
+      ) {
+        tryDrainQueuedMessage(currentHead);
+      }
+    });
+  }, [sessionId, tryDrainQueuedMessage]);
 
   useEffect(() => {
     if (chatState === "idle" && previousChatStateRef.current !== "idle") {
@@ -297,23 +476,25 @@ export function useMessageQueue(
   const enqueue = useCallback(
     (
       text: string,
-      personaId?: string,
+      personaId?: string | null,
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
+      personaName?: string,
+      _legacyExecutionTarget?: SessionExecutionTarget,
     ) => {
       if (readOnly) {
         return false;
       }
-      const executionTarget = useChatSessionStore
-        .getState()
-        .getSession(sessionId)?.executionTarget;
-      return useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
-        text,
-        personaId,
-        executionTarget,
-        attachments,
-        sendOptions,
-      });
+      return useChatStore.getState().enqueueTransportReadyMessage(
+        sessionId,
+        admitComposerQueuedMessage({
+          text,
+          personaId,
+          personaName,
+          attachments,
+          sendOptions,
+        }),
+      );
     },
     [readOnly, sessionId],
   );
