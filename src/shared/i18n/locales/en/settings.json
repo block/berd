@@ -65,7 +65,20 @@
     }
   },
   "archive": {
-    "title": "Archive"
+    "title": "Archive",
+    "autoArchive": {
+      "sectionTitle": "Automatic archiving",
+      "label": "Archive inactive chats",
+      "description": "Automatically archive chats after this much time without a message. Chats pinned to Home are never archived automatically.",
+      "options": {
+        "never": "Never",
+        "1-day": "After 1 day",
+        "7-days": "After 7 days",
+        "14-days": "After 14 days",
+        "30-days": "After 30 days",
+        "90-days": "After 90 days"
+      }
+    }
   },
   "chats": {
     "empty": "Archived chats will show here.",

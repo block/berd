@@ -21,6 +21,7 @@ import {
   requiresWorkspaceStartup,
   type ProjectInfo,
 } from "@/features/projects/api/projects";
+import { useAutoArchiveSessions } from "@/features/sessions/hooks/useAutoArchiveSessions";
 import {
   DEFAULT_SETTINGS_SECTION,
   resolveEnabledSettingsSection,
@@ -3676,6 +3677,12 @@ export function AppShell({
     },
     [cleanupChatSession, confirmGitCleanup, setActiveSession, t],
   );
+
+  const handleAutoArchiveChat = useCallback(
+    (sessionId: string) => archiveChat(sessionId, "reject"),
+    [archiveChat],
+  );
+  useAutoArchiveSessions(handleAutoArchiveChat);
 
   const handleArchiveChat = useCallback(
     (sessionId: string) => archiveChat(sessionId, "confirm"),
