@@ -63,6 +63,13 @@ let resolvedClient: GooseClient | null = null;
 let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
 let connectionGeneration = 0;
 
+interface ConnectionAttempt {
+  generation: number;
+  stream: ReturnType<typeof createWebSocketStream> | null;
+}
+
+let currentAttempt: ConnectionAttempt | null = null;
+
 function createClientCallbacks(): () => Client {
   return () => ({
     requestPermission: async (
@@ -96,14 +103,16 @@ function createClientCallbacks(): () => Client {
 function monitorConnection(
   client: GooseClient,
   stream: ReturnType<typeof createWebSocketStream>,
+  attempt: ConnectionAttempt,
 ): void {
   const clearCurrentConnection = () => {
-    if (activeStream !== stream) {
+    if (currentAttempt !== attempt || activeStream !== stream) {
       return;
     }
     resolvedClient = null;
     clientPromise = null;
     activeStream = null;
+    currentAttempt = null;
   };
   client.closed
     .then(() => {
@@ -127,7 +136,9 @@ function monitorConnection(
  */
 export async function invalidateClientConnection(): Promise<void> {
   connectionGeneration += 1;
-  const stream = activeStream;
+  const attempt = currentAttempt;
+  currentAttempt = null;
+  const stream = attempt?.stream ?? activeStream;
   activeStream = null;
   resolvedClient = null;
   clientPromise = null;
@@ -141,7 +152,9 @@ interface InitializedConnection {
   stream: ReturnType<typeof createWebSocketStream>;
 }
 
-async function initializeConnection(): Promise<InitializedConnection> {
+async function initializeConnection(
+  attempt: ConnectionAttempt,
+): Promise<InitializedConnection> {
   // Dev-only: inject a real failure into startup so the WARP probe runs
   // for real against kgoose. `VITE_DEV_STARTUP_ERROR=warp just dev` lets
   // us experience the diagnostic UI with whatever real WARP state the
@@ -174,6 +187,7 @@ async function initializeConnection(): Promise<InitializedConnection> {
 
   const tStream = performance.now();
   const stream = createWebSocketStream(wsUrl);
+  attempt.stream = stream;
 
   const client = new GooseClient(createClientCallbacks(), stream);
   perfLog(
@@ -204,42 +218,39 @@ async function initializeConnection(): Promise<InitializedConnection> {
 }
 
 export async function getClient(): Promise<GooseClient> {
-  if (resolvedClient) {
-    return resolvedClient;
-  }
-
+  if (resolvedClient) return resolvedClient;
   if (!clientPromise) {
     perfLog("[perf:conn] getClient() → initializing new ACP connection");
-    const generation = connectionGeneration;
-    const pendingClient = initializeConnection();
-    const clientInitialization = pendingClient
+    const attempt: ConnectionAttempt = {
+      generation: connectionGeneration,
+      stream: null,
+    };
+    currentAttempt = attempt;
+    const initialization = initializeConnection(attempt)
       .then(async ({ client, stream }) => {
         if (
-          generation === connectionGeneration &&
-          clientPromise === clientInitialization
+          currentAttempt === attempt &&
+          attempt.generation === connectionGeneration
         ) {
           activeStream = stream;
           resolvedClient = client;
-          monitorConnection(client, stream);
+          monitorConnection(client, stream, attempt);
           return client;
         }
         await stream.writable.abort();
         return client;
       })
       .catch((error) => {
-        if (
-          generation === connectionGeneration &&
-          clientPromise === clientInitialization
-        ) {
+        if (currentAttempt === attempt) {
+          currentAttempt = null;
           clientPromise = null;
         }
         throw error;
       });
-    clientPromise = clientInitialization;
+    clientPromise = initialization;
   } else {
     perfLog("[perf:conn] getClient() awaiting in-flight initializeConnection");
   }
-
   return clientPromise;
 }
 
