@@ -488,6 +488,13 @@ export function buildInitScript(options?: {
           case "_goose/providers/inventory/refresh":
           case "_goose/unstable/providers/inventory/refresh":
             return jsonRpcResult(message.id, { started: [], skipped: [] });
+          case "_goose/unstable/providers/config/status":
+            return jsonRpcResult(message.id, {
+              statuses: providerEntries(message.params?.providerIds).map((entry) => ({
+                providerId: entry.providerId,
+                isConfigured: entry.configured,
+              })),
+            });
           case "_goose/defaults/read":
           case "_goose/defaults/save":
             return jsonRpcResult(message.id, {

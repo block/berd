@@ -83,6 +83,19 @@ describe("ChatContextPanel", () => {
     expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 1012px)");
   });
 
+  it("keeps scrolling inside the tab body so the header remains pinned", () => {
+    const { container } = render(
+      <ChatContextPanel activeSessionId="session-1" isVisible />,
+    );
+
+    expect(container.querySelector(".chat-context-panel-surface")).toHaveClass(
+      "overflow-hidden",
+    );
+    expect(
+      container.querySelector(".chat-context-panel-surface"),
+    ).not.toHaveClass("overflow-y-auto");
+  });
+
   it("shows the panel at full material opacity without a fade", () => {
     const { container } = render(
       <ChatContextPanel activeSessionId="session-1" isVisible />,

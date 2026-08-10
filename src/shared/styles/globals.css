@@ -1839,6 +1839,10 @@ body,
     --sidebar-accent: var(--chat-context-panel-hover);
     --sidebar-foreground: var(--chat-context-panel-fg);
     --sidebar-accent-foreground: var(--chat-context-panel-fg);
+    /* The rail is dark in both app themes, so danger and deletion text need
+       light-on-dark tones rather than the light-theme destructive red. */
+    --destructive: var(--color-red-400);
+    --status-deleted: var(--color-red-100);
   }
 
   .chat-context-dropdown-surface {

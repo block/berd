@@ -35,6 +35,15 @@ describe("text shimmer motion", () => {
   });
 });
 
+describe("chat context panel surface", () => {
+  it("uses light-on-dark danger colors in both app themes", () => {
+    const panelSurface = declarationsFor(".chat-context-panel-surface {");
+
+    expect(panelSurface).toContain("--destructive: var(--color-red-400);");
+    expect(panelSurface).toContain("--status-deleted: var(--color-red-100);");
+  });
+});
+
 describe("dark navigation surface", () => {
   it("keeps the shared surface dark while navigation uses its paired token", () => {
     const lightTheme = declarationsFor(":root {");

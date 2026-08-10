@@ -2835,6 +2835,34 @@ describe("ContextPanel", () => {
     expect(worktreeNameInput).toHaveValue("demo-next");
     expect(branchNameInput).toHaveValue("custom-branch");
   });
+  it("keeps shared tab spacing on the tab content wrapper", async () => {
+    const user = userEvent.setup();
+    const { container } = renderContextPanel();
+
+    expect(container.querySelector('[data-slot="tabs"]')).toHaveClass(
+      "max-h-full",
+      "min-h-0",
+      "flex-1",
+      "overflow-hidden",
+    );
+
+    for (const name of [/context/i, /changes/i, /files/i]) {
+      const tab = screen.getByRole("tab", { name });
+      await user.click(tab);
+      const panel = container.querySelector<HTMLElement>(
+        `#${tab.getAttribute("aria-controls")}`,
+      );
+      expect(panel).toHaveClass(
+        "min-h-0",
+        "flex-1",
+        "overflow-y-auto",
+        "px-4",
+        "pb-4",
+        "pt-4",
+      );
+    }
+  });
+
   it("shows a Changes empty state instead of a blank rail for a non-git folder", async () => {
     const user = userEvent.setup();
     mockUseGitState.mockReturnValue({

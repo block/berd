@@ -26,6 +26,13 @@ export default defineConfig({
       },
     },
     {
+      name: "right-rail-layout",
+      testMatch: ["**/right-rail-layout.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+    {
       name: "session-fork",
       testMatch: ["**/session-fork.spec.ts"],
       use: {

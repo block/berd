@@ -437,7 +437,7 @@ export function WorkspaceWidget({
   );
 
   return (
-    <section className="w-full px-4 pb-1 pt-4 text-sm font-normal">
+    <section className="w-full pb-1 text-sm font-normal">
       <div className="space-y-5">
         <div className="group/workspace-section space-y-1.5">
           <div className="flex min-h-6 items-center justify-between gap-2">

@@ -21,7 +21,10 @@ import {
   useState,
 } from "react";
 
+type FileTreeDensity = "default" | "compact";
+
 interface FileTreeContextType {
+  density: FileTreeDensity;
   expandedPaths: Set<string>;
   togglePath: (path: string) => void;
   selectedPath?: string;
@@ -33,6 +36,7 @@ interface FileTreeContextType {
 const noop = () => {};
 
 const FileTreeContext = createContext<FileTreeContextType>({
+  density: "default",
   // oxlint-disable-next-line eslint-plugin-unicorn(no-new-builtin)
   expandedPaths: new Set(),
   togglePath: noop,
@@ -50,6 +54,7 @@ const fileTreeButtonClassName = cn(
 
 export type FileTreeProps = Omit<HTMLAttributes<HTMLDivElement>, "onSelect"> & {
   contentClassName?: string;
+  density?: FileTreeDensity;
   expanded?: Set<string>;
   defaultExpanded?: Set<string>;
   selectedPath?: string;
@@ -58,6 +63,7 @@ export type FileTreeProps = Omit<HTMLAttributes<HTMLDivElement>, "onSelect"> & {
 };
 
 export const FileTree = ({
+  density = "default",
   expanded: controlledExpanded,
   defaultExpanded = new Set(),
   selectedPath,
@@ -86,8 +92,8 @@ export const FileTree = ({
   );
 
   const contextValue = useMemo(
-    () => ({ expandedPaths, onSelect, selectedPath, togglePath }),
-    [expandedPaths, onSelect, selectedPath, togglePath],
+    () => ({ density, expandedPaths, onSelect, selectedPath, togglePath }),
+    [density, expandedPaths, onSelect, selectedPath, togglePath],
   );
 
   return (
@@ -160,7 +166,7 @@ export const FileTreeFolder = ({
   children,
   ...props
 }: FileTreeFolderProps) => {
-  const { expandedPaths, togglePath, selectedPath, onSelect } =
+  const { density, expandedPaths, togglePath, selectedPath, onSelect } =
     useContext(FileTreeContext);
   const isExpanded = expandedPaths.has(path);
   const isSelected = selectedPath === path;
@@ -267,7 +273,14 @@ export const FileTreeFolder = ({
             </div>
           )}
           <CollapsibleContent>
-            <div className="ml-4 border-l pl-2">{children}</div>
+            <div
+              className={cn(
+                "border-l",
+                density === "compact" ? "ml-2 pl-1" : "ml-4 pl-2",
+              )}
+            >
+              {children}
+            </div>
           </CollapsibleContent>
         </div>
       </Collapsible>

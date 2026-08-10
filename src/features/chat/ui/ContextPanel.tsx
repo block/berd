@@ -98,6 +98,8 @@ interface PendingCreatedWorktree {
 
 type ContextPanelTab = "details" | "changes" | "files";
 type ContextPanelSection = "workspace" | "changes" | "artifacts";
+const TAB_CONTENT_CLASS =
+  "scrollbar-none w-full min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4";
 type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
 
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:context-panel:section-visibility";
@@ -1070,7 +1072,7 @@ export function ContextPanel({
     <Tabs
       value={activeTab}
       onValueChange={(value) => setActiveTab(value as ContextPanelTab)}
-      className="flex w-full min-w-0 flex-col gap-0"
+      className="flex max-h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden"
     >
       <div className="shrink-0 px-4 pb-2 pt-2.5">
         <TabsList variant="weight">
@@ -1099,11 +1101,8 @@ export function ContextPanel({
       </div>
       <div className="mx-4 shrink-0 border-b border-border/80" aria-hidden />
 
-      <TabsContent
-        value="details"
-        className="scrollbar-none w-full min-h-0 flex-1 overflow-y-auto"
-      >
-        <div className="w-full pb-4">
+      <TabsContent value="details" className={TAB_CONTENT_CLASS}>
+        <div className="-mt-0.5 w-full">
           {isMultiWorkspaceMode ? (
             <>
               <WorkspaceWidget
@@ -1185,10 +1184,7 @@ export function ContextPanel({
         </div>
       </TabsContent>
 
-      <TabsContent
-        value="changes"
-        className="scrollbar-none w-full min-h-0 flex-1 overflow-y-auto"
-      >
+      <TabsContent value="changes" className={TAB_CONTENT_CLASS}>
         {shouldShowChanges ? (
           hasWorkspaceAttachments ? (
             <WorkspaceChangesWidget
@@ -1233,10 +1229,7 @@ export function ContextPanel({
         )}
       </TabsContent>
 
-      <TabsContent
-        value="files"
-        className="scrollbar-none w-full overflow-y-auto"
-      >
+      <TabsContent value="files" className={TAB_CONTENT_CLASS}>
         <FilesList projectWorkingDirs={fileBrowserRoots} />
       </TabsContent>
     </Tabs>

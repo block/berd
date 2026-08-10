@@ -62,12 +62,14 @@ describe("FilesList", () => {
     expect(screen.getByText("goose2")).toBeInTheDocument();
     expect(screen.getByText("sprout")).toBeInTheDocument();
     const rootRow = screen.getByText("goose2").closest("button")?.parentElement;
-    expect(rootRow).toHaveClass("gap-3", "rounded-sm", "px-3.5", "py-1.5");
+    expect(rootRow).toHaveClass("gap-3", "h-6", "rounded-sm", "px-0", "py-0");
+    expect(rootRow).not.toHaveClass("px-3.5");
+    expect(rootRow).not.toHaveClass("py-1.5");
     expect(rootRow).not.toHaveClass("py-2.5");
     expect(rootRow).not.toHaveClass("rounded");
-    expect(container.firstElementChild).toHaveClass("px-4");
-    expect(container.firstElementChild).toHaveClass("pb-4");
-    expect(container.firstElementChild).toHaveClass("pt-4");
+    expect(container.firstElementChild).not.toHaveClass("px-4");
+    expect(container.firstElementChild).not.toHaveClass("pb-4");
+    expect(container.firstElementChild).not.toHaveClass("pt-4");
     expect(container.firstElementChild).not.toHaveClass("px-1");
     expect(container.firstElementChild).not.toHaveClass("pb-1");
     expect(container.firstElementChild).not.toHaveClass("pb-6");

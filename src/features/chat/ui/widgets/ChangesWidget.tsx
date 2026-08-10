@@ -8,9 +8,9 @@ import type { ChangedFile } from "@/shared/types/git";
 import type { WorkspaceChangedFilesRuntime } from "../hooks/useWorkspaceGitRuntimes";
 
 const CHANGES_SCROLL_CONTAINER_CLASS =
-  "scrollbar-none max-h-[300px] overflow-y-auto rounded-[10px] bg-background/45 py-1";
+  "scrollbar-none max-h-[300px] overflow-y-auto rounded-sm bg-muted/60 py-1";
 const CHANGES_SCROLL_FADE_CLASS =
-  "pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-[10px] bg-gradient-to-t from-background/90 to-transparent";
+  "pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-sm bg-gradient-to-t from-muted/90 to-transparent";
 
 /** Placeholder rows shared by the widgets and the tab-level loading branch.
  *  Padding is the caller's job: the widgets already sit in a padded
@@ -37,12 +37,11 @@ function ChangesEmptyMessage({ message }: { message?: string }) {
   );
 }
 
-/** Tab-level states. The Changes tab renders these instead of a widget, so
- *  unlike the widgets there is no padded `<section>` around them — these own
- *  their own framing, centered to match the Files tab's empty state. */
+/** Tab-level states. Shared spacing comes from the tab content wrapper; these
+ *  only own their centered state layout. */
 export function ChangesEmptyState({ message }: { message?: string }) {
   return (
-    <div className="flex h-32 items-center justify-center px-4 text-center">
+    <div className="flex h-32 items-center justify-center text-center">
       <ChangesEmptyMessage message={message} />
     </div>
   );
@@ -50,7 +49,7 @@ export function ChangesEmptyState({ message }: { message?: string }) {
 
 export function ChangesErrorState({ message }: { message: string }) {
   return (
-    <div className="flex h-32 items-center justify-center px-4 text-center">
+    <div className="flex h-32 items-center justify-center text-center">
       <p className="text-sm text-destructive">{message}</p>
     </div>
   );
@@ -58,7 +57,7 @@ export function ChangesErrorState({ message }: { message: string }) {
 
 export function ChangesLoadingState() {
   return (
-    <div className="px-4 py-4">
+    <div>
       <ChangesSkeletonRows />
     </div>
   );
@@ -109,7 +108,7 @@ function ChangedFileRow({
         "transition-colors duration-100 before:absolute before:inset-x-1 before:inset-y-0 before:rounded-[8px] before:transition-colors after:absolute after:bottom-0 after:left-3 after:right-3 after:h-px after:bg-border/60 last:after:hidden [&:has(+_:focus-visible)]:after:bg-transparent [&:has(+_:hover)]:after:bg-transparent [&>*]:relative [&>*]:z-[1]",
         isDeleted
           ? "cursor-not-allowed opacity-60"
-          : "cursor-pointer hover:before:bg-background/20 hover:after:bg-transparent focus-visible:before:bg-background/20 focus-visible:after:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          : "cursor-pointer hover:before:bg-background/45 hover:after:bg-transparent focus-visible:before:bg-background/45 focus-visible:after:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       )}
       onClick={isDeleted ? undefined : () => onOpen(file.path)}
     >
@@ -179,14 +178,14 @@ export function ChangesWidget({
       : t("contextPanel.errors.gitChangesRead");
 
   return (
-    <section className="w-full px-4 py-4 text-sm font-normal">
+    <section className="w-full text-sm font-normal">
       {isLoading && !files ? (
         <ChangesSkeletonRows />
       ) : error && isLoadingError ? (
         <p className="text-sm text-destructive">{errorMessage}</p>
       ) : hasChanges ? (
         <div className="space-y-2">
-          <div className="flex min-w-0 items-center gap-2 px-2">
+          <div className="flex h-6 min-w-0 items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {renderChangeSummary(
                 t("contextPanel.summary.changes", { count: changeCount }),
@@ -207,7 +206,7 @@ export function ChangesWidget({
                 ) : null}
                 {totals.additions > 0 && totals.deletions > 0 ? " " : null}
                 {totals.deletions > 0 ? (
-                  <span className="text-destructive">
+                  <span className="text-status-deleted">
                     {/* i18n-check-ignore — mathematical symbol, not translatable */}
                     &minus;{totals.deletions}
                   </span>
@@ -284,7 +283,7 @@ export function WorkspaceChangesWidget({
       : t("contextPanel.errors.gitChangesRead");
 
   return (
-    <section className="w-full px-4 py-4 text-sm font-normal">
+    <section className="w-full text-sm font-normal">
       {isLoading && changedGroups.length === 0 ? (
         <ChangesSkeletonRows />
       ) : firstLoadingError ? (
@@ -301,7 +300,7 @@ export function WorkspaceChangesWidget({
                   {group.workspaceTitle}
                 </p>
               ) : null}
-              <div className="flex min-w-0 items-center gap-2 px-2">
+              <div className="flex h-6 min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {renderChangeSummary(
                     t("contextPanel.summary.changes", {
@@ -330,7 +329,7 @@ export function WorkspaceChangesWidget({
                       ? " "
                       : null}
                     {group.totals.deletions > 0 ? (
-                      <span className="text-destructive">
+                      <span className="text-status-deleted">
                         {/* i18n-check-ignore — mathematical symbol, not translatable */}
                         &minus;{group.totals.deletions}
                       </span>

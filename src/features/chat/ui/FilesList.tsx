@@ -22,6 +22,7 @@ interface DirectoryState {
 
 const EMPTY_ROOTS: string[] = [];
 const FILES_TREE_ROW_CLASS = "py-1.5";
+const FILES_TREE_ROOT_ROW_CLASS = "h-6 px-0 py-0";
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
@@ -245,17 +246,18 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
 
   if (roots.length === 0) {
     return (
-      <div className="flex h-32 items-center justify-center px-4 text-center">
+      <div className="flex h-32 items-center justify-center text-center">
         <p className="text-sm text-muted-foreground">{t("files.empty")}</p>
       </div>
     );
   }
 
   return (
-    <div className="min-w-0 px-4 pb-4 pt-4">
+    <div className="min-w-0">
       <FileTree
         className="border-0 bg-transparent font-normal"
         contentClassName="p-0"
+        density="compact"
         expanded={expandedPaths}
         onExpandedChange={handleExpandedChange}
         onSelect={handleOpenFile}
@@ -268,7 +270,7 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
               key={root}
               path={root}
               name={basename(root)}
-              rowClassName={FILES_TREE_ROW_CLASS}
+              rowClassName={FILES_TREE_ROOT_ROW_CLASS}
               contextMenuPath={root}
               title={root}
               toggleOnSelect
