@@ -53,8 +53,6 @@
   about: Read and manage events across your Google Calendars.
 - name: google-drive
   about: Search, read, create, and edit Google Drive files.
-- name: greenhouse
-  about: Interact with the Greenhouse applicant tracking system.
 - name: incidentio
   about: Manage Block incidents in Incident.io — list, view, and update.
 - name: intersect

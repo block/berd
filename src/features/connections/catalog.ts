@@ -125,6 +125,7 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "Greenhouse",
     description: "Interact with Greenhouse applications and candidates",
     Icon: GreenhouseIcon,
+    hidden: true,
   },
   {
     provider: "jira",
