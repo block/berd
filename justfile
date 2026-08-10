@@ -266,8 +266,17 @@ bb-cli-docker-acceptance:
     docker run --rm bb-cli-acceptance
 
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
-[unix]
 bundle:
+    just _bundle-{{ os_family() }}
+
+# Windows staging is native (real *-<triple>.exe, PE-validated, no Catch stub)
+# and drives `tauri build --bundles nsis` with a shared explicit target triple.
+[windows]
+_bundle-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Bundle-Windows.ps1
+
+[unix]
+_bundle-unix:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -291,6 +300,7 @@ bundle:
     fi
 
     CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \
+      BERD_APP_VERSION="$BERD_APP_VERSION" \
       VITE_AUTH_GATE=0 \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       "${TAURI_BUILD_ARGS[@]}"
@@ -325,8 +335,15 @@ bundle-linux-docker:
     ./scripts/build_linux_docker.sh
 
 # Stage the pinned Goose backend and build a release bundle with WebView devtools enabled.
-[unix]
 bundle-debug:
+    just _bundle-debug-{{ os_family() }}
+
+[windows]
+_bundle-debug-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Bundle-Windows.ps1 -Debug
+
+[unix]
+_bundle-debug-unix:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -347,6 +364,7 @@ bundle-debug:
       src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
     CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \
+      BERD_APP_VERSION="$BERD_APP_VERSION" \
       VITE_AUTH_GATE=0 \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"
@@ -513,13 +531,16 @@ _clean-windows:
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue dist,node_modules,sdk/node_modules,sdk/dist
 
-[unix]
 stage-sidecar:
     just _stage-sidecar-{{ os_family() }}
 
 [unix]
 _stage-sidecar-unix:
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
+
+[windows]
+_stage-sidecar-windows:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Invoke-Stage-Sidecar-Windows.ps1
 
 avatars-manifest source version:
     pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"

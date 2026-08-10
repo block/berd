@@ -9,3 +9,7 @@ src/shared/assets/avatars/hevc/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
 # platforms instead of flip-flopping \r\n into the committed JSON.
 src-tauri/plugins/*/permissions/**/*.toml text eol=lf
 src-tauri/gen/schemas/*.json text eol=lf
+src-tauri/tauri.windows.conf.json text eol=lf
+# sqlx migration checksums cover exact bytes; checkout conversion would make an
+# already-applied migration appear modified and abort application startup.
+src-tauri/migrations/*.sql text eol=lf

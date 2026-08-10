@@ -190,4 +190,10 @@ $tauriArguments = @(
     "--config", "src-tauri/tauri.dev.conf.json",
     "--config", $devConfigPath
 )
+if ($E2eMode) {
+    # E2E needs one stable native launch. Plugin build scripts generate files
+    # under src-tauri, so the ordinary dev watcher can otherwise invalidate its
+    # own in-flight compile before the test driver publishes readiness.
+    $tauriArguments += "--no-watch"
+}
 Invoke-CheckedCommand -FilePath $pnpm -ArgumentList $tauriArguments -Label "pnpm exec tauri dev"

@@ -159,7 +159,7 @@ fn build_record(input: DiagnosticEventInput) -> Result<DiagnosticLogRecord, Stri
         category: input.category,
         event: input.event,
         elapsed_ms: input.elapsed_ms,
-        app_version: env!("CARGO_PKG_VERSION"),
+        app_version: env!("BERD_BUILD_VERSION"),
         platform: std::env::consts::OS,
         fields,
     })

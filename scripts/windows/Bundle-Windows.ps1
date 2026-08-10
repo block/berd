@@ -1,7 +1,18 @@
+# Build a native Windows Berd bundle with real sidecars staged.
+#
+# This is the Windows counterpart to the Unix `just bundle` / `bundle-debug`
+# recipes. Those recipes run the POSIX prepare-*-sidecar.sh scripts directly,
+# which on Windows would look for an extensionless berdctl, stage goosed
+# without the .exe suffix, and emit the forbidden Catch shell stub — none of
+# which match the tauri.windows.conf.json externalBin contract. This driver
+# instead stages through Stage-Sidecar-Windows.ps1 (real *-<triple>.exe files,
+# PE-validated, no Catch) and hands Tauri the same explicit target triple so
+# the staged names and Tauri's externalBin resolution cannot diverge.
 param(
     [ValidateSet("nsis", "msi")][string]$Bundle = "nsis",
     [AllowNull()][AllowEmptyString()][string]$Version,
-    [switch]$SkipDependencyInstall
+    [switch]$SkipDependencyInstall,
+    [switch]$Debug
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,8 +41,6 @@ $repoRoot = Get-BerdRepoRoot
 Set-Location $repoRoot
 $targetTriple = "x86_64-pc-windows-msvc"
 $targetDir = Get-TauriCargoTargetDir
-$binaryDir = Join-Path $repoRoot "src-tauri\binaries"
-New-Item -ItemType Directory -Force -Path $binaryDir | Out-Null
 $env:CARGO_TARGET_DIR = $targetDir
 
 if (-not $SkipDependencyInstall) {
@@ -44,8 +53,8 @@ if (-not $SkipDependencyInstall) {
 Write-WindowsDevInfo "Building the workspace Goose SDK."
 Invoke-CheckedCommand -FilePath $pnpm -ArgumentList @("--filter", "@aaif/goose-sdk", "build") -Label "Goose SDK build"
 
-# Stage the exact pinned Goose checkout used by Windows development. Building
-# rather than accepting an arbitrary PATH binary keeps the bundle reproducible.
+# Build the exact pinned managed Goose checkout before native staging validates
+# its identity, PE shape, architecture, checksum, and exact Tauri filename.
 $oldGooseMode = $env:GOOSE_DEV_MODE
 try {
     $env:GOOSE_DEV_MODE = "required"
@@ -57,41 +66,58 @@ if (-not $goose.Ready -or [string]::IsNullOrWhiteSpace($goose.BinPath)) {
     throw "Pinned Goose sidecar is not ready: $($goose.Message)"
 }
 # Invoke-EnsureLocalGoose points CARGO_TARGET_DIR at the managed Goose cache.
-# Restore the app target before building berdctl and invoking Tauri.
+# Restore the app target before staging berdctl and invoking Tauri.
 $env:CARGO_TARGET_DIR = $targetDir
-$gooseOut = Join-Path $binaryDir "goosed-$targetTriple.exe"
-Copy-Item -Force $goose.BinPath $gooseOut
-Write-WindowsDevInfo "Staged Goose sidecar: $gooseOut"
 
-Write-WindowsDevInfo "Building and staging berdctl."
-Invoke-CheckedCommand -FilePath "cargo" -ArgumentList @("build", "--manifest-path", "src-tauri\Cargo.toml", "-p", "berdctl", "--release", "--target", $targetTriple) -Label "cargo build berdctl"
-$berdctlBuilt = Join-Path $targetDir "$targetTriple\release\berdctl.exe"
-$berdctlOut = Join-Path $binaryDir "berdctl-$targetTriple.exe"
-Copy-Item -Force $berdctlBuilt $berdctlOut
-
-# Catch is macOS-only, but Tauri resolves every configured externalBin on every
-# target. Stage a real Windows executable that fails explicitly if invoked.
-$stubSource = Join-Path ([System.IO.Path]::GetTempPath()) ("berd-catch-stub-" + [Guid]::NewGuid().ToString("N") + ".rs")
-try {
-    Set-Content -Path $stubSource -Encoding UTF8 -Value @'
-fn main() {
-    eprintln!("The Catch sidecar is only supported on macOS.");
-    std::process::exit(1);
-}
-'@
-    $catchOut = Join-Path $binaryDir "catch-$targetTriple.exe"
-    & rustc --edition 2021 -C opt-level=z -C strip=symbols $stubSource -o $catchOut
-    if ($LASTEXITCODE -ne 0) {
-        throw "Catch Windows stub build failed with exit code $LASTEXITCODE."
-    }
-} finally {
-    Remove-Item -Force -ErrorAction SilentlyContinue $stubSource
-}
+# Stage goosed/berdctl as validated *-<triple>.exe. Catch is macOS-only and is
+# excluded from the Windows externalBin overlay rather than replaced by a stub.
+Invoke-WindowsChildScript -ScriptPath (Join-Path $PSScriptRoot "Stage-Sidecar-Windows.ps1") `
+    -ArgumentList @("-Triple", $targetTriple) -Label "Stage Windows sidecars"
 
 Write-WindowsDevInfo "Resolving application version from Git metadata."
-$appVersion = Resolve-AppVersion $Version
-Write-WindowsDevInfo "Building Berd $($appVersion.Version) ($($appVersion.RichVersion))."
-$configPath = Join-Path ([System.IO.Path]::GetTempPath()) ("berd-tauri-windows-" + [Guid]::NewGuid().ToString("N") + ".json")
+$resolvedVersion = Resolve-AppVersion $Version
+Write-WindowsDevInfo "Building Berd $($resolvedVersion.Version) ($($resolvedVersion.RichVersion))."
+
+$env:CARGO_TARGET_DIR = $targetDir
+$env:BERD_APP_VERSION = $resolvedVersion.Version
+$env:VITE_AUTH_GATE = "0"
+$env:VITE_APP_VERSION = $resolvedVersion.RichVersion
+
+$features = "berdctl"
+if ($Debug) {
+    $features = "berdctl,devtools"
+}
+
+# Build the config overlay. Keep main's bundle target and updater controls;
+# debug bundles also fold in the base config with devtools enabled. Write
+# without a BOM: Tauri's serde --config parsing rejects BOM-prefixed JSON.
+$configPath = Join-Path ([System.IO.Path]::GetTempPath()) ("berd-tauri-{0}.{1}.json" -f ($(if ($Debug) { "debug" } else { "version" }), [System.IO.Path]::GetRandomFileName()))
+if ($Debug) {
+    if ($Bundle -ne "nsis") {
+        throw "Debug Windows bundles currently support only NSIS."
+    }
+    # Tauri merges overlays with json_patch (RFC 7386), which REPLACES arrays
+    # wholesale. Setting devtools on app.windows[0] therefore requires carrying
+    # the full base app.windows array (as the Unix recipe does), or the other
+    # window props would be dropped. But carrying the full base config also
+    # carries its bundle.externalBin (which includes catch) and would REPLACE
+    # the Windows overlay's catch-free array — re-breaking the Windows contract.
+    # So pin externalBin to the Windows contract in the same overlay.
+    $baseConfig = Read-JsonFile (Join-Path (Join-Path (Get-BerdRepoRoot) "src-tauri") "tauri.conf.json")
+    $baseConfig.version = $resolvedVersion.Version
+    $baseConfig.app.windows[0] | Add-Member -NotePropertyName devtools -NotePropertyValue $true -Force
+    $windowsConf = Read-JsonFile (Join-Path (Join-Path (Get-BerdRepoRoot) "src-tauri") "tauri.windows.conf.json")
+    $baseConfig.bundle.externalBin = (Get-ObjectValue (Get-ObjectValue $windowsConf "bundle") "externalBin")
+    $configJson = $baseConfig | ConvertTo-Json -Depth 32
+} else {
+    $configJson = ([pscustomobject]@{
+        version = $resolvedVersion.Version
+        bundle = @{ targets = @($Bundle) }
+        plugins = @{ updater = @{ active = $false } }
+    } | ConvertTo-Json -Depth 5)
+}
+[System.IO.File]::WriteAllText($configPath, $configJson, [System.Text.UTF8Encoding]::new($false))
+
 $schemaPath = Join-Path $repoRoot "src-tauri\gen\schemas\windows-schema.json"
 $schemaBackup = Join-Path ([System.IO.Path]::GetTempPath()) ("berd-windows-schema-" + [Guid]::NewGuid().ToString("N") + ".json")
 $schemaExisted = Test-Path -LiteralPath $schemaPath
@@ -99,17 +125,15 @@ if ($schemaExisted) {
     Copy-Item -LiteralPath $schemaPath -Destination $schemaBackup
 }
 try {
-    @{
-        version = $appVersion.Version
-        bundle = @{ targets = @($Bundle) }
-        plugins = @{ updater = @{ active = $false } }
-    } | ConvertTo-Json -Depth 5 | Set-Content -Path $configPath -Encoding UTF8
-
-    $env:VITE_AUTH_GATE = "0"
-    $env:VITE_APP_VERSION = $appVersion.RichVersion
-    Invoke-CheckedCommand -FilePath $pnpm -ArgumentList @("exec", "tauri", "build", "--features", "berdctl", "--target", $targetTriple, "--bundles", $Bundle, "--config", $configPath) -Label "Windows $Bundle bundle"
+    Invoke-CheckedCommand -FilePath $pnpm -ArgumentList @(
+        "exec", "tauri", "build",
+        "--target", $targetTriple,
+        "--features", $features,
+        "--bundles", $Bundle,
+        "--config", $configPath
+    ) -Label "pnpm exec tauri build --bundles $Bundle"
 } finally {
-    Remove-Item -Force -ErrorAction SilentlyContinue $configPath
+    Remove-Item -Path $configPath -Force -ErrorAction SilentlyContinue
     if ($schemaExisted) {
         Copy-Item -Force -LiteralPath $schemaBackup -Destination $schemaPath
     } else {
@@ -118,6 +142,38 @@ try {
     Remove-Item -Force -ErrorAction SilentlyContinue $schemaBackup
 }
 
+function Assert-WindowsBundleVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$BundleDir,
+        [Parameter(Mandatory = $true)][string]$TargetDir,
+        [Parameter(Mandatory = $true)][string]$TargetTriple,
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+        [Parameter(Mandatory = $true)][string]$BundleType
+    )
+
+    $appPath = Join-Path $TargetDir "$TargetTriple\release\Berd.exe"
+    if (-not (Test-Path -LiteralPath $appPath -PathType Leaf)) {
+        throw "Built application executable not found: $appPath"
+    }
+    $actualVersion = (Get-Item -LiteralPath $appPath).VersionInfo.ProductVersion
+    if ($actualVersion -ne $ExpectedVersion) {
+        throw "Built application version mismatch: expected '$ExpectedVersion', got '$actualVersion' at $appPath."
+    }
+
+    $bundlePattern = if ($BundleType -eq "nsis") {
+        "Berd_${ExpectedVersion}_x64-setup.exe"
+    } else {
+        "Berd_${ExpectedVersion}_x64_en-US.msi"
+    }
+    $bundlePath = Join-Path $BundleDir $bundlePattern
+    if (-not (Test-Path -LiteralPath $bundlePath -PathType Leaf)) {
+        throw "Expected $BundleType bundle not found: $bundlePath"
+    }
+
+    return $bundlePath
+}
+
 $bundleDir = Join-Path $targetDir "$targetTriple\release\bundle\$Bundle"
+$bundlePath = Assert-WindowsBundleVersion -BundleDir $bundleDir -TargetDir $targetDir -TargetTriple $targetTriple -ExpectedVersion $resolvedVersion.Version -BundleType $Bundle
 Write-Host ""
-Write-Host "Windows bundle ready: $bundleDir" -ForegroundColor Green
+Write-Host "Windows bundle ready: $bundlePath" -ForegroundColor Green

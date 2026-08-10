@@ -288,6 +288,24 @@ describe("build-tauri-release-config", () => {
   });
 });
 
+describe("local macOS bundle version propagation", () => {
+  it("exports the resolved version to Rust for release and debug bundles", async () => {
+    const justfile = await readFile(join(repo, "justfile"), "utf8");
+    const versionEnvironment = `CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \\
+      BERD_APP_VERSION="$BERD_APP_VERSION" \\
+      VITE_AUTH_GATE=0 \\
+      VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \\
+      `;
+
+    expect(justfile).toContain(
+      `${versionEnvironment}"\${TAURI_BUILD_ARGS[@]}"`,
+    );
+    expect(justfile).toContain(
+      `${versionEnvironment}pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"`,
+    );
+  });
+});
+
 describe("build-macos release resource staging", () => {
   it("requires Beta Linear routing when a Beta catalog is bundled", async () => {
     const script = await readFile(

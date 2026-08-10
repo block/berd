@@ -273,6 +273,189 @@ function Invoke-CheckedCommand {
     }
 }
 
+# Invoke a sibling PowerShell script as a native child process and fail on a
+# nonzero exit code. Dot-sourcing or `& script.ps1` runs the child in-process,
+# where a SUCCESSFUL script leaves $LASTEXITCODE untouched (commonly $null),
+# so a following `if ($LASTEXITCODE -ne 0)` guard reads a stale/`$null` value
+# and false-fails ($null -ne 0 is $true). Running the script through the same
+# host executable that is running this process gives it a real, deliberately
+# captured native exit code, so success (0) and failure (nonzero) are both
+# detected correctly and control only proceeds past a genuinely successful step.
+function Invoke-WindowsChildScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string[]]$ArgumentList = @(),
+        [string]$Label = $ScriptPath
+    )
+
+    if (-not (Test-Path $ScriptPath -PathType Leaf)) {
+        throw "Child script not found: $ScriptPath"
+    }
+
+    $shell = (Get-Process -Id $PID).Path
+    if ([string]::IsNullOrWhiteSpace($shell)) {
+        throw "Could not resolve the current PowerShell host executable to run $ScriptPath."
+    }
+
+    # Windows PowerShell (powershell.exe) honours machine execution policy; if it
+    # is Restricted/AllSigned the child would refuse to run even though the
+    # parent lane started under -ExecutionPolicy Bypass. Pass Bypass to the child
+    # too when the host is powershell.exe (pwsh ignores per-invocation policy).
+    $shellArgs = @("-NoProfile")
+    if ([System.IO.Path]::GetFileNameWithoutExtension($shell) -ieq "powershell") {
+        $shellArgs += @("-ExecutionPolicy", "Bypass")
+    }
+    $shellArgs += @("-File", $ScriptPath)
+    $shellArgs += $ArgumentList
+
+    Write-WindowsDevInfo $Label
+    $process = Start-Process -FilePath $shell -ArgumentList (Join-WindowsProcessArguments $shellArgs) -Wait -PassThru -NoNewWindow
+    if ($process.ExitCode -ne 0) {
+        throw "$Label failed with exit code $($process.ExitCode)."
+    }
+}
+
+# Build the taskkill argument vector that terminates a process AND its whole
+# child tree by PID. Factored out so the tree-kill command shape is a pure,
+# deterministically testable value: Windows PowerShell 5.1 has no kill-tree
+# process overload, so a timed-out probe must terminate the tree with
+# `taskkill /PID <id> /T /F` or a wedged child's grandchildren leak.
+function Get-TaskkillTreeArguments {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
+    return @("/PID", "$ProcessId", "/T", "/F")
+}
+
+# Terminate a process and its children in a way that works on both Windows
+# PowerShell 5.1 (.NET Framework, which lacks the kill-tree overload) and pwsh 7
+# (.NET Core). On Windows prefer taskkill's tree kill; on any host, and if
+# taskkill is missing or fails, fall back to the single-process Kill() that
+# exists everywhere.
+function Stop-ProcessTree {
+    param([Parameter(Mandatory = $true)]$Process)
+
+    $processId = $Process.Id
+    if (Test-IsWindowsHost) {
+        try {
+            $arguments = Get-TaskkillTreeArguments -ProcessId $processId
+            & taskkill.exe @arguments 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                return
+            }
+        } catch {
+            # Fall through to the portable single-process kill below.
+        }
+    }
+    try { $Process.Kill() } catch { }
+}
+
+# Run an external command with a hard wall-clock timeout and capture its exit
+# code and combined output. Unlike Invoke-CaptureCommand this bounds a hung or
+# non-responsive binary: if it does not exit within TimeoutSeconds it is killed
+# and TimedOut is reported so callers never block a build on a wedged probe.
+# Kept Windows PowerShell 5.1-safe: arguments are passed via the string
+# `Arguments` property (5.1 lacks ProcessStartInfo.ArgumentList) built with the
+# existing MSVCRT quoting helper, and the timeout path uses Stop-ProcessTree
+# instead of the .NET Core-only kill-tree process overload.
+function Invoke-BoundedCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [int]$TimeoutSeconds = 15
+    )
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = (Join-WindowsProcessArguments -Arguments $ArgumentList)
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+
+    try {
+        [void]$process.Start()
+        # Read both streams asynchronously so a full stderr pipe cannot deadlock
+        # a process still writing stdout (and vice versa). --version output is
+        # tiny, but the async tasks keep this correct regardless of volume.
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+
+        $exited = $process.WaitForExit($TimeoutSeconds * 1000)
+        if (-not $exited) {
+            Stop-ProcessTree -Process $process
+            [void]$process.WaitForExit(2000)
+            return [pscustomobject]@{ ExitCode = $null; Output = ""; TimedOut = $true }
+        }
+        $combined = (($stdoutTask.GetAwaiter().GetResult()) + ($stderrTask.GetAwaiter().GetResult())).Trim()
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $combined; TimedOut = $false }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+# Classify bounded Goose identity probes. Current Goose prints bare semver for
+# `--version`, so identity cannot be inferred from that output alone. Require a
+# successful help banner with Goose-specific commands when accepting bare semver;
+# still accept older clap banners that explicitly name the expected binary.
+function Test-GooseVersionOutput {
+    param(
+        [AllowNull()]$ExitCode,
+        [AllowNull()][string]$Output,
+        [bool]$TimedOut,
+        [Parameter(Mandatory = $true)][string]$BinName,
+        [AllowNull()]$HelpExitCode,
+        [AllowNull()][string]$HelpOutput,
+        [bool]$HelpTimedOut
+    )
+
+    if ($TimedOut) {
+        return [pscustomobject]@{ Ok = $false; Message = "Goose --version probe timed out." }
+    }
+    if ($ExitCode -ne 0) {
+        return [pscustomobject]@{ Ok = $false; Message = "Goose --version exited with code $ExitCode." }
+    }
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return [pscustomobject]@{ Ok = $false; Message = "Goose --version produced no output." }
+    }
+
+    $escaped = [regex]::Escape($BinName)
+    if ($Output -match "(?im)^\s*$escaped\s+v?\d+\.\d+") {
+        return [pscustomobject]@{ Ok = $true; Message = $Output.Trim() }
+    }
+    if ($Output -match '^\s*v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\s*$') {
+        if ($HelpTimedOut -or $HelpExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($HelpOutput)) {
+            return [pscustomobject]@{ Ok = $false; Message = "Goose --help identity probe failed." }
+        }
+        $hasUsage = $HelpOutput -match '(?im)^Usage:\s+goose(?:\.exe)?\s+'
+        $hasCommands = $HelpOutput -match '(?im)^\s+configure\s+' -and $HelpOutput -match '(?im)^\s+session\s+' -and $HelpOutput -match '(?im)^\s+serve\s+'
+        if ($hasUsage -and $hasCommands) {
+            return [pscustomobject]@{ Ok = $true; Message = $Output.Trim() }
+        }
+    }
+    return [pscustomobject]@{ Ok = $false; Message = "Goose identity probes did not identify '$BinName': $Output" }
+}
+
+function Assert-GooseBinaryIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$BinName,
+        [int]$TimeoutSeconds = 15
+    )
+
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        throw "Goose binary not found for identity probe: $Path"
+    }
+
+    $versionProbe = Invoke-BoundedCommand -FilePath $Path -ArgumentList @("--version") -TimeoutSeconds $TimeoutSeconds
+    $helpProbe = Invoke-BoundedCommand -FilePath $Path -ArgumentList @("--help") -TimeoutSeconds $TimeoutSeconds
+    $verdict = Test-GooseVersionOutput -ExitCode $versionProbe.ExitCode -Output $versionProbe.Output -TimedOut $versionProbe.TimedOut -BinName $BinName -HelpExitCode $helpProbe.ExitCode -HelpOutput $helpProbe.Output -HelpTimedOut $helpProbe.TimedOut
+    if (-not $verdict.Ok) {
+        throw "Goose identity probe failed for $Path. $($verdict.Message)"
+    }
+}
+
 function Join-WindowsProcessArguments {
     param([string[]]$Arguments)
     $quoted = foreach ($argument in $Arguments) {
@@ -453,6 +636,16 @@ function Get-TauriCargoTargetDir {
         return $env:BERD_TAURI_CARGO_TARGET_DIR
     }
     return (Join-Path (Get-LocalAppDataRoot) "berd-tauri\cargo-target")
+}
+
+# Checkout-relative directory the Windows bundle lane copies the verified NSIS
+# installer into. The Tauri target dir lives outside the checkout
+# (LOCALAPPDATA\berd-tauri\cargo-target by default), so Buildkite's
+# checkout-relative `artifact_paths` cannot see the installer where it is built.
+# Copying it here — and pointing artifact_paths at this dir — gives the lane a
+# stable, in-checkout artifact location to export.
+function Get-WindowsBundleArtifactDir {
+    return (Join-Path (Get-BerdRepoRoot) "artifacts\windows-bundle")
 }
 
 function Read-JsonFile {
@@ -695,6 +888,237 @@ function Get-WindowsExeName {
     return "$Name.exe"
 }
 
+# ── Windows sidecar staging ──────────────────────────────────
+# Tauri resolves externalBin entries on Windows as `<stem>-<triple>.exe`.
+# Unlike the Unix scripts, Windows has no execute bit: "executability" is
+# expressed as a valid PE image of the target architecture. These helpers
+# parse the PE headers directly so staging can reject non-PE inputs, wrong
+# architectures, and truncated files instead of trusting a chmod that does
+# nothing on Windows.
+
+# COFF machine identifiers from winnt.h (IMAGE_FILE_MACHINE_*).
+$script:PeMachineAmd64 = 0x8664
+$script:PeMachineArm64 = 0xAA64
+$script:PeMachineI386 = 0x014C
+# IMAGE_FILE_EXECUTABLE_IMAGE from the COFF Characteristics field.
+$script:PeCharacteristicsExecutableImage = 0x0002
+
+# Return the exact Tauri-resolved sidecar file name for a stem/triple, e.g.
+# Get-WindowsSidecarName "goosed" "x86_64-pc-windows-msvc"
+#   -> goosed-x86_64-pc-windows-msvc.exe
+function Get-WindowsSidecarName {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stem,
+        [Parameter(Mandatory = $true)][string]$Triple
+    )
+    return (Get-WindowsExeName "$Stem-$Triple")
+}
+
+# Map a Windows target triple to the COFF machine value its binaries must
+# carry. Returns $null for triples this staging path does not support.
+function Get-WindowsTripleMachine {
+    param([Parameter(Mandatory = $true)][string]$Triple)
+    switch -Regex ($Triple) {
+        '^(x86_64|x86_64h)-.*-windows-' { return $script:PeMachineAmd64 }
+        '^aarch64-.*-windows-' { return $script:PeMachineArm64 }
+        '^(i586|i686)-.*-windows-' { return $script:PeMachineI386 }
+        default { return $null }
+    }
+}
+
+# Parse the PE headers of a file without executing it. Returns an object
+# describing whether the file is a PE image, its COFF machine value, and
+# whether the executable-image characteristic is set. `IsPe` is $false for
+# anything that is not a well-formed PE (missing MZ/PE signatures, truncated
+# headers, or a shell script masquerading as a binary).
+function Get-PeFileInfo {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $result = [pscustomobject]@{
+        IsPe = $false
+        Machine = $null
+        IsExecutableImage = $false
+    }
+
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        return $result
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    # Need at least the DOS header up to the e_lfanew pointer at 0x3C.
+    if ($bytes.Length -lt 64) {
+        return $result
+    }
+    # DOS magic "MZ".
+    if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+        return $result
+    }
+
+    $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3C)
+    # PE signature (4) + COFF header (20) must fit within the file.
+    if ($peOffset -lt 0 -or ($peOffset + 24) -gt $bytes.Length) {
+        return $result
+    }
+    # PE signature "PE\0\0".
+    if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or
+        $bytes[$peOffset + 2] -ne 0x00 -or $bytes[$peOffset + 3] -ne 0x00) {
+        return $result
+    }
+
+    # COFF header layout (20 bytes, starting after the 4-byte PE signature):
+    #   +0  Machine (u16)          +16 SizeOfOptionalHeader (u16)
+    #   +2  NumberOfSections (u16) +18 Characteristics (u16)
+    $coffOffset = $peOffset + 4
+    $machine = [System.BitConverter]::ToUInt16($bytes, $coffOffset)
+    $numberOfSections = [System.BitConverter]::ToUInt16($bytes, $coffOffset + 2)
+    $sizeOfOptionalHeader = [System.BitConverter]::ToUInt16($bytes, $coffOffset + 16)
+    $characteristics = [System.BitConverter]::ToUInt16($bytes, $coffOffset + 18)
+
+    # A real image must carry an optional header; the section table follows it.
+    # Verify both regions fit in the file so a file truncated after the COFF
+    # header (or with a bogus header size) is rejected rather than blessed.
+    $optionalHeaderOffset = $coffOffset + 20
+    # The optional-header magic (first 2 bytes) is needed to know the required
+    # minimum size, so the header must at least reach it and fit in the file.
+    if ($sizeOfOptionalHeader -lt 2) {
+        return $result
+    }
+    if (($optionalHeaderOffset + [int]$sizeOfOptionalHeader) -gt $bytes.Length) {
+        return $result
+    }
+
+    # Optional-header magic distinguishes PE32 (0x10B) from PE32+ (0x20B).
+    # Anything else is not a loadable image.
+    $optionalMagic = [System.BitConverter]::ToUInt16($bytes, $optionalHeaderOffset)
+    if ($optionalMagic -ne 0x10B -and $optionalMagic -ne 0x20B) {
+        return $result
+    }
+
+    # Enforce the architecture-appropriate minimum optional-header size. The
+    # PE/COFF spec fixes the standard + Windows-specific fields at 96 bytes for
+    # PE32 and 112 bytes for PE32+ (before the optional data directories). A
+    # SizeOfOptionalHeader smaller than this cannot describe a loadable image,
+    # so a file that stops just past the magic (the reachable minimal-file
+    # defect) is rejected here rather than blessed.
+    $minOptionalHeaderSize = if ($optionalMagic -eq 0x20B) { 112 } else { 96 }
+    if ([int]$sizeOfOptionalHeader -lt $minOptionalHeaderSize) {
+        return $result
+    }
+
+    # A loadable image has at least one section. Reject NumberOfSections = 0 so
+    # a header-only file with no section table cannot pass.
+    if ($numberOfSections -lt 1) {
+        return $result
+    }
+
+    # The section table is NumberOfSections * 40 bytes immediately after the
+    # optional header; require it to fit as well.
+    $sectionTableOffset = $optionalHeaderOffset + [int]$sizeOfOptionalHeader
+    $sectionTableBytes = [int]$numberOfSections * 40
+    if (($sectionTableOffset + $sectionTableBytes) -gt $bytes.Length) {
+        return $result
+    }
+
+    $result.IsPe = $true
+    $result.Machine = [int]$machine
+    $result.IsExecutableImage = (($characteristics -band $script:PeCharacteristicsExecutableImage) -ne 0)
+    return $result
+}
+
+# Validate that a file is a PE executable image whose architecture matches the
+# requested target triple. Throws with an actionable message otherwise. This
+# replaces the Unix `chmod +x`/`[[ -x ]]` executability contract, which is a
+# no-op on Windows.
+function Assert-WindowsSidecarBinary {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Triple
+    )
+
+    $expectedMachine = Get-WindowsTripleMachine -Triple $Triple
+    if ($null -eq $expectedMachine) {
+        throw "Unsupported Windows sidecar target triple: $Triple"
+    }
+
+    $info = Get-PeFileInfo -Path $Path
+    if (-not $info.IsPe) {
+        throw "Sidecar is not a valid Windows PE executable: $Path"
+    }
+    if (-not $info.IsExecutableImage) {
+        throw "Sidecar PE image is not marked executable: $Path"
+    }
+    if ($info.Machine -ne $expectedMachine) {
+        throw ("Sidecar architecture 0x{0:X4} does not match {1} (expected 0x{2:X4}): {3}" -f `
+            $info.Machine, $Triple, $expectedMachine, $Path)
+    }
+}
+
+# Compute the SHA-256 of a file as a lowercase hex string.
+function Get-FileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+# Remove stale staged sidecars for a stem before writing the current one so a
+# renamed target triple, a leftover extensionless Unix-staged file, or an
+# aborted prior run cannot linger in the bundle inputs. Only files matching
+# the stem are touched.
+function Remove-StaleWindowsSidecars {
+    param(
+        [Parameter(Mandatory = $true)][string]$BinDir,
+        [Parameter(Mandatory = $true)][string]$Stem,
+        [Parameter(Mandatory = $true)][string]$KeepName
+    )
+
+    if (-not (Test-Path $BinDir -PathType Container)) {
+        return
+    }
+
+    # `<stem>-<triple>` with or without .exe, plus the bare `<stem>`/`<stem>.exe`
+    # the Unix scripts would have produced under Git Bash.
+    Get-ChildItem -Path $BinDir -File -ErrorAction SilentlyContinue |
+        Where-Object {
+            ($_.Name -like "$Stem-*") -or ($_.Name -eq $Stem) -or ($_.Name -eq (Get-WindowsExeName $Stem))
+        } |
+        Where-Object { $_.Name -ne $KeepName } |
+        ForEach-Object { Remove-Item -Path $_.FullName -Force -ErrorAction Stop }
+}
+
+# Stage one sidecar for Tauri's Windows externalBin resolution. Validates the
+# source PE/architecture, clears stale staged files, copies to the exact
+# `<stem>-<triple>.exe` name, then re-validates the staged copy and confirms it
+# is a byte-for-byte match of the source. Returns the staged path.
+function Stage-WindowsSidecar {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$Triple,
+        [Parameter(Mandatory = $true)][string]$Stem,
+        [Parameter(Mandatory = $true)][string]$BinDir
+    )
+
+    if (-not (Test-Path $SourcePath -PathType Leaf)) {
+        throw "Sidecar source binary not found: $SourcePath"
+    }
+    Assert-WindowsSidecarBinary -Path $SourcePath -Triple $Triple
+
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    $stagedName = Get-WindowsSidecarName -Stem $Stem -Triple $Triple
+    $stagedPath = Join-Path $BinDir $stagedName
+
+    Remove-StaleWindowsSidecars -BinDir $BinDir -Stem $Stem -KeepName $stagedName
+
+    $sourceSha = Get-FileSha256 -Path $SourcePath
+    Copy-Item -Path $SourcePath -Destination $stagedPath -Force
+
+    $stagedSha = Get-FileSha256 -Path $stagedPath
+    if ($stagedSha -ne $sourceSha) {
+        throw "Staged sidecar checksum mismatch for $stagedPath (expected $sourceSha, got $stagedSha)."
+    }
+    Assert-WindowsSidecarBinary -Path $stagedPath -Triple $Triple
+
+    return $stagedPath
+}
+
 function Resolve-GooseBinaryPath {
     param(
         [Parameter(Mandatory = $true)]$Paths,
@@ -749,6 +1173,7 @@ function Write-GooseStamp {
         package = $Settings.Package
         binName = $Settings.Bin
         bin = $BinPath
+        sha256 = (Get-FileSha256 -Path $BinPath)
     }
     $stamp | ConvertTo-Json -Depth 4 | Set-Content -Path $Paths.StampFile -Encoding UTF8
 }
@@ -784,6 +1209,18 @@ function Test-GooseStampRecordMatches {
         return $false
     }
     if (-not (Test-Path $BinPath -PathType Leaf)) {
+        return $false
+    }
+    # Bind the readiness record to the binary's content, not just its path. A
+    # stamp without a recorded digest predates this gate and cannot be trusted
+    # as ready; a recorded digest that no longer matches the on-disk bytes means
+    # the binary was replaced or corrupted after it was stamped, so reuse must
+    # rebuild rather than stage stale/unknown bytes.
+    $recordedSha = Get-ObjectValue $Stamp "sha256"
+    if ([string]::IsNullOrWhiteSpace($recordedSha)) {
+        return $false
+    }
+    if ((Get-FileSha256 -Path $BinPath) -ne $recordedSha) {
         return $false
     }
     if (-not [string]::IsNullOrWhiteSpace($LocalHead) -and (Get-ObjectValue $Stamp "commit") -ne $LocalHead) {
