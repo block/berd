@@ -6,6 +6,14 @@ import type {
   WorkspaceAttachmentSource,
 } from "@/shared/types/chat";
 import type { GitState, WorktreeInfo } from "@/shared/types/git";
+import {
+  getPathBasename,
+  getRelativePath,
+  isPathWithin,
+  isSamePath,
+  toComparablePath,
+  toIdentityKey,
+} from "@/shared/lib/pathIdentity";
 
 interface WorkspaceSessionFields {
   workingDir?: string | null;
@@ -68,21 +76,18 @@ export function normalizeWorkspacePath(
 }
 
 export function workspaceAttachmentIdForPath(path: string): string {
-  return `path:${path}`;
+  return `path:${toIdentityKey(path)}`;
 }
 
 export function normalizeComparableWorkspacePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return toIdentityKey(path);
 }
 
 export function isSameWorkspacePath(
   a: string | null | undefined,
   b: string | null | undefined,
 ): boolean {
-  if (!a || !b) return false;
-  return (
-    normalizeComparableWorkspacePath(a) === normalizeComparableWorkspacePath(b)
-  );
+  return isSamePath(a, b);
 }
 
 function normalizeLifecycleString(value: string | null | undefined) {
@@ -277,11 +282,10 @@ function addExcludedWorkspaceAttachment(
     return attachments;
   }
 
-  const comparablePath = normalizeComparableWorkspacePath(normalizedPath);
+  const identityKey = toIdentityKey(normalizedPath);
   return [
     ...attachments.filter(
-      (attachment) =>
-        normalizeComparableWorkspacePath(attachment.path) !== comparablePath,
+      (attachment) => toIdentityKey(attachment.path) !== identityKey,
     ),
     createWorkspaceAttachment({
       path: normalizedPath,
@@ -292,13 +296,11 @@ function addExcludedWorkspaceAttachment(
 }
 
 export function getWorkspaceDisplayName(path: string): string {
-  const normalizedPath = normalizeComparableWorkspacePath(path);
-  const segments = normalizedPath.split("/");
-  return segments[segments.length - 1] || path;
+  return getPathBasename(path) || path;
 }
 
 function getPathSegments(path: string): string[] {
-  return normalizeComparableWorkspacePath(path).split("/").filter(Boolean);
+  return toComparablePath(path).split("/").filter(Boolean);
 }
 
 function isDisplayableWorkspacePath(
@@ -315,12 +317,7 @@ export function getRelativeWorkspacePath(
   path: string,
   rootPath: string | null | undefined,
 ): string | null {
-  if (!rootPath) return null;
-  const normalizedPath = normalizeComparableWorkspacePath(path);
-  const normalizedRootPath = normalizeComparableWorkspacePath(rootPath);
-  if (normalizedPath === normalizedRootPath) return "";
-  if (!normalizedPath.startsWith(`${normalizedRootPath}/`)) return null;
-  return normalizedPath.slice(normalizedRootPath.length + 1);
+  return getRelativePath(path, rootPath);
 }
 
 function getMainWorktreePath(gitState: GitState): string | null {
@@ -339,13 +336,7 @@ function getMainWorktreePath(gitState: GitState): string | null {
 }
 
 function isPathInsideWorkspace(path: string, workspacePath: string): boolean {
-  const normalizedPath = normalizeComparableWorkspacePath(path);
-  const normalizedWorkspacePath =
-    normalizeComparableWorkspacePath(workspacePath);
-  return (
-    normalizedPath === normalizedWorkspacePath ||
-    normalizedPath.startsWith(`${normalizedWorkspacePath}/`)
-  );
+  return isPathWithin(workspacePath, path);
 }
 
 function findContainingWorktree(
@@ -459,7 +450,7 @@ export function getWorkspaceTitle(
   >,
   gitState?: GitState,
 ): string {
-  const path = normalizeComparableWorkspacePath(attachment.path);
+  const path = toComparablePath(attachment.path);
   if (attachment.kind === "non-git-directory") {
     return getWorkspaceDisplayName(path);
   }
@@ -576,8 +567,12 @@ export function getWorkspaceAttachments(
 
   if (hasExplicitWorkspaceAttachments) {
     const attachmentsByPath = new Map<string, WorkspaceAttachment>();
+    const activePath = normalizedAttachments.find(
+      (attachment) => attachment.id === session.activeWorkspaceId,
+    )?.path;
+    const activePathKey = activePath ? toIdentityKey(activePath) : null;
     for (const attachment of normalizedAttachments) {
-      const comparablePath = normalizeComparableWorkspacePath(attachment.path);
+      const comparablePath = toIdentityKey(attachment.path);
       const existing = attachmentsByPath.get(comparablePath);
       if (!existing) {
         attachmentsByPath.set(comparablePath, attachment);
@@ -587,8 +582,14 @@ export function getWorkspaceAttachments(
         attachment.repositoryPath ?? existing.repositoryPath;
       const worktreePath = attachment.worktreePath ?? existing.worktreePath;
       const lifecycle = attachment.lifecycle ?? existing.lifecycle;
+      const preserveActiveAttachment =
+        comparablePath === activePathKey &&
+        attachment.id === session.activeWorkspaceId;
+      const primaryAttachment = preserveActiveAttachment
+        ? attachment
+        : existing;
       const mergedAttachment: WorkspaceAttachment = {
-        ...existing,
+        ...primaryAttachment,
         source: preferWorkspaceSource(existing.source, attachment.source),
         branch: attachment.branch ?? existing.branch,
         usedByAgent: existing.usedByAgent || attachment.usedByAgent,
@@ -758,9 +759,9 @@ export function ensureWorkspaceAttachment<T extends WorkspaceSessionFields>(
       : normalizedAttachments;
   let ensuredAttachmentId = workspaceAttachmentIdForPath(path);
   let didUpdateExisting = false;
-  const comparablePath = normalizeComparableWorkspacePath(path);
+  const comparablePath = toIdentityKey(path);
   const nextAttachments = attachments.map((attachment) => {
-    if (normalizeComparableWorkspacePath(attachment.path) !== comparablePath) {
+    if (toIdentityKey(attachment.path) !== comparablePath) {
       return attachment;
     }
 

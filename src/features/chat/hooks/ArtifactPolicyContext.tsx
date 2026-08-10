@@ -19,6 +19,11 @@ import {
   isViewableArtifact,
 } from "@/features/chat/lib/artifactViewerTypes";
 import { isWithinBase } from "@/features/chat/lib/artifactAutoOpenPolicy";
+import {
+  fileUrlToPath,
+  toComparablePath,
+  toIdentityKey,
+} from "@/shared/lib/pathIdentity";
 
 export interface ArtifactLinkCandidate {
   resolvedPath: string;
@@ -82,7 +87,7 @@ function normalizePath(path: string): string {
 }
 
 function normalizeComparablePath(path: string): string {
-  return normalizePath(path).replace(/\/+$/, "").toLowerCase();
+  return toIdentityKey(path.trim());
 }
 
 function parentDir(path: string): string {
@@ -114,7 +119,7 @@ function hasBlockedMarkdownScheme(href: string): boolean {
     return false;
   }
 
-  return !href.toLowerCase().startsWith("file://");
+  return !href.toLowerCase().startsWith("file:");
 }
 
 function isAbsolutePath(path: string): boolean {
@@ -122,16 +127,18 @@ function isAbsolutePath(path: string): boolean {
 }
 
 function resolveRelativeToBase(base: string, relativePath: string): string {
-  const normalizedBase = normalizePath(base).replace(/\/+$/, "");
+  const normalizedBase = toComparablePath(base);
   const normalizedRelative = normalizePath(relativePath).replace(/^\.\/+/, "");
   if (!normalizedRelative || normalizedRelative === ".") return normalizedBase;
 
   const stack = normalizedBase.split("/").filter(Boolean);
   const hasWindowsDriveRoot = /^[a-zA-Z]:$/.test(stack[0] ?? "");
+  const hasUncRoot = normalizedBase.startsWith("//") && stack.length >= 2;
+  const minimumSegments = hasUncRoot ? 2 : hasWindowsDriveRoot ? 1 : 0;
   for (const segment of normalizedRelative.split("/")) {
     if (!segment || segment === ".") continue;
     if (segment === "..") {
-      if (stack.length > 0) stack.pop();
+      if (stack.length > minimumSegments) stack.pop();
       continue;
     }
     stack.push(segment);
@@ -139,7 +146,7 @@ function resolveRelativeToBase(base: string, relativePath: string): string {
 
   const resolved = stack.join("/");
   if (hasWindowsDriveRoot) return resolved;
-  return `/${resolved}`;
+  return hasUncRoot ? `//${resolved}` : `/${resolved}`;
 }
 
 // Markdown image/link destinations percent-encode characters that are not
@@ -157,12 +164,17 @@ function decodePathIfEncoded(path: string): string {
 }
 
 function resolvePath(path: string, sessionCwd: string | null): string {
+  const trimmed = path.trim();
+  const fromFileUrl = fileUrlToPath(trimmed);
+  if (fromFileUrl !== null) {
+    return fromFileUrl;
+  }
+  if (/^file:/i.test(trimmed)) {
+    return "";
+  }
+
   const normalized = decodePathIfEncoded(normalizePath(path));
   if (!normalized) return "";
-
-  if (normalized.toLowerCase().startsWith("file://")) {
-    return normalized.slice("file://".length);
-  }
 
   if (isAbsolutePath(normalized)) {
     return normalized;
@@ -317,11 +329,22 @@ export function ArtifactPolicyProvider({
       if (!trimmed || trimmed.startsWith("#")) return null;
       if (hasBlockedMarkdownScheme(trimmed)) return null;
 
+      if (/^file:/i.test(trimmed)) {
+        const resolvedPath = resolvePath(trimmed, normalizedSessionCwd);
+        if (!resolvedPath) return null;
+        return {
+          rawPath: trimmed,
+          resolvedPath,
+          isWithinSessionCwd: isWithinBase(normalizedSessionCwd, resolvedPath),
+        };
+      }
+
       const withoutHash = trimmed.split("#")[0];
       const withoutQuery = withoutHash.split("?")[0];
       if (!withoutQuery) return null;
 
       const resolvedPath = resolvePath(withoutQuery, normalizedSessionCwd);
+      if (!resolvedPath) return null;
       return {
         rawPath: withoutQuery,
         resolvedPath,

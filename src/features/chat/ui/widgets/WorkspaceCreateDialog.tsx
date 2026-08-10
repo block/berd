@@ -24,6 +24,7 @@ import {
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { formatErrorMessage } from "./formatError";
 import { shortenPath } from "./workspacePath";
+import { getPathBasename, toComparablePath } from "@/shared/lib/pathIdentity";
 
 const UNSET_SELECT_VALUE = "__unset__";
 
@@ -60,10 +61,10 @@ interface WorkspaceCreateDialogProps {
 }
 
 function worktreePreviewPath(rootPath: string, name: string) {
-  const normalizedPath = rootPath.replace(/\/+$/, "");
-  const pathSegments = normalizedPath.split("/");
-  const repoName = pathSegments[pathSegments.length - 1];
-  const parentPath = pathSegments.slice(0, -1).join("/");
+  const normalizedPath = toComparablePath(rootPath);
+  const repoName = getPathBasename(normalizedPath);
+  const lastSlash = normalizedPath.lastIndexOf("/");
+  const parentPath = lastSlash === -1 ? "" : normalizedPath.slice(0, lastSlash);
   return `${parentPath}/${repoName}-worktrees/${name}`;
 }
 

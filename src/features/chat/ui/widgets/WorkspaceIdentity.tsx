@@ -10,40 +10,26 @@ import type { WorkspaceAttachment } from "@/shared/types/chat";
 import type { GitState } from "@/shared/types/git";
 import { cn } from "@/shared/lib/cn";
 import {
+  isPathWithin,
+  isSamePath,
+  toIdentityKey,
+} from "@/shared/lib/pathIdentity";
+import {
   classifyWorkspaceAttachmentIfInGitState,
   getWorkspaceDisplayName,
   getWorkspaceTitle,
 } from "@/features/chat/lib/workspaceAttachments";
-
-function normalizeComparablePath(path: string) {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "");
-}
-
-function isSamePath(
-  a: string | null | undefined,
-  b: string | null | undefined,
-) {
-  if (!a || !b) return false;
-  return normalizeComparablePath(a) === normalizeComparablePath(b);
-}
 
 function findWorktreeForWorkspace(
   workspace: WorkspaceAttachment,
   gitState: GitState | undefined,
 ) {
   const matchingWorktrees =
-    gitState?.worktrees.filter((worktree) => {
-      const normalizedPath = normalizeComparablePath(workspace.path);
-      const normalizedWorktreePath = normalizeComparablePath(worktree.path);
-      return (
-        normalizedPath === normalizedWorktreePath ||
-        normalizedPath.startsWith(`${normalizedWorktreePath}/`)
-      );
-    }) ?? [];
+    gitState?.worktrees.filter((worktree) =>
+      isPathWithin(worktree.path, workspace.path),
+    ) ?? [];
   matchingWorktrees.sort(
-    (a, b) =>
-      normalizeComparablePath(b.path).length -
-      normalizeComparablePath(a.path).length,
+    (a, b) => toIdentityKey(b.path).length - toIdentityKey(a.path).length,
   );
   return matchingWorktrees[0] ?? null;
 }

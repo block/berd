@@ -30,6 +30,17 @@ describe("resolveImageContentSrc", () => {
     expect(src).toBe("asset://localhost/asset/tmp/with space.png");
   });
 
+  it.each([
+    ["file:generated.png"],
+    ["file:./generated.png"],
+    ["file:///tmp/bad%ZZ.png"],
+    ["file:///tmp/report.png?download=1"],
+    ["file:///tmp/report.png#preview"],
+    ["file://user@server/share/report.png"],
+  ])("rejects an unsafe file uri %s", (uri) => {
+    expect(resolveImageContentSrc({ data: "", uri })).toBeNull();
+  });
+
   it("passes through a remote uri verbatim when no data", () => {
     const src = resolveImageContentSrc({
       data: "",

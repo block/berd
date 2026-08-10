@@ -4,6 +4,8 @@ import {
   resolveFloatingTerminalRect,
   resolveFloatingTerminalResizeRect,
   resolveTerminalDockedPlacement,
+  shortenTerminalPath,
+  terminalTabLabel,
   validateTerminalState,
 } from "./terminalState";
 
@@ -79,6 +81,33 @@ describe("terminal state", () => {
       region: "rightRail",
       slot: "belowContext",
       size: { height: 340 },
+    });
+  });
+
+  it("preserves Windows root spelling and disambiguates equivalent cwd tabs", () => {
+    expect(shortenTerminalPath("C:\\")).toBe("C:/");
+
+    const tabs = [
+      { id: "one", cwd: String.raw`C:\Repo` },
+      { id: "two", cwd: "c:/repo/" },
+    ];
+    expect(terminalTabLabel(tabs[0], tabs)).toBe("C:/Repo (1)");
+    expect(terminalTabLabel(tabs[1], tabs)).toBe("c:/repo (2)");
+  });
+
+  it("deduplicates equivalent Windows paths during legacy migration", () => {
+    expect(
+      validateTerminalState(
+        {
+          paths: [String.raw`C:\Repo`, "c:/repo/", "/Repo", "/repo"],
+          expandedPath: "c:/REPO",
+        },
+        DEFAULT_TERMINAL_STATE,
+      ),
+    ).toMatchObject({
+      tabs: [{ cwd: String.raw`C:\Repo` }, { cwd: "/Repo" }, { cwd: "/repo" }],
+      activeTabId: expect.stringContaining("legacy-0-"),
+      expanded: true,
     });
   });
 

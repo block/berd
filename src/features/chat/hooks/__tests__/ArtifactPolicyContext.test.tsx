@@ -428,6 +428,26 @@ describe("ArtifactPolicyContext", () => {
     );
   });
 
+  it("resolves relative markdown hrefs against Windows and UNC roots", () => {
+    const { rerender } = render(
+      <ArtifactPolicyProvider messages={[]} sessionCwd="C:/">
+        <LinkProbe href="repo/report.md" />
+      </ArtifactPolicyProvider>,
+    );
+    expect(screen.getByTestId("link-path")).toHaveTextContent(
+      "C:/repo/report.md",
+    );
+
+    rerender(
+      <ArtifactPolicyProvider messages={[]} sessionCwd="//server/share">
+        <LinkProbe href="repo/report.md" />
+      </ArtifactPolicyProvider>,
+    );
+    expect(screen.getByTestId("link-path")).toHaveTextContent(
+      "//server/share/repo/report.md",
+    );
+  });
+
   it("decodes percent-encoded spaces in an absolute markdown href", () => {
     // The default chat working dir is "~/goose artifacts" (has a space), so a
     // correctly-authored markdown image escapes the space as %20. The resolved
@@ -534,6 +554,24 @@ describe("ArtifactPolicyContext", () => {
     );
 
     expect(screen.getByTestId("link-within-cwd")).toHaveTextContent("false");
+  });
+
+  it.each([
+    "file:report.md",
+    "file:./report.md",
+    "file:../report.md",
+    "file:///tmp/report%ZZ.md",
+    "file:///tmp/report.md?download=1",
+    "file:///tmp/report.md#preview",
+  ])("rejects an unsafe file markdown href %s", (href) => {
+    render(
+      <ArtifactPolicyProvider messages={[]} sessionCwd="/Users/test/app">
+        <LinkProbe href={href} />
+      </ArtifactPolicyProvider>,
+    );
+
+    expect(screen.getByTestId("link-has-candidate")).toHaveTextContent("false");
+    expect(screen.getByTestId("link-path")).toHaveTextContent("");
   });
 
   it("resolves file markdown hrefs as local paths", () => {

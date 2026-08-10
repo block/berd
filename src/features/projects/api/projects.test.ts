@@ -247,3 +247,94 @@ describe("projects API artifact metadata", () => {
     expect(project.chatGroups).toEqual(chatGroups);
   });
 });
+
+describe("normalizeProjectWorkspaces dedupe identity", () => {
+  it("collapses Windows drive-equivalent working dirs to one workspace and ID", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+    const { workspaceAttachmentIdForPath } = await import(
+      "@/features/chat/lib/workspaceAttachments"
+    );
+
+    const workspaces = normalizeProjectWorkspaces(undefined, [
+      "C:\\Repo",
+      "c:/repo/",
+    ]);
+
+    expect(workspaces).toHaveLength(1);
+    // Last-writer-wins retains the trailing-slash spelling from the input.
+    expect(workspaces[0]?.path).toBe("c:/repo/");
+    expect(workspaces[0]?.id).toBe(workspaceAttachmentIdForPath("C:\\Repo"));
+  });
+
+  it("collapses UNC-equivalent working dirs to one workspace", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+
+    const workspaces = normalizeProjectWorkspaces(undefined, [
+      "\\\\Server\\Share\\proj",
+      "//server/share/proj",
+    ]);
+
+    expect(workspaces).toHaveLength(1);
+  });
+
+  it("keeps drive-relative working dirs distinct by drive and from ordinary relative paths", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+
+    const workspaces = normalizeProjectWorkspaces(undefined, [
+      "C:foo/../bar",
+      "D:foo/../bar",
+      "bar",
+      "C:../bar",
+      "C:../../bar",
+      "c:foo/../bar",
+    ]);
+
+    expect(workspaces).toHaveLength(6);
+    expect(new Set(workspaces.map((workspace) => workspace.id)).size).toBe(6);
+  });
+
+  it("keeps case-distinct Unix working dirs as separate workspaces", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+
+    const workspaces = normalizeProjectWorkspaces(undefined, [
+      "/Users/dev/Repo",
+      "/users/dev/repo",
+    ]);
+
+    expect(workspaces).toHaveLength(2);
+  });
+
+  it("collapses drive-equivalent explicit workspaces to a single stable ID", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+    const { workspaceAttachmentIdForPath } = await import(
+      "@/features/chat/lib/workspaceAttachments"
+    );
+
+    const workspaces = normalizeProjectWorkspaces([
+      {
+        id: "path:C:/Repo",
+        path: "C:\\Repo",
+        kind: "directory",
+        source: "inferred",
+        branch: null,
+        usedByAgent: false,
+        startupMode: "none",
+      },
+      {
+        id: workspaceAttachmentIdForPath("c:/repo/"),
+        path: "c:/repo/",
+        kind: "directory",
+        source: "inferred",
+        branch: null,
+        usedByAgent: false,
+        startupMode: "none",
+      },
+    ]);
+
+    expect(workspaces).toHaveLength(1);
+    const [only] = workspaces;
+    expect(
+      workspaces.filter((workspace) => workspace.id === only?.id),
+    ).toHaveLength(1);
+  });
+});

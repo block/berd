@@ -1,3 +1,9 @@
+import {
+  isSamePath,
+  toComparablePath,
+  toIdentityKey,
+} from "@/shared/lib/pathIdentity";
+
 export interface TerminalTab {
   id: string;
   cwd: string;
@@ -223,11 +229,11 @@ export function findDefaultTerminalTab(
     return null;
   }
 
-  return tabs.find((tab) => tab.cwd === cwd) ?? null;
+  return tabs.find((tab) => isSamePath(tab.cwd, cwd)) ?? null;
 }
 
 export function shortenTerminalPath(path: string): string {
-  const normalized = path.replace(/\/+$/, "");
+  const normalized = toComparablePath(path);
   const segments = normalized.split("/").filter(Boolean);
   if (segments.length <= 2) {
     return normalized || path;
@@ -241,7 +247,9 @@ export function terminalTabLabel(
   tabs: TerminalTab[],
 ): string {
   const baseLabel = shortenTerminalPath(tab.cwd);
-  const matchingTabs = tabs.filter((candidate) => candidate.cwd === tab.cwd);
+  const matchingTabs = tabs.filter((candidate) =>
+    isSamePath(candidate.cwd, tab.cwd),
+  );
   if (matchingTabs.length <= 1) {
     return baseLabel;
   }
@@ -533,15 +541,25 @@ export function validateTerminalState(
         (path): path is string => typeof path === "string" && path.length > 0,
       )
     : [];
-  const uniquePaths = Array.from(new Set(legacyPaths));
+  const uniquePathsByKey = new Map<string, string>();
+  for (const path of legacyPaths) {
+    const key = toIdentityKey(path);
+    if (!uniquePathsByKey.has(key)) {
+      uniquePathsByKey.set(key, path);
+    }
+  }
+  const uniquePaths = [...uniquePathsByKey.values()];
   const tabs = uniquePaths.map((cwd, index) => ({
     id: createLegacyTerminalTabId(cwd, index),
     cwd,
   }));
-  const activeTab =
+  const expandedPath =
     typeof legacyParsed.expandedPath === "string"
-      ? (tabs.find((tab) => tab.cwd === legacyParsed.expandedPath) ?? null)
+      ? legacyParsed.expandedPath
       : null;
+  const activeTab = expandedPath
+    ? (tabs.find((tab) => isSamePath(tab.cwd, expandedPath)) ?? null)
+    : null;
 
   return {
     tabs,

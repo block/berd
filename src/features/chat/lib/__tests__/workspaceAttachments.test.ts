@@ -4,13 +4,16 @@ import type { GitState } from "@/shared/types/git";
 import {
   classifyWorkspaceAttachment,
   enrichWorkspaceAttachmentWithGitState,
+  ensureWorkspaceAttachment,
   formatIncludedWorkspacesPrompt,
   getWorkspaceCleanupTarget,
   getIncludedWorkspaceAttachments,
+  getWorkspaceAttachments,
   getWorkspaceTitle,
   removeWorkspaceAttachment,
   workspaceAttachmentUsesCleanupTarget,
   workspaceAttachmentIdForPath,
+  withWorkspaceBackfill,
 } from "../workspaceAttachments";
 
 const gitState: GitState = {
@@ -176,6 +179,25 @@ describe("enrichWorkspaceAttachmentWithGitState", () => {
         },
       ),
     ).toBe("cash-server/builderbot");
+  });
+});
+
+describe("drive-relative workspace identity", () => {
+  it("does not dedupe drive-relative paths across drives or into ordinary relative paths", () => {
+    const workspaces = getWorkspaceAttachments({
+      workingDir: "C:foo/../bar",
+      workspaceAttachments: [
+        attachment("C:foo/../bar"),
+        attachment("D:foo/../bar"),
+        attachment("bar"),
+        attachment("C:../bar"),
+        attachment("C:../../bar"),
+        attachment("c:foo/../bar"),
+      ],
+    });
+
+    expect(workspaces).toHaveLength(6);
+    expect(new Set(workspaces.map((workspace) => workspace.id)).size).toBe(6);
   });
 });
 
@@ -555,5 +577,138 @@ describe("removeWorkspaceAttachment", () => {
       }),
     ]);
     expect(getIncludedWorkspaceAttachments(session)).toEqual([]);
+  });
+});
+
+describe("windows identity across dedupe / ensure / exclude", () => {
+  it("dedupes persisted attachments that differ only by Windows casing/separators", () => {
+    // Legacy explicit ids so the merge is observably identity-based, not id-based.
+    const session = {
+      workingDir: "C:\\Repo",
+      workspaceAttachments: [
+        {
+          id: "legacy-a",
+          path: "C:\\Repo",
+          kind: "directory" as const,
+          source: "inferred" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+        {
+          id: "legacy-b",
+          path: "c:/repo",
+          kind: "directory" as const,
+          source: "selected" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+      ],
+      messageCount: 0,
+    };
+
+    const attachments = getWorkspaceAttachments(session);
+
+    expect(attachments).toHaveLength(1);
+    // First-seen entry wins the merge; the display spelling is preserved.
+    expect(attachments[0].path).toBe("C:\\Repo");
+    expect(attachments[0].source).toBe("selected");
+  });
+
+  it("preserves the active persisted ID when deduping Windows variants", () => {
+    const session = withWorkspaceBackfill({
+      workingDir: String.raw`C:\Repo`,
+      workspaceAttachments: [
+        {
+          id: "legacy-a",
+          path: String.raw`C:\Repo`,
+          kind: "directory" as const,
+          source: "inferred" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+        {
+          id: "legacy-b",
+          path: "c:/repo",
+          kind: "directory" as const,
+          source: "selected" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+        {
+          id: "legacy-other",
+          path: String.raw`D:\Other`,
+          kind: "directory" as const,
+          source: "selected" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+      ],
+      activeWorkspaceId: "legacy-b",
+      messageCount: 0,
+    });
+
+    expect(session.workspaceAttachments).toEqual([
+      expect.objectContaining({
+        id: "legacy-b",
+        path: "c:/repo",
+        source: "selected",
+      }),
+      expect.objectContaining({
+        id: "legacy-other",
+        path: String.raw`D:\Other`,
+      }),
+    ]);
+    expect(session.activeWorkspaceId).toBe("legacy-b");
+  });
+
+  it("reuses the persisted attachment id when ensuring a Windows casing/separator variant", () => {
+    const session = {
+      workingDir: "C:\\Repo",
+      workspaceAttachments: [
+        {
+          id: "legacy-id",
+          path: "C:\\Repo",
+          kind: "directory" as const,
+          source: "selected" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+      ],
+      messageCount: 0,
+    };
+
+    const next = ensureWorkspaceAttachment(session, {
+      path: "c:/repo",
+      source: "selected",
+      kind: "directory",
+    });
+
+    expect(next.workspaceAttachments).toHaveLength(1);
+    expect(next.workspaceAttachments?.[0].id).toBe("legacy-id");
+  });
+
+  it("excludes a Windows casing/separator variant without leaving a duplicate", () => {
+    const session = {
+      workingDir: "C:\\Repo",
+      workspaceAttachments: [
+        {
+          id: "legacy-id",
+          path: "C:\\Repo",
+          kind: "directory" as const,
+          source: "selected" as const,
+          branch: null,
+          usedByAgent: false,
+        },
+      ],
+      messageCount: 0,
+    };
+
+    // A distinct identity-derived id forces the exclude fallback path.
+    const next = removeWorkspaceAttachment(session, {
+      attachmentId: workspaceAttachmentIdForPath("c:/repo"),
+    });
+
+    expect(next.workspaceAttachments).toHaveLength(1);
+    expect(next.workspaceAttachments?.[0].source).toBe("excluded");
   });
 });

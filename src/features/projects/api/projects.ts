@@ -13,6 +13,7 @@ import {
   normalizeWorkspacePath,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
+import { toIdentityKey } from "@/shared/lib/pathIdentity";
 import type { ProjectArtifactMetadata } from "../artifact/types";
 
 export type ProjectWorkspaceStartupMode = "none" | "branch" | "worktree";
@@ -146,7 +147,7 @@ function dedupeProjectWorkspaces(
     if (!path) {
       continue;
     }
-    byPath.set(path.replace(/\\/g, "/").replace(/\/+$/, ""), {
+    byPath.set(toIdentityKey(path), {
       ...workspace,
       id: workspace.id || workspaceAttachmentIdForPath(path),
       path,

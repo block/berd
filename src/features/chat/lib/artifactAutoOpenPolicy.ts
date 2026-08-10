@@ -20,6 +20,8 @@
  *   4. Not agent machinery (skills, agent instructions, VCS/build scratch).
  */
 import type { ToolKind } from "@/shared/types/messages";
+import { isPathWithin } from "@/shared/lib/pathIdentity";
+import type { Platform } from "@/shared/lib/platform";
 import { artifactBasename, classifyArtifactView } from "./artifactViewerTypes";
 
 /**
@@ -149,23 +151,16 @@ export function isMachineryPath(path: string): boolean {
  * This is the single containment check for artifact scoping — the policy
  * gates here and `ArtifactPolicyContext`'s markdown-href scoping both consume
  * it, so the two surfaces cannot drift. Comparison is boundary-terminated
- * (a sibling like `/work-secrets` is not inside `/work`) and
- * case-insensitive, matching the artifact map's comparable-path keys: macOS's
- * default filesystem is case-insensitive, so `/users/tulsi/…` and
- * `/Users/tulsi/…` name the same directory and must not silently disagree.
+ * (a sibling like `/work-secrets` is not inside `/work`) and delegates case
+ * handling to the shared path-identity module: Windows drive/UNC and macOS
+ * paths fold case; Linux paths remain case-sensitive.
  */
 export function isWithinBase(
   base: string | null | undefined,
   resolvedPath: string,
+  platform?: Platform,
 ): boolean {
-  if (!base || !resolvedPath) return false;
-  const normalizedBase = normalize(base).replace(/\/+$/, "").toLowerCase();
-  const normalizedTarget = normalize(resolvedPath)
-    .replace(/\/+$/, "")
-    .toLowerCase();
-  if (!normalizedBase) return false;
-  if (normalizedTarget === normalizedBase) return true;
-  return normalizedTarget.startsWith(`${normalizedBase}/`);
+  return isPathWithin(base, resolvedPath, platform);
 }
 
 /**

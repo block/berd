@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { fileUrlToPath, isFileUrl } from "@/shared/lib/pathIdentity";
 
 interface ImageContentLike {
   data?: string | null;
@@ -43,19 +44,14 @@ export function resolveImageContentSrc(
 
   // A raw file:// URI is not loadable under the webview/CSP; route local files
   // through the asset scheme. convertFileSrc expects a decoded filesystem path.
-  if (uri.toLowerCase().startsWith("file://")) {
-    const path = decodeFileUriPath(uri);
-    return path.length > 0 ? convertFileSrc(path, "asset") : null;
+  // A file:// URI that fails to convert is malformed/unsafe — return null
+  // rather than handing the raw file:// string to the webview.
+  if (isFileUrl(uri)) {
+    const filePath = fileUrlToPath(uri);
+    return filePath && filePath.length > 0
+      ? convertFileSrc(filePath, "asset")
+      : null;
   }
 
   return uri;
-}
-
-function decodeFileUriPath(uri: string): string {
-  const withoutScheme = uri.slice("file://".length);
-  try {
-    return decodeURIComponent(withoutScheme);
-  } catch {
-    return withoutScheme;
-  }
 }
