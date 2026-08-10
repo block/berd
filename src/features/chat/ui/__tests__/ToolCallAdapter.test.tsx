@@ -14,12 +14,9 @@ const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 const mockOpenInApp =
   vi.fn<(path: string, filename?: string) => Promise<void>>();
 
-const subagentLocaleKeys = [
-  "delegatingAgentConfiguredTask",
-  "waitingAgentConfiguredTask",
-  "checkingAgentConfiguredTask",
-  "cancellingAgentConfiguredTask",
-] as const;
+const subagentLocaleKeys = Object.keys(enChat.tools.subagent) as Array<
+  keyof typeof enChat.tools.subagent
+>;
 
 describe("ToolCallAdapter — subagent locale parity", () => {
   it("keeps every subagent law string in English and Spanish", () => {
@@ -224,6 +221,35 @@ describe("ToolCallAdapter — subagent laws", () => {
       screen.getByRole("button", {
         name: /Waiting on Rivet · Count markdown files/i,
       }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      arguments: { source: "20260807_72" },
+      title: "Waiting on a delegated task · Count markdown files",
+    },
+    {
+      arguments: { source: "20260807_72", peek: true },
+      title: "Checking on a delegated task · Count markdown files",
+    },
+    {
+      arguments: { source: "20260807_72", cancel: true },
+      title: "Cancelling a delegated task · Count markdown files",
+    },
+  ])("describes task-only async $title activity", ({
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentTaskLabel: "Count markdown files",
+      arguments: args,
+    });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(title, "i") }),
     ).toBeInTheDocument();
   });
 

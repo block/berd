@@ -442,8 +442,18 @@ export function ToolCallAdapter({
     () => getSubagentToolCallInfo({ toolName, arguments: args }),
     [toolName, args],
   );
+  // A task-id load is only specialized once its delegated task context has
+  // been recovered. Until then, retain the ordinary provider title rather
+  // than showing a task-id or an invented description.
+  const hasResolvedSubagentContext = Boolean(
+    subagentInfo &&
+      (!subagentInfo.taskId ||
+        subagentAgentName ||
+        subagentTaskLabel ||
+        subagentTaskIsConfigured),
+  );
   const displayName =
-    (subagentInfo
+    (subagentInfo && hasResolvedSubagentContext
       ? subagentTitle(
           t,
           subagentInfo,

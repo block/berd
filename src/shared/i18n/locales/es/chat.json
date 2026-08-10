@@ -583,12 +583,15 @@
       "delegatingTaskUnavailable": "Delegando una tarea (descripción no disponible)",
       "delegatingAgentTaskUnavailable": "Delegando a {{name}} (descripción de la tarea no disponible)",
       "waitingAgentConfiguredTask": "Esperando la tarea configurada de {{name}}",
+      "waitingTaskLabeled": "Esperando una tarea delegada · {{label}}",
       "waitingTaskUnavailable": "Esperando una tarea delegada (descripción no disponible)",
       "waitingAgentTaskUnavailable": "Esperando a {{name}} (descripción de la tarea no disponible)",
       "checkingAgentConfiguredTask": "Comprobando la tarea configurada de {{name}}",
+      "checkingTaskLabeled": "Comprobando una tarea delegada · {{label}}",
       "checkingTaskUnavailable": "Comprobando una tarea delegada (descripción no disponible)",
       "checkingAgentTaskUnavailable": "Comprobando a {{name}} (descripción de la tarea no disponible)",
       "cancellingAgentConfiguredTask": "Cancelando la tarea configurada de {{name}}",
+      "cancellingTaskLabeled": "Cancelando una tarea delegada · {{label}}",
       "cancellingTaskUnavailable": "Cancelando una tarea delegada (descripción no disponible)",
       "cancellingAgentTaskUnavailable": "Cancelando a {{name}} (descripción de la tarea no disponible)"
     }

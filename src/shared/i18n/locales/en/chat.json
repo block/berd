@@ -588,12 +588,15 @@
       "delegatingTaskUnavailable": "Delegating a task (description unavailable)",
       "delegatingAgentTaskUnavailable": "Delegating to {{name}} (task description unavailable)",
       "waitingAgentConfiguredTask": "Waiting on {{name}}’s configured task",
+      "waitingTaskLabeled": "Waiting on a delegated task · {{label}}",
       "waitingTaskUnavailable": "Waiting on a delegated task (description unavailable)",
       "waitingAgentTaskUnavailable": "Waiting on {{name}} (task description unavailable)",
       "checkingAgentConfiguredTask": "Checking {{name}}’s configured task",
+      "checkingTaskLabeled": "Checking on a delegated task · {{label}}",
       "checkingTaskUnavailable": "Checking a delegated task (description unavailable)",
       "checkingAgentTaskUnavailable": "Checking on {{name}} (task description unavailable)",
       "cancellingAgentConfiguredTask": "Cancelling {{name}}’s configured task",
+      "cancellingTaskLabeled": "Cancelling a delegated task · {{label}}",
       "cancellingTaskUnavailable": "Cancelling a delegated task (description unavailable)",
       "cancellingAgentTaskUnavailable": "Cancelling {{name}} (task description unavailable)"
     }
