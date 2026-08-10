@@ -96,9 +96,10 @@ async function readProvenTargetInventory(
   const generationAtStart = providerModelInventoryGeneration(providerId);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
-    const client = await getClient();
     const response = await Promise.race([
-      client.goose.GooseUnstableProvidersSupportedModelsList({ providerId }),
+      getClient().then((client) =>
+        client.goose.GooseUnstableProvidersSupportedModelsList({ providerId }),
+      ),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           reject(

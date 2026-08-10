@@ -7,14 +7,10 @@ import {
   resolveValidatedManagedGooseProviderSelection,
 } from "./modelProviderPolicy";
 
+const mockGetClient = vi.hoisted(() => vi.fn());
 const mockSupportedModelsList = vi.hoisted(() => vi.fn());
 vi.mock("@/shared/api/acpConnection", () => ({
-  getClient: () =>
-    Promise.resolve({
-      goose: {
-        GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
-      },
-    }),
+  getClient: () => mockGetClient(),
 }));
 
 const managedConfig: RuntimeConfig = {
@@ -43,6 +39,12 @@ const managedConfig: RuntimeConfig = {
 describe("resolveManagedGooseProviderSelection", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    mockGetClient.mockReset();
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
+      },
+    });
     mockSupportedModelsList.mockReset();
   });
   it("returns unrestricted for an empty provider list", () => {
@@ -263,6 +265,22 @@ describe("resolveManagedGooseProviderSelection", () => {
     await rejectedMigration;
     resolveInventory({ models: ["goose-gpt-5-5"] });
     await Promise.resolve();
+  });
+
+  it("times out stalled ACP client acquisition", async () => {
+    vi.useFakeTimers();
+    mockGetClient.mockReturnValue(new Promise(() => {}));
+
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      { providerId: "disallowed" },
+    );
+    const rejectedMigration = expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedMigration;
+    expect(mockSupportedModelsList).not.toHaveBeenCalled();
   });
 
   it("rejects an inventory proof invalidated while it is in flight", async () => {
