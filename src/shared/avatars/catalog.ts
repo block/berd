@@ -167,6 +167,20 @@ function parseVariant(value: unknown): AvatarVariant | undefined {
   return { path, mimeType, byteSize, sha256: sha256.toLowerCase() };
 }
 
+/**
+ * Display-label overrides applied on top of the published catalog. The
+ * catalog is versioned and republished out-of-band, so a rename would
+ * otherwise wait on (and be silently reverted by) catalog pushes; overriding
+ * at the parse boundary keeps every surface (overlay wordmark, cards,
+ * pickers) consistent. Collection ids never change — existing
+ * `app-avatar:pollies-*` refs keep resolving.
+ */
+const COLLECTION_LABEL_OVERRIDES: Record<string, string> = {
+  // Renamed from the "Pollies" placeholder (design direction, Aug 2026).
+  // Remove once the published catalog carries the new label.
+  pollies: "Figgies",
+};
+
 function parseCollection(value: unknown): AvatarCollection | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -186,7 +200,12 @@ function parseCollection(value: unknown): AvatarCollection | undefined {
     return undefined;
   }
 
-  return { id, label, coverAvatarId, avatarIds };
+  return {
+    id,
+    label: COLLECTION_LABEL_OVERRIDES[id] ?? label,
+    coverAvatarId,
+    avatarIds,
+  };
 }
 
 function parseAsset(value: unknown): AvatarCatalogEntry | undefined {

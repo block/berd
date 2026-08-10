@@ -210,6 +210,52 @@ describe("useAvatarLibrary", () => {
     );
   });
 
+  it("keeps a failed collection's error reason after another succeeds", async () => {
+    // Concurrent ensures (the collections level warms every collection at
+    // once) resolve independently — a later success must not erase the
+    // reason an earlier collection failed, or the retry pill degrades to
+    // generic copy instead of the actionable network guidance.
+    const pending = new Map<
+      string,
+      { resolve: (value: CachedAvatarCollection) => void; reject: () => void }
+    >();
+    vi.mocked(ensureAvatarCollection).mockImplementation(
+      ({ collectionId }) =>
+        new Promise((resolve, reject) => {
+          pending.set(collectionId, {
+            resolve: (value) => resolve({ ...value, failedAssetIds: [] }),
+            reject: () =>
+              reject(
+                Object.assign(new Error("network access denied"), {
+                  code: "networkAccess",
+                }),
+              ),
+          });
+        }),
+    );
+
+    const { result } = renderHook(() => useAvatarLibrary(true));
+    await waitFor(() => expect(result.current.catalog).not.toBeNull());
+
+    act(() => {
+      void result.current.openCollection(collectionA);
+    });
+    act(() => {
+      void result.current.openCollection(collectionB);
+    });
+
+    // A fails with a network reason, then B succeeds afterward.
+    await act(async () => {
+      pending.get("a")?.reject();
+    });
+    await act(async () => {
+      pending.get("b")?.resolve(cachedCollection("b"));
+    });
+
+    expect(result.current.failedCollectionIds.has("a")).toBe(true);
+    expect(result.current.errorCode).toBe("networkAccess");
+  });
+
   it("clears the downloading flag when a download fails", async () => {
     vi.mocked(ensureAvatarCollection).mockRejectedValue(
       new Error("network down"),

@@ -639,9 +639,12 @@ export function AgentBuilderRail({
     working: boolean;
     ready: boolean;
     /**
-     * Visible call-to-action for states that wait on the user (options ready,
-     * finished result). The whole card is one button; this renders as a
-     * button-shaped affordance inside it so the card doesn't read as inert.
+     * Visible call-to-action for states that wait on the user (options
+     * ready, failed attempt). The whole card is one button; this renders as
+     * a button-shaped affordance inside it so the card doesn't read as
+     * inert. In-flight states deliberately carry none — a button during
+     * "creating…" implies there's something to do, when the whole point of
+     * backgrounding is that there isn't.
      */
     cta?: string;
   }
@@ -680,6 +683,7 @@ export function AgentBuilderRail({
           description: t(gloopieErrorMessageKey(gloopieGeneration.errorCode)),
           working: false,
           ready: false,
+          cta: t("gloopie.tryAgain"),
         };
       default:
         return null;
@@ -687,17 +691,33 @@ export function AgentBuilderRail({
   })();
 
   const gloopieStatusNode = gloopieStatus ? (
-    <Card className="aspect-square w-64 gap-0 border-0 bg-transparent p-0 py-0">
+    // Visible panel in the same card language as the avatar collection
+    // takeover's collection cards (translucent card surface that brightens on
+    // hover), so the in-progress work reads as a real, clickable object in
+    // the rail rather than loose centered text.
+    <Card className="aspect-square w-64 gap-0 border-0 bg-card/60 p-0 py-0 transition-colors hover:bg-card/90">
       <button
         type="button"
         // The takeover's funnel exit collapses toward this card, so
         // backgrounding a generation visibly lands the work here.
         data-avatar-funnel-target=""
-        className="flex h-full w-full items-center justify-center rounded-md p-5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={t("gloopie.statusAria", {
-          label: gloopieStatus.label,
-          description: gloopieStatus.description,
-        })}
+        className="flex h-full w-full items-center justify-center rounded-[inherit] p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        // The visible CTA must be part of the accessible name (the explicit
+        // aria-label replaces descendant text), so screen-reader users hear
+        // what activating the card does and voice-control users can target
+        // it by its visible text.
+        aria-label={
+          gloopieStatus.cta
+            ? t("gloopie.statusAriaWithCta", {
+                label: gloopieStatus.label,
+                description: gloopieStatus.description,
+                cta: gloopieStatus.cta,
+              })
+            : t("gloopie.statusAria", {
+                label: gloopieStatus.label,
+                description: gloopieStatus.description,
+              })
+        }
         onClick={onOpenGloopieCreator}
       >
         <span className="flex flex-col items-center gap-3">
@@ -1043,7 +1063,15 @@ export function AgentBuilderRail({
               aria-hidden="true"
             />
           )}
-          <span className="pointer-events-none absolute left-1/2 top-1/2 inline-flex h-8 -translate-x-1/2 -translate-y-1/2 items-center whitespace-nowrap rounded-sm bg-accent px-3 text-sm font-normal text-accent-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          {/* Black pill (design feedback): matches the takeover's primary
+            nav controls. Presentation only — the surrounding button is the
+            interactive element. */}
+          <span
+            className={cn(
+              buttonVariants({ variant: "primary", size: "sm" }),
+              "pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100",
+            )}
+          >
             {normalizedAvatar
               ? t("builderRail.changeAvatar")
               : t("builderRail.selectAvatar")}

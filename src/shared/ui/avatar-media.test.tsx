@@ -212,6 +212,96 @@ describe("AvatarMedia", () => {
     expect(pauseMock).toHaveBeenCalled();
   });
 
+  // The next three tests pin the hover-to-play contract: `paused` is
+  // transient host gating (hover fields), not the durable animation
+  // preference. Regressing any of them re-introduces the hover blink or the
+  // invisible-until-hovered tiles.
+
+  it("keeps a paused video mounted as a video instead of swapping to its poster", () => {
+    // Pre-fix, paused + posterSrc rendered the poster <img>; unpausing on
+    // hover remounted a fresh <video> that flashed blank while re-decoding.
+    render(
+      <AvatarMedia
+        media={{
+          src: "asset://localhost/avatar.mp4",
+          mediaType: "video",
+          posterSrc: "asset://localhost/avatar.png",
+        }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+        paused
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "avatar" }).tagName).toBe("VIDEO");
+  });
+
+  it("preloads a paused visible video so its first frame can paint", async () => {
+    // Paused videos never call play(), so preload is the only thing that
+    // forces a frame decode; pre-fix "none" left tiles invisible (onReady
+    // never fired) until the first hover started playback.
+    render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+        paused
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    emitIntersection(true);
+
+    await waitFor(() =>
+      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
+    );
+    expect(video).toHaveAttribute("preload", "auto");
+  });
+
+  it("keeps the video source attached when paused toggles", async () => {
+    // Pre-fix, the visibility effect was keyed on the animate flag, so every
+    // hover re-ran it — resetting shouldLoadVideo(false) and detaching the
+    // src for a frame: the hover blink.
+    const { rerender } = render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+        paused
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    emitIntersection(true);
+    await waitFor(() =>
+      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
+    );
+    const observeCallsAfterAttach = observeMock.mock.calls.length;
+
+    // Hover in (unpause) and out (pause): the source must stay attached and
+    // no new observer may be created (a new observer implies the detach).
+    rerender(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+        paused={false}
+      />,
+    );
+    expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4");
+
+    rerender(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+        paused
+      />,
+    );
+    expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4");
+    expect(observeMock.mock.calls.length).toBe(observeCallsAfterAttach);
+  });
+
   it("renders the matching poster instead of loading video when animation is disabled", () => {
     localStorage.setItem("goose:animated-avatars-enabled", "false");
 
@@ -318,6 +408,35 @@ describe("AvatarMedia", () => {
       expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
     );
     expect(playMock).toHaveBeenCalled();
+  });
+
+  it("keeps a posterless video's source attached across preference changes", async () => {
+    // No poster means the same <video> element renders either way — a
+    // preference change must not re-run the visibility effect, which resets
+    // shouldLoadVideo(false) and detaches the src for a frame (a blink).
+    // Only poster-backed media swaps elements and needs an observer rebind.
+    render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="visible-video"
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+    emitIntersection(true);
+    await waitFor(() =>
+      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
+    );
+    const observeCallsAfterAttach = observeMock.mock.calls.length;
+
+    dispatchAnimatedAvatarsPreference(false);
+    expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4");
+
+    dispatchAnimatedAvatarsPreference(true);
+    expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4");
+    // No new observer either — a new observer implies the detach happened.
+    expect(observeMock.mock.calls.length).toBe(observeCallsAfterAttach);
   });
 
   it("pauses and resumes a mounted visible video when animation preference changes", async () => {

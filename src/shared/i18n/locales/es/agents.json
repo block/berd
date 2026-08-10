@@ -38,6 +38,7 @@
     "viewOptions": "Ver opciones",
     "activeWorkAction": "Gloopie en progreso, ver",
     "statusAria": "{{label}}. {{description}}",
+    "statusAriaWithCta": "{{label}}. {{description}} {{cta}}",
     "chooseTitle": "Elige tu favorito",
     "chooseHelp": "Elige uno para animarlo.\nPuedes volver a generarlos si ninguno te convence.",
     "useThisOne": "Animar",
@@ -118,7 +119,7 @@
     "chatAria": "Chatear con {{name}}"
   },
   "collectionPage": {
-    "close": "Cerrar",
+    "collectionBadge": "Colección",
     "collectionHeading": "Colección {{label}}",
     "collectionsHeading": "Colecciones de avatares",
     "openCollection": "Abrir la colección {{label}}",

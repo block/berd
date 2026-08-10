@@ -2,9 +2,9 @@ import {
   IconArrowLeft,
   IconCheck,
   IconRefresh,
-  IconWand,
   IconX,
 } from "@tabler/icons-react";
+import createAvatarPlus from "@/features/agents/assets/create-avatar-plus.png";
 import { FocusScope } from "@radix-ui/react-focus-scope";
 import { RefreshCw } from "lucide-react";
 import {
@@ -27,8 +27,8 @@ import { GLOOPIE_PROMPT_MAX_LENGTH } from "@/shared/api/gloopies";
 import { cn } from "@/shared/lib/cn";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
+import { CanvasNavButton } from "@/shared/ui/canvas-nav-button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
-import { GlassButton } from "@/shared/ui/glass-button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Spinner } from "@/shared/ui/spinner";
@@ -109,9 +109,8 @@ function GloopieReviewTile({
     <button
       type="button"
       className={cn(
-        "group relative flex aspect-square w-full items-center justify-center rounded-2xl p-2 transition-opacity",
+        "group relative flex aspect-square w-full items-center justify-center rounded-2xl p-2",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        dimmed && "opacity-30 hover:opacity-70",
       )}
       aria-label={t("gloopie.optionLabel", { index: index + 1, total })}
       aria-pressed={selected}
@@ -124,7 +123,24 @@ function GloopieReviewTile({
           alt=""
           loadingStrategy="eager"
           paused={!selected}
-          className="h-full w-full object-contain"
+          // Generated option stills carry an opaque white background (unlike
+          // catalog avatars, which have real alpha). Multiply blends that
+          // white into the light dot-grid canvas so the character reads as
+          // sitting on the page; the overlay surface used to be near-white,
+          // which hid this. Dark mode keeps normal blending — multiply would
+          // darken the whole image there, and the light box on dark predates
+          // this change.
+          //
+          // Dimming rides on the same element as a `filter` opacity, not
+          // element `opacity` on the button: element opacity forms an
+          // isolated compositing group, which composites the image before
+          // blending and brings the white box back. `filter: opacity()`
+          // fades the pixels before multiply, so white keeps dissolving
+          // into the canvas while the character fades.
+          className={cn(
+            "h-full w-full object-contain mix-blend-multiply transition-[filter] dark:mix-blend-normal",
+            dimmed && "[filter:opacity(0.3)] group-hover:[filter:opacity(0.7)]",
+          )}
           onError={() => {}}
         />
       ) : (
@@ -183,6 +199,74 @@ function rowItemStyle(index: number): CSSProperties {
     "--scatter-pop-delay": `${index * 60}ms`,
   } as CSSProperties;
 }
+
+/**
+ * The giant centered wordmark, shared by every level of the takeover.
+ *
+ * Sized off the viewport to match the Figma reference (916-18033): Cash Sans
+ * Light at 114px on a 1440px frame is 8vw with -0.05em tracking, clamped so
+ * small windows stay readable and huge ones stay composed. The thin weight is
+ * what gives the headline presence at this scale — regular reads as shouting.
+ */
+const WORDMARK_CLASS =
+  "avatar-collection-wordmark text-center font-light leading-[0.96] tracking-[-0.05em] text-foreground/90 text-[clamp(3.25rem,8vw,9.5rem)]";
+
+/**
+ * Presentation order per design direction: gloopies lead, then pollies,
+ * then fuzzies; anything the catalog adds later lands after, in catalog
+ * order. The catalog itself stays unordered — this is a display opinion,
+ * so it lives in the view.
+ */
+const COLLECTION_DISPLAY_ORDER = ["gloopies", "pollies", "fuzzies"];
+
+function collectionRank(id: string): number {
+  const index = COLLECTION_DISPLAY_ORDER.indexOf(id);
+  return index === -1 ? COLLECTION_DISPLAY_ORDER.length : index;
+}
+
+/**
+ * Heading for the gloopie steps (prompt, waiting, review). The full wordmark
+ * scale suits a collection title — the name of a place you're browsing — but
+ * overwhelms a step instruction like "Pick your favorite". Same voice
+ * (light, tight, same enter animation), roughly half the size.
+ */
+const STEP_HEADING_CLASS =
+  "avatar-collection-wordmark text-center font-light leading-[0.96] tracking-[-0.04em] text-foreground/90 text-[clamp(2rem,4vw,3.5rem)]";
+
+/**
+ * Collections-level card, per the Figma reference (916-17932): a tall
+ * translucent white panel with a "Collection" pill in the top-left corner,
+ * the cover avatar filling the middle, and the collection name resting at
+ * the bottom-left. The card itself is what reads as clickable — it brightens
+ * on hover — so the collections feel dominant and tidy on the page instead
+ * of floating loose under the wordmark.
+ *
+ * Width/height track the viewport at the reference's proportions (292x512 on
+ * a 1440x1024 frame ≈ 20vw wide at a 4:7 ratio), clamped so small windows
+ * keep the cards usable and huge ones keep them composed.
+ */
+const COLLECTION_CARD_CLASS = cn(
+  "avatar-scatter-item group relative flex flex-col items-start rounded-[20px] p-5",
+  "w-[clamp(11rem,20vw,18.25rem)] aspect-[4/7] max-h-[56vh]",
+  // Nearly solid: at /60 the cards washed into the frosted scrim and the
+  // grid read as the surface (design feedback) — they should read as white
+  // boxes sitting on the grid.
+  "bg-card/85 transition-colors duration-200 hover:bg-card",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+);
+
+/** "Collection" pill in the card's top-left corner. */
+const COLLECTION_CARD_BADGE_CLASS =
+  "rounded-[10px] bg-muted px-1.5 py-0.5 text-sm text-foreground";
+
+/**
+ * Collection name resting at the card's bottom-left. The Figma reference
+ * rests at 40% opacity, but that lands around 2.2:1 contrast — under the
+ * WCAG 3:1 minimum for large text. /60 keeps the muted read while clearing
+ * the ratio; hover still raises it further.
+ */
+const COLLECTION_CARD_LABEL_CLASS =
+  "shrink-0 text-left text-2xl leading-[0.96] tracking-[-0.04em] text-foreground/60 transition-colors group-hover:text-foreground/80";
 
 /**
  * Gloopie "create your own" integration. The prompt step renders inside the
@@ -330,7 +414,13 @@ export function AvatarCollectionOverlay({
   }, []);
   const exitTimerRef = useRef<number | null>(null);
 
-  const collections = library.catalog?.collections ?? [];
+  const collections = useMemo(
+    () =>
+      [...(library.catalog?.collections ?? [])].sort(
+        (a, b) => collectionRank(a.id) - collectionRank(b.id),
+      ),
+    [library.catalog],
+  );
   // A single-collection catalog skips the collections level entirely — the
   // takeover opens straight onto that collection and back closes rather than
   // going up.
@@ -535,6 +625,55 @@ export function AvatarCollectionOverlay({
             onDiscard: animating.onDiscard,
           }
         : null;
+
+  // The collections level shows each collection's cover avatar, but covers
+  // only exist locally once their collection has been ensured — on a fresh
+  // cache nothing ever kicked that off, so the cards spun forever. Ensure
+  // every collection while the level is actually visible (not when the
+  // overlay opened straight into the gloopie creator, where no covers show);
+  // openCollection dedupes (cached / already-downloading collections return
+  // immediately), and covers fill in as each collection's assets land.
+  //
+  // Deliberate tradeoff: this ensures each collection's full asset set, not
+  // just the cover — a cold cache downloads the whole library while the user
+  // looks at the cards. Collections are small enough that instant drill-in
+  // afterward is worth the up-front bandwidth; if the library outgrows that,
+  // switch to a cover-only warm (the backend's warm_avatar_refs already
+  // takes specific refs) and keep full ensures on drill-in.
+  //
+  // Two guards keep the warm honest:
+  // - Wait for the disk-cache restore (`cacheChecking`) so already-cached
+  //   collections are visible to openCollection's short-circuit; warming
+  //   during the check would re-ensure collections that are already on disk.
+  // - Skip collections that already failed: openCollection deliberately
+  //   bypasses its cached short-circuit for those (so the explicit Retry
+  //   works), which here would silently re-download on every visit to the
+  //   level. Failures wait for the user's Retry.
+  useEffect(() => {
+    if (
+      collection ||
+      !hasCollectionsLevel ||
+      createOpen ||
+      gloopieStepOpen ||
+      library.cacheChecking
+    ) {
+      return;
+    }
+    for (const entry of library.catalog?.collections ?? []) {
+      if (library.failedCollectionIds.has(entry.id)) {
+        continue;
+      }
+      void openCollectionRef.current(entry);
+    }
+  }, [
+    collection,
+    createOpen,
+    gloopieStepOpen,
+    hasCollectionsLevel,
+    library.cacheChecking,
+    library.catalog,
+    library.failedCollectionIds,
+  ]);
 
   /**
    * Confirmed "are you sure": run the destructive action the open dialog was
@@ -820,8 +959,7 @@ export function AvatarCollectionOverlay({
           key={entry.id}
           type="button"
           className={cn(
-            "avatar-scatter-item group flex w-36 flex-col items-center gap-2 rounded-2xl p-2",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            COLLECTION_CARD_CLASS,
             cachedMedia && !readyIds.has(entry.id) && "avatar-scatter-waiting",
           )}
           style={rowItemStyle(index)}
@@ -829,18 +967,25 @@ export function AvatarCollectionOverlay({
             label: entry.label,
           })}
           disabled={closing}
-          {...hoverHandlers(entry.id)}
           onClick={() => setCollectionId(entry.id)}
         >
-          <span className="flex h-28 w-full items-center justify-center">
+          <span className={COLLECTION_CARD_BADGE_CLASS}>
+            {t("collectionPage.collectionBadge")}
+          </span>
+          {/* Cover avatars run big like the reference — ~82% of the card's
+            full width, breaking out of the card padding so they read as the
+            card's subject rather than a thumbnail floating in it. Always
+            animating (no hover gating): unlike the scatter field, the
+            collections level has only a handful of covers, so the panning
+            lag that forced hover-to-play there doesn't apply. */}
+          <span className="-mx-5 flex min-h-0 w-[calc(100%+2.5rem)] flex-1 items-center justify-center">
             {cachedMedia ? (
               <AvatarMedia
                 media={cachedMedia}
                 alt=""
                 lazy
                 loadingStrategy="visible-video"
-                paused={hoveredAvatarId !== entry.id}
-                className="avatar-scatter-media max-h-full max-w-full object-contain"
+                className="avatar-scatter-media max-h-full w-[82%] object-contain"
                 onError={() => {}}
                 onReady={() => markReady(entry.id)}
               />
@@ -848,17 +993,13 @@ export function AvatarCollectionOverlay({
               <Spinner className="size-5 text-muted-foreground" />
             )}
           </span>
-          <span className="shrink-0 text-sm text-foreground">
-            {entry.label}
-          </span>
+          <span className={COLLECTION_CARD_LABEL_CLASS}>{entry.label}</span>
         </button>
       );
     },
     [
       catalogVersion,
       closing,
-      hoveredAvatarId,
-      hoverHandlers,
       library.cachedAvatarMediaById,
       library.catalog,
       markReady,
@@ -869,31 +1010,6 @@ export function AvatarCollectionOverlay({
 
   const renderCreateYourOwnRowItem = useCallback(
     (index: number) => {
-      // Shadow silhouette of a real avatar instead of an icon — a character
-      // you haven't met yet. Deliberately not any collection's cover, so the
-      // silhouette never duplicates a tile sitting right next to it in the
-      // row; prefer the first cached non-cover avatar.
-      const coverIds = new Set(collections.map((entry) => entry.coverAvatarId));
-      let silhouetteMedia: ReturnType<typeof getCachedAvatarMedia>;
-      for (const entry of collections) {
-        for (const avatarId of entry.avatarIds) {
-          if (coverIds.has(avatarId)) {
-            continue;
-          }
-          const cached = getCachedAvatarMedia(
-            library.cachedAvatarMediaById,
-            catalogVersion,
-            avatarId,
-          );
-          if (cached) {
-            silhouetteMedia = cached;
-            break;
-          }
-        }
-        if (silhouetteMedia) {
-          break;
-        }
-      }
       const label = gloopie?.hasActiveWork
         ? t("gloopie.activeWorkAction")
         : t("editor.avatarCreateYourOwn");
@@ -901,43 +1017,41 @@ export function AvatarCollectionOverlay({
         <button
           key="create-your-own"
           type="button"
-          className={cn(
-            "avatar-scatter-item group flex w-36 flex-col items-center gap-2 rounded-2xl p-2",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          )}
+          className={COLLECTION_CARD_CLASS}
           style={rowItemStyle(index)}
           aria-label={label}
           disabled={closing}
           onClick={onCreateTile}
         >
-          <span className="flex h-28 w-full items-center justify-center">
-            {silhouetteMedia ? (
-              <AvatarMedia
-                media={silhouetteMedia}
-                alt=""
-                lazy
-                loadingStrategy="visible-video"
-                paused
-                className="avatar-scatter-media max-h-full max-w-full object-contain opacity-60 brightness-0 dark:invert"
-                onError={() => {}}
-              />
-            ) : (
-              <IconWand className="size-8 text-foreground" aria-hidden="true" />
-            )}
+          {/* No "Collection" pill here — this card creates something new, it
+            isn't a collection. An invisible spacer keeps the plus and the
+            label vertically aligned with the neighboring cards. */}
+          <span
+            className={cn(COLLECTION_CARD_BADGE_CLASS, "invisible")}
+            aria-hidden="true"
+          >
+            {t("collectionPage.collectionBadge")}
           </span>
-          <span className="shrink-0 text-sm text-foreground">{label}</span>
+          <span className="flex min-h-0 w-full flex-1 items-center justify-center">
+            {/* The exact chrome plus from the Figma reference (916-17932) —
+              a rendered 3D object like the avatars beside it, not a line
+              icon. Exported from the design frame itself. Works untinted in
+              both themes: the render is predominantly bright silver (median
+              luma ~203), so it holds contrast on the dark card too — only
+              the thin shading edges soften, like the avatar renders do. */}
+            <img
+              src={createAvatarPlus}
+              alt=""
+              draggable={false}
+              className="w-[55%] object-contain transition-transform duration-200 group-hover:scale-105"
+              aria-hidden="true"
+            />
+          </span>
+          <span className={COLLECTION_CARD_LABEL_CLASS}>{label}</span>
         </button>
       );
     },
-    [
-      catalogVersion,
-      closing,
-      collections,
-      gloopie?.hasActiveWork,
-      library.cachedAvatarMediaById,
-      onCreateTile,
-      t,
-    ],
+    [closing, gloopie?.hasActiveWork, onCreateTile, t],
   );
 
   const heading = reviewOpen
@@ -958,11 +1072,16 @@ export function AvatarCollectionOverlay({
     ? t("gloopie.quitGeneration")
     : createOpen || (collection && hasCollectionsLevel)
       ? t("editor.avatarBackToCollections")
-      : t("collectionPage.close");
+      : t("common:actions.close");
 
+  // On the collections level the cover downloads (kicked off by the batch
+  // ensure above) can fail per-collection; without folding those in, failed
+  // covers spin forever with no error or retry affordance. The retry pill's
+  // retryCatalog() path reloads the catalog, which clears the failed set and
+  // re-triggers the batch ensure.
   const collectionFailed = collection
     ? library.failedCollectionIds.has(collection.id)
-    : library.error;
+    : library.error || library.failedCollectionIds.size > 0;
 
   const canGenerate = Boolean(gloopie && gloopie.object.trim().length > 0);
 
@@ -976,7 +1095,10 @@ export function AvatarCollectionOverlay({
     <FocusScope asChild loop trapped>
       <div
         className={cn(
-          "fixed inset-0 z-[70] flex flex-col bg-[var(--overlay-avatar-field)] [backdrop-filter:var(--backdrop-avatar-field)] [-webkit-backdrop-filter:var(--backdrop-avatar-field)]",
+          // Opaque dot-grid canvas (design feedback): no frosted scrim or
+          // backdrop blur — the takeover is its own page, not a veil over
+          // the last one.
+          "avatar-collection-dot-grid fixed inset-0 z-[70] flex flex-col",
           closing
             ? exitTarget
               ? "avatar-overlay-exit-funnel"
@@ -1045,17 +1167,23 @@ export function AvatarCollectionOverlay({
             collections level the row of collections beneath it.
             Deliberately no z-index on these wrappers — they must not form a
             stacking context, so the wordmark (z-0) can sit behind the
-            avatar field (z-1) while the controls (z-2) float above it. */}
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            avatar field (z-1) while the controls (z-2) float above it.
+
+            Scroll-safe centering: the outer wrapper scrolls and the inner
+            column centers itself with auto margins instead of flex
+            centering. `items-center justify-center` clips both ends of
+            overflowing content with no way to reach it — at the supported
+            minimum window the collection cards wrap to two rows taller
+            than the viewport, and auto margins keep the overflow
+            scrollable. (Plain overflow, no stacking context.) */}
+          <div className="pointer-events-none absolute inset-0 flex overflow-y-auto">
             <div
-              className="flex max-w-[85%] flex-col items-center gap-6"
+              className="m-auto flex max-w-[85%] flex-col items-center gap-6 py-8"
               inert={closing ? true : undefined}
             >
               {reviewOpen && review ? (
                 <>
-                  <h1 className="avatar-collection-wordmark text-center text-6xl tracking-tight text-foreground/90 sm:text-7xl xl:text-8xl">
-                    {heading}
-                  </h1>
+                  <h1 className={STEP_HEADING_CLASS}>{heading}</h1>
                   <p className="max-w-sm whitespace-pre-line text-center text-sm text-muted-foreground">
                     {t("gloopie.chooseHelp")}
                   </p>
@@ -1121,10 +1249,7 @@ export function AvatarCollectionOverlay({
                 </>
               ) : waitingStep ? (
                 <>
-                  <h1
-                    className="avatar-collection-wordmark text-center text-6xl tracking-tight text-foreground/90 sm:text-7xl xl:text-8xl"
-                    aria-live="polite"
-                  >
+                  <h1 className={STEP_HEADING_CLASS} aria-live="polite">
                     {heading}
                   </h1>
                   <p className="max-w-sm whitespace-pre-line text-center text-sm text-muted-foreground">
@@ -1162,23 +1287,7 @@ export function AvatarCollectionOverlay({
                 </>
               ) : createOpen && gloopie ? (
                 <>
-                  {/* Same icon nav chrome as the collection levels: the arrow
-                    above the wordmark goes up a level, instead of a one-off
-                    text link beneath the primary action. */}
-                  <div className="pointer-events-auto relative z-[2] flex items-center justify-center">
-                    <GlassButton
-                      type="button"
-                      size="icon"
-                      aria-label={backLabel}
-                      disabled={closing}
-                      onClick={goBack}
-                    >
-                      <IconArrowLeft aria-hidden="true" />
-                    </GlassButton>
-                  </div>
-                  <h1 className="avatar-collection-wordmark text-center text-6xl tracking-tight text-foreground/90 sm:text-7xl xl:text-8xl">
-                    {heading}
-                  </h1>
+                  <h1 className={STEP_HEADING_CLASS}>{heading}</h1>
                   <div className="pointer-events-auto flex w-80 flex-col items-stretch gap-3">
                     <p className="text-center text-sm text-muted-foreground">
                       {t("gloopie.promptHelp")}
@@ -1226,42 +1335,59 @@ export function AvatarCollectionOverlay({
                 </>
               ) : (
                 <>
-                  <div className="pointer-events-auto relative z-[2] flex items-center justify-center gap-3">
-                    <GlassButton
-                      type="button"
-                      size="icon"
-                      aria-label={backLabel}
-                      onClick={goBack}
-                    >
-                      {/* Arrow when the control navigates up a level; X when it
-                        dismisses the overlay outright. */}
-                      {collection && hasCollectionsLevel ? (
-                        <IconArrowLeft aria-hidden="true" />
-                      ) : (
-                        <IconX aria-hidden="true" />
-                      )}
-                    </GlassButton>
-                  </div>
-                  <h1 className="avatar-collection-wordmark text-center text-6xl tracking-tight text-foreground/90 sm:text-7xl xl:text-8xl">
+                  {/* The giant wordmark belongs to a collection page, where
+                    it names the thing you're browsing. On the collections
+                    level the cards speak for themselves — the heading stays
+                    for screen readers (it also names the dialog) but paints
+                    nothing. */}
+                  <h1 className={collection ? WORDMARK_CLASS : "sr-only"}>
                     {heading}
                   </h1>
                   {!collection ? (
                     <div
                       data-collections-row
-                      className="pointer-events-auto flex flex-wrap items-end justify-center gap-4 rounded-3xl p-6"
+                      className="pointer-events-auto flex flex-wrap items-stretch justify-center gap-6 p-6"
                     >
+                      {/* "Create your own" leads the row, per the Figma
+                        reference (916-17932) — the empty card you fill in
+                        sits before the ready-made collections. */}
+                      {gloopie ? renderCreateYourOwnRowItem(0) : null}
                       {collections.map((entry, index) =>
-                        renderCollectionRowItem(entry, index),
+                        renderCollectionRowItem(
+                          entry,
+                          index + (gloopie ? 1 : 0),
+                        ),
                       )}
-                      {gloopie
-                        ? renderCreateYourOwnRowItem(collections.length)
-                        : null}
                     </div>
                   ) : null}
                 </>
               )}
             </div>
           </div>
+
+          {/* Navigation chrome, per design feedback (Berd-Updates 704-3688):
+            one black icon-only circle in the top-right corner. An arrow when
+            it goes up a level, an X when it dismisses the takeover outright;
+            the label survives as the accessible name. The gloopie steps keep
+            their own inline actions (review/waiting render explicit button
+            stacks). */}
+          {!gloopieStepOpen && !closing ? (
+            <div className="pointer-events-auto absolute right-6 top-6 z-10">
+              <CanvasNavButton
+                type="button"
+                size="icon-lg"
+                aria-label={backLabel}
+                title={backLabel}
+                onClick={goBack}
+              >
+                {createOpen || (collection && hasCollectionsLevel) ? (
+                  <IconArrowLeft aria-hidden="true" />
+                ) : (
+                  <IconX aria-hidden="true" />
+                )}
+              </CanvasNavButton>
+            </div>
+          ) : null}
 
           {collectionFailed && !createOpen && !gloopieStepOpen ? (
             <div className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-glass-strong px-4 py-2 text-sm text-surface-glass-strong-fg shadow-[var(--shadow-chat)] backdrop-blur-md">

@@ -485,6 +485,67 @@ describe("AgentBuilderRail", () => {
     );
   });
 
+  it("exposes the status card's visible CTA in its accessible name", () => {
+    // The card button carries an explicit aria-label, which replaces the
+    // descendant text — so the visible CTA ("View options" / "Try again")
+    // must be folded into it, or screen-reader users never hear what
+    // activating the card does and voice-control users can't target it by
+    // its visible text.
+    mockHook();
+    useGloopieGenerationStore.setState({
+      jobs: {
+        s1: {
+          phase: "choosing",
+          object: "teapot",
+          options: [{ id: "a", avatarRef: "user-avatar:a" }],
+          chosenOptionId: null,
+          resultAvatarRef: null,
+          errorCode: null,
+          attemptId: 70,
+        },
+      },
+    });
+
+    const { unmount } = renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /view options/i }),
+    ).toBeInTheDocument();
+    unmount();
+
+    useGloopieGenerationStore.setState({
+      jobs: {
+        s1: {
+          phase: "error",
+          object: "teapot",
+          options: [],
+          chosenOptionId: null,
+          resultAvatarRef: null,
+          errorCode: "unavailable",
+          attemptId: 71,
+        },
+      },
+    });
+
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows the full gloopie state instead of the status card in full-page mode", () => {
     mockHook();
     useGloopieGenerationStore.setState({

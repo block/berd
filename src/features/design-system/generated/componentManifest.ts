@@ -726,6 +726,18 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Canvas Nav Button",
+    source: "src/shared/ui/canvas-nav-button.tsx",
+    description:
+      "Chrome button for floating navigation over full-surface canvas takeovers\n(e.g. the avatar collection takeover's close X / back arrow).\n\nComposes Button. Base semantic variant: `primary`.\n\nExtra styling on top of primary:\n- carries the chat shadow so the control floats over canvas artwork\n  instead of reading as part of it\n- `select-none` so rapid clicks never select an icon or label\n\nThe solid primary fill is deliberate (design direction, Berd-Updates\n704-3688): quiet glass controls disappeared against the takeover's\ndot-grid canvas, so takeover navigation uses the high-contrast filled\ntreatment. This wrapper exists so that treatment is a named product\nsurface rather than a repurposed confirm action — takeover nav can be\nrestyled here without touching real primary actions, and cannot drift\nfrom the shared hover/active/focus/disabled behavior `primary` owns.\n\nUse for close/back/dismiss controls floating over full-surface canvas\ntakeovers. For ordinary main actions, use `Button variant=\"primary\"`;\nfor quiet controls floating over media, use `GlassButton`.\n\nIntent: the recipe owns every interactive state so takeover navigation\ncan never drift when the base variant changes. The base `primary`\ncontributes role, geometry, focus behavior, and icon sizing. No flag\nprops are used or accepted.",
+    exports: ["CanvasNavButton", "CanvasNavButtonProps"],
+    slots: [],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: [],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Card",
     source: "src/shared/ui/card.tsx",
     description:

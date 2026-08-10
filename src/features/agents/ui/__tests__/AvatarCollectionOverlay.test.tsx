@@ -262,6 +262,35 @@ describe("AvatarCollectionOverlay", () => {
     ).toBeInTheDocument();
   });
 
+  it("orders collections gloopies, pollies, fuzzies with unknowns after", () => {
+    // Catalog deliberately in the opposite order: the view owns the display
+    // ranking (design direction), so it must not lean on catalog order.
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(
+          catalogWith({
+            robots: ["r-1"],
+            fuzzies: ["f-1"],
+            pollies: ["p-1"],
+            gloopies: ["g-1"],
+          }),
+        )}
+        onSelectAvatar={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const cards = overlay()
+      .getAllByRole("button", { name: /open the .* collection/i })
+      .map((card) => card.getAttribute("aria-label"));
+    expect(cards).toEqual([
+      "Open the gloopies collection",
+      "Open the pollies collection",
+      "Open the fuzzies collection",
+      "Open the robots collection",
+    ]);
+  });
+
   it("clears a pending highlight when going up to the collections level", () => {
     renderWithProviders(
       <AvatarCollectionOverlay
@@ -723,6 +752,90 @@ describe("AvatarCollectionOverlay", () => {
     expect(library.openCollection).toHaveBeenCalledWith(
       expect.objectContaining({ id: "gloopies" }),
     );
+  });
+
+  it("waits for the disk-cache check before warming collections", () => {
+    // While cacheChecking is true the in-memory cache is still being restored
+    // from disk — warming during the check would re-ensure collections that
+    // are already cached (openCollection's short-circuit can't see them yet).
+    const checking = libraryWith(
+      catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
+      { cacheChecking: true },
+    );
+    const { rerender } = renderWithProviders(
+      <AvatarCollectionOverlay
+        library={checking}
+        onSelectAvatar={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(checking.openCollection).not.toHaveBeenCalled();
+
+    // Once the restore finishes, the warm kicks off.
+    const restored = { ...checking, cacheChecking: false };
+    rerender(
+      <AvatarCollectionOverlay
+        library={restored}
+        onSelectAvatar={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(restored.openCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "gloopies" }),
+    );
+    expect(restored.openCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "robots" }),
+    );
+  });
+
+  it("does not auto-retry failed collections when warming the level", () => {
+    // openCollection deliberately bypasses its cached short-circuit for
+    // failed collections (so the explicit Retry works) — the automatic warm
+    // must skip them or every visit to the level silently re-downloads.
+    const library = libraryWith(
+      catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
+      { failedCollectionIds: new Set(["gloopies"]) },
+    );
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={library}
+        onSelectAvatar={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(library.openCollection).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: "gloopies" }),
+    );
+    expect(library.openCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "robots" }),
+    );
+  });
+
+  it("surfaces a retry pill on the collections level when a cover download failed", () => {
+    // Multi-collection catalog so the collections level renders; one
+    // collection's cover download failed. Without folding failedCollectionIds
+    // into the collections-level error state, the cards spin forever with no
+    // retry affordance.
+    const library = libraryWith(
+      catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
+      {
+        failedCollectionIds: new Set(["gloopies"]),
+        errorCode: "networkAccess",
+      },
+    );
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={library}
+        onSelectAvatar={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // No collection is open, so retry falls back to reloading the catalog,
+    // which clears the failed set and re-triggers the cover batch ensure.
+    fireEvent.click(overlay().getByRole("button", { name: /retry/i }));
+    expect(library.retryCatalog).toHaveBeenCalled();
   });
 
   it("surfaces a retry pill when the open collection failed to load", () => {

@@ -38,6 +38,7 @@
     "viewOptions": "View options",
     "activeWorkAction": "Gloopie in progress, view",
     "statusAria": "{{label}}. {{description}}",
+    "statusAriaWithCta": "{{label}}. {{description}} {{cta}}",
     "chooseTitle": "Pick your favorite",
     "chooseHelp": "Choose one to animate.\nYou can regenerate if none feel right.",
     "useThisOne": "Animate",
@@ -118,7 +119,7 @@
     "chatAria": "Chat with {{name}}"
   },
   "collectionPage": {
-    "close": "Close",
+    "collectionBadge": "Collection",
     "collectionHeading": "{{label}} Collection",
     "collectionsHeading": "Avatar Collections",
     "openCollection": "Open the {{label}} collection",

@@ -2414,6 +2414,24 @@ button.avatar-scatter-item:active:not(:disabled) .avatar-scatter-media,
   }
 }
 
+/*
+ * Dotted grid behind the avatar collection takeover. Same tokens as the app
+ * chrome's `.bg-dot-grid` (design feedback: the takeover grid should look
+ * like the rest of the app, not a bigger one-off), on an opaque canvas so
+ * the collection cards read as white boxes on the grid instead of washing
+ * into a frosted scrim.
+ */
+.avatar-collection-dot-grid {
+  background-color: var(--canvas-base);
+  background-image: radial-gradient(
+    circle,
+    var(--dot-color-base) var(--dot-size),
+    transparent var(--dot-size)
+  );
+  background-size: var(--dot-spacing) var(--dot-spacing);
+  background-position: 0 0;
+}
+
 /* Big fixed wordmark the avatars pan behind. */
 .avatar-collection-wordmark {
   animation: avatar-wordmark-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;

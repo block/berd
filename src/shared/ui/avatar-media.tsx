@@ -44,14 +44,24 @@ function randomDelay({ min, max }: { min: number; max: number }): number {
 }
 
 function getVideoPreload(
-  animatedAvatarsEnabled: boolean,
+  animationAllowed: boolean,
+  paused: boolean,
   shouldLoadVideo: boolean,
   loadingStrategy: AvatarMediaProps["loadingStrategy"],
   playbackMode: AvatarMediaProps["playbackMode"],
   hasPoster: boolean,
 ) {
-  if (!animatedAvatarsEnabled && shouldLoadVideo) {
+  if (!animationAllowed && shouldLoadVideo) {
     return hasPoster ? "none" : "auto";
+  }
+
+  // Paused-but-mounted videos (hover-to-play hosts) never call play(), so
+  // nothing else forces data to load. They must still reach HAVE_CURRENT_DATA
+  // for `loadeddata` to fire `onReady` (hosts hold entrance animations on it)
+  // and for the first frame to be decoded. With "none"/"metadata" the tile
+  // stayed invisible until the first hover started playback.
+  if (paused && shouldLoadVideo) {
+    return "auto";
   }
 
   if (loadingStrategy === "eager") {
@@ -318,9 +328,20 @@ export const AvatarMedia = memo(function AvatarMedia({
   const videoRef = useRef<HTMLVideoElement>(null);
   const { enabled: animatedAvatarsEnabled } = useAnimatedAvatarsPreference();
   const prefersReducedMotion = usePrefersReducedMotion();
-  const shouldAnimateVideo =
-    animatedAvatarsEnabled && !prefersReducedMotion && !paused;
+  // "Allowed" is the durable setting (user preference, reduced motion);
+  // `paused` is transient host-driven gating (hover-to-play fields). Only
+  // the durable setting may swap the rendered element to a poster <img> —
+  // a paused-but-allowed video stays mounted and merely pauses, so hover
+  // toggles never remount media (which flashed blank while re-decoding).
+  const animationAllowed = animatedAvatarsEnabled && !prefersReducedMotion;
+  const shouldAnimateVideo = animationAllowed && !paused;
   const effectivePoster = poster ?? media.posterSrc;
+  // The visibility effect must re-attach its observer only when the rendered
+  // element can actually swap between a poster <img> and a <video> — which
+  // requires a poster to exist. Posterless media keeps the same <video>
+  // element across preference changes, so its observer (and src) must stay
+  // put; re-running the effect detaches the source for a frame (a blink).
+  const observerRebindKey = effectivePoster ? animationAllowed : true;
   const [failedVideoSrc, setFailedVideoSrc] = useState<string>();
   const videoFailed = failedVideoSrc === media.src;
   const [shouldLoadVideo, setShouldLoadVideo] = useState(
@@ -359,7 +380,17 @@ export const AvatarMedia = memo(function AvatarMedia({
 
     observer.observe(video);
     return () => observer.disconnect();
-  }, [loadingStrategy, media.mediaType, media.src, shouldAnimateVideo]);
+    // Keyed on `observerRebindKey` (not `shouldAnimateVideo` or the raw
+    // preference): flipping the durable preference swaps the rendered
+    // element between a poster <img> and a <video> — but only when a poster
+    // exists — so only then must the observer re-attach to the new node.
+    // This effect also resets shouldLoadVideo(false) on every run, detaching
+    // the video src until the new observer's first callback, so re-running
+    // it when nothing swapped blanks the tile for a frame: keying on the
+    // transient `paused` flag caused the hover blink, and keying on the
+    // preference for posterless media (same element either way) reproduced
+    // the same blink on preference changes.
+  }, [observerRebindKey, loadingStrategy, media.mediaType, media.src]);
 
   useEffect(() => {
     if (media.mediaType !== "video" || videoFailed) {
@@ -455,7 +486,7 @@ export const AvatarMedia = memo(function AvatarMedia({
   if (
     media.mediaType === "video" &&
     effectivePoster &&
-    (videoFailed || !shouldAnimateVideo)
+    (videoFailed || !animationAllowed)
   ) {
     return (
       <img
@@ -470,7 +501,8 @@ export const AvatarMedia = memo(function AvatarMedia({
 
   if (media.mediaType === "video") {
     const preload = getVideoPreload(
-      shouldAnimateVideo,
+      animationAllowed,
+      paused,
       shouldLoadVideo,
       loadingStrategy,
       playbackMode,

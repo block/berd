@@ -56,6 +56,24 @@ describe("avatar catalog", () => {
     });
   });
 
+  it("overrides the pollies display label to Figgies", () => {
+    // The published catalog still says "Pollies"; the rename is applied at
+    // the parse boundary so every surface shows the new name without waiting
+    // on a catalog republish. The id must stay `pollies` so existing
+    // `app-avatar:pollies-*` refs keep resolving.
+    const catalog = JSON.parse(JSON.stringify(validCatalog));
+    catalog.collections[0] = {
+      ...catalog.collections[0],
+      id: "pollies",
+      label: "Pollies",
+    };
+    catalog.assets[0] = { ...catalog.assets[0], collectionId: "pollies" };
+
+    expect(parseAvatarCatalog(catalog)).toMatchObject({
+      collections: [{ id: "pollies", label: "Figgies" }],
+    });
+  });
+
   it("rejects unsupported schemas and unsafe paths", () => {
     expect(() =>
       parseAvatarCatalog({ ...validCatalog, schemaVersion: 2 }),

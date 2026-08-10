@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { IconArrowDown, IconArrowNarrowLeft } from "@tabler/icons-react";
 import { AgentTileButton } from "./agent-tile-button";
 import { Button } from "./button";
+import { CanvasNavButton } from "./canvas-nav-button";
 import { ComposerActionButton } from "./composer-action-button";
 import { GlassButton } from "./glass-button";
 import { JumpToLatestButton } from "./jump-to-latest-button";
@@ -217,6 +218,20 @@ describe("Button", () => {
       "bg-surface-glass-strong",
       "text-surface-glass-strong-fg",
       "backdrop-blur-md",
+    );
+  });
+
+  it("renders the canvas nav recipe over the primary base", () => {
+    render(<CanvasNavButton aria-label="Close">×</CanvasNavButton>);
+
+    const button = screen.getByRole("button", { name: "Close" });
+    // The primary base owns fill, hover, focus, and disabled behavior; the
+    // recipe only adds the floating chrome (shadow, unselectable label).
+    expect(button).toHaveClass(
+      "bg-primary",
+      "text-primary-foreground",
+      "select-none",
+      "shadow-[var(--shadow-chat)]",
     );
   });
 

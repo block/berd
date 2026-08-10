@@ -29,7 +29,10 @@ const EXPECTED_EXTENSION_BY_FORMAT = {
 const COLLECTION_LABELS = {
   fuzzies: "Fuzzies",
   gloopies: "Gloopies",
-  pollies: "Pollies",
+  // Display label renamed from the "Pollies" placeholder (design direction);
+  // the collection id stays `pollies` so existing agent avatar refs
+  // (`app-avatar:pollies-*`) and cached assets keep resolving.
+  pollies: "Figgies",
 };
 function optionValue(args, name) {
   const prefix = `${name}=`;

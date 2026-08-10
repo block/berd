@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   cachedAssetToMedia,
   ensureAvatarCollection,
@@ -93,6 +93,14 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [failedCollectionIds, setFailedCollectionIds] = useState<Set<string>>(
     () => new Set(),
   );
+  // Error reason per failed collection. Concurrent ensures (the collections
+  // level warms every collection at once) each resolve independently — a
+  // later success must not erase the reason an earlier collection failed,
+  // so reasons live per-collection and the exposed errorCode aggregates
+  // from the set that is still failed.
+  const [collectionErrorCodes, setCollectionErrorCodes] = useState<
+    Record<string, AvatarLibraryErrorCode>
+  >({});
   const [cachedAvatarMediaById, setCachedAvatarMediaById] = useState<
     Record<string, CachedAvatarMediaEntry>
   >({});
@@ -163,6 +171,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
           setCatalog(nextCatalog);
           setCachedAvatarMediaById({});
           setFailedCollectionIds(new Set());
+          setCollectionErrorCodes({});
           setError(false);
           setErrorCode(null);
         }
@@ -205,8 +214,6 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         return;
       }
 
-      setErrorCode(null);
-
       if (
         isCollectionCached(collection) &&
         !failedCollectionIds.has(collection.id)
@@ -243,11 +250,19 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         });
         const collectionFailed =
           failedAssetIds.length > 0 || !collectionCachedAfterEnsure;
-        setErrorCode(
-          collectionFailed
-            ? (cachedCollection.errorCode ?? "unavailable")
-            : null,
-        );
+        setCollectionErrorCodes((current) => {
+          if (collectionFailed) {
+            return {
+              ...current,
+              [collection.id]: cachedCollection.errorCode ?? "unavailable",
+            };
+          }
+          if (!(collection.id in current)) {
+            return current;
+          }
+          const { [collection.id]: _removed, ...rest } = current;
+          return rest;
+        });
         setFailedCollectionIds((current) => {
           const next = new Set(current);
           if (collectionFailed) {
@@ -259,7 +274,10 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         });
       } catch (downloadError) {
         console.warn("Failed to download avatar collection:", downloadError);
-        setErrorCode(normalizeAvatarLibraryError(downloadError).code);
+        setCollectionErrorCodes((current) => ({
+          ...current,
+          [collection.id]: normalizeAvatarLibraryError(downloadError).code,
+        }));
         setFailedCollectionIds((current) =>
           new Set(current).add(collection.id),
         );
@@ -289,13 +307,29 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     setCatalogRetryToken((value) => value + 1);
   }, []);
 
+  // Aggregate download-failure reason derived only from collections that are
+  // still failed, so a successful ensure can never erase the reason an
+  // earlier concurrent one failed. networkAccess wins ties because the UI
+  // shows actionable "check your network" guidance for it.
+  const failedCollectionErrorCode = useMemo(() => {
+    const codes = [...failedCollectionIds]
+      .map((id) => collectionErrorCodes[id])
+      .filter((code): code is AvatarLibraryErrorCode => code !== undefined);
+    if (codes.includes("networkAccess")) {
+      return "networkAccess";
+    }
+    return codes[0] ?? null;
+  }, [collectionErrorCodes, failedCollectionIds]);
+
   return {
     catalog,
     cachedAvatarMediaById,
     loading,
     cacheChecking,
     error,
-    errorCode,
+    // Catalog-level failures (nothing loaded at all) take precedence over
+    // per-collection download failures.
+    errorCode: errorCode ?? failedCollectionErrorCode,
     downloadingCollectionIds,
     failedCollectionIds,
     retryCatalog,
