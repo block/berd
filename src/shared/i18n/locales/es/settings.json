@@ -70,6 +70,9 @@
       "sectionTitle": "Archivado automático",
       "label": "Archivar chats inactivos",
       "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
+      "confirmTitle": "¿Activar el archivado automático?",
+      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
+      "confirmAction": "Activar",
       "options": {
         "never": "Nunca",
         "1-day": "Después de 1 día",

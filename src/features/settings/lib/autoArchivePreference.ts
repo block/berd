@@ -3,6 +3,8 @@ import { useCallback, useSyncExternalStore } from "react";
 export const AUTO_ARCHIVE_STORAGE_KEY = "goose:auto-archive-unpinned-after";
 export const AUTO_ARCHIVE_CHANGED_EVENT =
   "goose:auto-archive-unpinned-after-changed";
+export const AUTO_ARCHIVE_CONSENT_STORAGE_KEY =
+  "goose:auto-archive-unpinned-consented";
 
 export type AutoArchiveAfter =
   | "never"
@@ -38,6 +40,14 @@ export function getAutoArchiveAfter(): AutoArchiveAfter {
   if (typeof window === "undefined") return DEFAULT_AUTO_ARCHIVE_AFTER;
 
   try {
+    // A duration alone is not consent. This separate marker prevents stale or
+    // experimental local values from ever enabling destructive behavior on a
+    // user's first run of the shipped feature.
+    if (
+      window.localStorage.getItem(AUTO_ARCHIVE_CONSENT_STORAGE_KEY) !== "true"
+    ) {
+      return DEFAULT_AUTO_ARCHIVE_AFTER;
+    }
     const stored = window.localStorage.getItem(AUTO_ARCHIVE_STORAGE_KEY);
     return isAutoArchiveAfter(stored) ? stored : DEFAULT_AUTO_ARCHIVE_AFTER;
   } catch {
@@ -54,17 +64,32 @@ export function getAutoArchiveAfterMs(
   return option?.days == null ? null : option.days * DAY_MS;
 }
 
-export function setAutoArchiveAfter(value: AutoArchiveAfter): void {
+function persistAutoArchivePreference(
+  value: AutoArchiveAfter,
+  consented: boolean,
+): void {
   if (typeof window === "undefined") return;
 
   try {
     window.localStorage.setItem(AUTO_ARCHIVE_STORAGE_KEY, value);
+    window.localStorage.setItem(
+      AUTO_ARCHIVE_CONSENT_STORAGE_KEY,
+      String(consented),
+    );
   } catch {
     // localStorage can be unavailable in restricted contexts.
   }
   window.dispatchEvent(
     new CustomEvent(AUTO_ARCHIVE_CHANGED_EVENT, { detail: { value } }),
   );
+}
+
+export function setAutoArchiveAfter(value: AutoArchiveAfter): void {
+  persistAutoArchivePreference(value, true);
+}
+
+export function resetAutoArchiveAfter(): void {
+  persistAutoArchivePreference(DEFAULT_AUTO_ARCHIVE_AFTER, false);
 }
 
 const listeners = new Set<() => void>();

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_ARCHIVE_CHANGED_EVENT,
+  AUTO_ARCHIVE_CONSENT_STORAGE_KEY,
   AUTO_ARCHIVE_STORAGE_KEY,
   getAutoArchiveAfter,
   getAutoArchiveAfterMs,
@@ -12,8 +13,13 @@ describe("auto archive preference", () => {
     localStorage.clear();
   });
 
-  it("defaults to never and rejects invalid persisted values", () => {
+  it("defaults to never and rejects unconfirmed or invalid persisted values", () => {
     expect(getAutoArchiveAfter()).toBe("never");
+
+    localStorage.setItem(AUTO_ARCHIVE_STORAGE_KEY, "14-days");
+    expect(getAutoArchiveAfter()).toBe("never");
+
+    localStorage.setItem(AUTO_ARCHIVE_CONSENT_STORAGE_KEY, "true");
     localStorage.setItem(AUTO_ARCHIVE_STORAGE_KEY, "tomorrow-ish");
     expect(getAutoArchiveAfter()).toBe("never");
   });
@@ -25,6 +31,7 @@ describe("auto archive preference", () => {
     setAutoArchiveAfter("30-days");
 
     expect(localStorage.getItem(AUTO_ARCHIVE_STORAGE_KEY)).toBe("30-days");
+    expect(localStorage.getItem(AUTO_ARCHIVE_CONSENT_STORAGE_KEY)).toBe("true");
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener(AUTO_ARCHIVE_CHANGED_EVENT, listener);
   });
