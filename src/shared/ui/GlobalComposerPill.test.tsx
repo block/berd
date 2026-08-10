@@ -883,12 +883,13 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
+    // The mock inventory is authoritative and does not contain this legacy
+    // model, so the new provider remains selected but its unsupported model
+    // must not reach the execution target.
     expectSent(onSend, "Hello", {
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
-        modelId: "goose-claude-opus-4-8",
-        modelName: "goose-claude-opus-4-8",
       },
       personaId: "persona-1",
     });
@@ -1158,12 +1159,12 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
+    // `goose-default` is absent from the authoritative mock inventory, so the
+    // selected harness/provider is retained but the model cannot be dispatched.
     expectSent(onSend, "Hello", {
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
-        modelId: "goose-default",
-        modelName: "goose-default",
       },
       personaId: "persona-2",
     });
@@ -1194,13 +1195,11 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
+    // Clearing the persona retains the selected external harness. Its model is
+    // absent from the authoritative inventory, so no stale provider/model
+    // metadata may be dispatched.
     expectSent(onSend, "Hello", {
-      executionTarget: {
-        harnessId: "claude-acp",
-        modelProviderId: "claude-acp",
-        modelId: "claude-sonnet-4",
-        modelName: "claude-sonnet-4",
-      },
+      executionTarget: { harnessId: "claude-acp" },
     });
   });
 

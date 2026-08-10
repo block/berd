@@ -19,12 +19,15 @@ const catalog = (id: string, category: "agent" | "model", aliases?: string[]) =>
 
 const context = (
   models: Array<{ id: string; providerId?: string; displayName?: string }> = [],
+  authoritativeProviderIds: readonly string[] = [],
 ) => ({
   providers: [
     { id: "goose", label: "Goose" },
     { id: "claude-acp", label: "Claude Code" },
   ],
   models,
+  isModelInventoryAuthoritative: (providerId: string) =>
+    authoritativeProviderIds.includes(providerId),
   catalogEntries: [
     catalog("goose", "agent"),
     catalog("claude-acp", "agent", ["claude"]),
@@ -78,6 +81,110 @@ describe("personaExecutionTarget", () => {
       provider: "goose",
       modelProviderId: null,
       model: null,
+    });
+  });
+
+  it.each([
+    {
+      name: "Goose canonical provider with a supported model",
+      persona: { provider: "goose", modelProviderId: "openai", model: "gpt-5" },
+      models: [{ id: "gpt-5", providerId: "openai" }],
+      authoritativeProviderIds: ["openai"],
+      target: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-5",
+        modelName: "gpt-5",
+      },
+      migration: null,
+    },
+    {
+      name: "Goose canonical provider with an unsupported model",
+      persona: { provider: "goose", modelProviderId: "openai", model: "gpt-5" },
+      models: [],
+      authoritativeProviderIds: ["openai"],
+      target: { harnessId: "goose", modelProviderId: "openai" },
+      migration: { provider: "goose", modelProviderId: "openai", model: null },
+    },
+    {
+      name: "external harness with foreign provider and supported model",
+      persona: {
+        provider: "claude-acp",
+        modelProviderId: "openai",
+        model: "sonnet",
+      },
+      models: [{ id: "sonnet", displayName: "Sonnet" }],
+      authoritativeProviderIds: ["claude-acp"],
+      target: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "sonnet",
+        modelName: "Sonnet",
+      },
+      migration: {
+        provider: "claude-acp",
+        modelProviderId: "claude-acp",
+        model: "sonnet",
+      },
+    },
+    {
+      name: "external harness with foreign provider and unsupported model",
+      persona: {
+        provider: "claude-acp",
+        modelProviderId: "openai",
+        model: "gpt-5",
+      },
+      models: [],
+      authoritativeProviderIds: ["claude-acp"],
+      target: { harnessId: "claude-acp", modelProviderId: "claude-acp" },
+      migration: {
+        provider: "claude-acp",
+        modelProviderId: "claude-acp",
+        model: null,
+      },
+    },
+    {
+      name: "external harness with unavailable inventory",
+      persona: {
+        provider: "claude-acp",
+        modelProviderId: "openai",
+        model: "gpt-5",
+      },
+      models: [],
+      authoritativeProviderIds: [],
+      target: {
+        harnessId: "claude-acp",
+        modelProviderId: "claude-acp",
+        modelId: "gpt-5",
+        modelName: "gpt-5",
+      },
+      migration: {
+        provider: "claude-acp",
+        modelProviderId: "claude-acp",
+        model: "gpt-5",
+      },
+    },
+  ])("canonicalizes $name across persisted target, migration, and wire selection", ({
+    persona,
+    models,
+    authoritativeProviderIds,
+    target,
+    migration,
+  }) => {
+    const targetContext = context(models, authoritativeProviderIds);
+
+    expect(personaExecutionTarget(persona, targetContext)).toEqual(target);
+    expect(personaTargetMigration(persona, targetContext)).toEqual(migration);
+    const wireProviderId =
+      target.harnessId === "goose" ? target.modelProviderId : target.harnessId;
+    expect(
+      gooseServeSelectionFromExecutionTarget(
+        personaExecutionTarget(persona, targetContext),
+      ),
+    ).toEqual({
+      providerId: wireProviderId,
+      modelId: target.modelId,
+      modelName: target.modelName,
     });
   });
 

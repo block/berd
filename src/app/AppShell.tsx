@@ -2711,6 +2711,10 @@ export function AppShell({
         const executionTarget = personaExecutionTarget(persona, {
           providers: agentState.providers,
           models: cachedModels,
+          isModelInventoryAuthoritative: (providerId) =>
+            useProviderModelCacheStore
+              .getState()
+              .isModelInventoryAuthoritative(providerId),
           catalogEntries: getProviderCatalog(),
         });
 

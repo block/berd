@@ -1093,6 +1093,7 @@ export function useChatSessionController({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,
@@ -1208,9 +1209,15 @@ export function useChatSessionController({
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
+        isModelInventoryAuthoritative,
         catalogEntries,
       }),
-    [catalogEntries, getModelsForAgent, providers],
+    [
+      catalogEntries,
+      getModelsForAgent,
+      isModelInventoryAuthoritative,
+      providers,
+    ],
   );
   const prepareSessionForCurrentSelection = useCallback(
     async (

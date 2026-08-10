@@ -28,6 +28,8 @@ export interface PersonaTargetContext {
   providers: readonly AvailableHarness[];
   models: readonly AvailableModel[];
   getModelsForHarness?: (harnessId: string) => readonly AvailableModel[];
+  /** Whether the model inventory for a provider/harness is authoritative. */
+  isModelInventoryAuthoritative?: (providerId: string) => boolean;
   catalogEntries: ProviderCatalogEntry[];
 }
 
@@ -130,6 +132,7 @@ export function personaExecutionTarget(
     providers,
     models,
     getModelsForHarness,
+    isModelInventoryAuthoritative,
     catalogEntries,
   }: PersonaTargetContext,
 ): SessionExecutionTarget | undefined {
@@ -171,6 +174,12 @@ export function personaExecutionTarget(
         canonicalModelProviderId(model.providerId, catalogEntries) ===
           modelProviderId),
   );
+  const inventoryIsAuthoritative =
+    isModelInventoryAuthoritative?.(modelProviderId ?? harnessId) ?? false;
+
+  if (modelId && !matchingModel && inventoryIsAuthoritative) {
+    return normalizeSessionExecutionTarget({ harnessId, modelProviderId });
+  }
 
   return normalizeSessionExecutionTarget({
     harnessId,

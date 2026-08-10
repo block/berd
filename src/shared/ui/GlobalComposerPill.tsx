@@ -503,9 +503,16 @@ export function GlobalComposerPill({
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
+        isModelInventoryAuthoritative,
         catalogEntries,
       }),
-    [catalogEntries, getModelsForAgent, providers, selectedPersona],
+    [
+      catalogEntries,
+      getModelsForAgent,
+      isModelInventoryAuthoritative,
+      providers,
+      selectedPersona,
+    ],
   );
 
   useEffect(() => {

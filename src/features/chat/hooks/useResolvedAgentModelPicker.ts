@@ -817,6 +817,7 @@ export function useResolvedAgentModelPicker({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,
