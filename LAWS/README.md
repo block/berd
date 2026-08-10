@@ -14,6 +14,12 @@ appear in all capitals.
 
 - Laws MUST describe behavior that is observable in the product.
 - Laws MUST specify product or user experience behavior, not implementation details.
+- Laws MUST express deliberately established, durable product invariants or
+  boundaries that should remain authoritative as feature designs change.
+- Feature requirements, workflows, fields, formats, and other changeable feature
+  policy MUST NOT be written as laws merely because they are observable or settled.
+- A behavior that qualifies as a law candidate MUST NOT be added unless the product
+  explicitly chooses to canonize it as an enduring constraint.
 - Laws MUST use **MUST** or **MUST NOT** for normative requirements.
 - Each law MUST state one requirement.
 - Laws MUST be concise and independently understandable.
