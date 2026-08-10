@@ -127,6 +127,83 @@ describe("ToolCallAdapter — ArtifactActions", () => {
   });
 });
 
+describe("ToolCallAdapter — subagent laws", () => {
+  it("attributes a known agent and describes an explicit task", () => {
+    renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: {
+        source: "Rivet",
+        instructions: "Count markdown files",
+      },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Delegating to Rivet · Count markdown files/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("describes a valid source-only delegation", () => {
+    renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "Rivet" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Asking Rivet to run its configured task/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      toolName: "delegate",
+      arguments: {},
+      title: "Delegating an unspecified task to a subagent",
+    },
+    {
+      toolName: "Agent",
+      arguments: { subagent_type: "code-reviewer" },
+      title: "Delegating an unspecified task to code-reviewer",
+    },
+    {
+      toolName: "spawn_agent",
+      arguments: {},
+      title: "Delegating an unspecified task to a subagent",
+    },
+  ])("explicitly describes malformed $toolName activity as an unspecified task", ({
+    toolName,
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({ name: toolName, toolName, arguments: args });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(title, "i") }),
+    ).toBeInTheDocument();
+  });
+
+  it("retains recovered identity and task on async follow-ups", () => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      subagentTaskLabel: "Count markdown files",
+      arguments: { source: "20260807_72" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Waiting on Rivet · Count markdown files/i,
+      }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("ToolCallAdapter — expanded body", () => {
   it("renders the tool name and status badge in the header", () => {
     renderAdapter();

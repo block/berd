@@ -320,7 +320,8 @@ function AgentWorkItemRow({
         <ToolCallAdapter
           name={getToolName(item)}
           toolName={item.request?.toolName}
-          subagentLabel={item.request?.subagentLabel}
+          subagentAgentName={item.request?.subagentAgentName}
+          subagentTaskLabel={item.request?.subagentTaskLabel}
           arguments={item.request?.arguments ?? {}}
           status={status}
           locations={item.request?.locations}

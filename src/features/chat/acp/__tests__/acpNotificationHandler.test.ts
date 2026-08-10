@@ -1380,6 +1380,103 @@ describe("acpNotificationHandler", () => {
     warnSpy.mockRestore();
   });
 
+  it.each([
+    { mode: "live", lateIdentity: false },
+    { mode: "live", lateIdentity: true },
+    { mode: "replay", lateIdentity: false },
+    { mode: "replay", lateIdentity: true },
+  ] as const)("retains async delegate identity and task in $mode when load identity is late=$lateIdentity", async ({
+    mode,
+    lateIdentity,
+  }) => {
+    const sessionId = "acp-session";
+    if (mode === "live") {
+      registerPreparedSession(sessionId, "goose", "/Users/test");
+      setActiveMessageId(sessionId, "assistant-1");
+    } else {
+      markSessionReplayLoading(sessionId);
+    }
+
+    const replayMeta =
+      mode === "replay"
+        ? { messageId: "assistant-1", created: 1_700_000_120 }
+        : {};
+    const toolMeta = (toolName: string) => ({
+      goose: {
+        ...replayMeta,
+        toolCall: { toolName },
+      },
+    });
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "delegate-1",
+        title: "delegate",
+        rawInput: {
+          source: "Rivet",
+          instructions: "Count markdown files",
+          async: true,
+        },
+        _meta: toolMeta("delegate"),
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "delegate-1",
+        status: "completed",
+        content: [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "Task 20260807_119 started in background",
+            },
+          },
+        ],
+        _meta: toolMeta("delegate"),
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "load-1",
+        title: "load",
+        rawInput: { source: "20260807_119" },
+        ...(!lateIdentity ? { _meta: toolMeta("load") } : {}),
+      },
+    } as never);
+    if (lateIdentity) {
+      await handleSessionNotification({
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "load-1",
+          _meta: toolMeta("load"),
+        },
+      } as never);
+    }
+
+    const messages =
+      mode === "live"
+        ? useChatStore.getState().messagesBySession[sessionId]
+        : getReplayBuffer(sessionId);
+    const load = messages
+      ?.flatMap((message) => message.content)
+      .find((block) => block.type === "toolRequest" && block.id === "load-1");
+    expect(load).toMatchObject({
+      type: "toolRequest",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      subagentTaskLabel: "Count markdown files",
+    });
+  });
+
   it("preserves ACP tool kind and locations on tool requests", async () => {
     registerPreparedSession("acp-session", "goose", "/Users/test");
     setActiveMessageId("acp-session", "assistant-1");

@@ -33,7 +33,9 @@ interface ToolCallAdapterProps {
   /** Real (wire-level) tool name from `_meta`, when the harness provides it. */
   toolName?: string;
   /** Named delegate source (custom agent) behind a subagent await/peek call. */
-  subagentLabel?: string;
+  subagentAgentName?: string;
+  /** Plain-language task recovered from the spawning delegate. */
+  subagentTaskLabel?: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   locations?: ToolCallLocation[];
@@ -315,6 +317,7 @@ function subagentTitle(
   t: (key: string, options?: Record<string, unknown>) => string,
   info: NonNullable<ReturnType<typeof getSubagentToolCallInfo>>,
   resolvedAgentName?: string,
+  resolvedTaskLabel?: string,
 ): string {
   // Explicit key map keeps the i18n usage statically checkable.
   const keys = {
@@ -349,14 +352,20 @@ function subagentTitle(
   // delegate). It replaces the word "subagent"; the task description is
   // kept alongside it: "Delegating to Rivet · Count markdown files…".
   const agentName = info.agentName ?? resolvedAgentName;
-  if (agentName && info.label) {
-    return t(agentLabeled, { name: agentName, label: info.label });
+  const taskLabel = info.label ?? resolvedTaskLabel;
+  if (agentName && info.sourceDefinesTask) {
+    return t("tools.subagent.delegatingAgentConfiguredTask", {
+      name: agentName,
+    });
+  }
+  if (agentName && taskLabel) {
+    return t(agentLabeled, { name: agentName, label: taskLabel });
   }
   if (agentName) return t(agent, { name: agentName });
   if (info.taskId) {
     return t(labeled, { label: shortTaskId(info.taskId) });
   }
-  return info.label ? t(labeled, { label: info.label }) : t(plain);
+  return taskLabel ? t(labeled, { label: taskLabel }) : t(plain);
 }
 
 function sentenceCaseToolTitle(name: string): string {
@@ -385,7 +394,8 @@ export function ToolCallAdapter({
   className,
   name,
   toolName,
-  subagentLabel,
+  subagentAgentName,
+  subagentTaskLabel,
   arguments: args,
   status,
   locations,
@@ -418,7 +428,7 @@ export function ToolCallAdapter({
     [toolName, args],
   );
   const displayName = subagentInfo
-    ? subagentTitle(t, subagentInfo, subagentLabel)
+    ? subagentTitle(t, subagentInfo, subagentAgentName, subagentTaskLabel)
     : sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");

@@ -56,7 +56,7 @@ import {
   getToolCallIdentity,
   getToolChainSummary,
 } from "@/shared/api/acpToolCallIdentity";
-import { resolveSubagentLabel } from "@/features/chat/lib/subagentToolCalls";
+import { resolveSubagentContext } from "@/features/chat/lib/subagentToolCalls";
 import { applyChatSessionConfigOptionsSnapshot } from "./sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
@@ -431,7 +431,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         getReplayAssistantMessageMetadata(sessionId, update),
       );
       const replayArguments = rawInputToArguments(update.rawInput);
-      const replaySubagentLabel = resolveSubagentLabel(
+      const replaySubagentContext = resolveSubagentContext(
         identity.toolName,
         replayArguments,
         getReplayBuffer(sessionId) ?? [],
@@ -446,7 +446,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         ...toolCallUpdatePatch(update),
         startedAt: created ?? Date.now(),
         ...(chainSummary ? { chainSummary } : {}),
-        ...(replaySubagentLabel ? { subagentLabel: replaySubagentLabel } : {}),
+        ...(replaySubagentContext ?? {}),
       });
       break;
     }
@@ -494,13 +494,17 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
             // The wire tool name can arrive after the initial tool_call
             // (identity patched in by a later update); resolve the subagent
             // label now that we know what the tool is.
-            if (identity.toolName && tc.subagentLabel === undefined) {
-              const lateLabel = resolveSubagentLabel(
+            if (
+              identity.toolName &&
+              (tc.subagentAgentName === undefined ||
+                tc.subagentTaskLabel === undefined)
+            ) {
+              const lateContext = resolveSubagentContext(
                 tc.toolName,
                 tc.arguments,
                 getReplayBuffer(sessionId) ?? [],
               );
-              if (lateLabel) tc.subagentLabel = lateLabel;
+              if (lateContext) Object.assign(tc, lateContext);
             }
           }
         }
@@ -628,7 +632,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       const chainSummary = getToolChainSummary(update);
 
       const liveArguments = rawInputToArguments(update.rawInput);
-      const liveSubagentLabel = resolveSubagentLabel(
+      const liveSubagentContext = resolveSubagentContext(
         identity.toolName,
         liveArguments,
         useChatStore.getState().messagesBySession[sessionId] ?? [],
@@ -643,7 +647,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
         ...toolCallUpdatePatch(update),
         startedAt: Date.now(),
         ...(chainSummary ? { chainSummary } : {}),
-        ...(liveSubagentLabel ? { subagentLabel: liveSubagentLabel } : {}),
+        ...(liveSubagentContext ?? {}),
       };
       store.setStreamingMessageId(sessionId, messageId);
       store.appendToStreamingMessage(sessionId, toolRequest);
@@ -674,8 +678,8 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
         // The wire tool name can arrive after the initial tool_call
         // (identity patched in by a later update); resolve the subagent
         // label now that we know what the tool is.
-        const lateSubagentLabel = identity.toolName
-          ? resolveSubagentLabel(
+        const lateSubagentContext = identity.toolName
+          ? resolveSubagentContext(
               identity.toolName,
               findLiveToolRequest(sessionId, messageId, update.toolCallId)
                 ?.arguments ?? {},
@@ -692,9 +696,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
                   ...identity,
                   ...patch,
                   ...(chainSummary ? { chainSummary } : {}),
-                  ...(lateSubagentLabel && c.subagentLabel === undefined
-                    ? { subagentLabel: lateSubagentLabel }
-                    : {}),
+                  ...(lateSubagentContext ?? {}),
                 }
               : c,
           ),

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   getSubagentToolCallInfo,
+  resolveDelegateContextForTask,
   resolveDelegateSourceForTask,
-  resolveSubagentLabel,
+  resolveSubagentContext,
   shortTaskId,
 } from "@/features/chat/lib/subagentToolCalls";
 import type { MessageContent } from "@/shared/types/messages";
@@ -47,7 +48,11 @@ describe("getSubagentToolCallInfo", () => {
           toolName: "delegate",
           arguments: { source: "code-reviewer", async: true },
         }),
-      ).toEqual({ activity: "delegating", agentName: "code-reviewer" });
+      ).toEqual({
+        activity: "delegating",
+        agentName: "code-reviewer",
+        sourceDefinesTask: true,
+      });
     });
 
     it("uses instructions as the label and truncates long labels", () => {
@@ -143,13 +148,32 @@ describe("getSubagentToolCallInfo", () => {
       });
     });
 
+    it("uses the full prompt when description is absent", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "Agent",
+          arguments: {
+            subagent_type: "code-reviewer",
+            prompt: "Review the authentication boundary",
+          },
+        }),
+      ).toEqual({
+        activity: "delegating",
+        agentName: "code-reviewer",
+        label: "Review the authentication boundary",
+      });
+    });
+
     it("classifies a named agent without a description", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "Agent",
           arguments: { subagent_type: "code-reviewer" },
         }),
-      ).toEqual({ activity: "delegating", agentName: "code-reviewer" });
+      ).toEqual({
+        activity: "delegating",
+        agentName: "code-reviewer",
+      });
     });
   });
 
@@ -256,6 +280,26 @@ describe("getSubagentToolCallInfo", () => {
       ).toBeUndefined();
     });
 
+    it("retains both identity and task for async follow-ups", () => {
+      const messages = transcript([
+        [
+          delegateRequest("call-1", {
+            source: "Rivet",
+            instructions: "Count markdown files",
+            async: true,
+          }),
+          delegateResponse(
+            "call-1",
+            'Task 20260807_119 started in background: "Count markdown files"',
+          ),
+        ],
+      ]);
+      expect(resolveDelegateContextForTask(messages, "20260807_119")).toEqual({
+        subagentAgentName: "Rivet",
+        subagentTaskLabel: "Count markdown files",
+      });
+    });
+
     it("returns undefined for ad-hoc delegates (no source)", () => {
       const messages = transcript([
         [
@@ -276,15 +320,15 @@ describe("getSubagentToolCallInfo", () => {
     });
   });
 
-  describe("resolveSubagentLabel", () => {
+  describe("resolveSubagentContext", () => {
     it("only resolves for load calls with a task-id source", () => {
       expect(
-        resolveSubagentLabel("load", { source: "deploy" }, []),
+        resolveSubagentContext("load", { source: "deploy" }, []),
       ).toBeUndefined();
       expect(
-        resolveSubagentLabel("delegate", { source: "Rivet" }, []),
+        resolveSubagentContext("delegate", { source: "Rivet" }, []),
       ).toBeUndefined();
-      expect(resolveSubagentLabel(undefined, {}, [])).toBeUndefined();
+      expect(resolveSubagentContext(undefined, {}, [])).toBeUndefined();
     });
   });
 

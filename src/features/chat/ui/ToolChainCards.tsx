@@ -397,7 +397,8 @@ export function ToolChainCards({
   ) => {
     const name = getToolItemName(item);
     const toolName = getToolItemToolName(item);
-    const subagentLabel = item.request?.subagentLabel;
+    const subagentAgentName = item.request?.subagentAgentName;
+    const subagentTaskLabel = item.request?.subagentTaskLabel;
     const status = getToolItemStatus(item);
     const { request, response } = item;
     const isOpen = !options.forceClose && expandedKeys.has(item.key);
@@ -430,7 +431,8 @@ export function ToolChainCards({
             <ToolCallAdapter
               name={name}
               toolName={toolName}
-              subagentLabel={subagentLabel}
+              subagentAgentName={subagentAgentName}
+              subagentTaskLabel={subagentTaskLabel}
               arguments={request?.arguments ?? {}}
               status={status}
               locations={request?.locations}
@@ -462,7 +464,8 @@ export function ToolChainCards({
           <ToolCallAdapter
             name={name}
             toolName={toolName}
-            subagentLabel={subagentLabel}
+            subagentAgentName={subagentAgentName}
+            subagentTaskLabel={subagentTaskLabel}
             arguments={request?.arguments ?? {}}
             status={status}
             locations={request?.locations}
