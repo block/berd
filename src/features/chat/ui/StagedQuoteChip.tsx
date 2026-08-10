@@ -1,4 +1,4 @@
-import { Quote } from "lucide-react";
+import { IconQuote } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { StagedQuoteItem } from "@/shared/types/messages";
 import {
@@ -38,7 +38,7 @@ export function StagedQuoteChip({
       tone="quote"
       label={stagedQuoteLabel(quote)}
       title={preview}
-      leading={<Quote className="size-3.5" />}
+      leading={<IconQuote className="size-3.5" />}
       onRemove={mode === "draft" ? () => onRemove?.(quote.id) : undefined}
       removeLabel={mode === "draft" ? t("quotes.remove") : undefined}
     />

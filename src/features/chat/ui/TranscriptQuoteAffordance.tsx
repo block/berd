@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
-import { Quote } from "lucide-react";
+import { IconQuote } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { Message, StagedQuoteItem } from "@/shared/types/messages";
 import { Button } from "@/shared/ui/button";
@@ -71,7 +71,7 @@ export function TranscriptQuoteAffordance({
         variant="subtle"
         size="xs"
         className="pointer-events-auto"
-        leftIcon={<Quote />}
+        leftIcon={<IconQuote />}
         onPointerDown={(event) => event.preventDefault()}
         onClick={() => {
           const root = rootRef.current;
