@@ -322,6 +322,7 @@ function AgentWorkItemRow({
           toolName={item.request?.toolName}
           subagentAgentName={item.request?.subagentAgentName}
           subagentTaskLabel={item.request?.subagentTaskLabel}
+          subagentTaskIsConfigured={item.request?.subagentTaskIsConfigured}
           arguments={item.request?.arguments ?? {}}
           status={status}
           locations={item.request?.locations}

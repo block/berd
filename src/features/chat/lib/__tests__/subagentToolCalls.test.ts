@@ -67,10 +67,10 @@ describe("getSubagentToolCallInfo", () => {
       expect(info?.label?.endsWith("…")).toBe(true);
     });
 
-    it("classifies delegate without any label", () => {
+    it("does not classify a delegate with no task boundary", () => {
       expect(
         getSubagentToolCallInfo({ toolName: "delegate", arguments: {} }),
-      ).toEqual({ activity: "delegating" });
+      ).toBeUndefined();
     });
   });
 
@@ -148,7 +148,7 @@ describe("getSubagentToolCallInfo", () => {
       });
     });
 
-    it("uses the full prompt when description is absent", () => {
+    it("does not classify an agent when description is absent", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "Agent",
@@ -157,23 +157,16 @@ describe("getSubagentToolCallInfo", () => {
             prompt: "Review the authentication boundary",
           },
         }),
-      ).toEqual({
-        activity: "delegating",
-        agentName: "code-reviewer",
-        label: "Review the authentication boundary",
-      });
+      ).toBeUndefined();
     });
 
-    it("classifies a named agent without a description", () => {
+    it("does not classify a named agent without a task description", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "Agent",
           arguments: { subagent_type: "code-reviewer" },
         }),
-      ).toEqual({
-        activity: "delegating",
-        agentName: "code-reviewer",
-      });
+      ).toBeUndefined();
     });
   });
 
@@ -300,6 +293,19 @@ describe("getSubagentToolCallInfo", () => {
       });
     });
 
+    it("retains a named source's configured task for async follow-ups", () => {
+      const messages = transcript([
+        [
+          delegateRequest("call-1", { source: "Rivet", async: true }),
+          delegateResponse("call-1", "Task 20260807_120 started in background"),
+        ],
+      ]);
+      expect(resolveDelegateContextForTask(messages, "20260807_120")).toEqual({
+        subagentAgentName: "Rivet",
+        subagentTaskIsConfigured: true,
+      });
+    });
+
     it("returns undefined for ad-hoc delegates (no source)", () => {
       const messages = transcript([
         [
@@ -353,6 +359,14 @@ describe("getSubagentToolCallInfo", () => {
         activity: "delegating",
         label: "Investigate the failing tests",
       });
+    });
+    it("does not classify spawn_agent without a prompt", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "spawn_agent",
+          arguments: {},
+        }),
+      ).toBeUndefined();
     });
   });
 });

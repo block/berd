@@ -579,7 +579,18 @@
       "cancellingLabeled": "Cancelando una tarea delegada no especificada · subagente #{{label}}",
       "cancellingAgent": "Cancelando la tarea delegada no especificada de {{name}}",
       "cancellingAgentLabeled": "Cancelando a {{name}} · {{label}}",
-      "delegatingAgentConfiguredTask": "Pidiendo a {{name}} que ejecute su tarea configurada"
+      "delegatingAgentConfiguredTask": "Pidiendo a {{name}} que ejecute su tarea configurada",
+      "delegatingTaskUnavailable": "Delegando una tarea (descripción no disponible)",
+      "delegatingAgentTaskUnavailable": "Delegando a {{name}} (descripción de la tarea no disponible)",
+      "waitingAgentConfiguredTask": "Esperando la tarea configurada de {{name}}",
+      "waitingTaskUnavailable": "Esperando una tarea delegada (descripción no disponible)",
+      "waitingAgentTaskUnavailable": "Esperando a {{name}} (descripción de la tarea no disponible)",
+      "checkingAgentConfiguredTask": "Comprobando la tarea configurada de {{name}}",
+      "checkingTaskUnavailable": "Comprobando una tarea delegada (descripción no disponible)",
+      "checkingAgentTaskUnavailable": "Comprobando a {{name}} (descripción de la tarea no disponible)",
+      "cancellingAgentConfiguredTask": "Cancelando la tarea configurada de {{name}}",
+      "cancellingTaskUnavailable": "Cancelando una tarea delegada (descripción no disponible)",
+      "cancellingAgentTaskUnavailable": "Cancelando a {{name}} (descripción de la tarea no disponible)"
     }
   },
   "agent_work": {

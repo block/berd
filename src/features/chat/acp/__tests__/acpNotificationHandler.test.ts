@@ -1381,13 +1381,18 @@ describe("acpNotificationHandler", () => {
   });
 
   it.each([
-    { mode: "live", lateIdentity: false },
-    { mode: "live", lateIdentity: true },
-    { mode: "replay", lateIdentity: false },
-    { mode: "replay", lateIdentity: true },
-  ] as const)("retains async delegate identity and task in $mode when load identity is late=$lateIdentity", async ({
+    { mode: "live", lateIdentity: false, configuredTask: false },
+    { mode: "live", lateIdentity: true, configuredTask: false },
+    { mode: "replay", lateIdentity: false, configuredTask: false },
+    { mode: "replay", lateIdentity: true, configuredTask: false },
+    { mode: "live", lateIdentity: false, configuredTask: true },
+    { mode: "live", lateIdentity: true, configuredTask: true },
+    { mode: "replay", lateIdentity: false, configuredTask: true },
+    { mode: "replay", lateIdentity: true, configuredTask: true },
+  ] as const)("retains async delegate identity and task in $mode when load identity is late=$lateIdentity and configured=$configuredTask", async ({
     mode,
     lateIdentity,
+    configuredTask,
   }) => {
     const sessionId = "acp-session";
     if (mode === "live") {
@@ -1416,7 +1421,7 @@ describe("acpNotificationHandler", () => {
         title: "delegate",
         rawInput: {
           source: "Rivet",
-          instructions: "Count markdown files",
+          ...(!configuredTask ? { instructions: "Count markdown files" } : {}),
           async: true,
         },
         _meta: toolMeta("delegate"),
@@ -1473,7 +1478,9 @@ describe("acpNotificationHandler", () => {
       type: "toolRequest",
       toolName: "load",
       subagentAgentName: "Rivet",
-      subagentTaskLabel: "Count markdown files",
+      ...(configuredTask
+        ? { subagentTaskIsConfigured: true }
+        : { subagentTaskLabel: "Count markdown files" }),
     });
   });
 

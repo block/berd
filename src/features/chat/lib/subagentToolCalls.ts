@@ -76,6 +76,8 @@ function toolResponseMentionsTask(
 export interface ResolvedSubagentContext {
   subagentAgentName?: string;
   subagentTaskLabel?: string;
+  /** The named Goose source owns a configured task when no instructions were supplied. */
+  subagentTaskIsConfigured?: boolean;
 }
 
 /**
@@ -121,7 +123,11 @@ export function resolveDelegateContextForTask(
         const taskLabel = stringArg(block.arguments, "instructions");
         const context: ResolvedSubagentContext = {
           ...(agentName ? { subagentAgentName: agentName } : {}),
-          ...(taskLabel ? { subagentTaskLabel: truncateLabel(taskLabel) } : {}),
+          ...(taskLabel
+            ? { subagentTaskLabel: truncateLabel(taskLabel) }
+            : agentName
+              ? { subagentTaskIsConfigured: true }
+              : {}),
         };
         return Object.keys(context).length > 0 ? context : undefined;
       }
@@ -201,22 +207,24 @@ export function getSubagentToolCallInfo(input: {
   // configured agent; description is the task.
   if (toolName === "Task" || toolName === "Agent") {
     const agentName = stringArg(args, "subagent_type");
-    const label = stringArg(args, "description") ?? stringArg(args, "prompt");
+    const label = stringArg(args, "description");
+    if (!label) return undefined;
     return {
       activity: "delegating",
       ...(agentName && agentName !== "general-purpose"
         ? { agentName: agentName.trim() }
         : {}),
-      ...(label ? { label: truncateLabel(label) } : {}),
+      label: truncateLabel(label),
     };
   }
 
   // Codex: spawn_agent collaboration tool.
   if (toolName === "spawn_agent") {
     const label = stringArg(args, "prompt");
+    if (!label) return undefined;
     return {
       activity: "delegating",
-      ...(label ? { label: truncateLabel(label) } : {}),
+      label: truncateLabel(label),
     };
   }
 

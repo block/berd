@@ -399,6 +399,7 @@ export function ToolChainCards({
     const toolName = getToolItemToolName(item);
     const subagentAgentName = item.request?.subagentAgentName;
     const subagentTaskLabel = item.request?.subagentTaskLabel;
+    const subagentTaskIsConfigured = item.request?.subagentTaskIsConfigured;
     const status = getToolItemStatus(item);
     const { request, response } = item;
     const isOpen = !options.forceClose && expandedKeys.has(item.key);
@@ -433,6 +434,7 @@ export function ToolChainCards({
               toolName={toolName}
               subagentAgentName={subagentAgentName}
               subagentTaskLabel={subagentTaskLabel}
+              subagentTaskIsConfigured={subagentTaskIsConfigured}
               arguments={request?.arguments ?? {}}
               status={status}
               locations={request?.locations}
@@ -466,6 +468,7 @@ export function ToolChainCards({
             toolName={toolName}
             subagentAgentName={subagentAgentName}
             subagentTaskLabel={subagentTaskLabel}
+            subagentTaskIsConfigured={subagentTaskIsConfigured}
             arguments={request?.arguments ?? {}}
             status={status}
             locations={request?.locations}

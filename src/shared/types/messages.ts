@@ -129,6 +129,8 @@ export interface ToolRequestContent {
   subagentAgentName?: string;
   /** Plain-language task recovered from the spawning delegate. */
   subagentTaskLabel?: string;
+  /** The named Goose source owns a configured task when no instructions were supplied. */
+  subagentTaskIsConfigured?: boolean;
 }
 
 export interface ToolResponseContent {

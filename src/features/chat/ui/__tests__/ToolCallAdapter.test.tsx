@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactLinkCandidate } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { ToolCallLocation } from "@/shared/types/messages";
+import enChat from "@/shared/i18n/locales/en/chat.json";
+import esChat from "@/shared/i18n/locales/es/chat.json";
 import { ToolCallAdapter } from "../ToolCallAdapter";
 
 const mockResolveMarkdownHref =
@@ -11,6 +13,24 @@ const mockPathExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 const mockOpenInApp =
   vi.fn<(path: string, filename?: string) => Promise<void>>();
+
+const subagentLocaleKeys = [
+  "delegatingAgentConfiguredTask",
+  "waitingAgentConfiguredTask",
+  "checkingAgentConfiguredTask",
+  "cancellingAgentConfiguredTask",
+] as const;
+
+describe("ToolCallAdapter — subagent locale parity", () => {
+  it("keeps every subagent law string in English and Spanish", () => {
+    const en = enChat.tools.subagent;
+    const es = esChat.tools.subagent;
+    for (const key of subagentLocaleKeys) {
+      expect(en[key], `English key ${key}`).toBeTruthy();
+      expect(es[key], `Spanish key ${key}`).toBeTruthy();
+    }
+  });
+});
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
@@ -160,30 +180,34 @@ describe("ToolCallAdapter — subagent laws", () => {
   });
 
   it.each([
-    {
-      toolName: "delegate",
-      arguments: {},
-      title: "Delegating an unspecified task to a subagent",
-    },
+    { toolName: "delegate", arguments: {} },
     {
       toolName: "Agent",
       arguments: { subagent_type: "code-reviewer" },
-      title: "Delegating an unspecified task to code-reviewer",
     },
-    {
-      toolName: "spawn_agent",
-      arguments: {},
-      title: "Delegating an unspecified task to a subagent",
-    },
-  ])("explicitly describes malformed $toolName activity as an unspecified task", ({
+    { toolName: "spawn_agent", arguments: {} },
+  ])("falls back to the ordinary tool title for malformed $toolName activity", ({
     toolName,
     arguments: args,
-    title,
   }) => {
     renderAdapter({ name: toolName, toolName, arguments: args });
 
     expect(
-      screen.getByRole("button", { name: new RegExp(title, "i") }),
+      screen.getByRole("button", { name: new RegExp(`^${toolName}$`, "i") }),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the ordinary tool title for unresolved async loads", () => {
+    renderAdapter({
+      name: "Loading source 20260807_72",
+      toolName: "load",
+      arguments: { source: "20260807_72" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Loading source 20260807_72/i,
+      }),
     ).toBeInTheDocument();
   });
 
@@ -199,6 +223,22 @@ describe("ToolCallAdapter — subagent laws", () => {
     expect(
       screen.getByRole("button", {
         name: /Waiting on Rivet · Count markdown files/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("retains a recovered configured task on async follow-ups", () => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      subagentTaskIsConfigured: true,
+      arguments: { source: "20260807_72", peek: true },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Checking Rivet’s configured task/i,
       }),
     ).toBeInTheDocument();
   });

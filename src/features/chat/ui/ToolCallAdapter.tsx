@@ -22,10 +22,7 @@ import {
 } from "@/features/chat/lib/toolCallPresentation";
 import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
-import {
-  getSubagentToolCallInfo,
-  shortTaskId,
-} from "@/features/chat/lib/subagentToolCalls";
+import { getSubagentToolCallInfo } from "@/features/chat/lib/subagentToolCalls";
 
 interface ToolCallAdapterProps {
   className?: string;
@@ -36,6 +33,8 @@ interface ToolCallAdapterProps {
   subagentAgentName?: string;
   /** Plain-language task recovered from the spawning delegate. */
   subagentTaskLabel?: string;
+  /** Whether the named source owns a configured task with no inline label. */
+  subagentTaskIsConfigured?: boolean;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   locations?: ToolCallLocation[];
@@ -318,7 +317,8 @@ function subagentTitle(
   info: NonNullable<ReturnType<typeof getSubagentToolCallInfo>>,
   resolvedAgentName?: string,
   resolvedTaskLabel?: string,
-): string {
+  resolvedTaskIsConfigured?: boolean,
+): string | undefined {
   // Explicit key map keeps the i18n usage statically checkable.
   const keys = {
     delegating: [
@@ -347,25 +347,39 @@ function subagentTitle(
     ],
   } as const;
   const [plain, labeled, agent, agentLabeled] = keys[info.activity];
+  const configuredTaskKeys = {
+    delegating: "tools.subagent.delegatingAgentConfiguredTask",
+    waiting: "tools.subagent.waitingAgentConfiguredTask",
+    checking: "tools.subagent.checkingAgentConfiguredTask",
+    cancelling: "tools.subagent.cancellingAgentConfiguredTask",
+  } as const;
+  const taskLabeledKeys = {
+    delegating: "tools.subagent.delegatingLabeled",
+    waiting: "tools.subagent.waitingTaskLabeled",
+    checking: "tools.subagent.checkingTaskLabeled",
+    cancelling: "tools.subagent.cancellingTaskLabeled",
+  } as const;
   // Agent name comes from the call arguments (delegate source) or is
   // resolved from the transcript (load of a task spawned by a named
   // delegate). It replaces the word "subagent"; the task description is
   // kept alongside it: "Delegating to Rivet · Count markdown files…".
   const agentName = info.agentName ?? resolvedAgentName;
   const taskLabel = info.label ?? resolvedTaskLabel;
-  if (agentName && info.sourceDefinesTask) {
-    return t("tools.subagent.delegatingAgentConfiguredTask", {
-      name: agentName,
-    });
+  if (agentName && (info.sourceDefinesTask || resolvedTaskIsConfigured)) {
+    return t(configuredTaskKeys[info.activity], { name: agentName });
   }
   if (agentName && taskLabel) {
     return t(agentLabeled, { name: agentName, label: taskLabel });
   }
   if (agentName) return t(agent, { name: agentName });
-  if (info.taskId) {
-    return t(labeled, { label: shortTaskId(info.taskId) });
+  if (taskLabel) {
+    return info.taskId
+      ? t(taskLabeledKeys[info.activity], { label: taskLabel })
+      : t(labeled, { label: taskLabel });
   }
-  return taskLabel ? t(labeled, { label: taskLabel }) : t(plain);
+  // A task id is implementation identity, not a plain-language task. Keep
+  // unresolved follow-ups out of the specialized subagent presentation.
+  return info.taskId ? undefined : t(plain);
 }
 
 function sentenceCaseToolTitle(name: string): string {
@@ -396,6 +410,7 @@ export function ToolCallAdapter({
   toolName,
   subagentAgentName,
   subagentTaskLabel,
+  subagentTaskIsConfigured,
   arguments: args,
   status,
   locations,
@@ -427,9 +442,16 @@ export function ToolCallAdapter({
     () => getSubagentToolCallInfo({ toolName, arguments: args }),
     [toolName, args],
   );
-  const displayName = subagentInfo
-    ? subagentTitle(t, subagentInfo, subagentAgentName, subagentTaskLabel)
-    : sentenceCaseToolTitle(name);
+  const displayName =
+    (subagentInfo
+      ? subagentTitle(
+          t,
+          subagentInfo,
+          subagentAgentName,
+          subagentTaskLabel,
+          subagentTaskIsConfigured,
+        )
+      : undefined) ?? sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");
   const headerFileLabel = pathRow?.value;

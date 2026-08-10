@@ -584,7 +584,18 @@
       "cancellingLabeled": "Cancelling an unspecified delegated task · subagent #{{label}}",
       "cancellingAgent": "Cancelling {{name}}’s unspecified delegated task",
       "cancellingAgentLabeled": "Cancelling {{name}} · {{label}}",
-      "delegatingAgentConfiguredTask": "Asking {{name}} to run its configured task"
+      "delegatingAgentConfiguredTask": "Asking {{name}} to run its configured task",
+      "delegatingTaskUnavailable": "Delegating a task (description unavailable)",
+      "delegatingAgentTaskUnavailable": "Delegating to {{name}} (task description unavailable)",
+      "waitingAgentConfiguredTask": "Waiting on {{name}}’s configured task",
+      "waitingTaskUnavailable": "Waiting on a delegated task (description unavailable)",
+      "waitingAgentTaskUnavailable": "Waiting on {{name}} (task description unavailable)",
+      "checkingAgentConfiguredTask": "Checking {{name}}’s configured task",
+      "checkingTaskUnavailable": "Checking a delegated task (description unavailable)",
+      "checkingAgentTaskUnavailable": "Checking on {{name}} (task description unavailable)",
+      "cancellingAgentConfiguredTask": "Cancelling {{name}}’s configured task",
+      "cancellingTaskUnavailable": "Cancelling a delegated task (description unavailable)",
+      "cancellingAgentTaskUnavailable": "Cancelling {{name}} (task description unavailable)"
     }
   },
   "agent_work": {
