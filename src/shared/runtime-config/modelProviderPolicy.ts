@@ -88,12 +88,13 @@ export function resolveManagedGooseProviderSelection(
 }
 
 /**
- * Resolve a managed provider migration only after the target provider proves
- * support for the selected (or fallback) model. Runtime config metadata is
- * advisory, so it is never evidence for this decision.
+ * Read a provider's live model inventory as authoritative evidence for managed
+ * configuration decisions. Both ACP acquisition and the inventory RPC share
+ * one deadline; a timeout invalidates the connection so a later proof starts
+ * from fresh state. Results from an invalidated inventory generation are never
+ * accepted.
  */
-
-async function readProvenTargetInventory(
+export async function readBoundedProvenModelInventory(
   providerId: string,
 ): Promise<ReadonlySet<string>> {
   const generationAtStart = providerModelInventoryGeneration(providerId);
@@ -145,7 +146,9 @@ export async function resolveValidatedManagedGooseProviderSelection(
 
   let supportedModelIds: ReadonlySet<string>;
   try {
-    supportedModelIds = await readProvenTargetInventory(resolved.providerId);
+    supportedModelIds = await readBoundedProvenModelInventory(
+      resolved.providerId,
+    );
   } catch (error) {
     throw new Error(
       `Cannot verify models for migrated provider ${resolved.providerId}; provider selection was not changed.`,

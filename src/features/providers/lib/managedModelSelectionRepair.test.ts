@@ -11,6 +11,7 @@ import { notifyProviderModelInventoryInvalidated } from "./providerModelInventor
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: vi.fn(),
+  invalidateClientConnection: vi.fn().mockResolvedValue(undefined),
 }));
 
 const managedConfig: RuntimeConfig = {
@@ -172,6 +173,69 @@ describe("repairManagedGooseModelSelection", () => {
     expect(supportedModelsList).toHaveBeenCalledTimes(2);
   });
 
+  it("releases same-provider proof after stalled client acquisition", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getClient).mockReturnValue(new Promise(() => {}));
+
+    const repair = repairManagedGooseModelSelection(
+      { providerId: "databricks_v2", modelId: "future-model" },
+      "session",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(repair).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "future-model",
+    });
+
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["future-model"],
+        }),
+      },
+    } as never);
+    await expect(
+      repairManagedGooseModelSelection(
+        { providerId: "databricks_v2", modelId: "future-model" },
+        "session",
+      ),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "future-model",
+    });
+  });
+
+  it("releases same-provider proof after stalled inventory RPC", async () => {
+    vi.useFakeTimers();
+    const stalledInventory = new Promise<{ models: string[] }>(() => {});
+    const supportedModelsList = vi
+      .fn()
+      .mockReturnValueOnce(stalledInventory)
+      .mockResolvedValueOnce({ models: ["future-model"] });
+    vi.mocked(getClient).mockResolvedValue({
+      goose: { GooseUnstableProvidersSupportedModelsList: supportedModelsList },
+    } as never);
+
+    const repair = repairManagedGooseModelSelection(
+      { providerId: "databricks_v2", modelId: "future-model" },
+      "session",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(repair).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "future-model",
+    });
+    await expect(
+      repairManagedGooseModelSelection(
+        { providerId: "databricks_v2", modelId: "future-model" },
+        "session",
+      ),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "future-model",
+    });
+    expect(supportedModelsList).toHaveBeenCalledTimes(2);
+  });
   it("preserves the selected model when live inventory cannot be read", async () => {
     vi.mocked(getClient).mockRejectedValue(new Error("offline"));
 

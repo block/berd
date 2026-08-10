@@ -1,5 +1,4 @@
 import packageJson from "../../../../package.json";
-import { getClient } from "@/shared/api/acpConnection";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import {
@@ -7,6 +6,7 @@ import {
   subscribeToProviderModelInventoryInvalidation,
 } from "@/shared/runtime-config/providerModelInventoryInvalidation";
 import {
+  readBoundedProvenModelInventory,
   resolveManagedGooseProviderSelection,
   resolveValidatedManagedGooseProviderSelection,
   type GooseProviderSelection,
@@ -51,12 +51,7 @@ async function validatedModelIds(
   let request!: Promise<ReadonlySet<string> | null>;
   request = (async () => {
     try {
-      const client = await getClient();
-      const response =
-        await client.goose.GooseUnstableProvidersSupportedModelsList({
-          providerId,
-        });
-      const modelIds = new Set<string>(response.models as string[]);
+      const modelIds = await readBoundedProvenModelInventory(providerId);
       if (generationAtStart !== providerModelInventoryGeneration(providerId)) {
         return validatedModelIds(providerId);
       }
@@ -66,6 +61,9 @@ async function validatedModelIds(
       });
       return modelIds;
     } catch (error) {
+      if (generationAtStart !== providerModelInventoryGeneration(providerId)) {
+        return validatedModelIds(providerId);
+      }
       console.warn("Could not validate managed provider model inventory", {
         providerId,
         error: error instanceof Error ? error.message : String(error),
