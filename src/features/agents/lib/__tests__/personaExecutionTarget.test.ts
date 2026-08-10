@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 import {
   personaExecutionTarget,
   personaTargetMigration,
@@ -57,6 +58,68 @@ describe("personaExecutionTarget", () => {
       provider: "goose",
       modelProviderId: "claude-acp",
       model: "sonnet",
+    };
+
+    expect(personaExecutionTarget(persona, context())).toBeUndefined();
+    expect(personaTargetMigration(persona, context())).toEqual({
+      provider: null,
+      modelProviderId: null,
+      model: null,
+    });
+  });
+
+  it("never materializes an agent provider as a Goose target without a model", () => {
+    const persona = { provider: "goose", modelProviderId: "claude-acp" };
+
+    expect(personaExecutionTarget(persona, context())).toEqual({
+      harnessId: "goose",
+    });
+    expect(personaTargetMigration(persona, context())).toEqual({
+      provider: "goose",
+      modelProviderId: null,
+      model: null,
+    });
+  });
+
+  it("owns an external harness model provider and repairs legacy display metadata", () => {
+    const persona = {
+      provider: "claude-acp",
+      modelProviderId: "openai",
+      model: "sonnet",
+    };
+    const target = personaExecutionTarget(
+      persona,
+      context([{ id: "sonnet", displayName: "Sonnet" }]),
+    );
+
+    expect(target).toEqual({
+      harnessId: "claude-acp",
+      modelProviderId: "claude-acp",
+      modelId: "sonnet",
+      modelName: "Sonnet",
+    });
+    expect(gooseServeSelectionFromExecutionTarget(target)).toEqual({
+      providerId: "claude-acp",
+      modelId: "sonnet",
+      modelName: "Sonnet",
+    });
+    expect(
+      personaTargetMigration(
+        persona,
+        context([{ id: "sonnet", displayName: "Sonnet" }]),
+      ),
+    ).toEqual({
+      provider: "claude-acp",
+      modelProviderId: "claude-acp",
+      model: "sonnet",
+    });
+  });
+
+  it("returns no target for an unknown persisted harness", () => {
+    const persona = {
+      provider: "deleted-harness",
+      modelProviderId: "openai",
+      model: "gpt-5",
     };
 
     expect(personaExecutionTarget(persona, context())).toBeUndefined();

@@ -92,19 +92,20 @@ function persistedModelProviderId(
   harnessId: string,
   catalogEntries: ProviderCatalogEntry[],
 ): string | undefined {
+  // A non-Goose harness is its own provider boundary. Its persisted model
+  // provider is display metadata from an older representation, never an
+  // independent provider that may be sent to Goose.
+  if (harnessId !== "goose") return harnessId;
+
   const persistedProviderId = persona.modelProviderId?.trim();
-  if (persistedProviderId) {
-    const persistedProviderIsAgent = isAgentProviderId(
-      persistedProviderId,
-      catalogEntries,
-    );
-    if (!(harnessId === "goose" && persistedProviderIsAgent)) {
-      return canonicalModelProviderId(persistedProviderId, catalogEntries);
-    }
+  if (
+    persistedProviderId &&
+    !isAgentProviderId(persistedProviderId, catalogEntries)
+  ) {
+    return canonicalModelProviderId(persistedProviderId, catalogEntries);
   }
   if (
     persona.provider?.trim() &&
-    harnessId === "goose" &&
     (INTERNAL_DATABRICKS_KEYS.has(normalizeProviderKey(persona.provider)) ||
       resolveModelProviderCatalogIdStrictFromEntries(
         catalogEntries,
@@ -113,7 +114,7 @@ function persistedModelProviderId(
   ) {
     return canonicalModelProviderId(persona.provider, catalogEntries);
   }
-  return harnessId === "goose" ? undefined : harnessId;
+  return undefined;
 }
 
 /**
