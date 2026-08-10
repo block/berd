@@ -440,8 +440,6 @@ export function AgentBuilderRail({
   const contentFieldValue = data?.content ?? "";
   const isPlaceholderContent = contentFieldValue === PLACEHOLDER_AGENT_BODY;
   const instructionsFieldValue = isPlaceholderContent ? "" : contentFieldValue;
-  const providerRequired = provider.trim().length > 0;
-  const modelRequired = model.trim().length > 0;
   const avatarRequired = Boolean(effectiveAvatar);
   const nameRequired = nameFieldValue.trim().length > 0;
   const instructionsRequired =
@@ -452,12 +450,6 @@ export function AgentBuilderRail({
       ? t("builderRail.requiredAvatar")
       : null,
     !nameRequired ? t("builderRail.requiredName") : null,
-    requiresNewDraftFields && !providerRequired
-      ? t("builderRail.requiredProvider")
-      : null,
-    requiresNewDraftFields && !modelRequired
-      ? t("builderRail.requiredModel")
-      : null,
     requiresNewDraftFields && !instructionsRequired
       ? t("builderRail.requiredInstructions")
       : null,

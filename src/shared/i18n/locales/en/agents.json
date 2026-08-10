@@ -97,8 +97,6 @@
     "completeRequiredFields": "Required: {{fields}}.",
     "requiredAvatar": "avatar",
     "requiredName": "name",
-    "requiredProvider": "provider",
-    "requiredModel": "model",
     "requiredInstructions": "instructions",
     "startFreshDraft": "Start fresh draft",
     "leaveDraftTitle": "Save this agent draft?",

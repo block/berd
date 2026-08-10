@@ -986,6 +986,46 @@ describe("AgentBuilderRail", () => {
     ).not.toHaveAttribute("aria-disabled", "true");
   });
 
+  it("promotes an otherwise-complete draft without provider or model overrides", async () => {
+    const { saveNow } = mockHook({
+      data: {
+        ...baseSource,
+        name: "Snark",
+        content: "Be snarky.",
+        properties: {
+          draft: true,
+          builderSessionId: "s1",
+          avatar: "app-avatar:gloopy-1",
+        },
+      },
+    });
+    vi.mocked(promoteDraft).mockResolvedValue({
+      ...baseSource,
+      name: "Snark",
+      content: "Be snarky.",
+      properties: {
+        avatar: "app-avatar:gloopy-1",
+      },
+    });
+
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+
+    const saveButton = screen.getByRole("button", { name: /save changes/i });
+    expect(saveButton).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(saveNow).toHaveBeenCalled();
+      expect(promoteDraft).toHaveBeenCalledWith("s1");
+    });
+  });
+
   it("promotes the draft when save changes is clicked with complete fields", async () => {
     const { saveNow } = mockHook({
       data: {

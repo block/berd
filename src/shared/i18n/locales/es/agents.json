@@ -97,8 +97,6 @@
     "completeRequiredFields": "Obligatorio: {{fields}}.",
     "requiredAvatar": "avatar",
     "requiredName": "nombre",
-    "requiredProvider": "proveedor",
-    "requiredModel": "modelo",
     "requiredInstructions": "instrucciones",
     "startFreshDraft": "Iniciar borrador nuevo",
     "leaveDraftTitle": "¿Guardar este borrador de agente?",

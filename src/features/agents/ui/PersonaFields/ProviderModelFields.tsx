@@ -132,10 +132,12 @@ export function ProviderModelFields({
               isReadOnly && "cursor-not-allowed opacity-70",
             )}
           >
-            <SelectValue placeholder={t("common:labels.none")} />
+            <SelectValue placeholder={t("common:labels.default")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">{t("common:labels.none")}</SelectItem>
+            <SelectItem value="__none__">
+              {t("common:labels.default")}
+            </SelectItem>
             {acpProviders.map((providerOption) => {
               const readiness =
                 agentReadiness.get(providerOption.id) ?? "not_ready";
@@ -223,7 +225,9 @@ export function ProviderModelFields({
             />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__none__">{t("common:labels.none")}</SelectItem>
+            <SelectItem value="__none__">
+              {t("common:labels.default")}
+            </SelectItem>
             {hasSavedModelOutsideInventory && (
               <SelectItem value={`__saved__:${model}`}>
                 {t("editor.savedModelUnavailable", { model })}
