@@ -1188,13 +1188,15 @@ async fn execute_local_fix(
 }
 
 /// Managed-runtime locations threaded into `run_doctor_impl`, which stays
-/// `AppHandle`-free. `node_root` is `<app-data>/packages/node`; `npm_prefix_dir`
-/// is the Berd-private npm global prefix; `shim_bin_dir` holds the managed
-/// bridge shims.
+/// `AppHandle`-free. `node_root` is `<app-data>/packages/node`;
+/// `npm_prefix_dir` configures npm itself, while `npm_prefix_bin_dir` is the
+/// platform-aware location of that prefix's executables (`<prefix>` on Windows,
+/// `<prefix>/bin` on Unix). `shim_bin_dir` holds managed bridge shims.
 #[derive(Default)]
 struct ManagedRuntimePaths {
     node_root: Option<PathBuf>,
     npm_prefix_dir: Option<PathBuf>,
+    npm_prefix_bin_dir: Option<PathBuf>,
     shim_bin_dir: Option<PathBuf>,
 }
 
@@ -1203,14 +1205,9 @@ impl ManagedRuntimePaths {
         Self {
             node_root: managed_node::managed_node_root(app_handle),
             npm_prefix_dir: managed_acp_tools::npm_prefix_dir(app_handle),
+            npm_prefix_bin_dir: managed_acp_tools::npm_prefix_bin_dir(app_handle),
             shim_bin_dir: managed_acp_tools::managed_shim_bin_dir(app_handle),
         }
-    }
-
-    fn npm_prefix_bin_dir(&self) -> Option<PathBuf> {
-        self.npm_prefix_dir
-            .as_ref()
-            .map(|dir| managed_acp_tools::npm_global_bin_dir(dir))
     }
 }
 
@@ -1379,7 +1376,7 @@ async fn run_doctor_impl(
     }
     if let Some(check) = run_node_runtime_check(
         managed_runtime.node_root.clone(),
-        managed_runtime.npm_prefix_bin_dir(),
+        managed_runtime.npm_prefix_bin_dir.clone(),
         managed_runtime.shim_bin_dir.clone(),
     )
     .await
