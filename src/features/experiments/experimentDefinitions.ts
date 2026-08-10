@@ -53,8 +53,6 @@ export const VOICE_CONVERSATION_EXPERIMENT_ID = "voice-conversation";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
-export const GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID = "gloopie-avatar-creator";
-
 export const AVATAR_COLLECTION_PAGE_EXPERIMENT_ID = "avatar-collection-page";
 
 export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
@@ -98,25 +96,10 @@ export const EXPERIMENT_DEFINITIONS = [
     descriptionKey: "experiments.starterTasks.description",
   },
   {
-    id: GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
-    titleKey: "experiments.gloopieAvatarCreator.title",
-    descriptionKey: "experiments.gloopieAvatarCreator.description",
-  },
-  {
     id: VOICE_CONVERSATION_EXPERIMENT_ID,
     titleKey: "experiments.voiceConversation.title",
     descriptionKey: "experiments.voiceConversation.description",
     defaultEnabled: true,
-  },
-  {
-    id: GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID,
-    titleKey: "experiments.gloopieAvatarCreator.title",
-    descriptionKey: "experiments.gloopieAvatarCreator.description",
-    // Lets users generate a custom animated "gloopie" avatar from the agent
-    // builder. Gated because generation calls the DAIM Apps service (requires
-    // WARP), can take minutes, and writes generated media into the user avatar
-    // store. No explicit default, so it follows the global auto-enable
-    // preference: on in dev builds, off in production.
   },
   {
     id: AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,

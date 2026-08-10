@@ -224,10 +224,6 @@
       "title": "Renderizador virtual de transcripciones"
     },
     "title": "Experimentos",
-    "gloopieAvatarCreator": {
-      "description": "Crea un avatar gloopie animado personalizado desde el generador de agentes. La generación se ejecuta en un servicio interno y requiere Cloudflare WARP.",
-      "title": "Crea tu propio gloopie"
-    },
     "starterTasks": {
       "title": "Tareas iniciales de incorporación",
       "description": "Muestra la nota adhesiva de tareas iniciales en Inicio para probar el flujo de incorporación.",

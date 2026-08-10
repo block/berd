@@ -1,10 +1,4 @@
-import {
-  ArrowLeft,
-  Check,
-  Download,
-  RefreshCw,
-  WandSparkles,
-} from "lucide-react";
+import { ArrowLeft, Check, Download, RefreshCw } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -35,12 +29,6 @@ interface AvatarLibraryPickerProps {
    */
   selectedCollectionId?: string | null;
   onSelectCollection?: (collectionId: string | null) => void;
-  /**
-   * When provided, a "Create your own" card is rendered as the first tile in
-   * the collections grid, alongside the bundled collections. Clicking it hands
-   * off to the custom gloopie generation flow.
-   */
-  onCreateYourOwn?: () => void;
 }
 
 export function getCachedAvatarMedia(
@@ -62,7 +50,6 @@ export function AvatarLibraryPicker({
   disabled = false,
   selectedCollectionId: controlledCollectionId,
   onSelectCollection,
-  onCreateYourOwn,
 }: AvatarLibraryPickerProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isControlled = controlledCollectionId !== undefined;
@@ -352,28 +339,6 @@ export function AvatarLibraryPicker({
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {onCreateYourOwn ? (
-            <button
-              key="create-your-own"
-              type="button"
-              className={cn(
-                "flex w-full items-center gap-4 rounded-xl bg-popover p-4 text-left",
-                "border border-border/80 transition-colors",
-                "hover:border-border hover:bg-accent",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                disabled && "cursor-not-allowed opacity-60",
-              )}
-              disabled={disabled}
-              onClick={onCreateYourOwn}
-            >
-              <span className="flex size-14 shrink-0 items-center justify-center">
-                <WandSparkles className="size-6 text-foreground" />
-              </span>
-              <span className="truncate text-base text-foreground">
-                {t("editor.avatarCreateYourOwn")}
-              </span>
-            </button>
-          ) : null}
           {library.loading && avatarCollections.length === 0
             ? [0, 1, 2].map(renderCollectionSkeleton)
             : avatarCollections.map(renderCollectionButton)}

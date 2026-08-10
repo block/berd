@@ -12,7 +12,6 @@ use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
-use uuid::Uuid;
 
 const AVATAR_CDN_BASE: &str = "https://dwwgwmfqqjotj.cloudfront.net/avatars/";
 const APP_AVATAR_REF_PREFIX: &str = "app-avatar:";
@@ -1520,67 +1519,6 @@ fn user_avatar_paths(app: &AppHandle) -> Result<UserAvatarPaths, String> {
         meta: root.join("meta"),
         media: root.join("media"),
     })
-}
-
-pub(crate) fn write_user_avatar(
-    app: &AppHandle,
-    bytes: &[u8],
-    mime_type: &str,
-) -> Result<String, String> {
-    write_user_avatar_with_alpha_mode(app, bytes, mime_type, None)
-}
-
-pub(crate) fn write_user_avatar_with_alpha_mode(
-    app: &AppHandle,
-    bytes: &[u8],
-    mime_type: &str,
-    alpha_mode: Option<&str>,
-) -> Result<String, String> {
-    validate_user_avatar_alpha_mode(alpha_mode)?;
-    let extension = user_avatar_extension(mime_type)
-        .ok_or_else(|| format!("Unsupported generated avatar media type: {mime_type}"))?;
-    let id = format!("gloopie-{}", Uuid::new_v4());
-    validate_avatar_id(&id)?;
-
-    let paths = user_avatar_paths(app)?;
-    let media_relative_path = format!("{id}.{extension}");
-    let media_path = paths.media.join(&media_relative_path);
-    atomic_write(&media_path, bytes)?;
-
-    let created_at_ms = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis());
-    let manifest = UserAvatarManifest {
-        id: id.clone(),
-        path: media_relative_path,
-        mime_type: mime_type.to_string(),
-        alpha_mode: alpha_mode.map(str::to_string),
-        byte_size: bytes.len() as u64,
-        created_at_ms,
-    };
-    let manifest_bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|error| format!("Failed to serialize generated avatar manifest: {error}"))?;
-    atomic_write(&paths.meta.join(format!("{id}.json")), &manifest_bytes)?;
-
-    Ok(format!("{USER_AVATAR_REF_PREFIX}{id}"))
-}
-
-pub(crate) fn read_user_avatar_bytes(
-    app: &AppHandle,
-    avatar_ref: &str,
-) -> Result<(Vec<u8>, String), String> {
-    let avatar_id = parse_user_avatar_ref(avatar_ref)?
-        .ok_or_else(|| "Invalid user avatar reference".to_string())?;
-    let paths = user_avatar_paths(app)?;
-    let manifest = read_user_avatar_manifest(&paths, &avatar_id)?;
-    let media_path = user_avatar_media_path(&paths, &manifest)?;
-    let bytes = fs::read(&media_path).map_err(|error| {
-        format!(
-            "Failed to read generated avatar media '{}': {error}",
-            media_path.display()
-        )
-    })?;
-    Ok((bytes, manifest.mime_type))
 }
 
 fn cached_user_avatar_for_id(

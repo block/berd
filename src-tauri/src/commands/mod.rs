@@ -17,7 +17,6 @@ pub mod feedback;
 pub mod git;
 pub mod git_changes;
 pub mod global_shortcut;
-pub mod gloopies;
 pub mod home_widget_media;
 pub mod layout;
 pub mod message_queues;

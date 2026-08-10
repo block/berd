@@ -224,10 +224,6 @@
       "title": "Transcript virtual renderer"
     },
     "title": "Experiments",
-    "gloopieAvatarCreator": {
-      "description": "Create a custom animated gloopie avatar from the agent builder. Generation runs on an internal service and needs Cloudflare WARP.",
-      "title": "Create your own gloopie"
-    },
     "starterTasks": {
       "title": "Onboarding starter tasks",
       "description": "Show the starter-task sticky note on Home for trying the onboarding flow.",

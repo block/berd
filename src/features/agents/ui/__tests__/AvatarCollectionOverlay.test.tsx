@@ -3,10 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { AvatarCatalog } from "@/shared/avatars/catalog";
 import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
-import type {
-  AvatarCollectionGloopieProps,
-  AvatarCollectionGloopieReview,
-} from "../AvatarCollectionOverlay";
 import { AvatarCollectionOverlay } from "../AvatarCollectionOverlay";
 
 function entry(id: string, collectionId: string) {
@@ -70,40 +66,6 @@ function libraryWith(
     retryCatalog: vi.fn(),
     openCollection: vi.fn().mockResolvedValue(undefined),
     isCollectionCached: () => true,
-    ...overrides,
-  };
-}
-
-function gloopieWith(
-  overrides: Partial<AvatarCollectionGloopieProps> = {},
-): AvatarCollectionGloopieProps {
-  return {
-    object: "",
-    setObject: vi.fn(),
-    start: vi.fn(),
-    onHandoff: vi.fn(),
-    hasActiveWork: false,
-    onOpenActiveWork: vi.fn(),
-    ...overrides,
-  };
-}
-
-function reviewWith(
-  overrides: Partial<AvatarCollectionGloopieReview> = {},
-): AvatarCollectionGloopieReview {
-  return {
-    options: [
-      { id: "one", avatarRef: "user-avatar:one" },
-      { id: "two", avatarRef: "user-avatar:two" },
-      { id: "three", avatarRef: "user-avatar:three" },
-      { id: "four", avatarRef: "user-avatar:four" },
-    ],
-    chosenOptionId: null,
-    chooseOption: vi.fn(),
-    animate: vi.fn(),
-    regenerate: vi.fn(),
-    startOver: vi.fn(),
-    onHandoff: vi.fn(),
     ...overrides,
   };
 }
@@ -289,8 +251,8 @@ describe("AvatarCollectionOverlay", () => {
       "Open the fuzzies collection",
       "Open the robots collection",
     ]);
+    expect(overlay().getAllByText("Collection")).toHaveLength(4);
   });
-
   it("clears a pending highlight when going up to the collections level", () => {
     renderWithProviders(
       <AvatarCollectionOverlay
@@ -400,346 +362,6 @@ describe("AvatarCollectionOverlay", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens the create prompt on the glass and hands off after generate", () => {
-    const gloopie = gloopieWith({ object: "a friendly teapot" });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    fireEvent.click(
-      overlay().getAllByRole("button", { name: /create your own/i })[0],
-    );
-
-    // The prompt renders on the overlay itself, under the swapped title.
-    expect(
-      overlay().getByRole("heading", { name: /create your own/i }),
-    ).toBeInTheDocument();
-    expect(
-      overlay().getByPlaceholderText(/friendly teapot/i),
-    ).toBeInTheDocument();
-
-    fireEvent.click(overlay().getByRole("button", { name: /create gloopie/i }));
-    // Generation starts immediately; the handoff waits for the exit.
-    expect(gloopie.start).toHaveBeenCalledTimes(1);
-    expect(gloopie.onHandoff).not.toHaveBeenCalled();
-    finishExitAnimation();
-    expect(gloopie.onHandoff).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables generate until a prompt is entered and backs out of the prompt in place", () => {
-    const gloopie = gloopieWith({ object: "" });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    fireEvent.click(
-      overlay().getAllByRole("button", { name: /create your own/i })[0],
-    );
-    expect(
-      overlay().getByRole("button", { name: /create gloopie/i }),
-    ).toBeDisabled();
-
-    // Back returns to the collections canvas without closing the overlay.
-    fireEvent.click(
-      overlay().getByRole("button", { name: /back to avatar collections/i }),
-    );
-    expect(
-      overlay().getByRole("heading", { name: /avatar collections/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("routes the create tile to in-flight work instead of the prompt", () => {
-    const gloopie = gloopieWith({ hasActiveWork: true });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    fireEvent.click(
-      overlay().getAllByRole("button", { name: /gloopie in progress/i })[0],
-    );
-    finishExitAnimation();
-    expect(gloopie.onOpenActiveWork).toHaveBeenCalledTimes(1);
-    expect(
-      overlay().queryByPlaceholderText(/friendly teapot/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it("keeps the takeover open while generating instead of handing off", () => {
-    const gloopie = gloopieWith({
-      object: "a friendly teapot",
-      stayOpenWhileGenerating: true,
-    });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    fireEvent.click(
-      overlay().getAllByRole("button", { name: /create your own/i })[0],
-    );
-    fireEvent.click(overlay().getByRole("button", { name: /create gloopie/i }));
-
-    // Generation started, but the surface stays put so the options can land
-    // here rather than back in the builder rail.
-    expect(gloopie.start).toHaveBeenCalledTimes(1);
-    finishExitAnimation();
-    expect(gloopie.onHandoff).not.toHaveBeenCalled();
-    expect(
-      screen.queryByTestId("avatar-collection-overlay"),
-    ).toBeInTheDocument();
-  });
-
-  it("shows generation progress on the glass and can background the work", () => {
-    const onContinueSetup = vi.fn();
-    const gloopie = gloopieWith({
-      object: "a friendly teapot",
-      hasActiveWork: true,
-      stayOpenWhileGenerating: true,
-      generating: { onContinueSetup, onDiscard: vi.fn() },
-    });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    expect(
-      overlay().getByRole("heading", { name: /creating your gloopie/i }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      overlay().getByRole("button", { name: /continue setting up agent/i }),
-    );
-    finishExitAnimation();
-    expect(onContinueSetup).toHaveBeenCalledTimes(1);
-  });
-
-  it("picks a generated option on the glass and animates it", () => {
-    const review = reviewWith({ chosenOptionId: "two" });
-    const gloopie = gloopieWith({
-      object: "a friendly teapot",
-      hasActiveWork: true,
-      stayOpenWhileGenerating: true,
-      review,
-    });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    // The choose step replaces the collection canvas on the same surface.
-    expect(
-      overlay().getByRole("heading", { name: /pick your favorite/i }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      overlay().getByRole("button", { name: /gloopie option 1 of 4/i }),
-    );
-    expect(review.chooseOption).toHaveBeenCalledWith("one");
-
-    fireEvent.click(overlay().getByRole("button", { name: /^animate$/i }));
-    // Animation starts immediately; the handoff waits for the exit animation.
-    expect(review.animate).toHaveBeenCalledTimes(1);
-    expect(review.onHandoff).not.toHaveBeenCalled();
-    finishExitAnimation();
-    expect(review.onHandoff).toHaveBeenCalledTimes(1);
-  });
-
-  it("cannot animate before an option is chosen", () => {
-    const review = reviewWith({ chosenOptionId: null });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopieWith({ hasActiveWork: true, review })}
-      />,
-    );
-
-    expect(
-      overlay().getByRole("button", { name: /^animate$/i }),
-    ).toBeDisabled();
-    expect(review.animate).not.toHaveBeenCalled();
-  });
-
-  it("returns from review to the prompt instead of closing the takeover", () => {
-    const review = reviewWith({ chosenOptionId: "one" });
-    const onClose = vi.fn();
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={onClose}
-        gloopie={gloopieWith({
-          object: "a friendly teapot",
-          hasActiveWork: true,
-          review,
-        })}
-      />,
-    );
-
-    fireEvent.click(overlay().getByRole("button", { name: /start over/i }));
-
-    // Throwing away four generated options asks first instead of acting.
-    expect(review.startOver).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", { name: /start over\?/i });
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: /start over/i }),
-    );
-    finishExitAnimation();
-
-    // Abandoning the options keeps the user on the takeover, at the prompt.
-    expect(review.startOver).toHaveBeenCalledTimes(1);
-    expect(onClose).not.toHaveBeenCalled();
-    expect(
-      screen.queryByTestId("avatar-collection-overlay"),
-    ).toBeInTheDocument();
-  });
-
-  it("keeps the options when the start-over confirmation is dismissed", () => {
-    const review = reviewWith({ chosenOptionId: "one" });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopieWith({
-          object: "a friendly teapot",
-          hasActiveWork: true,
-          review,
-        })}
-      />,
-    );
-
-    fireEvent.click(overlay().getByRole("button", { name: /start over/i }));
-    const dialog = screen.getByRole("dialog", { name: /start over\?/i });
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: /keep going/i }),
-    );
-
-    expect(review.startOver).not.toHaveBeenCalled();
-    expect(
-      overlay().getByRole("heading", { name: /pick your favorite/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("asks before discarding an in-flight generation from the glass", () => {
-    const onDiscard = vi.fn();
-    const gloopie = gloopieWith({
-      object: "a friendly teapot",
-      hasActiveWork: true,
-      stayOpenWhileGenerating: true,
-      generating: { onContinueSetup: vi.fn(), onDiscard },
-    });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopie}
-      />,
-    );
-
-    fireEvent.click(overlay().getByRole("button", { name: /^cancel$/i }));
-    expect(onDiscard).not.toHaveBeenCalled();
-
-    const dialog = screen.getByRole("dialog", {
-      name: /cancel this gloopie\?/i,
-    });
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: /cancel gloopie/i }),
-    );
-
-    // The attempt is abandoned and the takeover lands back on the prompt.
-    expect(onDiscard).toHaveBeenCalledTimes(1);
-  });
-
-  it("clicking the highlighted option again releases the selection", () => {
-    const review = reviewWith({ chosenOptionId: "one" });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopieWith({ hasActiveWork: true, review })}
-      />,
-    );
-
-    fireEvent.click(
-      overlay().getByRole("button", { name: /gloopie option 1 of 4/i }),
-    );
-    expect(review.chooseOption).toHaveBeenCalledWith(null);
-  });
-
-  it("clicking empty canvas on the review step releases the selection", () => {
-    const review = reviewWith({ chosenOptionId: "one" });
-    renderWithProviders(
-      <AvatarCollectionOverlay
-        library={libraryWith(
-          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
-        )}
-        onSelectAvatar={vi.fn()}
-        onClose={vi.fn()}
-        gloopie={gloopieWith({ hasActiveWork: true, review })}
-      />,
-    );
-
-    // Anywhere that is not an option tile or a control counts as "off the
-    // avatar" — the wordmark included. The click bubbles to the canvas.
-    fireEvent.click(
-      overlay().getByRole("heading", { name: /pick your favorite/i }),
-    );
-    expect(review.chooseOption).toHaveBeenCalledWith(null);
-  });
-
   it("requests collection assets when a collection opens", () => {
     const library = libraryWith(catalogWith({ gloopies: ["g-1"] }));
     renderWithProviders(
@@ -787,7 +409,6 @@ describe("AvatarCollectionOverlay", () => {
       expect.objectContaining({ id: "robots" }),
     );
   });
-
   it("does not auto-retry failed collections when warming the level", () => {
     // openCollection deliberately bypasses its cached short-circuit for
     // failed collections (so the explicit Retry works) — the automatic warm
@@ -811,7 +432,6 @@ describe("AvatarCollectionOverlay", () => {
       expect.objectContaining({ id: "robots" }),
     );
   });
-
   it("surfaces a retry pill on the collections level when a cover download failed", () => {
     // Multi-collection catalog so the collections level renders; one
     // collection's cover download failed. Without folding failedCollectionIds
@@ -837,7 +457,6 @@ describe("AvatarCollectionOverlay", () => {
     fireEvent.click(overlay().getByRole("button", { name: /retry/i }));
     expect(library.retryCatalog).toHaveBeenCalled();
   });
-
   it("surfaces a retry pill when the open collection failed to load", () => {
     const library = libraryWith(catalogWith({ gloopies: ["g-1"] }), {
       failedCollectionIds: new Set(["gloopies"]),

@@ -30,12 +30,6 @@ import {
   fileStem,
   isEmptyPlaceholderDraft,
 } from "./agentBuilderIdentity";
-import {
-  clearGloopieGenerationSession,
-  hasGloopieGenerationWork,
-} from "@/features/agents/stores/gloopieGenerationStore";
-import { getExperiment } from "@/features/experiments/experimentPreferences";
-import { GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 export {
   deriveSlug,
   fileStem,
@@ -465,13 +459,7 @@ export async function isEmptyDraftAgentSession(
 export async function hasAgentBuilderSessionUserContent(
   sessionId: string,
 ): Promise<boolean> {
-  const gloopieCreatorEnabled = Boolean(
-    getExperiment(GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID)?.enabled,
-  );
-  if (
-    localEditSessionIds.has(sessionId) ||
-    (gloopieCreatorEnabled && hasGloopieGenerationWork(sessionId))
-  ) {
+  if (localEditSessionIds.has(sessionId)) {
     return true;
   }
 
@@ -565,9 +553,6 @@ export async function reconcileAgentBuilderSessions(): Promise<void> {
 export function clearBuilderSessionState(sessionId: string): void {
   localEditSessionIds.delete(sessionId);
   localSaveHandlersBySessionId.delete(sessionId);
-  // The gloopie job lives in a module-level store keyed by session id, so it
-  // has to be evicted here or it outlives the session it belongs to.
-  clearGloopieGenerationSession(sessionId);
 
   useChatSessionStore.getState().patchSession(sessionId, {
     intent: null,

@@ -107,19 +107,11 @@ import {
   recoverDraftAgent,
   reconcileAgentBuilderSessions,
   saveDraftAgentSession,
+  setAgentBuilderSessionLocalEdits,
   setAgentBuilderSessionSaveHandler,
   startAgentBuilderSession,
 } from "../agentBuilderSession";
 import { resetAgentBuilderSourceLifecycleForTests } from "../agentBuilderSourceLifecycle";
-import {
-  resetGloopieGenerationStoreForTests,
-  setGloopieObject,
-} from "@/features/agents/stores/gloopieGenerationStore";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-} from "@/features/experiments/experimentPreferences";
-import { GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 
@@ -189,7 +181,7 @@ describe("agentBuilderSession", () => {
     closeSession.mockClear();
     navigateChat.mockClear();
     resetAgentBuilderSourceLifecycleForTests();
-    resetGloopieGenerationStoreForTests();
+    setAgentBuilderSessionLocalEdits("sess-1", false);
     window.localStorage.clear();
     useAgentStore.getState().setProviders([], false);
   });
@@ -748,37 +740,14 @@ describe("agentBuilderSession", () => {
     );
   });
 
-  it("treats in-flight gloopie work as agent builder user content", async () => {
+  it("treats unsaved local edits as agent builder user content", async () => {
     addBuilderSession();
-    setGloopieObject("sess-1", "teapot");
     mocks.listPersonaSources.mockResolvedValue([draftSource]);
     mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+    setAgentBuilderSessionLocalEdits("sess-1", true);
 
     await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
       true,
-    );
-  });
-
-  it("ignores gloopie work when the experiment is off", async () => {
-    // Tests run in dev mode, where auto-enable turns experiments on, so an
-    // explicit override is the only way to exercise the gated-off path. Without
-    // the gate this returns true and an empty draft would be kept alive.
-    window.localStorage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-        experiments: {
-          [GLOOPIE_AVATAR_CREATOR_EXPERIMENT_ID]: { enabled: false },
-        },
-      }),
-    );
-    addBuilderSession();
-    setGloopieObject("sess-1", "teapot");
-    mocks.listPersonaSources.mockResolvedValue([draftSource]);
-    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
-
-    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
-      false,
     );
   });
 
