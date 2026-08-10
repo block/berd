@@ -18,8 +18,7 @@ import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
-import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
-import { resolvePersonaModel } from "@/features/agents/lib/resolvePersonaModel";
+import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
@@ -498,26 +497,15 @@ export function GlobalComposerPill({
     },
   });
 
-  const personaExecutionSelection = useMemo(() => {
-    if (!selectedPersona?.provider) return null;
-    const harness = resolvePersonaProvider(selectedPersona, providers);
-    if (!harness) return { harness: undefined, model: undefined };
-    return {
-      harness,
-      model: resolvePersonaModel(
-        selectedPersona,
-        harness.id,
-        getModelsForAgent(harness.id),
+  const personaTarget = useMemo(
+    () =>
+      personaExecutionTarget(selectedPersona, {
+        providers,
+        models: getModelsForAgent("goose"),
+        getModelsForHarness: getModelsForAgent,
         catalogEntries,
-      ),
-    };
-  }, [catalogEntries, getModelsForAgent, providers, selectedPersona]);
-  const hasUnresolvedPersonaTarget = Boolean(
-    selectedPersonaId &&
-      personaOverrideUserOverrideForRef.current !== selectedPersonaId &&
-      (selectedPersona?.provider || selectedPersona?.model) &&
-      (!personaExecutionSelection?.harness ||
-        (selectedPersona.model && !personaExecutionSelection.model)),
+      }),
+    [catalogEntries, getModelsForAgent, providers, selectedPersona],
   );
 
   useEffect(() => {
@@ -552,33 +540,21 @@ export function GlobalComposerPill({
       return;
     }
 
-    if (!persona?.provider) {
+    if (!personaTarget) {
       clearPersonaOverride();
-      personaOverrideAppliedForRef.current = {
-        personaId: selectedPersonaId,
-        identity,
-      };
+      // Inventory-backed legacy targets may become resolvable after startup.
+      // Do not mark an unresolved attempt as applied; the target changing will
+      // rerun this effect without disturbing the current Composer selection.
       return;
     }
 
-    const harness = personaExecutionSelection?.harness;
-    if (!harness) {
-      clearPersonaOverride();
-      return;
-    }
-    const model = personaExecutionSelection?.model;
-    if (persona.model && !model) {
-      clearPersonaOverride();
-      return;
-    }
-
-    setProviderOverride(harness.id);
+    setProviderOverride(personaTarget.harnessId);
     setModelOverride(
-      model
+      personaTarget.modelId
         ? {
-            modelProviderId: model.modelProviderId,
-            modelId: model.modelId,
-            modelName: model.modelName,
+            modelProviderId: personaTarget.modelProviderId,
+            modelId: personaTarget.modelId,
+            modelName: personaTarget.modelName,
           }
         : null,
     );
@@ -587,7 +563,7 @@ export function GlobalComposerPill({
       personaId: selectedPersonaId,
       identity,
     };
-  }, [personaExecutionSelection, selectedPersona, selectedPersonaId]);
+  }, [personaTarget, selectedPersona, selectedPersonaId]);
 
   const concreteSelectedProviderId =
     resolveAgentProviderCatalogIdStrict(selectedProviderForPicker) == null
@@ -709,20 +685,14 @@ export function GlobalComposerPill({
   const personaSelectionOverridden =
     personaOverrideUserOverrideForRef.current === selectedPersonaId;
   const effectiveExecutionTarget =
-    !personaSelectionOverridden && personaExecutionSelection?.harness
-      ? normalizeSessionExecutionTarget({
-          harnessId: personaExecutionSelection.harness.id,
-          modelProviderId: personaExecutionSelection.model?.modelProviderId,
-          modelId: personaExecutionSelection.model?.modelId,
-          modelName: personaExecutionSelection.model?.modelName,
-        })
+    !personaSelectionOverridden && personaTarget
+      ? personaTarget
       : (localExecutionTarget ?? currentExecutionTarget ?? undefined);
   const canSend =
     hasSendableContent &&
     Boolean(effectiveExecutionTarget) &&
     !attachmentWorkPending &&
-    !handoffActive &&
-    !hasUnresolvedPersonaTarget;
+    !handoffActive;
 
   useEffect(() => {
     if (

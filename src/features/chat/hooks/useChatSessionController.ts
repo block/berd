@@ -77,11 +77,9 @@ import { moveSessionToProject } from "../stores/chatSessionOperations";
 import { acpSetSessionConfigOption } from "@/shared/api/acp";
 import { updateSessionProject } from "@/shared/api/acpApi";
 import { preSeedDraftAgent } from "@/features/agents/lib/agentBuilderSession";
-import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
-import { resolvePersonaModel } from "@/features/agents/lib/resolvePersonaModel";
+import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { deletePersonaSource } from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
-import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
 import {
   ensureAgentBuilderSkillDraft,
   hasAgentBuilderSkillDraft,
@@ -793,19 +791,20 @@ export function useChatSessionController({
         targetToApply.target,
       ).providerId;
       if (!wireProviderId) return false;
-      if (!targetToApply.target.modelId) {
-        return prepareCurrentSession(
-          wireProviderId,
-          nextProject,
-          nextWorkspacePath,
-          targetToApply.requestId,
-        );
-      }
-
       const workingDir = await resolveSessionCwd(
         nextProject,
         nextWorkspacePath,
       );
+      if (!targetToApply.target.modelId) {
+        const result = await transitionSessionTarget({
+          sessionId,
+          target: targetToApply.target,
+          workingDir,
+          requestId: targetToApply.requestId,
+        });
+        return result.applied;
+      }
+
       const modelStillCurrent = () => {
         const liveStore = useChatSessionStore.getState();
         const liveIntent = getModelSelectionIntent(sessionId);
@@ -846,7 +845,7 @@ export function useChatSessionController({
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
-    [prepareCurrentSession, project, sessionWorkspacePath, sessionId],
+    [project, sessionWorkspacePath, sessionId],
   );
   const prepareSelectedProvider = useCallback(
     (wireProviderId: string, options?: ModelSelectionApplyOptions) =>
@@ -1178,28 +1177,15 @@ export function useChatSessionController({
     void refreshMissingReasoningEffort();
   }, [handlePickerOpen, refreshMissingReasoningEffort]);
 
-  const resolvePersonaModelSelection = useCallback(
-    (
-      persona: Persona,
-      providerId: string,
-    ): PreferredModelSelection | undefined => {
-      const model = resolvePersonaModel(
-        persona,
-        providerId,
-        getModelsForAgent(providerId),
+  const resolvePersonaTarget = useCallback(
+    (persona: Persona) =>
+      personaExecutionTarget(persona, {
+        providers,
+        models: getModelsForAgent("goose"),
+        getModelsForHarness: getModelsForAgent,
         catalogEntries,
-        session?.executionTarget,
-      );
-      if (!model) return undefined;
-
-      return {
-        id: model.modelId,
-        name: model.modelName,
-        modelProviderId: model.modelProviderId,
-        source: "explicit",
-      };
-    },
-    [catalogEntries, getModelsForAgent, session?.executionTarget],
+      }),
+    [catalogEntries, getModelsForAgent, providers],
   );
   const prepareSessionForCurrentSelection = useCallback(
     async (
@@ -1425,120 +1411,106 @@ export function useChatSessionController({
       }
 
       const persona = personas.find((candidate) => candidate.id === personaId);
-      const matchingProvider = resolvePersonaProvider(persona, providers);
-      const hasExplicitPersonaModel = Boolean(
-        normalizeConcreteModelId(persona?.model),
-      );
-      const personaModelSelection =
-        persona && matchingProvider
-          ? resolvePersonaModelSelection(persona, matchingProvider.id)
-          : undefined;
-      const hasUnresolvedPersonaTarget = Boolean(
-        persona &&
-          ((persona.provider && !matchingProvider) ||
-            (hasExplicitPersonaModel && !personaModelSelection)),
-      );
+      const personaTarget = persona ? resolvePersonaTarget(persona) : undefined;
 
-      if (hasUnresolvedPersonaTarget) {
-        if (sessionId) {
-          clearCurrentModelSelectionIntent(sessionId);
-          replaceSessionTargetAfterDispatch(sessionId, undefined);
-        } else {
-          setPendingExecutionTarget(null);
-          setPendingModelSelection(null);
-        }
-      } else if (persona && matchingProvider) {
-        const personaModelProviderId = personaModelSelection?.modelProviderId;
-        const harnessId = matchingProvider.id;
-
-        if (!sessionId) {
-          if (personaModelSelection && personaModelProviderId) {
-            setPendingExecutionTarget(
-              targetFromAgentModelSelection(harnessId, {
-                modelProviderId: personaModelProviderId,
-                modelId: personaModelSelection.id,
-                modelName: personaModelSelection.name,
-              }),
-            );
-            setPendingModelSelection(personaModelSelection);
-            setGlobalSelectedProvider(harnessId);
-          } else if (!hasExplicitPersonaModel) {
-            setPendingExecutionTarget(
-              normalizeSessionExecutionTarget({ harnessId }),
-            );
+      if (personaTarget) {
+        const harnessId = personaTarget.harnessId;
+        if (!personaTarget.modelId) {
+          if (!sessionId) {
+            setPendingExecutionTarget(personaTarget);
             setPendingModelSelection(undefined);
             setGlobalSelectedProvider(harnessId);
-          }
-        } else if (personaModelSelection && personaModelProviderId) {
-          const previousTarget = session?.executionTarget;
-          const requestId = createModelSelectionRequestId();
-          const target = targetFromAgentModelSelection(harnessId, {
-            modelProviderId: personaModelProviderId,
-            modelId: personaModelSelection.id,
-            modelName: personaModelSelection.name,
-          });
-          if (!isModelExecutionTarget(target)) {
-            return;
-          }
-
-          clearCurrentModelSelectionIntent(sessionId);
-          beginModelSelectionIntent(sessionId, {
-            requestId,
-            target,
-            previousTarget,
-          });
-          setGlobalSelectedProvider(harnessId);
-
-          void applySessionModelSelection(
-            personaModelProviderId,
-            personaModelSelection,
-            requestId,
-          )
-            .then(() => {
-              clearCurrentModelSelectionIntent(sessionId, requestId);
-            })
-            .catch(async (error) => {
-              const selectionStillCurrent = () =>
-                getModelSelectionIntent(sessionId)?.requestId === requestId;
-              if (!selectionStillCurrent()) {
-                return;
-              }
-              // The agent editor and persona switches route here — when the
-              // session's live provider is unset (dead default on a machine
-              // without its credentials), the in-place apply can never
-              // succeed, so recreate onto the persona's provider instead of
-              // rolling back onto the corpse.
-              if (
-                await recoverStrandedProviderSession({
-                  error,
-                  sessionId,
-                  providerId: personaModelProviderId,
-                  modelSelection: personaModelSelection,
-                  recreateSessionForProvider,
-                  isSelectionCurrent: selectionStillCurrent,
-                })
-              ) {
-                clearCurrentModelSelectionIntent(sessionId, requestId);
-                return;
-              }
-              if (!selectionStillCurrent()) {
-                return;
-              }
-              clearCurrentModelSelectionIntent(sessionId, requestId);
-              console.error("Failed to apply persona model:", error);
-              rollbackToPreviousModel({
-                sessionId,
-                failedModelName: personaModelSelection.name,
-                previousTarget,
-                applySessionModelSelection,
-                prepareSelectedProvider,
-                setGlobalSelectedProvider,
-                restoreErrorMessage:
-                  "Failed to restore previous model after persona model failure:",
-              });
+          } else if (session?.creationState === "pending") {
+            clearCurrentModelSelectionIntent(sessionId);
+            replaceSessionTargetAfterDispatch(sessionId, personaTarget);
+            setGlobalSelectedProvider(harnessId);
+          } else {
+            const previousTarget = session?.executionTarget;
+            const requestId = createModelSelectionRequestId();
+            clearCurrentModelSelectionIntent(sessionId);
+            beginModelSelectionIntent(sessionId, {
+              requestId,
+              target: personaTarget,
+              previousTarget,
             });
-        } else if (!hasExplicitPersonaModel) {
-          handleProviderChange(harnessId);
+            setGlobalSelectedProvider(harnessId);
+            void prepareCurrentSessionTarget(personaTarget)
+              .then(() => {
+                clearCurrentModelSelectionIntent(sessionId, requestId);
+              })
+              .catch((error) => {
+                if (!isCurrentModelSelectionIntent(sessionId, requestId)) {
+                  return;
+                }
+                clearCurrentModelSelectionIntent(sessionId, requestId);
+                console.error("Failed to apply persona target:", error);
+              });
+          }
+        } else {
+          const personaModelProviderId = personaTarget.modelProviderId;
+          const personaModelSelection: PreferredModelSelection = {
+            id: personaTarget.modelId,
+            name: personaTarget.modelName,
+            modelProviderId: personaModelProviderId,
+            source: "explicit",
+          };
+
+          if (!sessionId) {
+            setPendingExecutionTarget(personaTarget);
+            setPendingModelSelection(personaModelSelection);
+            setGlobalSelectedProvider(harnessId);
+          } else {
+            const previousTarget = session?.executionTarget;
+            const requestId = createModelSelectionRequestId();
+
+            clearCurrentModelSelectionIntent(sessionId);
+            beginModelSelectionIntent(sessionId, {
+              requestId,
+              target: personaTarget,
+              previousTarget,
+            });
+            setGlobalSelectedProvider(harnessId);
+
+            void applySessionModelSelection(
+              personaModelProviderId,
+              personaModelSelection,
+              requestId,
+            )
+              .then(() => {
+                clearCurrentModelSelectionIntent(sessionId, requestId);
+              })
+              .catch(async (error) => {
+                const selectionStillCurrent = () =>
+                  getModelSelectionIntent(sessionId)?.requestId === requestId;
+                if (!selectionStillCurrent()) return;
+                if (
+                  await recoverStrandedProviderSession({
+                    error,
+                    sessionId,
+                    providerId: personaModelProviderId,
+                    modelSelection: personaModelSelection,
+                    recreateSessionForProvider,
+                    isSelectionCurrent: selectionStillCurrent,
+                  })
+                ) {
+                  clearCurrentModelSelectionIntent(sessionId, requestId);
+                  return;
+                }
+                if (!selectionStillCurrent()) return;
+                clearCurrentModelSelectionIntent(sessionId, requestId);
+                console.error("Failed to apply persona model:", error);
+                rollbackToPreviousModel({
+                  sessionId,
+                  failedModelName: personaModelSelection.name,
+                  previousTarget,
+                  applySessionModelSelection,
+                  prepareSelectedProvider,
+                  setGlobalSelectedProvider,
+                  restoreErrorMessage:
+                    "Failed to restore previous model after persona model failure:",
+                });
+              });
+          }
         }
       }
       const agentStore = useAgentStore.getState();
@@ -1557,13 +1529,13 @@ export function useChatSessionController({
         .patchSession(sessionId, { personaId: personaId ?? undefined });
     },
     [
-      handleProviderChange,
       applySessionModelSelection,
       personas,
+      prepareCurrentSessionTarget,
       prepareSelectedProvider,
-      providers,
       recreateSessionForProvider,
-      resolvePersonaModelSelection,
+      resolvePersonaTarget,
+      session?.creationState,
       session?.executionTarget,
       sessionId,
       selectedPersonaId,
@@ -1841,13 +1813,18 @@ export function useChatSessionController({
       const targetPersona = personas.find(
         (persona) => persona.id === overridePersona.id,
       );
-      if (!targetPersona?.provider) {
-        return selectedAgentId;
-      }
-
-      return resolvePersonaProvider(targetPersona, providers)?.id ?? null;
+      return (
+        (targetPersona
+          ? resolvePersonaTarget(targetPersona)?.harnessId
+          : undefined) ?? selectedAgentId
+      );
     },
-    [personas, providers, selectedAgentId, session?.executionTarget?.harnessId],
+    [
+      personas,
+      resolvePersonaTarget,
+      selectedAgentId,
+      session?.executionTarget?.harnessId,
+    ],
   );
   const canAutoCompactBeforeSend = useCallback(
     (

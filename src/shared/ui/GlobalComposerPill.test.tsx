@@ -659,6 +659,18 @@ describe("GlobalComposerPill", () => {
         },
       ],
     });
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "claude-acp"
+        ? [
+            {
+              id: "claude-sonnet-4",
+              name: "claude-sonnet-4",
+              displayName: "Sonnet 4",
+              providerId: "claude-acp",
+            },
+          ]
+        : [],
+    );
     const onSend = renderGlobalComposer(vi.fn(), {
       suggestedPersonaId: "persona-1",
     });
@@ -673,13 +685,13 @@ describe("GlobalComposerPill", () => {
         harnessId: "claude-acp",
         modelProviderId: "claude-acp",
         modelId: "claude-sonnet-4",
-        modelName: "claude-sonnet-4",
+        modelName: "Sonnet 4",
       },
       personaId: "persona-1",
     });
   });
 
-  it("blocks a persona whose model has no provider identity", async () => {
+  it("keeps the Composer target when a persona has no plausible target", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
       personas: [
@@ -698,10 +710,54 @@ describe("GlobalComposerPill", () => {
     });
 
     await user.type(screen.getByRole("textbox"), "Hello");
-    expect(
-      screen.getByRole("button", { name: /send message/i }),
-    ).toBeDisabled();
-    expect(onSend).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Hello", {
+      personaId: "persona-1",
+    });
+  });
+
+  it("applies a legacy persona target when inventory arrives", async () => {
+    const user = userEvent.setup();
+    const legacyPersona = {
+      id: "persona-1",
+      displayName: "Research Scout",
+      systemPrompt: "Gather context.",
+      provider: "goose",
+      model: "goose-claude-fable-5",
+      isBuiltin: false,
+      writable: true,
+    };
+    useAgentStore.setState({ personas: [legacyPersona] });
+    mockGetModelsForAgent.mockReturnValue([]);
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "goose-claude-fable-5",
+        name: "goose-claude-fable-5",
+        displayName: "Claude Fable 5",
+        providerId: "databricks_v2",
+      },
+    ]);
+    act(() => {
+      useAgentStore.setState({ personas: [{ ...legacyPersona }] });
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-claude-fable-5",
+        modelName: "Claude Fable 5",
+      },
+      personaId: "persona-1",
+    });
   });
 
   it("refreshes the suggested persona provider/model when the same persona changes", async () => {

@@ -515,6 +515,91 @@ describe("agents API", () => {
     });
   });
 
+  it("migrates only target properties from the freshest source", async () => {
+    const latestSource = {
+      ...agentSource,
+      name: "Scout Renamed",
+      content: "New instructions.",
+      properties: {
+        ...agentSource.properties,
+        color: "green",
+      },
+    };
+    mockGooseSourcesList.mockResolvedValue({ sources: [latestSource] });
+    mockGooseSourcesUpdate.mockResolvedValue({
+      source: {
+        ...latestSource,
+        properties: {
+          ...latestSource.properties,
+          provider: "goose",
+          modelProviderId: "databricks_v2",
+          model: "goose-gpt-5-5",
+        },
+      },
+    });
+
+    const { migratePersonaTargetIfUnchanged } = await import("../agents");
+    await migratePersonaTargetIfUnchanged(
+      {
+        id: agentSource.path,
+        provider: "openai",
+        model: "gpt-4.1",
+      },
+      {
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "goose-gpt-5-5",
+      },
+    );
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+      type: "agent",
+      path: agentSource.path,
+      name: "Scout Renamed",
+      description: "Agent",
+      content: "New instructions.",
+      properties: {
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "goose-gpt-5-5",
+        avatar: "https://example.test/scout.png",
+        color: "green",
+      },
+    });
+  });
+
+  it("skips target migration when the target changed after inspection", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            ...agentSource.properties,
+            provider: "anthropic",
+            model: "claude-new",
+          },
+        },
+      ],
+    });
+
+    const { migratePersonaTargetIfUnchanged } = await import("../agents");
+    const result = await migratePersonaTargetIfUnchanged(
+      {
+        id: agentSource.path,
+        provider: "openai",
+        model: "gpt-4.1",
+      },
+      {
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "goose-gpt-5-5",
+      },
+    );
+
+    expect(result).toBeNull();
+    expect(mockGooseSourcesUpdate).not.toHaveBeenCalled();
+  });
+
   it("updates persona sources from the exact markdown file when listing omits them", async () => {
     const sourcePath = "/Users/test/.agents/agents/untitled-agent-1.md";
     mockGooseSourcesList.mockResolvedValue({ sources: [] });

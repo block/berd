@@ -831,6 +831,33 @@ export async function updatePersona(
   return toPersona(response.source);
 }
 
+export async function migratePersonaTargetIfUnchanged(
+  persona: Pick<Persona, "id" | "provider" | "modelProviderId" | "model">,
+  target: Pick<UpdatePersonaRequest, "provider" | "modelProviderId" | "model">,
+): Promise<Persona | null> {
+  const latestSource = await readExistingPersonaSource(persona.id);
+  const latestPersona = toPersona(latestSource);
+  if (
+    latestPersona.provider !== persona.provider ||
+    latestPersona.modelProviderId !== persona.modelProviderId ||
+    latestPersona.model !== persona.model
+  ) {
+    return null;
+  }
+
+  const client = await getClient();
+  const response = await client.goose.GooseUnstableSourcesUpdate({
+    type: AGENT_SOURCE_TYPE,
+    path: latestSource.path,
+    name: latestSource.name,
+    description: latestSource.description,
+    content: latestSource.content,
+    properties: mergedPersonaProperties(latestSource.properties, target),
+  });
+
+  return toPersona(requireAgentSource(response.source));
+}
+
 export async function deletePersona(id: string): Promise<void> {
   const client = await getClient();
   await client.goose.GooseUnstableSourcesDelete({

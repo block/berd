@@ -64,6 +64,7 @@ vi.mock("../useResolvedAgentModelPicker", () => ({
     selectedAgentId,
     pickerAgents: [{ id: "goose", label: "Goose" }],
     availableModels: [],
+    getModelsForAgent: () => [],
     modelsLoading: false,
     modelStatusMessage: null,
     handleProviderChange: vi.fn(),

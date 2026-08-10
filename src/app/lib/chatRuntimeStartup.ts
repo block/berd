@@ -8,7 +8,11 @@ import {
   parseProviderAllowlist,
 } from "@/features/providers/runtimeProviderConstraints";
 import { getModelCacheRefreshProviderIds } from "@/features/providers/modelCacheRefresh";
-import { getModelProviders } from "@/features/providers/providerCatalog";
+import {
+  getModelProviders,
+  getProviderCatalog,
+} from "@/features/providers/providerCatalog";
+import { personaTargetMigration } from "@/features/agents/lib/personaExecutionTarget";
 import {
   applyRuntimeProviderConfig,
   defaultModelInventoryModeForLoadResult,
@@ -245,18 +249,75 @@ async function startChatRuntime(
     }
   };
 
-  const refreshProviderModels = async () => {
+  const migratePersonaTargets = async (
+    authoritativeProviderIds: ReadonlySet<string>,
+  ) => {
+    const { migratePersonaTargetIfUnchanged } = await import(
+      "@/shared/api/agents"
+    );
+    const modelState = useProviderModelCacheStore.getState();
+    const cachedModels = [...modelState.providers].flatMap(
+      ([providerId, entry]) =>
+        authoritativeProviderIds.has(providerId)
+          ? entry.models.map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            }))
+          : [],
+    );
+    const targetContext = {
+      providers: useAgentStore.getState().providers,
+      models: cachedModels,
+      catalogEntries: getProviderCatalog(),
+    };
+    const personas = useAgentStore.getState().personas;
+    await Promise.all(
+      personas.map(async (persona) => {
+        if (!persona.writable) return;
+        const migration = personaTargetMigration(persona, targetContext);
+        if (!migration) return;
+        try {
+          const migrated = await migratePersonaTargetIfUnchanged(
+            persona,
+            migration,
+          );
+          if (migrated) {
+            // Do not replace the collection: a refresh or edit may have changed
+            // another agent while this idempotent migration write was in flight.
+            useAgentStore.getState().updatePersona(persona.id, migrated);
+          }
+        } catch (error) {
+          console.warn("Failed to migrate custom agent target:", {
+            personaId: persona.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }),
+    );
+  };
+
+  const refreshProviderModels = async (): Promise<Set<string>> => {
     const runtimeConfigResult = useRuntimeConfigStore.getState().result;
     const configuredProviderIds = await getIntentionalConfiguredProviderIds(
       await checkAllProviderStatus({ coalesce: true }),
     );
-    await modelCacheStore.refreshAllModelProviders(
-      getModelCacheRefreshProviderIds(useRuntimeConfigStore.getState().config, {
+    const refreshProviderIds = getModelCacheRefreshProviderIds(
+      useRuntimeConfigStore.getState().config,
+      {
         defaultModelInventoryMode:
           defaultModelInventoryModeForLoadResult(runtimeConfigResult),
         configuredProviderIds,
-      }),
+      },
     );
+    await modelCacheStore.refreshAllModelProviders(refreshProviderIds);
+    const modelState = useProviderModelCacheStore.getState();
+    return new Set([
+      ...modelState.runtimeManagedProviderIds,
+      ...refreshProviderIds.filter((providerId) => {
+        const entry = modelState.providers.get(providerId);
+        return entry != null && !entry.error;
+      }),
+    ]);
   };
 
   const loadSessionState = async () => {
@@ -305,9 +366,18 @@ async function startChatRuntime(
   await loadDistroBundle();
   applyCuratedProviders(true);
 
-  void refreshProviderModels().catch((err) => {
+  // Legacy agent-target repair runs off the critical path: the read-time
+  // compatibility layer in personaExecutionTarget keeps unmigrated agents
+  // working immediately, so startup never waits on inventory for migration.
+  const providerModelsReady = refreshProviderModels().catch((err) => {
     console.error("Failed to refresh provider models on startup:", err);
+    return new Set<string>();
   });
 
   await Promise.allSettled([loadPersonas(), loadSessionState()]);
+  void providerModelsReady.then((authoritativeProviderIds) =>
+    migratePersonaTargets(authoritativeProviderIds).catch((err) => {
+      console.error("Failed to migrate custom agent targets:", err);
+    }),
+  );
 }

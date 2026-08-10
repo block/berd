@@ -79,8 +79,7 @@ import {
 } from "@/features/chat/stores/chatSessionSelectors";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
-import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
-import { resolvePersonaModel } from "@/features/agents/lib/resolvePersonaModel";
+import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
@@ -2629,11 +2628,6 @@ export function AppShell({
         const persona = agentState.personas.find(
           (candidate) => candidate.id === agentId,
         );
-        const matchingProvider = resolvePersonaProvider(
-          persona,
-          agentState.providers,
-        );
-        const harnessId = matchingProvider?.id ?? persona?.provider;
         const cachedModels = [
           ...useProviderModelCacheStore.getState().providers,
         ].flatMap(([providerId, entry]) =>
@@ -2642,27 +2636,11 @@ export function AppShell({
             providerId: model.providerId ?? providerId,
           })),
         );
-        const personaModel =
-          persona && harnessId
-            ? resolvePersonaModel(
-                persona,
-                harnessId,
-                cachedModels,
-                getProviderCatalog(),
-              )
-            : undefined;
-        if (persona?.model && !personaModel) {
-          toast.error(t("settings:providers.setupRequired.toast"));
-          return;
-        }
-        const executionTarget = harnessId
-          ? normalizeSessionExecutionTarget({
-              harnessId,
-              modelProviderId: personaModel?.modelProviderId,
-              modelId: personaModel?.modelId,
-              modelName: personaModel?.modelName,
-            })
-          : undefined;
+        const executionTarget = personaExecutionTarget(persona, {
+          providers: agentState.providers,
+          models: cachedModels,
+          catalogEntries: getProviderCatalog(),
+        });
 
         void createNewTab(DEFAULT_CHAT_TITLE, undefined, {
           executionTarget,
@@ -2682,7 +2660,6 @@ export function AppShell({
       createNewTab,
       patchSession,
       guardAppNavigation,
-      t,
     ],
   );
 

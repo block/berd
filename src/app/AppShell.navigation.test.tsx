@@ -4817,7 +4817,7 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("does not create a session when a persona target cannot resolve", async () => {
+  it("uses the normal new-chat target when a persona has no plausible target", async () => {
     useDefaultProviderReadinessStore.setState({
       readiness: {
         status: "ready",
@@ -4847,7 +4847,16 @@ describe("AppShell global navigation", () => {
       screen.getByRole("button", { name: "Start chat with unresolved agent" }),
     );
 
-    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "databricks_v2",
+        "~/goose artifacts",
+        expect.objectContaining({ modelId: "goose-default" }),
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("created-session"),
+    ).toMatchObject({ personaId: "persona-unresolved" });
   });
 
   it("tags a Home agent starter in the composer instead of opening a blank chat", async () => {

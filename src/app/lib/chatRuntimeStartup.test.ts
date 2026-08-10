@@ -4,6 +4,7 @@ const mockLoadPersistedMessageQueues = vi.hoisted(() =>
   vi.fn<() => Promise<Record<string, never[]>>>(),
 );
 const mockGetClient = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
+const mockRefreshAllModelProviders = vi.hoisted(() => vi.fn());
 
 // The latch under test wraps startChatRuntime, whose body touches most of the
 // startup module graph. Everything it reaches is stubbed inert (resolved,
@@ -52,6 +53,7 @@ vi.mock("@/features/providers/modelCacheRefresh", () => ({
 
 vi.mock("@/features/providers/providerCatalog", () => ({
   getModelProviders: () => [],
+  getProviderCatalog: () => [],
 }));
 
 vi.mock("@/features/providers/runtimeProviderConfig", () => ({
@@ -85,6 +87,7 @@ vi.mock("@/features/providers/stores/providerCatalogStore", () => ({
 
 vi.mock("@/features/providers/defaultProviderConfig", () => ({
   getIntentionalConfiguredProviderIds: async () => [],
+  reconcileManagedDefaultProviderSelection: async () => {},
   saveDefaultProviderSelectionFromConfiguredProvider: async () => {},
 }));
 
@@ -107,15 +110,18 @@ vi.mock("@/features/providers/stores/defaultProviderReadinessStore", () => ({
 vi.mock("@/features/providers/stores/providerModelCacheStore", () => ({
   useProviderModelCacheStore: {
     getState: () => ({
+      providers: new Map(),
+      runtimeManagedProviderIds: new Set(),
       loadPersisted: () => {},
-      refreshAllModelProviders: async () => {},
+      refreshAllModelProviders: (...args: unknown[]) =>
+        mockRefreshAllModelProviders(...args),
     }),
   },
 }));
 
 vi.mock("@/features/settings/stores/distroStore", () => ({
   useDistroStore: {
-    getState: () => ({ setManifest: () => {} }),
+    getState: () => ({ refresh: async () => {}, setManifest: () => {} }),
   },
 }));
 
@@ -161,6 +167,7 @@ vi.mock("@/shared/api/distro", () => ({
 
 vi.mock("@/shared/api/agents", () => ({
   listPersonas: async () => [],
+  migratePersonaTargetIfUnchanged: async () => null,
 }));
 
 function deferred<T>() {
@@ -181,6 +188,8 @@ describe("runChatRuntimeStartup", () => {
     mockLoadPersistedMessageQueues.mockResolvedValue({});
     mockGetClient.mockReset();
     mockGetClient.mockResolvedValue({});
+    mockRefreshAllModelProviders.mockReset();
+    mockRefreshAllModelProviders.mockResolvedValue(undefined);
   });
 
   it("collapses concurrent callers onto one startup run", async () => {
@@ -199,6 +208,17 @@ describe("runChatRuntimeStartup", () => {
     await expect(first).resolves.toBeUndefined();
     await expect(second).resolves.toBeUndefined();
     expect(mockGetClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not block startup on model inventory refresh", async () => {
+    const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
+    const inventoryRefresh = deferred<void>();
+    mockRefreshAllModelProviders.mockReturnValue(inventoryRefresh.promise);
+
+    await expect(runChatRuntimeStartup()).resolves.toBeUndefined();
+    expect(mockRefreshAllModelProviders).toHaveBeenCalledTimes(1);
+
+    inventoryRefresh.resolve();
   });
 
   it("stays latched after a successful run", async () => {
