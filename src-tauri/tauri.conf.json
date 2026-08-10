@@ -34,7 +34,7 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "connect-src": "'self' ipc: asset: http://asset.localhost http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* data: https: https://api.squareup.com https://api.squareupstaging.com",
+        "connect-src": "'self' ipc: asset: http://asset.localhost http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* data: https:",
         "font-src": "'self'",
         "img-src": "'self' asset: http://asset.localhost blob: data: https://models.dev",
         "media-src": "'self' asset: http://asset.localhost blob: data:",

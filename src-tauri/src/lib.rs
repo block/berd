@@ -478,7 +478,6 @@ pub fn run() {
             commands::builderbot::get_builderbot_routing_rules,
             commands::builderbot::update_builderbot_scheduled_trigger,
             commands::builderbot::update_builderbot_routing_rule,
-            commands::telemetry::send_telemetry_batch,
             commands::whoami::whoami,
             commands::acp::get_goose_serve_url,
             commands::acp::get_goose_serve_host_info,

@@ -2,10 +2,9 @@ import { screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockInitTelemetry = vi.hoisted(() => vi.fn());
 const mockInstallRendererDiagnostics = vi.hoisted(() => vi.fn());
 const mockReportRendererError = vi.hoisted(() => vi.fn());
-const mockTrackAppLaunched = vi.hoisted(() => vi.fn());
+const mockInvoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 vi.mock("@/shared/styles/globals.css", () => ({}));
@@ -53,10 +52,7 @@ vi.mock("@/shared/i18n", () => ({
   I18nProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/shared/telemetry/client", () => ({
-  initTelemetry: mockInitTelemetry,
-  trackAppLaunched: mockTrackAppLaunched,
-}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }));
 
 vi.mock("@/shared/theme/ThemeProvider", () => ({
   ThemeProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -69,22 +65,26 @@ async function loadMainAt(search: string) {
 }
 
 describe("main entrypoint telemetry startup", () => {
+  const originalFetch = globalThis.fetch;
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    globalThis.fetch = vi.fn() as typeof globalThis.fetch;
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
+    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  it("starts telemetry once for the main app window", async () => {
+  it("runs the production startup path without telemetry network or native-command work", async () => {
     await loadMainAt("");
 
     await screen.findByTestId("main-app");
-    expect(mockInitTelemetry).toHaveBeenCalledTimes(1);
-    expect(mockTrackAppLaunched).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockInvoke).not.toHaveBeenCalled();
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "main",
     });
@@ -96,8 +96,6 @@ describe("main entrypoint telemetry startup", () => {
     expect(await screen.findByTestId("session-app")).toHaveTextContent(
       "session-123",
     );
-    expect(mockInitTelemetry).not.toHaveBeenCalled();
-    expect(mockTrackAppLaunched).not.toHaveBeenCalled();
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "session",
     });
@@ -115,8 +113,6 @@ describe("main entrypoint telemetry startup", () => {
         screen.getByRole("heading", { name: "Session window failed to load" }),
       ).toBeInTheDocument();
     });
-    expect(mockInitTelemetry).not.toHaveBeenCalled();
-    expect(mockTrackAppLaunched).not.toHaveBeenCalled();
     expect(mockReportRendererError).toHaveBeenCalledWith(
       "session_key_decode_failed",
       expect.anything(),
