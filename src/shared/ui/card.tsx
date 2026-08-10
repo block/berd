@@ -23,7 +23,6 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 interface ExpandableCardProps extends React.ComponentProps<"div"> {
-  active?: boolean;
   interactive?: boolean;
 }
 
@@ -32,7 +31,6 @@ interface ExpandableCardProps extends React.ComponentProps<"div"> {
  * Use for row/card hybrids whose collapsed state is the primary control.
  */
 function ExpandableCard({
-  active = false,
   interactive = false,
   className,
   ...props
@@ -47,8 +45,7 @@ function ExpandableCard({
       })}
       data-slot="expandable-card"
       className={cn(
-        "flex flex-col rounded-md bg-background p-3 text-foreground transition-colors",
-        active && "bg-linear-to-b from-primary/10 to-primary/10",
+        "flex flex-col rounded-md bg-background p-3 text-foreground",
         interactive && "cursor-pointer",
         className,
       )}

@@ -122,7 +122,7 @@ export function HarnessSetupStep({
           autoStartInstall={!initiallyComplete}
           autoInstallProgressOnly
           simulateAutoInstall={previewMissing}
-          className="bg-card from-transparent to-transparent"
+          className="bg-card"
         />
       </div>
     </OnboardingShell>

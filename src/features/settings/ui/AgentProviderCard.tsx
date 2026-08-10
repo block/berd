@@ -894,7 +894,6 @@ export function AgentProviderCard({
       action={rowAction}
       details={details}
       detailsClassName={icon ? "ml-10" : undefined}
-      className={cn(isActive && "bg-linear-to-b from-primary/10 to-primary/10")}
     />
   );
 
@@ -985,7 +984,6 @@ export function AgentProviderCard({
       rowContent
     ) : (
       <ExpandableCard
-        active={isActive}
         interactive={canOpenCollapsedCard}
         onClick={canOpenCollapsedCard ? handleCardSurfaceClick : undefined}
         className={cn("border border-border", className)}
