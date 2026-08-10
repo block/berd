@@ -1,6 +1,9 @@
 import type { RuntimeConfig, RuntimeGooseConfig } from "./schema";
 import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
-import { getClient } from "@/shared/api/acpConnection";
+import {
+  getClient,
+  invalidateClientConnection,
+} from "@/shared/api/acpConnection";
 import { providerModelInventoryGeneration } from "./providerModelInventoryInvalidation";
 
 export interface GooseProviderSelection {
@@ -95,6 +98,7 @@ async function readProvenTargetInventory(
 ): Promise<ReadonlySet<string>> {
   const generationAtStart = providerModelInventoryGeneration(providerId);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let didTimeOut = false;
   try {
     const response = await Promise.race([
       getClient().then((client) =>
@@ -102,6 +106,7 @@ async function readProvenTargetInventory(
       ),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
+          didTimeOut = true;
           reject(
             new Error(`Timed out proving models for provider ${providerId}.`),
           );
@@ -114,6 +119,16 @@ async function readProvenTargetInventory(
       );
     }
     return new Set(response.models as string[]);
+  } catch (error) {
+    if (didTimeOut) {
+      await invalidateClientConnection().catch((invalidationError) => {
+        console.error(
+          "Failed to invalidate timed-out ACP connection:",
+          invalidationError,
+        );
+      });
+    }
+    throw error;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }

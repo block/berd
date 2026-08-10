@@ -75,13 +75,32 @@ function harnessIdForPersona(
   );
 }
 
+function isAgentProviderId(
+  providerId: string,
+  catalogEntries: ProviderCatalogEntry[],
+): boolean {
+  return (
+    resolveAgentProviderCatalogIdStrictFromEntries(
+      catalogEntries,
+      providerId,
+    ) !== null
+  );
+}
+
 function persistedModelProviderId(
   persona: Pick<Persona, "provider" | "modelProviderId">,
   harnessId: string,
   catalogEntries: ProviderCatalogEntry[],
 ): string | undefined {
-  if (persona.modelProviderId?.trim()) {
-    return canonicalModelProviderId(persona.modelProviderId, catalogEntries);
+  const persistedProviderId = persona.modelProviderId?.trim();
+  const persistedProviderIsAgent =
+    Boolean(persistedProviderId) &&
+    isAgentProviderId(persistedProviderId, catalogEntries);
+  if (
+    persistedProviderId &&
+    !(harnessId === "goose" && persistedProviderIsAgent)
+  ) {
+    return canonicalModelProviderId(persistedProviderId, catalogEntries);
   }
   if (
     persona.provider?.trim() &&
@@ -190,10 +209,22 @@ export function personaTargetMigration(
         context.providers,
         context.catalogEntries,
       );
+    const persistedAgentProviderForGoose =
+      harnessIdForPersona(
+        persona.provider,
+        context.providers,
+        context.catalogEntries,
+      ) === "goose" &&
+      Boolean(
+        persona.modelProviderId &&
+          isAgentProviderId(persona.modelProviderId, context.catalogEntries),
+      );
     // Clear only when the saved data itself proves it cannot form one target.
     // No inventory match may be a transient availability problem, so preserve
     // that legacy metadata until a later authoritative refresh can repair it.
-    return unknownHarness || matchingProviderIds.size > 1
+    return unknownHarness ||
+      persistedAgentProviderForGoose ||
+      matchingProviderIds.size > 1
       ? { provider: null, modelProviderId: null, model: null }
       : null;
   }

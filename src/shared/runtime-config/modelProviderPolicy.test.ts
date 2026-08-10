@@ -8,9 +8,11 @@ import {
 } from "./modelProviderPolicy";
 
 const mockGetClient = vi.hoisted(() => vi.fn());
+const mockInvalidateClientConnection = vi.hoisted(() => vi.fn());
 const mockSupportedModelsList = vi.hoisted(() => vi.fn());
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: () => mockGetClient(),
+  invalidateClientConnection: () => mockInvalidateClientConnection(),
 }));
 
 const managedConfig: RuntimeConfig = {
@@ -40,6 +42,8 @@ describe("resolveManagedGooseProviderSelection", () => {
   beforeEach(() => {
     vi.useRealTimers();
     mockGetClient.mockReset();
+    mockInvalidateClientConnection.mockReset();
+    mockInvalidateClientConnection.mockResolvedValue(undefined);
     mockGetClient.mockResolvedValue({
       goose: {
         GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
@@ -280,6 +284,7 @@ describe("resolveManagedGooseProviderSelection", () => {
     );
     await vi.advanceTimersByTimeAsync(60_000);
     await rejectedMigration;
+    expect(mockInvalidateClientConnection).toHaveBeenCalledOnce();
     expect(mockSupportedModelsList).not.toHaveBeenCalled();
   });
 

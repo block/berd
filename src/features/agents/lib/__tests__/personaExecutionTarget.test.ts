@@ -52,6 +52,21 @@ describe("personaExecutionTarget", () => {
     });
   });
 
+  it("rejects an agent harness persisted as a Goose model provider", () => {
+    const persona = {
+      provider: "goose",
+      modelProviderId: "claude-acp",
+      model: "sonnet",
+    };
+
+    expect(personaExecutionTarget(persona, context())).toBeUndefined();
+    expect(personaTargetMigration(persona, context())).toEqual({
+      provider: null,
+      modelProviderId: null,
+      model: null,
+    });
+  });
+
   it("uses an external harness as the runtime provider boundary", () => {
     expect(
       personaExecutionTarget(
