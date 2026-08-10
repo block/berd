@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import type {
+  ChatAttachmentDraft,
+  StagedQuoteItem,
+} from "@/shared/types/messages";
 import { MAX_PROMPT_ATTACHMENT_BYTES } from "./attachmentPayloadBudget";
 import { submitComposerMessage } from "./submitComposerMessage";
 
@@ -30,6 +33,42 @@ function imageDraft(base64: string): ChatAttachmentDraft {
 }
 
 describe("submitComposerMessage", () => {
+  it("sends a staged quote as hidden callback context and visible message metadata", async () => {
+    const onSend = vi.fn().mockReturnValue(true);
+    const quote: StagedQuoteItem = {
+      id: "quote-1",
+      kind: "quote",
+      excerpt: "Ask reviewers to separate product concerns from visual polish.",
+      sources: [
+        {
+          messageId: "message-1",
+          contentBlockIndex: 0,
+          start: 10,
+          end: 72,
+        },
+      ],
+    };
+
+    await submitComposerMessage({
+      text: "can you elaborate?",
+      attachments: [],
+      skills: [],
+      stagedItems: [quote],
+      onSend,
+      resolveSkillSlashCommand: () => null,
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      "can you elaborate?",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        assistantPrompt: expect.stringContaining(quote.excerpt),
+        userMessageMetadata: { stagedItems: [quote] },
+      }),
+    );
+  });
+
   it("adds skill instructions when a slash skill command matches", async () => {
     const onSend = vi.fn().mockReturnValue(true);
 

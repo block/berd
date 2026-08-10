@@ -1,6 +1,10 @@
 import { useCallback, type RefObject } from "react";
 import type { SkillCommandMatch } from "@/features/skills/lib/skillChatPrompt";
-import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
+import type {
+  ChatAttachmentDraft,
+  MessageChip,
+  StagedItem,
+} from "@/shared/types/messages";
 import { skillDraftSnapshotsMatch } from "../lib/chatInputSnapshots";
 import { submitComposerMessage } from "../lib/submitComposerMessage";
 import type { ChatInputSendHandler, ChatSkillDraft } from "../types";
@@ -8,6 +12,7 @@ import type { ChatInputSendHandler, ChatSkillDraft } from "../types";
 interface UseChatInputSubmitOptions {
   attachmentsRef: RefObject<ChatAttachmentDraft[]>;
   selectedSkillsRef: RefObject<ChatSkillDraft[]>;
+  stagedItemsRef: RefObject<StagedItem[]>;
   selectedChipsRef: RefObject<MessageChip[]>;
   skillProviderId?: string | null;
   selectedPersonaId?: string | null;
@@ -21,6 +26,7 @@ interface UseChatInputSubmitOptions {
 export function useChatInputSubmit({
   attachmentsRef,
   selectedSkillsRef,
+  stagedItemsRef,
   selectedChipsRef,
   skillProviderId,
   selectedPersonaId,
@@ -33,12 +39,14 @@ export function useChatInputSubmit({
       submittedText: string,
       submittedAttachments: ChatAttachmentDraft[],
       submittedSkills: ChatSkillDraft[],
+      submittedStagedItems: StagedItem[],
       submitHandler: ChatInputSendHandler = onSend,
     ) =>
       submitComposerMessage({
         text: submittedText,
         attachments: submittedAttachments,
         skills: submittedSkills,
+        stagedItems: submittedStagedItems,
         chips: selectedChipsRef.current,
         skillProviderId,
         selectedPersonaId,
@@ -62,6 +70,7 @@ export function useChatInputSubmit({
         submittedText,
         submittedAttachments,
         submittedSkills,
+        stagedItemsRef.current,
       );
       if (
         accepted &&
@@ -74,6 +83,7 @@ export function useChatInputSubmit({
     [
       attachmentsRef,
       selectedSkillsRef,
+      stagedItemsRef,
       setSelectedSkills,
       submitChatInputMessage,
     ],

@@ -1,7 +1,11 @@
 import { toast } from "sonner";
 import type { SkillCommandMatch } from "@/features/skills/lib/skillChatPrompt";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
-import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
+import type {
+  ChatAttachmentDraft,
+  MessageChip,
+  StagedItem,
+} from "@/shared/types/messages";
 import type { ChatInputSendHandler, ChatSkillDraft } from "../types";
 import {
   formatAttachmentsTooLargeMessage,
@@ -9,11 +13,14 @@ import {
   promptAttachmentBytes,
 } from "./attachmentPayloadBudget";
 import { buildSkillSendPayload } from "./skillSendPayload";
+import { buildStagedQuoteAssistantPrompt } from "./stagedQuoteSend";
+import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
 
 interface SubmitComposerMessageOptions {
   text: string;
   attachments: ChatAttachmentDraft[];
   skills: ChatSkillDraft[];
+  stagedItems?: StagedItem[];
   chips?: MessageChip[];
   skillProviderId?: string | null;
   selectedPersonaId?: string | null;
@@ -47,6 +54,7 @@ export async function submitComposerMessage({
   text,
   attachments,
   skills,
+  stagedItems = [],
   chips = [],
   skillProviderId,
   selectedPersonaId,
@@ -69,9 +77,24 @@ export async function submitComposerMessage({
     sendOptions?.chips && sendOptions.chips.length > 0
       ? [...chips, ...sendOptions.chips]
       : chips;
+  const stagedQuotePrompt = buildStagedQuoteAssistantPrompt(stagedItems);
   const mergedSendOptions =
-    mergedChips.length > 0
-      ? { ...sendOptions, chips: mergedChips }
+    mergedChips.length > 0 || stagedQuotePrompt || stagedItems.length > 0
+      ? {
+          ...sendOptions,
+          ...(mergedChips.length > 0 ? { chips: mergedChips } : {}),
+          ...(stagedQuotePrompt
+            ? {
+                assistantPrompt: composeSystemPrompt(
+                  sendOptions?.assistantPrompt,
+                  stagedQuotePrompt,
+                ),
+              }
+            : {}),
+          ...(stagedItems.length > 0
+            ? { userMessageMetadata: { stagedItems: [...stagedItems] } }
+            : {}),
+        }
       : sendOptions;
   const submittedText = sendOptions ? messageText : messageText.trim();
   const submittedAttachments = attachments.length > 0 ? attachments : undefined;

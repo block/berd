@@ -167,6 +167,41 @@ function restoreScrollHeight() {
 }
 
 describe("MessageBubble", () => {
+  it("renders a staged quote snapshot above the sent user text", () => {
+    const message: Message = {
+      id: "user-with-quote",
+      role: "user",
+      created: 1,
+      content: [{ type: "text", text: "can you elaborate?" }],
+      metadata: {
+        stagedItems: [
+          {
+            id: "quote-1",
+            kind: "quote",
+            excerpt:
+              "Ask reviewers to separate product concerns from visual polish.",
+            sources: [
+              {
+                messageId: "assistant-1",
+                contentBlockIndex: 0,
+                start: 10,
+                end: 72,
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(
+      screen.getByText(
+        "Ask reviewers to separate product concerns from visual polish.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("can you elaborate?")).toBeInTheDocument();
+  });
   beforeEach(() => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     useAgentStore.setState({ personas: [] });

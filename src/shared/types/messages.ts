@@ -278,6 +278,8 @@ export interface MessageMetadata {
   voiceConversationRevision?: number;
   attachments?: MessageAttachment[];
   chips?: MessageChip[];
+  /** Immutable local snapshot of composer staged items submitted with this turn. */
+  stagedItems?: StagedItem[];
   personaId?: string;
   personaName?: string;
   providerId?: string;

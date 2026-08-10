@@ -68,6 +68,7 @@ import { Button } from "@/shared/ui/button";
 import { LinkifiedText } from "@/shared/ui/LinkifiedText";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
+import { MessageStagedQuotes } from "./MessageStagedQuotes";
 import {
   couldOverflowUserMessagePreview,
   UserMessageClamp,
@@ -1049,6 +1050,9 @@ export const MessageBubble = memo(function MessageBubble({
                 </span>
               ) : null}
             </div>
+          ) : null}
+          {isUser && message.metadata?.stagedItems ? (
+            <MessageStagedQuotes items={message.metadata.stagedItems} />
           ) : null}
           {isUser && messageChips.length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-1.5">

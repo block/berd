@@ -63,6 +63,7 @@ import { ChatInputStagedItems } from "./ChatInputStagedItems";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
+import { stagedItemSnapshotsMatch } from "../lib/stagedQuoteSend";
 import {
   personaIntentFromComposer,
   type PersonaIntent,
@@ -513,7 +514,10 @@ export function ChatInput({
   });
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
-    visibleSelectedSkills.length > 0;
+    visibleSelectedSkills.length > 0 ||
+    stagedItems.length > 0;
+  const stagedItemsRef = useRef(stagedItems);
+  stagedItemsRef.current = stagedItems;
   const hasComposedMessage = text.trim().length > 0 || hasDraftContext;
   const hasDraftContent = text.length > 0 || hasDraftContext;
   const canQueueMessage =
@@ -696,6 +700,7 @@ export function ChatInput({
   const { submitChatInputMessage, handleVoiceAutoSubmit } = useChatInputSubmit({
     attachmentsRef,
     selectedSkillsRef,
+    stagedItemsRef,
     selectedChipsRef: selectedMessageChipsRef,
     selectedPersonaId,
     skillProviderId,
@@ -791,6 +796,7 @@ export function ChatInput({
 
       const submittedText = submittedTextOverride ?? text;
       const submittedSkills = visibleSelectedSkills;
+      const submittedStagedItems = stagedItemsRef.current;
       const submittedAttachments = scopedControls.attachments
         ? attachmentsRef.current
         : [];
@@ -829,6 +835,7 @@ export function ChatInput({
                 submittedText,
                 submittedAttachments,
                 submittedSkills,
+                submittedStagedItems,
                 submitHandler,
               );
       if (!accepted) {
@@ -855,6 +862,14 @@ export function ChatInput({
       if (attachmentsStillMatchSubmission) {
         clearAttachments();
       }
+      if (
+        onRemoveStagedItem &&
+        stagedItemSnapshotsMatch(stagedItemsRef.current, submittedStagedItems)
+      ) {
+        for (const item of submittedStagedItems) {
+          onRemoveStagedItem(item.id);
+        }
+      }
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
@@ -864,6 +879,7 @@ export function ChatInput({
       clearAttachments,
       editingQueuedRecordId,
       onUpdateQueue,
+      onRemoveStagedItem,
       scopedControls.attachments,
       scopedControls.voice,
       setEditingQueuedRecord,
@@ -994,6 +1010,7 @@ export function ChatInput({
         submittedText,
         submittedAttachments,
         submittedSkills,
+        stagedItemsRef.current,
         steerMessage,
       );
     }
@@ -1007,6 +1024,11 @@ export function ChatInput({
     setText("");
     setSelectedSkills([]);
     clearAttachments();
+    if (onRemoveStagedItem) {
+      for (const item of stagedItemsRef.current) {
+        onRemoveStagedItem(item.id);
+      }
+    }
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -1016,6 +1038,7 @@ export function ChatInput({
     dictation,
     editingQueuedRecordId,
     onCancelQueueEdit,
+    onRemoveStagedItem,
     onSteerMessage,
     restoredQueuedSendOptions,
     scopedControls.attachments,
