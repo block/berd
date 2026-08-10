@@ -24,29 +24,19 @@ use crate::services::{
 use doctor::FixType;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Block's internal Artifactory npm registry. Direct access to
-/// `registry.npmjs.org` is blocked by Cloudflare WARP, so npm-backed agent
-/// installs must route through this proxy. The doctor crate exposes an optional
-/// `npm_registry` param but bakes in no registry of its own, so Berd
-/// supplies this URL at every fix/run call site (BOT-686).
-pub(crate) const BLOCK_NPM_REGISTRY_URL: &str =
-    "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";
-
 pub(crate) fn npm_registry(app: &AppHandle) -> Option<String> {
     app.try_state::<DistroBundleState>()
         .and_then(|state| npm_registry_for_distro(state.inner()))
-        .or_else(fallback_npm_registry)
 }
 
 pub(crate) fn npm_registry_for_distro(distro_state: &DistroBundleState) -> Option<String> {
-    distro_state
-        .distribution_config()
-        .map(|config| config.npm_registry_url().to_string())
-        .or_else(fallback_npm_registry)
+    npm_registry_for_distribution(distro_state.distribution_config())
 }
 
-pub(crate) fn fallback_npm_registry() -> Option<String> {
-    (!cfg!(feature = "no-block-npm-registry")).then(|| BLOCK_NPM_REGISTRY_URL.to_string())
+fn npm_registry_for_distribution(
+    distribution: Option<&crate::services::distro_bundle::DistributionDistroConfig>,
+) -> Option<String> {
+    distribution.map(|config| config.npm_registry_url().to_string())
 }
 
 /// Cap the buffered output so emitting the full snapshot on every streamed line
@@ -768,6 +758,20 @@ async fn ensure_managed_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn npm_registry_is_quiet_without_a_distribution_and_override_wins() {
+        assert_eq!(npm_registry_for_distribution(None), None);
+
+        let distribution = serde_json::from_str(
+            r#"{"npmRegistryUrl":"https://packages.example.test/npm/","nodeDistBaseUrl":"https://node.example.test/dist/"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            npm_registry_for_distribution(Some(&distribution)),
+            Some("https://packages.example.test/npm/".to_string())
+        );
+    }
 
     #[test]
     fn crate_check_id_strips_acp_suffix() {

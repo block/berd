@@ -13,8 +13,8 @@
 #                     src-tauri/resources/runtime-config.json for custom builds
 #                     (default "{}"); validated before building
 #   - custom_vite_env: JSON object of VITE_* build env overrides plus
-#                     CUSTOM_BUNDLED_AGENTS, DISABLE_BLOCK_NPM_REGISTRY, and
-#                     DISABLE_BLOCK_DOCTOR_CHECKS for custom builds (default
+#                     CUSTOM_BUNDLED_AGENTS and DISABLE_BLOCK_DOCTOR_CHECKS
+#                     for custom builds (default
 #                     "{}"); VITE_APP_VERSION and
 #                     VITE_ENVIRONMENT are owned by the release script
 #   - databricks_host: optional distribution-owned HTTPS origin injected into
@@ -335,27 +335,18 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
     type == "object" and
     all(keys[];
       . == "CUSTOM_BUNDLED_AGENTS" or
-      . == "DISABLE_BLOCK_NPM_REGISTRY" or
       . == "DISABLE_BLOCK_DOCTOR_CHECKS" or
       test("^VITE_[A-Z0-9_]+$")
     ) and
     all(.[]; type == "string")
   ' >/dev/null || {
-    echo "custom_vite_env must be a JSON object with string VITE_* keys/values, CUSTOM_BUNDLED_AGENTS, DISABLE_BLOCK_NPM_REGISTRY, or DISABLE_BLOCK_DOCTOR_CHECKS: $CUSTOM_BUILD_ENV" >&2; exit 1;
+    echo "custom_vite_env must be a JSON object with string VITE_* keys/values, CUSTOM_BUNDLED_AGENTS, or DISABLE_BLOCK_DOCTOR_CHECKS: $CUSTOM_BUILD_ENV" >&2; exit 1;
   }
 
   while IFS=$'\t' read -r key value; do
     case "$key" in
       CUSTOM_BUNDLED_AGENTS)
         CUSTOM_BUNDLED_AGENTS_VALUE="$value"
-        ;;
-      DISABLE_BLOCK_NPM_REGISTRY)
-        if [[ "$value" == "1" ]]; then
-          CARGO_FEATURES="$CARGO_FEATURES,no-block-npm-registry"
-        elif [[ "$value" != "0" ]]; then
-          echo "DISABLE_BLOCK_NPM_REGISTRY must be \"0\" or \"1\"" >&2
-          exit 1
-        fi
         ;;
       DISABLE_BLOCK_DOCTOR_CHECKS)
         if [[ "$value" == "1" ]]; then

@@ -2048,7 +2048,7 @@ mod tests {
         // Install the real pinned Node runtime the bridge shim will exec.
         managed_node::ensure_managed_node_runtime_at(
             &node_root,
-            &managed_node::fallback_node_dist_base_url(),
+            "https://nodejs.org/dist",
             managed_node::node_runtime_lock(),
             90 * 1024 * 1024,
             &|_| {},
@@ -2061,13 +2061,12 @@ mod tests {
 
         // Install a real managed bridge into the private prefix.
         let tool = test_tool();
-        let npm_registry = crate::commands::agent_setup::fallback_npm_registry();
         install_npm_tool(
             &packages_root,
             &node_install_dir,
             &layout,
             &tool,
-            npm_registry.as_deref(),
+            None,
             &|_| {},
         )
         .await
@@ -2080,7 +2079,7 @@ mod tests {
             &node_install_dir,
             &layout,
             &tool,
-            npm_registry.as_deref(),
+            None,
             &|_| {},
         )
         .await

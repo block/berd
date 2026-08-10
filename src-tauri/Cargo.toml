@@ -114,9 +114,6 @@ no-bb-cli-install = []
 # ai-security OTLP logging env, and exposes disabled security settings commands.
 # Custom builds only; official builds must leave this off.
 no-security-ml = []
-# no-block-npm-registry: lets npm-backed doctor installs use the upstream npm
-# registry instead of Block's internal Artifactory proxy.
-no-block-npm-registry = []
 # no-block-doctor-checks: omits Block-only Square Agent Tools and internal
 # service access checks from the doctor report. Custom builds only.
 no-block-doctor-checks = []

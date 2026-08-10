@@ -4,9 +4,8 @@
 //! root, embedded at compile time; refresh with `just bump-node-runtime`),
 //! verifies it against the lock's SHA-256, and atomically installs it under
 //! `<app-data>/packages/node/<version>/<platform>/`. The tarball comes from
-//! Block's Artifactory `nodejs` repo — a read-through mirror of
-//! `https://nodejs.org/dist` — so the lock's hash pin is the trust root, not
-//! the mirror; `no-block-npm-registry` builds fetch from nodejs.org directly.
+//! `https://nodejs.org/dist` by default; its lockfile SHA-256 is the trust root.
+//! A distribution may override that base URL for its own builds.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +20,6 @@ use tokio::io::AsyncWriteExt;
 
 const NODE_RUNTIME_LOCK_JSON: &str = include_str!("../../../node-runtime.lock.json");
 
-const BLOCK_NODE_DIST_BASE_URL: &str = "https://global.block-artifacts.com/artifactory/nodejs";
 const UPSTREAM_NODE_DIST_BASE_URL: &str = "https://nodejs.org/dist";
 
 /// Hard cap on the compressed tarball; the largest pinned artifact today is
@@ -240,21 +238,18 @@ pub(crate) fn current_target_triple() -> Option<&'static str> {
 }
 
 fn node_dist_base_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
-    app.try_state::<DistroBundleState>()
-        .and_then(|state| {
-            state
-                .distribution_config()
-                .map(|config| config.node_dist_base_url().to_string())
-        })
-        .unwrap_or_else(fallback_node_dist_base_url)
+    node_dist_base_url_for_distribution(
+        app.try_state::<DistroBundleState>()
+            .and_then(|state| state.distribution_config().cloned()),
+    )
 }
 
-pub(crate) fn fallback_node_dist_base_url() -> String {
-    if cfg!(feature = "no-block-npm-registry") {
-        UPSTREAM_NODE_DIST_BASE_URL.to_string()
-    } else {
-        BLOCK_NODE_DIST_BASE_URL.to_string()
-    }
+fn node_dist_base_url_for_distribution(
+    distribution: Option<crate::services::distro_bundle::DistributionDistroConfig>,
+) -> String {
+    distribution
+        .map(|config| config.node_dist_base_url().to_string())
+        .unwrap_or_else(|| UPSTREAM_NODE_DIST_BASE_URL.to_string())
 }
 
 #[derive(Debug)]
@@ -1162,12 +1157,20 @@ mod tests {
     }
 
     #[test]
-    fn base_url_follows_registry_feature() {
-        if cfg!(feature = "no-block-npm-registry") {
-            assert_eq!(fallback_node_dist_base_url(), UPSTREAM_NODE_DIST_BASE_URL);
-        } else {
-            assert_eq!(fallback_node_dist_base_url(), BLOCK_NODE_DIST_BASE_URL);
-        }
+    fn base_url_defaults_upstream_and_distribution_override_wins() {
+        assert_eq!(
+            node_dist_base_url_for_distribution(None),
+            UPSTREAM_NODE_DIST_BASE_URL
+        );
+
+        let distribution = serde_json::from_str(
+            r#"{"npmRegistryUrl":"https://packages.example.test/npm/","nodeDistBaseUrl":"https://node.example.test/dist/"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            node_dist_base_url_for_distribution(Some(distribution)),
+            "https://node.example.test/dist/"
+        );
     }
 
     #[test]
@@ -1919,11 +1922,11 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let lock = node_runtime_lock();
 
-        // Fresh install from the pinned mirror; SHA and readiness are enforced
+        // Fresh install from the pinned upstream distribution; SHA and readiness are enforced
         // inside `ensure_managed_node_runtime_at`.
         ensure_managed_node_runtime_at(
             &root,
-            &fallback_node_dist_base_url(),
+            UPSTREAM_NODE_DIST_BASE_URL,
             lock,
             MAX_ARCHIVE_BYTES,
             &ignore_progress,
@@ -1999,7 +2002,7 @@ mod tests {
         );
         ensure_managed_node_runtime_at(
             &root,
-            &fallback_node_dist_base_url(),
+            UPSTREAM_NODE_DIST_BASE_URL,
             lock,
             MAX_ARCHIVE_BYTES,
             &ignore_progress,
@@ -2022,7 +2025,7 @@ mod tests {
         );
         ensure_managed_node_runtime_at(
             &root,
-            &fallback_node_dist_base_url(),
+            UPSTREAM_NODE_DIST_BASE_URL,
             lock,
             MAX_ARCHIVE_BYTES,
             &ignore_progress,
@@ -2046,7 +2049,7 @@ mod tests {
         );
         ensure_managed_node_runtime_at(
             &root,
-            &fallback_node_dist_base_url(),
+            UPSTREAM_NODE_DIST_BASE_URL,
             lock,
             MAX_ARCHIVE_BYTES,
             &ignore_progress,
