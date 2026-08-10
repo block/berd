@@ -316,6 +316,8 @@ function AgentWorkItemRow({
       <div className="min-w-0 flex-1 pb-2">
         <ToolCallAdapter
           name={getToolName(item)}
+          toolName={item.request?.toolName}
+          subagentLabel={item.request?.subagentLabel}
           arguments={item.request?.arguments ?? {}}
           status={status}
           locations={item.request?.locations}

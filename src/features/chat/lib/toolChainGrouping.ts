@@ -21,6 +21,11 @@ export function getToolItemName(item: ToolChainItem): string {
   return item.request?.name || item.response?.name || "Tool result";
 }
 
+/** Real (wire-level) tool name from `_meta`, when the harness provided one. */
+export function getToolItemToolName(item: ToolChainItem): string | undefined {
+  return item.request?.toolName;
+}
+
 export function getToolItemStatus(item: ToolChainItem): ToolCallStatus {
   if (item.response) {
     return item.response.isError ? "failed" : "completed";

@@ -121,6 +121,12 @@ export interface ToolRequestContent {
   startedAt?: number;
   annotations?: Annotations;
   chainSummary?: ToolChainSummary;
+  /**
+   * For subagent await/peek/cancel calls (e.g. goose `load <task-id>`): the
+   * named source (custom agent/recipe) of the delegate that spawned the task,
+   * resolved from the delegate's result in this session's transcript.
+   */
+  subagentLabel?: string;
 }
 
 export interface ToolResponseContent {

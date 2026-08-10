@@ -566,7 +566,25 @@
     "pathOutsideRoots": "Path is outside allowed roots",
     "structuredContent": "Structured content",
     "structuredOutput": "Structured output",
-    "structuredOutputLines": "{{count}} lines"
+    "structuredOutputLines": "{{count}} lines",
+    "subagent": {
+      "delegating": "Delegating to a subagent",
+      "delegatingLabeled": "Delegating to a subagent · {{label}}",
+      "delegatingAgent": "Delegating to {{name}}",
+      "delegatingAgentLabeled": "Delegating to {{name}} · {{label}}",
+      "waiting": "Waiting on a subagent",
+      "waitingLabeled": "Waiting on subagent #{{label}}",
+      "waitingAgent": "Waiting on {{name}}",
+      "waitingAgentLabeled": "Waiting on {{name}} · {{label}}",
+      "checking": "Checking on a subagent",
+      "checkingLabeled": "Checking on subagent #{{label}}",
+      "checkingAgent": "Checking on {{name}}",
+      "checkingAgentLabeled": "Checking on {{name}} · {{label}}",
+      "cancelling": "Cancelling a subagent",
+      "cancellingLabeled": "Cancelling subagent #{{label}}",
+      "cancellingAgent": "Cancelling {{name}}",
+      "cancellingAgentLabeled": "Cancelling {{name}} · {{label}}"
+    }
   },
   "agent_work": {
     "redactedThinking": "Thinking redacted",

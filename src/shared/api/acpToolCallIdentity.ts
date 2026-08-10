@@ -18,26 +18,48 @@ export function getToolCallIdentity(update: SessionUpdate): ToolCallIdentity {
   if (!isRecord(update._meta)) {
     return {};
   }
+
+  // Goose stamps the wire tool identity under `_meta.goose.toolCall`/`mcpApp`.
+  // Note `_meta.goose` can also carry replay-only fields (messageId, created)
+  // for sessions of ANY harness, so its presence alone must not short-circuit
+  // the other vendors' namespaces below.
   const goose = update._meta.goose;
-  if (!isRecord(goose)) {
-    return {};
+  if (isRecord(goose)) {
+    const toolCall = isRecord(goose.mcpApp)
+      ? goose.mcpApp
+      : isRecord(goose.toolCall)
+        ? goose.toolCall
+        : null;
+    if (toolCall) {
+      return {
+        ...(typeof toolCall.toolName === "string"
+          ? { toolName: toolCall.toolName }
+          : {}),
+        ...(typeof toolCall.extensionName === "string"
+          ? { extensionName: toolCall.extensionName }
+          : {}),
+      };
+    }
   }
 
-  const toolCall = isRecord(goose.mcpApp)
-    ? goose.mcpApp
-    : isRecord(goose.toolCall)
-      ? goose.toolCall
-      : null;
-  if (!toolCall) return {};
+  // Claude Code's ACP adapter stamps the underlying tool name (e.g. "Task"
+  // for subagent spawns) under `_meta.claudeCode.toolName`.
+  const claudeCode = update._meta.claudeCode;
+  if (isRecord(claudeCode) && typeof claudeCode.toolName === "string") {
+    return { toolName: claudeCode.toolName };
+  }
 
-  return {
-    ...(typeof toolCall.toolName === "string"
-      ? { toolName: toolCall.toolName }
-      : {}),
-    ...(typeof toolCall.extensionName === "string"
-      ? { extensionName: toolCall.extensionName }
-      : {}),
-  };
+  // Codex's ACP adapter reports collaboration tools (e.g. "spawn_agent")
+  // under `_meta.codex.collaboration.tool`.
+  const codex = update._meta.codex;
+  if (isRecord(codex)) {
+    const collaboration = codex.collaboration;
+    if (isRecord(collaboration) && typeof collaboration.tool === "string") {
+      return { toolName: collaboration.tool };
+    }
+  }
+
+  return {};
 }
 
 /**

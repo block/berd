@@ -22,10 +22,18 @@ import {
 } from "@/features/chat/lib/toolCallPresentation";
 import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import {
+  getSubagentToolCallInfo,
+  shortTaskId,
+} from "@/features/chat/lib/subagentToolCalls";
 
 interface ToolCallAdapterProps {
   className?: string;
   name: string;
+  /** Real (wire-level) tool name from `_meta`, when the harness provides it. */
+  toolName?: string;
+  /** Named delegate source (custom agent) behind a subagent await/peek call. */
+  subagentLabel?: string;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   locations?: ToolCallLocation[];
@@ -303,6 +311,54 @@ function AgentWorkToolSection({
   );
 }
 
+function subagentTitle(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  info: NonNullable<ReturnType<typeof getSubagentToolCallInfo>>,
+  resolvedAgentName?: string,
+): string {
+  // Explicit key map keeps the i18n usage statically checkable.
+  const keys = {
+    delegating: [
+      "tools.subagent.delegating",
+      "tools.subagent.delegatingLabeled",
+      "tools.subagent.delegatingAgent",
+      "tools.subagent.delegatingAgentLabeled",
+    ],
+    waiting: [
+      "tools.subagent.waiting",
+      "tools.subagent.waitingLabeled",
+      "tools.subagent.waitingAgent",
+      "tools.subagent.waitingAgentLabeled",
+    ],
+    checking: [
+      "tools.subagent.checking",
+      "tools.subagent.checkingLabeled",
+      "tools.subagent.checkingAgent",
+      "tools.subagent.checkingAgentLabeled",
+    ],
+    cancelling: [
+      "tools.subagent.cancelling",
+      "tools.subagent.cancellingLabeled",
+      "tools.subagent.cancellingAgent",
+      "tools.subagent.cancellingAgentLabeled",
+    ],
+  } as const;
+  const [plain, labeled, agent, agentLabeled] = keys[info.activity];
+  // Agent name comes from the call arguments (delegate source) or is
+  // resolved from the transcript (load of a task spawned by a named
+  // delegate). It replaces the word "subagent"; the task description is
+  // kept alongside it: "Delegating to Rivet · Count markdown files…".
+  const agentName = info.agentName ?? resolvedAgentName;
+  if (agentName && info.label) {
+    return t(agentLabeled, { name: agentName, label: info.label });
+  }
+  if (agentName) return t(agent, { name: agentName });
+  if (info.taskId) {
+    return t(labeled, { label: shortTaskId(info.taskId) });
+  }
+  return info.label ? t(labeled, { label: info.label }) : t(plain);
+}
+
 function sentenceCaseToolTitle(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return name;
@@ -328,6 +384,8 @@ function splitHeaderTitleByPath(name: string, fileLabel: string) {
 export function ToolCallAdapter({
   className,
   name,
+  toolName,
+  subagentLabel,
   arguments: args,
   status,
   locations,
@@ -355,7 +413,13 @@ export function ToolCallAdapter({
     status === "in_progress" && elapsed >= 3 ? elapsed : undefined;
 
   const { resolveMarkdownHref, openInApp } = useArtifactActionsContext();
-  const displayName = sentenceCaseToolTitle(name);
+  const subagentInfo = useMemo(
+    () => getSubagentToolCallInfo({ toolName, arguments: args }),
+    [toolName, args],
+  );
+  const displayName = subagentInfo
+    ? subagentTitle(t, subagentInfo, subagentLabel)
+    : sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");
   const headerFileLabel = pathRow?.value;

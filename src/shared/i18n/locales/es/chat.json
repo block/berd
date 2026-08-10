@@ -561,7 +561,25 @@
     "pathOutsideRoots": "La ruta está fuera de las raíces permitidas de proyecto/artefactos.",
     "structuredContent": "Contenido estructurado",
     "structuredOutput": "Salida estructurada",
-    "structuredOutputLines": "{{count}} líneas"
+    "structuredOutputLines": "{{count}} líneas",
+    "subagent": {
+      "delegating": "Delegando a un subagente",
+      "delegatingLabeled": "Delegando a un subagente · {{label}}",
+      "delegatingAgent": "Delegando a {{name}}",
+      "delegatingAgentLabeled": "Delegando a {{name}} · {{label}}",
+      "waiting": "Esperando a un subagente",
+      "waitingLabeled": "Esperando al subagente n.º {{label}}",
+      "waitingAgent": "Esperando a {{name}}",
+      "waitingAgentLabeled": "Esperando a {{name}} · {{label}}",
+      "checking": "Consultando a un subagente",
+      "checkingLabeled": "Consultando al subagente n.º {{label}}",
+      "checkingAgent": "Consultando a {{name}}",
+      "checkingAgentLabeled": "Consultando a {{name}} · {{label}}",
+      "cancelling": "Cancelando un subagente",
+      "cancellingLabeled": "Cancelando al subagente n.º {{label}}",
+      "cancellingAgent": "Cancelando a {{name}}",
+      "cancellingAgentLabeled": "Cancelando a {{name}} · {{label}}"
+    }
   },
   "agent_work": {
     "redactedThinking": "Pensamiento redactado",

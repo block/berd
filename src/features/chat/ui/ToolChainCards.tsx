@@ -24,6 +24,7 @@ import {
   getChainAggregateStatus,
   getToolItemName,
   getToolItemStatus,
+  getToolItemToolName,
   shouldRenderAsGroupedChain,
   type ToolChainItem,
 } from "@/features/chat/lib/toolChainGrouping";
@@ -391,6 +392,8 @@ export function ToolChainCards({
     },
   ) => {
     const name = getToolItemName(item);
+    const toolName = getToolItemToolName(item);
+    const subagentLabel = item.request?.subagentLabel;
     const status = getToolItemStatus(item);
     const { request, response } = item;
     const isOpen = !options.forceClose && expandedKeys.has(item.key);
@@ -422,6 +425,8 @@ export function ToolChainCards({
           <div className="min-w-0 flex-1">
             <ToolCallAdapter
               name={name}
+              toolName={toolName}
+              subagentLabel={subagentLabel}
               arguments={request?.arguments ?? {}}
               status={status}
               locations={request?.locations}
@@ -452,6 +457,8 @@ export function ToolChainCards({
         <div className="min-w-0 flex-1 pb-1">
           <ToolCallAdapter
             name={name}
+            toolName={toolName}
+            subagentLabel={subagentLabel}
             arguments={request?.arguments ?? {}}
             status={status}
             locations={request?.locations}
