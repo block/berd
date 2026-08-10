@@ -67,10 +67,10 @@ describe("getSubagentToolCallInfo", () => {
       expect(info?.label?.endsWith("…")).toBe(true);
     });
 
-    it("does not classify a delegate with no task boundary", () => {
+    it("classifies a delegate even when its task is unknown", () => {
       expect(
         getSubagentToolCallInfo({ toolName: "delegate", arguments: {} }),
-      ).toBeUndefined();
+      ).toEqual({ activity: "delegating" });
     });
   });
 
@@ -148,7 +148,7 @@ describe("getSubagentToolCallInfo", () => {
       });
     });
 
-    it("does not classify an agent when description is absent", () => {
+    it("uses prompt as the known task when description is absent", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "Agent",
@@ -157,16 +157,20 @@ describe("getSubagentToolCallInfo", () => {
             prompt: "Review the authentication boundary",
           },
         }),
-      ).toBeUndefined();
+      ).toEqual({
+        activity: "delegating",
+        agentName: "code-reviewer",
+        label: "Review the authentication boundary",
+      });
     });
 
-    it("does not classify a named agent without a task description", () => {
+    it("retains known identity when the task is unknown", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "Agent",
           arguments: { subagent_type: "code-reviewer" },
         }),
-      ).toBeUndefined();
+      ).toEqual({ activity: "delegating", agentName: "code-reviewer" });
     });
   });
 
@@ -360,13 +364,13 @@ describe("getSubagentToolCallInfo", () => {
         label: "Investigate the failing tests",
       });
     });
-    it("does not classify spawn_agent without a prompt", () => {
+    it("classifies spawn_agent when its task is unknown", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "spawn_agent",
           arguments: {},
         }),
-      ).toBeUndefined();
+      ).toEqual({ activity: "delegating" });
     });
   });
 });

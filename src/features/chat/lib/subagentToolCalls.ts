@@ -175,11 +175,8 @@ export function getSubagentToolCallInfo(input: {
   if (toolName === "delegate") {
     const agentName = stringArg(args, "source");
     const label = stringArg(args, "instructions");
-    // A named Goose source owns a configured task, so source-only delegates
-    // still have a coherent task boundary. An anonymous/descriptionless
-    // delegate does not: keep it out of subagent rendering rather than
-    // inventing a task description.
-    if (!agentName && !label) return undefined;
+    // A named Goose source owns a configured task even when no inline
+    // instructions are present. Unknown task facts remain absent.
     return {
       activity: "delegating",
       ...(agentName ? { agentName: agentName.trim() } : {}),
@@ -207,24 +204,22 @@ export function getSubagentToolCallInfo(input: {
   // configured agent; description is the task.
   if (toolName === "Task" || toolName === "Agent") {
     const agentName = stringArg(args, "subagent_type");
-    const label = stringArg(args, "description");
-    if (!label) return undefined;
+    const label = stringArg(args, "description") ?? stringArg(args, "prompt");
     return {
       activity: "delegating",
       ...(agentName && agentName !== "general-purpose"
         ? { agentName: agentName.trim() }
         : {}),
-      label: truncateLabel(label),
+      ...(label ? { label: truncateLabel(label) } : {}),
     };
   }
 
   // Codex: spawn_agent collaboration tool.
   if (toolName === "spawn_agent") {
     const label = stringArg(args, "prompt");
-    if (!label) return undefined;
     return {
       activity: "delegating",
-      label: truncateLabel(label),
+      ...(label ? { label: truncateLabel(label) } : {}),
     };
   }
 

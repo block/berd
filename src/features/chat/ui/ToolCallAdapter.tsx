@@ -318,7 +318,7 @@ function subagentTitle(
   resolvedAgentName?: string,
   resolvedTaskLabel?: string,
   resolvedTaskIsConfigured?: boolean,
-): string | undefined {
+): string {
   // Explicit key map keeps the i18n usage statically checkable.
   const keys = {
     delegating: [
@@ -377,9 +377,9 @@ function subagentTitle(
       ? t(taskLabeledKeys[info.activity], { label: taskLabel })
       : t(labeled, { label: taskLabel });
   }
-  // A task id is implementation identity, not a plain-language task. Keep
-  // unresolved follow-ups out of the specialized subagent presentation.
-  return info.taskId ? undefined : t(plain);
+  // A task id is correlation identity, not a task description. When no
+  // delegate context can be recovered, show only the known activity fact.
+  return t(plain);
 }
 
 function sentenceCaseToolTitle(name: string): string {
@@ -442,26 +442,15 @@ export function ToolCallAdapter({
     () => getSubagentToolCallInfo({ toolName, arguments: args }),
     [toolName, args],
   );
-  // A task-id load is only specialized once its delegated task context has
-  // been recovered. Until then, retain the ordinary provider title rather
-  // than showing a task-id or an invented description.
-  const hasResolvedSubagentContext = Boolean(
-    subagentInfo &&
-      (!subagentInfo.taskId ||
-        subagentAgentName ||
-        subagentTaskLabel ||
-        subagentTaskIsConfigured),
-  );
-  const displayName =
-    (subagentInfo && hasResolvedSubagentContext
-      ? subagentTitle(
-          t,
-          subagentInfo,
-          subagentAgentName,
-          subagentTaskLabel,
-          subagentTaskIsConfigured,
-        )
-      : undefined) ?? sentenceCaseToolTitle(name);
+  const displayName = subagentInfo
+    ? subagentTitle(
+        t,
+        subagentInfo,
+        subagentAgentName,
+        subagentTaskLabel,
+        subagentTaskIsConfigured,
+      )
+    : sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");
   const headerFileLabel = pathRow?.value;

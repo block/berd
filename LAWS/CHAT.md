@@ -34,4 +34,4 @@
 ## Subagent activity
 
 - Subagent activity MUST attribute the subagent when its identity is known.
-- Subagent activity MUST describe the delegated task in plain language.
+- Subagent activity MUST describe the delegated task when it is known.

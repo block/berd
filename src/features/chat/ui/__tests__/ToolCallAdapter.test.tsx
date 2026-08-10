@@ -177,24 +177,34 @@ describe("ToolCallAdapter — subagent laws", () => {
   });
 
   it.each([
-    { toolName: "delegate", arguments: {} },
+    {
+      toolName: "delegate",
+      arguments: {},
+      title: "Delegating to a subagent",
+    },
     {
       toolName: "Agent",
       arguments: { subagent_type: "code-reviewer" },
+      title: "Delegating to code-reviewer",
     },
-    { toolName: "spawn_agent", arguments: {} },
-  ])("falls back to the ordinary tool title for malformed $toolName activity", ({
+    {
+      toolName: "spawn_agent",
+      arguments: {},
+      title: "Delegating to a subagent",
+    },
+  ])("does not fabricate an unknown task for $toolName activity", ({
     toolName,
     arguments: args,
+    title,
   }) => {
     renderAdapter({ name: toolName, toolName, arguments: args });
 
     expect(
-      screen.getByRole("button", { name: new RegExp(`^${toolName}$`, "i") }),
+      screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
     ).toBeInTheDocument();
   });
 
-  it("falls back to the ordinary tool title for unresolved async loads", () => {
+  it("does not expose a task id as an unknown task description", () => {
     renderAdapter({
       name: "Loading source 20260807_72",
       toolName: "load",
@@ -203,9 +213,10 @@ describe("ToolCallAdapter — subagent laws", () => {
 
     expect(
       screen.getByRole("button", {
-        name: /Loading source 20260807_72/i,
+        name: /^Waiting on a subagent$/i,
       }),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/20260807_72/)).not.toBeInTheDocument();
   });
 
   it("retains recovered identity and task on async follow-ups", () => {
@@ -253,6 +264,33 @@ describe("ToolCallAdapter — subagent laws", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    {
+      arguments: { source: "20260807_72" },
+      title: "Waiting on Rivet",
+    },
+    {
+      arguments: { source: "20260807_72", peek: true },
+      title: "Checking on Rivet",
+    },
+    {
+      arguments: { source: "20260807_72", cancel: true },
+      title: "Cancelling Rivet",
+    },
+  ])("attributes agent-only async $title activity without inventing a task", ({
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      arguments: args,
+    });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
+    ).toBeInTheDocument();
   it("retains a recovered configured task on async follow-ups", () => {
     renderAdapter({
       name: "load",
@@ -268,9 +306,8 @@ describe("ToolCallAdapter — subagent laws", () => {
       }),
     ).toBeInTheDocument();
   });
-});
 
-describe("ToolCallAdapter — expanded body", () => {
+
   it("renders the tool name and status badge in the header", () => {
     renderAdapter();
     const header = screen.getByRole("button", { name: /Write_file/i });
