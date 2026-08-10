@@ -129,6 +129,7 @@ impl DistroBundleState {
                     kgoose: Some(kgoose),
                     diagnostics: None,
                     distribution: None,
+                    marketplace: None,
                 },
             }),
         }
