@@ -97,6 +97,8 @@ export type ChatAttachmentDraft =
  * units, matching DOM Range and JavaScript string offsets. */
 export interface StagedQuoteSourceRange {
   messageId: string;
+  /** Captured provenance for compact labels; the message id remains authoritative. */
+  role?: Extract<MessageRole, "user" | "assistant" | "system">;
   contentBlockIndex: number;
   start: number;
   end: number;

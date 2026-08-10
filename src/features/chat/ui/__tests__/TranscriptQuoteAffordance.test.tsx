@@ -91,7 +91,7 @@ describe("TranscriptQuoteAffordance", () => {
     fireEvent.pointerUp(root);
 
     expect(
-      await screen.findByRole("button", { name: "Add to composer" }),
+      await screen.findByRole("button", { name: "Quote in message" }),
     ).toBeInTheDocument();
   });
 });

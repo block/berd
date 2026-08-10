@@ -50,6 +50,10 @@ function isStagedQuoteSourceRange(
   const source = value as Record<string, unknown>;
   return (
     typeof source.messageId === "string" &&
+    (source.role === undefined ||
+      source.role === "user" ||
+      source.role === "assistant" ||
+      source.role === "system") &&
     Number.isInteger(source.contentBlockIndex) &&
     (source.contentBlockIndex as number) >= 0 &&
     Number.isInteger(source.start) &&

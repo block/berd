@@ -146,7 +146,15 @@ export function stagedQuoteFromSelection({
     id,
     kind: "quote",
     excerpt,
-    sources: [{ messageId, contentBlockIndex: blockIndex, start, end }],
+    sources: [
+      {
+        messageId,
+        role: message.role,
+        contentBlockIndex: blockIndex,
+        start,
+        end,
+      },
+    ],
   };
 }
 

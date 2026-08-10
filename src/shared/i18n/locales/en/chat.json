@@ -15,8 +15,19 @@
     "viewFullSize": "View full-size attachment {{name}}"
   },
   "quotes": {
-    "addToComposer": "Add to composer",
-    "remove": "Remove quote"
+    "quoteInMessage": "Quote in message",
+    "remove": "Remove quote",
+    "source": {
+      "agentResponse": "Agent response",
+      "yourMessage": "Your message",
+      "systemMessage": "System message",
+      "multipleMessages_one": "1 message",
+      "multipleMessages_other": "{{count}} messages"
+    },
+    "extent": {
+      "words_one": "1 word",
+      "words_other": "{{count}} words"
+    }
   },
   "agentToolsTip": {
     "connect": "Connect",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type RefObject } from "react";
 import { Quote } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Message, StagedQuoteItem } from "@/shared/types/messages";
-import { GlassButton } from "@/shared/ui/glass-button";
+import { Button } from "@/shared/ui/button";
 import {
   getQuoteAffordancePosition,
   stagedQuoteFromSelection,
@@ -66,8 +66,9 @@ export function TranscriptQuoteAffordance({
       className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full"
       style={{ left: pendingQuote.left, top: pendingQuote.top }}
     >
-      <GlassButton
+      <Button
         type="button"
+        variant="subtle"
         size="xs"
         className="pointer-events-auto"
         leftIcon={<Quote />}
@@ -90,8 +91,8 @@ export function TranscriptQuoteAffordance({
           setPendingQuote(null);
         }}
       >
-        {t("quotes.addToComposer")}
-      </GlassButton>
+        {t("quotes.quoteInMessage")}
+      </Button>
     </div>
   );
 }
