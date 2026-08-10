@@ -61,6 +61,7 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 let clientPromise: Promise<GooseClient> | null = null;
 let resolvedClient: GooseClient | null = null;
 let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
+let connectionGeneration = 0;
 
 function createClientCallbacks(): () => Client {
   return () => ({
@@ -125,6 +126,7 @@ function monitorConnection(
  * safer than allowing later mutations to race work still running remotely.
  */
 export async function invalidateClientConnection(): Promise<void> {
+  connectionGeneration += 1;
   const stream = activeStream;
   activeStream = null;
   resolvedClient = null;
@@ -134,7 +136,12 @@ export async function invalidateClientConnection(): Promise<void> {
   }
 }
 
-async function initializeConnection(): Promise<GooseClient> {
+interface InitializedConnection {
+  client: GooseClient;
+  stream: ReturnType<typeof createWebSocketStream>;
+}
+
+async function initializeConnection(): Promise<InitializedConnection> {
   // Dev-only: inject a real failure into startup so the WARP probe runs
   // for real against kgoose. `VITE_DEV_STARTUP_ERROR=warp just dev` lets
   // us experience the diagnostic UI with whatever real WARP state the
@@ -167,7 +174,6 @@ async function initializeConnection(): Promise<GooseClient> {
 
   const tStream = performance.now();
   const stream = createWebSocketStream(wsUrl);
-  activeStream = stream;
 
   const client = new GooseClient(createClientCallbacks(), stream);
   perfLog(
@@ -194,9 +200,7 @@ async function initializeConnection(): Promise<GooseClient> {
     `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
   );
 
-  monitorConnection(client, stream);
-
-  return client;
+  return { client, stream };
 }
 
 export async function getClient(): Promise<GooseClient> {
@@ -206,15 +210,32 @@ export async function getClient(): Promise<GooseClient> {
 
   if (!clientPromise) {
     perfLog("[perf:conn] getClient() → initializing new ACP connection");
-    clientPromise = initializeConnection()
-      .then((client) => {
-        resolvedClient = client;
+    const generation = connectionGeneration;
+    const pendingClient = initializeConnection();
+    const clientInitialization = pendingClient
+      .then(async ({ client, stream }) => {
+        if (
+          generation === connectionGeneration &&
+          clientPromise === clientInitialization
+        ) {
+          activeStream = stream;
+          resolvedClient = client;
+          monitorConnection(client, stream);
+          return client;
+        }
+        await stream.writable.abort();
         return client;
       })
       .catch((error) => {
-        clientPromise = null;
+        if (
+          generation === connectionGeneration &&
+          clientPromise === clientInitialization
+        ) {
+          clientPromise = null;
+        }
         throw error;
       });
+    clientPromise = clientInitialization;
   } else {
     perfLog("[perf:conn] getClient() awaiting in-flight initializeConnection");
   }

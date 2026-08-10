@@ -93,14 +93,14 @@ function persistedModelProviderId(
   catalogEntries: ProviderCatalogEntry[],
 ): string | undefined {
   const persistedProviderId = persona.modelProviderId?.trim();
-  const persistedProviderIsAgent =
-    Boolean(persistedProviderId) &&
-    isAgentProviderId(persistedProviderId, catalogEntries);
-  if (
-    persistedProviderId &&
-    !(harnessId === "goose" && persistedProviderIsAgent)
-  ) {
-    return canonicalModelProviderId(persistedProviderId, catalogEntries);
+  if (persistedProviderId) {
+    const persistedProviderIsAgent = isAgentProviderId(
+      persistedProviderId,
+      catalogEntries,
+    );
+    if (!(harnessId === "goose" && persistedProviderIsAgent)) {
+      return canonicalModelProviderId(persistedProviderId, catalogEntries);
+    }
   }
   if (
     persona.provider?.trim() &&
