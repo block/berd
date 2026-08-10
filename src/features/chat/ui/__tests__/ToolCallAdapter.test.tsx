@@ -291,6 +291,8 @@ describe("ToolCallAdapter — subagent laws", () => {
     expect(
       screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
     ).toBeInTheDocument();
+  });
+
   it("retains a recovered configured task on async follow-ups", () => {
     renderAdapter({
       name: "load",
@@ -306,8 +308,9 @@ describe("ToolCallAdapter — subagent laws", () => {
       }),
     ).toBeInTheDocument();
   });
+});
 
-
+describe("ToolCallAdapter — expanded body", () => {
   it("renders the tool name and status badge in the header", () => {
     renderAdapter();
     const header = screen.getByRole("button", { name: /Write_file/i });
