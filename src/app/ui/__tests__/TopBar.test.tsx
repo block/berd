@@ -36,6 +36,12 @@ describe("TopBar", () => {
     expect(screen.queryByText("Model and system info")).not.toBeInTheDocument();
   });
 
+  it("renders the skills title in the chat-title position", () => {
+    renderTopBar({ breadcrumbs: [{ id: "skills", label: "Skills" }] });
+
+    expect(screen.getByText("Skills")).toHaveClass("w-full", "truncate");
+  });
+
   it("omits search when onSearchClick is not provided", () => {
     renderTopBar();
 

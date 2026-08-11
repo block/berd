@@ -65,8 +65,9 @@ export function TopBar({
 }: TopBarProps) {
   const { t } = useTranslation(["sidebar", "feedback"]);
   const viewActions = useTopBarActions();
-  const chatTitle =
+  const topBarTitle =
     breadcrumbs.find((breadcrumb) => breadcrumb.id === "chat-session")?.label ??
+    breadcrumbs.find((breadcrumb) => breadcrumb.id === "skills")?.label ??
     null;
   const sidebarLabel = sidebarCollapsed
     ? t("actions.expand")
@@ -140,9 +141,9 @@ export function TopBar({
         </div>
       </div>
       <div className="flex min-w-0 items-center self-stretch">
-        {chatTitle ? (
+        {topBarTitle ? (
           <span className="block w-full min-w-0 truncate text-[length:var(--text-app-top-bar-title)] font-normal text-foreground">
-            {chatTitle}
+            {topBarTitle}
           </span>
         ) : null}
       </div>

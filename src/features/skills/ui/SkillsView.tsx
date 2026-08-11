@@ -2,35 +2,35 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconChevronDown,
-  IconMessageCircle,
-  IconPencil,
+  IconDownload,
   IconRefresh,
   IconPlus,
-  IconUpload,
+  IconSearch,
 } from "@tabler/icons-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { Button } from "@/shared/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { PageShell } from "@/shared/ui/page-shell";
+import { PageToolbarButton } from "@/shared/ui/page-toolbar-button";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Spinner } from "@/shared/ui/spinner";
-import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
-import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { useSkillImportExport } from "../hooks/useSkillImportExport";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsDialogs } from "./SkillsDialogs";
-import { skillsGridClass, SkillsGrid } from "./SkillsGrid";
+import { SkillsGrid } from "./SkillsGrid";
 import { hydrateProjectNames } from "../lib/projectHydration";
 import { listenSkillsChanged } from "../lib/skillsEvents";
 import { SkillDiscoveryView } from "./SkillDiscoveryView";
@@ -64,21 +64,6 @@ type SkillScope = "all" | "global" | `project:${string}`;
 // their ids from ever colliding with real installed-skill ids.
 const REMOTE_SKILL_PREFIX = "remote:";
 
-const SKILL_BUILDER_SKILL: SkillInfo = {
-  id: "builtin:skill-builder",
-  name: "skill-builder",
-  description:
-    "Create, edit, or inspect Berd skills stored as skill folders with SKILL.md files.",
-  instructions: "",
-  path: "builtin://skills/skill-builder",
-  fileLocation: "builtin://skills/skill-builder",
-  sourceKind: "builtin",
-  sourceLabel: "Built in",
-  projectLinks: [],
-  readonly: true,
-  color: null,
-};
-
 function skillMatchesQuery(skill: SkillInfo, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
@@ -98,9 +83,8 @@ function skillMatchesScope(skill: SkillInfo, scope: SkillScope): boolean {
     return true;
   }
   if (scope === "global") {
-    return skill.sourceKind !== "project";
+    return skill.sourceKind === "global";
   }
-
   const projectId = scope.replace(/^project:/, "");
   return skill.projectLinks.some((project) => project.id === projectId);
 }
@@ -171,6 +155,7 @@ export function SkillsView({
   onStartChatWithSkill,
 }: SkillsViewProps) {
   const { t } = useTranslation(["skills", "common"]);
+  const reduceMotion = useReducedMotion();
   const projects = useProjectStore(selectProjects);
   const isActiveSkillControlled = activeSkillId !== undefined;
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -181,6 +166,11 @@ export function SkillsView({
   const [loading, setLoading] = useState(true);
   const [deletingSkill, setDeletingSkill] = useState<SkillInfo | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchCloseVisible, setSearchCloseVisible] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTriggerRef = useRef<HTMLButtonElement>(null);
+  const restoreSearchFocusRef = useRef(false);
   const [skillScope, setSkillScope] = useState<SkillScope>("all");
   const [viewMode, setViewMode] = useState<"installed" | "discover">(
     "installed",
@@ -208,13 +198,20 @@ export function SkillsView({
     discoveryEnabled && currentActiveSkillId?.startsWith(REMOTE_SKILL_PREFIX)
       ? currentActiveSkillId.slice(REMOTE_SKILL_PREFIX.length)
       : null;
-  // Load the catalog whenever Discover is open OR a remote detail route is
-  // active (which can happen after a remount via app Back/Forward, when
-  // viewMode has reset to "installed" but the `remote:` id persists), so the
-  // detail resolves by name instead of falling through to the grid.
+  // Load the catalog while discovery is enabled so both tab counts are
+  // available before the user switches views and remote detail routes can
+  // resolve immediately after a remount.
   const remote = useRemoteSkills(
-    discoveryEnabled && (viewMode === "discover" || remoteSkillName !== null),
+    discoveryEnabled,
+    viewMode === "discover" || remoteSkillName !== null,
   );
+
+  useEffect(() => {
+    if (!discoveryEnabled && viewMode === "discover") {
+      setViewMode("installed");
+      setSelectedRemoteSkill(null);
+    }
+  }, [discoveryEnabled, viewMode]);
 
   const setActiveSkill = useCallback(
     (skillId: string | null, options?: AppNavigationUpdateOptions) => {
@@ -276,9 +273,9 @@ export function SkillsView({
     if (
       !projectsWithSkillDirs.some((project) => project.id === selectedProjectId)
     ) {
-      setSkillScope("all");
+      setSkillScope(viewMode === "discover" ? "global" : "all");
     }
-  }, [projectsWithSkillDirs, skillScope]);
+  }, [projectsWithSkillDirs, skillScope, viewMode]);
 
   const activeSkill = remoteSkillName
     ? null
@@ -343,10 +340,9 @@ export function SkillsView({
         t("view.scope.project")
       );
     }
-    if (skillScope === "global") {
-      return t("view.scope.global");
-    }
-    return t("view.scope.all");
+    return skillScope === "all"
+      ? t("view.scope.all")
+      : t("view.scope.personal");
   }, [projects, selectedProjectId, skillScope, t]);
 
   useEffect(() => {
@@ -508,10 +504,6 @@ export function SkillsView({
     setDialogOpen(true);
   }, []);
 
-  const handleNewSkillWithChat = useCallback(() => {
-    onStartChatWithSkill?.(SKILL_BUILDER_SKILL, selectedProjectId);
-  }, [onStartChatWithSkill, selectedProjectId]);
-
   const handleSkillSaved = useCallback(
     (savedSkill?: SkillInfo) => {
       if (!savedSkill) {
@@ -545,97 +537,29 @@ export function SkillsView({
   const { fileInputRef, handleFileChange, openFilePicker, handleExport } =
     useSkillImportExport();
 
-  const setTopBarActions = useSetTopBarActions();
-
   useEffect(() => {
-    if (activeSkill || remoteSkillName) {
-      setTopBarActions(null);
+    if (!searchOpen) {
+      setSearchCloseVisible(false);
+      if (restoreSearchFocusRef.current) {
+        restoreSearchFocusRef.current = false;
+        window.requestAnimationFrame(() => searchTriggerRef.current?.focus());
+      }
       return;
     }
-    setTopBarActions(
-      <>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <PageHeaderButton
-              type="button"
-              aria-label={t("view.scope.ariaLabel")}
-              rightIcon={<IconChevronDown />}
-            >
-              {selectedScopeLabel}
-            </PageHeaderButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              className={skillScope === "all" ? "bg-muted" : undefined}
-              onSelect={() => setSkillScope("all")}
-            >
-              {t("view.scope.all")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={skillScope === "global" ? "bg-muted" : undefined}
-              onSelect={() => setSkillScope("global")}
-            >
-              {t("view.scope.global")}
-            </DropdownMenuItem>
-            {projectsWithSkillDirs.length > 0 ? (
-              <DropdownMenuLabel className="pt-2 text-xs text-muted-foreground">
-                {t("view.scope.projects")}
-              </DropdownMenuLabel>
-            ) : null}
-            {projectsWithSkillDirs.map((project) => (
-              <DropdownMenuItem
-                key={project.id}
-                className={
-                  skillScope === `project:${project.id}`
-                    ? "bg-muted"
-                    : undefined
-                }
-                onSelect={() => setSkillScope(`project:${project.id}`)}
-              >
-                {project.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <PageHeaderButton
-          type="button"
-          onClick={openFilePicker}
-          leftIcon={<IconUpload />}
-        >
-          {t("common:actions.import")}
-        </PageHeaderButton>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <PageHeaderButton type="button" leftIcon={<IconPlus />}>
-              {t("view.newSkill")}
-            </PageHeaderButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={handleNewSkillWithChat}>
-              <IconMessageCircle />
-              {t("view.createWithChat")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={handleNewSkill}>
-              <IconPencil />
-              {t("view.createManually")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </>,
-    );
-    return () => setTopBarActions(null);
-  }, [
-    activeSkill,
-    handleNewSkill,
-    handleNewSkillWithChat,
-    openFilePicker,
-    projectsWithSkillDirs,
-    remoteSkillName,
-    selectedScopeLabel,
-    setTopBarActions,
-    skillScope,
-    t,
-  ]);
+    searchInputRef.current?.focus();
+    if (reduceMotion) {
+      setSearchCloseVisible(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setSearchCloseVisible(true), 180);
+    return () => window.clearTimeout(timer);
+  }, [reduceMotion, searchOpen]);
+
+  const closeSearch = useCallback(() => {
+    restoreSearchFocusRef.current = true;
+    setSearchQuery("");
+    setSearchOpen(false);
+  }, []);
 
   const handleShare = useCallback(
     (skill: SkillInfo) => {
@@ -749,68 +673,252 @@ export function SkillsView({
         aria-labelledby="skills-heading"
         className="flex flex-col gap-10"
       >
-        <div className={skillsGridClass}>
-          <div className="col-span-full flex flex-col gap-4 sm:col-span-2">
-            <SearchBar
-              size="pill"
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder={t("view.searchPlaceholder")}
-              aria-label={t("view.searchAriaLabel")}
-            />
-            {discoveryEnabled ? (
-              <Tabs
-                value={viewMode}
-                onValueChange={(value) => {
-                  setViewMode(value as "installed" | "discover");
-                  setSelectedRemoteSkill(null);
-                  if (remoteSkillName) {
-                    setActiveSkill(null, { replace: true });
-                  }
-                }}
-              >
-                <TabsList variant="weight">
-                  <TabsTrigger value="installed" variant="weight">
-                    {t("discover.tabInstalled")}
-                  </TabsTrigger>
-                  <TabsTrigger value="discover" variant="weight">
-                    {t("discover.tabDiscover")}
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            ) : null}
-          </div>
-        </div>
-        {discoveryEnabled && viewMode === "discover" ? (
-          <SkillDiscoveryView
-            searchQuery={searchQuery}
-            remote={remote}
-            onSelectSkill={handleSelectRemoteSkill}
-            onInstallSkill={(skill) =>
-              void remote.install(skill, {
-                projectDir: selectedProjectScopeDir,
-                destinationLabel: selectedProjectScopeDir
-                  ? `${selectedScopeLabel} (${selectedProjectScopeDir})`
-                  : null,
-              })
+        <Tabs
+          value={viewMode}
+          onValueChange={(value) => {
+            const nextView = value as "installed" | "discover";
+            setViewMode(nextView);
+            if (nextView === "discover" && skillScope === "all") {
+              setSkillScope("global");
             }
-          />
-        ) : (
-          <SkillsGrid
-            skills={visibleSkills}
-            isLoading={loading}
-            onSelectSkill={handleSelectSkill}
-            onCreateSkill={handleNewSkill}
-            onEditSkill={handleEdit}
-            onDeleteSkill={handleDelete}
-          />
-        )}
+            setSelectedRemoteSkill(null);
+            if (remoteSkillName) {
+              setActiveSkill(null, { replace: true });
+            }
+          }}
+          className="contents"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            {discoveryEnabled ? (
+              <TabsList variant="segmented">
+                <TabsTrigger
+                  value="installed"
+                  variant="segmented"
+                  aria-label={t("discover.tabInstalledCount", {
+                    count: skills.length,
+                  })}
+                >
+                  {t("discover.tabInstalled")}
+                  <span className="relative -top-px ml-1 inline-flex items-center justify-center text-[10px] leading-none tabular-nums text-muted-foreground">
+                    {skills.length}
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="discover"
+                  variant="segmented"
+                  aria-label={t("discover.tabDiscoverCount", {
+                    count:
+                      remote.catalogState === "ready"
+                        ? remote.skills.length
+                        : "–",
+                  })}
+                >
+                  {t("discover.tabDiscover")}
+                  <span className="relative -top-px ml-1 inline-flex items-center justify-center text-[10px] leading-none tabular-nums text-muted-foreground">
+                    {remote.catalogState === "ready"
+                      ? remote.skills.length
+                      : "–"}
+                  </span>
+                </TabsTrigger>
+              </TabsList>
+            ) : null}
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <PageToolbarButton
+                    type="button"
+                    size="xs"
+                    className="max-w-44 text-sm"
+                    aria-label={t(
+                      viewMode === "discover"
+                        ? "view.scope.installDestinationAriaLabel"
+                        : "view.scope.ariaLabel",
+                    )}
+                    rightIcon={<IconChevronDown />}
+                  >
+                    <span className="min-w-0 truncate">
+                      {selectedScopeLabel}
+                    </span>
+                  </PageToolbarButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup
+                    value={skillScope}
+                    onValueChange={(value) =>
+                      setSkillScope(value as SkillScope)
+                    }
+                  >
+                    {viewMode === "installed" ? (
+                      <DropdownMenuRadioItem value="all" indicatorSide="end">
+                        {t("view.scope.all")}
+                      </DropdownMenuRadioItem>
+                    ) : null}
+                    <DropdownMenuRadioItem value="global" indicatorSide="end">
+                      {t("view.scope.personal")}
+                    </DropdownMenuRadioItem>
+                    {projectsWithSkillDirs.length > 0 ? (
+                      <DropdownMenuLabel className="pt-4 text-sm text-muted-foreground/60">
+                        {t("view.scope.projects")}
+                      </DropdownMenuLabel>
+                    ) : null}
+                    {projectsWithSkillDirs.map((project) => (
+                      <DropdownMenuRadioItem
+                        key={project.id}
+                        value={`project:${project.id}`}
+                        indicatorSide="end"
+                      >
+                        {project.name}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <AnimatePresence initial={false} mode="popLayout">
+                {searchOpen || searchQuery ? (
+                  <motion.div
+                    key="search-field"
+                    initial={{ width: 32, opacity: 0 }}
+                    animate={{
+                      width: "min(256px, calc(100vw - 96px))",
+                      opacity: 1,
+                    }}
+                    exit={{ width: 32, opacity: 0 }}
+                    transition={
+                      reduceMotion
+                        ? { duration: 0 }
+                        : { type: "spring", stiffness: 420, damping: 38 }
+                    }
+                    data-search-field-container
+                    data-search-motion={reduceMotion ? "reduced" : "full"}
+                    className="relative overflow-hidden rounded-full"
+                  >
+                    <SearchBar
+                      size="pill-card"
+                      value={searchQuery}
+                      onChange={setSearchQuery}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          closeSearch();
+                        }
+                      }}
+                      placeholder={t("view.searchPlaceholder")}
+                      aria-label={t("view.searchAriaLabel")}
+                      inputRef={searchInputRef}
+                      className="w-64 pr-9"
+                    />
+                    {searchCloseVisible ? (
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={t("common:actions.close")}
+                          title={t("common:actions.close")}
+                          onClick={closeSearch}
+                        >
+                          <svg
+                            viewBox="0 0 16 16"
+                            aria-hidden="true"
+                            className="!size-4"
+                          >
+                            <path
+                              d="M3.5 3.5l9 9m0-9l-9 9"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </Button>
+                      </div>
+                    ) : null}
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="search-action"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={reduceMotion ? { duration: 0 } : undefined}
+                  >
+                    <PageToolbarButton
+                      ref={searchTriggerRef}
+                      type="button"
+                      size="icon-xs"
+                      aria-label={t("view.searchAriaLabel")}
+                      title={t("view.searchAriaLabel")}
+                      onClick={() => setSearchOpen(true)}
+                    >
+                      <IconSearch className="!size-4" />
+                    </PageToolbarButton>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <PageToolbarButton
+                type="button"
+                size="icon-xs"
+                aria-label={t("common:actions.import")}
+                tooltip={t("common:actions.import")}
+                onClick={openFilePicker}
+              >
+                <IconDownload className="!size-4" />
+              </PageToolbarButton>
+              <PageToolbarButton
+                type="button"
+                size="icon-xs"
+                aria-label={t("view.newSkill")}
+                tooltip={t("view.newSkill")}
+                onClick={handleNewSkill}
+              >
+                <IconPlus className="!size-4" />
+              </PageToolbarButton>
+            </div>
+          </div>
+          {discoveryEnabled ? (
+            <>
+              <TabsContent value="installed">
+                <SkillsGrid
+                  skills={visibleSkills}
+                  isLoading={loading}
+                  onSelectSkill={handleSelectSkill}
+                  onCreateSkill={handleNewSkill}
+                  onEditSkill={handleEdit}
+                  onDeleteSkill={handleDelete}
+                />
+              </TabsContent>
+              <TabsContent value="discover">
+                <SkillDiscoveryView
+                  searchQuery={searchQuery}
+                  remote={remote}
+                  onSelectSkill={handleSelectRemoteSkill}
+                  onInstallSkill={(skill) =>
+                    void remote.install(skill, {
+                      projectDir: selectedProjectScopeDir,
+                      destinationLabel: selectedProjectScopeDir
+                        ? `${selectedScopeLabel} (${selectedProjectScopeDir})`
+                        : null,
+                    })
+                  }
+                />
+              </TabsContent>
+            </>
+          ) : (
+            <SkillsGrid
+              skills={visibleSkills}
+              isLoading={loading}
+              onSelectSkill={handleSelectSkill}
+              onCreateSkill={handleNewSkill}
+              onEditSkill={handleEdit}
+              onDeleteSkill={handleDelete}
+            />
+          )}
+        </Tabs>
       </section>
 
       <input
         ref={fileInputRef}
         type="file"
-        accept=".skill.json,.json"
+        accept=".skill.json,.json,application/json"
         className="hidden"
         onChange={handleFileChange}
       />

@@ -521,11 +521,18 @@ export async function exportSkill(
   return { json: response.json, filename: response.filename };
 }
 
+export function isSkillImportFileName(fileName: string): boolean {
+  const normalizedName = fileName.toLowerCase();
+  return (
+    normalizedName.endsWith(".skill.json") || normalizedName.endsWith(".json")
+  );
+}
+
 export async function importSkills(
   fileBytes: number[],
   fileName: string,
 ): Promise<SkillInfo[]> {
-  if (!fileName.endsWith(".skill.json") && !fileName.endsWith(".json")) {
+  if (!isSkillImportFileName(fileName)) {
     throw new Error("File must have a .skill.json or .json extension");
   }
 

@@ -47,6 +47,15 @@ const searchBarSizes = {
     inputVariant: "ghost" as const,
     hideIcon: true,
   },
+  "pill-card": {
+    wrapper:
+      "flex h-[30px] items-center rounded-full bg-card pl-3 pr-4 ring-1 ring-transparent transition-shadow focus-within:ring-ring",
+    icon: "left-3 size-4",
+    input:
+      "h-auto appearance-none border-none bg-transparent px-0 pl-5 text-sm font-normal leading-none text-foreground shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-foreground! placeholder:opacity-40",
+    inputVariant: "ghost" as const,
+    hideIcon: false,
+  },
 } as const;
 
 interface SearchBarProps {

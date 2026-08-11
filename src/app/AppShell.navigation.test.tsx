@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { i18n } from "@/shared/i18n";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { getAppNavigationController } from "@/features/berdctl/navigation";
@@ -4597,7 +4598,17 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("keeps non-chat page titles and breadcrumbs out of the top bar", async () => {
+  it("localizes the Skills title in the top bar", async () => {
+    await i18n.changeLanguage("es");
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+
+    expect(screen.getByText("Habilidades")).toBeInTheDocument();
+  });
+
+  it("keeps non-chat breadcrumbs out of the top bar except the Skills title", async () => {
     const user = userEvent.setup();
     renderAppShell();
 
@@ -4606,7 +4617,9 @@ describe("AppShell global navigation", () => {
     expect(screen.queryByText("Agents")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    expect(screen.getByText("Skills")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open skill detail" }));
+    expect(screen.getByText("Skills")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Skills" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Code Review" })).toBeNull();
 

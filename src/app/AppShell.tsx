@@ -632,6 +632,7 @@ export function AppShell({
     "settings",
     "search",
     "home",
+    "sidebar",
   ]);
   const {
     expandSidebar,
@@ -4280,10 +4281,12 @@ export function AppShell({
       case "skills":
         return skillsSkillId && skillsBreadcrumbLabel
           ? [
-              parent("skills", "Skills", () => handleNavigate("skills")),
+              parent("skills", t("sidebar:navigation.skills"), () =>
+                handleNavigate("skills"),
+              ),
               current("skill-detail", skillsBreadcrumbLabel),
             ]
-          : [current("skills", "Skills")];
+          : [current("skills", t("sidebar:navigation.skills"))];
       case "agents":
         return agentsPersonaId && agentsBreadcrumbLabel
           ? [

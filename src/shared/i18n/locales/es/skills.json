@@ -9,7 +9,7 @@
     "duplicate": "Duplicar",
     "descriptionPlaceholder": "Qué hace y cuándo usarla...",
     "editTitle": "Editar skill",
-    "global": "Global",
+    "global": "Personal",
     "globalHint": "Disponible para todas las sesiones",
     "instructions": "Instrucciones",
     "instructionsPlaceholder": "Instrucciones en Markdown que seguirá el agente...",
@@ -46,7 +46,9 @@
     "noResults": "Ninguna skill coincide con \"{{query}}\".",
     "retry": "Reintentar",
     "cliMissingTitle": "El descubrimiento de skills necesita la CLI sq-agents",
-    "cliMissingDescription": "Instala la CLI sq-agents para explorar e instalar skills de Block dentro de la app."
+    "cliMissingDescription": "Instala la CLI sq-agents para explorar e instalar skills de Block dentro de la app.",
+    "tabInstalledCount": "Instaladas, {{count}}",
+    "tabDiscoverCount": "Descubrir, {{count}}"
   },
   "view": {
     "backToSkills": "Volver a skills",
@@ -78,6 +80,26 @@
     "startChat": "Iniciar chat con {{name}}",
     "startChatShort": "Iniciar chat",
     "title": "Skills",
-    "useInChat": "Usar en chat"
+    "useInChat": "Usar en chat",
+    "importDialog": {
+      "title": "Importar una skill",
+      "description": "Importa una skill desde un archivo JSON.",
+      "dropPrompt": "Arrastra y suelta un archivo de skill aquí",
+      "formats": "Compatible con .skill.json y .json",
+      "chooseFile": "Elegir un archivo",
+      "unsupportedFile": "Elige un archivo .skill.json o .json.",
+      "fileTooLarge": "Elige un archivo de skill de menos de 10 MB."
+    },
+    "searchAriaLabel": "Buscar skills",
+    "scope": {
+      "all": "Todas",
+      "ariaLabel": "Filtrar skills por origen",
+      "builtIn": "Integradas",
+      "global": "Personal",
+      "project": "Proyecto",
+      "projects": "Proyectos",
+      "installDestinationAriaLabel": "Elegir destino de instalación",
+      "personal": "Personal"
+    }
   }
 }

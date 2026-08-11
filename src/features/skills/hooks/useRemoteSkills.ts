@@ -32,13 +32,16 @@ export interface UseRemoteSkillsResult {
  * Loads the remote skill catalog and tracks CLI availability + per-skill
  * install state for the discovery UI.
  *
- * Loading is deferred until `enabled` becomes true (i.e. the Discover tab is
- * opened) so the installed-skills view never pays the network cost. The hook
- * is owned by `SkillsView` so its state survives the grid → detail-page
- * transition; that keeps install state and the loaded catalog warm when the
- * user navigates back from a skill's detail view.
+ * Loading begins when `enabled` becomes true. Callers can suppress load-error
+ * toasts for background catalog reads while still exposing `catalogState` for
+ * an inline retry state. The hook is owned by `SkillsView` so its state
+ * survives the grid → detail-page transition; that keeps install state and the
+ * loaded catalog warm when the user navigates back from a skill's detail view.
  */
-export function useRemoteSkills(enabled: boolean): UseRemoteSkillsResult {
+export function useRemoteSkills(
+  enabled: boolean,
+  reportLoadErrors = true,
+): UseRemoteSkillsResult {
   const { t } = useTranslation(["skills", "common"]);
   const [cliState, setCliState] = useState<CliState>("unknown");
   const [skills, setSkills] = useState<RemoteSkill[]>([]);
@@ -47,6 +50,13 @@ export function useRemoteSkills(enabled: boolean): UseRemoteSkillsResult {
   const [installing, setInstalling] = useState<Set<string>>(new Set());
   const loadRequestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
+  const reportLoadErrorsRef = useRef(false);
+  const enabledRef = useRef(false);
+
+  useEffect(() => {
+    reportLoadErrorsRef.current = reportLoadErrors;
+    enabledRef.current = enabled;
+  }, [enabled, reportLoadErrors]);
 
   const load = useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
@@ -77,7 +87,9 @@ export function useRemoteSkills(enabled: boolean): UseRemoteSkillsResult {
       if (loadRequestIdRef.current === requestId) {
         setSkills([]);
         setCatalogState("error");
-        toast.error(formatAcpErrorMessage(error, t("discover.loadError")));
+        if (enabledRef.current && reportLoadErrorsRef.current) {
+          toast.error(formatAcpErrorMessage(error, t("discover.loadError")));
+        }
       }
     } finally {
       if (loadRequestIdRef.current === requestId) {
@@ -87,16 +99,34 @@ export function useRemoteSkills(enabled: boolean): UseRemoteSkillsResult {
   }, [t]);
 
   useEffect(() => {
+    enabledRef.current = enabled;
     if (!enabled) {
-      // A skillsChanged event can occur while the Installed tab is visible.
-      // Force a fresh catalog read the next time Discover is opened so badges
-      // reflect deletions made while this hook was inactive.
+      // Invalidate pending requests so hidden Discover work cannot update state
+      // or notify after the feature is disabled.
+      loadRequestIdRef.current += 1;
       hasLoadedRef.current = false;
+      setLoading(false);
+      setCatalogState("idle");
       return;
     }
     if (!hasLoadedRef.current) {
       void load();
     }
+    return () => {
+      enabledRef.current = false;
+      const requestIdAtCleanup = loadRequestIdRef.current;
+      queueMicrotask(() => {
+        // StrictMode and dependency replays run the next setup before this
+        // microtask. Only invalidate when the hook remained disabled/unmounted.
+        if (
+          !enabledRef.current &&
+          loadRequestIdRef.current === requestIdAtCleanup
+        ) {
+          loadRequestIdRef.current += 1;
+          hasLoadedRef.current = false;
+        }
+      });
+    };
   }, [enabled, load]);
 
   useEffect(() => {

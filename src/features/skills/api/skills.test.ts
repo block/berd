@@ -207,7 +207,7 @@ describe("skill mutation events", () => {
         "blue",
       );
       await deleteSkill("/Users/test/.agents/skills/test-writer");
-      await importSkills([123, 125], "imported.skill.json");
+      await importSkills([123, 125], "IMPORTED.SKILL.JSON");
 
       expect(listener).toHaveBeenCalledTimes(3);
     } finally {

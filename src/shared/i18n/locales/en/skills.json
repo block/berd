@@ -9,7 +9,7 @@
     "duplicate": "Duplicate",
     "descriptionPlaceholder": "What it does and when to use it...",
     "editTitle": "Edit skill",
-    "global": "Global",
+    "global": "Personal",
     "globalHint": "Available to all sessions",
     "instructions": "Instructions",
     "instructionsPlaceholder": "Markdown instructions the agent will follow...",
@@ -46,7 +46,9 @@
     "noResults": "No skills match \"{{query}}\".",
     "retry": "Try again",
     "cliMissingTitle": "Skill discovery needs the sq-agents CLI",
-    "cliMissingDescription": "Install the sq-agents CLI to browse and install Block skills from within the app."
+    "cliMissingDescription": "Install the sq-agents CLI to browse and install Block skills from within the app.",
+    "tabInstalledCount": "Installed, {{count}}",
+    "tabDiscoverCount": "Discover, {{count}}"
   },
   "view": {
     "backToSkills": "Back to skills",
@@ -80,14 +82,24 @@
       "all": "All",
       "ariaLabel": "Filter skills by source",
       "builtIn": "Built in",
-      "global": "Global",
-      "personal": "Personal",
+      "global": "Personal",
       "project": "Project",
-      "projects": "Projects"
+      "projects": "Projects",
+      "installDestinationAriaLabel": "Choose install destination",
+      "personal": "Personal"
     },
     "startChat": "Start chat with {{name}}",
     "startChatShort": "Start chat",
     "title": "Skills",
-    "useInChat": "Use in chat"
+    "useInChat": "Use in chat",
+    "importDialog": {
+      "title": "Import a skill",
+      "description": "Import a skill from a JSON file.",
+      "dropPrompt": "Drag and drop a skill file here",
+      "formats": "Supports .skill.json and .json",
+      "chooseFile": "Choose a file",
+      "unsupportedFile": "Choose a .skill.json or .json file.",
+      "fileTooLarge": "Choose a skill file smaller than 10 MB."
+    }
   }
 }

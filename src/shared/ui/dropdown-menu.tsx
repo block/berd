@@ -224,8 +224,13 @@ function DropdownMenuRadioGroup({
 function DropdownMenuRadioItem({
   className,
   children,
+  indicatorSide = "start",
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & {
+  /** Where the check indicator renders. `start` reserves a left gutter;
+   * `end` places the check after the label. */
+  indicatorSide?: "start" | "end";
+}) {
   return (
     <DropdownMenuPrimitive.RadioItem
       {...getDesignSystemMetadata({
@@ -235,22 +240,33 @@ function DropdownMenuRadioItem({
         props: {
           value: props.value,
           disabled: props.disabled,
+          indicatorSide,
         },
         customClassName: typeof className === "string" ? className : undefined,
       })}
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "text-foreground focus:bg-accent focus:text-foreground relative flex cursor-pointer items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "text-foreground focus:bg-accent focus:text-foreground relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        indicatorSide === "start" && "pl-8",
         className,
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
+      {indicatorSide === "start" ? (
+        <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CircleIcon className="size-2 fill-current" />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      ) : null}
       {children}
+      {indicatorSide === "end" ? (
+        <span className="pointer-events-none ml-auto flex size-3.5 shrink-0 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CheckIcon className="size-4" />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      ) : null}
     </DropdownMenuPrimitive.RadioItem>
   );
 }

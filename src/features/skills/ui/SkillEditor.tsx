@@ -29,7 +29,7 @@ import {
 import { formatSkillName, isValidSkillName } from "../lib/skillsHelpers";
 import { getRenamedSkillFileLocation } from "../lib/skillsPath";
 
-/** Sentinel value for the "Global" option in the save-location picker. */
+/** Sentinel value for the personal (`~/.agents/skills`) save location. */
 const GLOBAL_VALUE = "__global__";
 
 // Shared visual constants for create/edit sheets.
@@ -404,11 +404,6 @@ export function SkillEditor({
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  {saveLocation === GLOBAL_VALUE
-                    ? t("dialog.globalHint")
-                    : t("dialog.projectHint")}
-                </p>
               </div>
             ) : null}
 

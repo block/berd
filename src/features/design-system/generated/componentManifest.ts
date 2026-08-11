@@ -2211,6 +2211,51 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: ["text-foreground", "text-muted-foreground"],
   },
   {
+    name: "Page Toolbar Button",
+    source: "src/shared/ui/page-toolbar-button.tsx",
+    description: "",
+    exports: ["PageToolbarButton", "PageToolbarButtonProps"],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "active:bg-background",
+      "active:text-foreground",
+      "aria-expanded:bg-background",
+      "aria-expanded:text-foreground",
+      "bg-background",
+      "data-[state=open]:bg-background",
+      "data-[state=open]:text-foreground",
+      "focus-visible:text-foreground",
+      "hover:bg-background",
+      "hover:text-foreground",
+      "text-muted-foreground",
+    ],
+    stateClasses: [
+      "active:bg-background",
+      "active:text-foreground",
+      "aria-expanded:bg-background",
+      "aria-expanded:text-foreground",
+      "data-[state=open]:bg-background",
+      "data-[state=open]:text-foreground",
+      "focus-visible:text-foreground",
+      "hover:bg-background",
+      "hover:text-foreground",
+    ],
+    sourceTokenClasses: [
+      "active:bg-background",
+      "active:text-foreground",
+      "aria-expanded:bg-background",
+      "aria-expanded:text-foreground",
+      "bg-background",
+      "data-[state=open]:bg-background",
+      "data-[state=open]:text-foreground",
+      "focus-visible:text-foreground",
+      "hover:bg-background",
+      "hover:text-foreground",
+      "text-muted-foreground",
+    ],
+  },
+  {
     name: "Pagination",
     source: "src/shared/ui/pagination.tsx",
     description: "",
@@ -2443,10 +2488,12 @@ export const designSystemComponentManifest = [
     tokenClasses: [
       "bg-accent",
       "bg-background",
+      "bg-card",
       "bg-muted",
       "border-border/80",
       "focus-visible:border-ring",
       "focus-within:bg-accent",
+      "focus-within:ring-ring",
       "hover:bg-accent",
       "hover:border-border/80",
       "hover:text-foreground",
@@ -2468,10 +2515,12 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [
       "bg-accent",
       "bg-background",
+      "bg-card",
       "bg-muted",
       "border-border/80",
       "focus-visible:border-ring",
       "focus-within:bg-accent",
+      "focus-within:ring-ring",
       "hover:bg-accent",
       "hover:border-border/80",
       "hover:text-foreground",
@@ -3103,7 +3152,7 @@ export const designSystemComponentManifest = [
       {
         name: "tabsListVariants",
         variants: {
-          variant: ["default", "buttons", "weight"],
+          variant: ["default", "segmented", "buttons", "weight"],
         },
         defaultVariants: {
           variant: "default",
@@ -3116,7 +3165,7 @@ export const designSystemComponentManifest = [
       {
         name: "tabsTriggerVariants",
         variants: {
-          variant: ["default", "buttons", "weight"],
+          variant: ["default", "segmented", "buttons", "weight"],
         },
         defaultVariants: {
           variant: "default",
@@ -3164,6 +3213,8 @@ export const designSystemComponentManifest = [
       },
     ],
     tokenClasses: [
+      "bg-background",
+      "bg-foreground/35",
       "bg-muted",
       "dark:data-[state=active]:bg-muted/30",
       "dark:data-[state=active]:border-input",
@@ -3190,6 +3241,8 @@ export const designSystemComponentManifest = [
       "hover:text-foreground",
     ],
     sourceTokenClasses: [
+      "bg-background",
+      "bg-foreground/35",
       "bg-muted",
       "dark:data-[state=active]:bg-muted/30",
       "dark:data-[state=active]:border-input",

@@ -12,6 +12,15 @@ import { SKILL_DISCOVERY_EXPERIMENT_ID } from "@/features/experiments/experiment
 import { SkillsView } from "../SkillsView";
 
 const mockRevealInFileManager = vi.hoisted(() => vi.fn());
+const mockReducedMotion = vi.hoisted(() => ({ value: false }));
+
+vi.mock("motion/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("motion/react")>();
+  return {
+    ...actual,
+    useReducedMotion: () => mockReducedMotion.value,
+  };
+});
 
 type MockProject = {
   id: string;
@@ -111,6 +120,8 @@ vi.mock("../../api/skills", () => ({
     .fn()
     .mockResolvedValue({ json: "{}", filename: "test.skill.json" }),
   importSkills: vi.fn().mockResolvedValue([]),
+  isSkillImportFileName: (fileName: string) =>
+    fileName.toLowerCase().endsWith(".json"),
 }));
 
 vi.mock("@/features/projects/stores/projectStore", () => ({
@@ -163,6 +174,7 @@ beforeEach(() => {
   resetHomeWidgetStoreForTests();
   vi.clearAllMocks();
   mockDiscoveryExperimentEnabled.value = false;
+  mockReducedMotion.value = false;
   mockUseExperiment.mockImplementation((id: string) =>
     id === SKILL_DISCOVERY_EXPERIMENT_ID
       ? { enabled: mockDiscoveryExperimentEnabled.value }
@@ -227,18 +239,14 @@ describe("SkillsView", () => {
     expect(createTiles.length).toBeGreaterThan(0);
   });
 
-  it("hides the discover tab when the skill-discovery experiment is off", async () => {
+  it("hides tab semantics when the skill-discovery experiment is off", async () => {
     mockDiscoveryExperimentEnabled.value = false;
+    listSkills.mockResolvedValue(mockSkills);
     renderSkillsViewWithTopBarActions();
-    await waitFor(() => {
-      expect(listSkills).toHaveBeenCalled();
-    });
-    expect(
-      screen.queryByRole("tab", { name: "Discover" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("tab", { name: "Installed" }),
-    ).not.toBeInTheDocument();
+
+    expect(await screen.findByText("code-review")).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("tabpanel")).toBeNull();
   });
 
   it("shows the installed/discover tabs when the experiment is on", async () => {
@@ -247,10 +255,37 @@ describe("SkillsView", () => {
     await waitFor(() => {
       expect(listSkills).toHaveBeenCalled();
     });
+    const installedTab = await screen.findByRole("tab", {
+      name: /Installed, 0/,
+    });
+    const discoverTab = screen.getByRole("tab", { name: /Discover, 0/ });
+    expect(installedTab).toBeInTheDocument();
+    expect(discoverTab).toBeInTheDocument();
     expect(
-      await screen.findByRole("tab", { name: "Installed" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Discover" })).toBeInTheDocument();
+      document.getElementById(installedTab.getAttribute("aria-controls") ?? ""),
+    ).toHaveAttribute("role", "tabpanel");
+    expect(
+      document.getElementById(discoverTab.getAttribute("aria-controls") ?? ""),
+    ).toHaveAttribute("role", "tabpanel");
+  });
+
+  it("returns to Installed when discovery is disabled", async () => {
+    mockDiscoveryExperimentEnabled.value = true;
+    listSkills.mockResolvedValue(mockSkills);
+    const { rerender } = renderSkillsViewWithTopBarActions();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("tab", { name: /Discover/ }));
+    mockDiscoveryExperimentEnabled.value = false;
+    rerender(
+      <TopBarActionsProvider>
+        <TopBarActionsHost />
+        <SkillsView />
+      </TopBarActionsProvider>,
+    );
+
+    expect(await screen.findByText("code-review")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Discover/ })).toBeNull();
   });
 
   it("resolves a remote detail route by name from the catalog", async () => {
@@ -403,6 +438,7 @@ describe("SkillsView", () => {
     renderSkillsViewWithTopBarActions();
     await screen.findByText("code-review");
 
+    await user.click(screen.getByRole("button", { name: "Search skills" }));
     await user.type(
       screen.getByRole("searchbox", { name: "Search skills" }),
       "test",
@@ -413,21 +449,125 @@ describe("SkillsView", () => {
     expect(screen.queryByText("code-review")).not.toBeInTheDocument();
   });
 
-  it("filters skills to global sources", async () => {
+  it("restores focus to the search action after closing search", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+
+    renderSkillsViewWithTopBarActions();
+    await screen.findByText("code-review");
+
+    await user.click(screen.getByRole("button", { name: "Search skills" }));
+    const search = screen.getByRole("searchbox", { name: "Search skills" });
+    expect(search).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Search skills" }),
+      ).toHaveFocus();
+    });
+  });
+
+  it("opens the skill file picker directly from Import", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+
+    const { container } = renderSkillsViewWithTopBarActions();
+    await screen.findByText("code-review");
+    const input = container.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Expected the skill import file input");
+    }
+    const click = vi.spyOn(input, "click");
+
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(click).toHaveBeenCalledOnce();
+    expect(input).toHaveAttribute(
+      "accept",
+      ".skill.json,.json,application/json",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("disables the search expansion spring for reduced motion", async () => {
+    mockReducedMotion.value = true;
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+
+    const { container } = renderSkillsViewWithTopBarActions();
+    await screen.findByText("code-review");
+    await user.click(screen.getByRole("button", { name: "Search skills" }));
+
+    const searchContainer = container.querySelector(
+      "[data-search-field-container]",
+    );
+    expect(searchContainer).toHaveAttribute("data-search-motion", "reduced");
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+
+  it("labels Discover scope as an install destination", async () => {
+    mockDiscoveryExperimentEnabled.value = true;
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+
+    renderSkillsViewWithTopBarActions();
+    await user.click(await screen.findByRole("tab", { name: /Discover/ }));
+
+    const destination = screen.getByRole("button", {
+      name: "Choose install destination",
+    });
+    expect(destination).toHaveTextContent("Personal");
+    await user.click(destination);
+    expect(
+      screen.getByRole("menuitemradio", { name: "Personal" }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.queryByRole("menuitemradio", { name: "All" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("filters Installed to personal skills", async () => {
     listSkills.mockResolvedValue([...mockSkills, builtinSkill]);
     const user = userEvent.setup();
 
     renderSkillsViewWithTopBarActions();
     await screen.findByText("test-writer");
-
     await user.click(
       screen.getByRole("button", { name: "Filter skills by source" }),
     );
-    await user.click(screen.getByRole("menuitem", { name: "Global" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Personal" }));
 
     expect(screen.getByText("layout")).toBeInTheDocument();
-    expect(screen.getByText("goose-doc-guide")).toBeInTheDocument();
     expect(screen.queryByText("test-writer")).not.toBeInTheDocument();
+    expect(screen.queryByText("goose-doc-guide")).not.toBeInTheDocument();
+  });
+
+  it("falls back to Personal when a Discover project disappears", async () => {
+    mockDiscoveryExperimentEnabled.value = true;
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+    const { rerender } = renderSkillsViewWithTopBarActions();
+
+    await user.click(await screen.findByRole("tab", { name: /Discover/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Choose install destination" }),
+    );
+    await user.click(screen.getByRole("menuitemradio", { name: "alpha" }));
+
+    mockProjects = [];
+    rerender(
+      <TopBarActionsProvider>
+        <TopBarActionsHost />
+        <SkillsView />
+      </TopBarActionsProvider>,
+    );
+
+    const destination = await screen.findByRole("button", {
+      name: "Choose install destination",
+    });
+    await waitFor(() => expect(destination).toHaveTextContent("Personal"));
   });
 
   it("filters skills to a selected project", async () => {
@@ -441,14 +581,28 @@ describe("SkillsView", () => {
       screen.getByRole("button", { name: "Filter skills by source" }),
     );
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("menuitemradio", { name: "alpha" }),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "alpha" }));
+    expect(screen.getByRole("menuitemradio", { name: "All" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    const projectOption = screen.getByRole("menuitemradio", { name: "alpha" });
+    expect(projectOption).toHaveAttribute("aria-checked", "false");
+    await user.click(projectOption);
 
     expect(screen.getByText("test-writer")).toBeInTheDocument();
     expect(screen.queryByText("layout")).not.toBeInTheDocument();
     expect(screen.queryByText("code-review")).not.toBeInTheDocument();
+  });
+
+  it("defaults new skills to the Personal destination", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+
+    renderSkillsViewWithTopBarActions();
+    await screen.findByText("code-review");
+    await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
+
+    expect(screen.getByRole("combobox")).toHaveTextContent("Personal");
   });
 
   it("preselects the current project when creating from a project filter", async () => {
@@ -461,58 +615,13 @@ describe("SkillsView", () => {
     await user.click(
       screen.getByRole("button", { name: "Filter skills by source" }),
     );
-    await user.click(screen.getByRole("menuitem", { name: "alpha" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "alpha" }));
     await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
-    await user.click(screen.getByRole("menuitem", { name: "Create manually" }));
 
+    expect(screen.getByRole("combobox")).toHaveTextContent("alpha");
     expect(
-      screen.getByText("Stored in the project folder"),
-    ).toBeInTheDocument();
-  });
-
-  it("starts skill builder chat from the top bar create menu", async () => {
-    listSkills.mockResolvedValue(mockSkills);
-    const onStartChatWithSkill = vi.fn();
-    const user = userEvent.setup();
-
-    renderSkillsViewWithTopBarActions({ onStartChatWithSkill });
-    await screen.findByText("code-review");
-
-    await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
-    await user.click(
-      screen.getByRole("menuitem", { name: "Create with chat" }),
-    );
-
-    expect(onStartChatWithSkill).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "builtin:skill-builder",
-        name: "skill-builder",
-      }),
-      null,
-    );
-  });
-
-  it("starts project-scoped skill builder chat from a project filter", async () => {
-    listSkills.mockResolvedValue(mockSkills);
-    const onStartChatWithSkill = vi.fn();
-    const user = userEvent.setup();
-
-    renderSkillsViewWithTopBarActions({ onStartChatWithSkill });
-    await screen.findByText("code-review");
-
-    await user.click(
-      screen.getByRole("button", { name: "Filter skills by source" }),
-    );
-    await user.click(screen.getByRole("menuitem", { name: "alpha" }));
-    await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
-    await user.click(
-      screen.getByRole("menuitem", { name: "Create with chat" }),
-    );
-
-    expect(onStartChatWithSkill).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "skill-builder" }),
-      "project-alpha",
-    );
+      screen.queryByText("Stored in the project folder"),
+    ).not.toBeInTheDocument();
   });
 
   it("uses the selected project copy for merged project skill actions", async () => {
@@ -562,7 +671,7 @@ describe("SkillsView", () => {
     await user.click(
       screen.getByRole("button", { name: "Filter skills by source" }),
     );
-    await user.click(screen.getByRole("menuitem", { name: "beta" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "beta" }));
     await user.click(
       screen.getByRole("button", { name: "Open test-writer details" }),
     );
@@ -834,12 +943,16 @@ describe("SkillsView", () => {
     render(<SkillsView />);
     await screen.findByText("code-review");
 
-    // The grid's inline create tile shares the "New skill" aria-label with
-    // the header button. Click the first matching control (the grid tile).
     const createControls = screen.getAllByRole("button", {
       name: "New skill",
     });
-    await user.click(createControls[0]);
+    const gridCreateControl = createControls.find((control) =>
+      control.classList.contains("gallery-card-enter"),
+    );
+    if (!gridCreateControl) {
+      throw new Error("Expected the grid create control to render");
+    }
+    await user.click(gridCreateControl);
 
     expect(
       screen.getByRole("heading", { name: "New skill" }),
