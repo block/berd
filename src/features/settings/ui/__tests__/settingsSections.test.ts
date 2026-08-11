@@ -47,26 +47,24 @@ describe("settingsSections", () => {
     expect(resolveSettingsSection("shortcuts")).toBe("shortcuts");
   });
 
-  it("includes security in settings navigation by default", () => {
-    expect(SETTINGS_SECTIONS.map((section) => section.id)).toContain(
+  it("omits security from settings navigation by default", () => {
+    expect(SETTINGS_SECTIONS.map((section) => section.id)).not.toContain(
       "security",
     );
-    expect(resolveSettingsSection("security")).toBe("security");
+    expect(resolveSettingsSection("security")).toBe("general");
   });
 
-  it("omits security when security ML is disabled", async () => {
+  it("includes security when security ML is enabled", async () => {
     vi.resetModules();
-    vi.stubEnv("VITE_SECURITY_ML", "0");
+    vi.stubEnv("VITE_SECURITY_ML", "1");
 
     const {
-      SETTINGS_SECTIONS: disabledSections,
-      resolveSettingsSection: resolveDisabledSettingsSection,
+      SETTINGS_SECTIONS: enabledSections,
+      resolveSettingsSection: resolveEnabledSettingsSection,
     } = await import("../settingsSections");
 
-    expect(disabledSections.map((section) => section.id)).not.toContain(
-      "security",
-    );
-    expect(resolveDisabledSettingsSection("security")).toBe("general");
+    expect(enabledSections.map((section) => section.id)).toContain("security");
+    expect(resolveEnabledSettingsSection("security")).toBe("security");
   });
 
   it("includes updates in settings navigation", () => {

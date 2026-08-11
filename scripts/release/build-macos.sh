@@ -106,7 +106,9 @@ VITE_APP_VERSION_VALUE="$RELEASE_VERSION"
 VITE_ENVIRONMENT_VALUE="production"
 VITE_AUTH_GATE_VALUE=0
 VITE_BYO_KEY_PROVIDERS_VALUE=0
-VITE_SECURITY_ML_VALUE=1
+# Public builds have no external security classifier. Internal distributions may
+# opt in by supplying their implementation and setting VITE_SECURITY_ML=1.
+VITE_SECURITY_ML_VALUE="${VITE_SECURITY_ML:-0}"
 VITE_UPDATER_ENABLED_VALUE="$UPDATER_ENABLED"
 VITE_BETA_LINEAR_LABEL_ID_VALUE="$BETA_LINEAR_LABEL_ID_VALUE"
 VITE_EXTRA_ENV=()
@@ -391,10 +393,6 @@ fi
 # exposes a dedicated select that disables it via the Cargo feature.
 if [[ "$BUILD_KIND" == "custom" && "$DISABLE_BB_CLI" == "true" ]]; then
   CARGO_FEATURES="$CARGO_FEATURES,no-bb-cli-install"
-fi
-
-if [[ "$BUILD_KIND" == "custom" && "$VITE_SECURITY_ML_VALUE" == "0" ]]; then
-  CARGO_FEATURES="$CARGO_FEATURES,no-security-ml"
 fi
 
 # Stage the selected bundled agents into distro/agents/ for the Tauri resource

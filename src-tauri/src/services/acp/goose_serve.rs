@@ -183,11 +183,7 @@ impl GooseServeProcess {
         if let Some(config_path) = distro_config_path.as_deref() {
             apply_additional_config_files_env(&mut command, &shell_env, config_path);
         }
-        #[cfg(not(feature = "no-security-ml"))]
-        {
-            set_security_env(&mut command);
-            set_otel_env(&mut command);
-        }
+        super::security_env::apply(&mut command);
         match runtime_config_for_spawn(&app_handle).await {
             Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
             Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
@@ -967,33 +963,6 @@ fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &Runt
             command.env(GOOSE_FAST_MODEL_ENV, fast_model_id);
         }
     }
-}
-
-#[cfg(not(feature = "no-security-ml"))]
-fn set_security_env(command: &mut Command) {
-    command.env("SECURITY_PROMPT_ENABLED_OVERRIDE", "true");
-    command.env("SECURITY_PROMPT_CLASSIFIER_ENABLED", "true");
-    command.env("SECURITY_COMMAND_CLASSIFIER_ENABLED_OVERRIDE", "true");
-    command.env(
-        "SECURITY_ML_MODEL_MAPPING",
-        r#"{"deberta-prompt-injection-v2":{"model_type":"prompt","endpoint":"https://gondola-ski.sqprod.co/hfproxy/text_classification/v1/models/deberta-prompt-injection-v2"},"bashcat-distilbert":{"endpoint":"https://gondola-ski.sqprod.co/hfproxy/text_classification/v1/models/bashcat-distilbert-goose2","model_type":"command"}}"#,
-    );
-    log::info!(
-        "Security env configured: prompt injection and command injection detection enabled (org-managed)"
-    );
-}
-
-#[cfg(not(feature = "no-security-ml"))]
-fn set_otel_env(command: &mut Command) {
-    command.env(
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "https://ai-security-otlp.sqprod.co",
-    );
-    command.env("OTEL_SERVICE_NAME", "berd");
-    command.env("OTEL_LOGS_EXPORTER", "otlp");
-    command.env("OTEL_TRACES_EXPORTER", "none");
-    command.env("OTEL_METRICS_EXPORTER", "none");
-    log::info!("OTLP telemetry configured: endpoint=ai-security-otlp.sqprod.co, service=berd");
 }
 
 fn reserve_free_port() -> Result<u16, String> {

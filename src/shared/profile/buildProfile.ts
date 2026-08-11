@@ -30,8 +30,9 @@ const BUILD_FEATURES: Record<BuildFeature, boolean> = {
   // backing system (kgoose), not the UI label. Defaults on; a restricted build
   // opts out with VITE_KGOOSE_CONNECTIONS=0.
   kgooseConnections: import.meta.env.VITE_KGOOSE_CONNECTIONS !== "0",
-  // Defaults on; a restricted custom build opts out with VITE_SECURITY_ML=0.
-  securityMl: import.meta.env.VITE_SECURITY_ML !== "0",
+  // Public Berd does not ship an external security classifier. Internal
+  // distributions can opt in when they provide the implementation.
+  securityMl: import.meta.env.VITE_SECURITY_ML === "1",
   // Dev keeps the Updates settings page visible; custom/restricted builds opt
   // out explicitly with VITE_UPDATER_ENABLED=false.
   updater: import.meta.env.VITE_UPDATER_ENABLED !== "false",
