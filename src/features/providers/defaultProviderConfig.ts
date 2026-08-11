@@ -137,9 +137,10 @@ export async function saveDefaultProviderSelection(
   const modelCacheStore = useProviderModelCacheStore.getState();
   await modelCacheStore.refreshProviderModels(providerId, { force: true });
 
-  const models = useProviderModelCacheStore
-    .getState()
-    .getModelsForProvider(providerId);
+  const cache = useProviderModelCacheStore.getState();
+  const models = cache.isModelInventoryAuthoritative(providerId)
+    ? cache.getProvenModelsForProvider(providerId)
+    : cache.getModelsForProvider(providerId);
   const runtimeDefaultModelId =
     providerId === getDefaultGooseModelProviderId()
       ? getDefaultGooseModelId()

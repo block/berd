@@ -23,7 +23,6 @@ export interface ManagedGooseProviderResolutionContext {
   targetInventoryValidated?: boolean;
 }
 
-const DATABRICKS_V2_PROVIDER_ID = "databricks_v2";
 const INVENTORY_PROOF_TIMEOUT_MS = 60_000;
 
 /**
@@ -71,20 +70,21 @@ export function resolveManagedGooseProviderSelection(
     (provider) => provider.id === selection.providerId,
   )?.id;
   const providerId = configuredProviderId ?? defaultManagedProviderId(goose);
-  let modelId =
-    normalizeConcreteModelId(selection.modelId) ??
-    normalizeConcreteModelId(goose.defaultModelId);
-
-  if (
-    providerId === DATABRICKS_V2_PROVIDER_ID &&
-    modelId &&
-    context.targetInventoryValidated === true &&
-    !context.targetModelIds?.has(modelId)
-  ) {
-    modelId = goose.defaultModelId;
+  const selectedModelId = normalizeConcreteModelId(selection.modelId);
+  const defaultModelId = normalizeConcreteModelId(goose.defaultModelId);
+  if (context.targetInventoryValidated === true) {
+    const provenModelIds = context.targetModelIds ?? new Set<string>();
+    const modelId =
+      (selectedModelId && provenModelIds.has(selectedModelId)
+        ? selectedModelId
+        : undefined) ??
+      (defaultModelId && provenModelIds.has(defaultModelId)
+        ? defaultModelId
+        : undefined);
+    return { providerId, modelId };
   }
 
-  return { providerId, modelId: modelId ?? undefined };
+  return { providerId, modelId: selectedModelId ?? defaultModelId };
 }
 
 /**
@@ -140,9 +140,7 @@ export async function resolveValidatedManagedGooseProviderSelection(
   selection: GooseProviderSelection,
 ): Promise<ManagedGooseProviderSelection | null> {
   const resolved = resolveManagedGooseProviderSelection(config, selection);
-  if (!resolved || resolved.providerId === selection.providerId) {
-    return resolved;
-  }
+  if (!resolved) return null;
 
   let supportedModelIds: ReadonlySet<string>;
   try {
@@ -150,19 +148,20 @@ export async function resolveValidatedManagedGooseProviderSelection(
       resolved.providerId,
     );
   } catch (error) {
+    if (resolved.providerId === selection.providerId) return resolved;
     throw new Error(
       `Cannot verify models for migrated provider ${resolved.providerId}; provider selection was not changed.`,
       { cause: error },
     );
   }
 
-  if (resolved.modelId && supportedModelIds.has(resolved.modelId)) {
-    return resolved;
-  }
-  const fallbackModelId = normalizeConcreteModelId(config.goose.defaultModelId);
-  if (fallbackModelId && supportedModelIds.has(fallbackModelId)) {
-    return { providerId: resolved.providerId, modelId: fallbackModelId };
-  }
+  const proven = resolveManagedGooseProviderSelection(config, selection, {
+    targetModelIds: supportedModelIds,
+    targetInventoryValidated: true,
+  });
+  if (resolved.providerId === selection.providerId) return proven;
+  if (proven?.modelId) return proven;
+
   const provenInventoryFallback = [...supportedModelIds].sort()[0];
   if (provenInventoryFallback) {
     return {

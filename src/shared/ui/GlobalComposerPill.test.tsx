@@ -24,6 +24,7 @@ const mockNormalizeImageBase64 = vi.fn();
 const mockSearchFilesForMentions = vi.fn();
 const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
+const mockGetProvenModelsForAgent = vi.fn();
 const pendingMentionLoad = new Promise<never>(() => {});
 const mockRefreshAllModelProviders = vi.fn();
 const mockRefreshAgentProviderStatus = vi.fn();
@@ -90,7 +91,7 @@ vi.mock("@/features/providers/hooks/useProviderModels", () => ({
     modelCacheRefreshProviderIds: ["openai", "anthropic"],
     getModelsForAgent: (agentId: string) => mockGetModelsForAgent(agentId),
     getProvenModelsForAgent: (agentId: string) =>
-      mockGetModelsForAgent(agentId),
+      mockGetProvenModelsForAgent(agentId),
     isModelInventoryAuthoritative: () =>
       mockProviderModelsState.inventoryAuthoritative,
     refreshAllModelProviders: (...args: unknown[]) =>
@@ -257,6 +258,10 @@ describe("GlobalComposerPill", () => {
     vi.mocked(listSkills).mockImplementation(() => pendingMentionLoad);
     mockGetModelsForAgent.mockReset();
     mockGetModelsForAgent.mockReturnValue([]);
+    mockGetProvenModelsForAgent.mockReset();
+    mockGetProvenModelsForAgent.mockImplementation((agentId: string) =>
+      mockGetModelsForAgent(agentId),
+    );
     mockRefreshAllModelProviders.mockReset();
     mockRefreshAllModelProviders.mockResolvedValue(undefined);
     mockRefreshAgentProviderStatus.mockReset();
@@ -894,6 +899,31 @@ describe("GlobalComposerPill", () => {
         modelProviderId: "databricks_v2",
       },
       personaId: "persona-1",
+    });
+  });
+
+  it("does not synthesize an unqualified advisory model from authoritative empty inventory", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({ selectedProvider: "databricks_v2" });
+    mockGetModelsForAgent.mockReturnValue([
+      { id: "advisory", name: "Advisory", recommended: true },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([]);
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
     });
   });
 

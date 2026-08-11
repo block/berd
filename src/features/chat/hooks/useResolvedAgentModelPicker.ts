@@ -133,6 +133,7 @@ function getPreferredSelectionForAgent(
 function resolveAvailableSelection(
   selection: PreferredModelSelection,
   models: readonly ModelOption[],
+  provenModels: readonly ModelOption[],
   selectedModelProviderId: string | null,
   isInventoryAuthoritative: (providerId: string) => boolean,
 ): PreferredModelSelection | null {
@@ -143,7 +144,10 @@ function resolveAvailableSelection(
     return null;
   }
 
-  const matchingModel = models.find(
+  const candidates = isInventoryAuthoritative(selection.modelProviderId)
+    ? provenModels
+    : models;
+  const matchingModel = candidates.find(
     (model) =>
       model.id === selection.id &&
       (!model.providerId || model.providerId === selection.modelProviderId),
@@ -696,6 +700,7 @@ export function useResolvedAgentModelPicker({
         const availableStoredSelection = resolveAvailableSelection(
           storedSelection,
           availableModels,
+          getProvenModelsForAgent(selectedAgentId),
           concreteSelectedProviderId,
           isModelInventoryAuthoritative,
         );
@@ -724,6 +729,7 @@ export function useResolvedAgentModelPicker({
           modelProviderId: defaultModelProviderId,
         },
         availableModels,
+        getProvenModelsForAgent(selectedAgentId),
         concreteSelectedProviderId,
         isModelInventoryAuthoritative,
       );
@@ -731,6 +737,7 @@ export function useResolvedAgentModelPicker({
       availableModels,
       catalogEntries,
       concreteSelectedProviderId,
+      getProvenModelsForAgent,
       gooseDefaultSelection,
       isModelInventoryAuthoritative,
       selectedAgentId,
@@ -782,13 +789,30 @@ export function useResolvedAgentModelPicker({
 
   const availableDefaultModelSelection =
     useMemo<PreferredModelSelection | null>(() => {
+      const provenModels = getProvenModelsForAgent(selectedAgentId);
+      const selectableModels = availableModels.filter((model) => {
+        const providerId = model.providerId ?? concreteSelectedProviderId;
+        const authoritative = providerId
+          ? isModelInventoryAuthoritative(providerId)
+          : isModelInventoryAuthoritative();
+        return (
+          !authoritative ||
+          provenModels.some(
+            (proven) =>
+              proven.id === model.id &&
+              (!providerId ||
+                !proven.providerId ||
+                proven.providerId === providerId),
+          )
+        );
+      });
       const compatibleModels = concreteSelectedProviderId
-        ? availableModels.filter(
+        ? selectableModels.filter(
             (model) =>
               !model.providerId ||
               model.providerId === concreteSelectedProviderId,
           )
-        : availableModels;
+        : selectableModels;
       const defaultModel =
         compatibleModels.find((model) => model.recommended) ??
         compatibleModels[0];
@@ -803,7 +827,14 @@ export function useResolvedAgentModelPicker({
         modelProviderId: defaultModel.providerId ?? selectedProvider,
         source: defaultModel.recommended ? "default" : "explicit",
       };
-    }, [availableModels, concreteSelectedProviderId, selectedProvider]);
+    }, [
+      availableModels,
+      concreteSelectedProviderId,
+      getProvenModelsForAgent,
+      isModelInventoryAuthoritative,
+      selectedAgentId,
+      selectedProvider,
+    ]);
 
   const fallbackModelSelection = session
     ? null

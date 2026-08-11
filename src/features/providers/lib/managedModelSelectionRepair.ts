@@ -13,7 +13,6 @@ import {
   type ManagedGooseProviderSelection,
 } from "@/shared/runtime-config/modelProviderPolicy";
 
-const DATABRICKS_V2_PROVIDER_ID = "databricks_v2";
 const VALIDATED_INVENTORY_TTL_MS = 5 * 60 * 1000;
 const validatedInventories = new Map<
   string,
@@ -101,10 +100,7 @@ export async function repairManagedGooseModelSelection(
     return resolveValidatedManagedGooseProviderSelection(config, selection);
   }
 
-  const targetModelIds =
-    initial.providerId === DATABRICKS_V2_PROVIDER_ID && selection.modelId
-      ? await validatedModelIds(initial.providerId)
-      : null;
+  const targetModelIds = await validatedModelIds(initial.providerId);
   const repaired = resolveManagedGooseProviderSelection(config, selection, {
     ...(targetModelIds ? { targetModelIds } : {}),
     targetInventoryValidated: targetModelIds !== null,

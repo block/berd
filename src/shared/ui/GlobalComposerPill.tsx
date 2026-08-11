@@ -580,10 +580,27 @@ export function GlobalComposerPill({
       ? selectedProviderForPicker
       : null;
   const defaultModelSelection = useMemo(() => {
+    const provenModels = getProvenModelsForAgent(selectedAgentId);
+    const selectableModels = availableModels.filter((model) => {
+      const providerId = model.providerId ?? concreteSelectedProviderId;
+      const authoritative = providerId
+        ? isModelInventoryAuthoritative(providerId)
+        : isModelInventoryAuthoritative();
+      return (
+        !authoritative ||
+        provenModels.some(
+          (proven) =>
+            proven.id === model.id &&
+            (!providerId ||
+              !proven.providerId ||
+              proven.providerId === providerId),
+        )
+      );
+    });
     const storedPreference = getStoredModelPreference(selectedAgentId);
     if (storedPreference) {
       const matchingModel = findMatchingModel(
-        availableModels,
+        selectableModels,
         storedPreference.modelId,
         storedPreference.providerId,
       );
@@ -619,7 +636,7 @@ export function GlobalComposerPill({
         gooseDefaultSelection.modelProviderId === concreteSelectedProviderId)
     ) {
       const matchingDefault = findMatchingModel(
-        availableModels,
+        selectableModels,
         gooseDefaultSelection.modelId,
         gooseDefaultSelection.modelProviderId,
       );
@@ -637,17 +654,18 @@ export function GlobalComposerPill({
     }
 
     const compatibleModels = concreteSelectedProviderId
-      ? availableModels.filter(
+      ? selectableModels.filter(
           (model) =>
             !model.providerId ||
             model.providerId === concreteSelectedProviderId,
         )
-      : availableModels;
+      : selectableModels;
 
     return getPreferredModel(compatibleModels, selectedProviderForPicker);
   }, [
     availableModels,
     concreteSelectedProviderId,
+    getProvenModelsForAgent,
     gooseDefaultSelection,
     isModelInventoryAuthoritative,
     selectedAgentId,

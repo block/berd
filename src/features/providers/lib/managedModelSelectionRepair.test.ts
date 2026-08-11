@@ -63,6 +63,23 @@ describe("repairManagedGooseModelSelection", () => {
     });
   });
 
+  it("keeps an authoritative-empty same-provider target provider-only", async () => {
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: [],
+        }),
+      },
+    } as never);
+
+    await expect(
+      repairManagedGooseModelSelection(
+        { providerId: "databricks_v2" },
+        "session",
+      ),
+    ).resolves.toEqual({ providerId: "databricks_v2", modelId: undefined });
+  });
+
   it("repairs any model absent from the live target-provider inventory", async () => {
     vi.mocked(getClient).mockResolvedValue({
       goose: {

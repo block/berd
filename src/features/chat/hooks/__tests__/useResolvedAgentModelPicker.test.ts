@@ -58,6 +58,7 @@ function renderModelPicker(overrides: Partial<ModelPickerOptions> = {}) {
 vi.mock("../useAgentModelPickerState", () => ({
   useAgentModelPickerState: (args: unknown) => ({
     getModelsForAgent: () => [],
+    getProvenModelsForAgent: () => [],
     isModelInventoryAuthoritative: () => false,
     ...mockUseAgentModelPickerState(args),
   }),
@@ -1220,6 +1221,29 @@ describe("useResolvedAgentModelPicker", () => {
     });
   });
 
+  it("does not auto-select an unqualified advisory model from authoritative empty inventory", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "advisory", name: "Advisory", recommended: true },
+      ],
+      getProvenModelsForAgent: () => [],
+      isModelInventoryAuthoritative: () => true,
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection).toBeNull();
+  });
+
   it("ignores a stored model missing from an authoritative populated inventory", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
@@ -1240,6 +1264,9 @@ describe("useResolvedAgentModelPicker", () => {
           providerId: "openai",
           recommended: true,
         },
+      ],
+      getProvenModelsForAgent: () => [
+        { id: "gpt-5.6", name: "GPT-5.6", providerId: "openai" },
       ],
       isModelInventoryAuthoritative: () => true,
       modelsLoading: true,

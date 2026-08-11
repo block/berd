@@ -119,6 +119,30 @@ describe("saveDefaultProviderSelection", () => {
     });
   });
 
+  it("does not persist an advisory recommendation excluded from live proof", async () => {
+    const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
+      useProviderModelCacheStore.setState({
+        providers: new Map([
+          [
+            providerId,
+            {
+              providerId,
+              fetchedAt: Date.now(),
+              provenModelIds: [],
+              models: [{ id: "advisory", name: "Advisory", recommended: true }],
+            },
+          ],
+        ]),
+      });
+    });
+    useProviderModelCacheStore.setState({ refreshProviderModels });
+
+    await expect(saveDefaultProviderSelection("openai")).rejects.toThrow(
+      "Could not load models for provider",
+    );
+    expect(defaultsSave).not.toHaveBeenCalled();
+  });
+
   it("saves backend defaults, local goose preference, and readiness", async () => {
     const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
       useProviderModelCacheStore.setState({
@@ -128,6 +152,7 @@ describe("saveDefaultProviderSelection", () => {
             {
               providerId,
               fetchedAt: Date.now(),
+              provenModelIds: ["gpt-4o"],
               models: [{ id: "gpt-4o", name: "gpt-4o", recommended: true }],
             },
           ],
