@@ -5434,6 +5434,7 @@ function isColorTokenName(token: string) {
       "--foreground",
       "--card",
       "--card-foreground",
+      "--card-glass",
       "--popover",
       "--popover-foreground",
       "--primary",

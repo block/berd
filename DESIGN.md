@@ -223,7 +223,7 @@ Berd uses semantic shadow tokens plus borders and tonal layering. Most surfaces 
 
 **The Flat First Rule.** Surfaces are flat unless the user is interacting with them or z-order would otherwise be unclear.
 
-**The No Glass Rule.** Blur and translucent glass are not default elevation. The top bar may use subtle translucency as window chrome, but product panels should use solid tokenized surfaces.
+**The No Glass Rule.** Blur and translucent glass are not default elevation. Chrome that floats over the canvas — the top bar, the navigation panes, the right rail, and the global composer pill — uses the `card-glass` surface paired with the `--backdrop-panel` blur so the dot grid reads through it. Contained product panels and cards stay on solid tokenized surfaces (see `docs/color-token-mapping.md`).
 
 ## 5. Shape
 

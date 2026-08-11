@@ -77,6 +77,7 @@ const allowedBridgeNames = new Set([
   "border",
   "card",
   "card-foreground",
+  "card-glass",
   "destructive",
   "destructive-foreground",
   "foreground",

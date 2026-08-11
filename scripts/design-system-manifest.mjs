@@ -30,6 +30,7 @@ const sourceTokenNames = new Set([
   "border",
   "card",
   "card-foreground",
+  "card-glass",
   "destructive",
   "destructive-foreground",
   "foreground",

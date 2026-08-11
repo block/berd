@@ -20,6 +20,7 @@ This follows the shadcn theming model: core tokens describe component anatomy an
 | --- | --- | --- | --- |
 | App/page background | `background` + `foreground` | `bg-background text-foreground` | The ordinary app canvas or page body. |
 | Contained surface | `card` + `card-foreground` | `bg-card text-card-foreground` | Cards and stable panels. |
+| Translucent contained surface | `card-glass` (+ `--backdrop-panel` blur) | `bg-card-glass` | Containers that float over the canvas and let the dot grid through (nav panes, right rail). Derived from `card` via `color-mix`, so both themes keep the same elevation ladder; the mix alpha is the only per-theme knob. |
 | Floating overlay | `popover` + `popover-foreground` | `bg-popover text-popover-foreground` | Menus, popovers, dropdowns, inspectors. |
 | Quiet fill or secondary zone | `muted` + `muted-foreground` | `bg-muted text-muted-foreground` | Low-emphasis blocks and secondary text. |
 | Hover, active, selected, highlighted | `accent` + `accent-foreground` | `hover:bg-accent hover:text-accent-foreground` | The standard gray interaction fill. |

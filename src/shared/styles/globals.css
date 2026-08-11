@@ -213,6 +213,12 @@
   --foreground: #242424;
   --card: var(--color-white);
   --card-foreground: var(--foreground);
+  /* Surface ladder: canvas (window backdrop) → card (opaque container) →
+     card-glass (translucent container floating over the canvas) → muted
+     (fills inside a card). card-glass derives from card so both themes keep
+     the same elevation relationships; the alpha is the only per-theme knob. */
+  --card-glass: color-mix(in srgb, var(--card) 78%, transparent);
+  --backdrop-panel: blur(18px) saturate(180%) brightness(1.02);
   --popover: var(--color-white);
   --popover-foreground: var(--foreground);
   --primary: var(--color-gray-900);
@@ -667,6 +673,8 @@
   --foreground: var(--color-white);
   --card: var(--color-gray-800);
   --card-foreground: var(--foreground);
+  --card-glass: color-mix(in srgb, var(--card) 82%, transparent);
+  --backdrop-panel: blur(18px) saturate(160%) brightness(1.08);
   /* Overflow menus and other floating popovers sit one step darker than
      cards so they read as distinct surfaces against dark content (BOT-1600). */
   --popover: var(--color-gray-900);
@@ -1040,6 +1048,7 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-card-glass: var(--card-glass);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
