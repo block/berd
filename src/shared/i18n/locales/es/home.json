@@ -219,8 +219,8 @@
       },
       "notes": {
         "welcome": {
-          "title": "Te damos la bienvenida a Berd para Block",
-          "body": "Creado para Block para explorar un espacio de trabajo de IA para todas las facetas del trabajo. Esto es solo el comienzo."
+          "title": "Te damos la bienvenida a Berd",
+          "body": "Un espacio de trabajo de IA para todas las facetas de tu trabajo. Esto es solo el comienzo."
         },
         "buildAgent": {
           "title": "Crea un agente",

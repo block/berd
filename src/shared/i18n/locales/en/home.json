@@ -219,8 +219,8 @@
       },
       "notes": {
         "welcome": {
-          "title": "Welcome to Berd for Block",
-          "body": "Built for Block to explore one AI workspace for all facets of work. This is just the beginning."
+          "title": "Welcome to Berd",
+          "body": "One AI workspace for all facets of your work. This is just the beginning."
         },
         "buildAgent": {
           "title": "Build an agent",
