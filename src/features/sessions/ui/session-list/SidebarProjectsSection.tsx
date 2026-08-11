@@ -7,11 +7,13 @@ import {
 } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import { selectHasFetchedProjects } from "@/features/projects/stores/projectSelectors";
+import { useProjectStore } from "@/features/projects/stores/projectStore";
 import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { DisclosureButton } from "@/shared/ui/disclosure-button";
 import { CollapseReveal } from "@/shared/ui/collapse-reveal";
+import { DisclosureButton } from "@/shared/ui/disclosure-button";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
@@ -28,6 +30,10 @@ import {
 import { SidebarFlatChatsSection } from "./SidebarFlatChatsSection";
 import { SidebarDisplayOptionsMenu } from "./SidebarDisplayOptionsMenu";
 import { SidebarProjectList } from "./SidebarProjectList";
+import {
+  SidebarProjectsInfoButton,
+  useSidebarProjectsInfoMoment,
+} from "./SidebarProjectsInfoButton";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
 import { SidebarPinnedItemsSection } from "./SidebarPinnedItemsSection";
@@ -49,6 +55,8 @@ export interface SidebarProjectsSectionProps {
   projectSessions: {
     byProject: Record<string, SidebarSessionItem[]>;
     standalone: SidebarSessionItem[];
+    /** True when loaded standalone chats were truncated to the recents cap. */
+    standaloneOverflow?: boolean;
   };
   hasVisibleChats: boolean;
   flatChatGroups: FlatChatGroup[];
@@ -192,9 +200,27 @@ export function SidebarProjectsSection({
 }: SidebarProjectsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const showProjectsEmptyState = projects.length === 0;
+  const hasFetchedProjects = useProjectStore(selectHasFetchedProjects);
+  const projectsInfoMoment = useSidebarProjectsInfoMoment({
+    hasProjects: !showProjectsEmptyState,
+    projectsReady: hasFetchedProjects,
+  });
   const showChatsEmptyState = projectSessions.standalone.length === 0;
   const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
   const showProjects = collapsed || projectsSectionOpen;
+  // Only surface the Session History route when the grouped view actually
+  // hides chats: loaded standalone chats were truncated to the recents cap,
+  // or the backend has more sessions than are loaded. The hasMoreSessions
+  // case is gated on having any loaded chats (not standalone ones
+  // specifically): grouped auto-loading is bounded, so a user whose loaded
+  // chats all belong to projects must still get a route to older sessions.
+  // Brand-new users have no chats and no backend pages, so they never see
+  // the link.
+  const showGroupedHistoryLink =
+    !collapsed &&
+    !searchActive &&
+    ((projectSessions.standaloneOverflow ?? false) ||
+      (hasMoreSessions && hasVisibleChats));
   const emptyActionClasses = cn(
     SIDEBAR_ROW_HEIGHT_CLASS,
     SIDEBAR_ROW_HOVER_CLASS,
@@ -310,6 +336,11 @@ export function SidebarProjectsSection({
           isOpen={projectsSectionOpen}
           showChevron={!showProjectsEmptyState}
           labelClassName={SECTION_HEADER_TEXT_CLASS}
+          labelAdornment={
+            projectsInfoMoment.visible ? (
+              <SidebarProjectsInfoButton moment={projectsInfoMoment} />
+            ) : undefined
+          }
           actions={
             !showProjectsEmptyState ? (
               <>
@@ -514,7 +545,7 @@ export function SidebarProjectsSection({
             sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}
           />
         )}
-        {!collapsed && onNavigate ? (
+        {showGroupedHistoryLink && onNavigate ? (
           <DisclosureButton
             type="button"
             surface="sidebarRow"

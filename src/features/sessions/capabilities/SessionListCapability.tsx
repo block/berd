@@ -114,11 +114,14 @@ const DEFAULT_DISPLAY_OPTIONS: SessionListDisplayOptions = {
 type SessionListGroups = {
   byProject: Record<string, SidebarSessionItem[]>;
   standalone: SidebarSessionItem[];
+  /** True when loaded standalone chats were truncated to MAX_RECENTS. */
+  standaloneOverflow: boolean;
 };
 
 const EMPTY_SESSION_LIST_GROUPS: SessionListGroups = {
   byProject: {},
   standalone: [],
+  standaloneOverflow: false,
 };
 
 type SessionListSurfaceOptions = {
@@ -296,13 +299,15 @@ function getSessionListGroups(
   const standalonePlaceholders = sortedStandalone.filter((session) =>
     placeholderSessionIds.has(session.id),
   );
-  const standaloneRecents = sortedStandalone
-    .filter((session) => !placeholderSessionIds.has(session.id))
-    .slice(0, MAX_RECENTS);
+  const standaloneNonPlaceholders = sortedStandalone.filter(
+    (session) => !placeholderSessionIds.has(session.id),
+  );
+  const standaloneRecents = standaloneNonPlaceholders.slice(0, MAX_RECENTS);
 
   return {
     byProject,
     standalone: [...standalonePlaceholders, ...standaloneRecents],
+    standaloneOverflow: standaloneNonPlaceholders.length > MAX_RECENTS,
   };
 }
 

@@ -58,6 +58,9 @@ interface SidebarSectionHeaderProps {
   isOpen?: boolean;
   /** Hide the chevron while keeping the toggle clickable (e.g. empty state). */
   showChevron?: boolean;
+  /** Inline element rendered immediately after the label, before the
+   * right-aligned actions (e.g. a one-time info affordance). */
+  labelAdornment?: ReactNode;
   /** Right-aligned action cluster (display menu, new project/chat buttons). */
   actions?: ReactNode;
   /** Extra class for the label text. */
@@ -81,6 +84,7 @@ export function SidebarSectionHeader({
   onToggleOpen,
   isOpen = true,
   showChevron = true,
+  labelAdornment,
   actions,
   labelClassName,
   className,
@@ -110,7 +114,8 @@ export function SidebarSectionHeader({
             onClick={onToggleOpen}
             aria-expanded={isOpen}
             className={cn(
-              "h-7 min-w-0 flex-1 justify-start gap-0.5",
+              "h-7 min-w-0 justify-start gap-0.5",
+              !labelAdornment && "flex-1",
               labelTransition,
               labelVisibilityClass,
             )}
@@ -138,6 +143,19 @@ export function SidebarSectionHeader({
             {label}
           </span>
         ))}
+      {!collapsed && labelAdornment ? (
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 items-center",
+            labelTransition,
+            labelVisible
+              ? "opacity-100"
+              : "opacity-0 overflow-hidden pointer-events-none",
+          )}
+        >
+          {labelAdornment}
+        </div>
+      ) : null}
       {!collapsed && actions ? (
         <div className="ml-1 flex items-center gap-1">{actions}</div>
       ) : null}

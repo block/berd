@@ -344,6 +344,7 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
   useProjectStore: (selector: (state: unknown) => unknown) =>
     selector({
       projects: [],
+      hasFetchedProjects: true,
     }),
 }));
 
@@ -488,6 +489,124 @@ describe("NavigationPanesView", () => {
 
     expect(onCreateProject).toHaveBeenCalledOnce();
     expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
+  it("shows the projects info moment next to the header for a fresh user", async () => {
+    const user = userEvent.setup();
+
+    renderSidebar();
+
+    const infoButton = screen.getByRole("button", { name: "About projects" });
+    await user.click(infoButton);
+
+    expect(
+      screen.getByText(
+        "Projects keep related chats together, and can share folders and instructions.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the projects info moment when the user has projects", () => {
+    renderSidebar({ projects: [mockProject()] });
+
+    expect(
+      screen.queryByRole("button", { name: "About projects" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("omits the view-all-chats row from the grouped sidebar", () => {
+    seedSessions(
+      {
+        id: "project-chat",
+        title: "Project Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+      {
+        id: "standalone-chat",
+        title: "Standalone Chat",
+        updatedAt: "2026-04-09T11:00:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    renderSidebar({ projects: [mockProject()] });
+
+    expect(screen.getByText("Standalone Chat")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "View all chats" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the view-all-chats row in the grouped sidebar when standalone chats overflow the recents cap", async () => {
+    const user = userEvent.setup();
+    seedSessions(
+      ...Array.from({ length: MAX_FLAT_SIDEBAR_CHATS + 5 }, (_, index) => ({
+        id: `standalone-chat-${index + 1}`,
+        title: `Standalone Chat ${index + 1}`,
+        updatedAt: `2026-04-09T12:00:${String(59 - index).padStart(2, "0")}.000Z`,
+        messageCount: 3,
+      })),
+    );
+
+    const onNavigate = vi.fn();
+    const { container } = renderSidebar({
+      onNavigate,
+      projects: [mockProject()],
+    });
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+    );
+    expect(rows).toHaveLength(MAX_FLAT_SIDEBAR_CHATS);
+
+    await user.click(screen.getByRole("button", { name: "View all chats" }));
+    expect(onNavigate).toHaveBeenCalledWith("session-history");
+  });
+
+  it("keeps the view-all-chats row in the grouped sidebar when more sessions remain unloaded", () => {
+    mockHasMoreSessions = true;
+    seedSessions({
+      id: "standalone-chat",
+      title: "Standalone Chat",
+      updatedAt: "2026-04-09T11:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({ projects: [mockProject()] });
+
+    expect(
+      screen.getByRole("button", { name: "View all chats" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the view-all-chats row when all loaded chats belong to projects and more sessions remain", () => {
+    // Grouped auto-loading stops at MAX_FLAT_SIDEBAR_CHATS * 2 chats. Seed
+    // that bound split across two projects with zero standalone chats: the
+    // Recents list is empty, but older sessions remain on the backend, so
+    // the history route must stay visible.
+    mockHasMoreSessions = true;
+    seedSessions(
+      ...Array.from({ length: MAX_FLAT_SIDEBAR_CHATS * 2 }, (_, index) => ({
+        id: `project-chat-${index + 1}`,
+        title: `Project Chat ${index + 1}`,
+        updatedAt: `2026-04-09T${String(10 + Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+        projectId: index % 2 === 0 ? "project-1" : "project-2",
+      })),
+    );
+
+    renderSidebar({
+      projects: [
+        mockProject(),
+        mockProject({ id: "project-2", name: "Project Two" }),
+      ],
+    });
+
+    expect(
+      screen.getByRole("button", { name: "View all chats" }),
+    ).toBeInTheDocument();
   });
 
   it("shows the sidebar search field by default", () => {

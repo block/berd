@@ -87,5 +87,11 @@
   "showLess": "Show less",
   "viewMoreChats": "View more",
   "viewAllInHistory": "View all chats",
-  "olderChatsInHistory": "View older chats in Session History"
+  "olderChatsInHistory": "View older chats in Session History",
+  "projectsInfo": {
+    "label": "About projects",
+    "tooltip": "What are projects?",
+    "title": "Projects",
+    "body": "Projects keep related chats together, and can share folders and instructions."
+  }
 }

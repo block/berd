@@ -87,5 +87,11 @@
   "showLess": "Mostrar menos",
   "viewMoreChats": "Ver más",
   "viewAllInHistory": "Ver todo",
-  "olderChatsInHistory": "Ver chats antiguos en Historial de sesiones"
+  "olderChatsInHistory": "Ver chats antiguos en Historial de sesiones",
+  "projectsInfo": {
+    "label": "Acerca de los proyectos",
+    "tooltip": "¿Qué son los proyectos?",
+    "title": "Proyectos",
+    "body": "Los proyectos agrupan chats relacionados y pueden compartir carpetas e instrucciones."
+  }
 }
