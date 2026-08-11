@@ -255,6 +255,9 @@ vi.mock("../useAgentModelPickerState", () => ({
     getModelsForAgent: (agentId: string) =>
       mockPickerState.modelsByAgent.get(agentId) ??
       mockPickerState.availableModels,
+    getProvenModelsForAgent: (agentId: string) =>
+      mockPickerState.modelsByAgent.get(agentId) ??
+      mockPickerState.availableModels,
     isModelInventoryAuthoritative: () => false,
     modelsLoading: mockPickerState.modelsLoading,
     modelStatusMessage: mockPickerState.modelStatusMessage,

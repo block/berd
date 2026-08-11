@@ -1150,6 +1150,7 @@ describe("useResolvedAgentModelPicker", () => {
           recommended: true,
         },
       ],
+      getProvenModelsForAgent: () => [],
       isModelInventoryAuthoritative: () => false,
       modelsLoading: true,
       modelStatusMessage: null,
@@ -1202,6 +1203,7 @@ describe("useResolvedAgentModelPicker", () => {
           recommended: true,
         },
       ],
+      getProvenModelsForAgent: () => [],
       isModelInventoryAuthoritative: (providerId: string) =>
         providerId === "openai",
       modelsLoading: false,
