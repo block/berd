@@ -29,13 +29,22 @@ export function mapProviderSetupCatalogEntryDto(
   };
 }
 
+// Legacy setup-catalog providers Goose still exposes but Berd no longer
+// offers. `databricks` is the deprecated v1 provider; Berd only supports the
+// Databricks AI Gateway (`databricks_v2`) entry.
+const HIDDEN_SETUP_CATALOG_PROVIDER_IDS = new Set(["databricks"]);
+
 // Public/dev builds surface every model provider Goose exposes through its
 // setup catalog. The catalog owns setup fields and behavior; Berd only curates
 // which entries are promoted on the main page.
 export function selectSetupCatalogModelProviders(
   entries: ProviderCatalogEntry[],
 ): ProviderCatalogEntry[] {
-  return entries.filter((entry) => entry.category === "model");
+  return entries.filter(
+    (entry) =>
+      entry.category === "model" &&
+      !HIDDEN_SETUP_CATALOG_PROVIDER_IDS.has(entry.id),
+  );
 }
 
 const SETUP_CATALOG_DATABRICKS_PROVIDER_ID = "databricks_v2";

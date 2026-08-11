@@ -141,16 +141,17 @@ describe("selectSetupCatalogModelProviders", () => {
     };
   }
 
-  it("keeps every model provider and excludes agent providers", () => {
+  it("keeps model providers, excluding agent providers and legacy databricks v1", () => {
     expect(
       selectSetupCatalogModelProviders([
         entry("openai"),
         entry("databricks"),
+        entry("databricks_v2"),
         entry("anthropic"),
         { ...entry("claude-acp"), category: "agent" },
         entry("ollama", false),
       ]).map((provider) => provider.id),
-    ).toEqual(["openai", "databricks", "anthropic", "ollama"]);
+    ).toEqual(["openai", "databricks_v2", "anthropic", "ollama"]);
   });
 
   it("selects only the editable Databricks host field", () => {
