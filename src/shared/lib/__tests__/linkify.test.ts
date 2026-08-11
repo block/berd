@@ -34,15 +34,13 @@ describe("linkifyText", () => {
   });
 
   it("trims trailing sentence punctuation out of the link", () => {
-    const segments = linkifyText(
-      "visit https://blockcell.sqprod.co/sites/buzz/.",
-    );
+    const segments = linkifyText("visit https://example.com/sites/buzz/.");
     expect(segments).toEqual([
       { type: "text", value: "visit " },
       {
         type: "link",
-        value: "https://blockcell.sqprod.co/sites/buzz/",
-        href: "https://blockcell.sqprod.co/sites/buzz/",
+        value: "https://example.com/sites/buzz/",
+        href: "https://example.com/sites/buzz/",
       },
       { type: "text", value: "." },
     ]);
