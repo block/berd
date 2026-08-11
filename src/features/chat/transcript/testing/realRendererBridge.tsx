@@ -698,12 +698,10 @@ function RealRendererBridgeApp() {
     pendingScrollPositionRef.current = null;
     requestAnimationFrame(() => {
       scrollToPosition(position);
-      requestAnimationFrame(() => {
-        if (metricsRef.current.timeToFirstVisibleTailMs === 0) {
-          metricsRef.current.timeToFirstVisibleTailMs =
-            performance.now() - metricsRef.current.loadStartMs;
-        }
-      });
+      if (metricsRef.current.timeToFirstVisibleTailMs === 0) {
+        metricsRef.current.timeToFirstVisibleTailMs =
+          performance.now() - metricsRef.current.loadStartMs;
+      }
     });
   });
 

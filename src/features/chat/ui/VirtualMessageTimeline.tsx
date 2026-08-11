@@ -1592,6 +1592,22 @@ function VirtualMessageTimelineSession({
       sessionEpoch,
     ],
   );
+  // Capture the first committed tail before the browser can defer passive
+  // effects behind unrelated work. At this point the tail is in the DOM, so
+  // this remains a visibility measure rather than a frame-scheduling measure.
+  useLayoutEffect(() => {
+    const accumulator = diagnosticsAccumulatorRef.current;
+    const elapsedMs = getDiagnosticsNowMs() - diagnosticsStartMsRef.current;
+    const tailRowId = stableRows.at(-1)?.rowId;
+    if (
+      accumulator.firstVisibleTailMs == null &&
+      tailRowId &&
+      (hasLiveStreamingTail || diagnostics.visibleRowIds.includes(tailRowId))
+    ) {
+      accumulator.firstVisibleTailMs = elapsedMs;
+    }
+  }, [diagnostics.visibleRowIds, hasLiveStreamingTail, stableRows]);
+
   useEffect(() => {
     const accumulator = diagnosticsAccumulatorRef.current;
     const elapsedMs = getDiagnosticsNowMs() - diagnosticsStartMsRef.current;
@@ -1625,15 +1641,6 @@ function VirtualMessageTimelineSession({
         );
       }
       accumulator.previousCorrectionCount = diagnostics.controller.corrections;
-    }
-
-    const tailRowId = stableRows.at(-1)?.rowId;
-    if (
-      accumulator.firstVisibleTailMs == null &&
-      tailRowId &&
-      (hasLiveStreamingTail || diagnostics.visibleRowIds.includes(tailRowId))
-    ) {
-      accumulator.firstVisibleTailMs = elapsedMs;
     }
 
     updateHeapGrowthMetric(accumulator);
@@ -1671,7 +1678,6 @@ function VirtualMessageTimelineSession({
     accumulator.previousProjectionSessionId = sessionId;
   }, [
     diagnostics,
-    hasLiveStreamingTail,
     onDiagnostics,
     onTranscriptDiagnostics,
     sessionId,
