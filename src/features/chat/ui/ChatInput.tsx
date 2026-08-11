@@ -482,6 +482,12 @@ export function ChatInput({
     queuedMessages ??
     (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : [])
   ).filter(({ payload }) => payload.showInComposer !== false);
+  // A record being edited lives in the composer, so its pill is hidden to
+  // avoid showing the same message both queued and in the composer. Queue
+  // positions (head-only actions) still come from the unfiltered list.
+  const queuedMessagePills = visibleQueuedMessages
+    .map((entry, index) => ({ ...entry, index }))
+    .filter(({ recordId }) => recordId !== editingQueuedRecordId);
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;
@@ -652,6 +658,30 @@ export function ChatInput({
   });
   const [restoredQueuedSendOptions, setRestoredQueuedSendOptions] =
     useState<ChatSendOptions | null>(null);
+
+  // The edited record's pill is hidden, so the record can only leave the
+  // queue through external paths (drain, dismissal elsewhere). When it does,
+  // drop the edit state so the composer submits as a fresh message instead of
+  // targeting a record that no longer exists. Cancel the edit in the store
+  // first: if the record was only filtered out of the prop (for example a
+  // composer handoff passes an empty list while the store still holds it),
+  // a lingering editing flag would block the queue from ever draining it.
+  // Canceling leaves the message itself unchanged and no-ops when the record
+  // is truly gone.
+  useEffect(() => {
+    if (!editingQueuedRecordId || editingQueuedRecordId === "legacy") {
+      return;
+    }
+    const stillQueued = (queuedMessages ?? []).some(
+      ({ recordId }) => recordId === editingQueuedRecordId,
+    );
+    if (!stillQueued) {
+      onCancelQueueEditRef.current?.(editingQueuedRecordId);
+      setEditingQueuedRecord(null);
+      setEditingQueuedPersona(null);
+      setRestoredQueuedSendOptions(null);
+    }
+  }, [editingQueuedRecordId, queuedMessages, setEditingQueuedRecord]);
 
   const setTextFromDictation = useCallback(
     (value: string) => setText(value, "aggregate"),
@@ -1595,9 +1625,9 @@ export function ChatInput({
                 onRemoveSkill={handleRemoveSkill}
               />
 
-              {visibleQueuedMessages.length > 0 && (
+              {queuedMessagePills.length > 0 && (
                 <div className="mb-2 flex max-h-36 flex-col gap-1 overflow-y-auto">
-                  {visibleQueuedMessages.map(({ recordId, payload }, index) => (
+                  {queuedMessagePills.map(({ recordId, payload, index }) => (
                     <div
                       key={recordId}
                       data-slot="queued-message"
@@ -1606,10 +1636,7 @@ export function ChatInput({
                       <span className="flex-1 truncate text-xs opacity-75">
                         {payload.text}
                       </span>
-                      {index === 0 &&
-                      isStreaming &&
-                      canSteerQueuedMessage &&
-                      editingQueuedRecordId !== recordId ? (
+                      {index === 0 && isStreaming && canSteerQueuedMessage ? (
                         <button
                           type="button"
                           onClick={handleSteerQueuedMessage}

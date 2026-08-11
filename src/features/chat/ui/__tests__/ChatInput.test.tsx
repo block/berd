@@ -2397,6 +2397,112 @@ describe("ChatInput", () => {
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
   });
 
+  it("hides the queued pill for the record being edited", async () => {
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "queued msg" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+
+    const queuedPills = () =>
+      Array.from(document.querySelectorAll('[data-slot="queued-message"]')).map(
+        (pill) => pill.textContent,
+      );
+
+    expect(queuedPills()).toEqual(
+      expect.arrayContaining([expect.stringContaining("queued msg")]),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+
+    // The message now lives in the composer, so its pill must disappear.
+    expect(screen.getByRole("textbox")).toHaveValue("queued msg");
+    expect(queuedPills()).toEqual([]);
+
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "edited msg");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalledWith("head", {
+      text: "edited msg",
+      persona: { kind: "none" },
+      attachments: undefined,
+      sendOptions: undefined,
+    });
+
+    // Once the edit is saved the pill returns with the updated text.
+    rerender(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "edited msg" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+    expect(screen.getByText("edited msg")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+
+  it("keeps head-only queue actions on the true head while a tail record is edited", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onSteerQueuedMessage={vi.fn()}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "first" },
+          },
+          {
+            recordId: "tail",
+            payload: { persona: { kind: "none" as const }, text: "second" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={vi.fn(() => true)}
+      />,
+    );
+
+    await user.click(
+      screen.getAllByRole("button", { name: "Edit queued message" })[0],
+    );
+
+    // Editing the head hides its pill; the tail pill must not inherit
+    // head-only actions like steering.
+    const pillTexts = Array.from(
+      document.querySelectorAll('[data-slot="queued-message"]'),
+    ).map((pill) => pill.textContent);
+    expect(pillTexts).toHaveLength(1);
+    expect(pillTexts[0]).toContain("second");
+    expect(pillTexts[0]).not.toContain("first");
+    expect(screen.queryByTitle("Steer queued message")).not.toBeInTheDocument();
+  });
+
   it("pauses a tail record while editing and updates it in place", async () => {
     const onEditQueue = vi.fn(() => true);
     const onCancelQueueEdit = vi.fn(() => true);
@@ -2705,37 +2811,43 @@ describe("ChatInput", () => {
     expect(onCancelQueueEdit).toHaveBeenCalledWith("head");
   });
 
-  it("clears the composer edit state when dismissing the edited record", async () => {
+  it("clears the composer edit state when the edited record leaves the queue", async () => {
     const onSend = vi.fn(() => true);
     const onUpdateQueue = vi.fn(() => true);
     const user = userEvent.setup();
 
-    function DismissEditedQueueInput() {
-      const [queuedMessages, setQueuedMessages] = useState([
-        {
-          recordId: "head",
-          payload: { persona: { kind: "none" as const }, text: "queued msg" },
-        },
-      ]);
-      return (
-        <ChatInput
-          onSend={onSend}
-          queuedMessages={queuedMessages}
-          onEditQueue={vi.fn(() => true)}
-          onCancelQueueEdit={vi.fn(() => true)}
-          onDismissQueue={() => setQueuedMessages([])}
-          onUpdateQueue={onUpdateQueue}
-        />
-      );
-    }
+    const queueProps = {
+      onEditQueue: vi.fn(() => true),
+      onCancelQueueEdit: vi.fn(() => true),
+      onDismissQueue: vi.fn(),
+      onUpdateQueue,
+    };
+    const { rerender } = render(
+      <ChatInput
+        onSend={onSend}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "queued msg" },
+          },
+        ]}
+        {...queueProps}
+      />,
+    );
 
-    render(<DismissEditedQueueInput />);
     await user.click(
       screen.getByRole("button", { name: "Edit queued message" }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Dismiss queued message" }),
-    );
+
+    // The record leaves the queue externally (for example the queue drains)
+    // while its text is still in the composer.
+    rerender(<ChatInput onSend={onSend} queuedMessages={[]} {...queueProps} />);
+
+    // The edit must also be canceled in the store: if the record was only
+    // filtered out of the prop (composer handoff), a lingering editing flag
+    // would block the queue from draining it.
+    expect(queueProps.onCancelQueueEdit).toHaveBeenCalledWith("head");
+
     await user.clear(screen.getByRole("textbox"));
     await user.type(screen.getByRole("textbox"), "new prompt");
     await user.keyboard("{Enter}");
