@@ -61,6 +61,13 @@ import { ProjectIconPicker } from "./ProjectIconPicker";
 import { ProjectArtifactPreview } from "../artifact/ProjectArtifactPreview";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 
+/* Shared recipe for the panel's flat card-surface fields (name input, folder
+   picker, description textarea). The light-mode hover/focus shadow is
+   imperceptible on dark surfaces, so a ring-token focus cue carries
+   keyboard-focus visibility in both themes. */
+const panelFieldClass =
+  "rounded-sm border-0 bg-card text-[14px] leading-[15px] text-card-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-card-foreground/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+
 function getDefaultProjectName(path: string | null | undefined): string {
   const trimmed = path?.trim();
   if (!trimmed) {
@@ -918,12 +925,12 @@ export function CreateProjectDialog({
       onClick={handleOpenAddWorkspace}
       loading={isPreparingAddWorkspace}
       className={cn(
-        "min-h-8 w-auto max-w-full gap-2 rounded-[14px] border-0 bg-white/85 px-3 py-1.5 text-[14px] leading-[18px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200",
-        "hover:bg-white hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:bg-white focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.18)]",
-        "disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-white",
+        "min-h-8 w-auto max-w-full gap-2 rounded-[14px] border-0 bg-card/85 px-3 py-1.5 text-[14px] leading-[18px] text-card-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200",
+        "hover:bg-card hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:bg-card focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.18)]",
+        "disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-card",
       )}
-      iconClassName="size-3.5 text-[#242424]"
-      labelClassName="flex-none text-[#242424]"
+      iconClassName="size-3.5 text-card-foreground"
+      labelClassName="flex-none text-card-foreground"
     />
   );
 
@@ -932,7 +939,7 @@ export function CreateProjectDialog({
       <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
         <SheetContent
           className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(196,226,246,0.26)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
-          closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-white/50"
+          closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-card/50"
           overlayClassName="bg-transparent"
           style={{
             backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 26%, transparent)`,
@@ -990,7 +997,7 @@ export function CreateProjectDialog({
                     setError(null);
                   }}
                   placeholder={t("dialog.nameInlinePlaceholder")}
-                  className="h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]"
+                  className={cn(panelFieldClass, "h-[42px] px-3.5 py-0")}
                 />
               </div>
 
@@ -1037,19 +1044,19 @@ export function CreateProjectDialog({
                     type="button"
                     onClick={handleAddDirectory}
                     className={cn(
-                      "h-[42px] rounded-sm border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
-                      "flex w-full items-center gap-2.5 text-left",
+                      panelFieldClass,
+                      "flex h-[42px] w-full items-center gap-2.5 pr-3.5 pl-[17px] text-left",
                     )}
                   >
                     <IconFolderPlus
-                      className="size-3 text-[#242424]"
+                      className="size-3 text-card-foreground"
                       aria-hidden="true"
                     />
                     <span
                       className={
                         folderDisplay
-                          ? "truncate text-[#242424]"
-                          : "truncate text-[#242424]/30"
+                          ? "truncate text-card-foreground"
+                          : "truncate text-card-foreground/30"
                       }
                     >
                       {folderDisplay ?? t("dialog.folderPlaceholder")}
@@ -1098,7 +1105,7 @@ export function CreateProjectDialog({
 
                   <div className="space-y-2">
                     {enrichedProjectWorkspaces.length > 0 ? (
-                      <div className="overflow-hidden rounded-sm bg-white text-[#242424]">
+                      <div className="overflow-hidden rounded-sm bg-card text-card-foreground">
                         {enrichedProjectWorkspaces.map((workspace, index) => {
                           const gitConfigurable =
                             canConfigureGitStartup(workspace);
@@ -1113,7 +1120,8 @@ export function CreateProjectDialog({
                               key={workspace.id}
                               className={cn(
                                 "flex min-w-0 items-start gap-3 px-4 py-3",
-                                index > 0 && "border-t border-[#242424]/10",
+                                index > 0 &&
+                                  "border-t border-card-foreground/10",
                               )}
                             >
                               <div className="min-w-0 flex-1 space-y-2">
@@ -1127,20 +1135,20 @@ export function CreateProjectDialog({
                                       workspace.path,
                                     ),
                                   })}
-                                  className="block w-full rounded-sm text-left outline-none transition-colors hover:bg-[#242424]/[0.03] focus-visible:ring-1 focus-visible:ring-[#242424]/30"
+                                  className="block w-full rounded-sm text-left outline-none transition-colors hover:bg-card-foreground/[0.03] focus-visible:ring-1 focus-visible:ring-card-foreground/30"
                                 >
                                   <WorkspaceIdentity
                                     workspace={workspace}
                                     gitState={workspaceGitState}
                                     className="min-w-0"
-                                    iconClassName="text-[#242424]"
-                                    titleClassName="text-[#242424]"
-                                    metadataClassName="text-[#242424]/55"
+                                    iconClassName="text-card-foreground"
+                                    titleClassName="text-card-foreground"
+                                    metadataClassName="text-card-foreground/55"
                                   />
                                 </button>
                                 {gitConfigurable ? (
                                   <div className="max-w-[220px] space-y-1 pl-[22px]">
-                                    <span className="block text-xs leading-none text-[#242424]/55">
+                                    <span className="block text-xs leading-none text-card-foreground/55">
                                       {t("dialog.workspacePolicy.sectionLabel")}
                                     </span>
                                     <Select
@@ -1161,7 +1169,7 @@ export function CreateProjectDialog({
                                             ),
                                           },
                                         )}
-                                        className="h-8 w-full rounded-[12px] border-0 bg-[#f6f6f6] px-2.5 text-xs shadow-none hover:bg-[#f2f2f2] focus-visible:ring-0"
+                                        className="h-8 w-full rounded-[12px] border-0 bg-muted px-2.5 text-xs shadow-none hover:bg-accent-hover"
                                       >
                                         <SelectValue />
                                       </SelectTrigger>
@@ -1212,7 +1220,10 @@ export function CreateProjectDialog({
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder={t("dialog.describePlaceholder")}
                   rows={4}
-                  className="h-[215px] min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
+                  className={cn(
+                    panelFieldClass,
+                    "h-[215px] min-h-[215px] w-full resize-none px-3.5 py-[13px]",
+                  )}
                 />
               </div>
 
@@ -1229,7 +1240,7 @@ export function CreateProjectDialog({
                 size="sm"
                 onClick={handleClose}
                 disabled={saving}
-                className="h-10 rounded-sm px-4 text-sm hover:bg-white/50"
+                className="h-10 rounded-sm px-4 text-sm"
               >
                 {t("common:actions.cancel")}
               </Button>
