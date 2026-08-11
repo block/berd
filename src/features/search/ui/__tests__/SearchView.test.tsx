@@ -66,7 +66,15 @@ describe("SearchView", () => {
     mockGetAutomationTiles.mockReset();
     mockGetAutomationTiles.mockResolvedValue({ tiles: [] });
     mockAcpSearchSessions.mockReset();
-    mockAcpSearchSessions.mockResolvedValue([]);
+    // Coverage is reported per sweep, derived from the targets the boundary was
+    // handed, so tests never have to restate which sessions a sweep covered.
+    mockAcpSearchSessions.mockImplementation(
+      async (_query: string, targets: { id: string }[]) => ({
+        results: [],
+        searchedIds: targets.map((target) => target.id),
+        failedIds: [],
+      }),
+    );
     mockListSkills.mockReset();
     mockListSkills.mockResolvedValue([
       {
@@ -482,7 +490,13 @@ describe("SearchView", () => {
       matchCount: 1,
     };
     useChatSessionStore.setState({ sessions: [contentSession] });
-    mockAcpSearchSessions.mockResolvedValue([messageMatch]);
+    mockAcpSearchSessions.mockImplementation(
+      async (_query: string, targets: { id: string }[]) => ({
+        results: [messageMatch],
+        searchedIds: targets.map((target) => target.id),
+        failedIds: [],
+      }),
+    );
 
     render(
       <SearchView
@@ -513,9 +527,14 @@ describe("SearchView", () => {
 
     // A session joining the list re-sweeps the same query. The row must not
     // blink out while the sweep is in flight.
-    let resolveSweep: (results: (typeof messageMatch)[]) => void = () => {};
+    type Sweep = {
+      results: (typeof messageMatch)[];
+      searchedIds: string[];
+      failedIds: string[];
+    };
+    let resolveSweep: (sweep: Sweep) => void = () => {};
     mockAcpSearchSessions.mockReturnValueOnce(
-      new Promise<(typeof messageMatch)[]>((resolve) => {
+      new Promise<Sweep>((resolve) => {
         resolveSweep = resolve;
       }),
     );
@@ -539,7 +558,11 @@ describe("SearchView", () => {
     ).toBeVisible();
 
     await act(async () => {
-      resolveSweep([messageMatch]);
+      resolveSweep({
+        results: [messageMatch],
+        searchedIds: ["session-1", "session-2"],
+        failedIds: [],
+      });
     });
 
     expect(

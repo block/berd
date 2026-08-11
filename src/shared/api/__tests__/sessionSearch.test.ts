@@ -68,15 +68,19 @@ describe("searchSessionsViaExports", () => {
 
     await expect(
       searchSessionsViaExports("needle", [{ id: "session-1", stamp: "v1" }]),
-    ).resolves.toEqual([
-      {
-        sessionId: "session-1",
-        snippet: "visible needle should become the snippet",
-        messageId: "visible-message",
-        messageRole: "assistant",
-        matchCount: 1,
-      },
-    ]);
+    ).resolves.toEqual({
+      results: [
+        {
+          sessionId: "session-1",
+          snippet: "visible needle should become the snippet",
+          messageId: "visible-message",
+          messageRole: "assistant",
+          matchCount: 1,
+        },
+      ],
+      searchedIds: ["session-1"],
+      failedIds: [],
+    });
   });
 
   it("exports each session once across sweeps with unchanged stamps", async () => {
@@ -101,7 +105,7 @@ describe("searchSessionsViaExports", () => {
     expect(mockExportSession).toHaveBeenCalledWith("session-1");
     expect(mockExportSession).toHaveBeenCalledWith("session-2");
     expect(second).toEqual(first);
-    expect(second.map((result) => result.sessionId)).toEqual([
+    expect(second.results.map((result) => result.sessionId)).toEqual([
       "session-1",
       "session-2",
     ]);
@@ -176,7 +180,10 @@ describe("searchSessionsViaExports", () => {
 
     expect(maxActive).toBe(4);
     expect(mockExportSession).toHaveBeenCalledTimes(10);
-    await expect(sweep).resolves.toHaveLength(10);
+    const settledSweep = await sweep;
+    expect(settledSweep.results).toHaveLength(10);
+    expect(settledSweep.searchedIds).toHaveLength(10);
+    expect(settledSweep.failedIds).toEqual([]);
   });
 
   it("keeps corpora well past the react-query default gc window", async () => {
@@ -283,15 +290,26 @@ describe("searchSessionsViaExports", () => {
 
     const targets = [{ id: "session-1", stamp: "v1" }];
 
+    // A failed export is reported as unread rather than as a searched session
+    // that simply had no match — the caller needs that split to avoid claiming
+    // it searched conversation text it never read.
     await expect(
       searchSessionsViaExports("needle", targets, { queryClient }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({
+      results: [],
+      searchedIds: [],
+      failedIds: ["session-1"],
+    });
 
     const retried = await searchSessionsViaExports("needle", targets, {
       queryClient,
     });
 
     expect(mockExportSession).toHaveBeenCalledTimes(2);
-    expect(retried).toMatchObject([{ sessionId: "session-1", matchCount: 1 }]);
+    expect(retried.results).toMatchObject([
+      { sessionId: "session-1", matchCount: 1 },
+    ]);
+    expect(retried.searchedIds).toEqual(["session-1"]);
+    expect(retried.failedIds).toEqual([]);
   });
 });

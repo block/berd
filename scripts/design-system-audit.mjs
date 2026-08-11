@@ -125,7 +125,6 @@ const buttonStylingBaseline = new Set([
   "src/features/home/widgets/StickyNoteWidget.tsx",
   "src/features/projects/ui/CreateProjectDialog.tsx",
   "src/features/projects/ui/ProjectsView.tsx",
-  "src/features/sessions/ui/SessionCard.tsx",
   "src/features/sessions/ui/session-list/SidebarFlatChatsSection.tsx",
   "src/features/sessions/ui/session-list/SidebarProjectList.tsx",
   "src/features/sessions/ui/session-list/SidebarRecentsSection.tsx",

@@ -2629,6 +2629,26 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: ["bg-border"],
   },
   {
+    name: "Session Card Action Button",
+    source: "src/shared/ui/session-card-action-button.tsx",
+    description:
+      "Chrome button for the overflow (\"meatball\") action on a session card.\n\nComposes Button. Base semantic variant: `ghost`, size `icon-xs`.\n\nThe card surface trades a piece of metadata for its actions: the card rests\nshowing a timestamp and reveals this control in the same slot on hover or\nkeyboard focus. That swap is what this recipe owns, so the reveal timing\nmatches the sibling metadata's fade instead of being re-derived per card\nlayout.\n\nInteractive-state contract:\n- rest: hidden — `invisible opacity-0`, so it is out of the tab order until\n  the card is hovered or something inside the card takes focus\n- reveal: visible at full opacity on `group-hover` / `group-focus-within` of\n  the card, over the same 75ms as the metadata it displaces\n- open: stays revealed while its menu is open, whether that is driven by the\n  `open` prop or by Radix's own `data-state` / `aria-expanded` on the trigger\n- color: inherited from `ghost` + `icon-xs`, which rests at\n  `muted-foreground`, raises to `foreground` on hover, and raises again while\n  open. No fill in any state.\n\nCallers pass positioning only (`absolute`, `right-6 top-6`, `z-10`); the card\ndecides where the control sits, never how it looks. Requires an ancestor with\nthe `group` class — the card root.\n\nIntent: the recipe owns every interactive state so card chrome cannot drift\nwhen the base variant changes, and so the geometry stays the named `icon-xs`\nhit target rather than being shrunk per call site.",
+    exports: ["SessionCardActionButton", "SessionCardActionButtonProps"],
+    slots: [],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: [
+      "aria-expanded",
+      "aria-expanded:opacity-100",
+      "aria-expanded:visible",
+      "data-[state=open]:opacity-100",
+      "data-[state=open]:visible",
+      "data-state",
+      "open:",
+    ],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Session Activity Indicator",
     source: "src/shared/ui/SessionActivityIndicator.tsx",
     description: "",

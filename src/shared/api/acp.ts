@@ -506,6 +506,16 @@ export interface AcpSessionSearchResult {
   matchCount: number;
 }
 
+/**
+ * A sweep's matches plus which of its targets were actually read. Callers need
+ * the coverage split to avoid reporting an unreadable session as a searched one.
+ */
+export interface AcpSessionSearchSweep {
+  results: AcpSessionSearchResult[];
+  searchedIds: string[];
+  failedIds: string[];
+}
+
 /** List one page of sessions known to the goose binary. */
 export async function acpListSessionsPage({
   cursor,
@@ -519,7 +529,7 @@ export async function acpSearchSessions(
   query: string,
   targets: SessionSearchTarget[],
   options: SessionSearchOptions = {},
-): Promise<AcpSessionSearchResult[]> {
+): Promise<AcpSessionSearchSweep> {
   return searchSessionsViaExports(query, targets, options);
 }
 

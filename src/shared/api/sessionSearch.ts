@@ -53,6 +53,22 @@ export interface SessionSearchResult {
   matchCount: number;
 }
 
+/**
+ * A sweep's matches plus which targets it actually managed to read.
+ *
+ * Coverage is reported rather than implied because a corpus export can fail for
+ * one session while the sweep as a whole resolves: without `failedIds` a caller
+ * cannot tell "no match" from "never looked", and would claim it searched
+ * conversation text it never saw.
+ */
+export interface SessionSearchSweep {
+  results: SessionSearchResult[];
+  /** Targets whose corpus was read and matched against the query. */
+  searchedIds: string[];
+  /** Targets whose corpus could not be read; their content is unsearched. */
+  failedIds: string[];
+}
+
 interface ParsedMessage {
   id: string;
   role: MessageRole | null;
@@ -91,9 +107,9 @@ export async function searchSessionsViaExports(
   query: string,
   targets: SessionSearchTarget[],
   options: SessionSearchOptions = {},
-): Promise<SessionSearchResult[]> {
+): Promise<SessionSearchSweep> {
   const trimmed = query.trim();
-  if (!trimmed) return [];
+  if (!trimmed) return { results: [], searchedIds: [], failedIds: [] };
 
   const seenIds = new Set<string>();
   const unique: SessionSearchTarget[] = [];
@@ -104,6 +120,9 @@ export async function searchSessionsViaExports(
   }
 
   const results: (SessionSearchResult | null)[] = unique.map(() => null);
+  // Per-target coverage, kept positionally so concurrent workers never race:
+  // a slot is written only by the worker that claimed that index.
+  const failed: boolean[] = unique.map(() => false);
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
@@ -115,7 +134,10 @@ export async function searchSessionsViaExports(
         const messages = await fetchCorpus(target, options.queryClient);
         results[index] = searchSession(target.id, messages, trimmed);
       } catch {
-        // skip sessions that fail to export
+        // A session whose corpus cannot be read is not a session without
+        // matches. Record it so callers can say so instead of counting it as
+        // searched and turning a read failure into a confident "no match".
+        failed[index] = true;
       }
     }
   }
@@ -126,9 +148,17 @@ export async function searchSessionsViaExports(
 
   if (options.queryClient) evictSupersededCorpora(options.queryClient, unique);
 
-  return results.filter(
-    (result): result is SessionSearchResult => result !== null,
-  );
+  return {
+    results: results.filter(
+      (result): result is SessionSearchResult => result !== null,
+    ),
+    searchedIds: unique
+      .filter((_, index) => !failed[index])
+      .map((target) => target.id),
+    failedIds: unique
+      .filter((_, index) => failed[index])
+      .map((target) => target.id),
+  };
 }
 
 /**

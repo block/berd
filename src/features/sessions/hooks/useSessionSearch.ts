@@ -1,7 +1,10 @@
 import { useCallback, useContext, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
-import { acpSearchSessions } from "@/shared/api/acp";
+import {
+  acpSearchSessions,
+  type AcpSessionSearchResult,
+} from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import {
@@ -18,6 +21,13 @@ interface UseSessionSearchOptions {
   getDisplayTitle?: (session: ChatSession) => string;
   visibleMetadataOnly?: boolean;
 }
+
+/**
+ * Shortest query that gets a conversation-text sweep. Below it only metadata
+ * is matched, so anything narrating the search scope must read this rather
+ * than assume every submitted query reached message content.
+ */
+export const SESSION_CONTENT_SEARCH_MIN_CHARS = 2;
 
 function searchErrorMessage(error: unknown): string {
   return formatAcpErrorMessage(error, "Search failed");
@@ -38,6 +48,45 @@ type SubmittedSearch = {
   requestId: number;
 };
 
+/** Content-sweep coverage for the submitted query, for narrating progress. */
+export type SessionSearchProgress = {
+  /** Sessions whose conversation text was actually read and matched. */
+  searched: number;
+  /**
+   * Unique sessions a content sweep has targeted so far (grows with
+   * `searchMore`). Counted by id rather than by attempt, so retrying a failed
+   * page cannot inflate the denominator past the number of real sessions.
+   */
+  total: number;
+  /**
+   * Targeted sessions whose corpus could not be read, so their conversation
+   * text is unsearched. Non-zero means the sweep's coverage is partial and
+   * "no match" cannot be claimed for these sessions.
+   */
+  unreadable: number;
+};
+
+/**
+ * Whether a query reaches conversation text at all. Sessions are only counted
+ * toward content coverage when a sweep will really run, so a query too short to
+ * sweep reports no coverage instead of a vacuous "n of n".
+ */
+function sweepsContent(trimmed: string, targetCount: number): boolean {
+  return trimmed.length >= SESSION_CONTENT_SEARCH_MIN_CHARS && targetCount > 0;
+}
+
+/** What one sweep settled, for callers deciding what may be marked done. */
+type SweepOutcome = {
+  /** False when the sweep was orphaned by a newer request, or threw. */
+  ok: boolean;
+  /**
+   * Targets whose corpus could not be read. These must not be recorded as
+   * searched: a caller that does so filters them out of every later sweep,
+   * turning one transient export failure into a permanently hidden session.
+   */
+  unreadableIds: string[];
+};
+
 export function useSessionSearch({
   sessions,
   resolvers,
@@ -56,10 +105,26 @@ export function useSessionSearch({
   const [results, setResults] = useState<SessionSearchDisplayResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sweep coverage mirrored into state so consumers can narrate progress —
+  // the coverage refs alone never trigger a re-render.
+  const [progress, setProgress] = useState<SessionSearchProgress | null>(null);
   const requestIdRef = useRef(0);
   const searchedSessionIdsRef = useRef<Set<string>>(new Set());
   const pendingSessionIdsRef = useRef<Set<string>>(new Set());
   const activeSearchesRef = useRef(0);
+  // Coverage behind `progress`, tracked as id sets rather than counters and
+  // kept in refs (mirrored into state via `syncProgress`) so concurrent page
+  // sweeps can update them without racing through stale state closures.
+  //
+  // Sets, not tallies: `searchMore` used to add every attempted session to a
+  // running total before its sweep, but a failed sweep dropped those ids from
+  // pending without ever marking them searched. Retrying the same ids counted
+  // them a second time, so the denominator measured attempts instead of
+  // sessions and could sit permanently above the numerator ("3 of 4" once all
+  // three had in fact been searched). Keyed by id, a retry is idempotent.
+  const targetedContentIdsRef = useRef<Set<string>>(new Set());
+  const searchedContentIdsRef = useRef<Set<string>>(new Set());
+  const unreadableContentIdsRef = useRef<Set<string>>(new Set());
   // `search` reads sessions and query through refs so its identity stays
   // stable across store churn and query state updates: consumers key sweep
   // effects on that identity, and an unstable callback used to re-fire a full
@@ -89,11 +154,44 @@ export function useSessionSearch({
     visibleMetadataOnly,
   };
 
+  const syncProgress = useCallback(() => {
+    setProgress({
+      searched: searchedContentIdsRef.current.size,
+      total: targetedContentIdsRef.current.size,
+      unreadable: unreadableContentIdsRef.current.size,
+    });
+  }, []);
+
+  const resetCoverage = useCallback(() => {
+    targetedContentIdsRef.current = new Set();
+    searchedContentIdsRef.current = new Set();
+    unreadableContentIdsRef.current = new Set();
+  }, []);
+
+  /**
+   * Fold one sweep's reported coverage in. A session that failed to export is
+   * moved out of `searched` — a later retry can promote it back — so the
+   * numerator only ever counts conversations actually read.
+   */
+  const recordCoverage = useCallback(
+    (searchedIds: string[], failedIds: string[]) => {
+      for (const id of searchedIds) {
+        searchedContentIdsRef.current.add(id);
+        unreadableContentIdsRef.current.delete(id);
+      }
+      for (const id of failedIds) {
+        unreadableContentIdsRef.current.add(id);
+        searchedContentIdsRef.current.delete(id);
+      }
+    },
+    [],
+  );
+
   const buildResults = useCallback(
     (
       targetSessions: ChatSession[],
       trimmed: string,
-      messageResults: Awaited<ReturnType<typeof acpSearchSessions>> = [],
+      messageResults: AcpSessionSearchResult[] = [],
     ) => {
       const options = displayOptionsRef.current;
       return buildSessionSearchResults(
@@ -149,21 +247,28 @@ export function useSessionSearch({
   );
 
   /**
-   * The sweep's own results: authoritative for the sessions it covered, so a
-   * session that stopped matching disappears, and additive for the rest, so a
-   * `searchMore` page merged in while the sweep was running survives it.
+   * The sweep's own results: authoritative only for the sessions whose corpus
+   * was actually read — a session that stopped matching disappears — and
+   * additive for the rest, so a `searchMore` page merged in while the sweep
+   * was running survives it. A target whose corpus could not be read keeps
+   * whatever it already had on screen: no successful read established that it
+   * stopped matching, so replacing its prior content match (or downgrading it
+   * to the metadata-only hit the new build produced) would present a transient
+   * export failure as "no longer matches".
    */
   const applySweptResults = useCallback(
-    (
-      nextResults: SessionSearchDisplayResult[],
-      sweptSessionIds: Set<string>,
-    ) => {
-      setResults((current) =>
-        mergeSessionSearchResults(
-          current.filter((result) => !sweptSessionIds.has(result.session.id)),
-          nextResults,
-        ),
-      );
+    (nextResults: SessionSearchDisplayResult[], searchedIds: Set<string>) => {
+      setResults((current) => {
+        const currentIds = new Set(current.map((result) => result.session.id));
+        return mergeSessionSearchResults(
+          current.filter((result) => !searchedIds.has(result.session.id)),
+          nextResults.filter(
+            (result) =>
+              searchedIds.has(result.session.id) ||
+              !currentIds.has(result.session.id),
+          ),
+        );
+      });
     },
     [],
   );
@@ -179,7 +284,7 @@ export function useSessionSearch({
       trimmed: string;
       targetSessions: ChatSession[];
       mode: SweepMode;
-    }): Promise<boolean> => {
+    }): Promise<SweepOutcome> => {
       const metadataResults = buildResults(targetSessions, trimmed);
       const targets = targetSessions.map((session) => ({
         id: session.id,
@@ -190,38 +295,59 @@ export function useSessionSearch({
       setError(null);
       applyInterimResults(metadataResults, mode, sweptSessionIds);
 
-      if (trimmed.length < 2 || targets.length === 0) {
-        return true;
+      if (!sweepsContent(trimmed, targets.length)) {
+        // No content sweep was owed, so there is nothing unread to retry.
+        return { ok: true, unreadableIds: [] };
       }
 
       activeSearchesRef.current += 1;
       setIsSearching(true);
 
       try {
-        const messageResults = await acpSearchSessions(trimmed, targets, {
+        const sweep = await acpSearchSessions(trimmed, targets, {
           queryClient,
         });
         if (requestIdRef.current !== requestId) {
-          return false;
+          return { ok: false, unreadableIds: [] };
         }
 
+        // Coverage comes from the sweep, not from the target list: the boundary
+        // resolves even when individual corpus exports fail, so counting every
+        // target as searched here is what let the UI claim it had read
+        // conversations it never opened.
+        recordCoverage(sweep.searchedIds, sweep.failedIds);
+        syncProgress();
+
         applySweptResults(
-          buildResults(targetSessions, trimmed, messageResults),
-          sweptSessionIds,
+          buildResults(targetSessions, trimmed, sweep.results),
+          new Set(sweep.searchedIds),
         );
-        return true;
+        // Partial coverage still counts as a completed sweep, but the skipped
+        // sessions travel back so the caller does not mark them done.
+        return { ok: true, unreadableIds: sweep.failedIds };
       } catch (searchError) {
         if (requestIdRef.current !== requestId) {
-          return false;
+          return { ok: false, unreadableIds: [] };
         }
 
         setError(searchErrorMessage(searchError));
+        // Nothing was read, so every target of this sweep is unsearched. The
+        // ids stay in `targeted`, so a retry promotes them rather than adding
+        // a second set of denominators.
+        recordCoverage(
+          [],
+          targets.map((target) => target.id),
+        );
+        syncProgress();
         // The sweep produced nothing, so leave the metadata matches standing
         // rather than dropping content matches from an earlier one.
         setResults((current) =>
           mergeSessionSearchResults(current, metadataResults),
         );
-        return false;
+        return {
+          ok: false,
+          unreadableIds: targets.map((target) => target.id),
+        };
       } finally {
         if (requestIdRef.current === requestId) {
           activeSearchesRef.current = Math.max(
@@ -232,7 +358,14 @@ export function useSessionSearch({
         }
       }
     },
-    [applyInterimResults, applySweptResults, buildResults, queryClient],
+    [
+      applyInterimResults,
+      applySweptResults,
+      buildResults,
+      queryClient,
+      recordCoverage,
+      syncProgress,
+    ],
   );
 
   const clear = useCallback(() => {
@@ -240,6 +373,7 @@ export function useSessionSearch({
     searchedSessionIdsRef.current = new Set();
     pendingSessionIdsRef.current = new Set();
     activeSearchesRef.current = 0;
+    resetCoverage();
     queryRef.current = "";
     submittedSearchRef.current = null;
     setQuery("");
@@ -247,30 +381,36 @@ export function useSessionSearch({
     setResults([]);
     setIsSearching(false);
     setError(null);
-  }, []);
+    setProgress(null);
+  }, [resetCoverage]);
 
-  const updateQuery = useCallback((nextQuery: string) => {
-    // Re-sending the query already held is a no-op. Consumers call this on
-    // every sweep trigger, not only on keystrokes — SearchView re-sends the
-    // debounced query whenever its swept sessions change — and the reset
-    // below would drop the results of the query still on screen and orphan an
-    // in-flight sweep for nothing.
-    if (nextQuery === queryRef.current) return;
+  const updateQuery = useCallback(
+    (nextQuery: string) => {
+      // Re-sending the query already held is a no-op. Consumers call this on
+      // every sweep trigger, not only on keystrokes — SearchView re-sends the
+      // debounced query whenever its swept sessions change — and the reset
+      // below would drop the results of the query still on screen and orphan an
+      // in-flight sweep for nothing.
+      if (nextQuery === queryRef.current) return;
 
-    requestIdRef.current += 1;
-    searchedSessionIdsRef.current = new Set();
-    pendingSessionIdsRef.current = new Set();
-    activeSearchesRef.current = 0;
-    // Synced here as well as on render so a submit in the same tick as the
-    // update (setQuery("x"); search()) already sees the new query.
-    queryRef.current = nextQuery;
-    submittedSearchRef.current = null;
-    setQuery(nextQuery);
-    setSubmittedSearch(null);
-    setResults([]);
-    setIsSearching(false);
-    setError(null);
-  }, []);
+      requestIdRef.current += 1;
+      searchedSessionIdsRef.current = new Set();
+      pendingSessionIdsRef.current = new Set();
+      activeSearchesRef.current = 0;
+      resetCoverage();
+      // Synced here as well as on render so a submit in the same tick as the
+      // update (setQuery("x"); search()) already sees the new query.
+      queryRef.current = nextQuery;
+      submittedSearchRef.current = null;
+      setQuery(nextQuery);
+      setSubmittedSearch(null);
+      setResults([]);
+      setIsSearching(false);
+      setError(null);
+      setProgress(null);
+    },
+    [resetCoverage],
+  );
 
   const search = useCallback(
     async (explicitQuery?: string) => {
@@ -288,18 +428,53 @@ export function useSessionSearch({
         submittedSearchRef.current?.query === trimmed ? "resweep" : "query";
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
-      searchedSessionIdsRef.current = new Set(
+      // Initial targets are pending, not searched: marking them searched
+      // before the sweep settles would exclude any that turn out unreadable
+      // from every later `searchMore`, so one transient export failure could
+      // hide a matching conversation until a manual resubmit. Completion is
+      // recorded from the settled sweep below, exactly as `searchMore` does.
+      searchedSessionIdsRef.current = new Set();
+      pendingSessionIdsRef.current = new Set(
         targetSessions.map((session) => session.id),
       );
-      pendingSessionIdsRef.current = new Set();
       activeSearchesRef.current = 0;
+      resetCoverage();
+      // A new query targets exactly the sessions it is about to sweep — and
+      // only if it will actually reach conversation text, so a one-character
+      // query reports no content coverage rather than a vacuous "n of n".
+      if (sweepsContent(trimmed, targetSessions.length)) {
+        targetedContentIdsRef.current = new Set(
+          targetSessions.map((session) => session.id),
+        );
+      }
+      syncProgress();
 
       submittedSearchRef.current = { query: trimmed, requestId };
       setSubmittedSearch({ query: trimmed, requestId });
 
-      await runSearchPage({ requestId, trimmed, targetSessions, mode });
+      // Coverage is recorded inside `runSearchPage`, from what the sweep
+      // reported reading — never assumed from the target list here.
+      const { ok, unreadableIds } = await runSearchPage({
+        requestId,
+        trimmed,
+        targetSessions,
+        mode,
+      });
+
+      if (requestIdRef.current !== requestId) return;
+      // Same settlement rule as `searchMore`: only sessions the sweep really
+      // read move to searched. An unreadable target stays out of the set, so
+      // the next incremental sweep targets it again instead of filtering it
+      // out as already-covered.
+      const unreadable = new Set(unreadableIds);
+      for (const session of targetSessions) {
+        pendingSessionIdsRef.current.delete(session.id);
+        if (ok && !unreadable.has(session.id)) {
+          searchedSessionIdsRef.current.add(session.id);
+        }
+      }
     },
-    [clear, runSearchPage],
+    [clear, resetCoverage, runSearchPage, syncProgress],
   );
 
   const searchMore = useCallback(
@@ -326,8 +501,16 @@ export function useSessionSearch({
       for (const session of unsearchedSessions) {
         pendingSessionIdsRef.current.add(session.id);
       }
+      // Union, not addition: a retry of a previously failed page re-adds ids
+      // that are already counted, and `Set` makes that idempotent.
+      if (sweepsContent(trimmed, unsearchedSessions.length)) {
+        for (const session of unsearchedSessions) {
+          targetedContentIdsRef.current.add(session.id);
+        }
+      }
+      syncProgress();
 
-      const succeeded = await runSearchPage({
+      const { ok, unreadableIds } = await runSearchPage({
         requestId,
         trimmed,
         targetSessions: unsearchedSessions,
@@ -335,14 +518,19 @@ export function useSessionSearch({
       });
 
       if (requestIdRef.current !== requestId) return;
+      // A session whose corpus could not be read stays out of the searched set,
+      // so the next page sweep targets it again. Marking it done on a partially
+      // failed sweep would filter it out of every later sweep and turn one
+      // transient export failure into a permanently hidden conversation.
+      const unreadable = new Set(unreadableIds);
       for (const session of unsearchedSessions) {
         pendingSessionIdsRef.current.delete(session.id);
-        if (succeeded) {
+        if (ok && !unreadable.has(session.id)) {
           searchedSessionIdsRef.current.add(session.id);
         }
       }
     },
-    [runSearchPage, submittedSearch],
+    [runSearchPage, submittedSearch, syncProgress],
   );
 
   return {
@@ -351,6 +539,7 @@ export function useSessionSearch({
     results,
     isSearching,
     error,
+    progress,
     setQuery: updateQuery,
     search,
     searchMore,

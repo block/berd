@@ -62,6 +62,17 @@ import { useBulkSessionActions } from "../hooks/useBulkSessionActions";
 import { useForkSession } from "../hooks/useForkSession";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import {
+  selectSessionsForScope,
+  type SessionScope,
+} from "../lib/sessionListFilters";
+import {
+  SessionListControls,
+  type SessionListView,
+} from "./SessionListControls";
+import { SessionSearchEmptyState } from "./SessionSearchEmptyState";
+import { SessionSearchStatus } from "./SessionSearchStatus";
+import { SessionTimelineScrubber } from "./SessionTimelineScrubber";
+import {
   flattenFlatSessionRows,
   flattenGroupedSessionRows,
   type FlatSessionRow,
@@ -70,22 +81,45 @@ import {
 import { useGridColumnCount } from "../hooks/useGridColumnCount";
 import type { SessionSearchDisplayResult } from "../lib/buildSessionSearchResults";
 
-const SESSION_GRID_COLS =
-  "grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(4,minmax(0,235px))] 2xl:grid-cols-[repeat(5,minmax(0,235px))] xl:justify-evenly";
+// List view: one session per row, automations-style full-width card rows.
+// Grid view: compact vertical cards, three columns max.
+const SESSION_VIEW_COLS = {
+  list: "grid grid-cols-1",
+  grid: "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3",
+} as const;
 
-// Matches the gallery stagger used by the agents and skills pages.
-const GALLERY_CARD_STAGGER_MS = 55;
-// Cap how many steps the cascade spans so a long list does not keep delaying
-// entrances well past the fold. Beyond this the delay plateaus.
-const GALLERY_CARD_STAGGER_MAX_STEPS = 10;
-// The gallery-card-enter keyframe runs for 320ms; keep the reveal window open
-// long enough for the last (capped) card to finish before the class is
-// removed, so no card is cut off mid-animation.
-const GALLERY_CARD_ENTER_MS = 320;
-const GALLERY_CARD_REVEAL_WINDOW_MS =
-  GALLERY_CARD_STAGGER_MAX_STEPS * GALLERY_CARD_STAGGER_MS +
-  GALLERY_CARD_ENTER_MS +
-  120;
+const SESSION_VIEW_STORAGE_KEY = "sessions.history.view";
+
+function readStoredView(): SessionListView {
+  try {
+    return window.localStorage.getItem(SESSION_VIEW_STORAGE_KEY) === "grid"
+      ? "grid"
+      : "list";
+  } catch {
+    return "list";
+  }
+}
+
+/**
+ * The one derivation of "sessions the history page shows": started sessions,
+ * narrowed to the scope tab and project filter. Both the rendered list and the
+ * search sweep targets go through this. They must agree on "started" in
+ * particular — a session whose only activity is a queued message renders as a
+ * row, so sweeping a different set would leave a visible row unsearched and
+ * make the "n of m" progress disagree with the screen.
+ */
+function selectHistorySessions(
+  sessions: ChatSession[],
+  localMessageCounts: Record<string, number>,
+  scope: SessionScope,
+  selectedProjectIds: ReadonlySet<string>,
+): ChatSession[] {
+  return selectSessionsForScope(
+    getVisibleSessions(sessions, localMessageCounts),
+    scope,
+    selectedProjectIds,
+  );
+}
 
 interface SessionHistoryViewProps {
   onSelectSession?: (sessionId: string) => void;
@@ -214,18 +248,6 @@ export function SessionHistoryView({
   );
   const [importNotice, setImportNotice] = useState<ImportNotice | null>(null);
   const [copiedImportCommand, setCopiedImportCommand] = useState(false);
-  // The session list is virtualized, so an unconditional card-enter would
-  // replay every time a row is recycled during scroll. Gate the staggered
-  // reveal to a short window after mount so it matches the agents/skills
-  // pages on first paint without re-triggering as the user scrolls.
-  const [isInitialReveal, setIsInitialReveal] = useState(true);
-  useEffect(() => {
-    const timer = window.setTimeout(
-      () => setIsInitialReveal(false),
-      GALLERY_CARD_REVEAL_WINDOW_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, []);
   const sessions = useChatSessionStore(selectSessions);
   const localMessageCountsBySession = useChatStore(
     useShallow(selectLocalMessageCountsBySession),
@@ -242,12 +264,40 @@ export function SessionHistoryView({
   const isMultiWindowEnabled = sessionWindowSupport.supported;
   const openSessions = useSessionWindowStore((s) => s.openSessions);
   const loadMoreInFlightRef = useRef(false);
+  const [scope, setScope] = useState<SessionScope>("active");
+  const [view, setView] = useState<SessionListView>(readStoredView);
+  const handleViewChange = useCallback((nextView: SessionListView) => {
+    setView(nextView);
+    try {
+      window.localStorage.setItem(SESSION_VIEW_STORAGE_KEY, nextView);
+    } catch {
+      // localStorage may be unavailable; the toggle still works in-session.
+    }
+  }, []);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  // Counted through the same pipeline the Archived tab renders, so the label
+  // can never promise rows the tab would not show.
+  const archivedCount = useMemo(
+    () =>
+      selectHistorySessions(
+        sessions,
+        localMessageCountsBySession,
+        "archived",
+        selectedProjectIds,
+      ).length,
+    [localMessageCountsBySession, selectedProjectIds, sessions],
+  );
   const activeSessions = useMemo(
     () =>
-      getVisibleSessions(sessions, localMessageCountsBySession).filter(
-        (session) => !session.archivedAt,
+      selectHistorySessions(
+        sessions,
+        localMessageCountsBySession,
+        scope,
+        selectedProjectIds,
       ),
-    [localMessageCountsBySession, sessions],
+    [localMessageCountsBySession, scope, selectedProjectIds, sessions],
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedCount = selectedSessionIds.size;
@@ -278,6 +328,7 @@ export function SessionHistoryView({
     [t],
   );
   const {
+    applySelectionAction,
     archiveConfirmOpen,
     archiveSelectionCount,
     confirmArchiveSelected,
@@ -312,6 +363,11 @@ export function SessionHistoryView({
     [projectsById],
   );
 
+  const getProjectIcon = useCallback(
+    (projectId: string) => projectsById.get(projectId)?.icon,
+    [projectsById],
+  );
+
   const getWorkingDir = useCallback(
     (projectId: string) => projectsById.get(projectId)?.workingDirs[0],
     [projectsById],
@@ -336,7 +392,7 @@ export function SessionHistoryView({
   const {
     error: searchError,
     isSearching,
-    query: searchQuery,
+    progress: searchProgress,
     results: searchResults,
     search: submitSearch,
     searchMore,
@@ -344,42 +400,139 @@ export function SessionHistoryView({
     submittedQuery,
   } = search;
 
+  // What the user has typed, held locally rather than pushed straight into the
+  // search hook. `updateQuery` resets the hook's submitted search — query,
+  // results, status — so feeding it every keystroke would blank the search
+  // branch for the whole debounce window and drop the page back to unfiltered
+  // browse history under a non-empty search box. Keeping the draft here means
+  // the previous query's results stay on screen until the next one is
+  // submitted, and the hook only ever hears queries we actually intend to run.
+  const [queryDraft, setQueryDraft] = useState("");
+  const trimmedQueryDraft = queryDraft.trim();
+  // True while the box holds an edit we have not submitted yet. The status line
+  // uses it to stop reporting the old query's result count as if it still
+  // described what is typed.
+  const isSearchPending =
+    trimmedQueryDraft.length > 0 && trimmedQueryDraft !== submittedQuery;
+
+  const runSearch = useCallback(
+    (nextQuery: string) => {
+      const trimmed = nextQuery.trim();
+      if (!trimmed) {
+        setSearchQuery("");
+        return;
+      }
+      setSearchQuery(trimmed);
+      void submitSearch(trimmed);
+    },
+    [setSearchQuery, submitSearch],
+  );
+
+  // Search-as-you-type: submit a beat after typing pauses. Enter in the
+  // SearchBar still submits immediately. An emptied box clears at once — there
+  // is no pending query worth protecting, and waiting would leave a stale
+  // search on screen with nothing in the input to explain it.
+  useEffect(() => {
+    if (!trimmedQueryDraft) {
+      setSearchQuery("");
+      return;
+    }
+    if (trimmedQueryDraft === submittedQuery) return;
+    const timer = window.setTimeout(() => {
+      runSearch(trimmedQueryDraft);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [runSearch, setSearchQuery, submittedQuery, trimmedQueryDraft]);
+
+  // A scope or project-filter change swaps out the session set behind a query
+  // that is already on screen — including via the empty state's own "Clear
+  // filters" and "Search archived" buttons, which move nothing but these two.
+  // The debounce effect above cannot cover it: the query text is unchanged, so
+  // it bails on `trimmed === submittedQuery` and the stale "no matches" state
+  // survives the tab flip. Re-submitting the same query lands in the hook's
+  // `resweep` mode, which keeps still-matching rows on screen while the new set
+  // is swept. Keyed on the filters rather than on the session list so neither a
+  // fresh submit (filters unchanged) nor background pagination (already swept
+  // page-by-page through `searchMore`) fires a duplicate full sweep.
+  const filterSweepKey = useMemo(
+    () => `${scope}\n${[...selectedProjectIds].sort().join(",")}`,
+    [scope, selectedProjectIds],
+  );
+  const sweptFilterKeyRef = useRef(filterSweepKey);
+  useEffect(() => {
+    if (!submittedQuery) {
+      // Nothing on screen to invalidate; adopt the filters so a change made
+      // before searching does not queue a resweep for the next query.
+      sweptFilterKeyRef.current = filterSweepKey;
+      return;
+    }
+    if (sweptFilterKeyRef.current === filterSweepKey) return;
+    sweptFilterKeyRef.current = filterSweepKey;
+    void submitSearch();
+  }, [filterSweepKey, submitSearch, submittedQuery]);
+
   const getLoadedActiveSessions = useCallback(() => {
     const state = useChatSessionStore.getState();
-    const chatState = useChatStore.getState();
-    return getVisibleSessions(
+    // Read through the same selector the rendered list uses (queued messages
+    // included), not raw `messagesBySession`: a session visible only through a
+    // queued message must be swept, not just rendered.
+    const localMessageCounts = selectLocalMessageCountsBySession(
+      useChatStore.getState(),
+    );
+    return selectHistorySessions(
       state.sessions,
-      chatState.messagesBySession,
-    ).filter((session) => !session.archivedAt);
-  }, []);
+      localMessageCounts,
+      scope,
+      selectedProjectIds,
+    );
+  }, [scope, selectedProjectIds]);
+
+  // The post-pagination sweep, reached through a ref (like
+  // `loadNextPageIfNeededRef` below) so it is resolved when the page lands
+  // rather than captured when the load started. A scope or project change
+  // mid-flight re-submits the query under a new request id, which makes the
+  // `searchMore` this callback had closed over a no-op: the page that just
+  // arrived would be rendered but never swept, and nothing later repairs it —
+  // the viewport need not move again, least of all when that was the last page.
+  const sweepLoadedSessions = useCallback(async () => {
+    // Re-read rather than trusting a pre-await snapshot: by now the search may
+    // have been cleared entirely, in which case there is nothing to sweep for.
+    if (!submittedQuery) return;
+    await searchMore(getLoadedActiveSessions());
+  }, [getLoadedActiveSessions, searchMore, submittedQuery]);
+  const sweepLoadedSessionsRef = useRef(sweepLoadedSessions);
+
+  useEffect(() => {
+    sweepLoadedSessionsRef.current = sweepLoadedSessions;
+  }, [sweepLoadedSessions]);
 
   const loadNextPageIfNeeded = useCallback(async () => {
-    const shouldSearchNewPage = Boolean(submittedQuery);
     if (
       !hasMoreSessions ||
       isLoadingMoreSessions ||
-      (shouldSearchNewPage && isSearching) ||
+      (Boolean(submittedQuery) && isSearching) ||
       loadMoreInFlightRef.current
     ) {
       return;
     }
 
+    // The latch is released in `finally`, so a rejected page load or sweep
+    // still re-arms pagination. It has no timeout escape: if one of these
+    // promises never settles, pagination stays parked until the next mount.
+    // That is deliberate — a timeout would race a slow-but-live page load and
+    // double-fetch it — and safe, since both calls own their own error paths.
     loadMoreInFlightRef.current = true;
     try {
       await loadMoreSessions();
-      if (shouldSearchNewPage) {
-        await searchMore(getLoadedActiveSessions());
-      }
+      await sweepLoadedSessionsRef.current();
     } finally {
       loadMoreInFlightRef.current = false;
     }
   }, [
-    getLoadedActiveSessions,
     hasMoreSessions,
     isLoadingMoreSessions,
     isSearching,
     loadMoreSessions,
-    searchMore,
     submittedQuery,
   ]);
   const loadNextPageIfNeededRef = useRef(loadNextPageIfNeeded);
@@ -489,7 +642,8 @@ export function SessionHistoryView({
       }),
     [activeSessions, i18n.resolvedLanguage, t],
   );
-  const columns = useGridColumnCount(columnProbeRef);
+  const probedColumns = useGridColumnCount(columnProbeRef);
+  const columns = view === "grid" ? probedColumns : 1;
   const groupedRows = useMemo(
     () => flattenGroupedSessionRows(dateGroups, columns),
     [columns, dateGroups],
@@ -497,7 +651,16 @@ export function SessionHistoryView({
   const groupedVirtualizer = useVirtualizer({
     count: groupedRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (groupedRows[index]?.kind === "header" ? 72 : 96),
+    estimateSize: (index) => {
+      // Headers are not all the same height: the first one is `pt-1` (~32px)
+      // while later ones carry `pt-8` to separate groups (~60px). One estimate
+      // for both over-guessed row 0 by ~28px, which showed up as a wider gap
+      // under "Today" than under every later date.
+      if (groupedRows[index]?.kind === "header") {
+        return index === 0 ? 32 : 60;
+      }
+      return view === "grid" ? 152 : 118;
+    },
     getItemKey: (index) => groupedRows[index]?.key ?? index,
     measureElement:
       typeof window !== "undefined" &&
@@ -509,14 +672,78 @@ export function SessionHistoryView({
   });
 
   const groupedVirtualItems = groupedVirtualizer.getVirtualItems();
+  const timelineMarkers = useMemo(() => {
+    // Weight each marker by its group's session count so busy recent dates
+    // own more of the rail (header keys are `h:${label}`).
+    const countsByLabel = new Map(
+      dateGroups.map((group) => [group.label, group.sessions.length]),
+    );
+    return groupedRows.flatMap((row, index) =>
+      row.kind === "header"
+        ? [
+            {
+              key: row.key,
+              label: row.label,
+              index,
+              count: countsByLabel.get(row.label) ?? 1,
+            },
+          ]
+        : [],
+    );
+  }, [dateGroups, groupedRows]);
+  // The date group currently at (or above) the top of the viewport: the last
+  // header at or before the first genuinely visible row.
+  //
+  // `getVirtualItems()` leads with `overscan` rows that are rendered but sit
+  // above the viewport, so its first entry is not the row the user is looking
+  // at — reading it made the highlighted date (and the scrubber's
+  // `aria-valuetext`) lag a section behind the screen. Measure against the
+  // scroll offset instead: the first row whose end has passed the viewport top
+  // is the first one actually on screen. Row `start`/`end` already include the
+  // virtualizer's `scrollMargin`, which is the same space `scrollOffset` is
+  // reported in, so the two compare directly.
+  const groupedScrollOffset = groupedVirtualizer.scrollOffset ?? 0;
+  const activeTimelineKey = useMemo(() => {
+    const firstVisible = groupedVirtualItems.find(
+      (item) => item.end > groupedScrollOffset,
+    );
+    const firstVisibleIndex = firstVisible?.index;
+    if (firstVisibleIndex === undefined) return undefined;
+    let active: string | undefined;
+    for (const marker of timelineMarkers) {
+      if (marker.index > firstVisibleIndex) break;
+      active = marker.key;
+    }
+    return active ?? timelineMarkers[0]?.key;
+  }, [groupedScrollOffset, groupedVirtualItems, timelineMarkers]);
+  const jumpToTimelineIndex = useCallback(
+    (index: number) => {
+      groupedVirtualizer.scrollToIndex(index, { align: "start" });
+    },
+    [groupedVirtualizer],
+  );
+  // Results are only as current as the last sweep, but membership can change
+  // under them without touching the query, the scope, or the project filter —
+  // restoring a session from the Archived tab is exactly that. Gate them on the
+  // live session set so a row that no longer belongs cannot linger (still
+  // offering its Restore action) until something else triggers a resweep.
+  const activeSessionIds = useMemo(
+    () => new Set(activeSessions.map((session) => session.id)),
+    [activeSessions],
+  );
+  const visibleSearchResults = useMemo(
+    () =>
+      searchResults.filter((result) => activeSessionIds.has(result.session.id)),
+    [activeSessionIds, searchResults],
+  );
   const searchRows = useMemo(
-    () => flattenFlatSessionRows(searchResults, columns),
-    [columns, searchResults],
+    () => flattenFlatSessionRows(visibleSearchResults, columns),
+    [columns, visibleSearchResults],
   );
   const searchVirtualizer = useVirtualizer({
     count: searchRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 128,
+    estimateSize: () => (view === "grid" ? 170 : 130),
     getItemKey: (index) => searchRows[index]?.key ?? index,
     measureElement:
       typeof window !== "undefined" &&
@@ -526,10 +753,33 @@ export function SessionHistoryView({
     overscan: 5,
     scrollMargin: listScrollMargin,
   });
+  // Row keys survive a list<->grid toggle (`r:${label}:${firstSessionId}` has
+  // no view component), so without this the virtualizer would apply heights it
+  // measured for list rows to grid rows and vice versa — leaving gaps or
+  // overlap until each row happens to be re-measured. `measure()` drops the
+  // cached sizes so every row re-measures against the new template.
+  // Read through refs so the effect fires on a view change only. Keying it on
+  // the virtualizer instances would re-run it on any render that hands back
+  // fresh ones, throwing away good measurements.
+  const groupedVirtualizerRef = useRef(groupedVirtualizer);
+  groupedVirtualizerRef.current = groupedVirtualizer;
+  const searchVirtualizerRef = useRef(searchVirtualizer);
+  searchVirtualizerRef.current = searchVirtualizer;
+  const isFirstViewRenderRef = useRef(true);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: view is the intentional trigger; the virtualizers are read through refs so a fresh instance never re-fires this.
+  useEffect(() => {
+    if (isFirstViewRenderRef.current) {
+      // Nothing measured yet on mount; skip the redundant invalidation.
+      isFirstViewRenderRef.current = false;
+      return;
+    }
+    groupedVirtualizerRef.current.measure();
+    searchVirtualizerRef.current.measure();
+  }, [view]);
+
   const viewportLoadCheckState = useMemo(
     () => ({
       activeSessionCount: activeSessions.length,
-      columnCount: columns,
       groupedRowCount: groupedRows.length,
       hasMoreSessions,
       searchRowCount: searchRows.length,
@@ -538,7 +788,6 @@ export function SessionHistoryView({
     }),
     [
       activeSessions.length,
-      columns,
       groupedRows.length,
       hasMoreSessions,
       searchRows.length,
@@ -570,6 +819,38 @@ export function SessionHistoryView({
     },
     [onArchiveChat],
   );
+
+  // The Archived tab is a first-class destination here, so its rows need the
+  // way back out. Resolves to an outcome rather than swallowing the result:
+  // the bulk path can only hold its pending state and count failed rows if the
+  // action it awaits reports what the backend actually did. Failures are still
+  // logged here, and the store rolls the row back itself.
+  const restoreSession = useCallback(async (sessionId: string) => {
+    try {
+      await useChatSessionStore.getState().unarchiveSession(sessionId);
+      return { ok: true };
+    } catch (err: unknown) {
+      console.error("Failed to restore session in backend:", err);
+      return { ok: false };
+    }
+  }, []);
+
+  // Single row: optimistic, same as archiving — the row leaves the list at
+  // once and a late failure rolls it back.
+  const handleUnarchive = useCallback(
+    (sessionId: string) => {
+      void restoreSession(sessionId);
+    },
+    [restoreSession],
+  );
+
+  // Restore for a multi-row selection, through the same bulk workflow Archive
+  // uses (pending state, per-row failure reporting, selection cleared on
+  // completion). No confirm step: unlike archiving, restoring is reversible
+  // from the row it lands on.
+  const handleUnarchiveSelected = useCallback(() => {
+    void applySelectionAction(restoreSession);
+  }, [applySelectionAction, restoreSession]);
 
   const handleFork = useForkSession({ onForked: onSelectSession });
 
@@ -832,7 +1113,6 @@ export function SessionHistoryView({
         leftIcon={<IconUpload />}
         feedbackState={isImporting ? "loading" : "idle"}
         loadingLabel={t("history.importingButton")}
-        preserveWidth
       >
         {t("common:actions.import")}
       </PageHeaderButton>,
@@ -859,33 +1139,39 @@ export function SessionHistoryView({
         matchCount?: number;
         messageId?: string;
         isSearchResult?: boolean;
-        revealIndex?: number;
       },
     ) => {
       const isSearchResult = options?.isSearchResult ?? false;
       const messageId = options?.messageId;
+      // Browse cards preview the latest message text; search cards show the
+      // matched snippet instead.
       const snippet = isSearchResult
         ? options?.snippet
         : (session.subtitle ?? undefined);
-      const revealIndex = options?.revealIndex;
-      const card = (
+      return (
         <SessionCard
+          key={session.id}
           id={session.id}
           title={session.title}
           updatedAt={sessionActivityAt(session)}
           personaName={
             session.personaId ? getPersonaName(session.personaId) : undefined
           }
+          projectId={session.projectId ?? undefined}
           projectName={
             session.projectId ? getProjectName(session.projectId) : undefined
           }
           projectColor={
             session.projectId ? getProjectColor(session.projectId) : undefined
           }
+          projectIcon={
+            session.projectId ? getProjectIcon(session.projectId) : undefined
+          }
           workingDir={
             session.projectId ? getWorkingDir(session.projectId) : undefined
           }
           archivedAt={session.archivedAt}
+          layout={view === "grid" ? "grid" : "row"}
           snippet={snippet}
           snippetLineClamp={isSearchResult ? undefined : 1}
           matchCount={options?.matchCount}
@@ -903,6 +1189,8 @@ export function SessionHistoryView({
           onRename={onRenameChat}
           onFork={handleFork}
           onArchive={handleArchive}
+          onUnarchive={handleUnarchive}
+          onUnarchiveSelected={handleUnarchiveSelected}
           onArchiveSelected={requestArchiveSelected}
           onExport={handleExport}
           onExportSelected={handleExportSelected}
@@ -920,38 +1208,16 @@ export function SessionHistoryView({
           onMarkSelectedUnread={handleMarkSelectedUnread}
         />
       );
-
-      // Only stagger-reveal on the initial paint; virtualized rows recycle on
-      // scroll and must not replay the entrance animation. Keep the wrapper
-      // element stable across that transition (toggle the class, not the tree
-      // shape) so the card is never unmounted mid-edit or mid-hover.
-      const reveal = isInitialReveal && revealIndex !== undefined;
-
-      return (
-        <div
-          key={session.id}
-          className={cn("h-full", reveal && "gallery-card-enter")}
-          style={
-            reveal
-              ? {
-                  animationDelay: `${
-                    Math.min(revealIndex + 1, GALLERY_CARD_STAGGER_MAX_STEPS) *
-                    GALLERY_CARD_STAGGER_MS
-                  }ms`,
-                }
-              : undefined
-          }
-        >
-          {card}
-        </div>
-      );
     },
     [
       getPersonaName,
       getProjectColor,
+      getProjectIcon,
       getProjectName,
       getWorkingDir,
       handleArchive,
+      handleUnarchive,
+      handleUnarchiveSelected,
       handleFork,
       requestArchiveSelected,
       clearSelection,
@@ -963,7 +1229,6 @@ export function SessionHistoryView({
       isSelectionPinnedToHome,
       handleMarkSelectedRead,
       handleMarkSelectedUnread,
-      isInitialReveal,
       isMultiWindowEnabled,
       isPinningBatch,
       handleSelectResult,
@@ -974,6 +1239,7 @@ export function SessionHistoryView({
       selectedCount,
       selectedSessionIds,
       toggleSessionSelection,
+      view,
     ],
   );
 
@@ -983,44 +1249,54 @@ export function SessionHistoryView({
         return (
           <h2
             className={cn(
-              SESSION_GRID_COLS,
-              "pb-3 text-base text-foreground",
+              // 14px regular sentence case, not small caps: the rest of the
+              // app does not lean on uppercase section labels.
+              "px-1 pb-2 text-sm font-normal text-muted-foreground",
               // The page container already spaces the search bar from the
               // first group; only stack extra top padding between groups.
-              isFirstRow ? "pt-1" : "pt-10",
+              isFirstRow ? "pt-1" : "pt-8",
             )}
           >
-            <span>{row.label}</span>
+            {row.label}
           </h2>
         );
       }
 
+      // Virtualized rows position absolutely, so the inter-row gap lives
+      // inside the measured element as bottom padding.
       return (
-        <div className={cn(SESSION_GRID_COLS, "gap-y-4 pb-3 pt-2")}>
-          {row.sessions.map((session, index) =>
-            renderSessionCard(session, { revealIndex: row.cardOffset + index }),
+        <div
+          className={cn(
+            SESSION_VIEW_COLS[view],
+            view === "grid" ? "pb-4" : "pb-2",
           )}
+        >
+          {row.sessions.map((session) => renderSessionCard(session))}
         </div>
       );
     },
-    [renderSessionCard],
+    [renderSessionCard, view],
   );
 
   const renderSearchRow = useCallback(
     (row: FlatSessionRow<SessionSearchDisplayResult>) => (
-      <div className={cn(SESSION_GRID_COLS, "gap-y-4 pb-3")}>
-        {row.items.map((result, index) =>
+      <div
+        className={cn(
+          SESSION_VIEW_COLS[view],
+          view === "grid" ? "pb-4" : "pb-2",
+        )}
+      >
+        {row.items.map((result) =>
           renderSessionCard(result.session, {
             snippet: result.snippet,
             matchCount: result.matchCount,
             messageId: result.messageId,
             isSearchResult: true,
-            revealIndex: row.cardOffset + index,
           }),
         )}
       </div>
     ),
-    [renderSessionCard],
+    [renderSessionCard, view],
   );
 
   const isLoadingAdditionalSessions =
@@ -1037,6 +1313,17 @@ export function SessionHistoryView({
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col">
+      {!submittedQuery && (
+        <SessionTimelineScrubber
+          markers={timelineMarkers}
+          activeKey={activeTimelineKey}
+          onJump={jumpToTimelineIndex}
+          hasMore={hasMoreSessions}
+          onLoadOlder={() => void loadNextPageIfNeeded()}
+          isLoadingOlder={isLoadingAdditionalSessions}
+          className="absolute bottom-24 right-2 top-32 z-10 hidden xl:flex"
+        />
+      )}
       <div
         ref={setScrollNode}
         data-testid="session-history-scroll"
@@ -1045,24 +1332,51 @@ export function SessionHistoryView({
       >
         <div
           ref={pageContentRef}
-          className="page-transition mx-auto flex w-full max-w-none flex-col gap-5 px-6 pb-app-page-bottom pt-8"
+          className="page-transition mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 pb-app-page-bottom pt-8"
         >
-          <div className={SESSION_GRID_COLS}>
-            <div className="col-span-full sm:col-span-2">
+          <div className="flex flex-col gap-3">
+            <div className="max-w-md">
               <SearchBar
                 size="pill"
-                value={searchQuery}
-                onChange={setSearchQuery}
+                value={queryDraft}
+                onChange={setQueryDraft}
                 onKeyDown={(event) => {
+                  // Enter skips the type-ahead debounce and submits now.
                   if (event.key === "Enter") {
                     event.preventDefault();
-                    void submitSearch();
+                    runSearch(queryDraft);
                   }
                 }}
                 placeholder={t("history.searchPlaceholder")}
                 aria-label={t("history.searchPlaceholder")}
               />
             </div>
+            {submittedQuery ? (
+              <SessionSearchStatus
+                query={submittedQuery}
+                isPending={isSearchPending}
+                isSearching={isSearching}
+                progress={searchProgress}
+                resultCount={visibleSearchResults.length}
+                error={searchError}
+              />
+            ) : null}
+            <SessionListControls
+              scope={scope}
+              onScopeChange={setScope}
+              archivedCount={archivedCount}
+              projects={projects.map((project) => ({
+                id: project.id,
+                name: project.name,
+                color: project.color,
+                icon: project.icon,
+              }))}
+              selectedProjectIds={selectedProjectIds}
+              onSelectedProjectIdsChange={setSelectedProjectIds}
+              showNoProject
+              view={view}
+              onViewChange={handleViewChange}
+            />
           </div>
 
           {importNotice && (
@@ -1177,11 +1491,9 @@ export function SessionHistoryView({
             </Alert>
           )}
 
-          {searchError && (
-            <p className="text-xs text-destructive">
-              {t("history.searchError")}
-            </p>
-          )}
+          {/* Search failures are narrated by SessionSearchStatus alone. A
+          second copy here meant one failed sweep rendered two error lines and
+          announced both to screen readers. */}
 
           <div role="status" aria-live="polite" className="sr-only">
             {loadMoreStatus}
@@ -1189,15 +1501,18 @@ export function SessionHistoryView({
 
           <div
             ref={columnProbeRef}
+            data-testid="session-column-probe"
             aria-hidden="true"
+            // Always probes the grid-view template (even in list view) so the
+            // column count is correct the moment the user toggles to grid.
             className={cn(
-              SESSION_GRID_COLS,
-              "pointer-events-none invisible h-0 gap-y-10 overflow-hidden",
+              SESSION_VIEW_COLS.grid,
+              "pointer-events-none invisible h-0 overflow-hidden",
             )}
           />
 
           {submittedQuery ? (
-            searchResults.length > 0 ? (
+            visibleSearchResults.length > 0 ? (
               <div
                 ref={setVirtualListElement}
                 className="relative w-full"
@@ -1224,22 +1539,25 @@ export function SessionHistoryView({
                   );
                 })}
               </div>
-            ) : (
+            ) : isSearching ? (
               <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
                 <History className="h-10 w-10 opacity-30" />
-                <div className="text-center">
-                  <p className="text-sm font-medium">
-                    {isSearching
-                      ? t("history.searching")
-                      : t("history.emptyNoMatches")}
-                  </p>
-                  {!isSearching && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {t("history.emptyNoMatchesHint")}
-                    </p>
-                  )}
-                </div>
+                <p className="text-sm font-medium">{t("history.searching")}</p>
               </div>
+            ) : (
+              <SessionSearchEmptyState
+                query={submittedQuery}
+                onClearFilters={
+                  selectedProjectIds.size > 0
+                    ? () => setSelectedProjectIds(new Set())
+                    : undefined
+                }
+                onShowArchived={
+                  scope === "active" && archivedCount > 0
+                    ? () => setScope("archived")
+                    : undefined
+                }
+              />
             )
           ) : dateGroups.length > 0 ? (
             <div
@@ -1272,11 +1590,37 @@ export function SessionHistoryView({
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
               <History className="h-10 w-10 opacity-30" />
               <div className="text-center">
-                <p className="text-sm font-medium">{t("history.emptyTitle")}</p>
+                {/* The project filter is read before the scope, because a
+                filtered-out tab is not an empty one: checking the scope first
+                told users their archive was empty while archived chats sat
+                just outside the selected projects, with no route back. */}
+                <p className="text-sm font-medium">
+                  {selectedProjectIds.size > 0
+                    ? t("history.emptyFiltered")
+                    : scope === "archived"
+                      ? t("history.emptyArchived")
+                      : t("history.emptyTitle")}
+                </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t("history.emptyHint")}
+                  {selectedProjectIds.size > 0
+                    ? scope === "archived"
+                      ? t("history.emptyFilteredArchivedHint")
+                      : t("history.emptyFilteredHint")
+                    : scope === "archived"
+                      ? t("history.emptyArchivedHint")
+                      : t("history.emptyHint")}
                 </p>
               </div>
+              {selectedProjectIds.size > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  flush
+                  onClick={() => setSelectedProjectIds(new Set())}
+                >
+                  {t("history.emptyClearFilters")}
+                </Button>
+              )}
             </div>
           )}
 

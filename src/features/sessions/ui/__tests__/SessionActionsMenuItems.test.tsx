@@ -1,8 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { ContextMenu, ContextMenuTrigger } from "@/shared/ui/context-menu";
 import { DropdownMenu } from "@/shared/ui/dropdown-menu";
-import { SessionActionsMenuContent } from "../SessionActionsMenuItems";
+import {
+  SessionActionsContextMenuContent,
+  SessionActionsMenuContent,
+} from "../SessionActionsMenuItems";
 
 function renderMenu(
   props: Omit<Parameters<typeof SessionActionsMenuContent>[0], "sessionId">,
@@ -79,5 +83,32 @@ describe("SessionActionsMenuContent", () => {
 
     expect(menuItemLabels()).toEqual(["Export…", "Restore"]);
     expect(screen.getAllByRole("separator")).toHaveLength(1);
+  });
+});
+
+describe("SessionActionsContextMenuContent", () => {
+  it("forwards onCloseAutoFocus to the menu content", async () => {
+    // The items component destructures a fixed prop set with no rest spread,
+    // so a content-level prop only reaches Radix if the wrapper names it.
+    // Callers rely on this to stop close-focus restoration stealing focus from
+    // an input the menu action just opened (SessionCard's rename).
+    const onCloseAutoFocus = vi.fn();
+
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger>Card</ContextMenuTrigger>
+        <SessionActionsContextMenuContent
+          sessionId="session-1"
+          onCloseAutoFocus={onCloseAutoFocus}
+          onRename={vi.fn()}
+          onArchive={vi.fn()}
+        />
+      </ContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByText("Card"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /rename/i }));
+
+    await waitFor(() => expect(onCloseAutoFocus).toHaveBeenCalled());
   });
 });

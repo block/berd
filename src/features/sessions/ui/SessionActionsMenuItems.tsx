@@ -353,12 +353,18 @@ export function SessionActionsMenuContent({
 
 export function SessionActionsContextMenuContent({
   className,
+  // Content-level props must be named to reach ContextMenuContent: the rest
+  // spread below feeds SessionActionsMenuItems, which destructures a fixed set
+  // and has no rest spread of its own, so anything not pulled out here is
+  // silently dropped instead of reaching Radix.
+  onCloseAutoFocus,
   ...props
 }: SessionActionsMenuProps &
   Omit<ComponentProps<typeof ContextMenuContent>, "children" | "variant">) {
   return (
     <ContextMenuContent
       variant="raised"
+      onCloseAutoFocus={onCloseAutoFocus}
       className={cn(SESSION_ACTIONS_MENU_CONTENT_CLASS, className)}
     >
       <SessionActionsMenuItems

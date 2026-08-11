@@ -20,8 +20,6 @@
     "emptyArchived": "No hay sesiones archivadas",
     "emptyArchivedHint": "Las sesiones archivadas aparecerán aquí.",
     "emptyHint": "Inicia un chat para verlo aquí.",
-    "emptyNoMatches": "No hay sesiones coincidentes",
-    "emptyNoMatchesHint": "Prueba con otro término de búsqueda.",
     "emptyTitle": "Aún no hay sesiones",
     "copyImportCommand": "Copiar comando de importación",
     "forkFailed": "No se pudo duplicar la sesión",
@@ -60,7 +58,47 @@
     "selectedContext_other": "{{displayCount}} chats seleccionados",
     "subtitle": "Explora y busca sesiones anteriores",
     "toggleArchived": "Archivadas",
-    "title": "Historial de sesiones"
+    "title": "Historial de sesiones",
+    "controls": {
+      "active": "Activas",
+      "archived": "Archivadas",
+      "archivedWithCount": "Archivadas ({{count}})",
+      "allProjects": "Todos los proyectos",
+      "projectsSelected_one": "{{count}} proyecto",
+      "projectsSelected_other": "{{count}} proyectos",
+      "noProject": "Sin proyecto",
+      "listView": "Vista de lista",
+      "gridView": "Vista de cuadrícula"
+    },
+    "searchStatus": {
+      "searching": "Buscando conversaciones… {{searched}} de {{total}}",
+      "pending": "Buscando mientras escribes…",
+      "doneWithContent_one": "{{count}} resultado · títulos, agentes, proyectos, fechas y texto de conversación",
+      "doneWithContent_other": "{{count}} resultados · títulos, agentes, proyectos, fechas y texto de conversación",
+      "donePartialContent": "{{done}} — {{note}}",
+      "unreadableNote_one": "no se pudo leer {{count}} conversación",
+      "unreadableNote_other": "no se pudieron leer {{count}} conversaciones",
+      "doneMetadataOnly_one": "{{count}} resultado · títulos, agentes, proyectos y fechas — escribe más para buscar en el texto de conversación",
+      "doneMetadataOnly_other": "{{count}} resultados · títulos, agentes, proyectos y fechas — escribe más para buscar en el texto de conversación"
+    },
+    "searchEmpty": {
+      "title": "Ninguna sesión coincide con «{{query}}»",
+      "clearFilters": "Borrar filtros",
+      "searchArchived": "Buscar en archivadas",
+      "scopeWithContent": "La búsqueda cubre títulos, agentes, proyectos, fechas y texto de conversación.",
+      "scopeWithContentAndArchivedHint": "La búsqueda cubre títulos, agentes, proyectos, fechas y texto de conversación. Las sesiones archivadas pueden tener coincidencias.",
+      "scopeMetadataOnly": "La búsqueda cubre títulos, agentes, proyectos y fechas. Escribe al menos 2 caracteres para buscar también en el texto de conversación.",
+      "scopeMetadataOnlyWithArchivedHint": "La búsqueda cubre títulos, agentes, proyectos y fechas. Escribe al menos 2 caracteres para buscar también en el texto de conversación. Las sesiones archivadas pueden tener coincidencias."
+    },
+    "timeline": {
+      "label": "Ir a la fecha",
+      "older": "Más antiguas",
+      "loadingOlder": "Cargando…"
+    },
+    "emptyFiltered": "Ninguna sesión coincide con estos filtros",
+    "emptyFilteredHint": "No hay chats activos en los proyectos seleccionados.",
+    "emptyFilteredArchivedHint": "No hay chats archivados en los proyectos seleccionados.",
+    "emptyClearFilters": "Borrar filtros"
   },
   "quickSwitch": {
     "description": "Escribe para buscar títulos de sesiones y pulsa Intro para saltar.",
@@ -69,6 +107,8 @@
     "title": "Saltar a sesión"
   },
   "search": {
+    "matches_one": "{{displayCount}} coincidencia",
+    "matches_other": "{{displayCount}} coincidencias",
     "messageMatches_one": "{{displayCount}} coincidencia en mensajes",
     "messageMatches_other": "{{displayCount}} coincidencias en mensajes"
   },
